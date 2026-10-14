@@ -35,3 +35,62 @@ command.program.def public @flash_next_mtp_input() launch(%parameters: buffer, %
   kernel.launch @flash_next_mtp_fuse(%epoch, %normalized_embedding, %normalized_hidden, %projection, %residual) : (buffer, buffer, buffer, view<2560x160x34xi8>, buffer)
   command.return
 }
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+kernel.decl @flash_next_mtp_compact() launch(%accepted: buffer, %compact: buffer, %origins: buffer)
+
+kernel.decl @flash_next_mtp_restore() launch(%epoch: buffer, %carry: buffer, %cache: buffer, %hidden: buffer)
+
+kernel.decl @flash_next_mtp_shift() launch(%epoch: buffer, %origins: buffer, %target: buffer, %target_tokens: buffer, %hidden: buffer, %tokens: buffer)
+
+kernel.decl @flash_next_mtp_commit() launch(%epoch: buffer, %origins: buffer, %target: buffer, %cache: buffer, %carry: buffer)
+
+kernel.decl @flash_next_map_tokens() launch(%epoch: buffer, %mapping: buffer)
+
+command.program.decl @flash_next_hc_attn(%layer: index) launch(%parameters: buffer, %span: buffer, %residual: buffer, %injection: buffer, %mixed: buffer)
+
+command.program.decl @flash_next_qsa_append(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %capture: buffer)
+
+// Catch-up consumes accepted target rows, not recursive draft hidden. Restore
+// the committed partial block before replacing rejected entries. The first
+// hidden row comes from old carry; publication follows every old-carry reader.
+command.program.def public @flash_next_mtp_warm() launch(%parameters: buffer, %target_parameters: buffer, %target_hidden: buffer, %accepted: buffer, %rows: buffer, %cache: buffer, %carry: buffer, %target_tokens: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %pool = config.get @flash_next.pool_capacity : index
+  %hidden_stride = index.constant 20480 : offset
+  %mixed_stride = index.constant 5120 : offset
+  %mapping_stride = index.constant 16 : offset
+  %id_stride = index.constant 4 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %mixed_bytes = index.scale %tokens, %mixed_stride : index, offset -> offset
+  %mapping_bytes = index.scale %tokens, %mapping_stride : index, offset -> offset
+  %id_bytes = index.scale %tokens, %id_stride : index, offset -> offset
+  %epoch_bytes = index.constant 332 : offset
+  %origin_bytes = index.constant 64 : offset
+  %epoch = buffer.alloca<global> align(16) %epoch_bytes : buffer
+  %origins = buffer.alloca<global> align(16) %origin_bytes : buffer
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %mixed = buffer.alloca<global> align(256) %mixed_bytes : buffer
+  %injection = buffer.alloca<global> align(256) %mapping_bytes : buffer
+  %mapping = buffer.alloca<global> align(16) %mapping_bytes : buffer
+  %ids = buffer.alloca<global> align(16) %id_bytes : buffer
+  kernel.launch @flash_next_mtp_compact(%accepted, %epoch, %origins) : (buffer, buffer, buffer)
+  kernel.launch @flash_next_mtp_restore(%epoch, %carry, %cache, %hidden) : (buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_mtp_shift(%epoch, %origins, %target_hidden, %target_tokens, %hidden, %ids) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_map_tokens(%epoch, %mapping) : (buffer, buffer)
+  command.program.launch @flash_next_mtp_input(%parameters, %target_parameters, %epoch, %ids, %hidden, %residual) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  %layer = index.constant 48 : index
+  %key_origin = index.constant 0 : offset
+  %tail_origin = index.constant 0 : offset
+  %main_stride = index.constant 1024 : offset
+  %value_origin = index.scale %pool, %main_stride : index, offset -> offset
+  %index_origin = index.add %value_origin, %value_origin : offset
+  command.program.launch @flash_next_hc_attn[%layer](%parameters, %epoch, %residual, %injection, %mixed) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_qsa_append[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %epoch, %mapping, %rows, %mixed, %cache, %hidden) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_mtp_commit(%epoch, %origins, %target_hidden, %cache, %carry) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
