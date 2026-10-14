@@ -4,12 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.rotary_capacity : %value: index where [range(%value, 16, 1048576)]
+
 // Shared FlowLM layer bodies select original checkpoint keys by layer index.
 // Each cache origin owns one key/value pair; six layers share the same
 // absolute stream position and advance it only after the complete backbone.
-kernel.decl @pocket.attention_scores_1024x1_c256_p255() launch(%q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer)
+kernel.decl @pocket.attention_scores_flow() launch(%q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer)
 
-kernel.decl @pocket.attention_values_1024x1_c256_p255() launch(%values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer)
+kernel.decl @pocket.attention_values_flow() launch(%values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer)
 
 kernel.decl @pocket.gated_residual() launch(%x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer)
 
@@ -27,17 +31,19 @@ kernel.decl @pocket.project_f64(%output_rows: index, %time_steps: index) launch(
 
 kernel.decl @pocket.residual_1024x1() launch(%x_storage: buffer, %update_storage: buffer, %y_storage: buffer)
 
-kernel.decl @pocket.rotary_cache_1024x1_c256_p255() launch(%x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer)
+kernel.decl @pocket.rotary_cache_flow() launch(%x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer)
 
 kernel.decl @pocket.silu_512() launch(%x_storage: buffer, %y_storage: buffer)
 
-kernel.decl @pocket.softmax_16x256() launch(%scores_storage: buffer, %probabilities_storage: buffer)
+kernel.decl @pocket.softmax_flow() launch(%scores_storage: buffer, %probabilities_storage: buffer)
 
 template.decl @pocket.flow_layer(%layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: view<1024x1xf32>) -> (view<1024x1xf32>)
 
 template.decl @pocket.flow_residual(%layer: index, %phase: buffer, %condition: view<512x1xf32>, %input: view<512x1xf32>) -> (view<512x1xf32>)
 
 template.def<@pocket.flow_layer> @pocket_flow_layer(%layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: view<1024x1xf32>) -> (view<1024x1xf32>) {
+  %capacity = config.get @pocket.context_capacity : index
+  %rotary_capacity = config.get @pocket.rotary_capacity : index
   %tensor_offset = index.constant 0 : offset
   %tensor = buffer.view %state[%tensor_offset] : buffer -> view<1xi32>
   %normalization_storage_bytes = index.constant 4096 : offset
@@ -48,10 +54,11 @@ template.def<@pocket.flow_layer> @pocket_flow_layer(%layer: index, %cache_origin
   kernel.launch @pocket.normalization_affine_1024x1_e1em05(%input, %normalization_tensor, %normalization_parameter, %normalization_parameter_2) : (view<1024x1xf32>, view<1024x1xf32>, view<1024xbf16>, view<1024xbf16>)
   %attention_tensor_offset_relative = index.constant 0 : offset
   %attention_tensor_offset = index.add %cache_origin, %attention_tensor_offset_relative : offset
-  %attention_tensor = buffer.view %state[%attention_tensor_offset] : buffer -> view<256x1024xf32>
-  %attention_tensor_2_offset_relative = index.constant 1048576 : offset
+  %attention_tensor = buffer.view %state[%attention_tensor_offset] : buffer -> view<[%capacity]x1024xf32>
+  %key_position_bytes = index.constant 4096 : offset
+  %attention_tensor_2_offset_relative = index.scale %capacity, %key_position_bytes : index, offset -> offset
   %attention_tensor_2_offset = index.add %cache_origin, %attention_tensor_2_offset_relative : offset
-  %attention_tensor_2 = buffer.view %state[%attention_tensor_2_offset] : buffer -> view<256x1024xf32>
+  %attention_tensor_2 = buffer.view %state[%attention_tensor_2_offset] : buffer -> view<[%capacity]x1024xf32>
   %attention_storage = buffer.alloca<global> align(16) %normalization_storage_bytes : buffer
   %attention_tensor_3 = buffer.view %attention_storage[%tensor_offset] : buffer -> view<1024x1xf32>
   %projection_parameter = command.parameter %backbone, "flow_lm.transformer.layers.{}.self_attn.in_proj.weight"[%layer] : view<3072x1024xbf16>
@@ -62,19 +69,20 @@ template.def<@pocket.flow_layer> @pocket_flow_layer(%layer: index, %cache_origin
   %projection_outputs = index.constant 3072 : index
   %projection_times = index.constant 1 : index
   kernel.launch @pocket.project_f64[%projection_outputs, %projection_times](%projection_inputs, %projection_outputs, %projection_times, %normalization_tensor, %projection_parameter, %projection_parameter, %projection_tensor) : [index, index](index, index, index, view<1024x1xf32>, view<3072x1024xbf16>, view<3072x1024xbf16>, view<3072x1xf32>)
-  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<2048x32xf32>
-  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<2048x32xf32>
-  kernel.launch @pocket.rotary_cache_1024x1_c256_p255(%projection_tensor, %attention_tensor_3, %attention_tensor, %attention_tensor_2, %tensor, %attention_parameter, %attention_parameter_2) : (view<3072x1xf32>, view<1024x1xf32>, view<256x1024xf32>, view<256x1024xf32>, view<1xi32>, view<2048x32xf32>, view<2048x32xf32>)
-  %attention_storage_2_bytes = index.constant 16384 : offset
+  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<[%rotary_capacity]x32xf32>
+  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<[%rotary_capacity]x32xf32>
+  kernel.launch @pocket.rotary_cache_flow(%projection_tensor, %attention_tensor_3, %attention_tensor, %attention_tensor_2, %tensor, %attention_parameter, %attention_parameter_2) : (view<3072x1xf32>, view<1024x1xf32>, view<[%capacity]x1024xf32>, view<[%capacity]x1024xf32>, view<1xi32>, view<[%rotary_capacity]x32xf32>, view<[%rotary_capacity]x32xf32>)
+  %score_position_bytes = index.constant 64 : offset
+  %attention_storage_2_bytes = index.scale %capacity, %score_position_bytes : index, offset -> offset
   %attention_storage_2 = buffer.alloca<global> align(16) %attention_storage_2_bytes : buffer
-  %attention_tensor_4 = buffer.view %attention_storage_2[%tensor_offset] : buffer -> view<16x256xf32>
-  kernel.launch @pocket.attention_scores_1024x1_c256_p255(%attention_tensor_3, %attention_tensor, %tensor, %attention_tensor_4) : (view<1024x1xf32>, view<256x1024xf32>, view<1xi32>, view<16x256xf32>)
+  %attention_tensor_4 = buffer.view %attention_storage_2[%tensor_offset] : buffer -> view<16x[%capacity]xf32>
+  kernel.launch @pocket.attention_scores_flow(%attention_tensor_3, %attention_tensor, %tensor, %attention_tensor_4) : (view<1024x1xf32>, view<[%capacity]x1024xf32>, view<1xi32>, view<16x[%capacity]xf32>)
   %attention_storage_3 = buffer.alloca<global> align(16) %attention_storage_2_bytes : buffer
-  %attention_tensor_5 = buffer.view %attention_storage_3[%tensor_offset] : buffer -> view<16x256xf32>
-  kernel.launch @pocket.softmax_16x256(%attention_tensor_4, %attention_tensor_5) : (view<16x256xf32>, view<16x256xf32>)
+  %attention_tensor_5 = buffer.view %attention_storage_3[%tensor_offset] : buffer -> view<16x[%capacity]xf32>
+  kernel.launch @pocket.softmax_flow(%attention_tensor_4, %attention_tensor_5) : (view<16x[%capacity]xf32>, view<16x[%capacity]xf32>)
   %attention_storage_4 = buffer.alloca<global> align(16) %normalization_storage_bytes : buffer
   %attention_tensor_6 = buffer.view %attention_storage_4[%tensor_offset] : buffer -> view<1024x1xf32>
-  kernel.launch @pocket.attention_values_1024x1_c256_p255(%attention_tensor_2, %attention_tensor_5, %tensor, %attention_tensor_6) : (view<256x1024xf32>, view<16x256xf32>, view<1xi32>, view<1024x1xf32>)
+  kernel.launch @pocket.attention_values_flow(%attention_tensor_2, %attention_tensor_5, %tensor, %attention_tensor_6) : (view<[%capacity]x1024xf32>, view<16x[%capacity]xf32>, view<1xi32>, view<1024x1xf32>)
   %projection_parameter_2 = command.parameter %backbone, "flow_lm.transformer.layers.{}.self_attn.out_proj.weight"[%layer] : view<1024x1024xbf16>
   %projection_storage_2 = buffer.alloca<global> align(16) %normalization_storage_bytes : buffer
   %projection_tensor_2 = buffer.view %projection_storage_2[%tensor_offset] : buffer -> view<1024x1xf32>
@@ -88,11 +96,12 @@ template.def<@pocket.flow_layer> @pocket_flow_layer(%layer: index, %cache_origin
   %normalization_parameter_4 = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm2.bias"[%layer] : view<1024xbf16>
   kernel.launch @pocket.normalization_affine_1024x1_e1em05(%residual_tensor, %normalization_tensor_2, %normalization_parameter_3, %normalization_parameter_4) : (view<1024x1xf32>, view<1024x1xf32>, view<1024xbf16>, view<1024xbf16>)
   %projection_parameter_3 = command.parameter %backbone, "flow_lm.transformer.layers.{}.linear1.weight"[%layer] : view<4096x1024xbf16>
-  %projection_storage_3 = buffer.alloca<global> align(16) %attention_storage_2_bytes : buffer
+  %feed_forward_bytes = index.constant 16384 : offset
+  %projection_storage_3 = buffer.alloca<global> align(16) %feed_forward_bytes : buffer
   %projection_tensor_3 = buffer.view %projection_storage_3[%tensor_offset] : buffer -> view<4096x1xf32>
   %projection_outputs_3 = index.constant 4096 : index
   kernel.launch @pocket.project_f64[%projection_outputs_3, %projection_times](%projection_inputs, %projection_outputs_3, %projection_times, %normalization_tensor_2, %projection_parameter_3, %projection_parameter_3, %projection_tensor_3) : [index, index](index, index, index, view<1024x1xf32>, view<4096x1024xbf16>, view<4096x1024xbf16>, view<4096x1xf32>)
-  %activation_storage = buffer.alloca<global> align(16) %attention_storage_2_bytes : buffer
+  %activation_storage = buffer.alloca<global> align(16) %feed_forward_bytes : buffer
   %activation_tensor = buffer.view %activation_storage[%tensor_offset] : buffer -> view<4096x1xf32>
   kernel.launch @pocket.gelu_4096(%projection_tensor_3, %activation_tensor) : (view<4096x1xf32>, view<4096x1xf32>)
   %projection_parameter_4 = command.parameter %backbone, "flow_lm.transformer.layers.{}.linear2.weight"[%layer] : view<1024x4096xbf16>
