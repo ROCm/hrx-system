@@ -36,6 +36,43 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    retirement
+  HDRS
+    "retirement.h"
+  SRCS
+    "retirement.c"
+  DEPS
+    ::commands
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    retirement_test
+  SRCS
+    "retirement_test.cc"
+  DEPS
+    ::retirement
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    retirement_benchmark
+  SRCS
+    "retirement_benchmark.cc"
+  DEPS
+    ::retirement
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
     launch_test
