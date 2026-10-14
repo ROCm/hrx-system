@@ -8,13 +8,13 @@ config.decl @flash_next.token_count : %value: index where [range(%value, 1, 3276
 
 command.program.decl @flash_next_hc_attn(%layer: index) launch(%parameters: buffer, %span: buffer, %residual: buffer, %injection: buffer, %mixed: buffer)
 
-command.program.decl @flash_next_qsa_attention(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %output: buffer)
+command.program.decl @flash_next_qsa_attention(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %output: buffer, %capture: buffer)
 
 kernel.decl @hc_combine() launch(%span: buffer, %residual: buffer, %projected: buffer, %injection: buffer, %output: buffer)
 
 // QSA advances paged main/index caches and private partial-block history.
 // The residual and MoE contracts are shared with the GDN layers.
-command.program.def public @flash_next_qsa_residual(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %residual: buffer, %rows: buffer, %arena: buffer, %output: buffer) {
+command.program.def public @flash_next_qsa_residual(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %residual: buffer, %rows: buffer, %arena: buffer, %output: buffer, %capture: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %hidden_row_bytes = index.constant 5120 : offset
   %injection_row_bytes = index.constant 16 : offset
@@ -24,7 +24,7 @@ command.program.def public @flash_next_qsa_residual(%layer: index, %key_origin: 
   %projected = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %injection = buffer.alloca<global> align(256) %injection_bytes : buffer
   command.program.launch @flash_next_hc_attn[%layer](%parameters, %span, %residual, %injection, %mixed) : [index](buffer, buffer, buffer, buffer, buffer)
-  command.program.launch @flash_next_qsa_attention[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %span, %mapping, %rows, %mixed, %arena, %projected) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_qsa_attention[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %span, %mapping, %rows, %mixed, %arena, %projected, %capture) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @hc_combine(%span, %residual, %projected, %injection, %output) : (buffer, buffer, buffer, buffer, buffer)
   command.return
 }

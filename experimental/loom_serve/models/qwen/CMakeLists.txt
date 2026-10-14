@@ -24,6 +24,22 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
     "${CMAKE_CURRENT_BINARY_DIR}/text_control.stamp"
 )
 
+iree_package_target_name(_FILEGROUP_TARGET "::speculation_kernels")
+add_custom_command(OUTPUT speculation_kernels.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch speculation_kernels.stamp
+  DEPENDS
+    "kernels/qwen38/accept.loom"
+    "kernels/qwen38/mtp_proposal.loom"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS speculation_kernels.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/speculation_kernels.stamp"
+)
+
 file(GLOB _GLOB_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 file(GLOB _GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/qwen38/*.loom)
 file(GLOB _GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS programs/qwen38/*.loom)

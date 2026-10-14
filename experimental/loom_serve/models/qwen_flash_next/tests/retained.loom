@@ -11,7 +11,7 @@ kernel.decl @flash_next_map_tokens() launch(%epoch: buffer, %mapping: buffer)
 
 kernel.decl @qsa_pool_blocks() launch(%tail_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %raw: buffer, %arena: buffer, %pooled: buffer)
 
-kernel.decl @qsa_publish_tail() launch(%tail_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
+kernel.decl @qsa_publish_tail() launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
 
 kernel.decl @flash_next_ple_hash_ids() launch(%history_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %tokens: buffer, %arena: buffer, %hashes: buffer)
 
@@ -312,7 +312,7 @@ check.case public @retained_forks {
   kernel.launch @flash_next_map_tokens(%epoch, %mapping) : (tensor<18xi32>, tensor<8x4xi32>)
   kernel.launch @qsa_pool_blocks(%tail_origin, %epoch, %mapping, %rows, %raw, %arena, %pooled) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x128xbf16>)
   kernel.launch @flash_next_ple_hash_ids(%ids_origin, %epoch, %mapping, %rows, %ids, %arena, %hashes) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>, tensor<8x16xi32>)
-  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %mapping, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
+  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
   kernel.launch @flash_next_ple_publish_history(%ids_origin, %epoch, %rows, %ids, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
   check.expect.bitwise actual(%mapping) expected(%expected_mapping) : tensor<8x4xi32>
   check.expect.bitwise actual(%pooled) expected(%expected_pooled) : tensor<8x128xbf16>
@@ -344,7 +344,7 @@ check.case public @retained_writers {
   kernel.launch @flash_next_map_tokens(%epoch, %mapping) : (tensor<18xi32>, tensor<8x4xi32>)
   kernel.launch @qsa_pool_blocks(%tail_origin, %epoch, %mapping, %rows, %raw, %arena, %pooled) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x128xbf16>)
   kernel.launch @flash_next_ple_hash_ids(%ids_origin, %epoch, %mapping, %rows, %ids, %arena, %hashes) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>, tensor<8x16xi32>)
-  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %mapping, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
+  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
   kernel.launch @flash_next_ple_publish_history(%ids_origin, %epoch, %rows, %ids, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
   check.expect.bitwise actual(%mapping) expected(%expected_mapping) : tensor<8x4xi32>
   check.expect.bitwise actual(%pooled) expected(%expected_pooled) : tensor<8x128xbf16>
@@ -376,7 +376,7 @@ check.case public @retained_empty {
   kernel.launch @flash_next_map_tokens(%epoch, %mapping) : (tensor<18xi32>, tensor<8x4xi32>)
   kernel.launch @qsa_pool_blocks(%tail_origin, %epoch, %mapping, %rows, %raw, %arena, %pooled) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x128xbf16>)
   kernel.launch @flash_next_ple_hash_ids(%ids_origin, %epoch, %mapping, %rows, %ids, %arena, %hashes) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>, tensor<8x16xi32>)
-  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %mapping, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
+  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
   kernel.launch @flash_next_ple_publish_history(%ids_origin, %epoch, %rows, %ids, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
   check.expect.bitwise actual(%mapping) expected(%expected_mapping) : tensor<8x4xi32>
   check.expect.bitwise actual(%pooled) expected(%expected_pooled) : tensor<8x128xbf16>
