@@ -41,6 +41,12 @@ global.rodata.def @latent_height = bytes("6b726561322e6c6174656e745f686569676874
 // krea2.latent_width
 global.rodata.def @latent_width = bytes("6b726561322e6c6174656e745f7769647468")
 
+// krea2.vae_tile_height
+global.rodata.def @vae_tile_height = bytes("6b726561322e7661655f74696c655f686569676874")
+
+// krea2.vae_tile_width
+global.rodata.def @vae_tile_width = bytes("6b726561322e7661655f74696c655f7769647468")
+
 // text_encoder/model.safetensors
 global.rodata.def @encoder = bytes("746578745f656e636f6465722f6d6f64656c2e7361666574656e736f7273")
 
@@ -152,12 +158,16 @@ func.def @declare_stage(%height: i64, %width: i64, %text: i64, %directory: buffe
   %key_steps = global.load @time_count : buffer
   %key_height = global.load @latent_height : buffer
   %key_width = global.load @latent_width : buffer
+  %key_tile_height = global.load @vae_tile_height : buffer
+  %key_tile_width = global.load @vae_tile_width : buffer
   func.call @config_i64(%stage, %key_blocks, %blocks) : (i32, buffer, i64)
   func.call @config_i64(%stage, %key_images, %images) : (i32, buffer, i64)
   func.call @config_i64(%stage, %key_text, %text) : (i32, buffer, i64)
   func.call @config_i64(%stage, %key_steps, %c8) : (i32, buffer, i64)
   func.call @config_i64(%stage, %key_height, %latent_height) : (i32, buffer, i64)
   func.call @config_i64(%stage, %key_width, %latent_width) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_tile_height, %latent_height) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_tile_width, %latent_width) : (i32, buffer, i64)
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32

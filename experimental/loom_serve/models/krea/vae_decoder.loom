@@ -2,9 +2,13 @@ config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), 
 
 config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
 
+config.decl @krea2.vae_tile_height : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
+
+config.decl @krea2.vae_tile_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
+
 command.program.decl @vae_input_attention() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
 
-command.program.decl @krea2.vae_mid_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_mid_residual(%block: index, %tile: i1) launch(%parameters: buffer, %input: buffer, %output: buffer)
 
 command.program.decl @krea2.vae_up0_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 
@@ -27,8 +31,8 @@ command.program.decl @krea2.vae_output_convolution() launch(%parameters: buffer,
 amdgpu.target<gfx11-generic> @vae_decoder_wave32 {subgroup_size = 32}
 
 kernel.def target(@vae_decoder_wave32) @krea_vae_clamp() {
-  %height = config.get @krea2.latent_height : index
-  %width = config.get @krea2.latent_width : index
+  %height = config.get @krea2.vae_tile_height : index
+  %width = config.get @krea2.vae_tile_width : index
   %pixels = index.mul %height, %width : index
   %scale_channels = index.constant 192 : index
   %elements = index.mul %pixels, %scale_channels : index
@@ -39,8 +43,8 @@ kernel.def target(@vae_decoder_wave32) @krea_vae_clamp() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
-  %height = config.get @krea2.latent_height : index
-  %width = config.get @krea2.latent_width : index
+  %height = config.get @krea2.vae_tile_height : index
+  %width = config.get @krea2.vae_tile_width : index
   %pixels = index.mul %height, %width : index
   %scale_channels = index.constant 192 : index
   %elements = index.mul %pixels, %scale_channels : index
@@ -74,16 +78,17 @@ command.program.def public @krea2.vae_clamp() launch(%input: buffer, %output: bu
 // in place. Output is NCHW RGB F32 clamped to [-1, 1], at eight times each
 // latent spatial dimension.
 command.program.def public @vae_decoder_body() launch(%parameters: buffer, %input: buffer, %output: buffer) {
-  %height = config.get @krea2.latent_height : index
-  %width = config.get @krea2.latent_width : index
+  %height = config.get @krea2.vae_tile_height : index
+  %width = config.get @krea2.vae_tile_width : index
   %pixels = index.mul %height, %width : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c3 = index.constant 3 : index
+  %tile = scalar.constant true : i1
   %state0_pixel_bytes = index.constant 1536 : offset
   %state0_bytes = index.scale %pixels, %state0_pixel_bytes : index, offset -> offset
   %state0 = buffer.alloca<global> align(256) %state0_bytes : buffer
-  command.program.launch @krea2.vae_mid_residual[%c1](%parameters, %input, %state0) : [index](buffer, buffer, buffer)
+  command.program.launch @krea2.vae_mid_residual[%c1, %tile](%parameters, %input, %state0) : [index, i1](buffer, buffer, buffer)
   scf.for %block = [%c0 to %c3 step %c1] unroll {
     command.program.launch @krea2.vae_up0_residual[%block](%parameters, %state0, %state0) : [index](buffer, buffer, buffer)
   }
