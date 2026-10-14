@@ -1,0 +1,227 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @flash_next_mtp_normalize() launch(%width_value: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @flash_next_mtp_fuse() launch(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer)
+
+// Different stream magnitudes make a per-stream hidden RMS visibly incorrect.
+func.def @scale_streams(%hidden: buffer) {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %hidden[%origin] : buffer -> view<2x4x2560xbf16>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %width = index.constant 2560 : index
+  %one = scalar.constant 1 : i32
+  scf.for %token = [%c0 to %c2 step %c1] {
+    scf.for %stream = [%c0 to %c4 step %c1] {
+      %shift = index.cast %stream : index to i32
+      %power = scalar.shli %one, %shift : i32
+      %factor = scalar.uitofp %power : i32 to f32
+      scf.for %channel = [%c0 to %width step %c1] {
+        %packed = view.load %values[%token, %stream, %channel] : view<2x4x2560xbf16> -> bf16
+        %value = scalar.extf %packed : bf16 to f32
+        %scaled = scalar.mulf %value, %factor : f32
+        %rounded = scalar.fptrunc %scaled : f32 to bf16
+        view.store %rounded, %values[%token, %stream, %channel] : bf16, view<2x4x2560xbf16>
+      }
+    }
+  }
+  func.return
+}
+
+// Scalar F64 RMS has no production reduction or normalization helper in common.
+func.def @normalize_reference(%width: index, %epoch: buffer, %input: buffer, %gamma: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, 2)] : index
+  %inputs = buffer.view %input[%origin] : buffer -> view<2x[%width]xbf16>
+  %weights = buffer.view %gamma[%origin] : buffer -> view<[%width]xf32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<2x[%width]xbf16>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %width_word = index.cast %width : index to i64
+  %divisor = scalar.uitofp %width_word : i64 to f64
+  %zero = scalar.constant 0.0 : f64
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f64
+  %one = scalar.constant 1.0 : f64
+  scf.for %token = [%c0 to %count step %c1] {
+    %sum = scf.for %channel = [%c0 to %width step %c1](%prior = %zero : f64) -> (f64) {
+      %packed = view.load %inputs[%token, %channel] : view<2x[%width]xbf16> -> bf16
+      %value = scalar.extf %packed : bf16 to f64
+      %square = scalar.mulf %value, %value : f64
+      %next = scalar.addf %prior, %square : f64
+      scf.yield %next : f64
+    }
+    %mean = scalar.divf %sum, %divisor : f64
+    %biased = scalar.addf %mean, %epsilon : f64
+    %biased32 = scalar.fptrunc %biased : f64 to f32
+    %root32 = scalar.sqrtf %biased32 : f32
+    %root = scalar.extf %root32 : f32 to f64
+    %inverse = scalar.divf %one, %root : f64
+    scf.for %channel = [%c0 to %width step %c1] {
+      %packed = view.load %inputs[%token, %channel] : view<2x[%width]xbf16> -> bf16
+      %value = scalar.extf %packed : bf16 to f64
+      %weight32 = view.load %weights[%channel] : view<[%width]xf32> -> f32
+      %weight = scalar.extf %weight32 : f32 to f64
+      %unit = scalar.mulf %value, %inverse : f64
+      %scaled = scalar.mulf %unit, %weight : f64
+      %rounded = scalar.fptrunc %scaled : f64 to bf16
+      view.store %rounded, %outputs[%token, %channel] : bf16, view<2x[%width]xbf16>
+    }
+  }
+  func.return
+}
+
+// Two sparse permutations have different signed coefficients. The serialized
+// matrix is otherwise zero, including the unused block scales. This fixture
+// distinguishes matrix halves, physical row stride, stream stride, and token
+// stride without a dense host matrix multiplication in the test runner.
+func.def @projection_fixture(%weight: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c7 = index.constant 7 : index
+  %c17 = index.constant 17 : index
+  %c32 = index.constant 32 : index
+  %c33 = index.constant 33 : index
+  %width = index.constant 2560 : index
+  %row_bytes = index.constant 5440 : offset
+  %half_bytes = index.constant 2720 : offset
+  %block_bytes = index.constant 34 : offset
+  %code_bytes = index.constant 2 : offset
+  %byte = index.constant 1 : offset
+  %embedding_scale = scalar.constant 0.015625 : f16
+  %hidden_scale = scalar.constant 0.0078125 : f16
+  %embedding_code = scalar.constant 37 : i8
+  %hidden_code = scalar.constant -53 : i8
+  scf.for %row = [%c0 to %width step %c1] {
+    %embedding_index = index.madd %row, %c3, %c17 : index
+    %hidden_index = index.madd %row, %c7, %c33 : index
+    %embedding_column = index.rem %embedding_index, %width : index
+    %hidden_column = index.rem %hidden_index, %width : index
+    %row_origin = index.scale %row, %row_bytes : index, offset -> offset
+    scf.for %half = [%c0 to %c2 step %c1] {
+      %first = index.cmp eq, %half, %c0 : index
+      %column = scf.select %first, %embedding_column, %hidden_column : index
+      %scale = scf.select %first, %embedding_scale, %hidden_scale : f16
+      %code = scf.select %first, %embedding_code, %hidden_code : i8
+      %half_delta = index.scale %half, %half_bytes : index, offset -> offset
+      %half_origin = index.add %row_origin, %half_delta : offset
+      %block = index.div %column, %c32 : index
+      %within = index.rem %column, %c32 : index
+      %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+      %block_origin = index.add %half_origin, %block_delta : offset
+      %payload = index.add %block_origin, %code_bytes : offset
+      %code_delta = index.scale %within, %byte : index, offset -> offset
+      %code_origin = index.add %payload, %code_delta : offset
+      %header = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+      %codes = buffer.view %weight[%code_origin] : buffer -> view<1xi8>
+      view.store %scale, %header[0] : f16, view<1xf16>
+      view.store %code, %codes[0] : i8, view<1xi8>
+    }
+  }
+  func.return
+}
+
+// Analytic sparse products independently establish the BF16 publications at
+// both linear outputs and at the final addition, not a single fused dot.
+func.def @fusion_reference(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, 2)] : index
+  %embeddings = buffer.view %embedding[%origin] : buffer -> view<2x2560xbf16>
+  %hiddens = buffer.view %hidden[%origin] : buffer -> view<2x4x2560xbf16>
+  %outputs = buffer.view %output[%origin] : buffer -> view<2x4x2560xbf16>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c7 = index.constant 7 : index
+  %c17 = index.constant 17 : index
+  %c33 = index.constant 33 : index
+  %width = index.constant 2560 : index
+  %embedding_coefficient = scalar.constant 0.578125 : f64
+  %hidden_coefficient = scalar.constant -0.4140625 : f64
+  scf.for %token = [%c0 to %count step %c1] {
+    scf.for %row = [%c0 to %width step %c1] {
+      %e_index = index.madd %row, %c3, %c17 : index
+      %h_index = index.madd %row, %c7, %c33 : index
+      %e_column = index.rem %e_index, %width : index
+      %h_column = index.rem %h_index, %width : index
+      %e_packed = view.load %embeddings[%token, %e_column] : view<2x2560xbf16> -> bf16
+      %e_value = scalar.extf %e_packed : bf16 to f64
+      %e_product = scalar.mulf %e_value, %embedding_coefficient : f64
+      %e_rounded = scalar.fptrunc %e_product : f64 to bf16
+      %e = scalar.extf %e_rounded : bf16 to f64
+      scf.for %stream = [%c0 to %c4 step %c1] {
+        %h_packed = view.load %hiddens[%token, %stream, %h_column] : view<2x4x2560xbf16> -> bf16
+        %h_value = scalar.extf %h_packed : bf16 to f64
+        %h_product = scalar.mulf %h_value, %hidden_coefficient : f64
+        %h_rounded = scalar.fptrunc %h_product : f64 to bf16
+        %h = scalar.extf %h_rounded : bf16 to f64
+        %sum = scalar.addf %e, %h : f64
+        %rounded = scalar.fptrunc %sum : f64 to bf16
+        view.store %rounded, %outputs[%token, %stream, %row] : bf16, view<2x4x2560xbf16>
+      }
+    }
+  }
+  func.return
+}
+
+func.def @normalization_width(%configuration: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %embedding_width = index.constant 2560 : index
+  %hidden_width = index.constant 10240 : index
+  %embedding = index.cmp eq, %configuration, %c0 : index
+  %width = scf.select %embedding, %embedding_width, %hidden_width : index
+  func.return %width : index
+}
+
+check.scenario public @predictor_normalization configure[2](%configuration: index, %configuration_entropy: check.entropy) {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %width = check.generate<@normalization_width>(%configuration) : (index) -> (index)
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %gamma_seed = check.literal value(419) : i64
+    %epoch = check.generate.fill value(2) : tensor<1xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<2x10240xbf16>
+    check.generate<@scale_streams>(%input) : (tensor<2x10240xbf16>) -> ()
+    %gamma = check.generate.random.uniform seed(%gamma_seed) range(0.5 to 1.5) : tensor<10240xf32>
+    %output = check.generate.fill value(-17.0) : tensor<2x10240xbf16>
+    check.compare<@flash_next_mtp_normalize, @normalize_reference>(%width, %epoch, %input, %gamma, %output) : (index, tensor<1xi32>, tensor<2x10240xbf16>, tensor<10240xf32>, tensor<2x10240xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<2x10240xbf16>
+    }
+  }
+  check.return
+}
+
+check.scenario public @predictor_fusion {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %epoch = check.generate.fill value(2) : tensor<1xi32>
+    %embedding = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<2x2560xbf16>
+    %hidden = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<2x10240xbf16>
+    check.generate<@scale_streams>(%hidden) : (tensor<2x10240xbf16>) -> ()
+    %weight = check.generate.fill value(0) : tensor<13926400xi8>
+    check.generate<@projection_fixture>(%weight) : (tensor<13926400xi8>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<2x4x2560xbf16>
+    check.compare<@flash_next_mtp_fuse, @fusion_reference>(%epoch, %embedding, %hidden, %weight, %output) : (tensor<1xi32>, tensor<2x2560xbf16>, tensor<2x10240xbf16>, tensor<13926400xi8>, tensor<2x4x2560xbf16>) -> () {
+      // Native grouped dots can move an exact BF16 midpoint by an F32 ULP.
+      // One BF16 step bounds the final publication. The absolute term covers
+      // cancellation between the two independently rounded projections;
+      // their smaller magnitude is bounded by the 37/64 embedding factor.
+      check.expect.close actual(%output) expected(%output) atol(0.0078125) rtol(0.0078125) nan(different) : tensor<2x4x2560xbf16>
+    }
+  }
+  check.return
+}
