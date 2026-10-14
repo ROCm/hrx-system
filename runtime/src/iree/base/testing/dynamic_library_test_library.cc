@@ -10,11 +10,21 @@ extern "C" {
 
 #if defined(_WIN32)
 #define IREE_SYM_EXPORT __declspec(dllexport)
+#define IREE_SYM_NOINLINE __declspec(noinline)
 #else
 #define IREE_SYM_EXPORT __attribute__((visibility("default")))
+#define IREE_SYM_NOINLINE __attribute__((noinline))
 #endif  // _WIN32
 
-int IREE_SYM_EXPORT times_two(int value) { return value * 2; }
+// Private code supplies a symbol and source line absent from the DLL exports.
+static IREE_SYM_NOINLINE int private_times_two(int value) { return value * 2; }
+
+int IREE_SYM_EXPORT times_two(int value) { return private_times_two(value); }
+
+typedef int (*private_function_t)(int);
+private_function_t IREE_SYM_EXPORT get_private_function() {
+  return private_times_two;
+}
 
 int IREE_SYM_EXPORT next_value() {
   static int value = 0;

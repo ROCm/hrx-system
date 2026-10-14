@@ -16,11 +16,28 @@ iree_cc_library(
   SHARED
 )
 
+set(_TEST_LIBRARY_FILES
+  "$<TARGET_FILE:iree::base::testing::dynamic_library_test_library.so>"
+)
+if(IREE_BUILD_TESTS AND WIN32)
+  set_property(TARGET iree_base_testing_dynamic_library_test_library.so
+    PROPERTY MSVC_DEBUG_INFORMATION_FORMAT Embedded)
+  target_link_options(iree_base_testing_dynamic_library_test_library.so PRIVATE
+    /DEBUG
+    /INCREMENTAL:NO
+    # Only explicit attachment can locate the matching embedded PDB.
+    /PDBALTPATH:dynamic_library_test_library.embedded.pdb
+  )
+  list(APPEND _TEST_LIBRARY_FILES
+    "$<TARGET_PDB_FILE:iree::base::testing::dynamic_library_test_library.so>"
+  )
+endif()
+
 iree_c_embed_data(
   NAME
     dynamic_library_test_library
   SRCS
-    "$<TARGET_FILE:iree::base::testing::dynamic_library_test_library.so>"
+    ${_TEST_LIBRARY_FILES}
   C_FILE_OUTPUT
     "dynamic_library_test_library_embed.c"
   H_FILE_OUTPUT
@@ -39,6 +56,7 @@ iree_cc_test(
     ::dynamic_library_test_library
     iree::base
     iree::base::internal::dynamic_library
+    iree::base::internal::symbol_resolver_win32
     iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
