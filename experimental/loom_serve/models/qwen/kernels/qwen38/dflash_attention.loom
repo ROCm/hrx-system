@@ -6,6 +6,8 @@ func.decl @qwen38_span_active(%epoch: buffer, %span: index) -> (i1)
 
 func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index)
 
+func.decl @qwen38_span_source_position(%epoch: buffer, %span: index) -> (i32)
+
 func.decl @qwen38_row_kv_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset)
 
 func.decl @qwen38_row_kv_map_origin(%logical_capacity: index, %row: index) -> (offset)
@@ -74,13 +76,12 @@ kernel.def target(@dflash_wave32) @qwen38_dflash_query_prepare(%tokens: index, %
   %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
   scf.if %active {
     %control_origin, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
-    %control = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
-    %position_word = view.load %control[1] : view<5xi32> -> i32
-    %position = index.cast %position_word : i32 to index
+    %source_position_word = func.call @qwen38_span_source_position(%epoch, %span) : (buffer, index) -> (i32)
+    %source_position = index.cast %source_position_word : i32 to index
     %relative = kernel.workgroup.id<x> : index
     %token_value = index.add %begin, %relative : index
     %token = index.assume %token_value [ge(%token_value, 0), lt(%token_value, %capacity)] : index
-    %absolute = index.add %position, %relative : index
+    %absolute = index.add %source_position, %relative : index
     %head = kernel.workgroup.id<y> : index
     %heads = index.constant 32 : index
     %pair = func.call @dflash_normalize_rotate(%capacity, %heads, %token, %head, %absolute, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<2xf32>)
@@ -135,13 +136,12 @@ kernel.def target(@dflash_wave32) @qwen38_dflash_block_prepare(%tokens: index, %
   %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
   scf.if %active {
     %control_origin, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
-    %control = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
-    %position_word = view.load %control[1] : view<5xi32> -> i32
-    %position = index.cast %position_word : i32 to index
+    %source_position_word = func.call @qwen38_span_source_position(%epoch, %span) : (buffer, index) -> (i32)
+    %source_position = index.cast %source_position_word : i32 to index
     %relative = kernel.workgroup.id<x> : index
     %token_value = index.add %begin, %relative : index
     %token = index.assume %token_value [ge(%token_value, 0), lt(%token_value, %capacity)] : index
-    %absolute = index.add %position, %relative : index
+    %absolute = index.add %source_position, %relative : index
     %head = kernel.workgroup.id<y> : index
     %origin = index.constant 0 : offset
     %token_bytes = index.constant 2048 : offset
@@ -164,14 +164,17 @@ kernel.def target(@dflash_wave32) @qwen38_dflash_context_prepare(%tokens: index,
     %control = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
     %count_word = view.load %control[0] : view<5xi32> -> i32
     %position_word = view.load %control[1] : view<5xi32> -> i32
+    %source_position_word = func.call @qwen38_span_source_position(%epoch, %span) : (buffer, index) -> (i32)
     %count = index.cast %count_word : i32 to index
     %position = index.cast %position_word : i32 to index
+    %source_position = index.cast %source_position_word : i32 to index
     %relative = kernel.workgroup.id<x> : index
     %valid = index.cmp ult, %relative, %count : index
     scf.if %valid {
       %token_value = index.add %begin, %relative : index
       %token = index.assume %token_value [ge(%token_value, 0), lt(%token_value, %capacity)] : index
       %absolute = index.add %position, %relative : index
+      %source_absolute = index.add %source_position, %relative : index
       %head = kernel.workgroup.id<y> : index
       %logical = config.get @qwen38.attention.cache_capacity : index
       %pool = config.get @qwen38.attention.pool_capacity : index
@@ -186,7 +189,7 @@ kernel.def target(@dflash_wave32) @qwen38_dflash_context_prepare(%tokens: index,
       %logical_position = index.assume %absolute [ge(%absolute, 0), lt(%absolute, %logical)] : index
       %destination_value = func.call @qwen38_kv_position(%logical, %rows, %map_origin, %logical_position, %pool) : (index, buffer, offset, index, index) -> (index)
       %destination = index.assume %destination_value [ge(%destination_value, 0), lt(%destination_value, %storage)] : index
-      func.call @dflash_prepare_key_value(%capacity, %storage, %token, %destination, %head, %absolute, %key_origin, %value_origin, %key, %value, %weight, %cache) : (index, index, index, index, index, index, offset, offset, buffer, buffer, buffer, buffer)
+      func.call @dflash_prepare_key_value(%capacity, %storage, %token, %destination, %head, %source_absolute, %key_origin, %value_origin, %key, %value, %weight, %cache) : (index, index, index, index, index, index, offset, offset, buffer, buffer, buffer, buffer)
     }
   }
   kernel.return
