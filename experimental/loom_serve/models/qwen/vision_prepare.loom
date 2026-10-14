@@ -1,0 +1,61 @@
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+global.rodata.def @root = bytes("7177656e33385f766973696f6e5f70726f6a6563746f725f323536")
+
+global.rodata.def @height_key = bytes("7177656e33382e766973696f6e2e696d6167655f686569676874")
+
+global.rodata.def @width_key = bytes("7177656e33382e766973696f6e2e696d6167655f7769647468")
+
+global.rodata.def @checkpoint = bytes("6d6d70726f6a2d4631362e67677566")
+
+global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
+
+global.rodata.def @name = bytes("7177656e332e382d3237622d766973696f6e2d323536")
+
+global.rodata.def @empty = bytes("")
+
+global.rodata.def @invalid_options = bytes("5177656e20766973696f6e2070726f6a6563746f72206f7074696f6e73206d75737420626520616e20656d707479206f626a656374")
+
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object_type = scalar.constant 2 : i32
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %zero64 = scalar.constant 0 : i64
+  %empty_options = scalar.cmpi eq, %count, %zero64 : i64
+  %valid = scalar.andi %object, %empty_options : i1
+  %valid32 = scalar.extui %valid : i1 to i32
+  %diagnostic = global.load @invalid_options : buffer
+  func.call @require(%valid32, %diagnostic) : (i32, buffer)
+
+  %root = global.load @root : buffer
+  %stage = func.call @stage(%root, %zero64) : (buffer, i64) -> (i32)
+  %geometry = scalar.constant 256 : i64
+  %height_key = global.load @height_key : buffer
+  func.call @config_i64(%stage, %height_key, %geometry) : (i32, buffer, i64)
+  %width_key = global.load @width_key : buffer
+  func.call @config_i64(%stage, %width_key, %geometry) : (i32, buffer, i64)
+  %binding = scalar.constant 0 : i32
+  %checkpoint = global.load @checkpoint : buffer
+  %policy = global.load @policy : buffer
+  func.call @parameter(%stage, %binding, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+
+  %batch_units = scalar.constant 1 : i64
+  %upload_bytes = scalar.constant 196672 : i64
+  %output_bytes = scalar.constant 1310720 : i64
+  %state_bytes = index.constant 1 : offset
+  %state = buffer.alloca<private> align(1) %state_bytes : buffer
+  %origin = index.constant 0 : offset
+  %zero32 = scalar.constant 0 : i32
+  buffer.store.i8 %zero32, %state[%origin]
+  %empty = global.load @empty : buffer
+  %name = global.load @name : buffer
+  func.return %batch_units, %upload_bytes, %output_bytes, %output_bytes, %empty, %name, %state : i64, i64, i64, i64, buffer, buffer, buffer
+}

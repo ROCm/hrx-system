@@ -1,0 +1,119 @@
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+global.rodata.def @invalid_request = bytes("5177656e20766973696f6e2070726f6a6563746f72207265717569726573206f6e652075707269676874203235367832353620696d616765")
+
+func.def @check(%condition: i1) {
+  %condition32 = scalar.extui %condition : i1 to i32
+  %diagnostic = global.load @invalid_request : buffer
+  func.call @require(%condition32, %diagnostic) : (i32, buffer)
+  func.return
+}
+
+func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %expected_bytes = index.constant 196672 : offset
+  %request_bytes = buffer.length %request
+  %exact_bytes = index.cmp eq, %request_bytes, %expected_bytes : offset
+  func.call @check(%exact_bytes) : (i1)
+  %header = buffer.view %request[%origin] : buffer -> view<16xi32>
+  %version = view.load %header[0] : view<16xi32> -> i32
+  %format = view.load %header[1] : view<16xi32> -> i32
+  %width = view.load %header[2] : view<16xi32> -> i32
+  %height = view.load %header[3] : view<16xi32> -> i32
+  %display_width = view.load %header[4] : view<16xi32> -> i32
+  %display_height = view.load %header[5] : view<16xi32> -> i32
+  %orientation = view.load %header[6] : view<16xi32> -> i32
+  %rows = view.load %header[7] : view<16xi32> -> i32
+  %metadata_offset = view.load %header[8] : view<16xi32> -> i32
+  %metadata_length = view.load %header[9] : view<16xi32> -> i32
+  %pixel_offset = view.load %header[10] : view<16xi32> -> i32
+  %pixel_length = view.load %header[11] : view<16xi32> -> i32
+  %one = scalar.constant 1 : i32
+  %four = scalar.constant 4 : i32
+  %geometry = scalar.constant 256 : i32
+  %row_count = scalar.constant 64 : i32
+  %pixel_bytes = scalar.constant 196608 : i32
+  %version_valid = scalar.cmpi eq, %version, %one : i32
+  %format_lower = scalar.cmpi uge, %format, %one : i32
+  %format_upper = scalar.cmpi ule, %format, %four : i32
+  %format_valid = scalar.andi %format_lower, %format_upper : i1
+  %width_valid = scalar.cmpi eq, %width, %geometry : i32
+  %height_valid = scalar.cmpi eq, %height, %geometry : i32
+  %display_width_valid = scalar.cmpi eq, %display_width, %geometry : i32
+  %display_height_valid = scalar.cmpi eq, %display_height, %geometry : i32
+  %orientation_valid = scalar.cmpi eq, %orientation, %one : i32
+  %rows_valid = scalar.cmpi eq, %rows, %row_count : i32
+  %header_bytes = scalar.constant 64 : i32
+  %metadata_offset_valid = scalar.cmpi eq, %metadata_offset, %header_bytes : i32
+  %zero = scalar.constant 0 : i32
+  %metadata_empty = scalar.cmpi eq, %metadata_length, %zero : i32
+  %pixel_offset_valid = scalar.cmpi eq, %pixel_offset, %header_bytes : i32
+  %pixel_length_valid = scalar.cmpi eq, %pixel_length, %pixel_bytes : i32
+  %valid0 = scalar.andi %version_valid, %format_valid : i1
+  %valid1 = scalar.andi %width_valid, %height_valid : i1
+  %valid2 = scalar.andi %display_width_valid, %display_height_valid : i1
+  %valid3 = scalar.andi %orientation_valid, %rows_valid : i1
+  %valid4 = scalar.andi %metadata_offset_valid, %metadata_empty : i1
+  %valid5 = scalar.andi %pixel_offset_valid, %pixel_length_valid : i1
+  %valid6 = scalar.andi %valid0, %valid1 : i1
+  %valid7 = scalar.andi %valid2, %valid3 : i1
+  %valid8 = scalar.andi %valid4, %valid5 : i1
+  %valid9 = scalar.andi %valid6, %valid7 : i1
+  %valid = scalar.andi %valid9, %valid8 : i1
+  func.call @check(%valid) : (i1)
+  %units = scalar.constant 1 : i64
+  %tag = scalar.constant 0 : i64
+  func.return %request, %units, %tag : buffer, i64, i64
+}
+
+func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %range_bytes = buffer.length %ranges
+  %expected_range_bytes = index.constant 16 : offset
+  %single = index.cmp eq, %range_bytes, %expected_range_bytes : offset
+  func.call @check(%single) : (i1)
+
+  %plan_bytes = index.constant 1080 : offset
+  %plan = buffer.alloca<private> align(8) %plan_bytes : buffer
+  %header = buffer.view %plan[%origin] : buffer -> view<4xi64>
+  %output_bytes = scalar.constant 1310720 : i64
+  %one = scalar.constant 1 : i64
+  %rows = scalar.constant 64 : i64
+  view.store %output_bytes, %header[0] : i64, view<4xi64>
+  view.store %output_bytes, %header[1] : i64, view<4xi64>
+  view.store %one, %header[2] : i64, view<4xi64>
+  view.store %rows, %header[3] : i64, view<4xi64>
+  %request_offset = index.constant 32 : offset
+  %request = buffer.view %plan[%request_offset] : buffer -> view<3xi64>
+  %zero = scalar.constant 0 : i64
+  view.store %zero, %request[0] : i64, view<3xi64>
+  view.store %rows, %request[1] : i64, view<3xi64>
+  view.store %rows, %request[2] : i64, view<3xi64>
+  %row_offset = index.constant 56 : offset
+  %records = buffer.view %plan[%row_offset] : buffer -> view<64x2xi64>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %row_bytes = scalar.constant 20480 : i64
+  %elements = scalar.constant 5120 : i64
+  scf.for %i = [%c0 to %c64 step %c1] {
+    %i64 = index.cast %i : index to i64
+    %offset = scalar.muli %i64, %row_bytes : i64
+    view.store %offset, %records[%i, 0] : i64, view<64x2xi64>
+    view.store %elements, %records[%i, 1] : i64, view<64x2xi64>
+  }
+  %stage = scalar.constant 0 : i32
+  func.return %stage, %packed, %plan : i32, buffer, buffer
+}
+
+func.def public @run(%stage: i32, %feedback_bytes: i64, %input: hal.buffer, %output: hal.buffer) {
+  %work = func.call @execute_2(%stage, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+  %slot = scalar.constant 0 : i32
+  %offset = scalar.constant 0 : i64
+  %done = func.call @feedback(%slot, %output, %offset, %feedback_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return
+}
