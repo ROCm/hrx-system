@@ -69,6 +69,12 @@ loom_library(
     ],
 )
 
+loom_library(
+    name = "vision_projector",
+    srcs = ["programs/qwen38/vision_projector.loom"],
+    deps = [":vision_kernels"],
+)
+
 loom_test(
     name = "vision_execution_test",
     srcs = ["tests/vision_projector.loom"],
