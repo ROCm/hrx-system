@@ -1,23 +1,23 @@
 template.decl @qwen38.attention.rope_text_value(%position: i32, %lane0: index, %normalized_head: buffer) -> (f32)
 
-template.decl @qwen38.attention.query_prepare(%head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer, %control_origin: offset, %token_begin: index)
+template.decl @qwen38.attention.query_prepare(%head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer, %source_position_base: i32, %control_origin: offset, %token_begin: index)
 
 func.decl @qwen38_kv_position(%logical_capacity: index, %map: buffer, %map_origin: offset, %position: index, %pool_capacity: index) -> (index)
 
-template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer, %source_position_base: i32, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
 
 // Qwen3.8-27B causal full-attention prefill primitives.
 //
 // The issue-time control buffer contains the active token count followed by
-// the first absolute token position. One compiled entry therefore handles
-// fresh prompts and appended prompt spans without specializing on positions.
+// the first causal/cache position. Preparation receives the independent
+// M-RoPE source position explicitly, so compressed media coordinates never
+// change cache placement or masking.
 config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
 
 // Normalizes and rotates every query head while extracting its colocated
 // sigmoid gate. One workgroup owns one complete token/head pair.
-template.def<@qwen38.attention.query_prepare> device @qwen38_attention_query_prepare(%head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer, %control_origin: offset, %token_begin: index) {
+template.def<@qwen38.attention.query_prepare> device @qwen38_attention_query_prepare(%head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer, %source_position_base: i32, %control_origin: offset, %token_begin: index) {
   %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
   %c0_offset = index.constant 0 : offset
   %c256 = index.constant 256 : index
   %c512 = index.constant 512 : index
@@ -28,8 +28,7 @@ template.def<@qwen38.attention.query_prepare> device @qwen38_attention_query_pre
   %token_active = index.cmp ult, %token0, %token_count : index
   scf.if %token_active {
     %token = index.assume %token0 [lt(%token0, %token_count)] : index
-    %position_base_i32 = view.load %control_view[%c1] : view<2xi32> -> i32
-    %position_base0 = index.cast %position_base_i32 : i32 to index
+    %position_base0 = index.cast %source_position_base : i32 to index
     %position_base = index.assume %position_base0 [range(%position_base0, 0, 262143)] : index
     %position = index.add %position_base, %token : index
     %position_i32 = index.cast %position : index to i32
@@ -85,7 +84,10 @@ kernel.def export("qwen38_attention_query_prepare_prefill") @qwen38_attention_qu
   %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
-  template.apply<@qwen38.attention.query_prepare>(%head, %token, %lane, %control, %epsilon, %query_gate_projection, %norm_weight, %query, %gate, %origin, %token_begin) : (index, index, index, buffer, f32, buffer, buffer, buffer, buffer, offset, index)
+  %control_view = buffer.view %control[%origin] : buffer -> view<2xi32>
+  %position_index = index.constant 1 : index
+  %source_position = view.load %control_view[%position_index] : view<2xi32> -> i32
+  template.apply<@qwen38.attention.query_prepare>(%head, %token, %lane, %control, %epsilon, %query_gate_projection, %norm_weight, %query, %gate, %source_position, %origin, %token_begin) : (index, index, index, buffer, f32, buffer, buffer, buffer, buffer, i32, offset, index)
   kernel.return
 }
 
@@ -93,7 +95,7 @@ kernel.def export("qwen38_attention_query_prepare_prefill") @qwen38_attention_qu
 // the persistent token-major cache at the matching absolute positions.
 // Logical extent bounds positions and page maps independently of pool size;
 // concrete wrappers supply both capacities as specialization operands.
-template.def<@qwen38.attention.kv_prepare> device @qwen38_attention_kv_prepare(%logical_capacity: index, %head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index) {
+template.def<@qwen38.attention.kv_prepare> device @qwen38_attention_kv_prepare(%logical_capacity: index, %head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer, %source_position_base: i32, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index) {
   %c0_2 = index.constant 0 : index
   %paged = index.cmp ne, %pool_capacity, %c0_2 : index
   %physical_capacity = scf.select %paged, %pool_capacity, %logical_capacity : index
@@ -113,7 +115,10 @@ template.def<@qwen38.attention.kv_prepare> device @qwen38_attention_kv_prepare(%
     %position_base = index.assume %position_base0 [range(%position_base0, 0, 262143)] : index
     %position0 = index.add %position_base, %token : index
     %position = index.assume %position0 [lt(%position0, %logical_capacity)] : index
-    %position_i32 = index.cast %position : index to i32
+    %source_base0 = index.cast %source_position_base : i32 to index
+    %source_base = index.assume %source_base0 [range(%source_base0, 0, 262143)] : index
+    %source_position = index.add %source_base, %token : index
+    %source_position_i32 = index.cast %source_position : index to i32
     %projection_row_bytes = index.constant 4096 : offset
     %projection_origin = index.scale %token_begin, %projection_row_bytes : index, offset -> offset
     %key_projection_view = buffer.view %key_projection[%projection_origin] : buffer -> view<[%token_count]x1024xf32>
@@ -139,7 +144,7 @@ template.def<@qwen38.attention.kv_prepare> device @qwen38_attention_kv_prepare(%
     %scratch_view = buffer.view %scratch[%c0_offset] : buffer -> view<256xf32>
     view.store %normalized, %scratch_view[%lane] : f32, view<256xf32>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    %rotated = template.apply<@qwen38.attention.rope_text_value>(%position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
+    %rotated = template.apply<@qwen38.attention.rope_text_value>(%source_position_i32, %lane, %scratch) : (i32, index, buffer) -> (f32)
     %physical_position = func.call @qwen38_kv_position(%logical_capacity, %map, %map_origin, %position, %pool_capacity) : (index, buffer, offset, index, index) -> (index)
     %cache_index = index.add %head_base, %lane : index
     %key_f16 = scalar.fptrunc %rotated : f32 to f16
@@ -165,7 +170,10 @@ kernel.def export("qwen38_attention_kv_prepare_prefill") @qwen38_attention_kv_pr
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
   %logical_capacity = config.get @qwen38.attention.cache_capacity : index
-  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key_projection, %value_projection, %norm_weight, %key_cache, %value_cache, %origin, %token_begin, %origin, %origin, %control, %origin, %token_begin) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  %control_view = buffer.view %control[%origin] : buffer -> view<2xi32>
+  %position_index = index.constant 1 : index
+  %source_position = view.load %control_view[%position_index] : view<2xi32> -> i32
+  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key_projection, %value_projection, %norm_weight, %key_cache, %value_cache, %source_position, %origin, %token_begin, %origin, %origin, %control, %origin, %token_begin) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, i32, offset, index, offset, offset, buffer, offset, index)
   kernel.return
 }
 

@@ -23,6 +23,7 @@ func.def @accept_fixture(%width_value: index, %span_count_value: index, %trial_v
   %c6 = index.constant 6 : index
   %c7 = index.constant 7 : index
   %last_row = index.constant 15 : index
+  %source_base = index.constant 23 : index
   %c100 = index.constant 100 : index
   %c1001 = index.constant 1001 : index
   %wrong = index.constant 7777 : index
@@ -45,9 +46,16 @@ func.def @accept_fixture(%width_value: index, %span_count_value: index, %trial_v
     %count_word = index.cast %count : index to i32
     %begin_word = index.cast %begin : index to i32
     %position_word = index.cast %position : index to i32
+    %source_position = index.add %source_base, %span : index
+    %source_word = index.cast %source_position : index to i32
     %row_word = index.cast %row : index to i32
     %selected_word = index.cast %selection : index to i32
     %selection_word = scf.select %hidden, %none, %selected_word : i32
+    %one = scalar.constant 1 : i32
+    %selection_code = scalar.addi %selection_word, %one : i32
+    %shift = scalar.constant 10 : i32
+    %source_bits = scalar.shli %source_word, %shift : i32
+    %descriptor_output = scalar.ori %source_bits, %selection_code : i32
     %flag = scalar.extui %speculative : i1 to i32
     %limited = index.cmp eq, %span, %c7 : index
     %trial_limit = index.add %trial, %c1 : index
@@ -57,7 +65,7 @@ func.def @accept_fixture(%width_value: index, %span_count_value: index, %trial_v
     view.store %position_word, %descriptors[%span, 1] : i32, view<64x5xi32>
     view.store %begin_word, %descriptors[%span, 2] : i32, view<64x5xi32>
     view.store %row_word, %descriptors[%span, 3] : i32, view<64x5xi32>
-    view.store %selection_word, %descriptors[%span, 4] : i32, view<64x5xi32>
+    view.store %descriptor_output, %descriptors[%span, 4] : i32, view<64x5xi32>
     view.store %flag, %options[%span, 0] : i32, view<64x2xi32>
     view.store %credit_word, %options[%span, 1] : i32, view<64x2xi32>
     %phase = index.add %span, %trial : index
@@ -114,7 +122,6 @@ func.def @accept_oracle(%width_value: index, %epoch: buffer, %inputs: buffer, %p
   %draft_count = index.sub %width, %c1 : index
   %c0_2 = scalar.constant 0 : i32
   %c1_2 = scalar.constant 1 : i32
-  %none = scalar.constant -1 : i32
   %eos = view.load %control[579] : view<580xi32> -> i32
   %total = view.load %control[0] : view<580xi32> -> i32
   %span_word = view.load %control[1] : view<580xi32> -> i32
@@ -128,7 +135,12 @@ func.def @accept_oracle(%width_value: index, %epoch: buffer, %inputs: buffer, %p
     %speculative = scalar.cmpi ne, %flag, %c0_2 : i32
     %count_word = view.load %descriptors[%span, 0] : view<64x5xi32> -> i32
     %begin_word = view.load %descriptors[%span, 2] : view<64x5xi32> -> i32
-    %selection_word = view.load %descriptors[%span, 4] : view<64x5xi32> -> i32
+    %descriptor_output = view.load %descriptors[%span, 4] : view<64x5xi32> -> i32
+    %selection_mask = scalar.constant 1023 : i32
+    %selection_code = scalar.andi %descriptor_output, %selection_mask : i32
+    %selection_word = scalar.subi %selection_code, %c1_2 : i32
+    %source_mask = scalar.constant -1024 : i32
+    %source_bits = scalar.andi %descriptor_output, %source_mask : i32
     %begin = index.cast %begin_word : i32 to index
     %selection = index.cast %selection_word : i32 to index
     %has_output = scalar.cmpi sge, %selection_word, %c0_2 : i32
@@ -189,7 +201,7 @@ func.def @accept_oracle(%width_value: index, %epoch: buffer, %inputs: buffer, %p
       %word = scf.select %is_count, %consumed, %input_word : i32
       view.store %word, %accepted[%span, %field] : i32, view<64x5xi32>
     }
-    view.store %none, %accepted[%span, 4] : i32, view<64x5xi32>
+    view.store %source_bits, %accepted[%span, 4] : i32, view<64x5xi32>
     %next_replay = scf.if %speculative -> (index) {
       %replay_slot = index.assume %replay_index [range(%replay_index, 0, 15)] : index
       %capture = index.mul %span, %width : index
@@ -200,7 +212,7 @@ func.def @accept_oracle(%width_value: index, %epoch: buffer, %inputs: buffer, %p
         %word = scf.select %is_begin, %capture_word, %accepted_word : i32
         view.store %word, %replayed[%replay_slot, %field] : i32, view<64x5xi32>
       }
-      view.store %none, %replayed[%replay_slot, 4] : i32, view<64x5xi32>
+      view.store %source_bits, %replayed[%replay_slot, 4] : i32, view<64x5xi32>
       %next = index.add %replay_slot, %c1 : index
       scf.yield %next : index
     } else {
