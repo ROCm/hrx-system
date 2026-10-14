@@ -29,7 +29,10 @@
     defined(IREE_PLATFORM_APPLE)
 #include <signal.h>
 #include <sys/resource.h>
+#endif
 
+#if defined(IREE_PLATFORM_WINDOWS) || defined(IREE_PLATFORM_LINUX) || \
+    defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_APPLE)
 #include <filesystem>
 #endif
 
@@ -282,7 +285,64 @@ TEST_F(DynamicLibraryTest, TryLookupSymbolNotFound) {
   iree_dynamic_library_release(library);
 }
 
-#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID) || \
+#if defined(IREE_PLATFORM_WINDOWS)
+
+static void CheckMemoryExtraction(const char* temp_directory,
+                                  const char* mode) {
+  ASSERT_TRUE(SetEnvironmentVariableA("TMP", temp_directory));
+  const auto* file = dynamic_library_test_library_create();
+  if (!strcmp(mode, "delete-on-close")) {
+    std::string path = std::string(temp_directory) + "/candidate.dll";
+    HANDLE write_handle =
+        CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    ASSERT_NE(INVALID_HANDLE_VALUE, write_handle) << GetLastError();
+    std::unique_ptr<void, decltype(&CloseHandle)> writer(write_handle,
+                                                         CloseHandle);
+    ASSERT_LE(file->size, MAXDWORD);
+    DWORD written = 0;
+    ASSERT_TRUE(WriteFile(writer.get(), file->data,
+                          static_cast<DWORD>(file->size), &written, nullptr))
+        << GetLastError();
+    ASSERT_EQ(file->size, written);
+    HANDLE read_handle =
+        ReOpenFile(writer.get(), GENERIC_READ | DELETE,
+                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                   FILE_FLAG_DELETE_ON_CLOSE);
+    ASSERT_NE(INVALID_HANDLE_VALUE, read_handle) << GetLastError();
+    std::unique_ptr<void, decltype(&CloseHandle)> image(read_handle,
+                                                        CloseHandle);
+    writer.reset();
+    HMODULE module = LoadLibraryA(path.c_str());
+    ASSERT_NE(nullptr, module) << GetLastError();
+    auto function =
+        reinterpret_cast<int (*)(int)>(GetProcAddress(module, "times_two"));
+    ASSERT_NE(nullptr, function);
+    EXPECT_EQ(246, function(123));
+    EXPECT_TRUE(FreeLibrary(module));
+    image.reset();
+  } else {
+    const char invalid_image[] = "not a shared library";
+    iree_const_byte_span_t data =
+        iree_make_const_byte_span(invalid_image, sizeof(invalid_image));
+    if (!strcmp(mode, "create-failure")) {
+      std::string missing_directory = std::string(temp_directory) + "/missing";
+      ASSERT_TRUE(SetEnvironmentVariableA("TMP", missing_directory.c_str()));
+      data = iree_make_const_byte_span(file->data, file->size);
+    }
+    iree_dynamic_library_t* library = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_NOT_FOUND,
+        iree_dynamic_library_load_from_memory(
+            IREE_SV("extraction_failure"), data, IREE_DYNAMIC_LIBRARY_FLAG_NONE,
+            iree_allocator_system(), &library));
+    EXPECT_EQ(nullptr, library);
+  }
+  EXPECT_TRUE(std::filesystem::is_empty(temp_directory));
+}
+
+#elif defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID) || \
     defined(IREE_PLATFORM_APPLE)
 
 // Each child initializes the loader's environment policy in its own process.
@@ -371,6 +431,11 @@ static void CheckMemoryExtraction(const char* temp_directory,
   }
 }
 
+#endif  // IREE_PLATFORM_WINDOWS / POSIX
+
+#if defined(IREE_PLATFORM_WINDOWS) || defined(IREE_PLATFORM_LINUX) || \
+    defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_APPLE)
+
 static int MemoryExtractionRole(int argc, char** argv,
                                 const char* temp_directory) {
   CheckMemoryExtraction(temp_directory, argv[argc - 1]);
@@ -398,11 +463,17 @@ TEST_P(DynamicLibraryMemoryTest, OwnsExtractedFile) {
                                          &kMemoryExtractionConfig));
 }
 
+#if defined(IREE_PLATFORM_WINDOWS)
+INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
+                         ::testing::Values("create-failure", "load-failure",
+                                           "delete-on-close"));
+#else
 INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
                          ::testing::Values("discard", "empty", "preserve",
                                            "directory", "write-failure"));
+#endif
 
-#endif  // IREE_PLATFORM_LINUX || IREE_PLATFORM_ANDROID || IREE_PLATFORM_APPLE
+#endif  // IREE_PLATFORM_WINDOWS || POSIX
 
 }  // namespace
 }  // namespace iree
