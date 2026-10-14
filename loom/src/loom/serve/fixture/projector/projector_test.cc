@@ -127,6 +127,9 @@ class ProjectorFixtureTest : public ::testing::TestWithParam<uint32_t> {
   void Invoke(iree_host_size_t rows, loom_serve_finite_result_t* result) {
     IREE_ASSERT_OK(
         loom_serve_finite_model_prepare_batch(model_, 1, &prepared_, &rows));
+    // Batch ownership is independent even when its payload aliases the decoded
+    // request. Dropping both caller references makes that lifetime observable.
+    ReleaseRequest();
     bool admitted = false;
     IREE_ASSERT_OK(loom_serve_residency_try_acquire(
         loom_serve_finite_model_residency(model_), &admitted));
@@ -138,7 +141,6 @@ class ProjectorFixtureTest : public ::testing::TestWithParam<uint32_t> {
         IREE_ASYNC_WAIT_FLAG_NONE));
     loom_serve_finite_model_complete(model_);
     loom_serve_finite_model_take_result(model_, result);
-    ReleaseRequest();
   }
 
   void ExpectRows(const loom_serve_finite_result_t& result, uint32_t rows,
@@ -171,9 +173,9 @@ class ProjectorFixtureTest : public ::testing::TestWithParam<uint32_t> {
   iree_string_view_t provider_ = IREE_SV("project.loom");
   // Owned finite source model under test.
   loom_serve_finite_model_t* model_ = nullptr;
-  // Owned decoded image request, retained through batch completion.
+  // Owned decoded image request, retained through batch preparation.
   iree_vm_buffer_t* request_ = nullptr;
-  // Owned source-prepared bytes, potentially aliasing request_.
+  // Owned source-prepared bytes retained through batch preparation.
   loom_serve_finite_prepared_t prepared_ = {};
   // Owned newest completed result.
   loom_serve_finite_result_t result_ = {};

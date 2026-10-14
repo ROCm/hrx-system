@@ -99,16 +99,16 @@ iree_status_t loom_serve_finite_load_free(loom_serve_finite_load_t* load);
 // Tokenizer asset is relative to asset_root; empty omits tokenization support.
 // State is immutable across requests. Positive units bound cohort work/storage;
 // equal tags permit batching. Ranges contain [offset, length] i64 pairs into
-// concatenated prepared bytes, in request order. Both stage kinds have two
-// dynamic roots (input/output) aligned to LOOM_SERVE_FINITE_BUFFER_ALIGNMENT.
-// Commands additionally have compiler-reflected private workspace; direct
-// stages use their compiled launch configuration without a command buffer or
-// runner workspace.
-// Weighted command stages share exactly the same fixed parameter placement.
-// Direct stages have no checkpoint parameters. Source run uses the same runner
-// execute_2/feedback imports for both kinds; only compact final vectors cross
-// to the host.
-// The cold outer-application constructor drives the same asynchronous load and
+// concatenated immutable prepared bytes, in request order. A source may return
+// those bytes as its payload or produce a replacement; it does not modify the
+// prepared input. Both stage kinds have two dynamic roots (input/output)
+// aligned to LOOM_SERVE_FINITE_BUFFER_ALIGNMENT. Commands additionally have
+// compiler-reflected private workspace; direct stages use their compiled launch
+// configuration without a command buffer or runner workspace. Weighted command
+// stages share exactly the same fixed parameter placement. Direct stages have
+// no checkpoint parameters. Source run uses the same runner execute_2/feedback
+// imports for both kinds; only compact final vectors cross to the host. The
+// cold outer-application constructor drives the same asynchronous load and
 // joins it outside the shared worker pool. Creation indexes weights without
 // loading them. The shared device outlives this model. Failure releases partial
 // ownership and leaves *out_model NULL. Compilation evidence is available
@@ -153,8 +153,8 @@ loom_serve_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model);
 
 typedef struct loom_serve_finite_prepared_t {
-  // Owned source bytes. The input buffer remains retained by the request owner
-  // through batch completion, including when bytes alias it.
+  // Owned immutable source bytes retained by the caller through batch prepare.
+  // A successful batch independently retains any storage needed for execution.
   iree_vm_buffer_t* bytes;
   // Positive additive source cost, at most the model's declared batch limit.
   uint64_t units;
@@ -176,7 +176,8 @@ iree_status_t loom_serve_finite_model_prepare_request(
 // feedback_bytes, request_count, row_count], request records
 // [first_row, row_count, input_tokens], then rows [byte_offset, f32_count].
 // Device extent may exceed compact feedback; it is never inferred from rows.
-// A prior cohort must have been released. Failure leaves no prepared cohort.
+// A prior cohort must have been released. Success retains its payload
+// independently of requests; failure leaves no prepared cohort.
 iree_status_t loom_serve_finite_model_prepare_batch(
     loom_serve_finite_model_t* model, iree_host_size_t count,
     const loom_serve_finite_prepared_t* requests,

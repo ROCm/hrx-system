@@ -1177,27 +1177,44 @@ iree_status_t loom_serve_finite_model_prepare_batch(
   iree_vm_buffer_t* packed = NULL;
   IREE_RETURN_IF_ERROR(
       iree_vm_buffer_create(count * 16, 8, model->host_allocator, &ranges));
-  iree_status_t status =
-      iree_vm_buffer_create(length, 8, model->host_allocator, &packed);
+  // One readable, aligned prepared request is already the complete contiguous
+  // cohort. Retaining it avoids allocating and copying large media packets.
+  const bool reuse_single_request =
+      count == 1 &&
+      iree_all_bits_set(iree_vm_buffer_access(requests[0].bytes),
+                        IREE_VM_BUFFER_ACCESS_FLAG_READ) &&
+      iree_host_ptr_has_alignment(iree_vm_buffer_data(requests[0].bytes),
+                                  sizeof(uint64_t));
+  iree_status_t status = iree_ok_status();
+  if (reuse_single_request) {
+    packed = requests[0].bytes;
+    iree_vm_buffer_retain(packed);
+  } else {
+    status = iree_vm_buffer_create(length, 8, model->host_allocator, &packed);
+  }
   iree_byte_span_t records = iree_byte_span_empty();
   iree_byte_span_t target = iree_byte_span_empty();
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_map_write(ranges, 0, count * 16, &records);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !reuse_single_request) {
     status = iree_vm_buffer_map_write(packed, 0, length, &target);
   }
   iree_host_size_t offset = 0;
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    iree_const_byte_span_t input;
-    status = iree_vm_buffer_map_read(
-        requests[i].bytes, 0, iree_vm_buffer_length(requests[i].bytes), &input);
-    if (iree_status_is_ok(status)) {
-      iree_unaligned_store_le_u64(records.data + i * 16, offset);
-      iree_unaligned_store_le_u64(records.data + i * 16 + 8, input.data_length);
-      memcpy(target.data + offset, input.data, input.data_length);
-      offset += input.data_length;
+    const iree_host_size_t input_length =
+        iree_vm_buffer_length(requests[i].bytes);
+    iree_unaligned_store_le_u64(records.data + i * 16, offset);
+    iree_unaligned_store_le_u64(records.data + i * 16 + 8, input_length);
+    if (!reuse_single_request) {
+      iree_const_byte_span_t input;
+      status =
+          iree_vm_buffer_map_read(requests[i].bytes, 0, input_length, &input);
+      if (iree_status_is_ok(status)) {
+        memcpy(target.data + offset, input.data, input.data_length);
+      }
     }
+    offset += input_length;
   }
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
