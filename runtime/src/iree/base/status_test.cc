@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstdarg>
 #include <ostream>
 #include <string>
 #include <type_traits>
@@ -13,6 +14,43 @@
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+
+#if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_STACK_TRACE) != 0 &&   \
+    (defined(IREE_PLATFORM_WINDOWS) || defined(IREE_PLATFORM_APPLE) || \
+     defined(IREE_HAVE_LIBBACKTRACE))
+#define IREE_STATUS_TEST_SYMBOLIZED_STACK 1
+
+// Export the frame on Windows so installed tests can resolve it without a PDB.
+// Annotating after allocation keeps the error-producing call from tail-calling.
+#if defined(IREE_PLATFORM_WINDOWS)
+extern "C" __declspec(dllexport) __declspec(noinline)
+#else
+extern "C" IREE_ATTRIBUTE_NOINLINE
+#endif
+iree_status_t iree_status_test_capture(int constructor, ...) {
+  iree_status_t status = iree_ok_status();
+  switch (constructor) {
+    case 0:
+      status = iree_make_status(IREE_STATUS_UNAVAILABLE);
+      break;
+    case 1:
+      status = iree_make_status(IREE_STATUS_UNAVAILABLE, "literal message");
+      break;
+    case 2:
+      status = iree_make_status(IREE_STATUS_UNAVAILABLE, "formatted %d", 42);
+      break;
+    case 3: {
+      va_list arguments;
+      va_start(arguments, constructor);
+      status = iree_status_allocate_vf(IREE_STATUS_UNAVAILABLE, __FILE__,
+                                       __LINE__, "variadic %d", arguments);
+      va_end(arguments);
+      break;
+    }
+  }
+  return iree_status_annotate(status, iree_make_cstring_view("captured frame"));
+}
+#endif  // symbolized stack traces
 
 namespace iree {
 namespace {
@@ -409,6 +447,20 @@ TEST(StatusFormatTo, WithMultipleAnnotationsTruncatedAtAllBoundaries) {
 }
 
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_STACK_TRACE) != 0
+
+#if defined(IREE_STATUS_TEST_SYMBOLIZED_STACK)
+TEST(StatusFormatTo, StackRetainsErrorSite) {
+  const char* constructors[] = {"empty", "literal", "formatted", "variadic"};
+  for (int constructor = 0; constructor < IREE_ARRAYSIZE(constructors);
+       ++constructor) {
+    SCOPED_TRACE(constructors[constructor]);
+    iree_status_t status = iree_status_test_capture(constructor, 42);
+    std::string text = FormatStatusBuffer(status);
+    iree_status_free(status);
+    EXPECT_THAT(text, HasSubstr("<iree_status_test_capture"));
+  }
+}
+#endif  // IREE_STATUS_TEST_SYMBOLIZED_STACK
 
 TEST(StatusFormatTo, WithStackTraceTruncatedBuffer) {
   iree_status_t status =

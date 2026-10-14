@@ -472,13 +472,12 @@ static void iree_status_payload_stack_trace_formatter(
   *out_buffer_length = 0;
   iree_status_payload_stack_trace_t* payload =
       (iree_status_payload_stack_trace_t*)base_payload;
-  iree_host_size_t first_frame = (iree_host_size_t)payload->skip_frames + 1;
-  if (first_frame >= payload->frame_count) {
+  if (payload->frame_count == 0) {
     return;
   }
   iree_host_size_t buffer_length =
       iree_string_buffer_append_cstr(buffer_capacity, buffer, 0, "stack:\n");
-  for (iree_host_size_t i = first_frame; i < payload->frame_count; ++i) {
+  for (iree_host_size_t i = 0; i < payload->frame_count; ++i) {
     iree_host_size_t remaining_capacity =
         buffer && buffer_length < buffer_capacity
             ? buffer_capacity - buffer_length
@@ -495,12 +494,10 @@ static void iree_status_payload_stack_trace_formatter(
 }
 
 // Captures the current stack and attaches it to the status storage.
-// A count of |skip_frames| will be skipped from the top of the stack.
-// Setting |skip_frames|=0 will include the caller in the stack while
-// |skip_frames|=1 will exclude it.
+// Preserve every captured frame: allocation helpers can inline or tail-call,
+// so a fixed skip count can discard the actual error site.
 iree_status_t iree_status_attach_stack_trace(iree_status_t status,
-                                             iree_status_storage_t* storage,
-                                             int skip_frames) {
+                                             iree_status_storage_t* storage) {
   // Reserve storage for the number of stack frames so we can capture directly
   // into the storage even if we don't need them all. At the point we are
   // mallocing the exact size doesn't really matter.
@@ -521,18 +518,11 @@ iree_status_t iree_status_attach_stack_trace(iree_status_t status,
   payload->header.formatter = iree_status_payload_stack_trace_formatter;
 
 #if defined(IREE_HAVE_BACKTRACE)
-  // Capture up to the max frame count and skip some frames when formatting -
-  // this means that our actual backtrace() max frame count is smaller than the
-  // defined value. We could instead overallocate by skip_frames to waste a bit
-  // of memory but keep the processing simpler.
-  payload->skip_frames = skip_frames;
   payload->frame_count = backtrace((void**)&payload->addresses,
                                    IREE_STATUS_MAX_STACK_TRACE_FRAMES);
 #elif defined(IREE_PLATFORM_WINDOWS)
-  // NOTE: Win32 supports skip frames by default so we don't lose any storage.
-  payload->frame_count =
-      CaptureStackBackTrace(skip_frames, IREE_STATUS_MAX_STACK_TRACE_FRAMES,
-                            (void**)&payload->addresses, NULL);
+  payload->frame_count = CaptureStackBackTrace(
+      0, IREE_STATUS_MAX_STACK_TRACE_FRAMES, (void**)&payload->addresses, NULL);
 #elif defined(IREE_USE_LIBBACKTRACE)
   // Use libbacktrace's backtrace_simple for unwinding.
   struct backtrace_state* state = iree_libbacktrace_get_state();
@@ -542,7 +532,6 @@ iree_status_t iree_status_attach_stack_trace(iree_status_t status,
         .max_frames = IREE_STATUS_MAX_STACK_TRACE_FRAMES,
         .frame_count = 0,
     };
-    payload->skip_frames = skip_frames;
     backtrace_simple(state, 0, iree_libbacktrace_capture_callback,
                      iree_libbacktrace_error_callback, &capture_state);
     payload->frame_count = capture_state.frame_count;
@@ -556,8 +545,7 @@ iree_status_t iree_status_attach_stack_trace(iree_status_t status,
 #else
 
 iree_status_t iree_status_attach_stack_trace(iree_status_t status,
-                                             iree_status_storage_t* storage,
-                                             int skip_frames) {
+                                             iree_status_storage_t* storage) {
   return status;
 }
 
