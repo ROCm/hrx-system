@@ -7,6 +7,7 @@
 """Analysis tests for generated-file Bazel rules."""
 
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
+load("@rules_testing//lib:truth.bzl", "matching")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo", "util")
 load("//build_tools/bazel:generate.bzl", "IreeGeneratedFilesInfo", "iree_generated_files")
 
@@ -33,10 +34,10 @@ def _test_generated_files_declares_action_contract(name, **kwargs):
         srcs = [":generate_rule_fixture.in"],
         data = [":generate_rule_fixture.data"],
         outs = [
-            name + "_generated.h",
-            name + "_generated.c",
+            "nested/" + name + "_generated.h",
+            "nested/" + name + "_generated.c",
         ],
-        output_directories = [name + "_assets"],
+        output_directories = ["nested/" + name + "_assets"],
         args = [
             "--input",
             "$(location :generate_rule_fixture.in)",
@@ -44,9 +45,10 @@ def _test_generated_files_declares_action_contract(name, **kwargs):
         ],
         mnemonic = "IreeGenerateTest",
         output_args = {
-            name + "_assets": "--assets={path}",
+            "nested/" + name + "_assets": "--assets={path}",
+            # A unique basename remains valid shorthand for a nested output.
             name + "_generated.c": "--source",
-            name + "_generated.h": "--header={path}",
+            "nested/" + name + "_generated.h": "--header={path}",
         },
         progress_message = "Testing generated-file action %{label}",
         tags = ["manual"],
@@ -80,7 +82,7 @@ def _test_generated_files_declares_action_contract_impl(env, target):
     action = actions[0]
     env.expect.that_str(action.mnemonic).equals("IreeGenerateTest")
     action_args = action.argv
-    _expect_arg_with_prefix_and_suffix(env, action_args, "--assets=", "test_generated_files_declares_action_contract_assets")
+    _expect_arg_with_prefix_and_suffix(env, action_args, "--assets=", "nested/test_generated_files_declares_action_contract_assets")
     _expect_value(env, action_args, "--input")
     _expect_arg_with_prefix_and_suffix(env, action_args, "", "generate_rule_fixture.in")
     _expect_arg_with_prefix_and_suffix(env, action_args, "--data=", "generate_rule_fixture.data")
@@ -88,14 +90,14 @@ def _test_generated_files_declares_action_contract_impl(env, target):
         env,
         action_args,
         "--header=",
-        "test_generated_files_declares_action_contract_generated.h",
+        "nested/test_generated_files_declares_action_contract_generated.h",
     )
     _expect_value(env, action_args, "--source")
     _expect_arg_with_prefix_and_suffix(
         env,
         action_args,
         "",
-        "test_generated_files_declares_action_contract_generated.c",
+        "nested/test_generated_files_declares_action_contract_generated.c",
     )
     _expect_basename(env, action.inputs.to_list(), "generate_rule_fixture.in")
     _expect_basename(env, action.inputs.to_list(), "generate_rule_fixture.data")
@@ -139,11 +141,91 @@ def _test_generated_files_accepts_repeated_basenames_impl(env, target):
         "second/shared.h",
     )
 
+def _test_invalid_output_arguments(name, outs, output_args, impl, **kwargs):
+    util.helper_target(
+        iree_generated_files,
+        name = name + "_subject",
+        outs = outs,
+        output_args = output_args,
+        tags = ["manual"],
+        tool = "//build_tools/bazel/test:generate_rule_fixture_tool",
+    )
+    analysis_test(
+        name = name,
+        expect_failure = True,
+        impl = impl,
+        target = name + "_subject",
+        **kwargs
+    )
+
+def _test_generated_files_rejects_unknown_output(name, **kwargs):
+    _test_invalid_output_arguments(
+        name,
+        outs = [name + "/declared.h"],
+        output_args = {"undeclared.h": "--header={path}"},
+        impl = _test_generated_files_rejects_unknown_output_impl,
+        **kwargs
+    )
+
+def _test_generated_files_rejects_unknown_output_impl(env, target):
+    env.expect.that_target(target).failures().contains_predicate(
+        matching.contains("output_args contains undeclared outputs: undeclared.h"),
+    )
+
+def _test_generated_files_rejects_missing_output(name, **kwargs):
+    _test_invalid_output_arguments(
+        name,
+        outs = [name + "/missing.h"],
+        output_args = {},
+        impl = _test_generated_files_rejects_missing_output_impl,
+        **kwargs
+    )
+
+def _test_generated_files_rejects_missing_output_impl(env, target):
+    env.expect.that_target(target).failures().contains_predicate(
+        matching.contains("output_args missing declared outputs: test_generated_files_rejects_missing_output/missing.h"),
+    )
+
+def _test_generated_files_rejects_duplicate_selection(name, **kwargs):
+    _test_invalid_output_arguments(
+        name,
+        outs = [name + "/duplicate.h"],
+        output_args = {
+            name + "/duplicate.h": "--first={path}",
+            "duplicate.h": "--second={path}",
+        },
+        impl = _test_generated_files_rejects_duplicate_selection_impl,
+        **kwargs
+    )
+
+def _test_generated_files_rejects_duplicate_selection_impl(env, target):
+    env.expect.that_target(target).failures().contains_predicate(
+        matching.contains("more than once"),
+    )
+
+def _test_generated_files_rejects_ambiguous_basename(name, **kwargs):
+    _test_invalid_output_arguments(
+        name,
+        outs = [name + "/first/shared.h", name + "/second/shared.h"],
+        output_args = {"shared.h": "--header={path}"},
+        impl = _test_generated_files_rejects_ambiguous_basename_impl,
+        **kwargs
+    )
+
+def _test_generated_files_rejects_ambiguous_basename_impl(env, target):
+    env.expect.that_target(target).failures().contains_predicate(
+        matching.contains("output_args contains undeclared outputs: shared.h"),
+    )
+
 def generate_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
             _test_generated_files_declares_action_contract,
             _test_generated_files_accepts_repeated_basenames,
+            _test_generated_files_rejects_unknown_output,
+            _test_generated_files_rejects_missing_output,
+            _test_generated_files_rejects_duplicate_selection,
+            _test_generated_files_rejects_ambiguous_basename,
         ],
     )

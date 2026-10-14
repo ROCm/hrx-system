@@ -21,20 +21,14 @@ def _expand_output_arg(output_arg, output):
         return [output_arg.replace("{path}", output.path)]
     return [output_arg, output.path]
 
-def _resolve_output_arguments(ctx, outputs):
+def _resolve_output_arguments(ctx, outputs_by_name):
     """Resolves output_args keys to declared outputs."""
     basename_counts = {}
-    for output in outputs:
+    for output in outputs_by_name.values():
         basename_counts[output.basename] = basename_counts.get(output.basename, 0) + 1
 
-    package_prefix = ctx.label.package + "/" if ctx.label.package else ""
-    outputs_by_path = {}
     outputs_by_basename = {}
-    for output in outputs:
-        output_path = output.short_path
-        if package_prefix and output_path.startswith(package_prefix):
-            output_path = output_path[len(package_prefix):]
-        outputs_by_path[output_path] = output
+    for output in outputs_by_name.values():
         if basename_counts[output.basename] == 1:
             outputs_by_basename[output.basename] = output
 
@@ -42,7 +36,7 @@ def _resolve_output_arguments(ctx, outputs):
     selected_output_paths = {}
     unknown_outputs = []
     for output_key in ctx.attr.output_args.keys():
-        output = outputs_by_path.get(output_key)
+        output = outputs_by_name.get(output_key)
         if output == None:
             output = outputs_by_basename.get(output_key)
         if output == None:
@@ -56,17 +50,24 @@ def _resolve_output_arguments(ctx, outputs):
         fail("output_args contains undeclared outputs: %s" % ", ".join(unknown_outputs))
 
     missing_outputs = []
-    for output in outputs:
+    for name, output in outputs_by_name.items():
         if output.path not in selected_output_paths:
-            missing_outputs.append(output.short_path)
+            missing_outputs.append(name)
     if missing_outputs:
         fail("output_args missing declared outputs: %s" % ", ".join(missing_outputs))
     return resolved_outputs
 
 def _iree_generated_files_impl(ctx):
-    directories = [ctx.actions.declare_directory(name) for name in ctx.attr.output_directories]
-    outputs = ctx.outputs.outs + directories
-    outputs_by_argument = _resolve_output_arguments(ctx, outputs)
+    # Output labels and directory declarations already provide package-relative
+    # names. Keep these identities independent of Bazel's artifact path layout.
+    outputs_by_name = {
+        label.name: output
+        for label, output in zip(ctx.attr.outs, ctx.outputs.outs)
+    }
+    for name in ctx.attr.output_directories:
+        outputs_by_name[name] = ctx.actions.declare_directory(name)
+    outputs = outputs_by_name.values()
+    outputs_by_argument = _resolve_output_arguments(ctx, outputs_by_name)
 
     location_targets = ctx.attr.srcs + ctx.attr.data
     command_args = []
