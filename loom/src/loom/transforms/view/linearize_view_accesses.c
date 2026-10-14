@@ -14,6 +14,7 @@
 #include "loom/ir/types.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cache.h"
+#include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
@@ -48,7 +49,8 @@ LOOM_PASS_STATISTICS_DEFINE(loom_linearize_view_accesses_statistics,
 
 static const loom_pass_info_t loom_linearize_view_accesses_pass_info_storage = {
     .name = IREE_SVL("linearize-view-accesses"),
-    .description = IREE_SVL("Linearize dense multi-dimensional view accesses."),
+    .description =
+        IREE_SVL("Linearize row-contiguous multi-dimensional view accesses."),
     .kind = LOOM_PASS_FUNCTION,
     .statistic_layout = &loom_linearize_view_accesses_statistics_layout,
 };
@@ -143,6 +145,19 @@ typedef struct loom_linearize_view_accesses_index_t {
   loom_linearize_view_accesses_index_term_t terms[LOOM_TYPE_MAX_RANK];
 } loom_linearize_view_accesses_index_t;
 
+typedef struct loom_linearize_view_accesses_layout_t {
+  // Physical element stride of each logical view axis.
+  int64_t strides[LOOM_TYPE_MAX_RANK];
+  // Number of elements spanning every address reachable through the view.
+  int64_t linear_length;
+  // Semantic role of an explicit strided encoding.
+  loom_encoding_role_t encoding_role;
+  // Exact storage-schema encoding retained after replacing a strided layout.
+  uint16_t storage_schema_encoding_id;
+  // Number of populated physical strides.
+  uint8_t rank;
+} loom_linearize_view_accesses_layout_t;
+
 static iree_status_t loom_linearize_view_accesses_op_list_push(
     iree_arena_allocator_t* arena, loom_linearize_view_accesses_op_list_t* list,
     loom_op_t* op) {
@@ -206,10 +221,9 @@ static iree_status_t loom_linearize_view_accesses_collect_access(
 // Linearization
 //===----------------------------------------------------------------------===//
 
-static bool loom_linearize_view_accesses_static_dense_view_type(
+static bool loom_linearize_view_accesses_static_view_layout(
     const loom_fact_context_t* fact_context, const loom_module_t* module,
-    loom_type_t view_type, int64_t* out_length) {
-  *out_length = 0;
+    loom_type_t view_type, loom_linearize_view_accesses_layout_t* out_layout) {
   if (!loom_type_is_view(view_type) || loom_type_rank(view_type) <= 1 ||
       !loom_type_is_all_static(view_type)) {
     return false;
@@ -223,19 +237,83 @@ static bool loom_linearize_view_accesses_static_dense_view_type(
           IREE_ARRAYSIZE(stride_storage), &layout)) {
     return false;
   }
-  if (layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE) {
+  if (layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE &&
+      layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED) {
     return false;
   }
 
-  int64_t length = 1;
-  uint8_t rank = loom_type_rank(view_type);
+  const uint8_t rank = loom_type_rank(view_type);
+  out_layout->rank = rank;
+  out_layout->encoding_role = LOOM_ENCODING_ROLE_UNKNOWN;
+  out_layout->storage_schema_encoding_id = 0;
+  if (layout.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE) {
+    int64_t stride = 1;
+    for (uint8_t reverse_axis = 0; reverse_axis < rank; ++reverse_axis) {
+      const uint8_t axis = rank - reverse_axis - 1;
+      const int64_t dimension = loom_type_dim_static_size_at(view_type, axis);
+      if (dimension <= 0) {
+        return false;
+      }
+      out_layout->strides[axis] = stride;
+      if (!iree_checked_mul_i64(stride, dimension, &stride)) {
+        return false;
+      }
+    }
+    out_layout->linear_length = stride;
+    return true;
+  }
+
+  if (layout.rank != rank || layout.strides == NULL) {
+    return false;
+  }
+  int64_t maximum_offset = 0;
   for (uint8_t axis = 0; axis < rank; ++axis) {
-    int64_t dim = loom_type_dim_static_size_at(view_type, axis);
-    if (dim <= 0 || !iree_checked_mul_i64(length, dim, &length)) {
+    const int64_t dimension = loom_type_dim_static_size_at(view_type, axis);
+    int64_t stride = 0;
+    if (dimension <= 0 ||
+        !loom_value_facts_as_exact_i64(layout.strides[axis], &stride) ||
+        stride < 0) {
       return false;
     }
+    int64_t axis_maximum_offset = 0;
+    if (!iree_checked_mul_i64(dimension - 1, stride, &axis_maximum_offset) ||
+        !iree_checked_add_i64(maximum_offset, axis_maximum_offset,
+                              &maximum_offset)) {
+      return false;
+    }
+    out_layout->strides[axis] = stride;
   }
-  *out_length = length;
+  // A dense rank-1 replacement is profitable when the logical trailing row is
+  // physically contiguous. Transposed and lane-strided layouts retain their
+  // ranked form for direct source-memory lowering.
+  if (out_layout->strides[rank - 1] != 1) {
+    return false;
+  }
+  if (!iree_checked_add_i64(maximum_offset, 1, &out_layout->linear_length)) {
+    return false;
+  }
+
+  out_layout->encoding_role =
+      loom_type_has_static_encoding(view_type)
+          ? loom_encoding_static_role(
+                module, loom_module_encoding(module, view_type.encoding_id))
+          : loom_encoding_value_role(module,
+                                     loom_type_encoding_value_id(view_type));
+  if (out_layout->encoding_role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
+    return true;
+  }
+  if (out_layout->encoding_role != LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) {
+    return false;
+  }
+
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(fact_context, module, view_type,
+                                               &storage_schema) ||
+      storage_schema.static_spec_encoding_id == 0) {
+    return false;
+  }
+  out_layout->storage_schema_encoding_id =
+      storage_schema.static_spec_encoding_id;
   return true;
 }
 
@@ -243,7 +321,8 @@ static bool loom_linearize_view_accesses_static_dense_view_type(
 // existing facts prove the entire access, including every row of a vector tile.
 // Otherwise the ranked access remains available to the production proof gate.
 static bool loom_linearize_view_accesses_prepare_index(
-    const loom_value_fact_table_t* fact_table, loom_type_t view_type,
+    const loom_value_fact_table_t* fact_table,
+    const loom_linearize_view_accesses_layout_t* layout, loom_type_t view_type,
     loom_type_t value_type, loom_attribute_t static_indices,
     loom_value_slice_t dynamic_indices,
     loom_linearize_view_accesses_index_t* out_index) {
@@ -253,9 +332,9 @@ static bool loom_linearize_view_accesses_prepare_index(
       loom_type_is_vector(value_type) ? loom_type_rank(value_type) : 0;
   const uint8_t first_vector_axis = rank - vector_rank;
   uint16_t dynamic_index_position = dynamic_indices.count;
-  int64_t stride = 1;
   for (uint8_t reverse_axis = 0; reverse_axis < rank; ++reverse_axis) {
     const uint8_t axis = rank - reverse_axis - 1;
+    const int64_t stride = layout->strides[axis];
     const int64_t dimension = loom_type_dim_static_size_at(view_type, axis);
     const int64_t footprint = axis < first_vector_axis
                                   ? 1
@@ -281,15 +360,17 @@ static bool loom_linearize_view_accesses_prepare_index(
                 .value = value,
                 .stride = stride,
             };
-        stride *= dimension;
         continue;
       }
     } else if (coordinate < 0 || coordinate > upper_bound) {
       return false;
     }
-    // The dense view's checked element count bounds all strides and offsets.
-    out_index->static_offset += coordinate * stride;
-    stride *= dimension;
+    int64_t coordinate_offset = 0;
+    if (!iree_checked_mul_i64(coordinate, stride, &coordinate_offset) ||
+        !iree_checked_add_i64(out_index->static_offset, coordinate_offset,
+                              &out_index->static_offset)) {
+      return false;
+    }
   }
   return true;
 }
@@ -362,7 +443,7 @@ static iree_status_t loom_linearize_view_accesses_build_linear_index(
 
 static iree_status_t loom_linearize_view_accesses_get_linear_view(
     loom_linearize_view_accesses_context_t* context, loom_op_t* view_op,
-    loom_type_t view_type, int64_t linear_length,
+    loom_type_t view_type, const loom_linearize_view_accesses_layout_t* layout,
     loom_value_id_t* out_linear_view) {
   for (iree_host_size_t i = 0; i < context->view_map->count; ++i) {
     loom_linearize_view_accesses_view_map_entry_t entry =
@@ -373,10 +454,33 @@ static iree_status_t loom_linearize_view_accesses_get_linear_view(
     }
   }
 
+  uint16_t linear_encoding_id = view_type.encoding_id;
+  loom_encoding_flags_t linear_encoding_flags = view_type.encoding_flags;
+  if (layout->encoding_role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
+    linear_encoding_id = 0;
+    linear_encoding_flags = 0;
+  } else if (layout->encoding_role == LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) {
+    const loom_value_fact_encoding_summary_t linear_summary = {
+        .role = LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
+        .address_layout =
+            {
+                .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE,
+            },
+        .storage_schema =
+            {
+                .static_spec_encoding_id = layout->storage_schema_encoding_id,
+            },
+    };
+    IREE_RETURN_IF_ERROR(loom_encoding_intern_exact_summary(
+        context->module, &linear_summary, &linear_encoding_id));
+    IREE_ASSERT(linear_encoding_id != 0);
+    linear_encoding_flags = 0;
+  }
+
   loom_type_t linear_type = loom_type_shaped_1d(
       LOOM_TYPE_VIEW, loom_type_element_type(view_type),
-      loom_dim_pack_static(linear_length), view_type.encoding_id);
-  linear_type.encoding_flags = view_type.encoding_flags;
+      loom_dim_pack_static(layout->linear_length), linear_encoding_id);
+  linear_type.encoding_flags = linear_encoding_flags;
   linear_type = loom_type_view_with_alignment(
       linear_type, loom_type_view_alignment(view_type));
 
@@ -404,17 +508,7 @@ static iree_status_t loom_linearize_view_accesses_get_linear_view(
 static bool loom_linearize_view_accesses_get_source_view(
     const loom_fact_context_t* fact_context, loom_module_t* module,
     loom_value_id_t view, loom_op_t** out_view_op, loom_type_t* out_view_type,
-    int64_t* out_linear_length) {
-  *out_view_op = NULL;
-  *out_view_type = loom_type_none();
-  *out_linear_length = 0;
-  loom_type_t view_type = loom_module_value_type(module, view);
-  int64_t linear_length = 0;
-  if (!loom_linearize_view_accesses_static_dense_view_type(
-          fact_context, module, view_type, &linear_length)) {
-    return false;
-  }
-
+    loom_linearize_view_accesses_layout_t* out_layout) {
   const loom_value_t* view_value = loom_module_value(module, view);
   if (loom_value_is_block_arg(view_value)) {
     return false;
@@ -423,22 +517,24 @@ static bool loom_linearize_view_accesses_get_source_view(
   if (!loom_buffer_view_isa(view_op)) {
     return false;
   }
+  loom_type_t view_type = loom_module_value_type(module, view);
+  if (!loom_linearize_view_accesses_static_view_layout(fact_context, module,
+                                                       view_type, out_layout)) {
+    return false;
+  }
 
   *out_view_op = view_op;
   *out_view_type = view_type;
-  *out_linear_length = linear_length;
   return true;
 }
 
 static bool loom_linearize_view_accesses_static_contiguous_vector_access(
     const loom_fact_context_t* fact_context, loom_module_t* module,
-    loom_type_t view_type, loom_type_t vector_type, int64_t linear_length) {
+    loom_type_t view_type, loom_type_t vector_type,
+    const loom_linearize_view_accesses_layout_t* layout) {
   loom_vector_memory_access_t access;
   if (!loom_vector_memory_access_describe(fact_context, module, view_type,
                                           vector_type, &access)) {
-    return false;
-  }
-  if (access.layout_kind != LOOM_VECTOR_MEMORY_LAYOUT_DENSE) {
     return false;
   }
   if (access.vector_rank != 1) {
@@ -452,7 +548,7 @@ static bool loom_linearize_view_accesses_static_contiguous_vector_access(
   }
 
   int64_t lane_count = loom_type_dim_static_size_at(vector_type, 0);
-  if (lane_count <= 0 || lane_count > linear_length) {
+  if (lane_count <= 0 || lane_count > layout->linear_length) {
     return false;
   }
   const int64_t trailing_axis_dim =
@@ -460,10 +556,10 @@ static bool loom_linearize_view_accesses_static_contiguous_vector_access(
   if (lane_count > trailing_axis_dim) {
     return false;
   }
-  return true;
+  return layout->strides[access.view_rank - 1] == 1;
 }
 
-static bool loom_linearize_view_accesses_static_dense_vector_tile(
+static bool loom_linearize_view_accesses_static_contiguous_vector_tile(
     const loom_fact_context_t* fact_context, loom_module_t* module,
     loom_type_t view_type, loom_type_t vector_type,
     loom_linearize_view_accesses_vector_tile_t* out_tile) {
@@ -472,9 +568,6 @@ static bool loom_linearize_view_accesses_static_dense_vector_tile(
   loom_vector_memory_access_t access;
   if (!loom_vector_memory_access_describe(fact_context, module, view_type,
                                           vector_type, &access)) {
-    return false;
-  }
-  if (access.layout_kind != LOOM_VECTOR_MEMORY_LAYOUT_DENSE) {
     return false;
   }
   if (access.vector_rank <= 1 || !loom_type_is_all_static(vector_type)) {
@@ -549,22 +642,21 @@ static void loom_linearize_view_accesses_tile_row_offsets(
 }
 
 static iree_status_t loom_linearize_view_accesses_build_tile_row_index(
-    loom_builder_t* builder, loom_type_t view_type,
+    loom_builder_t* builder,
+    const loom_linearize_view_accesses_layout_t* layout,
     const loom_linearize_view_accesses_index_t* index,
     const loom_linearize_view_accesses_vector_tile_t* tile, int64_t row_ordinal,
     loom_location_id_t location, loom_value_id_t* out_linear_index,
     int64_t* out_static_linear_index) {
-  const uint8_t rank = loom_type_rank(view_type);
   int64_t axis_static_offsets[LOOM_TYPE_MAX_RANK] = {0};
   loom_linearize_view_accesses_tile_row_offsets(tile, row_ordinal,
                                                 axis_static_offsets);
 
+  // The original footprint proof bounds this row within the checked physical
+  // span, so every product and their sum fit the span's signed 64-bit domain.
   int64_t row_offset = 0;
-  int64_t stride = 1;
-  for (uint8_t reverse_axis = 0; reverse_axis < rank; ++reverse_axis) {
-    const uint8_t axis = rank - reverse_axis - 1;
-    row_offset += axis_static_offsets[axis] * stride;
-    stride *= loom_type_dim_static_size_at(view_type, axis);
+  for (uint8_t axis = 0; axis < layout->rank; ++axis) {
+    row_offset += axis_static_offsets[axis] * layout->strides[axis];
   }
   return loom_linearize_view_accesses_build_linear_index(
       builder, index, row_offset, location, out_linear_index,
@@ -576,17 +668,17 @@ static iree_status_t loom_linearize_view_accesses_rewrite_load(
     bool* out_changed) {
   loom_op_t* view_op = NULL;
   loom_type_t view_type = loom_type_none();
-  int64_t linear_length = 0;
+  loom_linearize_view_accesses_layout_t layout;
   const loom_fact_context_t* fact_context = &context->fact_table->context;
   if (!loom_linearize_view_accesses_get_source_view(
           fact_context, context->module, loom_view_load_view(load_op), &view_op,
-          &view_type, &linear_length)) {
+          &view_type, &layout)) {
     return iree_ok_status();
   }
 
   loom_linearize_view_accesses_index_t index;
   if (!loom_linearize_view_accesses_prepare_index(
-          context->fact_table, view_type,
+          context->fact_table, &layout, view_type,
           loom_module_value_type(context->module,
                                  loom_view_load_result(load_op)),
           loom_view_load_static_indices(load_op),
@@ -604,7 +696,7 @@ static iree_status_t loom_linearize_view_accesses_rewrite_load(
 
   loom_value_id_t linear_view = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_linearize_view_accesses_get_linear_view(
-      context, view_op, view_type, linear_length, &linear_view));
+      context, view_op, view_type, &layout, &linear_view));
 
   int64_t static_indices[] = {
       linear_index == LOOM_VALUE_ID_INVALID ? static_linear_index : INT64_MIN};
@@ -649,17 +741,17 @@ static iree_status_t loom_linearize_view_accesses_rewrite_store(
     bool* out_changed) {
   loom_op_t* view_op = NULL;
   loom_type_t view_type = loom_type_none();
-  int64_t linear_length = 0;
+  loom_linearize_view_accesses_layout_t layout;
   const loom_fact_context_t* fact_context = &context->fact_table->context;
   if (!loom_linearize_view_accesses_get_source_view(
           fact_context, context->module, loom_view_store_view(store_op),
-          &view_op, &view_type, &linear_length)) {
+          &view_op, &view_type, &layout)) {
     return iree_ok_status();
   }
 
   loom_linearize_view_accesses_index_t index;
   if (!loom_linearize_view_accesses_prepare_index(
-          context->fact_table, view_type,
+          context->fact_table, &layout, view_type,
           loom_module_value_type(context->module,
                                  loom_view_store_value(store_op)),
           loom_view_store_static_indices(store_op),
@@ -677,7 +769,7 @@ static iree_status_t loom_linearize_view_accesses_rewrite_store(
 
   loom_value_id_t linear_view = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_linearize_view_accesses_get_linear_view(
-      context, view_op, view_type, linear_length, &linear_view));
+      context, view_op, view_type, &layout, &linear_view));
 
   int64_t static_indices[] = {
       linear_index == LOOM_VALUE_ID_INVALID ? static_linear_index : INT64_MIN};
@@ -716,11 +808,11 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_load(
     bool* out_changed) {
   loom_op_t* view_op = NULL;
   loom_type_t view_type = loom_type_none();
-  int64_t linear_length = 0;
+  loom_linearize_view_accesses_layout_t layout;
   const loom_fact_context_t* fact_context = &context->fact_table->context;
   if (!loom_linearize_view_accesses_get_source_view(
           fact_context, context->module, loom_vector_load_view(load_op),
-          &view_op, &view_type, &linear_length)) {
+          &view_op, &view_type, &layout)) {
     return iree_ok_status();
   }
 
@@ -729,16 +821,15 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_load(
   loom_linearize_view_accesses_index_t index;
   if (!loom_type_is_all_static(result_type) ||
       !loom_linearize_view_accesses_prepare_index(
-          context->fact_table, view_type, result_type,
+          context->fact_table, &layout, view_type, result_type,
           loom_vector_load_static_indices(load_op),
           loom_vector_load_indices(load_op), &index)) {
     return iree_ok_status();
   }
   if (!loom_linearize_view_accesses_static_contiguous_vector_access(
-          fact_context, context->module, view_type, result_type,
-          linear_length)) {
+          fact_context, context->module, view_type, result_type, &layout)) {
     loom_linearize_view_accesses_vector_tile_t tile = {0};
-    if (!loom_linearize_view_accesses_static_dense_vector_tile(
+    if (!loom_linearize_view_accesses_static_contiguous_vector_tile(
             fact_context, context->module, view_type, result_type, &tile)) {
       return iree_ok_status();
     }
@@ -753,7 +844,7 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_load(
     loom_builder_set_before(builder, load_op);
     loom_value_id_t linear_view = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_linearize_view_accesses_get_linear_view(
-        context, view_op, view_type, linear_length, &linear_view));
+        context, view_op, view_type, &layout, &linear_view));
 
     loom_value_id_t* row_values = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -763,7 +854,7 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_load(
       loom_value_id_t linear_index = LOOM_VALUE_ID_INVALID;
       int64_t static_linear_index = INT64_MIN;
       IREE_RETURN_IF_ERROR(loom_linearize_view_accesses_build_tile_row_index(
-          builder, view_type, &index, &tile, row, load_op->location,
+          builder, &layout, &index, &tile, row, load_op->location,
           &linear_index, &static_linear_index));
 
       int64_t static_indices[] = {linear_index == LOOM_VALUE_ID_INVALID
@@ -825,7 +916,7 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_load(
 
   loom_value_id_t linear_view = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_linearize_view_accesses_get_linear_view(
-      context, view_op, view_type, linear_length, &linear_view));
+      context, view_op, view_type, &layout, &linear_view));
 
   int64_t static_indices[] = {
       linear_index == LOOM_VALUE_ID_INVALID ? static_linear_index : INT64_MIN};
@@ -857,11 +948,11 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_store(
     bool* out_changed) {
   loom_op_t* view_op = NULL;
   loom_type_t view_type = loom_type_none();
-  int64_t linear_length = 0;
+  loom_linearize_view_accesses_layout_t layout;
   const loom_fact_context_t* fact_context = &context->fact_table->context;
   if (!loom_linearize_view_accesses_get_source_view(
           fact_context, context->module, loom_vector_store_view(store_op),
-          &view_op, &view_type, &linear_length)) {
+          &view_op, &view_type, &layout)) {
     return iree_ok_status();
   }
 
@@ -870,16 +961,15 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_store(
   loom_linearize_view_accesses_index_t index;
   if (!loom_type_is_all_static(value_type) ||
       !loom_linearize_view_accesses_prepare_index(
-          context->fact_table, view_type, value_type,
+          context->fact_table, &layout, view_type, value_type,
           loom_vector_store_static_indices(store_op),
           loom_vector_store_indices(store_op), &index)) {
     return iree_ok_status();
   }
   if (!loom_linearize_view_accesses_static_contiguous_vector_access(
-          fact_context, context->module, view_type, value_type,
-          linear_length)) {
+          fact_context, context->module, view_type, value_type, &layout)) {
     loom_linearize_view_accesses_vector_tile_t tile = {0};
-    if (!loom_linearize_view_accesses_static_dense_vector_tile(
+    if (!loom_linearize_view_accesses_static_contiguous_vector_tile(
             fact_context, context->module, view_type, value_type, &tile)) {
       return iree_ok_status();
     }
@@ -894,7 +984,7 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_store(
     loom_builder_set_before(builder, store_op);
     loom_value_id_t linear_view = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_linearize_view_accesses_get_linear_view(
-        context, view_op, view_type, linear_length, &linear_view));
+        context, view_op, view_type, &layout, &linear_view));
 
     loom_op_t* bitcast_op = NULL;
     IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
@@ -917,7 +1007,7 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_store(
       loom_value_id_t linear_index = LOOM_VALUE_ID_INVALID;
       int64_t static_linear_index = INT64_MIN;
       IREE_RETURN_IF_ERROR(loom_linearize_view_accesses_build_tile_row_index(
-          builder, view_type, &index, &tile, row, store_op->location,
+          builder, &layout, &index, &tile, row, store_op->location,
           &linear_index, &static_linear_index));
 
       int64_t static_indices[] = {linear_index == LOOM_VALUE_ID_INVALID
@@ -959,7 +1049,7 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_store(
 
   loom_value_id_t linear_view = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_linearize_view_accesses_get_linear_view(
-      context, view_op, view_type, linear_length, &linear_view));
+      context, view_op, view_type, &layout, &linear_view));
 
   int64_t static_indices[] = {
       linear_index == LOOM_VALUE_ID_INVALID ? static_linear_index : INT64_MIN};

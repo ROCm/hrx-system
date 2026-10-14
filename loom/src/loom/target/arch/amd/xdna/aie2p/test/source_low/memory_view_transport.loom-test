@@ -56,21 +56,21 @@ func.def @selected_dynamic_rank2_packets(%input: buffer, %first_input: offset, %
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @selected_dynamic_rank2_packets(%first_origin: reg<aie2p.er>, %second_origin: reg<aie2p.er>, %row: reg<aie2p.er>, %read_first: reg<aie2p.er>, %write_first: reg<aie2p.er>) asm {
   %destination = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %29 = mov.short 16
-  %30 = add.rr %first_origin, %29
-  %31 = add.rr %second_origin, %29
-  %32 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %source_offset = sel.nez %30, %31, %32
-  %34 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %destination_offset = sel.nez %30, %31, %34
-  %39 = mov.i32 6
-  %40 = lshl %row, %39
-  %41 = add.rr %source_offset, %40
-  %42 = mov.address-index %41
-  %43 = vlda.128.bf16x8.index %destination, %42
-  %48 = add.rr %destination_offset, %40
-  %49 = mov.address-index %48
-  vst.128.bf16x8.index %43, %destination, %49
+  %40 = mov.short 16
+  %41 = add.rr %first_origin, %40
+  %42 = add.rr %second_origin, %40
+  %43 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %source_offset = sel.nez %41, %42, %43
+  %45 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %destination_offset = sel.nez %41, %42, %45
+  %50 = mov.i32 6
+  %51 = lshl %row, %50
+  %52 = add.rr %source_offset, %51
+  %53 = mov.address-index %52
+  %54 = vlda.128.bf16x8.index %destination, %53
+  %59 = add.rr %destination_offset, %51
+  %60 = mov.address-index %59
+  vst.128.bf16x8.index %54, %destination, %60
   return
 }
 
@@ -160,30 +160,30 @@ func.def @rotating_selected_rank2_packets(%input: buffer, %first_input: offset, 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @rotating_selected_rank2_packets(%first_origin: reg<aie2p.er>, %second_origin: reg<aie2p.er>, %count: reg<aie2p.er>, %read_first: reg<aie2p.er>, %write_first: reg<aie2p.er>) asm {
   %destination = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %51 = mov.short 16
-  %52 = add.rr %first_origin, %51
-  %53 = add.rr %second_origin, %51
+  %62 = mov.short 16
+  %63 = add.rr %first_origin, %62
+  %64 = add.rr %second_origin, %62
   %begin = mov.short 0
   %step = mov.short 1
-  low.br ^_bb1(%begin: reg<aie2p.er>, %52: reg<aie2p.er>, %53: reg<aie2p.er>)
+  low.br ^_bb1(%begin: reg<aie2p.er>, %63: reg<aie2p.er>, %64: reg<aie2p.er>)
 ^_bb1(%row: reg<aie2p.er>, %current_offset: reg<aie2p.er>, %previous_offset: reg<aie2p.er>):
-  %56 = lt %row, %count
-  low.cond_br %56, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %67 = lt %row, %count
+  low.cond_br %67, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
-  %57 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %source_offset = sel.nez %current_offset, %previous_offset, %57
-  %59 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %destination_offset = sel.nez %current_offset, %previous_offset, %59
-  %64 = mov.i32 6
-  %65 = lshl %row, %64
-  %66 = add.rr %source_offset, %65
-  %67 = mov.address-index %66
-  %68 = vlda.128.bf16x8.index %destination, %67
-  %73 = add.rr %destination_offset, %65
-  %74 = mov.address-index %73
-  vst.128.bf16x8.index %68, %destination, %74
-  %75 = add.rr %row, %step
-  low.br ^_bb1(%75: reg<aie2p.er>, %previous_offset: reg<aie2p.er>, %current_offset: reg<aie2p.er>)
+  %68 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %source_offset = sel.nez %current_offset, %previous_offset, %68
+  %70 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %destination_offset = sel.nez %current_offset, %previous_offset, %70
+  %75 = mov.i32 6
+  %76 = lshl %row, %75
+  %77 = add.rr %source_offset, %76
+  %78 = mov.address-index %77
+  %79 = vlda.128.bf16x8.index %destination, %78
+  %84 = add.rr %destination_offset, %76
+  %85 = mov.address-index %84
+  vst.128.bf16x8.index %79, %destination, %85
+  %86 = add.rr %row, %step
+  low.br ^_bb1(%86: reg<aie2p.er>, %previous_offset: reg<aie2p.er>, %current_offset: reg<aie2p.er>)
 ^_bb3:
   return
 }

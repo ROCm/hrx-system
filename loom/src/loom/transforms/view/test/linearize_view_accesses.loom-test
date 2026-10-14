@@ -150,7 +150,7 @@ func.def @linearize_exact_dynamic_vector_index_to_static(%input: buffer, %zero_b
 
 // ====
 
-func.def @linearize_dense_rank2_vector_load(%input: buffer, %zero_bytes: offset, %row0: index, %column0: index) {
+func.def @linearize_dense_tile_and_strided_vector_loads(%input: buffer, %zero_bytes: offset, %row0: index, %column0: index) {
   %row = index.assume %row0 [range(%row0, 0, 6)] : index
   %column = index.assume %column0 [range(%column0, 0, 12)] : index
   %dense_view = buffer.view %input[%zero_bytes] : buffer -> view<8x16xf32>
@@ -163,11 +163,11 @@ func.def @linearize_dense_rank2_vector_load(%input: buffer, %zero_bytes: offset,
 }
 
 // ----
-func.def @linearize_dense_rank2_vector_load(%input: buffer, %zero_bytes: offset, %row0: index, %column0: index) {
+func.def @linearize_dense_tile_and_strided_vector_loads(%input: buffer, %zero_bytes: offset, %row0: index, %column0: index) {
   %row = index.assume %row0 [range(%row0, 0, 6)] : index
   %column = index.assume %column0 [range(%column0, 0, 12)] : index
   %dense_view = buffer.view %input[%zero_bytes] : buffer -> view<128xf32>
-  %strided_view = buffer.view %input[%zero_bytes] : buffer -> view<8x16xf32, #encoding.layout.strided<strides=[64, 1]>>
+  %strided_view = buffer.view %input[%zero_bytes] : buffer -> view<464xf32>
   %12 = index.constant 16 : index
   %13 = index.madd %row, %12, %column : index
   %14 = vector.load %dense_view[%13] : view<128xf32> -> vector<4xf32>
@@ -175,7 +175,9 @@ func.def @linearize_dense_rank2_vector_load(%input: buffer, %zero_bytes: offset,
   %19 = vector.load %dense_view[%18] : view<128xf32> -> vector<4xf32>
   %20 = vector.concat<0> %14, %19 : vector<4xf32>, vector<4xf32> -> vector<8xf32>
   %rank2 = vector.bitcast %20 : vector<8xf32> to vector<2x4xf32>
-  %strided = vector.load %strided_view[%row, %column] : view<8x16xf32, #encoding.layout.strided<strides=[64, 1]>> -> vector<4xf32>
+  %22 = index.constant 64 : index
+  %23 = index.madd %row, %22, %column : index
+  %strided = vector.load %strided_view[%23] : view<464xf32> -> vector<4xf32>
   test.use %rank2, %strided : vector<2x4xf32>, vector<4xf32>
   func.return
 }
@@ -208,7 +210,7 @@ func.def @linearize_dense_rank2_vector_store(%output: buffer, %zero_bytes: offse
 
 // ====
 
-func.def @leave_rank1_and_strided_views(%input: buffer, %zero_bytes: offset, %row: index, %column: index) {
+func.def @leave_rank1_and_unproved_views(%input: buffer, %zero_bytes: offset, %row: index, %column: index) {
   %dense_view = buffer.view %input[%zero_bytes] : buffer -> view<128xf32>
   %strided_layout = encoding.layout.strided [64, 1] : encoding<layout>
   %strided_view = buffer.view %input[%zero_bytes] : buffer -> view<8x16xf32, %strided_layout>
@@ -219,12 +221,178 @@ func.def @leave_rank1_and_strided_views(%input: buffer, %zero_bytes: offset, %ro
 }
 
 // ----
-func.def @leave_rank1_and_strided_views(%input: buffer, %zero_bytes: offset, %row: index, %column: index) {
+func.def @leave_rank1_and_unproved_views(%input: buffer, %zero_bytes: offset, %row: index, %column: index) {
   %dense_view = buffer.view %input[%zero_bytes] : buffer -> view<128xf32>
   %strided_view = buffer.view %input[%zero_bytes] : buffer -> view<8x16xf32, #encoding.layout.strided<strides=[64, 1]>>
   %dense = view.load %dense_view[%row] : view<128xf32> -> f32
   %strided = view.load %strided_view[%row, %column] : view<8x16xf32, #encoding.layout.strided<strides=[64, 1]>> -> f32
   test.use %dense, %strided : f32, f32
+  func.return
+}
+
+// ====
+// RUN: pass linearize-view-accesses,canonicalize,cse
+
+func.def @linearize_strided_load_store_shares_index(%input: buffer, %output: buffer, %origin: offset, %row0: index, %column0: index) {
+  %row = index.assume %row0 [range(%row0, 0, 7)] : index
+  %column = index.assume %column0 [range(%column0, 0, 12)] : index
+  %layout = encoding.layout.strided [20, 1] : encoding<layout>
+  %source = buffer.view %input[%origin] : buffer -> view<8x16xf32, %layout>
+  %destination = buffer.view %output[%origin] : buffer -> view<8x16xf32, %layout>
+  %value = vector.load %source[%row, %column] : view<8x16xf32, %layout> -> vector<4xf32>
+  vector.store %value, %destination[%row, %column] : vector<4xf32>, view<8x16xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @linearize_strided_load_store_shares_index(%input: buffer, %output: buffer, %origin: offset, %row0: index, %column0: index) {
+  %row = index.assume %row0 [range(%row0, 0, 7)] : index
+  %column = index.assume %column0 [range(%column0, 0, 12)] : index
+  %source = buffer.view %input[%origin] : buffer -> view<156xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<156xf32>
+  %11 = index.constant 20 : index
+  %12 = index.madd %row, %11, %column : index
+  %value = vector.load %source[%12] : view<156xf32> -> vector<4xf32>
+  vector.store %value, %destination[%12] : vector<4xf32>, view<156xf32>
+  func.return
+}
+
+// ====
+
+func.def @linearize_strided_vector_tile(%input: buffer, %output: buffer, %origin: offset, %row0: index, %column0: index) {
+  %row = index.assume %row0 [range(%row0, 0, 6)] : index
+  %column = index.assume %column0 [range(%column0, 0, 12)] : index
+  %layout = encoding.layout.strided [20, 1] : encoding<layout>
+  %source = buffer.view %input[%origin] : buffer -> view<8x16xf32, %layout>
+  %destination = buffer.view %output[%origin] : buffer -> view<8x16xf32, %layout>
+  %value = vector.load %source[%row, %column] : view<8x16xf32, %layout> -> vector<2x4xf32>
+  vector.store %value, %destination[%row, %column] : vector<2x4xf32>, view<8x16xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @linearize_strided_vector_tile(%input: buffer, %output: buffer, %origin: offset, %row0: index, %column0: index) {
+  %row = index.assume %row0 [range(%row0, 0, 6)] : index
+  %column = index.assume %column0 [range(%column0, 0, 12)] : index
+  %source = buffer.view %input[%origin] : buffer -> view<156xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<156xf32>
+  %12 = index.constant 20 : index
+  %13 = index.madd %row, %12, %column : index
+  %14 = vector.load %source[%13] : view<156xf32> -> vector<4xf32>
+  %18 = index.add %13, %12 : index
+  %19 = vector.load %source[%18] : view<156xf32> -> vector<4xf32>
+  vector.store %14, %destination[%13] : vector<4xf32>, view<156xf32>
+  vector.store %19, %destination[%18] : vector<4xf32>, view<156xf32>
+  func.return
+}
+
+// ====
+
+// Transposed layouts remain ranked for direct source-memory lowering.
+func.def @leave_transposed_accesses_ranked(%input: buffer, %origin: offset, %row0: index, %column0: index) {
+  %row = index.assume %row0 [range(%row0, 0, 7)] : index
+  %column = index.assume %column0 [range(%column0, 0, 12)] : index
+  %layout = encoding.layout.strided [1, 8] : encoding<layout>
+  %source = buffer.view %input[%origin] : buffer -> view<8x16xf32, %layout>
+  %scalar = view.load %source[%row, %column] : view<8x16xf32, %layout> -> f32
+  %vector = vector.load %source[%row, %column] : view<8x16xf32, %layout> -> vector<4xf32>
+  test.use %scalar, %vector : f32, vector<4xf32>
+  func.return
+}
+
+// ----
+func.def @leave_transposed_accesses_ranked(%input: buffer, %origin: offset, %row0: index, %column0: index) {
+  %row = index.assume %row0 [range(%row0, 0, 7)] : index
+  %column = index.assume %column0 [range(%column0, 0, 12)] : index
+  %source = buffer.view %input[%origin] : buffer -> view<8x16xf32, #encoding.layout.strided<strides=[1, 8]>>
+  %scalar = view.load %source[%row, %column] : view<8x16xf32, #encoding.layout.strided<strides=[1, 8]>> -> f32
+  %vector = vector.load %source[%row, %column] : view<8x16xf32, #encoding.layout.strided<strides=[1, 8]>> -> vector<4xf32>
+  test.use %scalar, %vector : f32, vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @linearize_overlapping_strided_layout(%input: buffer, %origin: offset, %row0: index, %column0: index) {
+  %row = index.assume %row0 [range(%row0, 0, 7)] : index
+  %column = index.assume %column0 [range(%column0, 0, 15)] : index
+  %layout = encoding.layout.strided [0, 1] : encoding<layout>
+  %source = buffer.view %input[%origin] : buffer -> view<8x16xf32, %layout>
+  %value = view.load %source[%row, %column] : view<8x16xf32, %layout> -> f32
+  test.use %value : f32
+  func.return
+}
+
+// ----
+func.def @linearize_overlapping_strided_layout(%input: buffer, %origin: offset, %row0: index, %column0: index) {
+  %column = index.assume %column0 [range(%column0, 0, 15)] : index
+  %source = buffer.view %input[%origin] : buffer -> view<16xf32>
+  %value = view.load %source[%column] : view<16xf32> -> f32
+  test.use %value : f32
+  func.return
+}
+
+// ====
+
+// Exact dynamic stride facts define a fixed physical span. A genuinely
+// runtime stride leaves the ranked address and its materialization intact.
+func.def @linearize_only_exact_dynamic_strides(%exact_input: buffer, %dynamic_input: buffer, %origin: offset, %exact_stride0: index, %dynamic_stride0: index, %row0: index, %column0: index) {
+  %exact_stride = index.assume %exact_stride0 [range(%exact_stride0, 20, 20)] : index
+  %dynamic_stride = index.assume %dynamic_stride0 [range(%dynamic_stride0, 20, 24)] : index
+  %row = index.assume %row0 [range(%row0, 0, 7)] : index
+  %column = index.assume %column0 [range(%column0, 0, 15)] : index
+  %exact_layout = encoding.layout.strided [%exact_stride, 1] : encoding<layout>
+  %dynamic_layout = encoding.layout.strided [%dynamic_stride, 1] : encoding<layout>
+  %exact_view = buffer.view %exact_input[%origin] : buffer -> view<8x16xf32, %exact_layout>
+  %dynamic_view = buffer.view %dynamic_input[%origin] : buffer -> view<8x16xf32, %dynamic_layout>
+  %exact = view.load %exact_view[%row, %column] : view<8x16xf32, %exact_layout> -> f32
+  %dynamic = view.load %dynamic_view[%row, %column] : view<8x16xf32, %dynamic_layout> -> f32
+  test.use %exact, %dynamic : f32, f32
+  func.return
+}
+
+// ----
+func.def @linearize_only_exact_dynamic_strides(%exact_input: buffer, %dynamic_input: buffer, %origin: offset, %exact_stride0: index, %dynamic_stride0: index, %row0: index, %column0: index) {
+  %dynamic_stride = index.assume %dynamic_stride0 [range(%dynamic_stride0, 20, 24)] : index
+  %row = index.assume %row0 [range(%row0, 0, 7)] : index
+  %column = index.assume %column0 [range(%column0, 0, 15)] : index
+  %dynamic_layout = encoding.layout.strided [%dynamic_stride, 1] : encoding<layout>
+  %exact_view = buffer.view %exact_input[%origin] : buffer -> view<156xf32>
+  %dynamic_view = buffer.view %dynamic_input[%origin] : buffer -> view<8x16xf32, %dynamic_layout>
+  %17 = index.constant 20 : index
+  %18 = index.madd %row, %17, %column : index
+  %exact = view.load %exact_view[%18] : view<156xf32> -> f32
+  %dynamic = view.load %dynamic_view[%row, %column] : view<8x16xf32, %dynamic_layout> -> f32
+  test.use %exact, %dynamic : f32, f32
+  func.return
+}
+
+// ====
+
+// Replacing the address layout of composed physical storage must retain its
+// exact payload schema.
+func.def @linearize_exact_composed_storage(%input: buffer, %origin: offset, %row_stride0: index, %row0: index, %column0: index) {
+  %row_stride = index.assume %row_stride0 [range(%row_stride0, 8, 8)] : index
+  %row = index.assume %row0 [range(%row0, 0, 1)] : index
+  %column = index.assume %column0 [range(%column0, 0, 3)] : index
+  %layout = encoding.layout.strided [%row_stride, 1] : encoding<layout>
+  %schema = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %source = buffer.view %input[%origin] : buffer -> view<2x4xf8E4M3, %storage>
+  %value = view.load %source[%row, %column] : view<2x4xf8E4M3, %storage> -> f8E4M3
+  test.use %value : f8E4M3
+  func.return
+}
+
+// ----
+func.def @linearize_exact_composed_storage(%input: buffer, %origin: offset, %row_stride0: index, %row0: index, %column0: index) {
+  %row = index.assume %row0 [range(%row0, 0, 1)] : index
+  %column = index.assume %column0 [range(%column0, 0, 3)] : index
+  %source = buffer.view %input[%origin] : buffer -> view<12xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e4m3fnuz>>
+  %13 = index.constant 8 : index
+  %14 = index.madd %row, %13, %column : index
+  %value = view.load %source[%14] : view<12xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e4m3fnuz>> -> f8E4M3
+  test.use %value : f8E4M3
   func.return
 }
 
