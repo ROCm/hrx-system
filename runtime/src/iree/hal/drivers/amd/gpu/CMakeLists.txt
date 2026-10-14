@@ -40,4 +40,37 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_library(
+  NAME
+    completion
+  HDRS
+    "completion.h"
+  SRCS
+    "completion.c"
+  DEPS
+    ::context
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::base::threading::thread
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    completion_test
+  SRCS
+    "completion_test.cc"
+  DEPS
+    ::completion
+    ::context
+    amdf::headers
+    iree::base
+    iree::base::threading::thread
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -45,3 +45,33 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+iree_runtime_cc_library(
+    name = "completion",
+    srcs = ["completion.c"],
+    hdrs = ["completion.h"],
+    visibility = ["//runtime/src/iree/hal/drivers/amd/gpu:__subpackages__"],
+    deps = [
+        ":context",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal/drivers/amd:status",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "completion_test",
+    srcs = ["completion_test.cc"],
+    deps = [
+        ":completion",
+        ":context",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
