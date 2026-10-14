@@ -1,3 +1,9 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 kernel.decl @qwen38_continue_dispatch() launch(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer)
 
 // A completed ordinary span advances causal and source coordinates from
@@ -129,5 +135,95 @@ check.case public @ordinary_continuation_preserves_source_position {
   check.expect.bitwise actual(%epoch) expected(%expected_epoch) : tensor<1528xi32>
   check.expect.bitwise actual(%tokens) expected(%expected_tokens) : tensor<1024xi32>
   check.expect.bitwise actual(%results) expected(%expected_results) : tensor<336xi32>
+  check.return
+}
+
+// A two-token first result advances position 62 to 64. The second plan uses
+// first-result slot five, independently of its packed slot and resident row.
+// Only two or more remaining outputs can repay another full-width proposal.
+kernel.def @fixture() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%width: index, %remaining: index, %terminal_value: i32, %context: index, %epoch: buffer, %results: buffer, %expected_header: buffer, %expected_inputs: buffer, %expected_tags: buffer) {
+  %origin = index.constant 0 : offset
+  %plan_origin = index.constant 2320 : offset
+  %span_origin = index.constant 2332 : offset
+  %options_origin = index.constant 4124 : offset
+  %indices_origin = index.constant 4640 : offset
+  %eos_origin = index.constant 2316 : offset
+  %plan = buffer.view %epoch[%plan_origin] : buffer -> view<3xi32>
+  %span = buffer.view %epoch[%span_origin] : buffer -> view<5xi32>
+  %options = buffer.view %epoch[%options_origin] : buffer -> view<2xi32>
+  %indices = buffer.view %epoch[%indices_origin] : buffer -> view<1xi32>
+  %eos = buffer.view %epoch[%eos_origin] : buffer -> view<1xi32>
+  %first = buffer.view %results[%origin] : buffer -> view<16x10xi32>
+  %header = buffer.view %expected_header[%origin] : buffer -> view<3xi32>
+  %inputs = buffer.view %expected_inputs[%origin] : buffer -> view<512xi32>
+  %tags = buffer.view %expected_tags[%origin] : buffer -> view<16xi32>
+  %zero = scalar.constant 0 : i32
+  %terminal = scalar.cmpi ne, %terminal_value, %zero : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %row = scalar.constant 3 : i32
+  %tag = scalar.constant 5 : i32
+  %position = scalar.constant 62 : i32
+  %token = scalar.constant 42 : i32
+  %stop = scalar.constant 99 : i32
+  %width_word = index.cast %width : index to i32
+  %remaining_word = index.cast %remaining : index to i32
+  %credit = scalar.addi %remaining_word, %two : i32
+  %prediction = scf.select %terminal, %stop, %token : i32
+  view.store %width_word, %plan[0] : i32, view<3xi32>
+  view.store %one, %plan[1] : i32, view<3xi32>
+  view.store %width_word, %plan[2] : i32, view<3xi32>
+  view.store %width_word, %span[0] : i32, view<5xi32>
+  view.store %position, %span[1] : i32, view<5xi32>
+  view.store %zero, %span[2] : i32, view<5xi32>
+  view.store %row, %span[3] : i32, view<5xi32>
+  view.store %one, %span[4] : i32, view<5xi32>
+  view.store %one, %options[0] : i32, view<2xi32>
+  view.store %credit, %options[1] : i32, view<2xi32>
+  view.store %tag, %indices[0] : i32, view<1xi32>
+  view.store %stop, %eos[0] : i32, view<1xi32>
+  view.store %two, %first[5, 0] : i32, view<16x10xi32>
+  view.store %two, %first[5, 1] : i32, view<16x10xi32>
+  view.store %prediction, %first[5, 3] : i32, view<16x10xi32>
+  %c2 = index.constant 2 : index
+  %c128 = index.constant 128 : index
+  %credit_available = index.cmp uge, %remaining, %c2 : index
+  %space_available = index.cmp eq, %context, %c128 : index
+  %false = scalar.constant false : i1
+  %continues = scalar.cmpi eq, %terminal, %false : i1
+  %permitted = scalar.andi %credit_available, %space_available : i1
+  %live = scalar.andi %permitted, %continues : i1
+  scf.if %live {
+    view.store %width_word, %header[0] : i32, view<3xi32>
+    view.store %one, %header[1] : i32, view<3xi32>
+    view.store %width_word, %header[2] : i32, view<3xi32>
+    view.store %token, %inputs[0] : i32, view<512xi32>
+    view.store %tag, %tags[0] : i32, view<16xi32>
+  }
+  kernel.return
+}
+
+check.case public @continuation_credit_and_frontier {
+  %width = check.param.choice values([2, 3, 4, 5, 6, 7, 8]) name("width") : index
+  %remaining = check.param.choice values([0, 1, 2, 3]) name("remaining") : index
+  %terminal = check.param.choice values([0, 1]) name("eos") : i32
+  %context = check.param.choice values([64, 128]) name("context") : index
+  %epoch = check.generate.fill value(0) : tensor<1528xi32>
+  %tokens = check.generate.fill value(-17) : tensor<1024xi32>
+  %results = check.generate.fill value(0) : tensor<336xi32>
+  %expected_header = check.generate.fill value(0) : tensor<3xi32>
+  %expected_inputs = check.generate.fill value(0) : tensor<512xi32>
+  %expected_tags = check.generate.fill value(-1) : tensor<16xi32>
+  kernel.launch @fixture(%width, %remaining, %terminal, %context, %epoch, %results, %expected_header, %expected_inputs, %expected_tags) : (index, index, i32, index, tensor<1528xi32>, tensor<336xi32>, tensor<3xi32>, tensor<512xi32>, tensor<16xi32>)
+  kernel.launch @qwen38_continue_dispatch(%context, %epoch, %tokens, %results) : (index, tensor<1528xi32>, tensor<1024xi32>, tensor<336xi32>)
+  %header = check.tensor.view %epoch offset(0) : tensor<1528xi32> -> tensor<3xi32>
+  %inputs = check.tensor.view %tokens offset(0) : tensor<1024xi32> -> tensor<512xi32>
+  %tags = check.tensor.view %results offset(1280) : tensor<336xi32> -> tensor<16xi32>
+  check.expect.bitwise actual(%header) expected(%expected_header) : tensor<3xi32>
+  check.expect.bitwise actual(%inputs) expected(%expected_inputs) : tensor<512xi32>
+  check.expect.bitwise actual(%tags) expected(%expected_tags) : tensor<16xi32>
   check.return
 }
