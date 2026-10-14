@@ -41,6 +41,7 @@ IREE_FLAG(string, direct_stage_source, "",
 
 namespace {
 
+using loom_serve::testing::HttpClient;
 using loom_serve::testing::StalledStderr;
 
 // A serialized serving-owner process, sharing the exact host with compilation
@@ -195,8 +196,22 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     auto listener_options = loom_serve_http_listener_options_default();
     listener_options.address = IREE_SV("127.0.0.1:0");
     IREE_ASSERT_OK(loom_serve_http_listener_allocate(
-        server_, &listener_options, host_allocator_, &listener_));
+        server_, &listener_options, {this, ListenerAllocatorControl},
+        &listener_));
     IREE_ASSERT_OK(http_.Initialize(server_, listener_));
+  }
+
+  static iree_status_t ListenerAllocatorControl(
+      void* self, iree_allocator_command_t command, const void* parameters,
+      void** inout_pointer) {
+    auto* test = static_cast<SourceEmbeddingServiceTest*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+        test->fail_listener_allocations_.load()) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "registration transport witness");
+    }
+    return test->host_allocator_.ctl(test->host_allocator_.self, command,
+                                     parameters, inout_pointer);
   }
 
   void CreateModel(const std::string& directory) {
@@ -444,6 +459,41 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     return {};
   }
 
+  void CheckInvalidFeedbackRetirement(const std::string& package) {
+    StartManagedRouter();
+    ASSERT_EQ(Read(Send(Declaration("broken", package, "drained"),
+                        "/v1/models/register"))
+                  .find("HTTP/1.1 202"),
+              0u);
+    ASSERT_EQ(Read(Send(Declaration("cold", directory_, "drained"),
+                        "/v1/models/register"))
+                  .find("HTTP/1.1 202"),
+              0u);
+    HttpClient cold(Send(R"({"model":"cold","input":"a"})"));
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_NO_FATAL_FAILURE(WaitModel("cold", R"("held_requests":1)"));
+    HttpClient broken(Send(R"({"model":"broken","input":"a"})"));
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_NO_FATAL_FAILURE(WaitModel("broken", R"("held_requests":1)"));
+    ASSERT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/undrain"))
+                  .find("HTTP/1.1 200"),
+              0u);
+
+    // Only successfully admitted work can reach the malformed feedback and
+    // terminate the router. Assertion exits instead stop it in TearDown.
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, http_.Join());
+    EXPECT_TRUE(Read(broken.release(), /*allow_empty=*/true).empty());
+    EXPECT_TRUE(Read(cold.release(), /*allow_empty=*/true).empty());
+    // The cold request never left the router's holding set and is observed
+    // through its aborted claim, not a model's execution counters.
+    EXPECT_EQ(retired_counters_.requests, 1u);
+    EXPECT_EQ(retired_counters_.failed, 1u);
+    EXPECT_EQ(retired_counters_.cancelled, 0u);
+    // Queue allocation records may still own backing after model retirement.
+    // Trim is nonblocking; group destruction joins the remaining records.
+    IREE_ASSERT_OK(loom_serve_device_trim(device_, 0));
+  }
+
   uint64_t CompletedRequests() {
     const std::string metrics = Read(Send({}, "/metrics", "GET"));
     const std::string prefix = "\nloom_serve_server_completed_total ";
@@ -562,6 +612,9 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
 
   // Host allocator used by all production owners.
   const iree_allocator_t host_allocator_ = iree_allocator_system();
+  // Rejects listener receive allocation after startup without changing
+  // teardown.
+  std::atomic<bool> fail_listener_allocations_{false};
   // Shared CPU/JIT/task runtime.
   loom_serve_host_t* host_ = nullptr;
   // Application group enclosing every device and model resource.
@@ -724,39 +777,30 @@ TEST_P(SourceEmbeddingServiceTest,
     output << source;
     ASSERT_TRUE(output.good());
   }
-  StartManagedRouter();
-  EXPECT_EQ(Read(Send(Declaration("broken", package, "drained"),
-                      "/v1/models/register"))
-                .find("HTTP/1.1 202"),
-            0u);
-  EXPECT_EQ(Read(Send(Declaration("cold", directory_, "drained"),
-                      "/v1/models/register"))
-                .find("HTTP/1.1 202"),
-            0u);
-  const int cold = Send(R"({"model":"cold","input":"a"})");
-  WaitModel("cold", R"("held_requests":1)");
-  const int broken = Send(R"({"model":"broken","input":"a"})");
-  WaitModel("broken", R"("held_requests":1)");
-  EXPECT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/undrain"))
-                .find("HTTP/1.1 200"),
-            0u);
+  CheckInvalidFeedbackRetirement(package);
+}
 
-  // The runner rejects feedback after accepting real command work. Its
-  // terminal error drains even an unrelated held registration.
-  // Join the owner directly: polling HTTP after terminal shutdown would wait
-  // on a consumer that has already retired.
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, http_.Join());
-  EXPECT_TRUE(Read(broken, /*allow_empty=*/true).empty());
-  EXPECT_TRUE(Read(cold, /*allow_empty=*/true).empty());
-  // Registry counters cover work admitted to a model. The cold request never
-  // left the router's holding set and is observed through its aborted claim.
-  EXPECT_EQ(retired_counters_.requests, 1u);
-  EXPECT_EQ(retired_counters_.failed, 1u);
-  EXPECT_EQ(retired_counters_.cancelled, 0u);
-  // Model consumers have retired, but raw queue allocation records may still
-  // own workspace backing. Trim does not wait for those records; the outer
-  // TearDown joins them when destroying the shared device group.
-  IREE_ASSERT_OK(loom_serve_device_trim(device_, 0));
+TEST_P(SourceEmbeddingServiceTest,
+       FailedRegistrationTransportDoesNotWaitForUnsubmittedWork) {
+  fail_listener_allocations_.store(true);
+  ::testing::TestPartResultArray failures;
+  {
+    ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::
+            INTERCEPT_ONLY_CURRENT_THREAD,
+        &failures);
+    CheckInvalidFeedbackRetirement(directory_);
+  }
+  ASSERT_EQ(failures.size(), 2);
+  EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+  EXPECT_NE(std::string(failures.GetTestPartResult(0).message())
+                .find("registration transport witness"),
+            std::string::npos);
+  EXPECT_TRUE(failures.GetTestPartResult(1).fatally_failed());
+  EXPECT_TRUE(http_.failed());
+  loom_serve_http_server_request_stop(server_);
+  IREE_ASSERT_OK(http_.Join());
+  EXPECT_EQ(retired_counters_.requests, 0u);
 }
 
 TEST_P(SourceEmbeddingServiceTest,

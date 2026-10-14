@@ -362,6 +362,7 @@ loom_cc_test(
     loom::serve::service::image::service
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
+    loom::serve::testing::http_harness
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   LABELS

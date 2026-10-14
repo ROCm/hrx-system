@@ -284,6 +284,7 @@ loom_cc_test(
         "//loom/src/loom/serve/service/image:service",
         "//loom/src/loom/serve/telemetry:record",
         "//loom/src/loom/serve/telemetry:stream",
+        "//loom/src/loom/serve/testing:http_harness",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
         "//runtime/src/iree/async",

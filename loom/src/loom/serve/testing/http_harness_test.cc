@@ -203,5 +203,64 @@ TEST_F(HttpHarnessTest,
   CheckServiceFailure(/*await_first_byte=*/true);
 }
 
+TEST_F(HttpHarnessTest, ReceiveAllocationFailureTerminatesModelWait) {
+  fail_listener_allocations_.store(true);
+  int descriptor = -1;
+  iree_status_t status =
+      client_.Send("GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n", &descriptor);
+  HttpClient peer(descriptor);
+  if (iree_status_is_ok(status)) {
+    status = client_.Await(peer.get(), [] { return false; });
+  }
+  const auto message = Message(status);
+  EXPECT_NE(message.find("HTTP receive allocation witness"), std::string::npos)
+      << message;
+  EXPECT_TRUE(client_.failed());
+}
+
+TEST_F(HttpHarnessTest, ServiceFailureTerminatesModelWait) {
+  client_.Start([] {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "model owner witness");
+  });
+  const auto message = Message(client_.Await(-1, [] { return false; }));
+  EXPECT_NE(message.find("model owner witness"), std::string::npos) << message;
+  EXPECT_NE(message.find("service owner exited"), std::string::npos) << message;
+  EXPECT_TRUE(client_.failed());
+  EXPECT_NE(Message(client_.Join()).find("model owner witness"),
+            std::string::npos);
+}
+
+TEST_F(HttpHarnessTest, PublishedModelStateWinsOverSubsequentOwnerExit) {
+  std::atomic<bool> ready{false};
+  client_.Start([&] {
+    ready.store(true, std::memory_order_release);
+    client_.Notify();
+    return iree_ok_status();
+  });
+  IREE_ASSERT_OK(
+      client_.Await(-1, [&] { return ready.load(std::memory_order_acquire); }));
+  IREE_ASSERT_OK(client_.Join());
+  EXPECT_FALSE(client_.failed());
+}
+
+TEST_F(HttpHarnessTest, ModelWaitDoesNotConsumeUnexpectedResponse) {
+  int descriptor = -1;
+  IREE_ASSERT_OK(client_.Send("GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n",
+                              &descriptor));
+  HttpClient peer(descriptor);
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  IREE_ASSERT_OK(client_.TakeRequest(peer.get(), &connection, &request));
+  IREE_ASSERT_OK(loom_serve_http_connection_send(
+      connection, IREE_SV("HTTP/1.1 503 Unavailable\r\n\r\nrejected")));
+  loom_serve_http_connection_finish(connection);
+  EXPECT_NE(Message(client_.Await(peer.get(), [] { return false; }))
+                .find("responded before expected model state"),
+            std::string::npos);
+  std::string response;
+  IREE_ASSERT_OK(client_.Read(peer.release(), false, &response));
+  EXPECT_EQ(response, "HTTP/1.1 503 Unavailable\r\n\r\nrejected");
+}
+
 }  // namespace
 }  // namespace loom_serve::testing

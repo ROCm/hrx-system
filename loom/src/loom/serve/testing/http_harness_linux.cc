@@ -25,7 +25,7 @@ iree_status_t SocketError(const char* operation, int error_number) {
                           error_number);
 }
 
-void Notify(int descriptor) {
+void Signal(int descriptor) {
   const uint64_t value = 1;
   ssize_t count;
   do {
@@ -48,6 +48,14 @@ void Consume(int descriptor) {
 }
 
 }  // namespace
+
+HttpClient::~HttpClient() {
+  if (descriptor_ >= 0 && close(descriptor_) < 0) {
+    iree_status_abort(SocketError("close HTTP client", errno));
+  }
+}
+
+int HttpClient::release() { return std::exchange(descriptor_, -1); }
 
 HttpHarness::~HttpHarness() {
   IREE_ASSERT(!thread_.joinable());
@@ -79,7 +87,7 @@ void HttpHarness::Start(std::function<iree_status_t()> run) {
   thread_ = std::thread([this, run = std::move(run)] {
     status_ = run();
     completed_.store(true, std::memory_order_release);
-    Notify(completion_);
+    Signal(completion_);
   });
 }
 
@@ -221,6 +229,58 @@ iree_status_t HttpHarness::AwaitResponse(int client) {
   return iree_status_is_ok(status) ? status : Diagnose(status);
 }
 
+iree_status_t HttpHarness::CheckPending(int client) {
+  if (client >= 0) {
+    char byte;
+    ssize_t count;
+    do {
+      count = recv(client, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
+    } while (count < 0 && errno == EINTR);
+    if (count >= 0) {
+      return Diagnose(iree_make_status(
+          IREE_STATUS_UNAVAILABLE, "HTTP peer %s before expected model state",
+          count == 0 ? "closed" : "responded"));
+    }
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      return Diagnose(SocketError("await model state", errno));
+    }
+  }
+  if (completed_.load(std::memory_order_acquire)) {
+    return Diagnose(iree_make_status(
+        IREE_STATUS_UNAVAILABLE, "service owner exited before model state"));
+  }
+  return iree_ok_status();
+}
+
+void HttpHarness::Notify() { Signal(notification_); }
+
+iree_status_t HttpHarness::Await(int client,
+                                 const std::function<bool()>& ready) {
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) && !ready()) {
+    pollfd descriptors[] = {{client, POLLIN, 0},
+                            {completion_, POLLIN, 0},
+                            {notification_, POLLIN, 0}};
+    int result;
+    do {
+      result = poll(descriptors, IREE_ARRAYSIZE(descriptors), -1);
+    } while (result < 0 && errno == EINTR);
+    if (result < 0) {
+      status = Diagnose(SocketError("poll model readiness", errno));
+    } else {
+      if (descriptors[2].revents) {
+        Consume(notification_);
+      }
+      // Published model state wins over a subsequent response or owner exit.
+      // In particular, admission denial may immediately send and close a 503.
+      if (!ready() && (descriptors[0].revents || descriptors[1].revents)) {
+        status = CheckPending(client);
+      }
+    }
+  }
+  return status;
+}
+
 iree_status_t HttpHarness::Read(int client, bool allow_empty,
                                 std::string* out_response) {
   out_response->clear();
@@ -257,10 +317,8 @@ iree_status_t HttpHarness::TakeRequest(
   *out_connection = nullptr;
   *out_request = nullptr;
   loom_serve_http_server_set_observer(
-      server_, {[](void* self) {
-                  Notify(static_cast<HttpHarness*>(self)->notification_);
-                },
-                this});
+      server_,
+      {[](void* self) { static_cast<HttpHarness*>(self)->Notify(); }, this});
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status) && !*out_connection) {
     *out_connection = loom_serve_http_server_take_request(server_, out_request);

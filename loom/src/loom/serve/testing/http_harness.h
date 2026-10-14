@@ -16,6 +16,29 @@
 
 namespace loom_serve::testing {
 
+// Owns a client descriptor across assertion exits. release() transfers it to a
+// consuming operation such as HttpHarness::Read; otherwise destruction closes
+// the client without waiting for its response.
+class HttpClient {
+ public:
+  explicit HttpClient(int descriptor = -1) : descriptor_(descriptor) {}
+  ~HttpClient();
+  HttpClient(const HttpClient&) = delete;
+  HttpClient& operator=(const HttpClient&) = delete;
+
+  int get() const { return descriptor_; }
+  // Receives a new descriptor only after default construction or release.
+  int* put() {
+    IREE_ASSERT(descriptor_ == -1);
+    return &descriptor_;
+  }
+  int release();
+
+ private:
+  // Owned nonblocking client socket, or -1 after transfer.
+  int descriptor_;
+};
+
 // Linux integration-test client with explicit service and socket readiness.
 // The fixture owns the server/listener until after Join and all client calls.
 // Service work is optional: a fixture may instead drive admitted requests
@@ -48,6 +71,17 @@ class HttpHarness {
   // Reads a close-delimited response and closes the descriptor on every path.
   // Cancellation tests may explicitly permit an empty orderly response.
   iree_status_t Read(int client, bool allow_empty, std::string* out_response);
+
+  // Checks that a pending request has not responded, disconnected, or lost its
+  // service owner. A negative client checks only the owner, for waits following
+  // an intentional disconnect or shutdown. Does not consume response bytes.
+  iree_status_t CheckPending(int client);
+
+  // A dependency callback publishes its state before Notify. Await observes
+  // that state as well as socket/owner failure, without taking the router's
+  // observer. Only the outer client thread waits; callbacks never block.
+  void Notify();
+  iree_status_t Await(int client, const std::function<bool()>& ready);
 
   // Claims an HTTP request while observing the corresponding client's socket.
   // Only a manually driven fixture calls this: it temporarily owns the server
