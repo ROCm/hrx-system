@@ -1,0 +1,501 @@
+amdgpu.target<gfx11-generic> @qwen38_vision_gfx11 {subgroup_size = 32}
+
+config.decl @qwen38.vision.image_height : %value: index where [range(%value, 256, 256)]
+
+config.decl @qwen38.vision.image_width : %value: index where [range(%value, 256, 256)]
+
+func.def inline @qwen38_vision_rotate_fragment(%patch_width: index, %row_origin: index, %pair_base: index, %lane_column: index, %lane_row_parity: index, %left: vector<8xf32>, %right: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c18 = index.constant 18 : index
+  %pair = index.add %pair_base, %lane_column : index
+  %uses_y = index.cmp ult, %pair, %c18 : index
+  %axis_pair = scf.if %uses_y -> (index) {
+    scf.yield %pair : index
+  } else {
+    %x_pair = index.sub %pair, %c18 : index
+    scf.yield %x_pair : index
+  }
+  %axis_pair_i32 = index.cast %axis_pair : index to i32
+  %axis_pair_f32 = scalar.uitofp %axis_pair_i32 : i32 to f32
+  %log_step = scalar.constant -0.51168557622089905 : f32
+  %log_frequency = scalar.mulf %axis_pair_f32, %log_step : f32
+  %frequency = scalar.expf<afn> %log_frequency : f32
+  %block_width = index.div %patch_width, %c2 : index
+  %rotated_left, %rotated_right = scf.for %element = [%c0 to %c8 step %c1](%current_left = %left : vector<8xf32>, %current_right = %right : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) unroll {
+    %row_delta = index.madd %element, %c2, %lane_row_parity : index
+    %row = index.add %row_origin, %row_delta : index
+    %merge_block = index.div %row, %c4 : index
+    %within_block = index.rem %row, %c4 : index
+    %block_y = index.div %merge_block, %block_width : index
+    %block_x = index.rem %merge_block, %block_width : index
+    %delta_y = index.div %within_block, %c2 : index
+    %delta_x = index.rem %within_block, %c2 : index
+    %patch_y = index.madd %block_y, %c2, %delta_y : index
+    %patch_x = index.madd %block_x, %c2, %delta_x : index
+    %coordinate = scf.select %uses_y, %patch_y, %patch_x : index
+    %coordinate_i32 = index.cast %coordinate : index to i32
+    %coordinate_f32 = scalar.uitofp %coordinate_i32 : i32 to f32
+    %angle = scalar.mulf %coordinate_f32, %frequency : f32
+    %sine = scalar.sinf<afn> %angle : f32
+    %cosine = scalar.cosf<afn> %angle : f32
+    %left_value = vector.extract %current_left[%element] : vector<8xf32> -> f32
+    %right_value = vector.extract %current_right[%element] : vector<8xf32> -> f32
+    %left_cosine = scalar.mulf %left_value, %cosine : f32
+    %right_sine = scalar.mulf %right_value, %sine : f32
+    %left_sine = scalar.mulf %left_value, %sine : f32
+    %right_cosine = scalar.mulf %right_value, %cosine : f32
+    %next_left_value = scalar.subf %left_cosine, %right_sine : f32
+    %next_right_value = scalar.addf %left_sine, %right_cosine : f32
+    %next_left = vector.insert %next_left_value into %current_left[%element] : f32, vector<8xf32>
+    %next_right = vector.insert %next_right_value into %current_right[%element] : f32, vector<8xf32>
+    scf.yield %next_left, %next_right : vector<8xf32>, vector<8xf32>
+  }
+  func.return %rotated_left, %rotated_right : vector<8xf32>, vector<8xf32>
+}
+
+// Produces one four-head K/V cohort. Each dense 64-value weight row is rotated
+// by eight values per physical row modulo eight. Cooperative publication still
+// covers one contiguous row, while each matrix fragment is recovered as two
+// aligned eight-value reads whose lane addresses advance by four LDS banks.
+// K and V are owned by separate workgroups in one dispatch. This preserves
+// 32-row weight reuse while exposing twice as many independent groups, and a
+// paired physical result order retains both NEOX halves through K rotary.
+kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_key_value_cohort(%cohort: index) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c16 = index.constant 16 : index
+  %c31 = index.constant 31 : index
+  %c32 = index.constant 32 : index
+  %c384 = index.constant 384 : index
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height = index.div %image_height, %c16 : index
+  %patch_width = index.div %image_width, %c16 : index
+  %rows = index.mul %patch_height, %patch_width : index
+  %padded_rows = index.add %rows, %c31 : index
+  %row_tiles = index.div %padded_rows, %c32 : index
+  kernel.launch.config workgroups(%row_tiles, %c2, %c1) workgroup_size(%c384, %c1, %c1) : index
+} launch(%cohort: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer) where [range(%cohort, 0, 3)] {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %c8 = index.constant 8 : index
+  %c12 = index.constant 12 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c36 = index.constant 36 : index
+  %c48 = index.constant 48 : index
+  %c52 = index.constant 52 : index
+  %c64 = index.constant 64 : index
+  %c68 = index.constant 68 : index
+  %c72 = index.constant 72 : index
+  %c256 = index.constant 256 : index
+  %c288 = index.constant 288 : index
+  %c384 = index.constant 384 : index
+  %c512 = index.constant 512 : index
+  %c576 = index.constant 576 : index
+  %c1152 = index.constant 1152 : index
+  %c2304 = index.constant 2304 : index
+  %c4096 = index.constant 4096 : index
+  %true = scalar.constant true : i1
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c0_f16x4 = vector.constant 0.0 : vector<4xf16>
+  %c0_f16x16 = vector.constant 0.0 : vector<16xf16>
+  %c0_f32x8 = vector.constant 0.0 : vector<8xf32>
+
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height0 = index.div %image_height, %c16 : index
+  %patch_width0 = index.div %image_width, %c16 : index
+  %patch_height = index.assume %patch_height0 [range(%patch_height0, 2, 256), multiple_of(%patch_height0, 2)] : index
+  %patch_width = index.assume %patch_width0 [range(%patch_width0, 2, 256), multiple_of(%patch_width0, 2)] : index
+  %rows0 = index.mul %patch_height, %patch_width : index
+  %rows = index.assume %rows0 [range(%rows0, 4, 65536), multiple_of(%rows0, 4)] : index
+
+  %row_tile = kernel.workgroup.id<x> : index
+  %projection = kernel.workgroup.id<y> : index
+  %is_key = index.cmp eq, %projection, %c0 : index
+  %is_value = index.cmp eq, %projection, %c1 : index
+  %row_origin = index.mul %row_tile, %c32 : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %lane_column = index.rem %lane, %c16 : index
+  %lane_row_parity = index.div %lane, %c16 : index
+  %wave_row_group = index.div %subgroup, %c6 : index
+  %wave_output_group = index.rem %subgroup, %c6 : index
+  %wave_row = index.mul %wave_row_group, %c16 : index
+  %result_row = index.add %row_origin, %wave_row : index
+  %cohort_output_base = index.mul %cohort, %c288 : index
+  %key_weight_base = index.add %c1152, %cohort_output_base : index
+  %value_weight_base = index.add %c2304, %cohort_output_base : index
+  %projection_weight_base = scf.select %is_key, %key_weight_base, %value_weight_base : index
+  %full_output_group = index.cmp ult, %wave_output_group, %c4 : index
+  %tail_lane_valid = index.cmp ult, %lane_column, %c4 : index
+  %channel_valid = scf.select %full_output_group, %true, %tail_lane_valid : i1
+  %tail_output_group = scf.if %full_output_group -> (index) {
+    scf.yield %c0 : index
+  } else {
+    %tail_group = index.sub %wave_output_group, %c4 : index
+    scf.yield %tail_group : index
+  }
+  %channel0_raw, %channel1_raw, %channel2_raw, %channel3_raw = scf.if %full_output_group -> (index, index, index, index) {
+    %head_base = index.mul %wave_output_group, %c72 : index
+    %channel0_full = index.add %head_base, %lane_column : index
+    %channel1_base = index.add %head_base, %c36 : index
+    %channel1_full = index.add %channel1_base, %lane_column : index
+    %channel2_base = index.add %head_base, %c16 : index
+    %channel2_full = index.add %channel2_base, %lane_column : index
+    %channel3_base = index.add %head_base, %c52 : index
+    %channel3_full = index.add %channel3_base, %lane_column : index
+    scf.yield %channel0_full, %channel1_full, %channel2_full, %channel3_full : index, index, index, index
+  } else {
+    %first_head = index.mul %tail_output_group, %c2 : index
+    %second_head = index.add %first_head, %c1 : index
+    %first_head_base = index.mul %first_head, %c72 : index
+    %second_head_base = index.mul %second_head, %c72 : index
+    %channel0_base = index.add %first_head_base, %c32 : index
+    %channel0_tail = index.add %channel0_base, %lane_column : index
+    %channel1_base = index.add %first_head_base, %c68 : index
+    %channel1_tail = index.add %channel1_base, %lane_column : index
+    %channel2_base = index.add %second_head_base, %c32 : index
+    %channel2_tail = index.add %channel2_base, %lane_column : index
+    %channel3_base = index.add %second_head_base, %c68 : index
+    %channel3_tail = index.add %channel3_base, %lane_column : index
+    scf.yield %channel0_tail, %channel1_tail, %channel2_tail, %channel3_tail : index, index, index, index
+  }
+  %channel0_safe = scf.select %channel_valid, %channel0_raw, %c0 : index
+  %channel1_safe = scf.select %channel_valid, %channel1_raw, %c0 : index
+  %channel2_safe = scf.select %channel_valid, %channel2_raw, %c0 : index
+  %channel3_safe = scf.select %channel_valid, %channel3_raw, %c0 : index
+  %channel0 = index.assume %channel0_safe [range(%channel0_safe, 0, 287)] : index
+  %channel1 = index.assume %channel1_safe [range(%channel1_safe, 0, 287)] : index
+  %channel2 = index.assume %channel2_safe [range(%channel2_safe, 0, 287)] : index
+  %channel3 = index.assume %channel3_safe [range(%channel3_safe, 0, 287)] : index
+  %pair_base0 = scf.select %full_output_group, %c0, %c32 : index
+  %pair_base2 = scf.select %full_output_group, %c16, %c32 : index
+
+  %residual_noalias, %statistics_noalias, %layernorm_weight_noalias, %layernorm_bias_noalias, %qkv_weight_noalias, %qkv_bias_noalias, %key_noalias, %value_noalias = buffer.assume.noalias %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %residual_view = buffer.view %residual_noalias[%origin] : buffer -> view<[%rows]x1152xf32>
+  %statistics_view = buffer.view %statistics_noalias[%origin] : buffer -> view<[%rows]x2xf32>
+  %layernorm_weight_view = buffer.view %layernorm_weight_noalias[%origin] : buffer -> view<1152xf32>
+  %layernorm_bias_view = buffer.view %layernorm_bias_noalias[%origin] : buffer -> view<1152xf32>
+  %qkv_weight_view = buffer.view %qkv_weight_noalias[%origin] : buffer -> view<3456x1152xf16>
+  %qkv_bias_view = buffer.view %qkv_bias_noalias[%origin] : buffer -> view<3456xf32>
+  %key_view = buffer.view %key_noalias[%origin] : buffer -> view<[%rows]x288xf16>
+  %value_view = buffer.view %value_noalias[%origin] : buffer -> view<288x[%rows]xf16>
+
+  %input_stage_bytes = index.constant 4608 : offset
+  %weight_stage_bytes = index.constant 36864 : offset
+  %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<32x72xf16>
+  %weight_stage_view = buffer.view %weight_stage[%origin] : buffer -> view<288x64xf16>
+  %value_stage_view = buffer.view %weight_stage[%origin] : buffer -> view<288x40xf16>
+
+  %initial = vector.fragment<init> %c0_f32x8 shape [%c16, %c16] : vector<8xf32>
+  %projection0, %projection1, %projection2, %projection3 = scf.for %column_ordinal = [%c0 to %c1152 step %c64](%projection_acc0 = %initial : vector<8xf32>, %projection_acc1 = %initial : vector<8xf32>, %projection_acc2 = %initial : vector<8xf32>, %projection_acc3 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    scf.for %weight_round = [%c0 to %c12 step %c1] unroll schedule(linear) {
+      %packet = index.madd %weight_round, %c384, %workitem : index
+      %weight_packet = index.rem %packet, %c16 : index
+      %weight_column = index.mul %weight_packet, %c4 : index
+      %global_column = index.add %column_ordinal, %weight_column : index
+      %full_packet = index.cmp ult, %packet, %c4096 : index
+      scf.if %full_packet {
+        %weight_row = index.div %packet, %c16 : index
+        %head = index.div %weight_row, %c64 : index
+        %head_slot = index.rem %weight_row, %c64 : index
+        %fragment = index.div %head_slot, %c16 : index
+        %fragment_pair = index.div %fragment, %c2 : index
+        %fragment_side = index.rem %fragment, %c2 : index
+        %pair_base = index.mul %fragment_pair, %c16 : index
+        %side_offset = index.mul %fragment_side, %c36 : index
+        %fragment_lane = index.rem %head_slot, %c16 : index
+        %channel00 = index.add %pair_base, %side_offset : index
+        %channel01 = index.add %channel00, %fragment_lane : index
+        %head_base = index.mul %head, %c72 : index
+        %channel = index.add %head_base, %channel01 : index
+        %global_row = index.add %projection_weight_base, %channel : index
+        %weights = vector.load %qkv_weight_view[%global_row, %global_column] : view<3456x1152xf16> -> vector<4xf16>
+        %stage_lane = index.rem %weight_row, %c8 : index
+        %rotation = index.mul %stage_lane, %c8 : index
+        %physical_column0 = index.add %weight_column, %rotation : index
+        %physical_column_raw = index.rem %physical_column0, %c64 : index
+        %physical_column = index.assume %physical_column_raw [range(%physical_column_raw, 0, 60), multiple_of(%physical_column_raw, 4)] : index
+        vector.store %weights, %weight_stage_view[%weight_row, %physical_column] : vector<4xf16>, view<288x64xf16>
+      } else {
+        %tail_packet = index.sub %packet, %c4096 : index
+        %weight_row = index.div %tail_packet, %c16 : index
+        %head = index.div %weight_row, %c8 : index
+        %head_slot = index.rem %weight_row, %c8 : index
+        %side = index.div %head_slot, %c4 : index
+        %pair_offset = index.rem %head_slot, %c4 : index
+        %pair = index.add %c32, %pair_offset : index
+        %side_offset = index.mul %side, %c36 : index
+        %channel00 = index.add %pair, %side_offset : index
+        %head_base = index.mul %head, %c72 : index
+        %channel = index.add %head_base, %channel00 : index
+        %global_row = index.add %projection_weight_base, %channel : index
+        %weights = vector.load %qkv_weight_view[%global_row, %global_column] : view<3456x1152xf16> -> vector<4xf16>
+        %stage_row = index.add %c256, %weight_row : index
+        %stage_lane = index.rem %stage_row, %c8 : index
+        %rotation = index.mul %stage_lane, %c8 : index
+        %physical_column0 = index.add %weight_column, %rotation : index
+        %physical_column_raw = index.rem %physical_column0, %c64 : index
+        %physical_column = index.assume %physical_column_raw [range(%physical_column_raw, 0, 60), multiple_of(%physical_column_raw, 4)] : index
+        vector.store %weights, %weight_stage_view[%stage_row, %physical_column] : vector<4xf16>, view<288x64xf16>
+      }
+    }
+    scf.for %input_round = [%c0 to %c2 step %c1] unroll {
+      %packet = index.madd %input_round, %c384, %workitem : index
+      %packet_valid = index.cmp ult, %packet, %c512 : index
+      scf.if %packet_valid {
+        %stage_row = index.div %packet, %c16 : index
+        %stage_packet = index.rem %packet, %c16 : index
+        %stage_column = index.mul %stage_packet, %c4 : index
+        %input_row = index.add %row_origin, %stage_row : index
+        %input_valid = index.cmp ult, %input_row, %rows : index
+        %rounded = scf.if %input_valid -> (vector<4xf16>) {
+          %mean = view.load %statistics_view[%input_row, %c0] : view<[%rows]x2xf32> -> f32
+          %inverse = view.load %statistics_view[%input_row, %c1] : view<[%rows]x2xf32> -> f32
+          %input_column = index.add %column_ordinal, %stage_column : index
+          %values = vector.load %residual_view[%input_row, %input_column] : view<[%rows]x1152xf32> -> vector<4xf32>
+          %scales = vector.load %layernorm_weight_view[%input_column] : view<1152xf32> -> vector<4xf32>
+          %shifts = vector.load %layernorm_bias_view[%input_column] : view<1152xf32> -> vector<4xf32>
+          %mean_vector = vector.splat %mean : vector<4xf32>
+          %inverse_vector = vector.splat %inverse : vector<4xf32>
+          %centered = vector.subf %values, %mean_vector : vector<4xf32>
+          %normalized = vector.mulf %centered, %inverse_vector : vector<4xf32>
+          %scaled = vector.mulf %normalized, %scales : vector<4xf32>
+          %shifted = vector.addf %scaled, %shifts : vector<4xf32>
+          %values_f16 = vector.fptrunc %shifted : vector<4xf32> to vector<4xf16>
+          scf.yield %values_f16 : vector<4xf16>
+        } else {
+          scf.yield %c0_f16x4 : vector<4xf16>
+        }
+        vector.store %rounded, %input_stage_view[%stage_row, %stage_column] : vector<4xf16>, view<32x72xf16>
+      }
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    %next_projection0, %next_projection1, %next_projection2, %next_projection3 = scf.for %weight_fragment = [%c0 to %c4 step %c1](%fragment0 = %projection_acc0 : vector<8xf32>, %fragment1 = %projection_acc1 : vector<8xf32>, %fragment2 = %projection_acc2 : vector<8xf32>, %fragment3 = %projection_acc3 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll(%c2) schedule(linear) {
+      %fragment_column = index.mul %weight_fragment, %c16 : index
+      %lhs = vector.fragment.load<lhs> %input_stage_view[%wave_row, %fragment_column] shape [%c16, %c16] : view<32x72xf16> -> vector<16xf16>
+      %weights0, %weights1, %weights2, %weights3 = scf.if %full_output_group -> (vector<16xf16>, vector<16xf16>, vector<16xf16>, vector<16xf16>) {
+        %weight_row_base = index.mul %wave_output_group, %c64 : index
+        %weight_row0 = index.add %weight_row_base, %lane_column : index
+        %weight_row1_base = index.add %weight_row_base, %c16 : index
+        %weight_row1 = index.add %weight_row1_base, %lane_column : index
+        %weight_row2_base = index.add %weight_row_base, %c32 : index
+        %weight_row2 = index.add %weight_row2_base, %lane_column : index
+        %weight_row3_base = index.add %weight_row_base, %c48 : index
+        %weight_row3 = index.add %weight_row3_base, %lane_column : index
+        %rotation_lane = index.rem %lane_column, %c8 : index
+        %rotation = index.mul %rotation_lane, %c8 : index
+        %low_column0 = index.add %fragment_column, %rotation : index
+        %low_column_raw = index.rem %low_column0, %c64 : index
+        %low_column = index.assume %low_column_raw [range(%low_column_raw, 0, 56), multiple_of(%low_column_raw, 8)] : index
+        %logical_high_column = index.add %fragment_column, %c8 : index
+        %high_column0 = index.add %logical_high_column, %rotation : index
+        %high_column_raw = index.rem %high_column0, %c64 : index
+        %high_column = index.assume %high_column_raw [range(%high_column_raw, 0, 56), multiple_of(%high_column_raw, 8)] : index
+        %low0 = vector.load %weight_stage_view[%weight_row0, %low_column] : view<288x64xf16> -> vector<8xf16>
+        %high0 = vector.load %weight_stage_view[%weight_row0, %high_column] : view<288x64xf16> -> vector<8xf16>
+        %low1 = vector.load %weight_stage_view[%weight_row1, %low_column] : view<288x64xf16> -> vector<8xf16>
+        %high1 = vector.load %weight_stage_view[%weight_row1, %high_column] : view<288x64xf16> -> vector<8xf16>
+        %low2 = vector.load %weight_stage_view[%weight_row2, %low_column] : view<288x64xf16> -> vector<8xf16>
+        %high2 = vector.load %weight_stage_view[%weight_row2, %high_column] : view<288x64xf16> -> vector<8xf16>
+        %low3 = vector.load %weight_stage_view[%weight_row3, %low_column] : view<288x64xf16> -> vector<8xf16>
+        %high3 = vector.load %weight_stage_view[%weight_row3, %high_column] : view<288x64xf16> -> vector<8xf16>
+        %loaded0 = vector.concat<0> %low0, %high0 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        %loaded1 = vector.concat<0> %low1, %high1 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        %loaded2 = vector.concat<0> %low2, %high2 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        %loaded3 = vector.concat<0> %low3, %high3 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        scf.yield %loaded0, %loaded1, %loaded2, %loaded3 : vector<16xf16>, vector<16xf16>, vector<16xf16>, vector<16xf16>
+      } else {
+        %tail_row_base0 = index.mul %tail_output_group, %c16 : index
+        %tail_row_base = index.add %c256, %tail_row_base0 : index
+        %weight_row0 = index.add %tail_row_base, %lane_column : index
+        %weight_row1_base = index.add %tail_row_base, %c4 : index
+        %weight_row1 = index.add %weight_row1_base, %lane_column : index
+        %weight_row2_base = index.add %tail_row_base, %c8 : index
+        %weight_row2 = index.add %weight_row2_base, %lane_column : index
+        %weight_row3_base = index.add %tail_row_base, %c12 : index
+        %weight_row3 = index.add %weight_row3_base, %lane_column : index
+        %loaded0, %loaded1, %loaded2, %loaded3 = scf.if %tail_lane_valid -> (vector<16xf16>, vector<16xf16>, vector<16xf16>, vector<16xf16>) {
+          %rotation_lane0 = index.rem %lane_column, %c8 : index
+          %rotation0 = index.mul %rotation_lane0, %c8 : index
+          %shifted_lane1 = index.add %lane_column, %c4 : index
+          %rotation_lane1 = index.rem %shifted_lane1, %c8 : index
+          %rotation1 = index.mul %rotation_lane1, %c8 : index
+          %logical_high_column = index.add %fragment_column, %c8 : index
+          %low_column00 = index.add %fragment_column, %rotation0 : index
+          %low_column0_raw = index.rem %low_column00, %c64 : index
+          %low_column0 = index.assume %low_column0_raw [range(%low_column0_raw, 0, 56), multiple_of(%low_column0_raw, 8)] : index
+          %high_column00 = index.add %logical_high_column, %rotation0 : index
+          %high_column0_raw = index.rem %high_column00, %c64 : index
+          %high_column0 = index.assume %high_column0_raw [range(%high_column0_raw, 0, 56), multiple_of(%high_column0_raw, 8)] : index
+          %low_column10 = index.add %fragment_column, %rotation1 : index
+          %low_column1_raw = index.rem %low_column10, %c64 : index
+          %low_column1 = index.assume %low_column1_raw [range(%low_column1_raw, 0, 56), multiple_of(%low_column1_raw, 8)] : index
+          %high_column10 = index.add %logical_high_column, %rotation1 : index
+          %high_column1_raw = index.rem %high_column10, %c64 : index
+          %high_column1 = index.assume %high_column1_raw [range(%high_column1_raw, 0, 56), multiple_of(%high_column1_raw, 8)] : index
+          %low0 = vector.load %weight_stage_view[%weight_row0, %low_column0] : view<288x64xf16> -> vector<8xf16>
+          %high0 = vector.load %weight_stage_view[%weight_row0, %high_column0] : view<288x64xf16> -> vector<8xf16>
+          %low1 = vector.load %weight_stage_view[%weight_row1, %low_column1] : view<288x64xf16> -> vector<8xf16>
+          %high1 = vector.load %weight_stage_view[%weight_row1, %high_column1] : view<288x64xf16> -> vector<8xf16>
+          %low2 = vector.load %weight_stage_view[%weight_row2, %low_column0] : view<288x64xf16> -> vector<8xf16>
+          %high2 = vector.load %weight_stage_view[%weight_row2, %high_column0] : view<288x64xf16> -> vector<8xf16>
+          %low3 = vector.load %weight_stage_view[%weight_row3, %low_column1] : view<288x64xf16> -> vector<8xf16>
+          %high3 = vector.load %weight_stage_view[%weight_row3, %high_column1] : view<288x64xf16> -> vector<8xf16>
+          %tail0 = vector.concat<0> %low0, %high0 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+          %tail1 = vector.concat<0> %low1, %high1 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+          %tail2 = vector.concat<0> %low2, %high2 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+          %tail3 = vector.concat<0> %low3, %high3 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+          scf.yield %tail0, %tail1, %tail2, %tail3 : vector<16xf16>, vector<16xf16>, vector<16xf16>, vector<16xf16>
+        } else {
+          scf.yield %c0_f16x16, %c0_f16x16, %c0_f16x16, %c0_f16x16 : vector<16xf16>, vector<16xf16>, vector<16xf16>, vector<16xf16>
+        }
+        scf.yield %loaded0, %loaded1, %loaded2, %loaded3 : vector<16xf16>, vector<16xf16>, vector<16xf16>, vector<16xf16>
+      }
+      %rhs0 = vector.fragment<rhs> %weights0 shape [%c16, %c16] : vector<16xf16>
+      %rhs1 = vector.fragment<rhs> %weights1 shape [%c16, %c16] : vector<16xf16>
+      %rhs2 = vector.fragment<rhs> %weights2 shape [%c16, %c16] : vector<16xf16>
+      %rhs3 = vector.fragment<rhs> %weights3 shape [%c16, %c16] : vector<16xf16>
+      %updated0 = vector.mma %lhs, %rhs0, %fragment0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated1 = vector.mma %lhs, %rhs1, %fragment1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated2 = vector.mma %lhs, %rhs2, %fragment2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated3 = vector.mma %lhs, %rhs3, %fragment3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      scf.yield %updated0, %updated1, %updated2, %updated3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    scf.yield %next_projection0, %next_projection1, %next_projection2, %next_projection3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+
+  %projection_bias0 = scf.if %channel_valid -> (f32) {
+    %bias_row = index.add %projection_weight_base, %channel0 : index
+    %loaded = view.load %qkv_bias_view[%bias_row] : view<3456xf32> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %c0_f32 : f32
+  }
+  %projection_bias1 = scf.if %channel_valid -> (f32) {
+    %bias_row = index.add %projection_weight_base, %channel1 : index
+    %loaded = view.load %qkv_bias_view[%bias_row] : view<3456xf32> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %c0_f32 : f32
+  }
+  %projection_bias2 = scf.if %channel_valid -> (f32) {
+    %bias_row = index.add %projection_weight_base, %channel2 : index
+    %loaded = view.load %qkv_bias_view[%bias_row] : view<3456xf32> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %c0_f32 : f32
+  }
+  %projection_bias3 = scf.if %channel_valid -> (f32) {
+    %bias_row = index.add %projection_weight_base, %channel3 : index
+    %loaded = view.load %qkv_bias_view[%bias_row] : view<3456xf32> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %c0_f32 : f32
+  }
+  %projection_bias_vector0 = vector.splat %projection_bias0 : vector<8xf32>
+  %projection_bias_vector1 = vector.splat %projection_bias1 : vector<8xf32>
+  %projection_bias_vector2 = vector.splat %projection_bias2 : vector<8xf32>
+  %projection_bias_vector3 = vector.splat %projection_bias3 : vector<8xf32>
+  %biased_projection0 = vector.addf %projection0, %projection_bias_vector0 : vector<8xf32>
+  %biased_projection1 = vector.addf %projection1, %projection_bias_vector1 : vector<8xf32>
+  %biased_projection2 = vector.addf %projection2, %projection_bias_vector2 : vector<8xf32>
+  %biased_projection3 = vector.addf %projection3, %projection_bias_vector3 : vector<8xf32>
+
+  scf.if %is_key {
+    %rotated0, %rotated1 = func.call @qwen38_vision_rotate_fragment(%patch_width, %result_row, %pair_base0, %lane_column, %lane_row_parity, %biased_projection0, %biased_projection1) : (index, index, index, index, index, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>)
+    %rotated2, %rotated3 = func.call @qwen38_vision_rotate_fragment(%patch_width, %result_row, %pair_base2, %lane_column, %lane_row_parity, %biased_projection2, %biased_projection3) : (index, index, index, index, index, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>)
+    %rounded0 = vector.fptrunc %rotated0 : vector<8xf32> to vector<8xf16>
+    %rounded1 = vector.fptrunc %rotated1 : vector<8xf32> to vector<8xf16>
+    %rounded2 = vector.fptrunc %rotated2 : vector<8xf32> to vector<8xf16>
+    %rounded3 = vector.fptrunc %rotated3 : vector<8xf32> to vector<8xf16>
+    scf.for %element = [%c0 to %c8 step %c1] unroll {
+      %row_delta = index.madd %element, %c2, %lane_row_parity : index
+      %row = index.add %result_row, %row_delta : index
+      %row_valid = index.cmp ult, %row, %rows : index
+      %store = scalar.andi %row_valid, %channel_valid : i1
+      scf.if %store {
+        %value0 = vector.extract %rounded0[%element] : vector<8xf16> -> f16
+        %value1 = vector.extract %rounded1[%element] : vector<8xf16> -> f16
+        %value2 = vector.extract %rounded2[%element] : vector<8xf16> -> f16
+        %value3 = vector.extract %rounded3[%element] : vector<8xf16> -> f16
+        view.store %value0, %key_view[%row, %channel0] : f16, view<[%rows]x288xf16>
+        view.store %value1, %key_view[%row, %channel1] : f16, view<[%rows]x288xf16>
+        view.store %value2, %key_view[%row, %channel2] : f16, view<[%rows]x288xf16>
+        view.store %value3, %key_view[%row, %channel3] : f16, view<[%rows]x288xf16>
+      }
+    }
+  } else {
+    %rounded0 = vector.fptrunc %biased_projection0 : vector<8xf32> to vector<8xf16>
+    %rounded1 = vector.fptrunc %biased_projection1 : vector<8xf32> to vector<8xf16>
+    %rounded2 = vector.fptrunc %biased_projection2 : vector<8xf32> to vector<8xf16>
+    %rounded3 = vector.fptrunc %biased_projection3 : vector<8xf32> to vector<8xf16>
+    scf.for %element = [%c0 to %c8 step %c1] unroll {
+      %row_delta = index.madd %element, %c2, %lane_row_parity : index
+      %row = index.add %result_row, %row_delta : index
+      %local_row = index.add %wave_row, %row_delta : index
+      %row_valid = index.cmp ult, %row, %rows : index
+      %store = scalar.andi %row_valid, %channel_valid : i1
+      scf.if %store {
+        %value0 = vector.extract %rounded0[%element] : vector<8xf16> -> f16
+        %value1 = vector.extract %rounded1[%element] : vector<8xf16> -> f16
+        %value2 = vector.extract %rounded2[%element] : vector<8xf16> -> f16
+        %value3 = vector.extract %rounded3[%element] : vector<8xf16> -> f16
+        view.store %value0, %value_stage_view[%channel0, %local_row] : f16, view<288x40xf16>
+        view.store %value1, %value_stage_view[%channel1, %local_row] : f16, view<288x40xf16>
+        view.store %value2, %value_stage_view[%channel2, %local_row] : f16, view<288x40xf16>
+        view.store %value3, %value_stage_view[%channel3, %local_row] : f16, view<288x40xf16>
+      }
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+  scf.if %is_value {
+    scf.for %copy_round = [%c0 to %c2 step %c1] unroll {
+      %packet = index.madd %copy_round, %c384, %workitem : index
+      %packet_valid = index.cmp ult, %packet, %c576 : index
+      scf.if %packet_valid {
+        %channel = index.div %packet, %c2 : index
+        %row_packet = index.rem %packet, %c2 : index
+        %local_row = index.mul %row_packet, %c16 : index
+        %global_row = index.add %row_origin, %local_row : index
+        %end_row = index.add %global_row, %c16 : index
+        %full = index.cmp ule, %end_row, %rows : index
+        scf.if %full {
+          %values = vector.load %value_stage_view[%channel, %local_row] : view<288x40xf16> -> vector<16xf16>
+          vector.store %values, %value_view[%channel, %global_row] : vector<16xf16>, view<288x[%rows]xf16>
+        } else {
+          %begins = index.cmp ult, %global_row, %rows : index
+          scf.if %begins {
+            scf.for %element = [%c0 to %c16 step %c1] unroll {
+              %row = index.add %global_row, %element : index
+              %valid = index.cmp ult, %row, %rows : index
+              scf.if %valid {
+                %stage_row = index.add %local_row, %element : index
+                %value_element = view.load %value_stage_view[%channel, %stage_row] : view<288x40xf16> -> f16
+                view.store %value_element, %value_view[%channel, %row] : f16, view<288x[%rows]xf16>
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  kernel.return
+}
