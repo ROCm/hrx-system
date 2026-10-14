@@ -7,6 +7,7 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
+load("//loom/src/loom/tooling/target/spirv:execution_profiles.bzl", "SPIRV_VULKAN_HARDWARE_PROFILE")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "amdgpu_execution_profile")
 
 package(
@@ -209,6 +210,7 @@ loom_test(
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
+        SPIRV_VULKAN_HARDWARE_PROFILE,
     ],
 )
 
