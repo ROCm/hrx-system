@@ -1,0 +1,39 @@
+func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+func.def public @prepare_request(%state: buffer, %input: buffer) -> (buffer, i64, i64) {
+  %c1 = scalar.constant 1 : i64
+  %c0 = scalar.constant 0 : i64
+  func.return %input, %c1, %c0 : buffer, i64, i64
+}
+
+func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %input: buffer) -> (i32, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %c72 = index.constant 72 : offset
+  %plan = buffer.alloca<private> align(8) %c72 : buffer
+  %values = buffer.view %plan[%origin] : buffer -> view<9xi64>
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %c4 = scalar.constant 4 : i64
+  %c16 = scalar.constant 16 : i64
+  view.store %c16, %values[0] : i64, view<9xi64>
+  view.store %c16, %values[1] : i64, view<9xi64>
+  view.store %c1, %values[2] : i64, view<9xi64>
+  view.store %c1, %values[3] : i64, view<9xi64>
+  view.store %c0, %values[4] : i64, view<9xi64>
+  view.store %c1, %values[5] : i64, view<9xi64>
+  view.store %c4, %values[6] : i64, view<9xi64>
+  view.store %c0, %values[7] : i64, view<9xi64>
+  view.store %c4, %values[8] : i64, view<9xi64>
+  %stage = scalar.constant 0 : i32
+  func.return %stage, %input, %plan : i32, buffer, buffer
+}
+
+func.def public @run(%stage: i32, %feedback_bytes: i64, %input: hal.buffer, %output: hal.buffer) {
+  %work = func.call @execute_2(%stage, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+  %slot = scalar.constant 0 : i32
+  %offset = scalar.constant 0 : i64
+  %ready = func.call @feedback(%slot, %output, %offset, %feedback_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return
+}

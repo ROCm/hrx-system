@@ -84,6 +84,28 @@ py_test(
     deps = ["//loom/src/loom/serve/testing:http"],
 )
 
+loom_cc_test(
+    name = "finite_component_test",
+    data = [
+        "//loom/src/loom/serve/service/finite:component_testdata",
+        "//loom/src/loom/serve/service/finite:testdata/component/prepare.loom",
+    ],
+    env = {
+        "LOOM_SERVE_TEST_COMPONENT_SOURCE": "$(rootpath //loom/src/loom/serve/service/finite:testdata/component/prepare.loom)",
+    },
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/finite:component_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 py_test(
     name = "text_client_test",
     size = "small",
