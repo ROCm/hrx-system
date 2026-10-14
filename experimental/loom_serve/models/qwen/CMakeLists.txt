@@ -125,6 +125,18 @@ loom_module(
   STRICT_DEPS
 )
 
+loom_module(
+  NAME
+    vision_projector
+  SRCS
+    "programs/qwen38/vision_projector.loom"
+  LIBRARIES
+    "::vision_kernels"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
 loom_test_module(
   NAME
     vision_execution_test_module
