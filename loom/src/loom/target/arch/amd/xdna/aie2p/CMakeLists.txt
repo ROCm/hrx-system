@@ -579,6 +579,7 @@ loom_cc_library(
     ::pipeline_native
     ::target_facts
     iree::base
+    loom::analysis::storage_access
     loom::analysis::symbolic_expr
     loom::analysis::view_regions
     loom::ir

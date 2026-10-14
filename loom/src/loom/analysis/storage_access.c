@@ -32,6 +32,8 @@ typedef struct loom_storage_access_function_record_t {
   struct loom_storage_access_function_record_t* next_pending;
   // Reference nodes in formal argument order; scalar entries are NULL.
   loom_storage_reference_t** arguments;
+  // Last direct use retained in source walk order, or NULL.
+  loom_storage_access_use_t* use_tail;
   // Last rendezvous retained in source order, or NULL.
   loom_storage_access_barrier_t* barrier_tail;
 } loom_storage_access_function_record_t;
@@ -263,11 +265,18 @@ static iree_status_t loom_storage_access_record_use(
       iree_arena_allocate(state->scope->arena, sizeof(*use), (void**)&use));
   *use = (loom_storage_access_use_t){
       .operation = op,
+      .value_id = value_id,
       .effects = effects,
       .callee_argument = callee_argument,
       .next = reference->uses,
   };
   reference->uses = use;
+  if (state->current->use_tail) {
+    state->current->use_tail->next_in_function = use;
+  } else {
+    state->current->graph.uses = use;
+  }
+  state->current->use_tail = use;
   if (iree_any_bit_set(effects, LOOM_STORAGE_ACCESS_ASYNC)) {
     effects =
         (effects & ~LOOM_STORAGE_ACCESS_ASYNC) | LOOM_STORAGE_ACCESS_ESCAPE;

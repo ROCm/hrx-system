@@ -1,20 +1,177 @@
-// RUN: with-checks emit source-low output=module
+// RUN: with-checks emit source-low target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 output=module
 
-// Unit source kernels become finite array programs without changing the
-// authored kernel contract.
-aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
-
-kernel.def target(@device) @unit_store() {
+// Source kernels with structured control become finite array programs without
+// changing the authored kernel contract or requiring a target operation.
+kernel.def @loop_store() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%buffer: buffer) {
-  %c0 = index.constant 0 : offset
-  %view = buffer.view %buffer[%c0] : buffer -> view<16xi32>
-  %value = vector.constant 42 : vector<16xi32>
-  vector.store %value, %view[0] : vector<16xi32>, view<16xi32>
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %view = buffer.view %buffer[%origin] : buffer -> view<16xi32>
+  scf.for %ordinal = [%begin to %end step %step] {
+    %value = index.cast %ordinal : index to i32
+    view.store %value, %view[%ordinal] : i32, view<16xi32>
+  }
   kernel.return
 }
 
 // ----
 CHECK: low.func.def inline target<amd.xdna.aie2p.core>* @__pipeline_worker_*() asm {
-CHECK: low.func.def public retain target<amd.xdna.aie2p.configuration>* abi(array_program) @unit_store() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.configuration>* abi(array_program) @loop_store() asm {
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 aie2p-realize-kernel
+
+// A write followed by a read through another potentially aliasing binding is
+// realized by refreshing and flushing around each source memory operation.
+kernel.def @write_read() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%first: buffer, %second: buffer) {
+  %c0 = index.constant 0 : offset
+  %first_view = buffer.view %first[%c0] : buffer -> view<4xi32>
+  %second_view = buffer.view %second[%c0] : buffer -> view<4xi32>
+  %c1 = vector.constant 1 : vector<4xi32>
+  vector.store %c1, %first_view[0] : vector<4xi32>, view<4xi32>
+  %observed = vector.load %second_view[0] : view<4xi32> -> vector<4xi32>
+  vector.store %observed, %first_view[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+// ----
+pipeline.def<kernel> public retain @write_read() run(%8: buffer, %9: buffer) {
+  %10 = pipeline.memory<workgroup>[0, 3] : pool
+  %11 = index.constant 0 : offset
+  %12 = index.constant 1 : index
+  %13 = buffer.assume.alignment %8 {minimum_alignment = 4} : buffer
+  %14 = index.constant 16 : offset
+  %15 = buffer.alloca<workgroup> pool(%10) align(4) %14 : buffer
+  %16 = buffer.view %15[%11] : buffer -> view<1x16xi8>
+  %17 = channel.bind<fifo> %16, %12 : view<1x16xi8>, index -> channel<tile<16xi8>>
+  %18 = buffer.assume.alignment %9 {minimum_alignment = 4} : buffer
+  %19 = index.constant 16 : offset
+  %20 = buffer.alloca<workgroup> pool(%10) align(4) %19 : buffer
+  %21 = buffer.view %20[%11] : buffer -> view<1x16xi8>
+  %22 = channel.bind<fifo> %21, %12 : view<1x16xi8>, index -> channel<tile<16xi8>>
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %23 = buffer.view %13[%11] : buffer -> view<16xi8>
+    %24 = buffer.view %18[%11] : buffer -> view<16xi8>
+    %c0 = index.constant 0 : offset
+    %first_view = buffer.view %15[%c0] : buffer -> view<4xi32>
+    %second_view = buffer.view %20[%c0] : buffer -> view<4xi32>
+    %c1 = vector.constant 1 : vector<4xi32>
+    %25, %26 = channel.reserve %17 : channel<tile<16xi8>> -> (write<tile<16xi8>>, view<16xi8>)
+    %27 = kernel.async.copy %23 to %26 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %28 = kernel.async.group %27 : kernel.async.token -> kernel.async.group
+    kernel.async.wait %28 {newer_groups = 0} : kernel.async.group
+    channel.publish %25 : write<tile<16xi8>>
+    %29, %30 = channel.acquire<mutable> %17 : channel<tile<16xi8>> -> (read<tile<16xi8>, mutable>, view<16xi8>)
+    vector.store %c1, %first_view[0] : vector<4xi32>, view<4xi32>
+    %31 = kernel.async.copy %30 to %23 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %32 = kernel.async.group %31 : kernel.async.token -> kernel.async.group
+    kernel.async.wait %32 {newer_groups = 0} : kernel.async.group
+    channel.release %29 : read<tile<16xi8>, mutable>
+    %33, %34 = channel.reserve %22 : channel<tile<16xi8>> -> (write<tile<16xi8>>, view<16xi8>)
+    %35 = kernel.async.copy %24 to %34 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %36 = kernel.async.group %35 : kernel.async.token -> kernel.async.group
+    kernel.async.wait %36 {newer_groups = 0} : kernel.async.group
+    channel.publish %33 : write<tile<16xi8>>
+    %37, %38 = channel.acquire<mutable> %22 : channel<tile<16xi8>> -> (read<tile<16xi8>, mutable>, view<16xi8>)
+    %observed = vector.load %second_view[0] : view<4xi32> -> vector<4xi32>
+    channel.release %37 : read<tile<16xi8>, mutable>
+    %39, %40 = channel.reserve %17 : channel<tile<16xi8>> -> (write<tile<16xi8>>, view<16xi8>)
+    %41 = kernel.async.copy %23 to %40 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %42 = kernel.async.group %41 : kernel.async.token -> kernel.async.group
+    kernel.async.wait %42 {newer_groups = 0} : kernel.async.group
+    channel.publish %39 : write<tile<16xi8>>
+    %43, %44 = channel.acquire<mutable> %17 : channel<tile<16xi8>> -> (read<tile<16xi8>, mutable>, view<16xi8>)
+    vector.store %observed, %first_view[0] : vector<4xi32>, view<4xi32>
+    %45 = kernel.async.copy %44 to %23 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %46 = kernel.async.group %45 : kernel.async.token -> kernel.async.group
+    kernel.async.wait %46 {newer_groups = 0} : kernel.async.group
+    channel.release %43 : read<tile<16xi8>, mutable>
+  }
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 aie2p-realize-kernel
+
+// An explicit source noalias contract retains the overlapped bulk-transfer
+// realization with independent DMA and compute strands.
+kernel.def @write_read_noalias() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%first: buffer, %second: buffer) {
+  %first_unique, %second_unique = buffer.assume.noalias %first, %second : buffer, buffer
+  %c0 = index.constant 0 : offset
+  %first_view = buffer.view %first_unique[%c0] : buffer -> view<4xi32>
+  %second_view = buffer.view %second_unique[%c0] : buffer -> view<4xi32>
+  %c1 = vector.constant 1 : vector<4xi32>
+  vector.store %c1, %first_view[0] : vector<4xi32>, view<4xi32>
+  %observed = vector.load %second_view[0] : view<4xi32> -> vector<4xi32>
+  vector.store %observed, %first_view[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+// ----
+pipeline.def<kernel> public retain @write_read_noalias() run(%10: buffer, %11: buffer) {
+  %12 = pipeline.memory<workgroup>[0, 3] : pool
+  %13 = index.constant 0 : offset
+  %14 = index.constant 1 : index
+  %15 = buffer.assume.alignment %10 {minimum_alignment = 4} : buffer
+  %16 = index.constant 16 : offset
+  %17 = buffer.alloca<workgroup> pool(%12) align(4) %16 : buffer
+  %18 = buffer.view %17[%13] : buffer -> view<1x16xi8>
+  %19 = channel.bind<fifo> %18, %14 : view<1x16xi8>, index -> channel<tile<16xi8>>
+  %20 = index.constant 16 : offset
+  %21 = buffer.alloca<workgroup> pool(%12) align(4) %20 : buffer
+  %22 = buffer.view %21[%13] : buffer -> view<1x16xi8>
+  %23 = channel.bind<fifo> %22, %14 : view<1x16xi8>, index -> channel<tile<16xi8>>
+  %24 = buffer.assume.alignment %11 {minimum_alignment = 4} : buffer
+  %25 = index.constant 16 : offset
+  %26 = buffer.alloca<workgroup> pool(%12) align(4) %25 : buffer
+  %27 = buffer.view %26[%13] : buffer -> view<1x16xi8>
+  %28 = channel.bind<fifo> %27, %14 : view<1x16xi8>, index -> channel<tile<16xi8>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %29 = buffer.view %15[%13] : buffer -> view<16xi8>
+    %30, %31 = channel.reserve %19 : channel<tile<16xi8>> -> (write<tile<16xi8>>, view<16xi8>)
+    %32 = kernel.async.copy %29 to %31 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %33 = kernel.async.group %32 : kernel.async.token -> kernel.async.group
+    kernel.async.wait %33 {newer_groups = 0} : kernel.async.group
+    channel.publish %30 : write<tile<16xi8>>
+    %34 = buffer.view %24[%13] : buffer -> view<16xi8>
+    %35, %36 = channel.reserve %28 : channel<tile<16xi8>> -> (write<tile<16xi8>>, view<16xi8>)
+    %37 = kernel.async.copy %34 to %36 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %38 = kernel.async.group %37 : kernel.async.token -> kernel.async.group
+    kernel.async.wait %38 {newer_groups = 0} : kernel.async.group
+    channel.publish %35 : write<tile<16xi8>>
+    %39, %40 = channel.acquire %23 : channel<tile<16xi8>> -> (read<tile<16xi8>>, view<16xi8>)
+    %41 = kernel.async.copy %40 to %29 {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi8> to view<16xi8> -> kernel.async.token
+    %42 = kernel.async.group %41 : kernel.async.token -> kernel.async.group
+    kernel.async.wait %42 {newer_groups = 0} : kernel.async.group
+    channel.release %39 : read<tile<16xi8>>
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %43, %44 = channel.acquire %19 : channel<tile<16xi8>> -> (read<tile<16xi8>>, view<16xi8>)
+    %45, %46 = channel.reserve %23 : channel<tile<16xi8>> -> (write<tile<16xi8>>, view<16xi8>)
+    %47 = index.constant 16 : offset
+    buffer.copy %17[%13], %21[%13], %47
+    %48, %49 = channel.acquire %28 : channel<tile<16xi8>> -> (read<tile<16xi8>>, view<16xi8>)
+    %first_unique, %second_unique = buffer.assume.noalias %21, %26 : buffer, buffer
+    %c0 = index.constant 0 : offset
+    %first_view = buffer.view %first_unique[%c0] : buffer -> view<4xi32>
+    %second_view = buffer.view %second_unique[%c0] : buffer -> view<4xi32>
+    %c1 = vector.constant 1 : vector<4xi32>
+    vector.store %c1, %first_view[0] : vector<4xi32>, view<4xi32>
+    %observed = vector.load %second_view[0] : view<4xi32> -> vector<4xi32>
+    vector.store %observed, %first_view[0] : vector<4xi32>, view<4xi32>
+    channel.publish %45 : write<tile<16xi8>>
+    channel.release %43 : read<tile<16xi8>>
+    channel.release %48 : read<tile<16xi8>>
+  }
+}

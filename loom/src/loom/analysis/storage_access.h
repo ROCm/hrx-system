@@ -36,12 +36,16 @@ typedef struct loom_storage_reference_t loom_storage_reference_t;
 typedef struct loom_storage_access_use_t {
   // Source operation containing the classified reference operand.
   const loom_op_t* operation;
+  // Reference operand classified by this use.
+  loom_value_id_t value_id;
   // Effects of this direct use, excluding any separately referenced callee.
   loom_storage_access_effects_t effects;
   // Completed formal-argument effects for a semantic call, or NULL.
   const loom_storage_reference_t* callee_argument;
   // Next classified use of the same reference.
   struct loom_storage_access_use_t* next;
+  // Next classified use in the function's source walk order.
+  struct loom_storage_access_use_t* next_in_function;
 } loom_storage_access_use_t;
 
 typedef struct loom_storage_reference_edge_t {
@@ -86,6 +90,8 @@ typedef struct loom_storage_access_barrier_t {
 typedef struct loom_storage_access_function_t {
   // Canonical reference nodes, including unused formal references.
   loom_storage_reference_t* references;
+  // Direct uses in source walk order across all canonical references.
+  loom_storage_access_use_t* uses;
   // Qualifying workgroup barriers in source traversal order.
   loom_storage_access_barrier_t* barriers;
   // The body may access storage without an identified reference operand.

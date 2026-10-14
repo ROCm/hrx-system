@@ -665,6 +665,19 @@ static iree_status_t loom_target_pipeline_build_execution_cleanup(
   return loom_target_pipeline_build_inlined_source_cleanup(builder, user_data);
 }
 
+static iree_status_t loom_target_pipeline_build_realized_lexical_workers(
+    loom_builder_t* builder, void* user_data) {
+  // Execution realization may introduce pipeline strands after the initial
+  // lexical-worker boundary. Give them the same scheduling and control-flow
+  // preparation as authored strands before target-owned execution lowering.
+  loom_op_t* for_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"), loom_target_pipeline_build_lexical_workers,
+      user_data, &for_op));
+  return loom_target_pipeline_build_run(builder,
+                                        IREE_SV("outline-pipeline-strands"));
+}
+
 static iree_status_t loom_target_pipeline_build_source_low_body(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
@@ -694,6 +707,12 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
       builder, context,
       LOOM_TARGET_PIPELINE_PHASE_SOURCE_EXECUTION_REALIZATION));
+  loom_op_t* realization_changed = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_realized_lexical_workers, user_data,
+      &realization_changed));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
+      builder, context, LOOM_TARGET_PIPELINE_PHASE_SOURCE_EXECUTION_LOWERING));
   loom_op_t* execution_changed = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
       builder, loom_target_pipeline_build_execution_cleanup, user_data,

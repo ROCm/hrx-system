@@ -26,17 +26,12 @@ loom_corpus_test(
     },
     xfails = {
         XDNA_HARDWARE_PROFILE.name: {
-            "memory/address/tiled_channel.loom:@tiled_channel_values": "XDNA/051",
             "numeric/vector/constants.loom:@vector_coordinate_constant_values": "XDNA/051",
             "numeric/vector/constants.loom:@vector_f64_constant_selection_values": "XDNA/051",
             "numeric/vector/constants.loom:@vector_predicate_constant_values": "XDNA/051",
-            "numeric/vector/f32.loom:@vector_bf16_origin_scale_values": "XDNA/051",
-            "numeric/vector/f32.loom:@vector_f32_arithmetic_values": "XDNA/051",
-            "numeric/vector/f32.loom:@vector_f32_comparisons_no_nan_values": "XDNA/051",
-            "numeric/vector/f32.loom:@vector_f32_division_values": "XDNA/051",
-            "numeric/vector/f32.loom:@vector_f32_rounding_values": "XDNA/051",
-            "numeric/vector/f32.loom:@vector_f32_sign_values": "XDNA/051",
-            "numeric/vector/f32.loom:@vector_f32_square_root_values": "XDNA/051",
+            "numeric/vector/f32.loom:@vector_f32_division_values": "TARGET/001",
+            "numeric/vector/f32.loom:@vector_f32_rounding_values": "LOWERING/036",
+            "numeric/vector/f32.loom:@vector_f32_square_root_values": "TARGET/001",
         },
     },
 )

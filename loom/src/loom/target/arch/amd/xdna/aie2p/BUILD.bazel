@@ -492,6 +492,7 @@ loom_cc_library(
     deps = [
         ":pipeline_native",
         ":target_facts",
+        "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/ir",
