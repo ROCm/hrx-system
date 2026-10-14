@@ -4,10 +4,36 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_binary")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "model.json",
+        "//experimental/loom_serve/models/qwen:text_control",
+        "//experimental/loom_serve/motifs/ggml:sources",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ] + glob([
+        "*.loom",
+        "kernels/*.loom",
+        "programs/*.loom",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "check_service",
+    testonly = True,
+    srcs = ["check_service.py"],
+    deps = [
+        "//loom/src/loom/serve/testing:chat",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
 
 loom_library(
     name = "residual_programs",
@@ -17,6 +43,7 @@ loom_library(
     ]) + [
         "config.loom",
         "//experimental/loom_serve/motifs/ggml:sources",
+        "//experimental/loom_serve/motifs/tensor:sources",
     ],
 )
 
