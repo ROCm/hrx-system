@@ -54,6 +54,7 @@ function(iree_configure_mimalloc)
     "${_mimalloc_source_dir}/src"
   )
   set_target_properties(iree_mimalloc PROPERTIES
+    C_VISIBILITY_PRESET hidden
     INTERPROCEDURAL_OPTIMIZATION OFF
     POSITION_INDEPENDENT_CODE ON
   )
