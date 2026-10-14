@@ -21,6 +21,54 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    launch
+  HDRS
+    "launch.h"
+  SRCS
+    "launch.c"
+  DEPS
+    ::commands
+    iree::base
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::target::identity
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    launch_test
+  SRCS
+    "launch_test.cc"
+  DEPS
+    ::commands
+    ::launch
+    iree::base
+    iree::base::core_headers
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::image::hsaco
+    iree::hal::drivers::amd::gpu::image::hsaco_test_util
+    iree::hal::drivers::amd::gpu::target::identity
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    launch_benchmark
+  SRCS
+    "launch_benchmark.cc"
+  DEPS
+    ::commands
+    ::launch
+    iree::base
+    iree::hal::drivers::amd::gpu::image
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
     commands_test
