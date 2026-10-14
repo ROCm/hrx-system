@@ -46,6 +46,7 @@
       "vae_attention.loom",
       "../../motifs/tensor/image_attention.loom",
       "../../motifs/tensor/image_attention_matrix.loom",
+      "vae_tiles.loom",
       "vae_upsample.loom",
       "vae_decoder.loom",
       "sample.loom",
