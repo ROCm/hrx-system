@@ -4,6 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 config.decl @flash_next.ple.eos : %value: i32 where [range(%value, 0, 248319)]
@@ -77,6 +81,8 @@ config.decl @flash_next.ple.offset_14 : %value: i32 where [range(%value, 0, 3200
 config.decl @flash_next.ple.prime_15 : %value: i64 where [range(%value, 1, 320001536)]
 
 config.decl @flash_next.ple.offset_15 : %value: i32 where [range(%value, 0, 320001535)]
+
+func.decl @flash_next_span_publishes(%verification: index, %epoch: buffer, %span: index) -> (i1)
 
 func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
@@ -252,41 +258,65 @@ kernel.def @flash_next_ple_hash_ids() {
 
 // One owner publishes after all hash readers complete. A one-token span shifts
 // the last actual ID, without substituting the EOS-masked hash context.
+template.decl @flash_next.ple_publish_history.body(%capacity: index, %verification: index, %history_origin: offset, %span: buffer, %origins: buffer, %tokens: buffer, %arena: buffer)
+
+template.def<@flash_next.ple_publish_history.body> device @flash_next_ple_publish_history_body(%capacity: index, %verification: index, %history_origin: offset, %span: buffer, %origins: buffer, %tokens: buffer, %arena: buffer) {
+  %slot = kernel.workgroup.id<x> : index
+  %active = func.call @flash_next_span_active(%span, %slot) : (buffer, index) -> (i1)
+  scf.if %active {
+    %publish = func.call @flash_next_span_publishes(%verification, %span, %slot) : (index, buffer, index) -> (i1)
+    scf.if %publish {
+      %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%span, %origins, %slot, %history_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
+      %origin = index.constant 0 : offset
+      %c1 = index.constant 1 : index
+      %input = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
+      %previous = buffer.view %arena[%reader] : buffer -> view<2xi32>
+      %output = buffer.view %arena[%writer] : buffer -> view<2xi32>
+      %last = index.sub %end, %c1 : index
+      %has_two = index.cmp ugt, %last, %begin : index
+      %newest = view.load %input[%last] : view<[%capacity]xi32> -> i32
+      %older = scf.if %has_two -> (i32) {
+        %position = index.sub %last, %c1 : index
+        %value = view.load %input[%position] : view<[%capacity]xi32> -> i32
+        scf.yield %value : i32
+      } else {
+        %value = scf.if %fresh -> (i32) {
+          %eos = config.get @flash_next.ple.eos : i32
+          scf.yield %eos : i32
+        } else {
+          %stored = view.load %previous[1] : view<2xi32> -> i32
+          scf.yield %stored : i32
+        }
+        scf.yield %value : i32
+      }
+      view.store %older, %output[0] : i32, view<2xi32>
+      view.store %newest, %output[1] : i32, view<2xi32>
+    }
+  }
+  template.return
+}
+
 kernel.def @flash_next_ple_publish_history() {
   %spans = index.constant 16 : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%history_origin: offset, %span: buffer, %origins: buffer, %tokens: buffer, %arena: buffer) {
-  %slot = kernel.workgroup.id<x> : index
-  %active = func.call @flash_next_span_active(%span, %slot) : (buffer, index) -> (i1)
-  scf.if %active {
-    %capacity = config.get @flash_next.token_count : index
-    %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%span, %origins, %slot, %history_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
-    %origin = index.constant 0 : offset
-    %c1 = index.constant 1 : index
-    %input = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
-    %previous = buffer.view %arena[%reader] : buffer -> view<2xi32>
-    %output = buffer.view %arena[%writer] : buffer -> view<2xi32>
-    %last = index.sub %end, %c1 : index
-    %has_two = index.cmp ugt, %last, %begin : index
-    %newest = view.load %input[%last] : view<[%capacity]xi32> -> i32
-    %older = scf.if %has_two -> (i32) {
-      %position = index.sub %last, %c1 : index
-      %value = view.load %input[%position] : view<[%capacity]xi32> -> i32
-      scf.yield %value : i32
-    } else {
-      %value = scf.if %fresh -> (i32) {
-        %eos = config.get @flash_next.ple.eos : i32
-        scf.yield %eos : i32
-      } else {
-        %stored = view.load %previous[1] : view<2xi32> -> i32
-        scf.yield %stored : i32
-      }
-      scf.yield %value : i32
-    }
-    view.store %older, %output[0] : i32, view<2xi32>
-    view.store %newest, %output[1] : i32, view<2xi32>
-  }
+  %capacity = config.get @flash_next.token_count : index
+  %verification = config.get @flash_next.verification_width : index
+  template.apply<@flash_next.ple_publish_history.body>(%capacity, %verification, %history_origin, %span, %origins, %tokens, %arena) : (index, index, offset, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def @flash_next_ple_publish_history_commit() {
+  %spans = index.constant 16 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%history_origin: offset, %span: buffer, %origins: buffer, %tokens: buffer, %arena: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %verification = index.constant 0 : index
+  template.apply<@flash_next.ple_publish_history.body>(%capacity, %verification, %history_origin, %span, %origins, %tokens, %arena) : (index, index, offset, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
