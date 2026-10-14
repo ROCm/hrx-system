@@ -30,6 +30,23 @@ TOOLS = [
     }
 ]
 
+VISION_TOKENS = {
+    "<|vision_start|>": 131,
+    "<|image_pad|>": 132,
+    "<|vision_end|>": 133,
+}
+
+IMAGE_256 = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAQMAAABmvDolAAAAIGNIUk0AAHomAACAhAAA+gAA"
+    "AIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURTNmmf////ENxh0AAAABYktHRAH/Ai3e"
+    "AAAAB3RJTUUH6goOFiked4aAnAAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyNi0xMC0xNFQyMj"
+    "o0MTozMCswMDowMBg77kkAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjYtMTAtMTRUMjI6NDE6"
+    "MzArMDA6MDBpZlb1AAAAKHRFWHRkYXRlOnRpbWVzdGFtcAAyMDI2LTEwLTE0VDIyOjQxOj"
+    "MwKzAwOjAwPnN3KgAAAB9JREFUaN7twQENAAAAwqD3T20ON6AAAAAAAAAAAL4NIQAAAX8Z"
+    "nKcAAAAASUVORK5CYII="
+)
+
 
 class RequestCheckTest(unittest.TestCase):
     def setUp(self):
@@ -38,6 +55,7 @@ class RequestCheckTest(unittest.TestCase):
         self.directory = Path(temporary.name)
         vocabulary = {chr(index): index for index in range(128)}
         vocabulary.update({"<bos>": 128, "<eos>": 129, "λ": 130})
+        vocabulary.update(VISION_TOKENS)
         tokenizer = {
             "model": {"type": "BPE", "vocab": vocabulary, "merges": []},
             "added_tokens": [
@@ -50,7 +68,11 @@ class RequestCheckTest(unittest.TestCase):
                     "normalized": False,
                     "special": True,
                 }
-                for spelling, index in (("<bos>", 128), ("<eos>", 129))
+                for spelling, index in (
+                    ("<bos>", 128),
+                    ("<eos>", 129),
+                    *VISION_TOKENS.items(),
+                )
             ],
             "post_processor": {
                 "type": "TemplateProcessing",
@@ -100,12 +122,28 @@ class RequestCheckTest(unittest.TestCase):
     def success(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
         value = json.loads(result.stdout)
+        expected_tokens = []
+        position = 0
+        while position < len(value["prompt"]):
+            special = next(
+                (
+                    (spelling, token)
+                    for spelling, token in VISION_TOKENS.items()
+                    if value["prompt"].startswith(spelling, position)
+                ),
+                None,
+            )
+            if special:
+                spelling, token = special
+                expected_tokens.append(token)
+                position += len(spelling)
+                continue
+            character = value["prompt"][position]
+            expected_tokens.append(130 if character == "λ" else ord(character))
+            position += 1
         self.assertEqual(
             value["tokens"],
-            [
-                130 if character == "λ" else ord(character)
-                for character in value["prompt"]
-            ],
+            expected_tokens,
         )
         return value
 
@@ -148,6 +186,30 @@ class RequestCheckTest(unittest.TestCase):
             "<|im_start|>user\nHello λ.<|im_end|>\n"
             "<|im_start|>assistant\n<think>\n\n</think>\n\n",
         )
+
+    def test_ordered_image_parts_publish_projected_token_spans(self):
+        request = self.request(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "  before "},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": IMAGE_256, "detail": "high"},
+                        },
+                        {"type": "text", "text": " after  "},
+                    ],
+                }
+            ]
+        )
+        value = self.success(self.execute(PACKAGE / "control.loom", request))
+        self.assertEqual(value["tokens"].count(VISION_TOKENS["<|vision_start|>"]), 1)
+        self.assertEqual(value["tokens"].count(VISION_TOKENS["<|image_pad|>"]), 64)
+        self.assertEqual(value["tokens"].count(VISION_TOKENS["<|vision_end|>"]), 1)
+        self.assertEqual(value["media_spans"], [[0, 25, 64]])
+        self.assertIn("user\nbefore <|vision_start|>", value["prompt"])
+        self.assertIn("<|vision_end|> after<|im_end|>", value["prompt"])
 
     def test_production_xml_completion(self):
         call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
