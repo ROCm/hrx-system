@@ -78,6 +78,9 @@ static void loom_serve_text_epoch_prepare_continuation(
                          : rows[row].input_tokens + spans[first].token_count,
         .flags = (select ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT : 0) |
                  (speculative ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0),
+        .input_offset =
+            speculative ? 0 : rows[row].input_offset + spans[first].token_count,
+        .media = speculative ? NULL : rows[row].media,
     };
     next_limits[i] =
         speculative
@@ -131,6 +134,8 @@ void loom_serve_text_epoch_prepare(
         .token_ids = prefill ? input->input_tokens : &decode_tokens[i],
         .flags = (select ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT : 0) |
                  (output_limits[i] ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0),
+        .input_offset = prefill ? input->input_offset : 0,
+        .media = prefill ? input->media : NULL,
     };
     input_count += spans[i].token_count;
   }

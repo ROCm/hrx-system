@@ -1181,6 +1181,10 @@ static iree_status_t loom_serve_text_submit_epoch(
         .input_count = prefill ? session->request.input_count -
                                      session->request.input_offset
                                : 0,
+        .input_offset = prefill ? session->request.input_origin +
+                                      session->request.input_offset
+                                : 0,
+        .media = NULL,
         .output_count =
             session->request.chat.max_tokens - session->request.output_count,
         .position = loom_serve_text_row_position(session->row),

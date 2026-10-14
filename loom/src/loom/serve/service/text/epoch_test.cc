@@ -23,10 +23,13 @@ TEST(TextEpochTest, KnownInputsAndDecodePreserveRowIdentityAndPhase) {
       .shape_count = 1,
   };
   const int32_t tokens[] = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19};
+  const loom_serve_text_media_input_t media = {};
   loom_serve_text_epoch_row_t rows[16] = {};
   rows[7] = {
       .input_tokens = tokens,
       .input_count = 10,
+      .input_offset = 37,
+      .media = &media,
       .output_count = 7,
       .position = 5,
   };
@@ -51,12 +54,16 @@ TEST(TextEpochTest, KnownInputsAndDecodePreserveRowIdentityAndPhase) {
   EXPECT_EQ(epoch.spans[0].row_index, 7);
   EXPECT_EQ(epoch.spans[0].token_ids, tokens);
   EXPECT_EQ(epoch.spans[0].flags, 0);
+  EXPECT_EQ(epoch.spans[0].input_offset, 37u);
+  EXPECT_EQ(epoch.spans[0].media, &media);
   EXPECT_EQ(epoch.positions[0], 5);
   EXPECT_TRUE(epoch.prefill[0]);
   EXPECT_EQ(epoch.spans[1].row_index, 2);
   EXPECT_EQ(epoch.spans[1].token_ids, &epoch.decode_tokens[1]);
   EXPECT_EQ(*epoch.spans[1].token_ids, 42);
   EXPECT_EQ(epoch.spans[1].flags, kSelect);
+  EXPECT_EQ(epoch.spans[1].input_offset, 0u);
+  EXPECT_EQ(epoch.spans[1].media, nullptr);
   EXPECT_FALSE(epoch.prefill[1]);
   EXPECT_EQ(epoch.spans[2].row_index, 11);
   EXPECT_EQ(epoch.spans[2].token_ids, tokens + 9);
@@ -75,10 +82,13 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
       .shape_count = 1,
   };
   const int32_t tokens[] = {10, 11, 12, 13};
+  const loom_serve_text_media_input_t media = {};
   loom_serve_text_epoch_row_t rows[16] = {};
   rows[5] = {
       .input_tokens = tokens,
       .input_count = 4,
+      .input_offset = 30,
+      .media = &media,
       .output_count = 9,
       .position = 10,
   };
@@ -105,6 +115,8 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
   EXPECT_EQ(epoch.output_limits[1], 8);
   EXPECT_EQ(epoch.spans[1].flags, kSelect | kPropose);
   EXPECT_EQ(epoch.spans[2].flags, kSelect);
+  EXPECT_EQ(epoch.spans[0].input_offset, 30u);
+  EXPECT_EQ(epoch.spans[0].media, &media);
   ASSERT_EQ(next.continuation.span_count, 3);
   EXPECT_EQ(next.continuation.spans, next.spans);
   EXPECT_EQ(next.continuation.output_limits, next.output_limits);
@@ -112,6 +124,8 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
   EXPECT_EQ(next.spans[0].token_ids, nullptr);
   EXPECT_EQ(next.spans[0].token_count, 4);
   EXPECT_EQ(next.spans[0].flags, kSelect | kPropose);
+  EXPECT_EQ(next.spans[0].input_offset, 0u);
+  EXPECT_EQ(next.spans[0].media, nullptr);
   EXPECT_EQ(next.output_limits[0], 8);
   EXPECT_EQ(next.spans[1].row_index, 9);
   EXPECT_EQ(next.spans[1].token_ids, nullptr);
@@ -121,6 +135,8 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
   EXPECT_EQ(next.spans[2].token_ids, tokens + 2);
   EXPECT_EQ(next.spans[2].token_count, 2);
   EXPECT_EQ(next.spans[2].flags, kSelect);
+  EXPECT_EQ(next.spans[2].input_offset, 32u);
+  EXPECT_EQ(next.spans[2].media, &media);
   EXPECT_EQ(next.output_limits[2], 0);
 
   options.packing_mode = LOOM_SERVE_TEXT_PACKING_SEPARATE;

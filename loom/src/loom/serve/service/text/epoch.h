@@ -43,6 +43,10 @@ typedef struct loom_serve_text_epoch_row_t {
   const int32_t* input_tokens;
   // Number of unconsumed known input IDs; zero for decode.
   iree_host_size_t input_count;
+  // Absolute first unconsumed input in the request's prepared token array.
+  iree_host_size_t input_offset;
+  // Borrowed projected request media, or NULL for an ordinary text request.
+  const loom_serve_text_media_input_t* media;
   // Remaining client output allowance, including terminal selection.
   iree_host_size_t output_count;
   // Current consumed position in the model's retained state.

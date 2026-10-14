@@ -10,11 +10,15 @@ func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: b
 
 global.rodata.def @root = bytes("616476616e6365")
 
+global.rodata.def @media_root = bytes("616476616e63655f6d65646961")
+
 global.rodata.def @context_key = bytes("666978747572652e636f6e74657874")
 
 global.rodata.def @rows_key = bytes("666978747572652e726f7773")
 
 global.rodata.def @tokens_key = bytes("666978747572652e746f6b656e73")
+
+global.rodata.def @media_key = bytes("666978747572652e6d65646961")
 
 global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
 
@@ -43,6 +47,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %c1 = index.constant 1 : index
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
+  %c2_i32 = scalar.constant 2 : i32
   %c0_i64 = scalar.constant 0 : i64
   %c1_i64 = scalar.constant 1 : i64
   %c4_i64 = scalar.constant 4 : i64
@@ -62,17 +67,26 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   func.call @require(%supported32, %error) : (i32, buffer)
   %root = global.load @root : buffer
   %stage = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+  %media_root = global.load @media_root : buffer
+  %media_stage = func.call @stage(%media_root, %c1_i64) : (buffer, i64) -> (i32)
   %context_key = global.load @context_key : buffer
   %rows_key = global.load @rows_key : buffer
+  %media_key = global.load @media_key : buffer
   func.call @config_i64(%stage, %context_key, %context) : (i32, buffer, i64)
   func.call @config_i64(%stage, %rows_key, %rows) : (i32, buffer, i64)
+  func.call @config_i64(%media_stage, %context_key, %context) : (i32, buffer, i64)
+  func.call @config_i64(%media_stage, %rows_key, %rows) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %media_key, %c0_i64) : (i32, buffer, i64)
+  func.call @config_i64(%media_stage, %media_key, %c1_i64) : (i32, buffer, i64)
   %empty = global.load @empty : buffer
   %policy = global.load @policy : buffer
   func.call @parameter(%stage, %c0_i32, %empty, %weights, %policy) : (i32, i32, buffer, buffer, buffer)
-  %state_bytes = index.constant 4 : offset
+  func.call @parameter(%media_stage, %c0_i32, %empty, %weights, %policy) : (i32, i32, buffer, buffer, buffer)
+  %state_bytes = index.constant 8 : offset
   %state = buffer.alloca<private> align(4) %state_bytes : buffer
-  %state_view = buffer.view %state[%origin] : buffer -> view<1xi32>
-  view.store %stage, %state_view[0] : i32, view<1xi32>
+  %state_view = buffer.view %state[%origin] : buffer -> view<2xi32>
+  view.store %stage, %state_view[0] : i32, view<2xi32>
+  view.store %media_stage, %state_view[1] : i32, view<2xi32>
 
   %bounded_count = scalar.assume %shape_count [range(%shape_count, 1, 2147483647)] : i64
   %count = index.cast %bounded_count : i64 to index
@@ -87,6 +101,8 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %effective = scf.select %smaller, %maximum, %prefill : i64
   %tokens_key = global.load @tokens_key : buffer
   func.call @config_i64(%stage, %tokens_key, %maximum) : (i32, buffer, i64)
+  %media_tokens = scalar.addi %maximum, %maximum : i64
+  func.call @config_i64(%media_stage, %tokens_key, %media_tokens) : (i32, buffer, i64)
   %bounded_rows = scalar.assume %rows [range(%rows, 1, 16)] : i64
   %row_count = index.cast %bounded_rows : i64 to index
   %slot_stride = scalar.constant 256 : i64
@@ -175,5 +191,5 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %block_bytes = scalar.constant 16 : i64
   view.store %block_bytes, %geometry_view[12] : i64, view<13xi64>
   %terminal = global.load @terminal : buffer
-  func.return %effective, %c1_i32, %state, %terminal, %allocations, %views, %origins, %empty, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  func.return %effective, %c2_i32, %state, %terminal, %allocations, %views, %origins, %empty, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
 }

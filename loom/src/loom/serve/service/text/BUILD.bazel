@@ -298,6 +298,34 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "media_epoch",
+    srcs = ["media_epoch.c"],
+    hdrs = ["media_epoch.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    visibility = ["//visibility:private"],
+    deps = [
+        ":chat",
+        "//loom/src/loom/serve/runtime/execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "media_epoch_test",
+    srcs = ["media_epoch_test.cc"],
+    deps = [
+        ":media_epoch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "storage",
     srcs = ["storage.c"],
     hdrs = ["storage.h"],
@@ -331,6 +359,7 @@ loom_cc_library(
     ]),
     deps = [
         ":chat",
+        ":media_epoch",
         ":packing",
         ":storage",
         "//loom/binding/c:loomc",

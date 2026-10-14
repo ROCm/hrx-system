@@ -190,4 +190,88 @@ TEST_F(SourceTextServiceTest, OrderedImageContentReachesRetainedExecution) {
             Oracle::Complete("axb", 2));
 }
 
+TEST_F(SourceTextServiceTest,
+       ProjectedMediaRowsReplacePlaceholderIdsAcrossChunks) {
+  const int32_t projected[] = {7, 11};
+  const iree_const_byte_span_t rows[] = {
+      iree_make_const_byte_span(&projected[0], sizeof(projected[0])),
+      iree_make_const_byte_span(&projected[1], sizeof(projected[1])),
+  };
+  const loom_serve_text_media_input_span_t media_spans[] = {{
+      .input_offset = 1,
+      .input_count = 2,
+      .row_offset = 0,
+  }};
+  const loom_serve_text_media_input_t media = {
+      .spans = media_spans,
+      .span_count = IREE_ARRAYSIZE(media_spans),
+      .rows = rows,
+      .row_count = IREE_ARRAYSIZE(rows),
+  };
+  const int32_t tokens[] = {Oracle::Id('a'), Oracle::Id('x'), Oracle::Id('x'),
+                            Oracle::Id('b')};
+  const loom_serve_text_span_t first[] = {
+      {
+          .row_index = 0,
+          .token_count = 2,
+          .token_ids = tokens,
+          .input_offset = 0,
+          .media = &media,
+      },
+      {
+          .row_index = 1,
+          .token_count = IREE_ARRAYSIZE(tokens),
+          .token_ids = tokens,
+          .flags = LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
+      },
+  };
+  IREE_ASSERT_OK(
+      loom_serve_text_model_epoch(model_, 1, IREE_ARRAYSIZE(first), first));
+  const loom_serve_text_span_t second = {
+      .row_index = 0,
+      .token_count = 2,
+      .token_ids = tokens + 2,
+      .flags = LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
+      .input_offset = 2,
+      .media = &media,
+  };
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, 1, &second));
+
+  Oracle projected_oracle;
+  projected_oracle.Consume(tokens[0]);
+  projected_oracle.Consume(projected[0]);
+  projected_oracle.Consume(projected[1]);
+  projected_oracle.Consume(tokens[3]);
+  Oracle placeholder_oracle;
+  for (int32_t token : tokens) {
+    placeholder_oracle.Consume(token);
+  }
+  auto* projected_row = loom_serve_text_model_row(model_, 0);
+  auto* placeholder_row = loom_serve_text_model_row(model_, 1);
+  EXPECT_EQ(loom_serve_text_row_token(projected_row),
+            projected_oracle.Predict());
+  EXPECT_EQ(loom_serve_text_row_token(placeholder_row),
+            placeholder_oracle.Predict());
+
+  const int32_t projected_prediction = loom_serve_text_row_token(projected_row);
+  const int32_t placeholder_prediction =
+      loom_serve_text_row_token(placeholder_row);
+  const loom_serve_text_span_t follow_up[] = {
+      {0, 1, &projected_prediction, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+      {1, 1, &placeholder_prediction, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+  };
+  IREE_ASSERT_OK(loom_serve_text_model_epoch(
+      model_, 1, IREE_ARRAYSIZE(follow_up), follow_up));
+  projected_oracle.Consume(projected_prediction);
+  placeholder_oracle.Consume(placeholder_prediction);
+  EXPECT_EQ(loom_serve_text_row_token(projected_row),
+            projected_oracle.Predict());
+  EXPECT_EQ(loom_serve_text_row_token(placeholder_row),
+            placeholder_oracle.Predict());
+
+  IREE_ASSERT_OK(loom_serve_text_row_reset(projected_row));
+  IREE_ASSERT_OK(loom_serve_text_row_reset(placeholder_row));
+  EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
+}
+
 }  // namespace

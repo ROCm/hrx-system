@@ -327,6 +327,36 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    media_epoch
+  HDRS
+    "media_epoch.h"
+  SRCS
+    "media_epoch.c"
+  DEPS
+    ::chat
+    iree::base
+    iree::hal
+    iree::vm
+    loom::serve::runtime::execution
+  PUBLIC
+)
+endif()
+
+loom_cc_test(
+  NAME
+    media_epoch_test
+  SRCS
+    "media_epoch_test.cc"
+  DEPS
+    ::media_epoch
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     storage
@@ -361,6 +391,7 @@ loom_cc_library(
     "variant.c"
   DEPS
     ::chat
+    ::media_epoch
     ::packing
     ::storage
     iree::async
