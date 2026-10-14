@@ -89,7 +89,7 @@ KV uses 64-token pages. Recurrent state has an independently pooled lifetime,
 allowing retained readers and private writers to share KV prefixes without
 copying an entire recurrent history before every fork. Explicit checkpoints,
 additional idle endpoints and intermediate prefix caching are opt-in capacities in
-the [text definition](../../../../loom/docs/src/reference/serving-models.md#text-definitions).
+the [text definition](../../../../loom/docs/src/serving/model-documents.md#text-definitions).
 They retain recurrent endpoints as well as KV references, so their memory cost
 is larger than a page-table entry.
 
