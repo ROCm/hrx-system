@@ -65,15 +65,10 @@ kernel.def target(@flash_next_hc_wave32) @hc_normalize() {
   kernel.return
 }
 
-// The final workgroup owns the four F32 injection rows. The other workgroups
-// own Q8_0 low-rank rows and publish SiLU directly in packed BF16.
-kernel.def target(@flash_next_hc_wave32) @hc_down_inject() {
-  %tokens = config.get @flash_next.token_count : index
-  %groups = index.constant 81 : index
-  %c1 = index.constant 1 : index
-  %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%span_arg: buffer, %normalized_arg: buffer, %down_weight_arg: buffer, %injection_weight_arg: buffer, %lowrank_arg: buffer, %injection_arg: buffer) {
+// The final workgroup owns four injection rows. Their checkpoint storage is
+// F32 in the target and Q8_0 in the predictor. Low-rank projections and the
+// scaled SiLU/sigmoid publications share one implementation for both formats.
+func.def inline @hc_down_inject_body(%q8_injection: i1, %span_arg: buffer, %normalized_arg: buffer, %down_weight_arg: buffer, %injection_weight_arg: buffer, %lowrank_arg: buffer, %injection_arg: buffer) {
   %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection = buffer.assume.noalias %span_arg, %normalized_arg, %down_weight_arg, %injection_weight_arg, %lowrank_arg, %injection_arg : buffer, buffer, buffer, buffer, buffer, buffer
   %tokens = config.get @flash_next.token_count : index
   %token = kernel.workgroup.id<y> : index
@@ -102,19 +97,25 @@ kernel.def target(@flash_next_hc_wave32) @hc_down_inject() {
       scf.yield %value : f32
     } else {
       %injection_row = index.sub %row, %rank : index
-      %input_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x10240xbf16>
-      %weight_view = buffer.view %injection_weight[%origin] : buffer -> view<4x10240xf32>
-      %first = index.mul %lane, %c8 : index
-      %initial = vector.constant 0.0 : vector<8xf32>
-      %parts = scf.for %channel = [%first to %width step %stride](%accumulator = %initial : vector<8xf32>) -> (vector<8xf32>) {
-        %stored = vector.load %input_view[%token, %channel] : view<[%tokens]x10240xbf16> -> vector<8xbf16>
-        %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
-        %weights = vector.load %weight_view[%injection_row, %channel] : view<4x10240xf32> -> vector<8xf32>
-        %next = vector.fmaf %values, %weights, %accumulator : vector<8xf32>
-        scf.yield %next : vector<8xf32>
+      %value = scf.if %q8_injection -> (f32) {
+        %part = func.call @flash_next_q8_partial(%width, %token, %injection_row, %lane, %wave_size, %normalized, %injection_weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+        scf.yield %part : f32
+      } else {
+        %input_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x10240xbf16>
+        %weight_view = buffer.view %injection_weight[%origin] : buffer -> view<4x10240xf32>
+        %first = index.mul %lane, %c8 : index
+        %initial = vector.constant 0.0 : vector<8xf32>
+        %parts = scf.for %channel = [%first to %width step %stride](%accumulator = %initial : vector<8xf32>) -> (vector<8xf32>) {
+          %stored = vector.load %input_view[%token, %channel] : view<[%tokens]x10240xbf16> -> vector<8xbf16>
+          %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+          %weights = vector.load %weight_view[%injection_row, %channel] : view<4x10240xf32> -> vector<8xf32>
+          %next = vector.fmaf %values, %weights, %accumulator : vector<8xf32>
+          scf.yield %next : vector<8xf32>
+        }
+        %sum = vector.reduce<addf> %parts, %c0 : vector<8xf32>, f32
+        scf.yield %sum : f32
       }
-      %sum = vector.reduce<addf> %parts, %c0 : vector<8xf32>, f32
-      scf.yield %sum : f32
+      scf.yield %value : f32
     }
     %dot = kernel.subgroup.reduce<addf> %partial : f32
     %leader = index.cmp eq, %lane, %c0_index : index
@@ -136,6 +137,30 @@ kernel.def target(@flash_next_hc_wave32) @hc_down_inject() {
       }
     }
   }
+  func.return
+}
+
+kernel.def target(@flash_next_hc_wave32) @hc_down_inject() {
+  %tokens = config.get @flash_next.token_count : index
+  %groups = index.constant 81 : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span: buffer, %normalized: buffer, %down_weight: buffer, %injection_weight: buffer, %lowrank: buffer, %injection: buffer) {
+  %q8_injection = scalar.constant false : i1
+  func.call @hc_down_inject_body(%q8_injection, %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@flash_next_hc_wave32) @hc_down_inject_q8() {
+  %tokens = config.get @flash_next.token_count : index
+  %groups = index.constant 81 : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span: buffer, %normalized: buffer, %down_weight: buffer, %injection_weight: buffer, %lowrank: buffer, %injection: buffer) {
+  %q8_injection = scalar.constant true : i1
+  func.call @hc_down_inject_body(%q8_injection, %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (i1, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -240,7 +265,7 @@ kernel.def target(@flash_next_hc_wave32) @hc_combine() {
 }
 
 // Attention and FFN bind different parameters to the same packed schedule.
-command.program.def @flash_next_hc(%gamma: view<4x2560xf32>, %down_weight: view<3481600xi8>, %up_weight: view<3481600xi8>, %injection_weight: view<4x10240xf32>) launch(%span: buffer, %residual: buffer, %injection: buffer, %mixed: buffer) {
+command.program.def @flash_next_hc(%injection_bytes: index, %q8_injection: i1, %gamma: view<4x2560xf32>, %down_weight: view<3481600xi8>, %up_weight: view<3481600xi8>, %injection_weight: view<[%injection_bytes]xi8>) launch(%span: buffer, %residual: buffer, %injection: buffer, %mixed: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %residual_row_bytes = index.constant 20480 : offset
   %rank_row_bytes = index.constant 640 : offset
@@ -249,7 +274,11 @@ command.program.def @flash_next_hc(%gamma: view<4x2560xf32>, %down_weight: view<
   %normalized = buffer.alloca<global> align(256) %residual_bytes : buffer
   %lowrank = buffer.alloca<global> align(256) %rank_bytes : buffer
   kernel.launch @hc_normalize(%span, %residual, %gamma, %normalized) : (buffer, buffer, view<4x2560xf32>, buffer)
-  kernel.launch @hc_down_inject(%span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (buffer, buffer, view<3481600xi8>, view<4x10240xf32>, buffer, buffer)
+  scf.if %q8_injection {
+    kernel.launch @hc_down_inject_q8(%span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (buffer, buffer, view<3481600xi8>, view<[%injection_bytes]xi8>, buffer, buffer)
+  } else {
+    kernel.launch @hc_down_inject(%span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (buffer, buffer, view<3481600xi8>, view<[%injection_bytes]xi8>, buffer, buffer)
+  }
   kernel.launch @hc_up_mix(%span, %normalized, %lowrank, %up_weight, %mixed) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
   command.return
 }
@@ -258,8 +287,13 @@ command.program.def public @flash_next_hc_attn(%layer: index) launch(%parameters
   %gamma = command.parameter %parameters, "blk.{}.hc_attn_norm.weight"[%layer] : view<4x2560xf32>
   %down_weight = command.parameter %parameters, "blk.{}.hc_attn_down.weight"[%layer] : view<3481600xi8>
   %up_weight = command.parameter %parameters, "blk.{}.hc_attn_up.weight"[%layer] : view<3481600xi8>
-  %injection_weight = command.parameter %parameters, "blk.{}.hc_attn_inject.weight"[%layer] : view<4x10240xf32>
-  command.program.launch @flash_next_hc[%gamma, %down_weight, %up_weight, %injection_weight](%span, %residual, %injection, %mixed) : [view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>, view<4x10240xf32>](buffer, buffer, buffer, buffer)
+  %predictor_layer = index.constant 48 : index
+  %q8_injection = index.cmp eq, %layer, %predictor_layer : index
+  %q8_bytes = index.constant 43520 : index
+  %f32_bytes = index.constant 163840 : index
+  %injection_bytes = scf.select %q8_injection, %q8_bytes, %f32_bytes : index
+  %injection_weight = command.parameter %parameters, "blk.{}.hc_attn_inject.weight"[%layer] : view<[%injection_bytes]xi8>
+  command.program.launch @flash_next_hc[%injection_bytes, %q8_injection, %gamma, %down_weight, %up_weight, %injection_weight](%span, %residual, %injection, %mixed) : [index, i1, view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>, view<[%injection_bytes]xi8>](buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -267,7 +301,12 @@ command.program.def public @flash_next_hc_ffn(%layer: index) launch(%parameters:
   %gamma = command.parameter %parameters, "blk.{}.hc_ffn_norm.weight"[%layer] : view<4x2560xf32>
   %down_weight = command.parameter %parameters, "blk.{}.hc_ffn_down.weight"[%layer] : view<3481600xi8>
   %up_weight = command.parameter %parameters, "blk.{}.hc_ffn_up.weight"[%layer] : view<3481600xi8>
-  %injection_weight = command.parameter %parameters, "blk.{}.hc_ffn_inject.weight"[%layer] : view<4x10240xf32>
-  command.program.launch @flash_next_hc[%gamma, %down_weight, %up_weight, %injection_weight](%span, %residual, %injection, %mixed) : [view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>, view<4x10240xf32>](buffer, buffer, buffer, buffer)
+  %predictor_layer = index.constant 48 : index
+  %q8_injection = index.cmp eq, %layer, %predictor_layer : index
+  %q8_bytes = index.constant 43520 : index
+  %f32_bytes = index.constant 163840 : index
+  %injection_bytes = scf.select %q8_injection, %q8_bytes, %f32_bytes : index
+  %injection_weight = command.parameter %parameters, "blk.{}.hc_ffn_inject.weight"[%layer] : view<[%injection_bytes]xi8>
+  command.program.launch @flash_next_hc[%injection_bytes, %q8_injection, %gamma, %down_weight, %up_weight, %injection_weight](%span, %residual, %injection, %mixed) : [index, i1, view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>, view<[%injection_bytes]xi8>](buffer, buffer, buffer, buffer)
   command.return
 }

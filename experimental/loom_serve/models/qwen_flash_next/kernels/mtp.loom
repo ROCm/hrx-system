@@ -119,3 +119,39 @@ kernel.def target(@flash_next_mtp_wave32) @flash_next_mtp_fuse() {
   }
   kernel.return
 }
+
+template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logits_origin: offset, %temperature: f32, %top_p: f32, %top_k: i32, %seed: i64, %position: i64) -> (i32)
+
+// Proposals are greedy; target verification still uses the request's sampling
+// policy. Proposal metadata is compact and has no target sampling-policy table.
+kernel.def @flash_next_mtp_sample() {
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %logits: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %row = kernel.workgroup.id<x> : index
+  %count = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %row, %count : index
+  scf.if %active {
+    %row_bytes = index.constant 993280 : offset
+    %logits_origin = index.scale %row, %row_bytes : index, offset -> offset
+    %columns = index.constant 248077 : index
+    %temperature = scalar.constant 0.0 : f32
+    %top_p = scalar.constant 1.0 : f32
+    %top_k = scalar.constant 1 : i32
+    %seed = scalar.constant 0 : i64
+    %position = scalar.constant 0 : i64
+    %selected = template.apply<@sampling.categorical_f32>(%columns, %logits, %logits_origin, %temperature, %top_p, %top_k, %seed, %position) : (index, buffer, offset, f32, f32, i32, i64, i64) -> (i32)
+    %thread = kernel.workitem.id<x> : index
+    %c0 = index.constant 0 : index
+    %leader = index.cmp eq, %thread, %c0 : index
+    scf.if %leader {
+      %origin = index.constant 0 : offset
+      %ids = buffer.view %output[%origin] : buffer -> view<[%tokens]xi32>
+      view.store %selected, %ids[%row] : i32, view<[%tokens]xi32>
+    }
+  }
+  kernel.return
+}

@@ -70,6 +70,8 @@ func.def public inline @flash_next_span_state(%epoch: buffer, %rows: buffer, %sp
 
 config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
 
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
 config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
 
 func.def public pure inline @flash_next_output_capacity() -> (index) {
@@ -80,5 +82,10 @@ func.def public pure inline @flash_next_output_capacity() -> (index) {
   %ordinary = index.cmp eq, %width, %c0 : index
   %outputs = scf.select %ordinary, %c1, %width : index
   %count = index.mul %spans, %outputs : index
-  func.return %count : index
+  // Each selected output belongs to a distinct packed input. Small scheduler
+  // buckets can hold fewer inputs than span_capacity * verification_width.
+  %tokens = config.get @flash_next.token_count : index
+  %smaller = index.cmp ult, %count, %tokens : index
+  %capacity = scf.select %smaller, %count, %tokens : index
+  func.return %capacity : index
 }

@@ -23,8 +23,8 @@ Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf
 Preparation explicitly declares all four files in one parameter domain. The
 first contains metadata, and the other three contain tensor payloads. All
 specialized batch shapes share that domain. Renaming a differently quantized or
-modified model does not make its tensor layouts compatible. The separate vision
-and MTP files are not part of this text deployment.
+modified model does not make its tensor layouts compatible. Vision is separate;
+the optional MTP predictor uses the additional asset described below.
 
 The parameter bank occupies approximately **103.69 GiB**, including the
 **26.82 GiB** IQ4_NL n-gram table. Original packed weights remain packed; there
@@ -66,9 +66,46 @@ checkpoint on first use. `/v1/status` distinguishes those operations. Reusing
 The shared [Qwen chat policy](../qwen/README.md#device-sampling) supplies thinking,
 tool formatting, and device sampling, including `definition.options.sampling`.
 
-Copy this directory together with `../qwen/control.loom` and `../../motifs/`,
+Copy this directory together with `../qwen/` and `../../motifs/`,
 preserving their relative layout. Model changes do not require rebuilding the
 server.
+
+## Multi-token prediction
+
+The optional predictor uses the original `mtp-Qwen3.8-Flash-Next-Q8_0.gguf`
+sidecar. Enable three recursive proposals by extending the deployment document:
+
+```sh
+flash_draft=/path/to/mtp-Qwen3.8-Flash-Next-Q8_0.gguf
+jq --arg draft "$flash_draft" \
+   '.definition.draft_depth = 3 |
+    .definition.options.draft_weights = $draft' \
+   /tmp/flash-next-deployment.json > /tmp/flash-next-mtp-deployment.json
+```
+
+Use that document with `--model`. The sidecar's embedding and vocabulary tensors
+are identical to the target's tensors and share their device allocations. Only
+2,775,621,632 additional parameter bytes are needed; allocation rounding brings
+the observed total parameter commitment to approximately **106.31 GiB**. The
+predictor reads its Q8_0 expert and injection weights directly.
+
+The predictor proposes greedily, and the target verifies under the request's
+sampling policy. Accepted prefixes publish target state and refresh the
+predictor with accepted target hidden rows. Rejected proposals remain outside
+the committed cache frontier. Verification retains compact transition operands
+and replays the accepted prefix through the existing recurrent kernels; it does
+not copy a complete recurrent endpoint for each candidate. Predictor carry adds
+21,248 bytes per retained owner, and predictor cache adds 2,112 bytes per pooled
+token, plus a 768-byte working tail per execution row.
+
+The deployment uses `continuation_epochs: 1`. MTP shares the hybrid scheduler's
+mixed prompt and generated spans, checkpoint forks, EOS, and cancellation.
+
+The default remains `draft_depth: 0`: the gain depends on accepted proposals
+repaying proposal, verification, and catch-up work. Compare the same prompts,
+sampling policy, output budget, and retained state with and without MTP. Server
+epoch records expose proposed and accepted draft-input counts independently of
+selected output tokens.
 
 ## Packed execution and retained state
 
@@ -76,7 +113,7 @@ Every epoch carries one immutable table of active token spans. Prompt chunks,
 single-token continuations, and independent sessions use the same program.
 `prefill_capacity` bounds an epoch, not a prompt: longer inputs are chunked.
 The package requires pooled cache storage, a context capacity divisible by 64,
-at most 512 tokens per epoch, `draft_depth: 0`, and `continuation_epochs: 1`.
+at most 512 tokens per epoch, and draft depth zero or three.
 
 The default document provides four execution rows, a 16K per-session context
 ceiling, a shared 32K-token page pool, 32-token epochs, and four checkpoint
@@ -99,8 +136,10 @@ synthesize empty state instead of depending on cleared recurrent storage.
 | `prepare.loom`, `weights.loom` | Stage specialization, explicit checkpoint files, and storage geometry. |
 | `../qwen/control.loom` | Chat policy, sampling policy, epoch submission, and feedback publication. |
 | `epoch.loom` | Four residual streams through 48 layers, including PLE at layer 1 and QSA every fourth layer. |
+| `propose.loom`, `verify.loom`, `programs/mtp.loom` | Recursive proposals, target verification, and accepted-prefix predictor catch-up. |
 | `programs/` | Hyperconnection, recurrent attention, sparse attention, routed/shared experts, and output-head composition. |
 | `kernels/gdn.loom`, `kernels/work.loom` | Recurrent updates and immutable span ownership. |
+| `kernels/speculation.loom`, `kernels/mtp_state.loom` | Compact target transition capture, accepted-prefix replay, and predictor carry ownership. |
 | `kernels/qsa_*.loom`, `kernels/pages.loom` | Paged K/V, four-token compression, exact top-512 block selection, and causal attention. |
 | `kernels/ple_*.loom`, `kernels/iq4.loom` | EOS-aware bigram/trigram hashes, IQ4_NL reads, and dilated convolution history. |
 | `kernels/quantized.loom`, `kernels/experts.loom` | Q4_K, Q5_K, Q5_1, and Q8_0 expert projections in the checkpoint's actual encodings. |
