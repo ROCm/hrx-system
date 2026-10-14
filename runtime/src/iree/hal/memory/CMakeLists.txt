@@ -63,11 +63,11 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
-    asan
+    asan_pool
   HDRS
-    "asan.h"
+    "asan_pool.h"
   SRCS
-    "asan.c"
+    "asan_pool.c"
   DEPS
     iree::base
   PUBLIC
@@ -75,11 +75,11 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
-    asan_test
+    asan_pool_test
   SRCS
-    "asan_test.cc"
+    "asan_pool_test.cc"
   DEPS
-    ::asan
+    ::asan_pool
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main
@@ -392,7 +392,7 @@ iree_cc_library(
   SRCS
     "slab_provider.c"
   DEPS
-    ::asan
+    ::asan_pool
     iree::base
     iree::base::internal
     iree::hal
@@ -405,7 +405,7 @@ iree_cc_test(
   SRCS
     "slab_provider_test.cc"
   DEPS
-    ::asan
+    ::asan_pool
     ::cpu_slab_provider
     ::slab_provider
     iree::base

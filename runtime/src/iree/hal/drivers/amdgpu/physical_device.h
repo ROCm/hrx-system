@@ -23,7 +23,7 @@
 #include "iree/hal/drivers/amdgpu/util/block_pool.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/signal_pool.h"
-#include "iree/hal/memory/asan.h"
+#include "iree/hal/memory/asan_pool.h"
 
 #ifdef __cplusplus
 extern "C" {

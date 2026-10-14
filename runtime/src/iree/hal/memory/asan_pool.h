@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_MEMORY_ASAN_H_
-#define IREE_HAL_MEMORY_ASAN_H_
+#ifndef IREE_HAL_MEMORY_ASAN_POOL_H_
+#define IREE_HAL_MEMORY_ASAN_POOL_H_
 
 #include "iree/base/api.h"
 
@@ -122,4 +122,4 @@ IREE_API_EXPORT iree_status_t iree_hal_asan_extend_allocation_layout(
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_HAL_MEMORY_ASAN_H_
+#endif  // IREE_HAL_MEMORY_ASAN_POOL_H_

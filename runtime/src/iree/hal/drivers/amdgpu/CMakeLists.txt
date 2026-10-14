@@ -414,7 +414,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::shadow_map
     iree::hal::drivers::amdgpu::util::topology
     iree::hal::drivers::amdgpu::util::vmem
-    iree::hal::memory::asan
+    iree::hal::memory::asan_pool
     iree::hal::memory::maintenance
     iree::hal::memory::maintenance_thread
     iree::hal::memory::passthrough_pool

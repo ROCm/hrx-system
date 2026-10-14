@@ -11,7 +11,7 @@
 #include "iree/base/internal/atomics.h"
 #include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
-#include "iree/hal/memory/asan.h"
+#include "iree/hal/memory/asan_pool.h"
 #include "iree/hal/pool.h"
 
 #ifdef __cplusplus

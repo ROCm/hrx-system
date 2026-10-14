@@ -13,7 +13,7 @@
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
 #include "iree/hal/atomic.h"
-#include "iree/hal/memory/asan.h"
+#include "iree/hal/memory/asan_pool.h"
 #include "iree/hal/queue.h"
 #include "iree/hal/resource.h"
 

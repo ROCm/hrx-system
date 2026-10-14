@@ -13,7 +13,7 @@
 #include "iree/hal/allocator.h"
 #include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
-#include "iree/hal/memory/asan.h"
+#include "iree/hal/memory/asan_pool.h"
 #include "iree/hal/queue.h"
 #include "iree/hal/semaphore.h"
 #include "iree/hal/topology.h"

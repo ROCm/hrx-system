@@ -21,7 +21,7 @@
 #include "iree/hal/device_spec.h"
 #include "iree/hal/fence.h"
 #include "iree/hal/file.h"
-#include "iree/hal/memory/asan.h"
+#include "iree/hal/memory/asan_pool.h"
 #include "iree/hal/pool.h"
 #include "iree/hal/profile_options.h"
 #include "iree/hal/queue.h"

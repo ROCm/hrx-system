@@ -67,19 +67,19 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
-    name = "asan",
-    srcs = ["asan.c"],
-    hdrs = ["asan.h"],
+    name = "asan_pool",
+    srcs = ["asan_pool.c"],
+    hdrs = ["asan_pool.h"],
     deps = [
         "//runtime/src/iree/base",
     ],
 )
 
 iree_runtime_cc_test(
-    name = "asan_test",
-    srcs = ["asan_test.cc"],
+    name = "asan_pool_test",
+    srcs = ["asan_pool_test.cc"],
     deps = [
-        ":asan",
+        ":asan_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -349,7 +349,7 @@ iree_runtime_cc_library(
     srcs = ["slab_provider.c"],
     hdrs = ["slab_provider.h"],
     deps = [
-        ":asan",
+        ":asan_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
@@ -360,7 +360,7 @@ iree_runtime_cc_test(
     name = "slab_provider_test",
     srcs = ["slab_provider_test.cc"],
     deps = [
-        ":asan",
+        ":asan_pool",
         ":cpu_slab_provider",
         ":slab_provider",
         "//runtime/src/iree/base",

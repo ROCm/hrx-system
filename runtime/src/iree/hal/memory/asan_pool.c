@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/memory/asan.h"
+#include "iree/hal/memory/asan_pool.h"
 
 static iree_status_t iree_hal_asan_validate_required_power_of_two(
     const char* name, iree_device_size_t value) {
