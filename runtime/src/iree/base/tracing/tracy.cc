@@ -6,6 +6,13 @@
 
 #include "iree/base/tracing.h"
 
+#if defined(IREE_PLATFORM_WINDOWS)
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "iree/base/internal/symbol_resolver_win32.h"
+#endif  // IREE_PLATFORM_WINDOWS
+
 // Textually include the Tracy implementation.
 // We do this here instead of relying on an external build target so that we can
 // ensure our configuration specified in tracing.h is picked up.
@@ -27,14 +34,18 @@ extern "C" {
 #endif  // __cplusplus
 
 #if defined(TRACY_ENABLE) && defined(IREE_PLATFORM_WINDOWS)
-static HANDLE iree_dbghelp_mutex;
-void IREEDbgHelpInit(void) {
-  iree_dbghelp_mutex = CreateMutex(NULL, FALSE, NULL);
+void* IREEDbgHelpInit(void) {
+  const iree_symbol_resolver_t* resolver = NULL;
+  DWORD error = iree_symbol_resolver_get(&resolver);
+  if (error != ERROR_SUCCESS) {
+    fprintf(stderr, "Tracy: cannot initialize symbol session: %lu\n",
+            (unsigned long)error);
+    abort();
+  }
+  return resolver->process;
 }
-void IREEDbgHelpLock(void) {
-  WaitForSingleObject(iree_dbghelp_mutex, INFINITE);
-}
-void IREEDbgHelpUnlock(void) { ReleaseMutex(iree_dbghelp_mutex); }
+void IREEDbgHelpLock(void) { iree_symbol_resolver_lock(); }
+void IREEDbgHelpUnlock(void) { iree_symbol_resolver_unlock(); }
 #endif  // TRACY_ENABLE && IREE_PLATFORM_WINDOWS
 
 #if IREE_TRACING_FEATURES != 0

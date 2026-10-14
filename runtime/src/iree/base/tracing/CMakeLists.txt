@@ -49,6 +49,7 @@ elseif(${IREE_TRACING_PROVIDER} STREQUAL "tracy")
       "tracy.cc"
     DEPS
       iree::base::core_headers
+      iree::base::internal::symbol_resolver_win32
       tracy_client::runtime
       ${CMAKE_DL_LIBS}
     DEFINES

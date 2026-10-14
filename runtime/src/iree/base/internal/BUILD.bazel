@@ -271,6 +271,7 @@ iree_runtime_cc_library(
     deps = [
         ":internal",
         ":path",
+        ":symbol_resolver_win32",
         "//build_tools/bazel:dl",
         "//build_tools/bazel:pthreads",
         "//runtime/src/iree/base",
@@ -499,6 +500,31 @@ iree_runtime_cc_test(
     srcs = ["sysfs_test.cc"],
     deps = [
         ":sysfs",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "symbol_resolver_win32",
+    srcs = select({
+        "@platforms//os:windows": ["symbol_resolver_win32.c"],
+        "//conditions:default": [],
+    }),
+    hdrs = ["symbol_resolver_win32.h"],
+    deps = ["//runtime/src/iree/base:core_headers"],
+)
+
+iree_runtime_cc_test(
+    name = "symbol_resolver_win32_test",
+    srcs = ["symbol_resolver_win32_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":symbol_resolver_win32",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

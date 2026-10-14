@@ -86,6 +86,7 @@ iree_cc_library(
   DEPS
     ::core_headers
     iree::base::internal
+    iree::base::internal::symbol_resolver_win32
     iree::base::internal::time
     iree::base::tracing::provider
     ${IREE_LIBBACKTRACE_TARGET}

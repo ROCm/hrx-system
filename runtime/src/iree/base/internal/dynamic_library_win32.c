@@ -15,15 +15,13 @@
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
-// TODO(benvanik): support PDB overlays when tracy is not enabled; we'll
-// need to rearrange how the dbghelp lock is handled for that (probably moving
-// it here and having the tracy code redirect to this).
+// PDB overlays are registered when the profiling symbol store is active.
 #if defined(TRACY_ENABLE)
 #define IREE_HAVE_DYNAMIC_LIBRARY_PDB_SUPPORT 1
 #pragma warning(disable : 4091)
-#include <dbghelp.h>
-void IREEDbgHelpLock(void);
-void IREEDbgHelpUnlock(void);
+#include <psapi.h>
+
+#include "iree/base/internal/symbol_resolver_win32.h"
 #endif  // TRACY_ENABLE
 
 struct iree_dynamic_library_t {
@@ -384,54 +382,42 @@ iree_status_t iree_dynamic_library_append_symbol_path_to_builder(
 
 #if defined(IREE_HAVE_DYNAMIC_LIBRARY_PDB_SUPPORT)
 
-typedef struct {
-  const char* module_path;
-  DWORD64 module_base;
-  ULONG module_size;
-} ModuleEnumCallbackState;
-
-static BOOL EnumLoadedModulesCallback(PCSTR ModuleName, DWORD64 ModuleBase,
-                                      ULONG ModuleSize, PVOID UserContext) {
-  ModuleEnumCallbackState* state = (ModuleEnumCallbackState*)UserContext;
-  if (strcmp(ModuleName, state->module_path) != 0) {
-    return TRUE;  // not a match; continue
-  }
-  state->module_base = ModuleBase;
-  state->module_size = ModuleSize;
-  return FALSE;  // match found; stop enumeration
-}
-
 iree_status_t iree_dynamic_library_attach_symbols_from_file(
     iree_dynamic_library_t* library, const char* file_path) {
   IREE_ASSERT_ARGUMENT(library);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  IREEDbgHelpLock();
-
-  // Useful for debugging this logic; will print search paths and results:
-  // SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_DEBUG);
-
-  // Enumerates all loaded modules in the process to extract the module
-  // base/size parameters we need to overlay the PDB. There's other ways to
-  // get this (such as registering a LdrDllNotification callback and snooping
-  // the values during LoadLibrary or using CreateToolhelp32Snapshot), however
-  // EnumerateLoadedModules is in dbghelp which we are using anyway.
-  ModuleEnumCallbackState state;
-  memset(&state, 0, sizeof(state));
-  state.module_path = library->module_path;
-  EnumerateLoadedModules64(GetCurrentProcess(), EnumLoadedModulesCallback,
-                           &state);
-
-  // Load the PDB file and overlay it onto the already-loaded module at the
-  // address range it got loaded into.
-  if (state.module_base != 0) {
-    SymLoadModuleEx(GetCurrentProcess(), NULL, file_path, library->identifier,
-                    state.module_base, state.module_size, NULL, 0);
+  // The loader already owns the module handle; query its mapping directly.
+  MODULEINFO module_info;
+  if (!GetModuleInformation(GetCurrentProcess(), library->module, &module_info,
+                            sizeof(module_info))) {
+    DWORD error = GetLastError();
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(iree_status_code_from_win32_error(error),
+                            "querying module mapping for '%s'",
+                            library->identifier);
+  }
+  const iree_symbol_resolver_t* resolver = NULL;
+  DWORD error = iree_symbol_resolver_get(&resolver);
+  if (error != ERROR_SUCCESS) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(iree_status_code_from_win32_error(error),
+                            "initializing symbol session");
   }
 
-  IREEDbgHelpUnlock();
+  iree_symbol_resolver_lock();
+  DWORD64 module_base = resolver->SymLoadModuleEx(
+      resolver->process, NULL, file_path, library->identifier,
+      (DWORD64)module_info.lpBaseOfDll, module_info.SizeOfImage, NULL, 0);
+  // An already registered module returns zero with ERROR_SUCCESS.
+  error = module_base ? ERROR_SUCCESS : GetLastError();
+  iree_symbol_resolver_unlock();
 
   IREE_TRACE_ZONE_END(z0);
+  if (error != ERROR_SUCCESS) {
+    return iree_make_status(iree_status_code_from_win32_error(error),
+                            "loading debug symbols from '%s'", file_path);
+  }
   return iree_ok_status();
 }
 

@@ -45,9 +45,9 @@
 #define TRACY_CALLSTACK 1
 #endif  // IREE_TRACING_FEATURE_INSTRUMENTATION_CALLSTACKS
 
-// Guard tracy use of DbgHelp on Windows via IREEDbgHelp* functions.
-// All our own usage of DbgHelp must be guarded with the same lock.
+// Share the initialized Windows symbol session and lock with diagnostics.
 #define TRACY_DBGHELP_LOCK IREEDbgHelp
+#define TRACY_DBGHELP_SESSION 1
 
 // Disable frame image capture to avoid the DXT compression code and the frame
 // capture worker thread.

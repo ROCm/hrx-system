@@ -1,0 +1,82 @@
+--- a/public/client/TracyCallstack.cpp
++++ b/public/client/TracyCallstack.cpp
+@@ -47,7 +47,12 @@
+
+ extern "C"
+ {
++#  ifdef TRACY_DBGHELP_SESSION
++    // Init returns a session whose lifetime and options are owned externally.
++    void* DBGHELP_INIT;
++#  else
+     void DBGHELP_INIT;
++#  endif
+     void DBGHELP_LOCK;
+     void DBGHELP_UNLOCK;
+ };
+@@ -310,6 +315,8 @@
+     ___tracy_RtlWalkFrameChain = (___tracy_t_RtlWalkFrameChain)GetProcAddress( GetModuleHandleA( "ntdll.dll" ), "RtlWalkFrameChain" );
+ }
+
++static HANDLE s_dbgHelpProcess;
++
+ void DbgHelpInit()
+ {
+     if( s_shouldResolveSymbolsOffline ) return;
+@@ -319,23 +326,28 @@
+     _SymFromInlineContext = (t_SymFromInlineContext)GetProcAddress(GetModuleHandleA("dbghelp.dll"), "SymFromInlineContext");
+     _SymGetLineFromInlineContext = (t_SymGetLineFromInlineContext)GetProcAddress(GetModuleHandleA("dbghelp.dll"), "SymGetLineFromInlineContext");
+
++#ifdef TRACY_DBGHELP_SESSION
++    s_dbgHelpProcess = (HANDLE)DBGHELP_INIT;
++#else
++    s_dbgHelpProcess = GetCurrentProcess();
+ #ifdef TRACY_DBGHELP_LOCK
+     DBGHELP_INIT;
+     DBGHELP_LOCK;
+ #endif
+
+-    SymInitialize( GetCurrentProcess(), nullptr, true );
++    SymInitialize( s_dbgHelpProcess, nullptr, true );
+     SymSetOptions( SYMOPT_LOAD_LINES );
+
+ #ifdef TRACY_DBGHELP_LOCK
+     DBGHELP_UNLOCK;
+ #endif
++#endif
+ }
+
+ DWORD64 DbgHelpLoadSymbolsForModule( const char* imageName, uint64_t baseOfDll, uint32_t bllSize )
+ {
+     if( s_shouldResolveSymbolsOffline ) return 0;
+-    return SymLoadModuleEx( GetCurrentProcess(), nullptr, imageName, nullptr, baseOfDll, bllSize, nullptr, 0 );
++    return SymLoadModuleEx( s_dbgHelpProcess, nullptr, imageName, nullptr, baseOfDll, bllSize, nullptr, 0 );
+ }
+
+ ModuleCache* LoadSymbolsForModuleAndCache( const char* imageName, uint32_t imageNameLength, uint64_t baseOfDll, uint32_t dllSize )
+@@ -487,7 +499,7 @@
+     if( s_shouldResolveSymbolsOffline ) return "[unresolved]";
+
+     static char ret[MaxNameSize];
+-    const auto proc = GetCurrentProcess();
++    const auto proc = s_dbgHelpProcess;
+
+     char buf[sizeof( SYMBOL_INFO ) + MaxNameSize];
+     auto si = (SYMBOL_INFO*)buf;
+@@ -600,7 +612,7 @@
+ #ifdef TRACY_DBGHELP_LOCK
+     DBGHELP_LOCK;
+ #endif
+-    const auto res = SymGetLineFromAddr64( GetCurrentProcess(), ptr, &displacement, &line );
++    const auto res = SymGetLineFromAddr64( s_dbgHelpProcess, ptr, &displacement, &line );
+     if( res == 0 || line.LineNumber >= 0xF00000 )
+     {
+         sym.file = "[unknown]";
+@@ -646,7 +658,7 @@
+     }
+
+     int write;
+-    const auto proc = GetCurrentProcess();
++    const auto proc = s_dbgHelpProcess;
+
+ #if !defined TRACY_NO_CALLSTACK_INLINES
+     BOOL doInline = FALSE;

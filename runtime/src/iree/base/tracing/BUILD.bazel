@@ -92,6 +92,7 @@ iree_runtime_cc_library(
         "//build_tools/bazel:dl",
         "//build_tools/bazel:pthreads",
         "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:symbol_resolver_win32",
         "@tracy_client//:runtime",
     ],
 )

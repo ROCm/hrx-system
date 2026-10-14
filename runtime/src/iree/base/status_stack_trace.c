@@ -15,8 +15,7 @@
 #define IREE_HAVE_BACKTRACE 1
 #define IREE_STATUS_HAVE_STACK_TRACE_SUPPORT 1
 #elif defined(IREE_PLATFORM_WINDOWS)
-#pragma warning(disable : 4091)
-#include <dbghelp.h>
+#include "iree/base/internal/symbol_resolver_win32.h"
 #define IREE_STATUS_HAVE_STACK_TRACE_SUPPORT 1
 #elif (defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX)) && \
     defined(IREE_HAVE_LIBBACKTRACE)
@@ -192,134 +191,32 @@ static int iree_libbacktrace_pcinfo_callback(void* data, uintptr_t pc,
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
-typedef BOOL(WINAPI* PFN_SymInitialize)(HANDLE, PCSTR, BOOL);
-typedef BOOL(WINAPI* PFN_SymCleanup)(HANDLE);
-typedef BOOL(WINAPI* PFN_SymGetModuleInfo64)(HANDLE, DWORD64,
-                                             PIMAGEHLP_MODULE64);
-typedef BOOL(WINAPI* PFN_SymFromAddr)(HANDLE, DWORD64, PDWORD64, PSYMBOL_INFO);
-typedef BOOL(WINAPI* PFN_SymGetLineFromAddr64)(HANDLE, DWORD64, PDWORD,
-                                               PIMAGEHLP_LINE);
-typedef struct iree_symbol_resolver_t {
-  SRWLOCK mutex;
-  HMODULE library;
-  PFN_SymInitialize SymInitialize;
-  PFN_SymCleanup SymCleanup;
-  PFN_SymGetModuleInfo64 SymGetModuleInfo64;
-  PFN_SymFromAddr SymFromAddr;
-  PFN_SymGetLineFromAddr64 SymGetLineFromAddr64;
-} iree_symbol_resolver_t;
-
-// If tracy is enabled then it has its own dbghelp lock we need to use.
-// If not enabled then we
-#if defined(TRACY_ENABLE)
-void IREEDbgHelpInit(void);
-void IREEDbgHelpLock(void);
-void IREEDbgHelpUnlock(void);
-static void iree_symbol_resolver_initialize_mutex(
-    iree_symbol_resolver_t* resolver) {
-  IREEDbgHelpInit();
-}
-static void iree_symbol_resolver_lock(iree_symbol_resolver_t* resolver) {
-  IREEDbgHelpLock();
-}
-static void iree_symbol_resolver_unlock(iree_symbol_resolver_t* resolver) {
-  IREEDbgHelpUnlock();
-}
-#else
-static void iree_symbol_resolver_initialize_mutex(
-    iree_symbol_resolver_t* resolver) {
-  InitializeSRWLock(&resolver->mutex);
-}
-static void iree_symbol_resolver_lock(iree_symbol_resolver_t* resolver) {
-  AcquireSRWLockExclusive(&resolver->mutex);
-}
-static void iree_symbol_resolver_unlock(iree_symbol_resolver_t* resolver) {
-  ReleaseSRWLockExclusive(&resolver->mutex);
-}
-#endif  // TRACY_ENABLE
-
-static void iree_symbol_resolver_initialize(
-    iree_symbol_resolver_t* out_resolver) {
-  memset(out_resolver, 0, sizeof(*out_resolver));
-  iree_symbol_resolver_initialize_mutex(out_resolver);
-  out_resolver->library = LoadLibraryA("dbghelp.dll");
-  if (!out_resolver->library) {
-    return;
-  }
-  out_resolver->SymInitialize =
-      (PFN_SymInitialize)GetProcAddress(out_resolver->library, "SymInitialize");
-  out_resolver->SymCleanup =
-      (PFN_SymCleanup)GetProcAddress(out_resolver->library, "SymCleanup");
-  out_resolver->SymGetModuleInfo64 = (PFN_SymGetModuleInfo64)GetProcAddress(
-      out_resolver->library, "SymGetModuleInfo64");
-  out_resolver->SymFromAddr =
-      (PFN_SymFromAddr)GetProcAddress(out_resolver->library, "SymFromAddr");
-  out_resolver->SymGetLineFromAddr64 = (PFN_SymGetLineFromAddr64)GetProcAddress(
-      out_resolver->library, "SymGetLineFromAddr64");
-  if (!out_resolver->SymInitialize || !out_resolver->SymCleanup ||
-      !out_resolver->SymGetModuleInfo64 || !out_resolver->SymFromAddr ||
-      !out_resolver->SymGetLineFromAddr64) {
-    FreeLibrary(out_resolver->library);
-    memset(out_resolver, 0, sizeof(*out_resolver));
-    return;
-  }
-  out_resolver->SymInitialize(GetCurrentProcess(), /*UserSearchPath=*/NULL,
-                              /*fInvadeProcess=*/TRUE);
-}
-
-static void iree_symbol_resolver_deinitialize(
-    iree_symbol_resolver_t* resolver) {
-  if (resolver->SymCleanup) {
-    resolver->SymCleanup(GetCurrentProcess());
-  }
-  if (resolver->library) {
-    FreeLibrary(resolver->library);
-    resolver->library = NULL;
-  }
-  memset(resolver, 0, sizeof(*resolver));
-}
-
-static BOOL CALLBACK iree_symbol_resolver_setup(PINIT_ONCE InitOnce,
-                                                PVOID Parameter,
-                                                PVOID* Context) {
-  ((void)InitOnce);
-  ((void)Context);
-  iree_symbol_resolver_initialize((iree_symbol_resolver_t*)Parameter);
-  return TRUE;
-}
-
-static INIT_ONCE instance_flag = INIT_ONCE_STATIC_INIT;
-static iree_symbol_resolver_t instance;
-static iree_symbol_resolver_t* iree_symbol_resolver_get(void) {
-  InitOnceExecuteOnce(&instance_flag, iree_symbol_resolver_setup,
-                      (PVOID)&instance, NULL);
-  return &instance;
-}
-
-static bool iree_symbol_resolver_format_frame(iree_symbol_resolver_t* resolver,
-                                              void* address,
+static bool iree_symbol_resolver_format_frame(void* address,
                                               iree_host_size_t buffer_capacity,
                                               char* buffer,
                                               iree_host_size_t* buffer_length) {
-  if (IREE_UNLIKELY(!resolver->library)) {
-    return false;
+  const iree_symbol_resolver_t* resolver = NULL;
+  DWORD error = iree_symbol_resolver_get(&resolver);
+  if (error != ERROR_SUCCESS) {
+    *buffer_length = iree_string_buffer_append_format(
+        buffer_capacity, buffer, *buffer_length,
+        "<symbols unavailable: Win32 error %lu>", (unsigned long)error);
+    return true;
   }
-
-  HANDLE process = GetCurrentProcess();
+  HANDLE process = resolver->process;
 
   // Query generic information like what module the address is located in and
   // what the offset of the address is within its parent symbol.
-  char symbol_buffer[512];
+  IREE_ALIGNAS(8) char symbol_buffer[512];
   SYMBOL_INFO* symbol_info = (SYMBOL_INFO*)symbol_buffer;
   symbol_info->SizeOfStruct = sizeof(*symbol_info);
   symbol_info->MaxNameLen = sizeof(symbol_buffer) - sizeof(*symbol_info);
   DWORD64 displacement64 = 0;
-  iree_symbol_resolver_lock(resolver);
+  iree_symbol_resolver_lock();
   BOOL result = resolver->SymFromAddr(process, (DWORD64)address,
                                       &displacement64, symbol_info);
-  iree_symbol_resolver_unlock(resolver);
   if (!result) {
-    // Failed to get any information; bail.
+    iree_symbol_resolver_unlock();
     return false;
   }
 
@@ -355,14 +252,13 @@ static bool iree_symbol_resolver_format_frame(iree_symbol_resolver_t* resolver,
   IMAGEHLP_LINE64 line;
   line.SizeOfStruct = sizeof(line);
   DWORD displacement32 = 0;
-  iree_symbol_resolver_lock(resolver);
   if (resolver->SymGetLineFromAddr64(process, (DWORD64)address, &displacement32,
                                      &line)) {
     *buffer_length = iree_string_buffer_append_format(
         buffer_capacity, buffer, *buffer_length, " (%s:%" PRIu32 ")",
         line.FileName, (uint32_t)line.LineNumber);
   }
-  iree_symbol_resolver_unlock(resolver);
+  iree_symbol_resolver_unlock();
 
   return true;
 }
@@ -411,8 +307,7 @@ static iree_host_size_t iree_status_payload_stack_trace_format_frame(
                                                    buffer_length, "???");
   }
 #elif defined(IREE_PLATFORM_WINDOWS)
-  if (!iree_symbol_resolver_format_frame(iree_symbol_resolver_get(), address,
-                                         buffer_capacity, buffer,
+  if (!iree_symbol_resolver_format_frame(address, buffer_capacity, buffer,
                                          &buffer_length)) {
     buffer_length = iree_string_buffer_append_cstr(buffer_capacity, buffer,
                                                    buffer_length, "???");

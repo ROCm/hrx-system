@@ -296,6 +296,7 @@ iree_cc_library(
     ${CMAKE_DL_LIBS}
     ::internal
     ::path
+    ::symbol_resolver_win32
     iree::base
     iree::base::threading
   PUBLIC
@@ -563,6 +564,36 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+
+set(_symbol_resolver_win32_platform_srcs "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  list(APPEND _symbol_resolver_win32_platform_srcs "symbol_resolver_win32.c")
+endif()
+iree_cc_library(
+  NAME
+    symbol_resolver_win32
+  HDRS
+    "symbol_resolver_win32.h"
+  SRCS
+    ${_symbol_resolver_win32_platform_srcs}
+  DEPS
+    iree::base::core_headers
+  PUBLIC
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+iree_cc_test(
+  NAME
+    symbol_resolver_win32_test
+  SRCS
+    "symbol_resolver_win32_test.cc"
+  DEPS
+    ::symbol_resolver_win32
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
 
 iree_cc_library(
   NAME

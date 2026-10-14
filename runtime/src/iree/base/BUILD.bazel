@@ -69,6 +69,7 @@ iree_runtime_cc_library(
     deps = [
         ":core_headers",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:symbol_resolver_win32",
         "//runtime/src/iree/base/internal:time",
         "//runtime/src/iree/base/tracing:provider",
         "//third_party:libbacktrace",
