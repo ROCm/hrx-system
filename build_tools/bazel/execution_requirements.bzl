@@ -180,7 +180,10 @@ done > "$output"
 
     added_runfiles = ctx.runfiles(transitive_files = files)
     default_runfiles = default_info.default_runfiles or ctx.runfiles()
-    data_runfiles = default_info.data_runfiles or ctx.runfiles()
+
+    # The parent may use DefaultInfo(runfiles = ...), whose data_runfiles is
+    # unset until Bazel installs the provider on the target.
+    data_runfiles = default_info.data_runfiles or default_runfiles
     updated_default_info = DefaultInfo(
         data_runfiles = data_runfiles.merge(added_runfiles),
         default_runfiles = default_runfiles.merge(added_runfiles),
