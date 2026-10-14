@@ -56,3 +56,26 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+loom_cc_library(
+    name = "image_request",
+    srcs = ["image_request.c"],
+    hdrs = ["image_request.h"],
+    deps = [
+        ":image",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "image_request_test",
+    srcs = ["image_request_test.cc"],
+    deps = [
+        ":image_request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)

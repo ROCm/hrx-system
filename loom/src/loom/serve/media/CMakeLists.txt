@@ -64,4 +64,31 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+loom_cc_library(
+  NAME
+    image_request
+  HDRS
+    "image_request.h"
+  SRCS
+    "image_request.c"
+  DEPS
+    ::image
+    iree::base
+    iree::vm
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    image_request_test
+  SRCS
+    "image_request_test.cc"
+  DEPS
+    ::image_request
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
