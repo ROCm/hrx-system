@@ -32,6 +32,8 @@ typedef iree_alignas(64) struct loom_low_schedule_ready_node_state_t {
   uint32_t descriptor_previous_node;
   // Next ready node with the same descriptor ordinal.
   uint32_t descriptor_next_node;
+  // Caller-owned transient coalescing mark.
+  uint32_t transient_mark;
 } loom_low_schedule_ready_node_state_t;
 
 static_assert(sizeof(loom_low_schedule_ready_node_state_t) == 64,
@@ -288,6 +290,7 @@ void loom_low_schedule_ready_frontier_insert(
                  LOOM_LOW_SCHEDULE_READY_NODE_NONE);
   memcpy(state->keys, keys->values,
          frontier->view_count * sizeof(*state->keys));
+  state->transient_mark = 0;
   for (uint8_t view = 0; view < frontier->view_count; ++view) {
     loom_low_schedule_ready_heap_insert(
         frontier, (loom_low_schedule_ready_view_t)view, node_index);
@@ -463,14 +466,27 @@ uint8_t loom_low_schedule_ready_frontier_copy_best(
   return output_count;
 }
 
-void loom_low_schedule_ready_frontier_update_key(
-    loom_low_schedule_ready_frontier_t* frontier,
-    loom_low_schedule_ready_view_t view, uint32_t node_index, uint64_t key) {
+bool loom_low_schedule_ready_frontier_try_mark(
+    loom_low_schedule_ready_frontier_t* frontier, uint32_t node_index) {
   IREE_ASSERT_ARGUMENT(frontier);
-  IREE_ASSERT((uint8_t)view < frontier->view_count);
-  IREE_ASSERT(loom_low_schedule_ready_frontier_contains(frontier, node_index));
+  if (node_index >= frontier->node_capacity) {
+    return false;
+  }
   loom_low_schedule_ready_node_state_t* state =
       loom_low_schedule_ready_frontier_node_state(frontier, node_index);
+  if (state->heap_positions[LOOM_LOW_SCHEDULE_READY_VIEW_SOURCE] ==
+          LOOM_LOW_SCHEDULE_READY_NODE_NONE ||
+      state->transient_mark != 0) {
+    return false;
+  }
+  state->transient_mark = 1;
+  return true;
+}
+
+static void loom_low_schedule_ready_frontier_update_key_state(
+    loom_low_schedule_ready_frontier_t* frontier,
+    loom_low_schedule_ready_view_t view, uint32_t node_index, uint64_t key,
+    loom_low_schedule_ready_node_state_t* state) {
   const uint64_t old_key = state->keys[view];
   if (old_key == key) {
     return;
@@ -489,6 +505,31 @@ void loom_low_schedule_ready_frontier_update_key(
     }
   }
   loom_low_schedule_ready_heap_sift_down(frontier, view, position, node_index);
+}
+
+void loom_low_schedule_ready_frontier_update_marked_key(
+    loom_low_schedule_ready_frontier_t* frontier,
+    loom_low_schedule_ready_view_t view, uint32_t node_index, uint64_t key) {
+  IREE_ASSERT_ARGUMENT(frontier);
+  IREE_ASSERT((uint8_t)view < frontier->view_count);
+  IREE_ASSERT(loom_low_schedule_ready_frontier_contains(frontier, node_index));
+  loom_low_schedule_ready_node_state_t* state =
+      loom_low_schedule_ready_frontier_node_state(frontier, node_index);
+  IREE_ASSERT_NE(state->transient_mark, 0u);
+  state->transient_mark = 0;
+  loom_low_schedule_ready_frontier_update_key_state(frontier, view, node_index,
+                                                    key, state);
+}
+
+void loom_low_schedule_ready_frontier_update_key(
+    loom_low_schedule_ready_frontier_t* frontier,
+    loom_low_schedule_ready_view_t view, uint32_t node_index, uint64_t key) {
+  IREE_ASSERT_ARGUMENT(frontier);
+  IREE_ASSERT((uint8_t)view < frontier->view_count);
+  IREE_ASSERT(loom_low_schedule_ready_frontier_contains(frontier, node_index));
+  loom_low_schedule_ready_frontier_update_key_state(
+      frontier, view, node_index, key,
+      loom_low_schedule_ready_frontier_node_state(frontier, node_index));
 }
 
 uint32_t loom_low_schedule_ready_frontier_descriptor_head(

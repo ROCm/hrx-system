@@ -56,22 +56,23 @@ uint64_t loom_low_schedule_pressure_ready_key(
   const loom_value_ordinal_t* operand_ordinals =
       loom_low_schedule_node_const_operand_ordinals(node);
   for (uint16_t i = 0; i < node->operand_count; ++i) {
-    loom_low_schedule_note_candidate_operand_use(pressure_state,
-                                                 operand_ordinals[i]);
+    ++pressure_state->candidate_scratch_counts[operand_ordinals[i]];
   }
-  for (iree_host_size_t i = 0; i < pressure_state->candidate_operand_count;
-       ++i) {
-    const loom_value_ordinal_t value_ordinal =
-        pressure_state->candidate_operand_ordinals[i];
+  for (uint16_t i = 0; i < node->operand_count; ++i) {
+    const loom_value_ordinal_t value_ordinal = operand_ordinals[i];
+    uint32_t* operand_use_count =
+        &pressure_state->candidate_scratch_counts[value_ordinal];
+    if (*operand_use_count == 0) {
+      continue;
+    }
     const loom_low_schedule_value_record_t* value =
         &state->values[value_ordinal];
     if (iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE) &&
-        value->remaining_use_count ==
-            pressure_state->candidate_operand_use_counts[value_ordinal]) {
+        value->remaining_use_count == *operand_use_count) {
       killed_units += value->live_unit_count;
     }
+    *operand_use_count = 0;
   }
-  loom_low_schedule_reset_candidate_operand_uses(state, pressure_state);
 
   uint64_t produced_units = 0;
   const loom_value_ordinal_t* result_ordinals =

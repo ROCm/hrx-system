@@ -2025,17 +2025,39 @@ void loom_low_schedule_pressure_update_ready_consumers(
     if (*remaining_consumer_count == 1) {
       loom_low_schedule_nominate_unspillable_completion(state, pressure_state,
                                                         value_ordinal);
-      const uint32_t consumer_node = *remaining_consumer_node_xor;
-      if (!loom_low_schedule_ready_frontier_contains(&ready_policy->frontier,
-                                                     consumer_node)) {
-        continue;
-      }
-      loom_low_schedule_ready_frontier_update_key(
-          &ready_policy->frontier, LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE,
-          consumer_node,
-          loom_low_schedule_pressure_ready_key(state, pressure_state,
-                                               consumer_node));
     }
   }
-  loom_low_schedule_reset_candidate_operand_uses(state, pressure_state);
+  // Commit every consumer transition before collecting the distinct retained
+  // consumers whose keys need refresh. The transient frontier mark occupies
+  // existing node-state padding and avoids both heap churn and another table.
+  // Once an operand's scratch is reset, compact its first marked consumer into
+  // the visited prefix of the operand array; later operand entries remain
+  // untouched until they are consumed.
+  iree_host_size_t refresh_consumer_count = 0;
+  for (iree_host_size_t i = 0; i < pressure_state->candidate_operand_count;
+       ++i) {
+    const loom_value_ordinal_t value_ordinal =
+        pressure_state->candidate_operand_ordinals[i];
+    if (pressure_state->remaining_consumer_counts[value_ordinal] == 1) {
+      const uint32_t consumer_node =
+          pressure_state->remaining_consumer_node_xors[value_ordinal];
+      if (loom_low_schedule_ready_frontier_try_mark(&ready_policy->frontier,
+                                                    consumer_node)) {
+        pressure_state->candidate_operand_ordinals[refresh_consumer_count++] =
+            consumer_node;
+      }
+    }
+    loom_low_schedule_reset_candidate_operand_use(state, pressure_state,
+                                                  value_ordinal);
+  }
+  pressure_state->candidate_operand_count = 0;
+  for (iree_host_size_t i = 0; i < refresh_consumer_count; ++i) {
+    const uint32_t consumer_node =
+        pressure_state->candidate_operand_ordinals[i];
+    loom_low_schedule_ready_frontier_update_marked_key(
+        &ready_policy->frontier, LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE,
+        consumer_node,
+        loom_low_schedule_pressure_ready_key(state, pressure_state,
+                                             consumer_node));
+  }
 }

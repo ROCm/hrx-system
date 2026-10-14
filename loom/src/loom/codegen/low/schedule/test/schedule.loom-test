@@ -455,6 +455,41 @@ block 0 order: 0, 1, 17, 18, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 scheduled pressure test.i32: peak-live-units=19 peak-live-values=16
 
 // ====
+// RUN: emit low-schedule-query @resource_stall_refreshes_ready_sole_consumer strategy=resource-stall test.i32=16 order=*
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_refreshes_ready_sole_consumer(%shared: reg<test.i32 x4>, %anchor: reg<test.i32 x4>, %lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  // Scheduling the dead bridge leaves the final add as the sole consumer of
+  // both inputs. The final add begins outside the bounded source window; its
+  // refreshed pressure key must nominate it before unrelated ready work.
+  %bridge = test.add.v4i32 %shared, %anchor
+  %independent0 = test.add.v4i32 %lhs, %rhs
+  %independent1 = test.add.v4i32 %lhs, %rhs
+  %independent2 = test.add.v4i32 %lhs, %rhs
+  %independent3 = test.add.v4i32 %lhs, %rhs
+  %independent4 = test.add.v4i32 %lhs, %rhs
+  %independent5 = test.add.v4i32 %lhs, %rhs
+  %independent6 = test.add.v4i32 %lhs, %rhs
+  %independent7 = test.add.v4i32 %lhs, %rhs
+  %independent8 = test.add.v4i32 %lhs, %rhs
+  %independent9 = test.add.v4i32 %lhs, %rhs
+  %independent10 = test.add.v4i32 %lhs, %rhs
+  %independent11 = test.add.v4i32 %lhs, %rhs
+  %independent12 = test.add.v4i32 %lhs, %rhs
+  %independent13 = test.add.v4i32 %lhs, %rhs
+  %independent14 = test.add.v4i32 %lhs, %rhs
+  %independent15 = test.add.v4i32 %lhs, %rhs
+  %independent16 = test.add.v4i32 %lhs, %rhs
+  %independent17 = test.add.v4i32 %lhs, %rhs
+  %final = test.add.v4i32 %shared, %anchor
+  return %independent0, %independent1, %independent2, %independent3, %independent4, %independent5, %independent6, %independent7, %independent8, %independent9, %independent10, %independent11, %independent12, %independent13, %independent14, %independent15, %independent16, %independent17, %final
+}
+
+// ----
+block 0 order: 0, 19, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_fills_open_issue_lane_before_storage_compaction strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target

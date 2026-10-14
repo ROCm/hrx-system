@@ -70,7 +70,8 @@ struct loom_low_schedule_pressure_state_t {
   // Candidate operand multiplicity by local value ordinal, retained through
   // target scoring so packing completion can distinguish final uses.
   uint16_t* candidate_operand_use_counts;
-  // Per-candidate counters reused for alias units and unlocked operand uses.
+  // Per-candidate counters reused for ready keys, alias units, and unlocked
+  // operand uses.
   uint32_t* candidate_scratch_counts;
   // Value ordinals touched in candidate_operand_use_counts.
   loom_value_ordinal_t* candidate_operand_ordinals;
@@ -184,6 +185,19 @@ static inline uint16_t loom_low_schedule_unspillable_completion_domain_id(
       .unspillable_completion_domain_ids_by_reg_class[reg_class_id];
 }
 
+// Resets the sparse operand-use scratch for one candidate operand.
+static inline void loom_low_schedule_reset_candidate_operand_use(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state,
+    loom_value_ordinal_t value_ordinal) {
+  pressure_state->candidate_operand_use_counts[value_ordinal] = 0;
+  pressure_state->candidate_scratch_counts[value_ordinal] = 0;
+  state->values[value_ordinal].candidate_transferred_units = 0;
+  state->values[value_ordinal].flags &=
+      ~(LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_ALIAS_CLAIM |
+        LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ);
+}
+
 // Resets the sparse operand-use scratch accumulated for one candidate.
 static inline void loom_low_schedule_reset_candidate_operand_uses(
     const loom_low_schedule_build_state_t* state,
@@ -192,12 +206,8 @@ static inline void loom_low_schedule_reset_candidate_operand_uses(
        ++i) {
     const loom_value_ordinal_t value_ordinal =
         pressure_state->candidate_operand_ordinals[i];
-    pressure_state->candidate_operand_use_counts[value_ordinal] = 0;
-    pressure_state->candidate_scratch_counts[value_ordinal] = 0;
-    state->values[value_ordinal].candidate_transferred_units = 0;
-    state->values[value_ordinal].flags &=
-        ~(LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_ALIAS_CLAIM |
-          LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ);
+    loom_low_schedule_reset_candidate_operand_use(state, pressure_state,
+                                                  value_ordinal);
   }
   pressure_state->candidate_operand_count = 0;
 }

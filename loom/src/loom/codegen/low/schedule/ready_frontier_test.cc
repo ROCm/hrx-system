@@ -116,8 +116,17 @@ TEST_F(ScheduleReadyFrontierTest, MaintainsViewsAcrossSegmentBoundaries) {
             513u);
   EXPECT_EQ(loom_low_schedule_ready_frontier_descriptor_count(&frontier, 1),
             2u);
-
-  loom_low_schedule_ready_frontier_update_key(
+  EXPECT_FALSE(loom_low_schedule_ready_frontier_try_mark(&frontier, 1000));
+  EXPECT_FALSE(loom_low_schedule_ready_frontier_try_mark(&frontier, 5000));
+  EXPECT_TRUE(loom_low_schedule_ready_frontier_try_mark(&frontier, 4999));
+  EXPECT_FALSE(loom_low_schedule_ready_frontier_try_mark(&frontier, 4999));
+  loom_low_schedule_ready_frontier_update_marked_key(
+      &frontier, LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE, 4999, 1);
+  EXPECT_TRUE(loom_low_schedule_ready_frontier_try_mark(&frontier, 4999));
+  loom_low_schedule_ready_frontier_update_marked_key(
+      &frontier, LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE, 4999, 1);
+  EXPECT_TRUE(loom_low_schedule_ready_frontier_try_mark(&frontier, 4999));
+  loom_low_schedule_ready_frontier_update_marked_key(
       &frontier, LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE, 4999, 1);
   uint32_t pressure_nodes[2];
   EXPECT_EQ(

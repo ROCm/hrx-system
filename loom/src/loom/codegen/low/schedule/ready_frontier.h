@@ -97,6 +97,18 @@ uint8_t loom_low_schedule_ready_frontier_copy_best(
     loom_low_schedule_ready_view_t view, uint8_t capacity,
     uint32_t* out_node_indices);
 
+// Sets |node_index|'s caller-owned transient mark when it is retained,
+// returning true only when it was previously clear. The caller must consume
+// every mark with update_marked_key before another frontier user runs.
+bool loom_low_schedule_ready_frontier_try_mark(
+    loom_low_schedule_ready_frontier_t* frontier, uint32_t node_index);
+
+// Changes one marked nomination key, clears the mark, and repairs its indexed
+// heap position.
+void loom_low_schedule_ready_frontier_update_marked_key(
+    loom_low_schedule_ready_frontier_t* frontier,
+    loom_low_schedule_ready_view_t view, uint32_t node_index, uint64_t key);
+
 // Changes one nomination key and repairs its indexed heap position.
 void loom_low_schedule_ready_frontier_update_key(
     loom_low_schedule_ready_frontier_t* frontier,
