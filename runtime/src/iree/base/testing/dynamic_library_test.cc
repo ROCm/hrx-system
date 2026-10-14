@@ -367,10 +367,54 @@ static void CheckMemoryExtraction(const char* temp_directory,
                                   const char* mode) {
   ASSERT_TRUE(SetEnvironmentVariableA("TMP", temp_directory));
   const auto* file = dynamic_library_test_library_create();
-  if (!strcmp(mode, "release") || !strcmp(mode, "nodelete")) {
+  if (!strcmp(mode, "native-posix-close")) {
+    auto path = std::filesystem::path(temp_directory) / "native_image.dll";
+    HANDLE writer =
+        CreateFileA(path.string().c_str(), GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    ASSERT_NE(INVALID_HANDLE_VALUE, writer) << GetLastError();
+    DWORD written = 0;
+    BOOL wrote = WriteFile(writer, file->data, static_cast<DWORD>(file->size),
+                           &written, nullptr);
+    DWORD write_error = wrote ? ERROR_SUCCESS : GetLastError();
+    HANDLE image =
+        ReOpenFile(writer, GENERIC_READ | DELETE,
+                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                   FILE_FLAG_DELETE_ON_CLOSE);
+    DWORD reopen_error =
+        image != INVALID_HANDLE_VALUE ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(writer);
+    ASSERT_TRUE(wrote) << write_error;
+    ASSERT_EQ(file->size, written);
+    ASSERT_NE(INVALID_HANDLE_VALUE, image) << reopen_error;
+    std::unique_ptr<void, decltype(&CloseHandle)> image_owner(image,
+                                                              CloseHandle);
+    HMODULE module = LoadLibraryA(path.string().c_str());
+    ASSERT_NE(nullptr, module) << GetLastError();
+    auto function =
+        reinterpret_cast<int (*)(int)>(GetProcAddress(module, "times_two"));
+    ASSERT_NE(nullptr, function);
+    EXPECT_EQ(246, function(123));
+    FILE_DISPOSITION_INFO_EX disposition = {};
+    disposition.Flags = FILE_DISPOSITION_FLAG_DELETE |
+                        FILE_DISPOSITION_FLAG_POSIX_SEMANTICS |
+                        FILE_DISPOSITION_FLAG_ON_CLOSE;
+    BOOL marked = SetFileInformationByHandle(image, FileDispositionInfoEx,
+                                             &disposition, sizeof(disposition));
+    DWORD mark_error = marked ? ERROR_SUCCESS : GetLastError();
+    std::cout << "native retained image: disposition_error=" << mark_error
+              << "\n";
+    EXPECT_TRUE(marked);
+    EXPECT_TRUE(std::filesystem::exists(path));
+    EXPECT_EQ(246, function(123));
+    // Exercise OS process-exit cleanup with the image still mapped.
+    image_owner.release();
+  } else if (!strcmp(mode, "release") || !strcmp(mode, "nodelete") ||
+             !strcmp(mode, "nodelete-os-temp")) {
     iree_dynamic_library_flags_t flags =
-        !strcmp(mode, "nodelete") ? IREE_DYNAMIC_LIBRARY_FLAG_NODELETE
-                                  : IREE_DYNAMIC_LIBRARY_FLAG_NONE;
+        strcmp(mode, "release") ? IREE_DYNAMIC_LIBRARY_FLAG_NODELETE
+                                : IREE_DYNAMIC_LIBRARY_FLAG_NONE;
     iree_dynamic_library_t* library = nullptr;
     IREE_ASSERT_OK(iree_dynamic_library_load_from_memory(
         IREE_SV("extraction_lifetime"),
@@ -550,6 +594,12 @@ TEST_P(DynamicLibraryMemoryTest, OwnsExtractedFile) {
   // This directory belongs to the parent, outside the child harness's cleanup.
   // Observing it after process exit proves that Windows retired retained files.
   auto directory = iree::testing::MakeTempFilePath("memory_extraction");
+  if (mode == "nodelete-os-temp") {
+    directory = (std::filesystem::temp_directory_path() /
+                 std::filesystem::path(directory).filename())
+                    .string();
+  }
+  std::cout << "extraction parent directory=" << directory << "\n";
   ASSERT_TRUE(std::filesystem::create_directory(directory));
   arguments.push_back(directory.data());
 #endif
@@ -559,8 +609,11 @@ TEST_P(DynamicLibraryMemoryTest, OwnsExtractedFile) {
       0, iree_coordinated_test_run(static_cast<int>(arguments.size() - 1),
                                    arguments.data(), &kMemoryExtractionConfig));
 #if defined(IREE_PLATFORM_WINDOWS)
-  EXPECT_TRUE(std::filesystem::is_empty(directory));
-  EXPECT_TRUE(std::filesystem::remove(directory));
+  bool empty = std::filesystem::is_empty(directory);
+  EXPECT_TRUE(empty);
+  if (empty) {
+    EXPECT_TRUE(std::filesystem::remove(directory));
+  }
 #endif
 }
 
@@ -568,7 +621,9 @@ TEST_P(DynamicLibraryMemoryTest, OwnsExtractedFile) {
 INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
                          ::testing::Values("create-failure", "load-failure",
                                            "allocation-failure", "empty-image",
-                                           "release", "nodelete"));
+                                           "release", "nodelete",
+                                           "nodelete-os-temp",
+                                           "native-posix-close"));
 #else
 INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
                          ::testing::Values("discard", "empty", "preserve",
