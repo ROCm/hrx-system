@@ -2,7 +2,7 @@ config.decl @qwen38.vision.image_height : %value: index where [range(%value, 256
 
 config.decl @qwen38.vision.image_width : %value: index where [range(%value, 256, 256)]
 
-kernel.decl @qwen38_vision_patch_embedding() launch(%source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer)
+kernel.decl @qwen38_vision_patch_embedding() launch(%source_offset: offset, %source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer)
 
 kernel.decl @qwen38_vision_position_layernorm_statistics() launch(%position_table: buffer, %residual: buffer, %statistics: buffer)
 
@@ -63,6 +63,7 @@ template.def<@qwen38_vision_block_256> @qwen38_vision_block_256_impl(%layer: ind
 // disjoint ranges or lifetimes within one request-owned workspace.
 command.program.def public @qwen38_vision_projector_256() launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
+  %pixel_offset = index.constant 64 : offset
   %key_offset = index.constant 589824 : offset
   %value_offset = index.constant 737280 : offset
   %residual_bytes = index.constant 1179648 : offset
@@ -79,7 +80,7 @@ command.program.def public @qwen38_vision_projector_256() launch(%parameters: bu
   %patch_weight1 = command.parameter %parameters, "v.patch_embd.weight.1" : view<1152x768xf16>
   %patch_bias = command.parameter %parameters, "v.patch_embd.bias" : view<1152xf32>
   %position = command.parameter %parameters, "v.position_embd.weight" : view<2304x1152xf32>
-  kernel.launch @qwen38_vision_patch_embedding(%input, %patch_weight0, %patch_weight1, %patch_bias, %state) : (buffer, view<1152x768xf16>, view<1152x768xf16>, view<1152xf32>, buffer)
+  kernel.launch @qwen38_vision_patch_embedding(%pixel_offset, %input, %patch_weight0, %patch_weight1, %patch_bias, %state) : (offset, buffer, view<1152x768xf16>, view<1152x768xf16>, view<1152xf32>, buffer)
   kernel.launch @qwen38_vision_position_layernorm_statistics(%position, %state, %statistics) : (view<2304x1152xf32>, buffer, buffer)
 
   %layer0 = index.constant 0 : index
