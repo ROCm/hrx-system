@@ -56,6 +56,56 @@ bool loom_source_resolve(loom_source_resolver_t resolver,
   return true;
 }
 
+void loom_source_resolve_diagnostic(
+    const loom_module_t* module, loom_source_resolver_t resolver,
+    loom_emitter_t emitter, const loom_diagnostic_emission_t* emission,
+    loom_diagnostic_related_location_t* related_locations,
+    loom_diagnostic_t* out_diagnostic) {
+  *out_diagnostic = (loom_diagnostic_t){
+      .severity = loom_error_def_severity(emission->error),
+      .error = emission->error,
+      .params = emission->params,
+      .param_count = emission->param_count,
+      .emitter = emitter,
+      .origin = {.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE},
+      .source_location = {.provenance =
+                              LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE},
+  };
+  if (emission->op) {
+    const loom_module_t* primary_module =
+        emission->module ? emission->module : module;
+    loom_source_range_t range;
+    if (loom_source_resolve(resolver, primary_module, emission->op->location,
+                            &range)) {
+      out_diagnostic->origin = range;
+      out_diagnostic->source_location = range;
+    }
+  }
+  for (iree_host_size_t i = 0; i < emission->related_op_count; ++i) {
+    const loom_diagnostic_related_op_t* related = &emission->related_ops[i];
+    const loom_module_t* related_module =
+        related->module ? related->module : module;
+    loom_source_range_t range;
+    if (!related->op || !loom_source_resolve(resolver, related_module,
+                                             related->op->location, &range)) {
+      continue;
+    }
+    if (out_diagnostic->related_location_count ==
+        LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS) {
+      ++out_diagnostic->related_location_omitted_count;
+      continue;
+    }
+    related_locations[out_diagnostic->related_location_count++] =
+        (loom_diagnostic_related_location_t){
+            .label = related->label,
+            .source_location = range,
+        };
+  }
+  if (out_diagnostic->related_location_count) {
+    out_diagnostic->related_locations = related_locations;
+  }
+}
+
 // Blocks are large enough for optimized compilers to vectorize newline
 // counting while keeping the terminal scalar search tightly bounded.
 #define LOOM_SOURCE_SCAN_BLOCK_SIZE 256u

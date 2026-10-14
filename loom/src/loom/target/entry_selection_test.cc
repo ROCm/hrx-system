@@ -206,6 +206,47 @@ TEST_F(TargetEntrySelectionTest, EmissionAndRelatedOpsUseTheirOwnModules) {
   EXPECT_EQ(emitter.error_count, 1u);
 }
 
+TEST_F(TargetEntrySelectionTest, OnlyResolvedRelatedLocationsCountAsOmitted) {
+  ModulePtr module = ParseModule("func.def @entry() { func.return }\n");
+  const loom_op_t* op = loom_module_block(module.get())->first_op;
+  loom_diagnostic_related_op_t
+      related[LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS + 3] = {};
+  // A producer may have no operation for one note. It consumes no source slot.
+  related[0].label = IREE_SV("unavailable");
+  for (iree_host_size_t i = 1; i < IREE_ARRAYSIZE(related); ++i) {
+    related[i].op = op;
+    related[i].label = IREE_SV("related");
+  }
+  loom_target_entry_options_t options = {};
+  options.diagnostic_sink.fn = [](void*, const loom_diagnostic_t* diagnostic) {
+    EXPECT_EQ(diagnostic->related_location_count,
+              LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS);
+    EXPECT_EQ(diagnostic->related_location_omitted_count, 2u);
+    for (iree_host_size_t i = 0; i < diagnostic->related_location_count; ++i) {
+      EXPECT_TRUE(iree_string_view_equal(diagnostic->related_locations[i].label,
+                                         IREE_SV("related")));
+      EXPECT_EQ(diagnostic->related_locations[i].source_location.start_line,
+                1u);
+    }
+    return iree_ok_status();
+  };
+  loom_target_entry_diagnostic_emitter_t emitter;
+  loom_target_entry_diagnostic_emitter_initialize(module.get(), &options,
+                                                  LOOM_EMITTER_PASS, &emitter);
+  loom_diagnostic_param_t parameter = loom_param_string(IREE_SV("value"));
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = &parameter,
+      .param_count = 1,
+      .related_ops = related,
+      .related_op_count = IREE_ARRAYSIZE(related),
+  };
+  IREE_ASSERT_OK(
+      iree_diagnostic_emit(loom_target_entry_emitter(&emitter), &emission));
+  EXPECT_EQ(emitter.error_count, 1u);
+}
+
 TEST_F(TargetEntrySelectionTest, ForwardingPreservesRawEmissionIdentity) {
   ModulePtr module = ParseModule("func.def @entry() { func.return }\n");
   const loom_op_t* op = loom_module_block(module.get())->first_op;

@@ -71,6 +71,7 @@ loom_cc_test(
   SRCS
     "source_test.cc"
   DEPS
+    ::error_defs
     ::source
     iree::base
     iree::base::internal::arena

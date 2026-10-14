@@ -11,11 +11,39 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/error/error_defs.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/linker.h"
 
 namespace {
+
+TEST(SourceTest, DiagnosticWithoutOperationsHasNoSource) {
+  loom_diagnostic_param_t parameter = loom_param_string(IREE_SV("value"));
+  const loom_diagnostic_emission_t emission = {
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = &parameter,
+      .param_count = 1,
+  };
+  loom_diagnostic_related_location_t
+      related_locations[LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS];
+  loom_diagnostic_t diagnostic;
+  loom_source_resolve_diagnostic(nullptr, {}, LOOM_EMITTER_PASS, &emission,
+                                 related_locations, &diagnostic);
+  EXPECT_EQ(diagnostic.error, emission.error);
+  EXPECT_EQ(diagnostic.params, &parameter);
+  EXPECT_EQ(diagnostic.param_count, 1u);
+  EXPECT_EQ(diagnostic.emitter, LOOM_EMITTER_PASS);
+  EXPECT_EQ(diagnostic.severity, LOOM_DIAGNOSTIC_ERROR);
+  EXPECT_EQ(diagnostic.origin.provenance,
+            LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
+  EXPECT_EQ(diagnostic.source_location.provenance,
+            LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);
+  EXPECT_EQ(diagnostic.source_location.source.size, 0u);
+  EXPECT_EQ(diagnostic.related_locations, nullptr);
+  EXPECT_EQ(diagnostic.related_location_count, 0u);
+  EXPECT_EQ(diagnostic.related_location_omitted_count, 0u);
+}
 
 static iree_host_size_t ReferenceAsciiByteOffset(iree_string_view_t source,
                                                  uint32_t line,

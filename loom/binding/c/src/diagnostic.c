@@ -311,47 +311,11 @@ loomc_status_t loomc_result_add_loom_diagnostic_emission(
     loom_source_resolver_t source_resolver, loom_emitter_t emitter,
     const loom_diagnostic_emission_t* emission,
     const loomc_diagnostic_type_printer_t* type_printer) {
-  if (emission == NULL || emission->error == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "diagnostic emission must not be NULL");
-  }
-  loom_diagnostic_t diagnostic = {
-      .severity = loom_error_def_severity(emission->error),
-      .error = emission->error,
-      .params = emission->params,
-      .param_count = emission->param_count,
-      .emitter = emitter,
-  };
-  if (emission->op) {
-    const loom_module_t* primary_module =
-        emission->module ? emission->module : module;
-    loom_source_resolve(source_resolver, primary_module, emission->op->location,
-                        &diagnostic.source_location);
-    diagnostic.origin = diagnostic.source_location;
-  }
+  loom_diagnostic_t diagnostic;
   loom_diagnostic_related_location_t
       related_locations[LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS];
-  for (iree_host_size_t i = 0; i < emission->related_op_count; ++i) {
-    const loom_diagnostic_related_op_t* related = &emission->related_ops[i];
-    const loom_module_t* related_module =
-        related->module ? related->module : module;
-    loom_source_range_t range;
-    if (!related->op || !loom_source_resolve(source_resolver, related_module,
-                                             related->op->location, &range)) {
-      continue;
-    }
-    if (diagnostic.related_location_count ==
-        LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS) {
-      ++diagnostic.related_location_omitted_count;
-      continue;
-    }
-    related_locations[diagnostic.related_location_count++] =
-        (loom_diagnostic_related_location_t){
-            .label = related->label,
-            .source_location = range,
-        };
-  }
-  diagnostic.related_locations = related_locations;
+  loom_source_resolve_diagnostic(module, source_resolver, emitter, emission,
+                                 related_locations, &diagnostic);
   return loomc_result_add_loom_diagnostic(result, NULL, &diagnostic,
                                           type_printer);
 }

@@ -46,6 +46,23 @@ bool loom_source_resolve(loom_source_resolver_t resolver,
                          loom_location_id_t location,
                          loom_source_range_t* out_range);
 
+// Resolves a trusted operation diagnostic to borrowed source ranges. Explicit
+// module overrides select each operation's source namespace; absent overrides
+// use |module|. Unresolved operations contribute no source range. Resolved
+// related locations beyond LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS are counted as
+// omitted. Field-token highlighting and printed-IR fallback belong to callers
+// that provide those richer presentations.
+//
+// |related_locations| supplies LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS entries
+// and must outlive |out_diagnostic|, along with the emission, modules and
+// resolver. This operation allocates nothing and does not invoke a diagnostic
+// sink.
+void loom_source_resolve_diagnostic(
+    const loom_module_t* module, loom_source_resolver_t resolver,
+    loom_emitter_t emitter, const loom_diagnostic_emission_t* emission,
+    loom_diagnostic_related_location_t* related_locations,
+    loom_diagnostic_t* out_diagnostic);
+
 // Source bytes associated with a source identity in the module being resolved.
 typedef struct loom_source_entry_t {
   // Module-local source identity, or LOOM_SOURCE_ID_INVALID for an empty entry.

@@ -63,6 +63,7 @@ loom_cc_test(
     name = "source_test",
     srcs = ["source_test.cc"],
     deps = [
+        ":error_defs",
         ":source",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:linker",
