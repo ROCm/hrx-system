@@ -46,7 +46,8 @@
       "programs/mtp.loom",
       "propose.loom",
       "../qwen/kernels/qwen38/mtp_proposal.loom",
-      "../qwen/kernels/qwen38/continuation.loom"
+      "../qwen/kernels/qwen38/continuation.loom",
+      "../qwen/kernels/qwen38/spans.loom"
     ],
     "weights": "UD-Q4_K_XL",
     "tokenizer": "tokenizer.json",
