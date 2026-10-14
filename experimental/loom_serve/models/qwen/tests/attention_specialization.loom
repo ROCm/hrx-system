@@ -5,7 +5,7 @@ amdgpu.target<gfx11-generic> @cache_specialization_wave64 {subgroup_size = 64}
 
 func.decl @qwen38_row_kv_map_origin(%logical_capacity: index, %row: index) -> (offset)
 
-template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token: index, %lane: index, %control: buffer, %epsilon: f32, %key: buffer, %value: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token: index, %lane: index, %control: buffer, %epsilon: f32, %key: buffer, %value: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer, %source_position_base: i32, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
 
 template.decl @qwen38.attention.wmma(%logical_capacity: index, %tile: index, %head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
 
@@ -28,7 +28,10 @@ kernel.def @cache_81_prepare() {
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
-  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key, %value, %weight, %key_cache, %value_cache, %origin, %token_begin, %origin, %origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  %control_view = buffer.view %control[%origin] : buffer -> view<2xi32>
+  %position_index = index.constant 1 : index
+  %source_position = view.load %control_view[%position_index] : view<2xi32> -> i32
+  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key, %value, %weight, %key_cache, %value_cache, %source_position, %origin, %token_begin, %origin, %origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, i32, offset, index, offset, offset, buffer, offset, index)
   kernel.return
 }
 
@@ -76,7 +79,10 @@ kernel.def @cache_145_prepare() {
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
-  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key, %value, %weight, %key_cache, %value_cache, %origin, %token_begin, %origin, %origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  %control_view = buffer.view %control[%origin] : buffer -> view<2xi32>
+  %position_index = index.constant 1 : index
+  %source_position = view.load %control_view[%position_index] : view<2xi32> -> i32
+  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key, %value, %weight, %key_cache, %value_cache, %source_position, %origin, %token_begin, %origin, %origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, i32, offset, index, offset, offset, buffer, offset, index)
   kernel.return
 }
 
