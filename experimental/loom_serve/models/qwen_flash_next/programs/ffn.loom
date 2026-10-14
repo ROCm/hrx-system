@@ -1,0 +1,41 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+command.program.decl @flash_next_hc_ffn(%layer: index) launch(%parameters: buffer, %span: buffer, %residual: buffer, %injection: buffer, %mixed: buffer)
+
+command.program.decl @flash_next_route(%layer: index) launch(%parameters: buffer, %span: buffer, %input: buffer, %ids: buffer, %weights: buffer, %shared_gate: buffer)
+
+command.program.decl @flash_next_experts(%layer: index) launch(%parameters: buffer, %span: buffer, %input: buffer, %ids: buffer, %weights: buffer, %shared_gate: buffer, %output: buffer)
+
+kernel.decl @hc_combine() launch(%span: buffer, %residual: buffer, %projected: buffer, %injection: buffer, %output: buffer)
+
+// Routing and every branch consume the same packed mixed activation. The
+// residual input survives until the final four-stream injection; inactive rows
+// are neither read from transient publications nor written to the output.
+command.program.def public @flash_next_ffn_residual(%layer: index) launch(%parameters: buffer, %span: buffer, %residual: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %hidden_row_bytes = index.constant 5120 : offset
+  %injection_row_bytes = index.constant 16 : offset
+  %selection_row_bytes = index.constant 40 : offset
+  %gate_row_bytes = index.constant 4 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_row_bytes : index, offset -> offset
+  %injection_bytes = index.scale %tokens, %injection_row_bytes : index, offset -> offset
+  %selection_bytes = index.scale %tokens, %selection_row_bytes : index, offset -> offset
+  %gate_bytes = index.scale %tokens, %gate_row_bytes : index, offset -> offset
+  %mixed = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %branch = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %injection = buffer.alloca<global> align(256) %injection_bytes : buffer
+  %ids = buffer.alloca<global> align(256) %selection_bytes : buffer
+  %weights = buffer.alloca<global> align(256) %selection_bytes : buffer
+  %shared_gate = buffer.alloca<global> align(256) %gate_bytes : buffer
+  command.program.launch @flash_next_hc_ffn[%layer](%parameters, %span, %residual, %injection, %mixed) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_route[%layer](%parameters, %span, %mixed, %ids, %weights, %shared_gate) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_experts[%layer](%parameters, %span, %mixed, %ids, %weights, %shared_gate, %branch) : [index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @hc_combine(%span, %residual, %branch, %injection, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
