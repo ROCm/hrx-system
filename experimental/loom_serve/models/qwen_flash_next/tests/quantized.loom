@@ -1,0 +1,298 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// The oracle decodes one element at a time and accumulates in F64. Production
+// keeps integer codes in vectors and applies each affine correction after a
+// BF16 dot. These paths share neither decoding nor reduction implementation.
+// Format indices are Q8_0, Q5_1, Q4_K, and Q5_K.
+func.def @qk_weight(%q5_encoding: i1, %table: buffer, %inputs: index, %row0: index, %column: index) -> (f64) {
+  %block_width = index.constant 256 : index
+  %block = index.div %column, %block_width : index
+  %channel0 = index.rem %column, %block_width : index
+  %channel = index.assume %channel0 [range(%channel0, 0, 255)] : index
+  %blocks = index.div %inputs, %block_width : index
+  %row_start = index.mul %row0, %blocks : index
+  %block_index = index.add %row_start, %block : index
+  %q4_bytes = index.constant 144 : offset
+  %q5_bytes = index.constant 176 : offset
+  %block_bytes = scf.select %q5_encoding, %q5_bytes, %q4_bytes : offset
+  %header_bytes = index.constant 4 : offset
+  %q4_payload = index.constant 16 : offset
+  %q5_payload = index.constant 48 : offset
+  %payload_bytes = scf.select %q5_encoding, %q5_payload, %q4_payload : offset
+  %base = index.scale %block_index, %block_bytes : index, offset -> offset
+  %scales_base = index.add %base, %header_bytes : offset
+  %codes_base = index.add %base, %payload_bytes : offset
+  %header = buffer.view %table[%base] : buffer -> view<2xf16>
+  %scales = buffer.view %table[%scales_base] : buffer -> view<12xi8>
+  %codes = buffer.view %table[%codes_base] : buffer -> view<128xi8>
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %group = index.div %channel, %c32 : index
+  %group_plus4 = index.add %group, %c4 : index
+  %shift4 = scalar.constant 4 : i32
+  %shift6 = scalar.constant 6 : i32
+  %mask4 = scalar.constant 15 : i32
+  %mask6 = scalar.constant 63 : i32
+  %low = index.cmp ult, %group, %c4 : index
+  %scale, %minimum = scf.if %low -> (i32, i32) {
+    %a = view.load %scales[%group] : view<12xi8> -> i8
+    %b = view.load %scales[%group_plus4] : view<12xi8> -> i8
+    %ua = scalar.extui %a : i8 to i32
+    %ub = scalar.extui %b : i8 to i32
+    %s = scalar.andi %ua, %mask6 : i32
+    %m = scalar.andi %ub, %mask6 : i32
+    scf.yield %s, %m : i32, i32
+  } else {
+    %group_minus4 = index.sub %group, %c4 : index
+    %a = view.load %scales[%group_minus4] : view<12xi8> -> i8
+    %b = view.load %scales[%group] : view<12xi8> -> i8
+    %c = view.load %scales[%group_plus4] : view<12xi8> -> i8
+    %ua = scalar.extui %a : i8 to i32
+    %ub = scalar.extui %b : i8 to i32
+    %uc = scalar.extui %c : i8 to i32
+    %s_low = scalar.andi %uc, %mask4 : i32
+    %m_low = scalar.shrui %uc, %shift4 : i32
+    %s_high0 = scalar.shrui %ua, %shift6 : i32
+    %m_high0 = scalar.shrui %ub, %shift6 : i32
+    %s_high = scalar.shli %s_high0, %shift4 : i32
+    %m_high = scalar.shli %m_high0, %shift4 : i32
+    %s = scalar.ori %s_low, %s_high : i32
+    %m = scalar.ori %m_low, %m_high : i32
+    scf.yield %s, %m : i32, i32
+  }
+  %page = index.div %channel, %c64 : index
+  %within = index.rem %channel, %c32 : index
+  %page_base = index.mul %page, %c32 : index
+  %code_index = index.add %page_base, %within : index
+  %packed = view.load %codes[%code_index] : view<128xi8> -> i8
+  %word = scalar.extui %packed : i8 to i32
+  %half = index.rem %channel, %c64 : index
+  %upper = index.cmp uge, %half, %c32 : index
+  %high = scalar.shrui %word, %shift4 : i32
+  %chosen = scf.select %upper, %high, %word : i32
+  %low_code = scalar.andi %chosen, %mask4 : i32
+  %code = scf.if %q5_encoding -> (i32) {
+    %high_base = index.add %base, %q4_payload : offset
+    %high_bits = buffer.view %table[%high_base] : buffer -> view<32xi8>
+    %packed_high = view.load %high_bits[%within] : view<32xi8> -> i8
+    %high_word = scalar.extui %packed_high : i8 to i32
+    %shift = index.cast %group : index to i32
+    %shifted = scalar.shrui %high_word, %shift : i32
+    %c1 = scalar.constant 1 : i32
+    %bit = scalar.andi %shifted, %c1 : i32
+    %high_code = scalar.shli %bit, %shift4 : i32
+    %joined = scalar.ori %low_code, %high_code : i32
+    scf.yield %joined : i32
+  } else {
+    scf.yield %low_code : i32
+  }
+  %d16 = view.load %header[0] : view<2xf16> -> f16
+  %m16 = view.load %header[1] : view<2xf16> -> f16
+  %d = scalar.extf %d16 : f16 to f64
+  %m = scalar.extf %m16 : f16 to f64
+  %s = scalar.uitofp %scale : i32 to f64
+  %minimum_f = scalar.uitofp %minimum : i32 to f64
+  %q = scalar.uitofp %code : i32 to f64
+  %scaled = scalar.mulf %d, %s : f64
+  %positive = scalar.mulf %scaled, %q : f64
+  %negative = scalar.mulf %m, %minimum_f : f64
+  %value = scalar.subf %positive, %negative : f64
+  func.return %value : f64
+}
+
+func.def @small_weight(%q8: i1, %weight: buffer, %row: index, %column: index) -> (f64) {
+  %width = index.constant 768 : index
+  %block_width = index.constant 32 : index
+  %q8_bytes = index.constant 34 : offset
+  %q5_bytes = index.constant 24 : offset
+  %bytes = scf.select %q8, %q8_bytes, %q5_bytes : offset
+  %blocks = index.div %width, %block_width : index
+  %block = index.div %column, %block_width : index
+  %element_value = index.rem %column, %block_width : index
+  %element = index.assume %element_value [range(%element_value, 0, 31)] : index
+  %block_index = index.madd %row, %blocks, %block : index
+  %base = index.scale %block_index, %bytes : index, offset -> offset
+  %header = buffer.view %weight[%base] : buffer -> view<2xf16>
+  %scale16 = view.load %header[0] : view<2xf16> -> f16
+  %scale = scalar.extf %scale16 : f16 to f64
+  %value = scf.if %q8 -> (f64) {
+    %header_bytes = index.constant 2 : offset
+    %codes_base = index.add %base, %header_bytes : offset
+    %codes = buffer.view %weight[%codes_base] : buffer -> view<32xi8>
+    %code = view.load %codes[%element] : view<32xi8> -> i8
+    %code64 = scalar.sitofp %code : i8 to f64
+    %scaled = scalar.mulf %code64, %scale : f64
+    scf.yield %scaled : f64
+  } else {
+    %high_offset = index.constant 4 : offset
+    %codes_offset = index.constant 8 : offset
+    %high_base = index.add %base, %high_offset : offset
+    %codes_base = index.add %base, %codes_offset : offset
+    %high_view = buffer.view %weight[%high_base] : buffer -> view<1xi32>
+    %codes = buffer.view %weight[%codes_base] : buffer -> view<16xi8>
+    %c16 = index.constant 16 : index
+    %half = index.div %element, %c16 : index
+    %within = index.rem %element, %c16 : index
+    %packed = view.load %codes[%within] : view<16xi8> -> i8
+    %word = scalar.extui %packed : i8 to i32
+    %half32 = index.cast %half : index to i32
+    %c4 = scalar.constant 4 : i32
+    %shift = scalar.muli %half32, %c4 : i32
+    %shifted = scalar.shrui %word, %shift : i32
+    %mask = scalar.constant 15 : i32
+    %low = scalar.andi %shifted, %mask : i32
+    %high_word = view.load %high_view[0] : view<1xi32> -> i32
+    %bit_index = index.cast %element : index to i32
+    %high_shifted = scalar.shrui %high_word, %bit_index : i32
+    %c1 = scalar.constant 1 : i32
+    %bit = scalar.andi %high_shifted, %c1 : i32
+    %high = scalar.shli %bit, %c4 : i32
+    %code = scalar.ori %low, %high : i32
+    %code64 = scalar.uitofp %code : i32 to f64
+    %minimum16 = view.load %header[1] : view<2xf16> -> f16
+    %minimum = scalar.extf %minimum16 : f16 to f64
+    %scaled = scalar.mulf %code64, %scale : f64
+    %result = scalar.addf %scaled, %minimum : f64
+    scf.yield %result : f64
+  }
+  func.return %value : f64
+}
+
+func.def @finite_headers(%format: index, %weight: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %q8 = index.cmp eq, %format, %c0 : index
+  %q5k = index.cmp eq, %format, %c3 : index
+  %large = index.cmp uge, %format, %c2 : index
+  %small_count = index.constant 96 : index
+  %large_count = index.constant 12 : index
+  %count = scf.select %large, %large_count, %small_count : index
+  %b24 = index.constant 24 : offset
+  %b34 = index.constant 34 : offset
+  %b144 = index.constant 144 : offset
+  %b176 = index.constant 176 : offset
+  %small_bytes = scf.select %q8, %b34, %b24 : offset
+  %large_bytes = scf.select %q5k, %b176, %b144 : offset
+  %bytes = scf.select %large, %large_bytes, %small_bytes : offset
+  %scale = scalar.constant 0.015625 : f16
+  %minimum = scalar.constant 0.0078125 : f16
+  scf.for %block = [%c0 to %count step %c1] {
+    %base = index.scale %block, %bytes : index, offset -> offset
+    %header = buffer.view %weight[%base] : buffer -> view<2xf16>
+    view.store %scale, %header[0] : f16, view<2xf16>
+    %affine = index.cmp ne, %format, %c0 : index
+    scf.if %affine {
+      view.store %minimum, %header[1] : f16, view<2xf16>
+    }
+  }
+  func.return
+}
+
+func.def @reference(%format: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %width = index.constant 768 : index
+  %origin = index.constant 0 : offset
+  %q8 = index.cmp eq, %format, %c0 : index
+  %c5 = index.cmp eq, %format, %c3 : index
+  %large = index.cmp uge, %format, %c2 : index
+  %inputs = buffer.view %input[%origin] : buffer -> view<4x768xbf16>
+  %outputs = buffer.view %output[%origin] : buffer -> view<4x4xf32>
+  %initial = scalar.constant 0.0 : f64
+  scf.for %token = [%c0 to %c4 step %c1] {
+    scf.for %row = [%c0 to %c4 step %c1] {
+      %sum = scf.for %column = [%c0 to %width step %c1](%accumulator = %initial : f64) -> (f64) {
+        %w = scf.if %large -> (f64) {
+          %value = func.call @qk_weight(%c5, %weight, %width, %row, %column) : (i1, buffer, index, index, index) -> (f64)
+          scf.yield %value : f64
+        } else {
+          %value = func.call @small_weight(%q8, %weight, %row, %column) : (i1, buffer, index, index) -> (f64)
+          scf.yield %value : f64
+        }
+        %packed = view.load %inputs[%token, %column] : view<4x768xbf16> -> bf16
+        %x = scalar.extf %packed : bf16 to f64
+        %product = scalar.mulf %w, %x : f64
+        %next = scalar.addf %accumulator, %product : f64
+        scf.yield %next : f64
+      }
+      %rounded = scalar.fptrunc %sum : f64 to f32
+      view.store %rounded, %outputs[%token, %row] : f32, view<4x4xf32>
+    }
+  }
+  func.return
+}
+
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+
+func.decl @flash_next_qk_partial(%q5_encoding: i1, %width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+func.decl @flash_next_q51_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+kernel.def target(@wave32) @quantized_dot(%format: index) {
+  %c4 = index.constant 4 : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%format: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %row = kernel.workgroup.id<x> : index
+  %token = kernel.workgroup.id<y> : index
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %width = index.constant 768 : index
+  %stride = index.constant 32 : index
+  %origin = index.constant 0 : offset
+  %large = index.cmp uge, %format, %c2 : index
+  %partial = scf.if %large -> (f32) {
+    %c5 = index.cmp eq, %format, %c3 : index
+    %value = func.call @flash_next_qk_partial(%c5, %width, %token, %row, %lane, %stride, %input, %weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
+    scf.yield %value : f32
+  } else {
+    %q8 = index.cmp eq, %format, %c0 : index
+    %value = scf.if %q8 -> (f32) {
+      %value = func.call @flash_next_q8_partial(%width, %token, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+      scf.yield %value : f32
+    } else {
+      %value = func.call @flash_next_q51_partial(%width, %token, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+      scf.yield %value : f32
+    }
+    scf.yield %value : f32
+  }
+  %sum = kernel.subgroup.reduce<addf> %partial : f32
+  %leader = index.cmp eq, %lane, %c0 : index
+  scf.if %leader {
+    %view = buffer.view %output[%origin] : buffer -> view<4x4xf32>
+    view.store %sum, %view[%token, %row] : f32, view<4x4xf32>
+  }
+  kernel.return
+}
+
+check.scenario public @original_quantization configure[4](%format: index, %configuration_entropy: check.entropy) {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.literal value(73419) : i64
+    %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<4x768xbf16>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<3264xi8>
+    check.generate<@finite_headers>(%format, %weight) : (index, tensor<3264xi8>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<4x4xf32>
+    check.compare<@quantized_dot, @reference>[%format](%format, %input, %weight, %output) : [index](index, tensor<4x768xbf16>, tensor<3264xi8>, tensor<4x4xf32>) -> () {
+      // F32 affine terms and a wave reduction; the F64 oracle never quantizes
+      // activations again or rounds decoded weights through BF16/F16.
+      check.expect.close actual(%output) expected(%output) atol(0.002) rtol(2.0000000000000002e-05) nan(different) : tensor<4x4xf32>
+    }
+  }
+  check.return
+}
