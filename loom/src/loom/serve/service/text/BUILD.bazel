@@ -314,6 +314,34 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "projected_media",
+    srcs = ["projected_media.c"],
+    hdrs = ["projected_media.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    visibility = ["//visibility:private"],
+    deps = [
+        ":input",
+        "//loom/src/loom/serve/service/finite:model",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "projected_media_test",
+    srcs = ["projected_media_test.cc"],
+    deps = [
+        ":projected_media",
+        "//loom/src/loom/serve/service/finite:model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
 loom_cc_test(
     name = "media_epoch_test",
     srcs = ["media_epoch_test.cc"],
