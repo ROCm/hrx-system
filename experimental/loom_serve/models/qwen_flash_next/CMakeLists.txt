@@ -43,6 +43,7 @@ loom_module(
     "${_GLOB_KERNELS_X_LOOM}"
     "${_GLOB_PROGRAMS_X_LOOM}"
     "config.loom"
+    "iree::experimental::loom_serve::models::qwen::speculation_kernels"
     "iree::experimental::loom_serve::motifs::ggml::sources"
     "iree::experimental::loom_serve::motifs::tensor::sources"
   MODE merge
@@ -638,7 +639,6 @@ loom_test_module(
     speculation_test_module
   SRCS
     "tests/speculation.loom"
-    "iree::experimental::loom_serve::models::qwen::speculation_kernels"
   LIBRARIES
     "::residual_programs"
 )

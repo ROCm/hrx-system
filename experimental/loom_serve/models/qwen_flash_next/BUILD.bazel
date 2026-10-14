@@ -43,6 +43,7 @@ loom_library(
         "programs/*.loom",
     ]) + [
         "config.loom",
+        "//experimental/loom_serve/models/qwen:speculation_kernels",
         "//experimental/loom_serve/motifs/ggml:sources",
         "//experimental/loom_serve/motifs/tensor:sources",
     ],
@@ -153,7 +154,6 @@ loom_test(
     name = "speculation_test",
     srcs = [
         "tests/speculation.loom",
-        "//experimental/loom_serve/models/qwen:speculation_kernels",
     ],
     benchmark_smoke = False,
     configs = {

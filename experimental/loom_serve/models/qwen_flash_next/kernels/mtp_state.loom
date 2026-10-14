@@ -10,6 +10,10 @@ config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16
 
 func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
 
+func.decl @qwen38_descriptor_source_position(%word: i32) -> (i32)
+
+func.decl @qwen38_descriptor_pack(%source_position: i32, %selection: i32) -> (i32)
+
 // Accepted descriptors retain original packed starts, including rejected holes.
 // Publish a dense predictor batch and a separate map back to target hidden rows.
 kernel.def @flash_next_mtp_compact() {
@@ -37,12 +41,15 @@ kernel.def @flash_next_mtp_compact() {
       %position = view.load %source[%span, 1] : view<16x5xi32> -> i32
       %begin = view.load %source[%span, 2] : view<16x5xi32> -> i32
       %row = view.load %source[%span, 3] : view<16x5xi32> -> i32
+      %descriptor = view.load %source[%span, 4] : view<16x5xi32> -> i32
+      %source_position = func.call @qwen38_descriptor_source_position(%descriptor) : (i32) -> (i32)
       %output_index = index.cast %slot : index to i32
+      %packed_descriptor = func.call @qwen38_descriptor_pack(%source_position, %output_index) : (i32, i32) -> (i32)
       view.store %length, %output[%slot, 0] : i32, view<16x5xi32>
       view.store %position, %output[%slot, 1] : i32, view<16x5xi32>
       view.store %next_token, %output[%slot, 2] : i32, view<16x5xi32>
       view.store %row, %output[%slot, 3] : i32, view<16x5xi32>
-      view.store %output_index, %output[%slot, 4] : i32, view<16x5xi32>
+      view.store %packed_descriptor, %output[%slot, 4] : i32, view<16x5xi32>
       view.store %begin, %mapping[%slot] : i32, view<16xi32>
       %spans = index.add %next_span, %c1 : index
       %tokens = scalar.addi %next_token, %length : i32
