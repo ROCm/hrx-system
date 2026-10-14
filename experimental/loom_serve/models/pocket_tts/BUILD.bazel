@@ -16,6 +16,27 @@ filegroup(
 )
 
 loom_test(
+    name = "request_test",
+    srcs = glob(["*.loom"]) + [
+        "tests/request.loom",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.chunk_tokens": "4",
+        "pocket.context_capacity": "1",
+        "pocket.rotary_capacity": "16",
+        "pocket.threads": "128",
+        "pocket.voice_frames": "2",
+        "pocket.voice_index": "0",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "projection_test",
     srcs = [
         "dispatch.loom",
