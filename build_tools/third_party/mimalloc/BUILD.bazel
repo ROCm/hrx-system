@@ -23,7 +23,10 @@ cc_library(
         "@platforms//os:windows": ["/EHsc"],
         "//conditions:default": ["-fexceptions"],
     }),
-    features = ["-thin_lto"],
+    features = [
+        "-thin_lto",
+        "-thin_lto_link",
+    ],
     visibility = ["//third_party:__pkg__"],
     deps = ["@mimalloc"],
 )

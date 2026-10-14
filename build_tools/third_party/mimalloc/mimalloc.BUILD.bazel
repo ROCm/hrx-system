@@ -17,7 +17,10 @@ cc_library(
         "//conditions:default": ["-ftls-model=initial-exec"],
     }),
     defines = ["MI_STATIC_LIB=1"],
-    features = ["-thin_lto"],
+    features = [
+        "-thin_lto",
+        "-thin_lto_link",
+    ],
     includes = ["include"],
     linkopts = select({
         "@platforms//os:windows": [
