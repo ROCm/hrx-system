@@ -29,9 +29,11 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
 
 loom_cc_library(
   NAME
-    component_tests
+    component_test_fixture
+  HDRS
+    "component_test_fixture.h"
   SRCS
-    "component_test.cc"
+    "component_test_fixture.cc"
   DEPS
     ::component
     ::model
@@ -45,8 +47,42 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
-    loom::serve::testing::device
     loom::serve::testing::service_application
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    component_tests
+  SRCS
+    "component_test.cc"
+  DEPS
+    ::component_test_fixture
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    component_storage_tests
+  SRCS
+    "component_storage_test.cc"
+  DEPS
+    ::component_test_fixture
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    component_elastic_storage_tests
+  SRCS
+    "component_elastic_storage_test.cc"
+  DEPS
+    ::component_test_fixture
   TESTONLY
   ALWAYSLINK
   PUBLIC

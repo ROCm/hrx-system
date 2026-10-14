@@ -116,16 +116,10 @@ loom_cc_library(
 loom_cc_library(
     name = "source_lifecycle_tests",
     testonly = True,
-    srcs = [
-        "component_service_test.cc",
-        "source_lifecycle_test.cc",
-    ],
+    srcs = ["source_lifecycle_test.cc"],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
-    visibility = ["//visibility:private"],
-    deps = [
-        ":source_service_fixture",
-        "//loom/src/loom/serve/service/finite:component",
-    ],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [":source_service_fixture"],
     alwayslink = True,
 )
 
@@ -198,14 +192,49 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "source_reference_tests",
+    name = "image_service_fixture",
     testonly = True,
+    srcs = ["image_service_test_fixture.cc"],
+    hdrs = ["image_service_test_fixture.h"],
+    target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
+    visibility = ["//visibility:private"],
+    deps = [
+        ":source_service_fixture",
+        "//loom/src/loom/serve/service/finite:component",
+    ],
+)
+
+loom_cc_library(
+    name = "component_service_tests",
+    testonly = True,
+    srcs = ["component_service_test.cc"],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
-        ":source_execution_tests",
-        ":source_lifecycle_tests",
+        ":source_service_fixture",
+        "//loom/src/loom/serve/service/finite:component",
     ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "source_media_cache_tests",
+    testonly = True,
+    srcs = ["source_media_cache_test.cc"],
+    target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [":image_service_fixture"],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "source_media_lifecycle_tests",
+    testonly = True,
+    srcs = ["source_media_lifecycle_test.cc"],
+    target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [":image_service_fixture"],
+    alwayslink = True,
 )
 
 # Source compilation and execution invariants shared by every physical target.
@@ -216,8 +245,8 @@ loom_cc_library(
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
+        ":image_service_fixture",
         ":media_projector",
-        ":source_service_fixture",
         "//runtime/src/iree/async/util:proactor_pool",
     ],
     alwayslink = True,

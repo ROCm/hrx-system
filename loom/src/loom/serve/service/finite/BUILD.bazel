@@ -30,10 +30,11 @@ exports_files(
 )
 
 loom_cc_library(
-    name = "component_tests",
+    name = "component_test_fixture",
     testonly = True,
-    srcs = ["component_test.cc"],
-    visibility = ["//visibility:public"],
+    srcs = ["component_test_fixture.cc"],
+    hdrs = ["component_test_fixture.h"],
+    visibility = ["//visibility:private"],
     deps = [
         ":component",
         ":model",
@@ -41,7 +42,6 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/parameter:residency",
-        "//loom/src/loom/serve/testing:device",
         "//loom/src/loom/serve/testing:service_application",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -50,6 +50,35 @@ loom_cc_library(
         "//runtime/src/iree/testing:temp_file",
         "//runtime/src/iree/vm",
     ],
+)
+
+loom_cc_library(
+    name = "component_tests",
+    testonly = True,
+    srcs = ["component_test.cc"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        ":component_test_fixture",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "component_storage_tests",
+    testonly = True,
+    srcs = ["component_storage_test.cc"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        ":component_test_fixture",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "component_elastic_storage_tests",
+    testonly = True,
+    srcs = ["component_elastic_storage_test.cc"],
+    deps = [":component_test_fixture"],
     alwayslink = True,
 )
 

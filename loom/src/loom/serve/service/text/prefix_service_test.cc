@@ -8,7 +8,6 @@
 
 namespace {
 
-using loom_serve::testing::text::ImageComponentTextServiceTest;
 using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::SourceTextServiceTest;
 using loom_serve::testing::text::StalledClient;
@@ -40,82 +39,6 @@ class PrefixServiceTest : public SourceTextServiceTest {
   }
 };
 
-class MediaPrefixServiceTest : public ImageComponentTextServiceTest {
- protected:
-  void TearDown() override {
-    if (service_) {
-      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-          interface_,
-          [&] {
-            return !interface_.is_pending(interface_.self) &&
-                   !interface_.is_active(interface_.self) &&
-                   !interface_.snapshot(interface_.self).queued_requests;
-          },
-          LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
-      interface_.set_observer(interface_.self, {});
-      loom_serve_text_service_free(service_, IREE_STATUS_OK);
-      service_ = nullptr;
-    }
-    ImageComponentTextServiceTest::TearDown();
-  }
-
-  loom_serve_text_service_options_t ServiceOptions() const override {
-    auto options = ImageComponentTextServiceTest::ServiceOptions();
-    options.prefix_cache_capacity = 2;
-    return options;
-  }
-
-  void StartDirect() {
-    auto options = ServiceOptions();
-    options.chunk_size = 4;
-    IREE_ASSERT_OK(loom_serve_text_service_allocate(
-        model_, &options, nullptr, host_allocator_, &service_));
-    interface_ = loom_serve_text_service_interface(service_);
-    Observe(interface_);
-  }
-
-  std::string Complete(const std::string& body) {
-    const int client = Send(body);
-    loom_serve_http_connection_t* connection = nullptr;
-    Accept(client, interface_, &connection);
-    if (HasFatalFailure()) {
-      return {};
-    }
-    AdvanceUntil(interface_, [&] {
-      return !interface_.is_pending(interface_.self) &&
-             !interface_.is_active(interface_.self) &&
-             !interface_.snapshot(interface_.self).queued_requests;
-    });
-    if (HasFatalFailure()) {
-      return {};
-    }
-    return Read(client);
-  }
-
-  static std::string CompleteProjected(const std::string& before,
-                                       const std::string& after, size_t limit) {
-    Oracle oracle;
-    oracle.Consume(before);
-    oracle.Consume(255);
-    oracle.Consume(after);
-    std::string output;
-    for (size_t i = 0; i < limit; ++i) {
-      const int32_t token = oracle.Predict();
-      if (token == 3) {
-        break;
-      }
-      output.push_back("abx"[token]);
-      oracle.Consume(token);
-    }
-    return output;
-  }
-
-  // Owned explicitly driven service borrowing image_component_.
-  loom_serve_text_service_t* service_ = nullptr;
-  // Borrowed callbacks driven by this serialized test owner.
-  loom_serve_http_service_t interface_ = {};
-};
-
 TEST_F(PrefixServiceTest, SharesActiveSourceWithIndependentDivergentRequests) {
   Start(4);
   StalledClient source;
@@ -145,34 +68,6 @@ TEST_F(PrefixServiceTest, SharesActiveSourceWithIndependentDivergentRequests) {
   const auto log =
       Read(Send("", "X-Loom-Model: fixture-text\r\n", "/logz", "GET"));
   EXPECT_NE(log.find(R"("event":"prefix_capture")"), std::string::npos) << log;
-}
-
-TEST_F(MediaPrefixServiceTest, SeparatesTokenIdenticalMediaPrefixes) {
-  StartDirect();
-  const std::string prompt = "abxxabb";
-  const auto run = [&](const std::string& before, const std::string& mime_type,
-                       const std::string& base64, const std::string& detail,
-                       const std::string& after, size_t cached) {
-    const std::string message =
-        ImageMessage(before, mime_type, base64, detail, after);
-    const std::string response = Complete(Request(message, 2));
-    EXPECT_EQ(Content(response), CompleteProjected(before, after, 2));
-    EXPECT_NE(
-        response.find("\"cached_tokens\":" + std::to_string(cached) + "}"),
-        std::string::npos)
-        << response;
-    EXPECT_NE(response.find(
-                  "\"prompt_tokens\":" + std::to_string(prompt.size()) + ","),
-              std::string::npos)
-        << response;
-  };
-  run("abx", "image/png", kPng, "low", "abb", 0);
-  run("ab", "image/png", kPng, "low", "xabb", 0);
-  run("abx", "image/png", kPng, "low", "abb", 4);
-  run("abx", "image/gif", kGif, "low", "abb", 0);
-  run("abx", "image/png", kPng, "low", "abb", 4);
-  run("abx", "image/png", kPng, "high", "abb", 0);
-  run("abx", "image/png", kPng, "low", "abb", 4);
 }
 
 TEST_F(PrefixServiceTest, PreservesNamedCompletedHistoryAfterAutomaticReuse) {

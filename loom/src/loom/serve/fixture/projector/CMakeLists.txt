@@ -17,7 +17,6 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::base64
-    iree::base::tooling::flags
     iree::hal
     iree::testing::gtest
     iree::vm
@@ -29,6 +28,7 @@ loom_cc_library(
     loom::serve::runtime::parameter::residency
     loom::serve::service::finite::model
     loom::serve::service::image::output
+    loom::serve::testing::service_application
   TESTONLY
   ALWAYSLINK
   PUBLIC

@@ -5,20 +5,18 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
 
 #include "iree/base/internal/base64.h"
-#include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/media/image_request.h"
 #include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/image/output.h"
-
-IREE_FLAG(string, projector_source, "", "Pixel projector prepare source.");
-IREE_FLAG(string, test_device, "task", "Device executing the pixel projector.");
+#include "loom/serve/testing/service_application.h"
 
 namespace {
 
@@ -29,19 +27,19 @@ constexpr loom_serve_media_image_limits_t kLimits = {
     .pixels = 4096,
 };
 
-class ProjectorFixtureTest : public ::testing::TestWithParam<uint32_t> {
+class ProjectorFixtureTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(loom_serve_host_create(GetParam(), host_allocator_, &host_));
-    const loom_serve_device_options_t device_options = {
-        .uri = iree_make_cstring_view(FLAG_test_device),
-        .backing = LOOM_SERVE_DEVICE_BACKING_FIXED,
-    };
-    IREE_ASSERT_OK(loom_serve_device_group_allocate(host_, 1, &device_options,
-                                                    host_allocator_, &group_));
-    directory_ = std::filesystem::path(FLAG_projector_source)
-                     .parent_path()
-                     .generic_string();
+    const auto application_options =
+        loom_serve_test_application_options_default();
+    loom_serve_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+        &application_options, host_allocator_, &application));
+    auto* device = loom_serve_test_application_device_at(application, 0);
+    const char* source_path = std::getenv("LOOM_SERVE_TEST_PROJECTOR_SOURCE");
+    ASSERT_NE(source_path, nullptr);
+    directory_ =
+        std::filesystem::path(source_path).parent_path().generic_string();
     const loom_serve_finite_model_options_t options = {
         .sources =
             {
@@ -55,9 +53,8 @@ class ProjectorFixtureTest : public ::testing::TestWithParam<uint32_t> {
         .options = IREE_SV("{}"),
     };
     // The application thread may join cold loading; shared workers never wait.
-    IREE_ASSERT_OK(
-        loom_serve_finite_model_allocate(loom_serve_device_group_at(group_, 0),
-                                         &options, host_allocator_, &model_));
+    IREE_ASSERT_OK(loom_serve_finite_model_allocate(device, &options,
+                                                    host_allocator_, &model_));
     EXPECT_EQ(loom_serve_finite_model_tokenizer(model_), nullptr);
     EXPECT_EQ(loom_serve_finite_model_batch_limit(model_), 64u);
   }
@@ -67,8 +64,6 @@ class ProjectorFixtureTest : public ::testing::TestWithParam<uint32_t> {
     ReleaseRequest();
     loom_serve_finite_result_deinitialize(&result_);
     loom_serve_finite_result_deinitialize(&retained_);
-    IREE_EXPECT_OK(loom_serve_device_group_free(group_));
-    loom_serve_host_release(host_);
   }
 
   void ReleaseRequest() {
@@ -163,10 +158,6 @@ class ProjectorFixtureTest : public ::testing::TestWithParam<uint32_t> {
 
   // Allocator owning model, request, and detached result storage.
   iree_allocator_t host_allocator_ = iree_allocator_system();
-  // Shared worker and I/O infrastructure, outliving the device group.
-  loom_serve_host_t* host_ = nullptr;
-  // Owned device group, released after every model and result borrower.
-  loom_serve_device_group_t* group_ = nullptr;
   // Runfiles package path backing borrowed source locators.
   std::string directory_;
   // Direct numerical provider in the source catalog.
@@ -183,7 +174,7 @@ class ProjectorFixtureTest : public ::testing::TestWithParam<uint32_t> {
   loom_serve_finite_result_t retained_ = {};
 };
 
-TEST_P(ProjectorFixtureTest, ObservesPixelsAtVariableOffsetsAndExactRowCounts) {
+TEST_F(ProjectorFixtureTest, ObservesPixelsAtVariableOffsetsAndExactRowCounts) {
   const std::array<uint8_t, 3> colors[] = {{255, 0, 17}, {3, 127, 231}};
   for (const auto& color : colors) {
     for (const auto& shape :
@@ -200,7 +191,7 @@ TEST_P(ProjectorFixtureTest, ObservesPixelsAtVariableOffsetsAndExactRowCounts) {
   }
 }
 
-TEST_P(ProjectorFixtureTest, DetachedRowsSurviveAnotherImageAndModelRemoval) {
+TEST_F(ProjectorFixtureTest, DetachedRowsSurviveAnotherImageAndModelRemoval) {
   const std::array<uint8_t, 3> first = {255, 0, 17};
   const std::array<uint8_t, 3> second = {3, 127, 231};
   ASSERT_NO_FATAL_FAILURE(MakeRequest(3, 3, first));
@@ -215,7 +206,7 @@ TEST_P(ProjectorFixtureTest, DetachedRowsSurviveAnotherImageAndModelRemoval) {
   ASSERT_NO_FATAL_FAILURE(ExpectRows(result_, 2, second));
 }
 
-TEST_P(ProjectorFixtureTest, RejectsUnsupportedRowsAndThenServesValidImage) {
+TEST_F(ProjectorFixtureTest, RejectsUnsupportedRowsAndThenServesValidImage) {
   const std::array<uint8_t, 3> color = {255, 0, 17};
   for (const uint32_t rows : {0u, 65u}) {
     ASSERT_NO_FATAL_FAILURE(MakeRequest(rows, 0, color));
@@ -230,7 +221,7 @@ TEST_P(ProjectorFixtureTest, RejectsUnsupportedRowsAndThenServesValidImage) {
   ASSERT_NO_FATAL_FAILURE(ExpectRows(result_, 4, color));
 }
 
-TEST_P(ProjectorFixtureTest, RejectsMultipleImagesAndThenServesOne) {
+TEST_F(ProjectorFixtureTest, RejectsMultipleImagesAndThenServesOne) {
   const std::array<uint8_t, 3> color = {3, 127, 231};
   ASSERT_NO_FATAL_FAILURE(MakeRequest(3, 3, color));
   ASSERT_NO_FATAL_FAILURE(Prepare());
@@ -243,7 +234,7 @@ TEST_P(ProjectorFixtureTest, RejectsMultipleImagesAndThenServesOne) {
   ASSERT_NO_FATAL_FAILURE(ExpectRows(result_, 3, color));
 }
 
-TEST_P(ProjectorFixtureTest, EnforcesTheConsumersExpectedRowCount) {
+TEST_F(ProjectorFixtureTest, EnforcesTheConsumersExpectedRowCount) {
   const std::array<uint8_t, 3> color = {255, 0, 17};
   ASSERT_NO_FATAL_FAILURE(MakeRequest(3, 0, color));
   ASSERT_NO_FATAL_FAILURE(Prepare());
@@ -254,8 +245,5 @@ TEST_P(ProjectorFixtureTest, EnforcesTheConsumersExpectedRowCount) {
   ASSERT_NO_FATAL_FAILURE(Invoke(3, &result_));
   ASSERT_NO_FATAL_FAILURE(ExpectRows(result_, 3, color));
 }
-
-INSTANTIATE_TEST_SUITE_P(Workers, ProjectorFixtureTest,
-                         ::testing::Values(1u, 4u));
 
 }  // namespace

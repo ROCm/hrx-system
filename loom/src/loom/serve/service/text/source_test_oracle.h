@@ -44,20 +44,23 @@ class Oracle {
                               : 3;
   }
 
-  static std::string Complete(const std::string& prompt, size_t limit,
-                              uint32_t bias = 2) {
-    Oracle oracle(bias);
-    oracle.Consume(prompt);
+  std::string Generate(size_t limit) {
     std::string response;
     for (size_t i = 0; i < limit; ++i) {
-      const int32_t token = oracle.Predict();
+      const int32_t token = Predict();
       if (token == 3) {
         break;
       }
       response.push_back("abx"[token]);
-      oracle.Consume(token);
+      Consume(token);
     }
     return response;
+  }
+  static std::string Complete(const std::string& prompt, size_t limit,
+                              uint32_t bias = 2) {
+    Oracle oracle(bias);
+    oracle.Consume(prompt);
+    return oracle.Generate(limit);
   }
 
  private:
