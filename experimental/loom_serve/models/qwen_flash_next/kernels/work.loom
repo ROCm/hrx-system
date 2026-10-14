@@ -67,3 +67,18 @@ func.def public inline @flash_next_span_state(%epoch: buffer, %rows: buffer, %sp
   %fresh = scalar.cmpi eq, %position, %c0 : i64
   func.return %begin, %end, %fresh, %reader, %writer : index, index, i1, offset, offset
 }
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+func.def public pure inline @flash_next_output_capacity() -> (index) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %ordinary = index.cmp eq, %width, %c0 : index
+  %outputs = scf.select %ordinary, %c1, %width : index
+  %count = index.mul %spans, %outputs : index
+  func.return %count : index
+}

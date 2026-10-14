@@ -14,6 +14,7 @@ filegroup(
     name = "sources",
     srcs = [
         "model.json",
+        "//experimental/loom_serve/models/qwen:speculation_kernels",
         "//experimental/loom_serve/models/qwen:text_control",
         "//experimental/loom_serve/motifs/ggml:sources",
         "//experimental/loom_serve/motifs/tensor:sources",
@@ -86,6 +87,25 @@ loom_test(
     name = "quantized_test",
     srcs = ["tests/quantized.loom"],
     benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
+    name = "speculation_test",
+    srcs = [
+        "tests/speculation.loom",
+        "//experimental/loom_serve/models/qwen:speculation_kernels",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "flash_next.span_capacity": "5",
+        "flash_next.token_count": "20",
+        "flash_next.verification_width": "4",
+    },
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,

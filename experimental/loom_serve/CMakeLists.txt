@@ -7,6 +7,12 @@
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
 
+if(NOT LOOM_BUILD)
+  return()
+endif()
+include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_module.cmake")
+include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_test.cmake")
+
 iree_add_all_subdirs()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
