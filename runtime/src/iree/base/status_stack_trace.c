@@ -207,7 +207,7 @@ static bool iree_symbol_resolver_format_frame(void* address,
 
   // Query generic information like what module the address is located in and
   // what the offset of the address is within its parent symbol.
-  IREE_ALIGNAS(8) char symbol_buffer[512];
+  iree_alignas(iree_alignof(SYMBOL_INFO)) char symbol_buffer[512];
   SYMBOL_INFO* symbol_info = (SYMBOL_INFO*)symbol_buffer;
   symbol_info->SizeOfStruct = sizeof(*symbol_info);
   symbol_info->MaxNameLen = sizeof(symbol_buffer) - sizeof(*symbol_info);
