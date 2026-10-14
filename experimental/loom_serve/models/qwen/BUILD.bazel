@@ -57,6 +57,33 @@ loom_library(
     ],
 )
 
+loom_library(
+    name = "vision_kernels",
+    srcs = [
+        "kernels/qwen38/vision_attention.loom",
+        "kernels/qwen38/vision_ffn.loom",
+        "kernels/qwen38/vision_key_value.loom",
+        "kernels/qwen38/vision_merger.loom",
+        "kernels/qwen38/vision_normalization.loom",
+        "kernels/qwen38/vision_patch_embedding.loom",
+    ],
+)
+
+loom_test(
+    name = "vision_execution_test",
+    srcs = ["tests/vision_projector.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "qwen38.vision.image_height": "256",
+        "qwen38.vision.image_width": "256",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":vision_kernels"],
+)
+
 loom_test(
     name = "ffn_gate_up_test",
     srcs = ["tests/ffn_gate_up.loom"],
