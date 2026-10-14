@@ -31,6 +31,7 @@ add_custom_command(OUTPUT speculation_kernels.stamp
     "kernels/qwen38/accept.loom"
     "kernels/qwen38/continuation.loom"
     "kernels/qwen38/mtp_proposal.loom"
+    "kernels/qwen38/spans.loom"
 )
 
 add_custom_target(${_FILEGROUP_TARGET}
