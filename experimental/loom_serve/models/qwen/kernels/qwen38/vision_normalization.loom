@@ -1,0 +1,190 @@
+amdgpu.target<gfx11-generic> @qwen38_vision_gfx11 {subgroup_size = 32}
+
+config.decl @qwen38.vision.image_height : %value: index where [range(%value, 256, 256)]
+
+config.decl @qwen38.vision.image_width : %value: index where [range(%value, 256, 256)]
+
+// Adds the aligned-corners learned position directly to the retained residual
+// and emits only the row statistics needed by panel-fused LayerNorm consumers.
+kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_position_layernorm_statistics() {
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %c256 = index.constant 256 : index
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height = index.div %image_height, %c16 : index
+  %patch_width = index.div %image_width, %c16 : index
+  %rows = index.mul %patch_height, %patch_width : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%position_table: buffer, %residual: buffer, %statistics: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %c47 = index.constant 47 : index
+  %c48 = index.constant 48 : index
+  %c256 = index.constant 256 : index
+  %c1152 = index.constant 1152 : index
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c1_f32 = scalar.constant 1.0 : f32
+  %source_span = scalar.constant 47.0 : f32
+  %width_f32 = scalar.constant 1152.0 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height0 = index.div %image_height, %c16 : index
+  %patch_width0 = index.div %image_width, %c16 : index
+  %patch_height = index.assume %patch_height0 [range(%patch_height0, 2, 256), multiple_of(%patch_height0, 2)] : index
+  %patch_width = index.assume %patch_width0 [range(%patch_width0, 2, 256), multiple_of(%patch_width0, 2)] : index
+  %rows0 = index.mul %patch_height, %patch_width : index
+  %rows = index.assume %rows0 [range(%rows0, 4, 65536), multiple_of(%rows0, 4)] : index
+  %block_width0 = index.div %patch_width, %c2 : index
+  %block_width = index.assume %block_width0 [range(%block_width0, 1, 128)] : index
+
+  %row0 = kernel.workgroup.id<x> : index
+  %row = index.assume %row0 [lt(%row0, %rows)] : index
+  %lane = kernel.workitem.id<x> : index
+  %merge_block = index.div %row, %c4 : index
+  %within_block = index.rem %row, %c4 : index
+  %block_y = index.div %merge_block, %block_width : index
+  %block_x = index.rem %merge_block, %block_width : index
+  %delta_y = index.div %within_block, %c2 : index
+  %delta_x = index.rem %within_block, %c2 : index
+  %patch_y = index.madd %block_y, %c2, %delta_y : index
+  %patch_x = index.madd %block_x, %c2, %delta_x : index
+
+  %patch_width_span = index.sub %patch_width, %c1 : index
+  %patch_height_span = index.sub %patch_height, %c1 : index
+  %patch_x_i32 = index.cast %patch_x : index to i32
+  %patch_y_i32 = index.cast %patch_y : index to i32
+  %patch_width_span_i32 = index.cast %patch_width_span : index to i32
+  %patch_height_span_i32 = index.cast %patch_height_span : index to i32
+  %patch_x_f32 = scalar.uitofp %patch_x_i32 : i32 to f32
+  %patch_y_f32 = scalar.uitofp %patch_y_i32 : i32 to f32
+  %patch_width_span_f32 = scalar.uitofp %patch_width_span_i32 : i32 to f32
+  %patch_height_span_f32 = scalar.uitofp %patch_height_span_i32 : i32 to f32
+  %x_scale = scalar.divf %patch_width_span_f32, %source_span : f32
+  %y_scale = scalar.divf %patch_height_span_f32, %source_span : f32
+  %source_x = scalar.divf %patch_x_f32, %x_scale : f32
+  %source_y = scalar.divf %patch_y_f32, %y_scale : f32
+  %source_x_floor = scalar.floorf %source_x : f32
+  %source_y_floor = scalar.floorf %source_y : f32
+  %source_x0_i32 = scalar.fptoui %source_x_floor : f32 to i32
+  %source_y0_i32 = scalar.fptoui %source_y_floor : f32 to i32
+  %source_x0 = index.cast %source_x0_i32 : i32 to index
+  %source_y0 = index.cast %source_y0_i32 : i32 to index
+  %source_x1_unbounded = index.add %source_x0, %c1 : index
+  %source_y1_unbounded = index.add %source_y0, %c1 : index
+  %source_x1 = index.min %source_x1_unbounded, %c47 : index
+  %source_y1 = index.min %source_y1_unbounded, %c47 : index
+  %delta_source_x = scalar.subf %source_x, %source_x_floor : f32
+  %delta_source_y = scalar.subf %source_y, %source_y_floor : f32
+  %inverse_source_x = scalar.subf %c1_f32, %delta_source_x : f32
+  %inverse_source_y = scalar.subf %c1_f32, %delta_source_y : f32
+  %source_row00 = index.mul %source_y0, %c48 : index
+  %source_row01 = index.mul %source_y1, %c48 : index
+  %source_index00 = index.add %source_row00, %source_x0 : index
+  %source_index10 = index.add %source_row00, %source_x1 : index
+  %source_index01 = index.add %source_row01, %source_x0 : index
+  %source_index11 = index.add %source_row01, %source_x1 : index
+  %bounded_source_index00 = index.assume %source_index00 [range(%source_index00, 0, 2303)] : index
+  %bounded_source_index10 = index.assume %source_index10 [range(%source_index10, 0, 2303)] : index
+  %bounded_source_index01 = index.assume %source_index01 [range(%source_index01, 0, 2303)] : index
+  %bounded_source_index11 = index.assume %source_index11 [range(%source_index11, 0, 2303)] : index
+
+  %position_noalias, %residual_noalias, %statistics_noalias = buffer.assume.noalias %position_table, %residual, %statistics : buffer, buffer, buffer
+  %position_view = buffer.view %position_noalias[%origin] : buffer -> view<2304x1152xf32>
+  %residual_view = buffer.view %residual_noalias[%origin] : buffer -> view<[%rows]x1152xf32>
+  %statistics_view = buffer.view %statistics_noalias[%origin] : buffer -> view<[%rows]x2xf32>
+
+  %partial_sum, %partial_square_sum = scf.for %column = [%lane to %c1152 step %c256](%sum = %c0_f32 : f32, %square_sum = %c0_f32 : f32) -> (f32, f32) {
+    %a = view.load %position_view[%bounded_source_index00, %column] : view<2304x1152xf32> -> f32
+    %b = view.load %position_view[%bounded_source_index10, %column] : view<2304x1152xf32> -> f32
+    %c = view.load %position_view[%bounded_source_index01, %column] : view<2304x1152xf32> -> f32
+    %d = view.load %position_view[%bounded_source_index11, %column] : view<2304x1152xf32> -> f32
+    %ax = scalar.mulf %a, %inverse_source_x : f32
+    %axy = scalar.mulf %ax, %inverse_source_y : f32
+    %bx = scalar.mulf %b, %delta_source_x : f32
+    %bxy = scalar.mulf %bx, %inverse_source_y : f32
+    %cx = scalar.mulf %c, %inverse_source_x : f32
+    %cxy = scalar.mulf %cx, %delta_source_y : f32
+    %dx = scalar.mulf %d, %delta_source_x : f32
+    %dxy = scalar.mulf %dx, %delta_source_y : f32
+    %top = scalar.addf %axy, %bxy : f32
+    %bottom = scalar.addf %cxy, %dxy : f32
+    %position = scalar.addf %top, %bottom : f32
+    %patch = view.load %residual_view[%row, %column] : view<[%rows]x1152xf32> -> f32
+    %value = scalar.addf %patch, %position : f32
+    view.store %value, %residual_view[%row, %column] : f32, view<[%rows]x1152xf32>
+    %next_sum = scalar.addf %sum, %value : f32
+    %square = scalar.mulf %value, %value : f32
+    %next_square_sum = scalar.addf %square_sum, %square : f32
+    scf.yield %next_sum, %next_square_sum : f32, f32
+  }
+  %sum = kernel.workgroup.reduce<addf> %partial_sum : f32
+  %square_sum = kernel.workgroup.reduce<addf> %partial_square_sum : f32
+  %mean = scalar.divf %sum, %width_f32 : f32
+  %square_mean = scalar.divf %square_sum, %width_f32 : f32
+  %mean_square = scalar.mulf %mean, %mean : f32
+  %variance = scalar.subf %square_mean, %mean_square : f32
+  %biased_variance = scalar.addf %variance, %epsilon : f32
+  %inverse_standard_deviation = scalar.rsqrtf %biased_variance : f32
+  %leader = index.cmp eq, %lane, %c0 : index
+  scf.if %leader {
+    view.store %mean, %statistics_view[%row, %c0] : f32, view<[%rows]x2xf32>
+    view.store %inverse_standard_deviation, %statistics_view[%row, %c1] : f32, view<[%rows]x2xf32>
+  }
+  kernel.return
+}
+
+// Applies the final vision LayerNorm after the transformer stack. Transformer
+// projections consume the same statistics while staging their matrix panels.
+kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_layernorm_apply() {
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %c256 = index.constant 256 : index
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height = index.div %image_height, %c16 : index
+  %patch_width = index.div %image_width, %c16 : index
+  %rows = index.mul %patch_height, %patch_width : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%residual: buffer, %statistics: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %c256 = index.constant 256 : index
+  %c1152 = index.constant 1152 : index
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height = index.div %image_height, %c16 : index
+  %patch_width = index.div %image_width, %c16 : index
+  %rows0 = index.mul %patch_height, %patch_width : index
+  %rows = index.assume %rows0 [range(%rows0, 4, 65536), multiple_of(%rows0, 4)] : index
+  %row0 = kernel.workgroup.id<x> : index
+  %row = index.assume %row0 [lt(%row0, %rows)] : index
+  %lane = kernel.workitem.id<x> : index
+  %residual_noalias, %statistics_noalias, %weight_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %residual, %statistics, %weight, %bias, %output : buffer, buffer, buffer, buffer, buffer
+  %residual_view = buffer.view %residual_noalias[%origin] : buffer -> view<[%rows]x1152xf32>
+  %statistics_view = buffer.view %statistics_noalias[%origin] : buffer -> view<[%rows]x2xf32>
+  %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<1152xf32>
+  %bias_view = buffer.view %bias_noalias[%origin] : buffer -> view<1152xf32>
+  %output_view = buffer.view %output_noalias[%origin] : buffer -> view<[%rows]x1152xf32>
+  %mean = view.load %statistics_view[%row, %c0] : view<[%rows]x2xf32> -> f32
+  %inverse_standard_deviation = view.load %statistics_view[%row, %c1] : view<[%rows]x2xf32> -> f32
+  scf.for %column = [%lane to %c1152 step %c256] {
+    %value = view.load %residual_view[%row, %column] : view<[%rows]x1152xf32> -> f32
+    %scale = view.load %weight_view[%column] : view<1152xf32> -> f32
+    %shift = view.load %bias_view[%column] : view<1152xf32> -> f32
+    %centered = scalar.subf %value, %mean : f32
+    %normalized = scalar.mulf %centered, %inverse_standard_deviation : f32
+    %scaled = scalar.mulf %normalized, %scale : f32
+    %result = scalar.addf %scaled, %shift : f32
+    view.store %result, %output_view[%row, %column] : f32, view<[%rows]x1152xf32>
+  }
+  kernel.return
+}

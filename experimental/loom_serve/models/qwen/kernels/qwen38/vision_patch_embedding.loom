@@ -1,0 +1,182 @@
+amdgpu.target<gfx11-generic> @qwen38_vision_gfx11 {subgroup_size = 32}
+
+config.decl @qwen38.vision.image_height : %value: index where [range(%value, 256, 256)]
+
+config.decl @qwen38.vision.image_width : %value: index where [range(%value, 256, 256)]
+
+// Direct RGB8 patch projection for the Qwen3.8 vision checkpoint. The 256x256
+// specialization produces 256 pre-merge rows. Rows are published in 2x2
+// merged-block order, with dx varying first.
+kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_patch_embedding() {
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %c18 = index.constant 18 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height = index.div %image_height, %c16 : index
+  %patch_width = index.div %image_width, %c16 : index
+  %rows = index.mul %patch_height, %patch_width : index
+  %row_groups = index.div %rows, %c64 : index
+  kernel.launch.config workgroups(%row_groups, %c18, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c12 = index.constant 12 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %c768 = index.constant 768 : index
+  %c1152 = index.constant 1152 : index
+  %stage_bytes = index.constant 9216 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c1_f32 = scalar.constant 1.0 : f32
+  %c2_f32 = scalar.constant 2.0 : f32
+  %byte_scale = scalar.constant 255.0 : f32
+
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height0 = index.div %image_height, %c16 : index
+  %patch_width0 = index.div %image_width, %c16 : index
+  %patch_height = index.assume %patch_height0 [range(%patch_height0, 2, 256), multiple_of(%patch_height0, 2)] : index
+  %patch_width = index.assume %patch_width0 [range(%patch_width0, 2, 256), multiple_of(%patch_width0, 2)] : index
+  %rows0 = index.mul %patch_height, %patch_width : index
+  %rows = index.assume %rows0 [range(%rows0, 64, 65536), multiple_of(%rows0, 64)] : index
+  %block_width0 = index.div %patch_width, %c2 : index
+  %block_width = index.assume %block_width0 [range(%block_width0, 1, 128)] : index
+  %source_pixels = index.mul %image_height, %image_width : index
+  %source_elements = index.mul %source_pixels, %c3 : index
+
+  %row_group = kernel.workgroup.id<x> : index
+  %output_group = kernel.workgroup.id<y> : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %lane_column = index.rem %lane, %c16 : index
+  %wave_row_group = index.div %subgroup, %c2 : index
+  %wave_output_group = index.rem %subgroup, %c2 : index
+  %wave_row = index.mul %wave_row_group, %c16 : index
+  %wave_output = index.mul %wave_output_group, %c32 : index
+  %weight_stage_row0 = index.add %wave_output, %lane_column : index
+  %weight_stage_row1 = index.add %weight_stage_row0, %c16 : index
+  %row_origin = index.mul %row_group, %c64 : index
+  %output_origin = index.mul %output_group, %c64 : index
+  %result_row = index.add %row_origin, %wave_row : index
+  %last_result_row = index.sub %rows, %c16 : index
+  %bounded_result_row = index.assume %result_row [ge(%result_row, 0), le(%result_row, %last_result_row)] : index
+  %result_column0 = index.add %output_origin, %wave_output : index
+  %result_column1 = index.add %result_column0, %c16 : index
+
+  %source_noalias, %weight0_noalias, %weight1_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %source, %weight0, %weight1, %bias, %output : buffer, buffer, buffer, buffer, buffer
+  %source_view = buffer.view %source_noalias[%origin] : buffer -> view<[%source_elements]xi8>
+  %weight0_view = buffer.view %weight0_noalias[%origin] : buffer -> view<1152x768xf16>
+  %weight1_view = buffer.view %weight1_noalias[%origin] : buffer -> view<1152x768xf16>
+  %bias_view = buffer.view %bias_noalias[%origin] : buffer -> view<1152xf32>
+  %output_view = buffer.view %output_noalias[%origin] : buffer -> view<[%rows]x1152xf32>
+
+  %input_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %weight0_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %weight1_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<64x72xf16>
+  %weight0_stage_view = buffer.view %weight0_stage[%origin] : buffer -> view<64x72xf16>
+  %weight1_stage_view = buffer.view %weight1_stage[%origin] : buffer -> view<64x72xf16>
+
+  %c0_f32x8 = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %c0_f32x8 shape [%c16, %c16] : vector<8xf32>
+  %temporal00, %temporal01, %temporal10, %temporal11 = scf.for %column_ordinal = [%c0 to %c12 step %c1](%acc00 = %initial : vector<8xf32>, %acc01 = %initial : vector<8xf32>, %acc10 = %initial : vector<8xf32>, %acc11 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %column = index.mul %column_ordinal, %c64 : index
+
+    // Each invocation gathers sixteen RGB8 patch elements. The global row is
+    // already in the transformer's merged-block order, so no packed image or
+    // patch tensor exists outside this workgroup stage.
+    scf.for %input_round = [%c0 to %c16 step %c1] unroll schedule(linear) {
+      %element = index.madd %input_round, %c256, %workitem : index
+      %stage_row = index.div %element, %c64 : index
+      %stage_column = index.rem %element, %c64 : index
+      %patch_row = index.add %row_origin, %stage_row : index
+      %merge_block = index.div %patch_row, %c4 : index
+      %within_block = index.rem %patch_row, %c4 : index
+      %block_y = index.div %merge_block, %block_width : index
+      %block_x = index.rem %merge_block, %block_width : index
+      %dy = index.div %within_block, %c2 : index
+      %dx = index.rem %within_block, %c2 : index
+      %patch_y0 = index.madd %block_y, %c2, %dy : index
+      %patch_x0 = index.madd %block_x, %c2, %dx : index
+
+      %k = index.add %column, %stage_column : index
+      %channel = index.div %k, %c256 : index
+      %patch_element = index.rem %k, %c256 : index
+      %ky = index.div %patch_element, %c16 : index
+      %kx = index.rem %patch_element, %c16 : index
+      %source_y = index.madd %patch_y0, %c16, %ky : index
+      %source_x = index.madd %patch_x0, %c16, %kx : index
+      %source_pixel = index.madd %source_y, %image_width, %source_x : index
+      %source_element0 = index.madd %source_pixel, %c3, %channel : index
+      %source_element = index.assume %source_element0 [ge(%source_element0, 0), lt(%source_element0, %source_elements)] : index
+      %byte = view.load %source_view[%source_element] : view<[%source_elements]xi8> -> i8
+      %wide = scalar.extui %byte : i8 to i32
+      %sample = scalar.uitofp %wide : i32 to f32
+      %unit = scalar.divf %sample, %byte_scale : f32
+      %doubled = scalar.mulf %unit, %c2_f32 : f32
+      %normalized = scalar.subf %doubled, %c1_f32 : f32
+      %rounded = scalar.fptrunc %normalized : f32 to f16
+      view.store %rounded, %input_stage_view[%stage_row, %stage_column] : f16, view<64x72xf16>
+    }
+
+    // Four vector packets per invocation cover each 64x64 weight tile. The
+    // two temporal slices remain independent until the F32 epilogue.
+    scf.for %weight_round = [%c0 to %c4 step %c1] unroll schedule(linear) {
+      %packet = index.madd %weight_round, %c256, %workitem : index
+      %stage_row = index.div %packet, %c16 : index
+      %stage_packet = index.rem %packet, %c16 : index
+      %stage_column = index.mul %stage_packet, %c4 : index
+      %output_row = index.add %output_origin, %stage_row : index
+      %weight_column = index.add %column, %stage_column : index
+      %values0 = vector.load %weight0_view[%output_row, %weight_column] : view<1152x768xf16> -> vector<4xf16>
+      %values1 = vector.load %weight1_view[%output_row, %weight_column] : view<1152x768xf16> -> vector<4xf16>
+      vector.store %values0, %weight0_stage_view[%stage_row, %stage_column] : vector<4xf16>, view<64x72xf16>
+      vector.store %values1, %weight1_stage_view[%stage_row, %stage_column] : vector<4xf16>, view<64x72xf16>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    %next00, %next01, %next10, %next11 = scf.for %fragment_column = [%c0 to %c64 step %c16](%fragment_acc00 = %acc00 : vector<8xf32>, %fragment_acc01 = %acc01 : vector<8xf32>, %fragment_acc10 = %acc10 : vector<8xf32>, %fragment_acc11 = %acc11 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll {
+      %lhs = vector.fragment.load<lhs> %input_stage_view[%wave_row, %fragment_column] shape [%c16, %c16] : view<64x72xf16> -> vector<16xf16>
+      %weight_values00 = vector.load %weight0_stage_view[%weight_stage_row0, %fragment_column] : view<64x72xf16> -> vector<16xf16>
+      %weight_values01 = vector.load %weight0_stage_view[%weight_stage_row1, %fragment_column] : view<64x72xf16> -> vector<16xf16>
+      %weight_values10 = vector.load %weight1_stage_view[%weight_stage_row0, %fragment_column] : view<64x72xf16> -> vector<16xf16>
+      %weight_values11 = vector.load %weight1_stage_view[%weight_stage_row1, %fragment_column] : view<64x72xf16> -> vector<16xf16>
+      %rhs00 = vector.fragment<rhs> %weight_values00 shape [%c16, %c16] : vector<16xf16>
+      %rhs01 = vector.fragment<rhs> %weight_values01 shape [%c16, %c16] : vector<16xf16>
+      %rhs10 = vector.fragment<rhs> %weight_values10 shape [%c16, %c16] : vector<16xf16>
+      %rhs11 = vector.fragment<rhs> %weight_values11 shape [%c16, %c16] : vector<16xf16>
+      %fragment_next00 = vector.mma %lhs, %rhs00, %fragment_acc00 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %fragment_next01 = vector.mma %lhs, %rhs01, %fragment_acc01 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %fragment_next10 = vector.mma %lhs, %rhs10, %fragment_acc10 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %fragment_next11 = vector.mma %lhs, %rhs11, %fragment_acc11 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      scf.yield %fragment_next00, %fragment_next01, %fragment_next10, %fragment_next11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next00, %next01, %next10, %next11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+
+  %combined0 = vector.addf %temporal00, %temporal10 : vector<8xf32>
+  %combined1 = vector.addf %temporal01, %temporal11 : vector<8xf32>
+  %bias_column0 = index.add %result_column0, %lane_column : index
+  %bias_column1 = index.add %result_column1, %lane_column : index
+  %bias0 = view.load %bias_view[%bias_column0] : view<1152xf32> -> f32
+  %bias1 = view.load %bias_view[%bias_column1] : view<1152xf32> -> f32
+  %bias_vector0 = vector.splat %bias0 : vector<8xf32>
+  %bias_vector1 = vector.splat %bias1 : vector<8xf32>
+  %result0 = vector.addf %combined0, %bias_vector0 : vector<8xf32>
+  %result1 = vector.addf %combined1, %bias_vector1 : vector<8xf32>
+  vector.fragment.store<result> %result0, %output_view[%bounded_result_row, %result_column0] shape [%c16, %c16] : vector<8xf32>, view<[%rows]x1152xf32>
+  vector.fragment.store<result> %result1, %output_view[%bounded_result_row, %result_column1] shape [%c16, %c16] : vector<8xf32>, view<[%rows]x1152xf32>
+  kernel.return
+}
