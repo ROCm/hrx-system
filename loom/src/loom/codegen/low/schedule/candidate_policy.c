@@ -660,11 +660,11 @@ void loom_low_schedule_candidate_policy_select(
                                                nominees[i], &nominee_scores[i]);
   }
   if (nominee_count > source_view_nominee_count) {
-    // The extra graph nominee repairs a source-window boundary within the
-    // current critical-path band. It must not use that escape hatch to enter a
-    // distant pressure-growing path: repeatedly selecting the head of such a
-    // path can accumulate every intermediate before ordinary pressure
-    // recovery begins. Non-growing work remains directly actionable.
+    // Graph ranking repairs source-window boundaries only within the current
+    // critical-path band. A growing path can remain graph ranked at each
+    // successive node, so it must also have enough modeled headroom for its
+    // downstream demand. Pressure and latency recovery below admit risky
+    // growing work when it makes concrete progress.
     uint32_t maximum_source_critical_path_cycles = 0;
     for (uint8_t i = 0; i < source_view_nominee_count; ++i) {
       maximum_source_critical_path_cycles =
@@ -673,12 +673,17 @@ void loom_low_schedule_candidate_policy_select(
     }
     const loom_low_schedule_candidate_score_t* graph_score =
         &nominee_scores[source_view_nominee_count];
-    if (graph_score->produced_live_units > graph_score->killed_live_units &&
+    const bool grows_live_frontier =
+        graph_score->produced_live_units > graph_score->killed_live_units;
+    const bool exceeds_critical_path_band =
         graph_score->critical_path_cycles >
             maximum_source_critical_path_cycles &&
         graph_score->critical_path_cycles -
                 maximum_source_critical_path_cycles >
-            LOOM_LOW_SCHEDULE_READY_CRITICAL_PATH_BAND_CYCLES) {
+            LOOM_LOW_SCHEDULE_READY_CRITICAL_PATH_BAND_CYCLES;
+    if (grows_live_frontier &&
+        (graph_score->pressure_risk != LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE ||
+         exceeds_critical_path_band)) {
       nominee_count = source_view_nominee_count;
     }
   }

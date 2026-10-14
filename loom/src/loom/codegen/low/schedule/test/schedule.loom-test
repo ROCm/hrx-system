@@ -490,6 +490,61 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_refreshes_ready
 block 0 order: 0, 19, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20
 
 // ====
+// The source frontier exactly fills the bounded nominee window. Graph ranking
+// reaches the extract one critical-path cycle beyond that window, but opening
+// its live range and downstream activation reaches the register budget.
+// Repeated graph nominations can otherwise accumulate each extracted lane
+// before the bounded source paths close their live ranges.
+// RUN: emit low-schedule-query @resource_stall_rejects_risky_graph_nominee strategy=resource-stall test.i32=10 order=0,32,33
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_rejects_risky_graph_nominee(%vector: reg<test.i32 x4>, %part0: reg<test.i32>, %part1: reg<test.i32>, %part2: reg<test.i32>, %part3: reg<test.i32>) asm {
+  %independent0 = test.add.v4i32 %vector, %vector
+  %discarded_independent0 = test.add.v4i32 %independent0, %independent0
+  %independent1 = test.add.v4i32 %vector, %vector
+  %discarded_independent1 = test.add.v4i32 %independent1, %independent1
+  %independent2 = test.add.v4i32 %vector, %vector
+  %discarded_independent2 = test.add.v4i32 %independent2, %independent2
+  %independent3 = test.add.v4i32 %vector, %vector
+  %discarded_independent3 = test.add.v4i32 %independent3, %independent3
+  %independent4 = test.add.v4i32 %vector, %vector
+  %discarded_independent4 = test.add.v4i32 %independent4, %independent4
+  %independent5 = test.add.v4i32 %vector, %vector
+  %discarded_independent5 = test.add.v4i32 %independent5, %independent5
+  %independent6 = test.add.v4i32 %vector, %vector
+  %discarded_independent6 = test.add.v4i32 %independent6, %independent6
+  %independent7 = test.add.v4i32 %vector, %vector
+  %discarded_independent7 = test.add.v4i32 %independent7, %independent7
+  %independent8 = test.add.v4i32 %vector, %vector
+  %discarded_independent8 = test.add.v4i32 %independent8, %independent8
+  %independent9 = test.add.v4i32 %vector, %vector
+  %discarded_independent9 = test.add.v4i32 %independent9, %independent9
+  %independent10 = test.add.v4i32 %vector, %vector
+  %discarded_independent10 = test.add.v4i32 %independent10, %independent10
+  %independent11 = test.add.v4i32 %vector, %vector
+  %discarded_independent11 = test.add.v4i32 %independent11, %independent11
+  %independent12 = test.add.v4i32 %vector, %vector
+  %discarded_independent12 = test.add.v4i32 %independent12, %independent12
+  %independent13 = test.add.v4i32 %vector, %vector
+  %discarded_independent13 = test.add.v4i32 %independent13, %independent13
+  %independent14 = test.add.v4i32 %vector, %vector
+  %discarded_independent14 = test.add.v4i32 %independent14, %independent14
+  %independent15 = test.add.v4i32 %vector, %vector
+  %discarded_independent15 = test.add.v4i32 %independent15, %independent15
+  %packed = concat(%part0, %part1, %part2, %part3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %lane0 = test.extract_lane.i32 %packed, 0
+  %lane0_step0 = test.add.i32 %lane0, %lane0
+  %lane0_step1 = test.add.i32 %lane0_step0, %lane0_step0
+  %discarded_lane0 = test.add.i32 %lane0_step1, %lane0_step1
+  %discarded_lane1 = test.extract_lane.i32 %packed, 1
+  return
+}
+
+// ----
+block 0 order: 32, 0, 33
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_fills_open_issue_lane_before_storage_compaction strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
