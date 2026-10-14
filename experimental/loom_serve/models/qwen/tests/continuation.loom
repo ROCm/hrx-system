@@ -1,0 +1,133 @@
+kernel.decl @qwen38_continue_dispatch() launch(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer)
+
+// A completed ordinary span advances causal and source coordinates from
+// different bases. Its queued token IDs are compacted into the active bank,
+// and its output selection is rewritten relative to the new packed epoch.
+kernel.def @continuation_fixture() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%epoch: buffer, %tokens: buffer, %results: buffer, %expected_epoch: buffer, %expected_tokens: buffer, %expected_results: buffer) {
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %selection_origin = index.constant 1292 : offset
+  %options_origin = index.constant 1804 : offset
+  %eos_origin = index.constant 2316 : offset
+  %plan_origin = index.constant 2320 : offset
+  %plan_descriptors = index.constant 2332 : offset
+  %plan_options = index.constant 4124 : offset
+  %indices_origin = index.constant 4640 : offset
+  %identity_origin = index.constant 5088 : offset
+  %queued_origin = index.constant 2048 : offset
+  %next_origin = index.constant 640 : offset
+  %tags_origin = index.constant 1280 : offset
+  %epoch_bytes = index.constant 6112 : offset
+  %token_bytes = index.constant 4096 : offset
+  %result_bytes = index.constant 1344 : offset
+  %plan = buffer.view %epoch[%plan_origin] : buffer -> view<3xi32>
+  %planned = buffer.view %epoch[%plan_descriptors] : buffer -> view<64x5xi32>
+  %credits = buffer.view %epoch[%plan_options] : buffer -> view<64x2xi32>
+  %indices = buffer.view %epoch[%indices_origin] : buffer -> view<16xi32>
+  %terminal = buffer.view %epoch[%eos_origin] : buffer -> view<1xi32>
+  %queued = buffer.view %tokens[%queued_origin] : buffer -> view<512xi32>
+  %prior = buffer.view %results[%origin] : buffer -> view<16x10xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %five = scalar.constant 5 : i32
+  %seven = scalar.constant 7 : i32
+  %source = scalar.constant 23 : i32
+  %shift = scalar.constant 10 : i32
+  %source_bits = scalar.shli %source, %shift : i32
+  %selection_code = scalar.constant 5 : i32
+  %descriptor_word = scalar.ori %source_bits, %selection_code : i32
+  %causal_position = scalar.constant 100 : i32
+  %eos = scalar.constant 42 : i32
+  view.store %one, %plan[1] : i32, view<3xi32>
+  view.store %three, %planned[0, 0] : i32, view<64x5xi32>
+  view.store %causal_position, %planned[0, 1] : i32, view<64x5xi32>
+  view.store %five, %planned[0, 2] : i32, view<64x5xi32>
+  view.store %seven, %planned[0, 3] : i32, view<64x5xi32>
+  view.store %descriptor_word, %planned[0, 4] : i32, view<64x5xi32>
+  view.store %zero, %credits[0, 0] : i32, view<64x2xi32>
+  view.store %five, %credits[0, 1] : i32, view<64x2xi32>
+  view.store %zero, %indices[0] : i32, view<16xi32>
+  view.store %eos, %terminal[0] : i32, view<1xi32>
+  view.store %two, %prior[0, 0] : i32, view<16x10xi32>
+  view.store %one, %prior[0, 1] : i32, view<16x10xi32>
+  %token0 = scalar.constant 900 : i32
+  %token1 = scalar.constant 901 : i32
+  %token2 = scalar.constant 902 : i32
+  view.store %token0, %queued[5] : i32, view<512xi32>
+  view.store %token1, %queued[6] : i32, view<512xi32>
+  view.store %token2, %queued[7] : i32, view<512xi32>
+  buffer.copy %epoch[%origin], %expected_epoch[%origin], %epoch_bytes
+  buffer.copy %tokens[%origin], %expected_tokens[%origin], %token_bytes
+  buffer.copy %results[%origin], %expected_results[%origin], %result_bytes
+
+  %header = buffer.view %expected_epoch[%origin] : buffer -> view<3xi32>
+  %spans = buffer.view %expected_epoch[%descriptor_origin] : buffer -> view<64x5xi32>
+  %selections = buffer.view %expected_epoch[%selection_origin] : buffer -> view<128xi32>
+  %options = buffer.view %expected_epoch[%options_origin] : buffer -> view<64x2xi32>
+  %identities = buffer.view %expected_epoch[%identity_origin] : buffer -> view<128x2xi32>
+  %active_tokens = buffer.view %expected_tokens[%origin] : buffer -> view<512xi32>
+  %next = buffer.view %expected_results[%next_origin] : buffer -> view<160xi32>
+  %tags = buffer.view %expected_results[%tags_origin] : buffer -> view<16xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %c160 = index.constant 160 : index
+  %c512 = index.constant 512 : index
+  %zero4 = vector.constant 0 : vector<4xi32>
+  %none = scalar.constant -1 : i32
+  scf.for %i = [%c0 to %c512 step %c4] {
+    vector.store %zero4, %active_tokens[%i] : vector<4xi32>, view<512xi32>
+  }
+  scf.for %i = [%c0 to %c160 step %c4] {
+    vector.store %zero4, %next[%i] : vector<4xi32>, view<160xi32>
+  }
+  scf.for %i = [%c0 to %c16 step %c1] {
+    view.store %none, %tags[%i] : i32, view<16xi32>
+  }
+  %advanced = scalar.constant 102 : i32
+  %advanced_source = scalar.constant 25 : i32
+  %advanced_source_bits = scalar.shli %advanced_source, %shift : i32
+  %packed_descriptor = scalar.ori %advanced_source_bits, %one : i32
+  %remaining = scalar.constant 4 : i32
+  %target_position = scalar.constant 105 : i32
+  view.store %three, %header[0] : i32, view<3xi32>
+  view.store %one, %header[1] : i32, view<3xi32>
+  view.store %one, %header[2] : i32, view<3xi32>
+  view.store %three, %spans[0, 0] : i32, view<64x5xi32>
+  view.store %advanced, %spans[0, 1] : i32, view<64x5xi32>
+  view.store %zero, %spans[0, 2] : i32, view<64x5xi32>
+  view.store %seven, %spans[0, 3] : i32, view<64x5xi32>
+  view.store %packed_descriptor, %spans[0, 4] : i32, view<64x5xi32>
+  view.store %two, %selections[0] : i32, view<128xi32>
+  view.store %zero, %options[0, 0] : i32, view<64x2xi32>
+  view.store %remaining, %options[0, 1] : i32, view<64x2xi32>
+  view.store %seven, %identities[0, 0] : i32, view<128x2xi32>
+  view.store %target_position, %identities[0, 1] : i32, view<128x2xi32>
+  view.store %token0, %active_tokens[0] : i32, view<512xi32>
+  view.store %token1, %active_tokens[1] : i32, view<512xi32>
+  view.store %token2, %active_tokens[2] : i32, view<512xi32>
+  view.store %zero, %tags[0] : i32, view<16xi32>
+  kernel.return
+}
+
+check.case public @ordinary_continuation_preserves_source_position {
+  %context = check.literal value(256) : index
+  %epoch = check.generate.fill value(-99) : tensor<1528xi32>
+  %tokens = check.generate.fill value(-99) : tensor<1024xi32>
+  %results = check.generate.fill value(-99) : tensor<336xi32>
+  %expected_epoch = check.generate.fill value(-99) : tensor<1528xi32>
+  %expected_tokens = check.generate.fill value(-99) : tensor<1024xi32>
+  %expected_results = check.generate.fill value(-99) : tensor<336xi32>
+  kernel.launch @continuation_fixture(%epoch, %tokens, %results, %expected_epoch, %expected_tokens, %expected_results) : (tensor<1528xi32>, tensor<1024xi32>, tensor<336xi32>, tensor<1528xi32>, tensor<1024xi32>, tensor<336xi32>)
+  kernel.launch @qwen38_continue_dispatch(%context, %epoch, %tokens, %results) : (index, tensor<1528xi32>, tensor<1024xi32>, tensor<336xi32>)
+  check.expect.bitwise actual(%epoch) expected(%expected_epoch) : tensor<1528xi32>
+  check.expect.bitwise actual(%tokens) expected(%expected_tokens) : tensor<1024xi32>
+  check.expect.bitwise actual(%results) expected(%expected_results) : tensor<336xi32>
+  check.return
+}
