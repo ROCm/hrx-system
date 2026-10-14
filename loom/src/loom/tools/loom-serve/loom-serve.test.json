@@ -15,7 +15,7 @@
           "--pool_backing"
         ]
       },
-      "stderr": {"empty": true}
+      "stderr": {"not_contains": ["\"event\":\"ready\""]}
     },
     {
       "name": "agent help explains deployment and source inputs",

@@ -68,6 +68,7 @@ loom_cc_binary(
     ::signals
     iree::async
     iree::base
+    iree::base::core_headers
     iree::base::tooling::flags
     loom::serve::runtime::device
     loom::serve::server::configuration

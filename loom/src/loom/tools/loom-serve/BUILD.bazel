@@ -83,6 +83,7 @@ loom_cc_binary(
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/tooling:flags",
     ],
 )

@@ -9,6 +9,7 @@
 
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/base/tracing.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
@@ -123,7 +124,7 @@ static int loom_serve_main_agents_markdown(void) {
              : EXIT_SUCCESS;
 }
 
-int main(int argc, char** argv) {
+static int loom_serve_main(int argc, char** argv) {
   iree_flags_set_usage(
       "loom-serve",
       "Serves source-defined models over HTTP with shared devices and "
@@ -301,4 +302,11 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;
+}
+
+int main(int argc, char** argv) {
+  IREE_TRACE_APP_ENTER();
+  int exit_code = loom_serve_main(argc, argv);
+  IREE_TRACE_APP_EXIT(exit_code);
+  return exit_code;
 }
