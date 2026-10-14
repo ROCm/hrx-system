@@ -19,7 +19,10 @@ iree_runtime_cc_library(
     srcs = ["ring.c"],
     hdrs = ["ring.h"],
     deps = [
+        "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/gpu:context",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:commands",
     ],
 )

@@ -17,8 +17,11 @@ iree_cc_library(
   SRCS
     "ring.c"
   DEPS
+    amdf::headers
     iree::base
+    iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::queue::pm4::commands
+    iree::hal::drivers::amd::status
   PUBLIC
 )
 
