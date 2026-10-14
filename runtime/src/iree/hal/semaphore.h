@@ -419,7 +419,11 @@ IREE_API_EXPORT void iree_hal_semaphore_list_release(
 
 // Clones a semaphore list into a single heap allocation containing both the
 // semaphore pointer and payload value arrays. Each semaphore is retained. The
-// cloned list must be freed with iree_hal_semaphore_list_free.
+// cloned list must be freed with iree_hal_semaphore_list_free. An empty source
+// requires no allocation. Failure leaves out_list empty and retains nothing;
+// an unrepresentable array layout returns IREE_STATUS_OUT_OF_RANGE before
+// allocating or reading either source array. The source and output descriptors
+// may alias; source array storage remains caller-owned.
 IREE_API_EXPORT iree_status_t iree_hal_semaphore_list_clone(
     const iree_hal_semaphore_list_t* source_list,
     iree_allocator_t host_allocator, iree_hal_semaphore_list_t* out_list);

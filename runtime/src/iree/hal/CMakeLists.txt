@@ -114,6 +114,21 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
+    semaphore_test
+  SRCS
+    "semaphore_test.cc"
+  DEPS
+    ::hal
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal::utils::host_semaphore
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     memory_scope_test
   SRCS
     "memory_scope_test.cc"

@@ -293,26 +293,34 @@ IREE_API_EXPORT iree_status_t iree_hal_semaphore_list_clone(
     const iree_hal_semaphore_list_t* source_list,
     iree_allocator_t host_allocator, iree_hal_semaphore_list_t* out_list) {
   IREE_ASSERT_ARGUMENT(out_list);
+  const iree_hal_semaphore_list_t source = *source_list;
   *out_list = iree_hal_semaphore_list_empty();
-  if (iree_hal_semaphore_list_is_empty(*source_list)) {
+  if (iree_hal_semaphore_list_is_empty(source)) {
     return iree_ok_status();
   }
 
-  // Single allocation for both arrays.
-  iree_host_size_t semaphores_size =
-      source_list->count * sizeof(iree_hal_semaphore_t*);
-  iree_host_size_t values_size = source_list->count * sizeof(uint64_t);
+  // Both arrays share one allocation, with their native element alignment.
+  iree_host_size_t total_size = 0;
+  iree_host_size_t semaphores_offset = 0;
+  iree_host_size_t values_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &total_size,
+      IREE_STRUCT_FIELD_ALIGNED(source.count, iree_hal_semaphore_t*,
+                                iree_alignof(iree_hal_semaphore_t*),
+                                &semaphores_offset),
+      IREE_STRUCT_FIELD_ALIGNED(source.count, uint64_t, iree_alignof(uint64_t),
+                                &values_offset)));
   uint8_t* buffer = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, semaphores_size + values_size, (void**)&buffer));
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, total_size, (void**)&buffer));
 
-  out_list->count = source_list->count;
-  out_list->semaphores = (iree_hal_semaphore_t**)buffer;
-  out_list->payload_values = (uint64_t*)(buffer + semaphores_size);
-  for (iree_host_size_t i = 0; i < source_list->count; ++i) {
-    out_list->semaphores[i] = source_list->semaphores[i];
+  out_list->count = source.count;
+  out_list->semaphores = (iree_hal_semaphore_t**)(buffer + semaphores_offset);
+  out_list->payload_values = (uint64_t*)(buffer + values_offset);
+  for (iree_host_size_t i = 0; i < source.count; ++i) {
+    out_list->semaphores[i] = source.semaphores[i];
     iree_hal_semaphore_retain(out_list->semaphores[i]);
-    out_list->payload_values[i] = source_list->payload_values[i];
+    out_list->payload_values[i] = source.payload_values[i];
   }
   return iree_ok_status();
 }
@@ -327,17 +335,13 @@ IREE_API_EXPORT void iree_hal_semaphore_list_free(
 IREE_API_EXPORT bool iree_hal_semaphore_list_poll(
     iree_hal_semaphore_list_t semaphore_list) {
   for (iree_host_size_t i = 0; i < semaphore_list.count; ++i) {
-    // NOTE: this is unfortunately expensive in failure cases as it'll return
-    // a clone (or maybe the original!) status. We rely on failures being
-    // exceptional to make this acceptable.
-    uint64_t current_value = 0;
-    iree_status_t status =
-        iree_hal_semaphore_query(semaphore_list.semaphores[i], &current_value);
-    if (!iree_status_is_ok(status)) {
-      iree_status_ignore(status);
+    // The predicate borrows failure state without cloning an owned status.
+    // A failed payload sorts above every valid timeline value.
+    const uint64_t current_value = iree_async_semaphore_query(
+        (iree_async_semaphore_t*)semaphore_list.semaphores[i]);
+    if (current_value >= IREE_HAL_SEMAPHORE_FAILURE_VALUE ||
+        current_value < semaphore_list.payload_values[i]) {
       return false;
-    } else if (current_value < semaphore_list.payload_values[i]) {
-      return false;  // not yet reached
     }
   }
   return true;
