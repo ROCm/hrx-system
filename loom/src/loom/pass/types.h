@@ -19,14 +19,14 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
-#include "loom/ir/function_version.h"
-#include "loom/ir/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct loom_module_t loom_module_t;
+typedef struct loom_func_like_t loom_func_like_t;
+typedef struct loom_function_version_t loom_function_version_t;
 typedef struct loom_pass_environment_t loom_pass_environment_t;
 typedef struct loom_pass_decoded_options_t loom_pass_decoded_options_t;
 typedef struct loom_pass_report_detail_t loom_pass_report_detail_t;

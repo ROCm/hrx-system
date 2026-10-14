@@ -6,6 +6,7 @@
 
 #include "loom/transforms/cleanup/canonicalize.h"
 
+#include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/value_facts.h"
@@ -108,7 +109,7 @@ iree_status_t loom_canonicalizer_pass_create(
   *options = (loom_canonicalize_pass_options_t){0};
   pass->state = options;
   if (pass->decoded_options) {
-    // Both pass schemas contain only max-iterations. The registry validates
+    // Both pass schemas contain only max-iterations. Option decoding validates
     // it and supplies zero for the absent option, selecting the default.
     options->max_iterations = pass->decoded_options->options[0].uint32_value;
     return iree_ok_status();

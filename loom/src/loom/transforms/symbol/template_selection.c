@@ -28,6 +28,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/template/ops.h"
+#include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/report.h"

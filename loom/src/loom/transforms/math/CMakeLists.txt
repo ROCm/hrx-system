@@ -31,6 +31,7 @@ loom_cc_library(
     loom::ops::scalar
     loom::ops::scf
     loom::ops::vector
+    loom::pass::options
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types

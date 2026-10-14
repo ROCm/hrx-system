@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/transforms/pipeline/target_legalize.h"
+#include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/rewrite/greedy.h"

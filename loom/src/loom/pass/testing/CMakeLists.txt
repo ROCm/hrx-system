@@ -36,6 +36,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::pass::environment
+    loom::pass::options
     loom::pass::registry
     loom::pass::report
     loom::pass::test::registry

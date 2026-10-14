@@ -39,6 +39,7 @@ loom_cc_test(
     deps = [
         ":registry_verify",
         "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:options",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:report",
         "//loom/src/loom/pass/test:registry",

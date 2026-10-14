@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/pass/options.h"
 #include "loom/pass/test/harness.h"
 #include "loom/pass/testing/registry_verify.h"
 
@@ -16,10 +17,7 @@ namespace loom {
 namespace {
 
 static const loom_pass_descriptor_t* LookupTestPass(iree_string_view_t name) {
-  const loom_pass_descriptor_t* descriptor = nullptr;
-  IREE_EXPECT_OK(
-      loom_pass_registry_lookup(loom_test_pass_registry(), name, &descriptor));
-  return descriptor;
+  return loom_pass_registry_lookup(loom_test_pass_registry(), name);
 }
 
 class PassTestRegistryHarness : public PassTestHarness {};

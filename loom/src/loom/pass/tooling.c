@@ -330,12 +330,8 @@ static iree_status_t loom_pass_tool_build_flat_pipeline_body(
       break;
     }
 
-    const loom_pass_descriptor_t* descriptor = NULL;
-    status =
-        loom_pass_registry_lookup(context->registry, spec.name, &descriptor);
-    if (!iree_status_is_ok(status)) {
-      break;
-    }
+    const loom_pass_descriptor_t* descriptor =
+        loom_pass_registry_lookup(context->registry, spec.name);
     if (!descriptor) {
       status =
           iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

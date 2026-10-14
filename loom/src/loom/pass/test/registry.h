@@ -15,6 +15,7 @@
 #ifndef LOOM_PASS_TEST_REGISTRY_H_
 #define LOOM_PASS_TEST_REGISTRY_H_
 
+#include "loom/ir/ir.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/registry.h"
 

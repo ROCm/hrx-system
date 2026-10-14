@@ -10,6 +10,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/pass/ops.h"
+#include "loom/pass/options.h"
 
 typedef struct loom_pass_program_compiler_t {
   // Source module containing pass pipeline IR.

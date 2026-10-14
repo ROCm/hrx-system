@@ -26,9 +26,11 @@ loom_cc_library(
   DEPS
     iree::base
     loom::analysis::ownership_lifetime
+    loom::ir
     loom::ops::op_defs
     loom::ops::test
     loom::pass::environment
+    loom::pass::options
     loom::pass::registry
     loom::pass::report
     loom::pass::types
@@ -74,6 +76,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::pass::options
     loom::pass::registry
     loom::pass::testing::registry_verify
     loom::pass::types

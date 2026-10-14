@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/pass/environment.h"
+#include "loom/pass/options.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/report.h"
 #include "loom/pass/test/registry.h"
@@ -20,10 +21,7 @@ namespace loom {
 namespace {
 
 static const loom_pass_descriptor_t* LookupTestPass(iree_string_view_t name) {
-  const loom_pass_descriptor_t* descriptor = nullptr;
-  IREE_EXPECT_OK(
-      loom_pass_registry_lookup(loom_test_pass_registry(), name, &descriptor));
-  return descriptor;
+  return loom_pass_registry_lookup(loom_test_pass_registry(), name);
 }
 
 static const loom_pass_info_t* BrokenStatisticsPassInfo() {
@@ -462,9 +460,8 @@ TEST(PassRegistryCoreTest, RejectsUnsortedRequirementMetadata) {
 }
 
 TEST(PassRegistryCoreTest, LookupKnownAndUnknownPasses) {
-  const loom_pass_descriptor_t* descriptor = nullptr;
-  IREE_ASSERT_OK(loom_pass_registry_lookup(
-      loom_test_pass_registry(), IREE_SV("test.options"), &descriptor));
+  const loom_pass_descriptor_t* descriptor = loom_pass_registry_lookup(
+      loom_test_pass_registry(), IREE_SV("test.options"));
   ASSERT_NE(descriptor, nullptr);
   EXPECT_TRUE(iree_string_view_equal(descriptor->key, IREE_SV("test.options")));
   ASSERT_NE(descriptor->info, nullptr);
@@ -472,10 +469,8 @@ TEST(PassRegistryCoreTest, LookupKnownAndUnknownPasses) {
   EXPECT_NE(descriptor->function_run, nullptr);
   EXPECT_NE(descriptor->create, nullptr);
 
-  descriptor = reinterpret_cast<const loom_pass_descriptor_t*>(0x1);
-  IREE_ASSERT_OK(loom_pass_registry_lookup(loom_test_pass_registry(),
-                                           IREE_SV("definitely-not-a-pass"),
-                                           &descriptor));
+  descriptor = loom_pass_registry_lookup(loom_test_pass_registry(),
+                                         IREE_SV("definitely-not-a-pass"));
   EXPECT_EQ(descriptor, nullptr);
 }
 

@@ -11,6 +11,7 @@
 #include "loom/analysis/ownership_lifetime.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
+#include "loom/pass/options.h"
 #include "loom/pass/report.h"
 #include "loom/pass/value_facts.h"
 

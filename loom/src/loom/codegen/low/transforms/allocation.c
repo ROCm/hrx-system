@@ -18,6 +18,7 @@
 #include "loom/codegen/low/rematerialization.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/type_registry.h"
+#include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/target/function_version.h"

@@ -126,6 +126,7 @@ loom_cc_library(
         ":canonicalizer",
         ":integer_division",
         ":pass_environment",
+        "//loom/src/loom/pass:options",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:types",

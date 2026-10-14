@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
@@ -26,7 +27,6 @@ loom_cc_library(
     hdrs = ["types.h"],
     deps = [
         "//loom/src/loom/error:emitter",
-        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -129,6 +129,7 @@ loom_cc_library(
     hdrs = ["predicate.h"],
     deps = [
         ":types",
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
     ],
 )
@@ -138,11 +139,21 @@ loom_cc_library(
     srcs = ["registry.c"],
     hdrs = ["registry.h"],
     deps = [
-        ":environment",
-        ":pipeline",
         ":types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "options",
+    srcs = ["options.c"],
+    hdrs = ["options.h"],
+    deps = [
+        ":pipeline",
+        ":registry",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -151,6 +162,7 @@ loom_cc_library(
     srcs = ["invocation.c"],
     hdrs = ["invocation.h"],
     deps = [
+        ":options",
         ":registry",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/pass",
@@ -181,6 +193,7 @@ loom_cc_library(
     deps = [
         ":environment",
         ":invocation",
+        ":options",
         ":registry",
         ":verify",
         "//loom/src/loom/ir",
@@ -350,6 +363,7 @@ loom_cc_test(
     srcs = ["invocation_test.cc"],
     deps = [
         ":invocation",
+        ":options",
         "//loom/src/loom/ops/pass",
         "//loom/src/loom/pass/test:harness",
         "//loom/src/loom/pass/test:registry",
@@ -451,6 +465,7 @@ loom_cc_test(
     name = "program_test",
     srcs = ["program_test.cc"],
     deps = [
+        ":options",
         ":program",
         "//loom/src/loom/ops/pass",
         "//loom/src/loom/pass/test:harness",
@@ -464,6 +479,7 @@ loom_cc_test(
     srcs = ["builtin_registry_test.cc"],
     deps = [
         ":builtin_registry",
+        ":options",
         ":registry",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/pass/testing:registry_verify",
@@ -485,4 +501,17 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+iree_assert_dependency_boundary(
+    name = "registry_has_no_compiler_dependencies",
+    forbidden_subtrees = [
+        "//loom/src/loom/codegen/...",
+        "//loom/src/loom/format/...",
+        "//loom/src/loom/ir/...",
+        "//loom/src/loom/ops/...",
+        "//loom/src/loom/target/...",
+    ],
+    message = "Pass registry metadata and composition must remain independent of compiler IR and invocation decoding",
+    target = ":registry",
 )

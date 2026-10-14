@@ -30,7 +30,6 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::error::emitter
-    loom::ir
   PUBLIC
 )
 
@@ -150,6 +149,7 @@ loom_cc_library(
   DEPS
     ::types
     iree::base
+    loom::ir
   PUBLIC
 )
 
@@ -161,10 +161,23 @@ loom_cc_library(
   SRCS
     "registry.c"
   DEPS
-    ::environment
-    ::pipeline
     ::types
     iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    options
+  HDRS
+    "options.h"
+  SRCS
+    "options.c"
+  DEPS
+    ::pipeline
+    ::registry
+    iree::base
+    iree::base::internal::arena
     loom::ir
   PUBLIC
 )
@@ -177,6 +190,7 @@ loom_cc_library(
   SRCS
     "invocation.c"
   DEPS
+    ::options
     ::registry
     iree::base
     loom::ir
@@ -213,6 +227,7 @@ loom_cc_library(
   DEPS
     ::environment
     ::invocation
+    ::options
     ::registry
     ::verify
     iree::base
@@ -388,6 +403,7 @@ loom_cc_test(
     "invocation_test.cc"
   DEPS
     ::invocation
+    ::options
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ops::pass
@@ -496,6 +512,7 @@ loom_cc_test(
   SRCS
     "program_test.cc"
   DEPS
+    ::options
     ::program
     iree::testing::gtest
     iree::testing::gtest_main
@@ -510,6 +527,7 @@ loom_cc_test(
     "builtin_registry_test.cc"
   DEPS
     ::builtin_registry
+    ::options
     ::registry
     iree::testing::gtest
     iree::testing::gtest_main

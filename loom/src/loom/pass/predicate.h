@@ -20,6 +20,7 @@
 #define LOOM_PASS_PREDICATE_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/ir.h"
 #include "loom/pass/types.h"
 
 #ifdef __cplusplus

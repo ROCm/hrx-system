@@ -462,9 +462,8 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   EXPECT_TRUE(iree_string_view_equal(loom_pass_registry_at(registry, 1)->key,
                                      IREE_SV("target-beta")));
 
-  const loom_pass_descriptor_t* descriptor = nullptr;
-  IREE_ASSERT_OK(
-      loom_pass_registry_lookup(registry, IREE_SV("target-beta"), &descriptor));
+  const loom_pass_descriptor_t* descriptor =
+      loom_pass_registry_lookup(registry, IREE_SV("target-beta"));
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(descriptor->info, &TargetBetaPassInfo);
 

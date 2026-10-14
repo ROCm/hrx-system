@@ -9,6 +9,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ops/pass/ops.h"
+#include "loom/pass/options.h"
 #include "loom/pass/test/harness.h"
 
 namespace loom {

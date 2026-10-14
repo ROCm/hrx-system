@@ -10,6 +10,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/pass/ops.h"
+#include "loom/pass/options.h"
 
 static const char* loom_pass_kind_display_name(loom_pass_kind_t kind) {
   switch (kind) {
@@ -47,8 +48,8 @@ iree_status_t loom_pass_invocation_resolve_run_op(
   IREE_RETURN_IF_ERROR(loom_pass_string_from_id(module, loom_pass_run_key(op),
                                                 "pass key", &key));
 
-  const loom_pass_descriptor_t* descriptor = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_registry_lookup(registry, key, &descriptor));
+  const loom_pass_descriptor_t* descriptor =
+      loom_pass_registry_lookup(registry, key);
   if (!descriptor) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "unknown pass '%.*s'",
                             (int)key.size, key.data);

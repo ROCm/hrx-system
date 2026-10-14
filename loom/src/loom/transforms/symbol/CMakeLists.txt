@@ -150,6 +150,7 @@ loom_cc_library(
     loom::ops::scf
     loom::ops::target
     loom::ops::template
+    loom::pass::options
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::report
@@ -247,6 +248,7 @@ loom_cc_library(
     loom::ops::func
     loom::ops::low
     loom::ops::op_defs
+    loom::pass::options
     loom::pass::pipeline
     loom::pass::types
     loom::rewrite::callable
@@ -308,6 +310,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::special_values
     loom::ops::type_registry
+    loom::pass::options
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types

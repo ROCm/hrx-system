@@ -563,11 +563,8 @@ static iree_status_t loom_opt_build_reproducer_synthetic_pipeline(
       break;
     }
 
-    const loom_pass_descriptor_t* descriptor = NULL;
-    status = loom_pass_registry_lookup(registry, spec.name, &descriptor);
-    if (!iree_status_is_ok(status)) {
-      break;
-    }
+    const loom_pass_descriptor_t* descriptor =
+        loom_pass_registry_lookup(registry, spec.name);
     const loom_pass_info_t* info = descriptor ? descriptor->info() : NULL;
     if (info && info->kind == LOOM_PASS_FUNCTION) {
       status = loom_opt_reproducer_function_group_open(&pipeline_builder,
@@ -1154,8 +1151,8 @@ static void loom_opt_print_pass_option_schema(
 
 static iree_status_t loom_opt_print_pass_help(
     const loom_pass_registry_t* registry, iree_string_view_t key) {
-  const loom_pass_descriptor_t* descriptor = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_registry_lookup(registry, key, &descriptor));
+  const loom_pass_descriptor_t* descriptor =
+      loom_pass_registry_lookup(registry, key);
   if (!descriptor) {
     return iree_make_status(IREE_STATUS_NOT_FOUND, "unknown pass '%.*s'",
                             (int)key.size, key.data);

@@ -15,6 +15,7 @@
 #define LOOM_PASS_INVOCATION_H_
 
 #include "iree/base/api.h"
+#include "loom/pass/options.h"
 #include "loom/pass/registry.h"
 
 #ifdef __cplusplus

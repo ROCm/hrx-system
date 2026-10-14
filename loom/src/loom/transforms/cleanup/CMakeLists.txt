@@ -139,6 +139,7 @@ loom_cc_library(
     ::pass_environment
     iree::base
     iree::base::internal::arena
+    loom::pass::options
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types

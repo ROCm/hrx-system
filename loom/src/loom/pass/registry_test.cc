@@ -16,7 +16,7 @@ const loom_pass_info_t* AlphaPassInfo(void) {
   static const loom_pass_info_t kInfo = {
       .name = IREE_SVL("alpha"),
       .description = IREE_SVL("Alpha pass."),
-      .kind = LOOM_PASS_FUNCTION,
+      .kind = LOOM_PASS_MODULE,
   };
   return &kInfo;
 }
@@ -25,7 +25,7 @@ const loom_pass_info_t* BetaPassInfo(void) {
   static const loom_pass_info_t kInfo = {
       .name = IREE_SVL("beta"),
       .description = IREE_SVL("Beta pass."),
-      .kind = LOOM_PASS_FUNCTION,
+      .kind = LOOM_PASS_MODULE,
   };
   return &kInfo;
 }
@@ -34,33 +34,32 @@ const loom_pass_info_t* GammaPassInfo(void) {
   static const loom_pass_info_t kInfo = {
       .name = IREE_SVL("gamma"),
       .description = IREE_SVL("Gamma pass."),
-      .kind = LOOM_PASS_FUNCTION,
+      .kind = LOOM_PASS_MODULE,
   };
   return &kInfo;
 }
 
-iree_status_t NoopFunctionPass(loom_pass_t* pass, loom_module_t* module,
-                               loom_func_like_t function) {
+iree_status_t NoopModulePass(loom_pass_t* pass, loom_module_t* module) {
   return iree_ok_status();
 }
 
-static loom_pass_descriptor_t MakeFunctionPassDescriptor(
+static loom_pass_descriptor_t MakeModulePassDescriptor(
     iree_string_view_t key, loom_pass_info_fn_t info) {
   loom_pass_descriptor_t descriptor = {
       .key = key,
       .info = info,
-      .function_run = NoopFunctionPass,
+      .module_run = NoopModulePass,
   };
   return descriptor;
 }
 
 TEST(PassRegistryStorageTest, MergesSortedRegistries) {
   static const loom_pass_descriptor_t kFirstDescriptors[] = {
-      MakeFunctionPassDescriptor(IREE_SV("alpha"), AlphaPassInfo),
-      MakeFunctionPassDescriptor(IREE_SV("gamma"), GammaPassInfo),
+      MakeModulePassDescriptor(IREE_SV("alpha"), AlphaPassInfo),
+      MakeModulePassDescriptor(IREE_SV("gamma"), GammaPassInfo),
   };
   static const loom_pass_descriptor_t kSecondDescriptors[] = {
-      MakeFunctionPassDescriptor(IREE_SV("beta"), BetaPassInfo),
+      MakeModulePassDescriptor(IREE_SV("beta"), BetaPassInfo),
   };
   static const loom_pass_registry_t kFirstRegistry = {
       .descriptors = kFirstDescriptors,
@@ -89,9 +88,8 @@ TEST(PassRegistryStorageTest, MergesSortedRegistries) {
   EXPECT_TRUE(iree_string_view_equal(loom_pass_registry_at(registry, 2)->key,
                                      IREE_SV("gamma")));
 
-  const loom_pass_descriptor_t* descriptor = nullptr;
-  IREE_ASSERT_OK(
-      loom_pass_registry_lookup(registry, IREE_SV("beta"), &descriptor));
+  const loom_pass_descriptor_t* descriptor =
+      loom_pass_registry_lookup(registry, IREE_SV("beta"));
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(descriptor, &kSecondDescriptors[0]);
   EXPECT_EQ(descriptor->info, &BetaPassInfo);
@@ -99,10 +97,10 @@ TEST(PassRegistryStorageTest, MergesSortedRegistries) {
 
 TEST(PassRegistryStorageTest, RejectsDuplicateKeys) {
   static const loom_pass_descriptor_t kFirstDescriptors[] = {
-      MakeFunctionPassDescriptor(IREE_SV("alpha"), AlphaPassInfo),
+      MakeModulePassDescriptor(IREE_SV("alpha"), AlphaPassInfo),
   };
   static const loom_pass_descriptor_t kSecondDescriptors[] = {
-      MakeFunctionPassDescriptor(IREE_SV("alpha"), AlphaPassInfo),
+      MakeModulePassDescriptor(IREE_SV("alpha"), AlphaPassInfo),
   };
   static const loom_pass_registry_t kFirstRegistry = {
       .descriptors = kFirstDescriptors,

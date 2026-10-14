@@ -26,6 +26,7 @@ loom_cc_library(
     loom::codegen::low::pipeline::pass_environment
     loom::ir
     loom::ops::low
+    loom::pass::options
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types
@@ -63,6 +64,7 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scalar
+    loom::pass::options
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types

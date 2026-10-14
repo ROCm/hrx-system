@@ -445,9 +445,8 @@ TEST_F(AmdgpuProviderTest, ProvidesSortedPassRegistry) {
       loom_target_environment_pass_registry(&target_environment_);
   IREE_ASSERT_OK(loom_pass_registry_verify(registry));
 
-  const loom_pass_descriptor_t* descriptor = nullptr;
-  IREE_ASSERT_OK(loom_pass_registry_lookup(
-      registry, IREE_SV("amdgpu-materialize-hal-kernel-abi"), &descriptor));
+  const loom_pass_descriptor_t* descriptor = loom_pass_registry_lookup(
+      registry, IREE_SV("amdgpu-materialize-hal-kernel-abi"));
   ASSERT_NE(descriptor, nullptr);
   ASSERT_NE(descriptor->info, nullptr);
   EXPECT_EQ(descriptor->info()->kind, LOOM_PASS_FUNCTION);
