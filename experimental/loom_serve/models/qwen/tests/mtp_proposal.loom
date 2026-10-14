@@ -30,6 +30,7 @@ kernel.def @proposal_fixture() {
   %c7 = index.constant 7 : index
   %last_row = index.constant 15 : index
   %known_length = index.constant 16 : index
+  %source_base = index.constant 23 : index
   %c100 = index.constant 100 : index
   %input_base = index.constant 1000 : index
   %prediction_base = index.constant 10000 : index
@@ -56,16 +57,26 @@ kernel.def @proposal_fixture() {
     %row_word = index.cast %row : index to i32
     %position = index.add %c100, %span : index
     %position_word = index.cast %position : index to i32
+    %source_position = index.add %source_base, %span : index
+    %source_word = index.cast %source_position : index to i32
+    %shift = scalar.constant 10 : i32
+    %source_bits = scalar.shli %source_word, %shift : i32
     view.store %length_word, %spans[%span, 0] : i32, view<64x5xi32>
     view.store %position_word, %spans[%span, 1] : i32, view<64x5xi32>
     view.store %begin_word, %spans[%span, 2] : i32, view<64x5xi32>
     view.store %row_word, %spans[%span, 3] : i32, view<64x5xi32>
+    view.store %source_bits, %spans[%span, 4] : i32, view<64x5xi32>
     view.store %flag, %options[%span, 0] : i32, view<64x2xi32>
     view.store %c4_2, %options[%span, 1] : i32, view<64x2xi32>
     %next_slot = scf.if %generated -> (index) {
       %slot_word = index.cast %slot : index to i32
+      %selection_code = scalar.addi %slot_word, %c1_2 : i32
       %final_position = index.add %position, %c3 : index
       %final_position_word = index.cast %final_position : index to i32
+      %final_source_position = index.add %source_position, %c3 : index
+      %final_source_word = index.cast %final_source_position : index to i32
+      %final_source_bits = scalar.shli %final_source_word, %shift : i32
+      %draft_output = scalar.ori %final_source_bits, %selection_code : i32
       %stride = index.mul %slot, %c7 : index
       %prediction = index.add %prediction_base, %stride : index
       %prediction_word = index.cast %prediction : index to i32
@@ -75,7 +86,7 @@ kernel.def @proposal_fixture() {
       view.store %final_position_word, %draft[%slot, 1] : i32, view<64x5xi32>
       view.store %slot_word, %draft[%slot, 2] : i32, view<64x5xi32>
       view.store %row_word, %draft[%slot, 3] : i32, view<64x5xi32>
-      view.store %slot_word, %draft[%slot, 4] : i32, view<64x5xi32>
+      view.store %draft_output, %draft[%slot, 4] : i32, view<64x5xi32>
       view.store %begin_word, %origins[%slot] : i32, view<16xi32>
       view.store %anchor_word, %anchors[%slot] : i32, view<512xi32>
       view.store %prediction_word, %inputs[%slot] : i32, view<512xi32>

@@ -21,6 +21,7 @@ func.def @dflash_epoch_fixture(%trial: index, %epoch: buffer) {
   %c8 = index.constant 8 : index
   %last = index.constant 15 : index
   %base = index.constant 100 : index
+  %source_base = index.constant 23 : index
   %all = index.cmp eq, %trial, %c2 : index
   %mixed = index.cmp eq, %trial, %c1 : index
   %n = scalar.constant 16 : i32
@@ -42,10 +43,15 @@ func.def @dflash_epoch_fixture(%trial: index, %epoch: buffer) {
     %begin_word = index.cast %begin : index to i32
     %row_word = index.cast %row : index to i32
     %position_word = index.cast %position : index to i32
+    %source_position = index.add %source_base, %i : index
+    %source_word = index.cast %source_position : index to i32
+    %shift = scalar.constant 10 : i32
+    %source_bits = scalar.shli %source_word, %shift : i32
     view.store %length, %spans[%i, 0] : i32, view<64x5xi32>
     view.store %position_word, %spans[%i, 1] : i32, view<64x5xi32>
     view.store %begin_word, %spans[%i, 2] : i32, view<64x5xi32>
     view.store %row_word, %spans[%i, 3] : i32, view<64x5xi32>
+    view.store %source_bits, %spans[%i, 4] : i32, view<64x5xi32>
     view.store %mode, %options[%i, 0] : i32, view<64x2xi32>
     %next = index.add %begin, %extent : index
     scf.yield %next : index
@@ -99,15 +105,22 @@ func.def @dflash_prepare_reference(%epoch: buffer, %target_tokens: buffer, %draf
       %token = view.load %tokens[%start] : view<512xi32> -> i32
       %position = view.load %spans[%i, 1] : view<64x5xi32> -> i32
       %row = view.load %spans[%i, 3] : view<64x5xi32> -> i32
+      %descriptor_output = view.load %spans[%i, 4] : view<64x5xi32> -> i32
+      %shift = scalar.constant 10 : i32
+      %source_position = scalar.shrui %descriptor_output, %shift : i32
       %begin = index.mul %count, %c8 : index
       %output = index.mul %count, %c7 : index
       %begin_word = index.cast %begin : index to i32
       %output_word = index.cast %output : index to i32
+      %one = scalar.constant 1 : i32
+      %output_code = scalar.addi %output_word, %one : i32
+      %source_bits = scalar.shli %source_position, %shift : i32
+      %packed_output = scalar.ori %source_bits, %output_code : i32
       view.store %c8_2, %out_spans[%count, 0] : i32, view<64x5xi32>
       view.store %position, %out_spans[%count, 1] : i32, view<64x5xi32>
       view.store %begin_word, %out_spans[%count, 2] : i32, view<64x5xi32>
       view.store %row, %out_spans[%count, 3] : i32, view<64x5xi32>
-      view.store %output_word, %out_spans[%count, 4] : i32, view<64x5xi32>
+      view.store %packed_output, %out_spans[%count, 4] : i32, view<64x5xi32>
       view.store %start_word, %mapping[%count] : i32, view<64xi32>
       view.store %token, %anchor_view[%count] : i32, view<64xi32>
       view.store %token, %inputs[%begin] : i32, view<512xi32>

@@ -1,7 +1,7 @@
 // Model-owned packed work. The header contains three I32 words: active token
 // count, span count, and selected output count. Each following span contains
 // five I32 words: token count, absolute position, packed token begin, resident
-// row, and selected output index (-1 when no output is requested). Input epochs
+// row, and a packed source position plus selected-output code. Input epochs
 // partition the packed token prefix and refer to distinct resident rows.
 // Accepted/replay controls retain original activation offsets with gaps; their
 // counts describe only the accepted subspans inside the header's token extent.
@@ -68,6 +68,53 @@ func.def public inline @qwen38_span_active(%epoch: buffer, %span: index) -> (i1)
   %count = index.cast %count_word : i32 to index
   %active = index.cmp ult, %span, %count : index
   func.return %active : i1
+}
+
+// The final descriptor word packs the source-coordinate base above a ten-bit
+// selected-output code. Code zero means no output; nonzero codes carry the
+// selected row plus one. This covers the target's 128 rows and DFlash's
+// 448 compact rows while keeping the causal cache position and compressed
+// M-RoPE position adjacent without enlarging the hot span table.
+func.def public inline @qwen38_descriptor_pack(%source_position: i32, %selection: i32) -> (i32) {
+  %shift = scalar.constant 10 : i32
+  %one = scalar.constant 1 : i32
+  %source_bits = scalar.shli %source_position, %shift : i32
+  %selection_code = scalar.addi %selection, %one : i32
+  %word = scalar.ori %source_bits, %selection_code : i32
+  func.return %word : i32
+}
+
+func.def public inline @qwen38_descriptor_source_position(%word: i32) -> (i32) {
+  %shift = scalar.constant 10 : i32
+  %position = scalar.shrui %word, %shift : i32
+  func.return %position : i32
+}
+
+func.def public inline @qwen38_descriptor_selection(%word: i32) -> (i32) {
+  %mask = scalar.constant 1023 : i32
+  %one = scalar.constant 1 : i32
+  %code = scalar.andi %word, %mask : i32
+  %selection = scalar.subi %code, %one : i32
+  func.return %selection : i32
+}
+
+func.def public inline @qwen38_descriptor_without_selection(%word: i32) -> (i32) {
+  %source_mask = scalar.constant -1024 : i32
+  %source_bits = scalar.andi %word, %source_mask : i32
+  func.return %source_bits : i32
+}
+
+func.def public inline @qwen38_span_source_position(%epoch: buffer, %span: index) -> (i32) {
+  %header_bytes = index.constant 12 : offset
+  %span_bytes = index.constant 20 : offset
+  %source_index = index.constant 4 : index
+  %relative_origin = index.scale %span, %span_bytes : index, offset -> offset
+  %control_origin = index.add %header_bytes, %relative_origin : offset
+  %metadata = buffer.assume.memory_space<constant> %epoch : buffer
+  %descriptor = buffer.view %metadata[%control_origin] : buffer -> view<5xi32>
+  %word = view.load %descriptor[%source_index] : view<5xi32> -> i32
+  %position = func.call @qwen38_descriptor_source_position(%word) : (i32) -> (i32)
+  func.return %position : i32
 }
 
 // The returned control origin addresses the count/position pair used by the
