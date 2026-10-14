@@ -6,34 +6,52 @@
 
 config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
 
-template.decl @pocket.flow_state_size(%capacity: index) -> (offset)
+template.decl pure @pocket.flow_state_words(%capacity: index) -> (index)
 
-template.decl @pocket.state_size(%capacity: index) -> (offset)
+template.decl pure @pocket.state_words(%capacity: index) -> (index)
 
-template.decl @pocket.flow_cache_origin(%layer: index) -> (offset)
+template.decl pure @pocket.flow_state_size(%capacity: index) -> (offset)
 
-template.decl @pocket.codec_state_origin(%relative: offset) -> (offset)
+template.decl pure @pocket.state_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.flow_cache_origin(%layer: index) -> (offset)
+
+template.decl pure @pocket.codec_state_origin(%relative: offset) -> (offset)
 
 // The header contains three absolute positions, one reserved word, and the
 // normalized 32-element latent. Six full-context layers follow, each with an
 // F32 key/value pair of capacity x 1024. Codec state follows this prefix and
 // has fixed size because Mimi alone uses a bounded causal attention window.
-template.def<@pocket.flow_state_size> @pocket_flow_state_size(%capacity: index) -> (offset) {
-  %header = index.constant 144 : offset
-  %position_bytes = index.constant 49152 : offset
-  %caches = index.scale %capacity, %position_bytes : index, offset -> offset
-  %length = index.add %header, %caches : offset
+template.def<@pocket.flow_state_words> pure @pocket_flow_state_words(%capacity: index) -> (index) {
+  %header = index.constant 36 : index
+  %position_words = index.constant 12288 : index
+  %caches = index.mul %capacity, %position_words : index
+  %length = index.add %header, %caches : index
+  template.return %length : index
+}
+
+template.def<@pocket.state_words> pure @pocket_state_words(%capacity: index) -> (index) {
+  %flow = template.apply<@pocket.flow_state_words>(%capacity) pure : (index) -> (index)
+  %codec = index.constant 1112710 : index
+  %length = index.add %flow, %codec : index
+  template.return %length : index
+}
+
+template.def<@pocket.flow_state_size> pure @pocket_flow_state_size(%capacity: index) -> (offset) {
+  %words = template.apply<@pocket.flow_state_words>(%capacity) pure : (index) -> (index)
+  %word_bytes = index.constant 4 : offset
+  %length = index.scale %words, %word_bytes : index, offset -> offset
   template.return %length : offset
 }
 
-template.def<@pocket.state_size> @pocket_state_size(%capacity: index) -> (offset) {
-  %flow = template.apply<@pocket.flow_state_size>(%capacity) : (index) -> (offset)
-  %codec = index.constant 4450840 : offset
-  %length = index.add %flow, %codec : offset
+template.def<@pocket.state_size> pure @pocket_state_size(%capacity: index) -> (offset) {
+  %words = template.apply<@pocket.state_words>(%capacity) pure : (index) -> (index)
+  %word_bytes = index.constant 4 : offset
+  %length = index.scale %words, %word_bytes : index, offset -> offset
   template.return %length : offset
 }
 
-template.def<@pocket.flow_cache_origin> @pocket_flow_cache_origin(%layer: index) -> (offset) {
+template.def<@pocket.flow_cache_origin> pure @pocket_flow_cache_origin(%layer: index) -> (offset) {
   %capacity = config.get @pocket.context_capacity : index
   %pair_bytes = index.constant 8192 : offset
   %header = index.constant 144 : offset
@@ -43,9 +61,9 @@ template.def<@pocket.flow_cache_origin> @pocket_flow_cache_origin(%layer: index)
   template.return %origin : offset
 }
 
-template.def<@pocket.codec_state_origin> @pocket_codec_state_origin(%relative: offset) -> (offset) {
+template.def<@pocket.codec_state_origin> pure @pocket_codec_state_origin(%relative: offset) -> (offset) {
   %capacity = config.get @pocket.context_capacity : index
-  %flow = template.apply<@pocket.flow_state_size>(%capacity) : (index) -> (offset)
+  %flow = template.apply<@pocket.flow_state_size>(%capacity) pure : (index) -> (offset)
   %origin = index.add %flow, %relative : offset
   template.return %origin : offset
 }

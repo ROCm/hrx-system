@@ -1,10 +1,11 @@
-# Pocket TTS numerical source
+# Pocket TTS source commands
 
 This package implements Pocket's voice encoder, FlowLM, and streaming Mimi
 waveform decoder in Loom. It consumes the original BF16 Safetensors checkpoint
 by tensor key. Activations, recurrent state, and waveform samples are F32.
-The source modules form the numerical portion of a speech model; the caller
-owns text preparation, sampling, voice selection, termination, and wire encoding.
+The source modules provide numerical phases and native request commands. A
+speech controller owns text preparation, voice admission, termination, and wire
+encoding; request commands own immutable token selection and seeded sampling.
 
 The architecture follows
 [Pocket TTS](https://github.com/kyutai-labs/pocket-tts/tree/ec569b2dd3fec4a601b391aace185791e92b3785)
@@ -40,7 +41,8 @@ I32 absolute FlowLM, decoder, and encoder positions. Offset 16 holds the
 32-element normalized latent; offset 144 begins the six FlowLM key/value pairs.
 Subsequent ranges hold the independent Mimi caches and convolution histories.
 `layout.loom` computes the shared prefix and complete state sizes from context
-capacity: `144 + 49152 * capacity` and `4450984 + 49152 * capacity` bytes.
+capacity: `144 + 49152 * capacity` and `4450984 + 49152 * capacity` bytes. Word
+counts remain logical indices; byte sizes use offsets, including above 2 GiB.
 Command-local scratch is allocated through `buffer.alloca`; command planning
 owns its reuse and lifetime.
 
@@ -65,12 +67,48 @@ in F64, Mimi decoder projections and convolutions in F32, and normalization
 and attention reductions in F64. These choices establish recurrent numerical
 accuracy; they are not a throughput qualification.
 
+## Request commands
+
+`request.loom` composes the numerical phases with an immutable request payload.
+Its first 16 bytes contain a 64-bit seed, I32 voice frame count, and I32 chunk
+count. Each chunk occupies `16 + 4 * pocket.chunk_tokens` bytes: four I32 header
+words (token count, post-EOS tail, generation bound, reserved) followed by the
+token IDs. The controller validates those extents before submission.
+
+The private stream allocation adds two I32 cursors after numerical state:
+current chunk and next token. `initialize_request` resets the entire allocation
+and sets the chunk to -1. `begin_voice` appends BOS; `encode_voice` selects the
+next 1,920-sample block from the independent registered-voice archive. The
+`pocket.voice_index` and `pocket.voice_frames` configurations select the F32
+tensor `voices.<index>.samples` with shape `[frames,1920]`. Learned voice
+encoding uses the original checkpoint.
+
+`save_conditioning` copies the FlowLM prefix into the model's conditioning
+bank. Its controller invalidates the previous cache identity before accepting
+that overwrite and publishes the replacement only after execution retires.
+`restore_conditioning` restores that prefix, resets codec state, advances the
+chunk cursor, and clears the token cursor. `prefill_text` consumes the next
+token from the immutable packet. Each command uses the serving owner's request,
+conditioning, stream, and output bindings; numerical commands additionally bind
+their phase/backbone/rotary archives, and voice encoding binds the voice archive.
+
+`generate_audio` derives 32 normal samples from the shared tensor random motifs,
+then runs the one-step flow and waveform decoder. Philox4x32-10 uses the full
+64-bit seed and counters `(normal_quadruple, generation_step, chunk, 0)`;
+Box-Muller scales by `sqrt(0.3)`. Launch order cannot affect a request's random
+stream. Fresh state with the same payload replays exactly on the same target.
+Sampling math can round differently across targets, and autoregressive feedback
+can amplify small differences; an equal seed does not promise equal waveforms
+across implementations.
+
 ## Source map and checks
 
 `flow_layers.loom` shares transformer and flow-residual layer bodies.
 `mimi_layers.loom` shares encoder and decoder transformer structure while
 preserving their precision choices. `prefill.loom`, `voice.loom`, and
 `decode.loom` compose those layers and the convolution stages.
+Their phase templates also serve the request commands without copying numerical
+bodies or adding intermediate host uploads.
 
 The arithmetic modules group projection, normalization, attention, convolution,
 pointwise maps, and recurrent state. Concrete model shapes wrap shared template

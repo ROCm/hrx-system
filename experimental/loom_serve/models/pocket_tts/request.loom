@@ -1,0 +1,331 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.chunk_tokens : %value: index where [range(%value, 1, 512)]
+
+config.decl @pocket.voice_index : %value: index where [range(%value, 0, 255)]
+
+config.decl @pocket.voice_frames : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+template.decl @pocket.element() -> (index)
+
+template.decl pure @pocket.flow_state_words(%capacity: index) -> (index)
+
+template.decl pure @pocket.state_words(%capacity: index) -> (index)
+
+template.decl pure @pocket.state_size(%capacity: index) -> (offset)
+
+template.decl @pocket.prefill.step(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer)
+
+template.decl @pocket.voice.step(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer)
+
+template.decl @pocket.decode.step(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer)
+
+template.decl @random.philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32)
+
+template.decl @random.normal_pair(%radius_word: i32, %angle_word: i32) -> (f32, f32)
+
+// Immutable upload: seed at byte 0, voice frame count at byte 8, and chunk
+// count at byte 12. Each packet has four I32 header words (token count,
+// post-EOS tail, maximum generation frames, reserved), then chunk_tokens IDs.
+// Two I32 cursors after numerical state select the chunk and its next token.
+// Initial chunk -1 becomes zero on the first conditioning restoration.
+template.decl pure @pocket.packet_stride(%tokens: index) -> (offset)
+
+template.def<@pocket.packet_stride> pure @pocket_packet_stride(%tokens: index) -> (offset) {
+  %word = index.constant 4 : offset
+  %header = index.constant 16 : offset
+  %ids = index.scale %tokens, %word : index, offset -> offset
+  %stride = index.add %header, %ids : offset
+  template.return %stride : offset
+}
+
+// Initialization writes every numerical and control byte. Allocator contents
+// never determine a fresh stream, including a stream following cancellation.
+kernel.def target(@pocket) @pocket.initialize_request() {
+  %capacity = config.get @pocket.context_capacity : index
+  %state_words = template.apply<@pocket.state_words>(%capacity) pure : (index) -> (index)
+  %two = index.constant 2 : index
+  %elements = index.add %state_words, %two : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%state: buffer) {
+  %capacity = config.get @pocket.context_capacity : index
+  %state_words = template.apply<@pocket.state_words>(%capacity) pure : (index) -> (index)
+  %two = index.constant 2 : index
+  %elements = index.add %state_words, %two : index
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %words = buffer.view %state[%origin] : buffer -> view<[%elements]xi32>
+    %is_chunk = index.cmp eq, %element, %state_words : index
+    %zero = scalar.constant 0 : i32
+    %before_first = scalar.constant -1 : i32
+    %value = scf.select %is_chunk, %before_first, %zero : i32
+    view.store %value, %words[%element] : i32, view<[%elements]xi32>
+  }
+  kernel.return
+}
+
+command.program.def public @initialize_request() launch(%request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  kernel.launch @pocket.initialize_request(%state) : (buffer)
+  command.return
+}
+
+kernel.def target(@pocket) @pocket.begin_token() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%token: buffer) {
+  %origin = index.constant 0 : offset
+  %word = buffer.view %token[%origin] : buffer -> view<1xi32>
+  %bos = scalar.constant -1 : i32
+  view.store %bos, %word[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.program.def public @begin_voice() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %word_bytes = index.constant 4 : offset
+  %token = buffer.alloca<global> align(4) %word_bytes : buffer
+  kernel.launch @pocket.begin_token(%token) : (buffer)
+  template.apply<@pocket.prefill.step>(%phase, %backbone, %rotary, %token, %conditioning, %state, %output) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.def target(@pocket) @pocket.voice_block() {
+  %elements = index.constant 1920 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%samples: buffer, %state: buffer, %output: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %elements = index.constant 1920 : index
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %frames = config.get @pocket.voice_frames : index
+    %origin = index.constant 0 : offset
+    %position_offset = index.constant 8 : offset
+    %position = buffer.view %state[%position_offset] : buffer -> view<1xi32>
+    %absolute = view.load %position[0] : view<1xi32> -> i32
+    %sixteen = scalar.constant 16 : i32
+    %frame32 = scalar.divui %absolute, %sixteen : i32
+    %frame_value = index.cast %frame32 : i32 to index
+    %frame = index.assume %frame_value [ge(%frame_value, 0), lt(%frame_value, %frames)] : index
+    %source = buffer.view %samples[%origin] : buffer -> view<[%frames]x1920xf32>
+    %target = buffer.view %output[%origin] : buffer -> view<1920xf32>
+    %value = view.load %source[%frame, %element] : view<[%frames]x1920xf32> -> f32
+    view.store %value, %target[%element] : f32, view<1920xf32>
+  }
+  kernel.return
+}
+
+command.program.def public @encode_voice() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %voices: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %voice = config.get @pocket.voice_index : index
+  %frames = config.get @pocket.voice_frames : index
+  %samples = command.parameter %voices, "voices.{}.samples"[%voice] : view<[%frames]x1920xf32>
+  %block_bytes = index.constant 7680 : offset
+  %block = buffer.alloca<global> align(16) %block_bytes : buffer
+  kernel.launch @pocket.voice_block(%samples, %state, %block) : (view<[%frames]x1920xf32>, buffer, buffer)
+  template.apply<@pocket.voice.step>(%phase, %backbone, %rotary, %block, %conditioning, %state, %output) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Save only FlowLM conditioning. Encoder histories belong to the request;
+// decoder histories are always reset before a text chunk. Source control
+// invalidates the old identity before this copy and publishes after retirement.
+kernel.def target(@pocket) @pocket.save_conditioning() {
+  %capacity = config.get @pocket.context_capacity : index
+  %elements = template.apply<@pocket.flow_state_words>(%capacity) pure : (index) -> (index)
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%state: buffer, %conditioning: buffer) {
+  %capacity = config.get @pocket.context_capacity : index
+  %elements = template.apply<@pocket.flow_state_words>(%capacity) pure : (index) -> (index)
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %source = buffer.view %state[%origin] : buffer -> view<[%elements]xi32>
+    %target = buffer.view %conditioning[%origin] : buffer -> view<[%elements]xi32>
+    %value = view.load %source[%element] : view<[%elements]xi32> -> i32
+    view.store %value, %target[%element] : i32, view<[%elements]xi32>
+  }
+  kernel.return
+}
+
+command.program.def public @save_conditioning() launch(%request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  kernel.launch @pocket.save_conditioning(%state, %conditioning) : (buffer, buffer)
+  command.return
+}
+
+kernel.def target(@pocket) @pocket.restore_conditioning() {
+  %capacity = config.get @pocket.context_capacity : index
+  %elements = template.apply<@pocket.state_words>(%capacity) pure : (index) -> (index)
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%conditioning: buffer, %state: buffer) {
+  %capacity = config.get @pocket.context_capacity : index
+  %state_bytes = template.apply<@pocket.state_size>(%capacity) pure : (index) -> (offset)
+  %elements = template.apply<@pocket.state_words>(%capacity) pure : (index) -> (index)
+  %flow_words = template.apply<@pocket.flow_state_words>(%capacity) pure : (index) -> (index)
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  %zero = scalar.constant 0 : i32
+  %origin = index.constant 0 : offset
+  scf.if %live {
+    %target = buffer.view %state[%origin] : buffer -> view<[%elements]xi32>
+    %conditioned = index.cmp ult, %element, %flow_words : index
+    %value = scf.if %conditioned -> (i32) {
+      %source = buffer.view %conditioning[%origin] : buffer -> view<[%flow_words]xi32>
+      %word = view.load %source[%element] : view<[%flow_words]xi32> -> i32
+      scf.yield %word : i32
+    } else {
+      scf.yield %zero : i32
+    }
+    view.store %value, %target[%element] : i32, view<[%elements]xi32>
+  }
+  %first_element = index.constant 0 : index
+  %first = index.cmp eq, %element, %first_element : index
+  scf.if %first {
+    %control = buffer.view %state[%state_bytes] : buffer -> view<2xi32>
+    %chunk = view.load %control[0] : view<2xi32> -> i32
+    %one = scalar.constant 1 : i32
+    %next = scalar.addi %chunk, %one : i32
+    view.store %next, %control[0] : i32, view<2xi32>
+    view.store %zero, %control[1] : i32, view<2xi32>
+  }
+  kernel.return
+}
+
+command.program.def public @restore_conditioning() launch(%request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  kernel.launch @pocket.restore_conditioning(%conditioning, %state) : (buffer, buffer)
+  command.return
+}
+
+kernel.def target(@pocket) @pocket.text_token() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%request: buffer, %state: buffer, %output: buffer) {
+  %capacity = config.get @pocket.context_capacity : index
+  %tokens = config.get @pocket.chunk_tokens : index
+  %state_bytes = template.apply<@pocket.state_size>(%capacity) pure : (index) -> (offset)
+  %control = buffer.view %state[%state_bytes] : buffer -> view<2xi32>
+  %chunk32 = view.load %control[0] : view<2xi32> -> i32
+  %cursor32 = view.load %control[1] : view<2xi32> -> i32
+  %chunk = index.cast %chunk32 : i32 to index
+  %cursor_value = index.cast %cursor32 : i32 to index
+  %cursor = index.assume %cursor_value [ge(%cursor_value, 0), lt(%cursor_value, %tokens)] : index
+  %stride = template.apply<@pocket.packet_stride>(%tokens) pure : (index) -> (offset)
+  %packet = index.scale %chunk, %stride : index, offset -> offset
+  %headers = index.constant 32 : offset
+  %token_origin = index.add %packet, %headers : offset
+  %ids = buffer.view %request[%token_origin] : buffer -> view<[%tokens]xi32>
+  %id = view.load %ids[%cursor] : view<[%tokens]xi32> -> i32
+  %origin = index.constant 0 : offset
+  %target = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %id, %target[0] : i32, view<1xi32>
+  %one = scalar.constant 1 : i32
+  %next = scalar.addi %cursor32, %one : i32
+  view.store %next, %control[1] : i32, view<2xi32>
+  kernel.return
+}
+
+command.program.def public @prefill_text() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %word_bytes = index.constant 4 : offset
+  %token = buffer.alloca<global> align(4) %word_bytes : buffer
+  kernel.launch @pocket.text_token(%request, %state, %token) : (buffer, buffer, buffer)
+  template.apply<@pocket.prefill.step>(%phase, %backbone, %rotary, %token, %conditioning, %state, %output) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Counter words partition normal quadruple, generation step, text chunk, and
+// zero. The full 64-bit request seed is the key. Workgroup order cannot alter
+// the noise stream, and resetting request state exactly replays it.
+kernel.def target(@pocket) @pocket.sample_noise() {
+  %one = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %pairs = index.constant 16 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %pairs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%request: buffer, %state: buffer, %output: buffer) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %pairs = index.constant 16 : index
+  %live = index.cmp ult, %element, %pairs : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %seed = buffer.view %request[%origin] : buffer -> view<2xi32>
+    %seed0 = view.load %seed[0] : view<2xi32> -> i32
+    %seed1 = view.load %seed[1] : view<2xi32> -> i32
+    %position_offset = index.constant 4 : offset
+    %position = buffer.view %state[%position_offset] : buffer -> view<1xi32>
+    %absolute = view.load %position[0] : view<1xi32> -> i32
+    %sixteen = scalar.constant 16 : i32
+    %frame = scalar.divui %absolute, %sixteen : i32
+    %capacity = config.get @pocket.context_capacity : index
+    %state_bytes = template.apply<@pocket.state_size>(%capacity) pure : (index) -> (offset)
+    %control = buffer.view %state[%state_bytes] : buffer -> view<2xi32>
+    %chunk = view.load %control[0] : view<2xi32> -> i32
+    %two = index.constant 2 : index
+    %quadruple = index.div %element, %two : index
+    %quadruple32 = index.cast %quadruple : index to i32
+    %zero = scalar.constant 0 : i32
+    %a, %b, %c, %d = template.apply<@random.philox4x32>(%quadruple32, %frame, %chunk, %zero, %seed0, %seed1) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+    %parity = index.rem %element, %two : index
+    %zero_index = index.constant 0 : index
+    %even = index.cmp eq, %parity, %zero_index : index
+    %radial = scf.select %even, %a, %c : i32
+    %angular = scf.select %even, %b, %d : i32
+    %normal0, %normal1 = template.apply<@random.normal_pair>(%radial, %angular) : (i32, i32) -> (f32, f32)
+    %deviation = scalar.constant 0.54772255750516607 : f32
+    %noise0 = scalar.mulf %normal0, %deviation : f32
+    %noise1 = scalar.mulf %normal1, %deviation : f32
+    %noise = buffer.view %output[%origin] : buffer -> view<34xf32>
+    %first = index.mul %element, %two : index
+    %one = index.constant 1 : index
+    %second = index.add %first, %one : index
+    view.store %noise0, %noise[%first] : f32, view<34xf32>
+    view.store %noise1, %noise[%second] : f32, view<34xf32>
+    %first_pair = index.cmp eq, %element, %zero_index : index
+    scf.if %first_pair {
+      %start = scalar.constant 0.0 : f32
+      %end = scalar.constant 1.0 : f32
+      view.store %start, %noise[32] : f32, view<34xf32>
+      view.store %end, %noise[33] : f32, view<34xf32>
+    }
+  }
+  kernel.return
+}
+
+command.program.def public @generate_audio() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %noise_bytes = index.constant 136 : offset
+  %noise = buffer.alloca<global> align(16) %noise_bytes : buffer
+  kernel.launch @pocket.sample_noise(%request, %state, %noise) : (buffer, buffer, buffer)
+  template.apply<@pocket.decode.step>(%phase, %backbone, %rotary, %noise, %conditioning, %state, %output) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
