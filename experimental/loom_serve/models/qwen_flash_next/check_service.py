@@ -51,7 +51,7 @@ def run(address, model):
     headers = {"Content-Type": "application/json", "X-Loom-Model": model}
     selector = json.dumps({"model": model})
 
-    def chat(label, history, maximum=2, checkpoint=None):
+    def chat(label, history, maximum=16, checkpoint=None):
         result = request(
             address,
             prefix + "-" + label,
@@ -129,7 +129,7 @@ def run(address, model):
         ]
         with ThreadPoolExecutor(max_workers=2) as clients:
             pending = [
-                clients.submit(chat, f"fork-{i}", branch, 2, prefix)
+                clients.submit(chat, f"fork-{i}", branch, 16, prefix)
                 for i, branch in enumerate(branches)
             ]
             forks = [future.result() for future in pending]

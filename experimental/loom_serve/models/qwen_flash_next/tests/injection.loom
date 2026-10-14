@@ -1,0 +1,145 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @hc_down_inject() launch(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
+
+kernel.decl @hc_down_inject_q8() launch(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
+
+// Each format encodes the same signed row-dependent coefficients. Every Q8
+// block has its own scale header; the reference derives coefficients directly
+// and accumulates scalar F64 products instead of decoding the packed tensor.
+func.def @fixture(%q8: i1, %weight: buffer) {
+  %origin = index.constant 0 : offset
+  %plain = buffer.view %weight[%origin] : buffer -> view<4x10240xf32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %blocks = index.constant 320 : index
+  %block_bytes = index.constant 34 : offset
+  %header_bytes = index.constant 2 : offset
+  %scale = scalar.constant 0.0009765625 : f32
+  %scale16 = scalar.constant 0.0009765625 : f16
+  %prime = scalar.constant 17 : i32
+  %mask = scalar.constant 127 : i32
+  %bias = scalar.constant 64 : i32
+  scf.for %row = [%c0 to %c4 step %c1] {
+    %row_word = index.cast %row : index to i32
+    %row_shift = scalar.muli %row_word, %prime : i32
+    scf.for %block = [%c0 to %blocks step %c1] {
+      %block_index = index.madd %row, %blocks, %block : index
+      %base = index.scale %block_index, %block_bytes : index, offset -> offset
+      %codes_origin = index.add %base, %header_bytes : offset
+      %header = buffer.view %weight[%base] : buffer -> view<1xf16>
+      %codes = buffer.view %weight[%codes_origin] : buffer -> view<32xi8>
+      scf.if %q8 {
+        view.store %scale16, %header[0] : f16, view<1xf16>
+      }
+      scf.for %element = [%c0 to %c32 step %c1] {
+        %column = index.madd %block, %c32, %element : index
+        %word = index.cast %column : index to i32
+        %shifted = scalar.addi %word, %row_shift : i32
+        %positive = scalar.andi %shifted, %mask : i32
+        %code = scalar.subi %positive, %bias : i32
+        scf.if %q8 {
+          %packed = scalar.trunci %code : i32 to i8
+          view.store %packed, %codes[%element] : i8, view<32xi8>
+        } else {
+          %value = scalar.sitofp %code : i32 to f32
+          %scaled = scalar.mulf %value, %scale : f32
+          view.store %scaled, %plain[%row, %column] : f32, view<4x10240xf32>
+        }
+      }
+    }
+  }
+  func.return
+}
+
+func.def @reference(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<3x10240xbf16>
+  %outputs = buffer.view %output[%origin] : buffer -> view<3x4xf32>
+  %ranks = buffer.view %lowrank[%origin] : buffer -> view<3x320xbf16>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %width = index.constant 10240 : index
+  %rank = index.constant 320 : index
+  %period = index.constant 128 : index
+  %shift = index.constant 17 : index
+  %center = scalar.constant 64.0 : f64
+  %scale = scalar.constant 0.000244140625 : f64
+  %initial = scalar.constant 0.0 : f64
+  %zero = scalar.constant 0.0 : bf16
+  %one = scalar.constant 1.0 : f32
+  %two = scalar.constant 2.0 : f32
+  scf.for %token = [%c0 to %c2 step %c1] {
+    scf.for %row = [%c0 to %c4 step %c1] {
+      %dot = scf.for %column = [%c0 to %width step %c1](%sum = %initial : f64) -> (f64) {
+        %position = index.madd %row, %shift, %column : index
+        %remainder = index.rem %position, %period : index
+        %word = index.cast %remainder : index to i32
+        %positive = scalar.uitofp %word : i32 to f64
+        %signed = scalar.subf %positive, %center : f64
+        %coefficient = scalar.mulf %signed, %scale : f64
+        %stored = view.load %inputs[%token, %column] : view<3x10240xbf16> -> bf16
+        %value = scalar.extf %stored : bf16 to f64
+        %product = scalar.mulf %value, %coefficient : f64
+        %next = scalar.addf %sum, %product : f64
+        scf.yield %next : f64
+      }
+      %scaled = scalar.fptrunc %dot : f64 to f32
+      %negative = scalar.negf %scaled : f32
+      %exponential = scalar.expf<afn> %negative : f32
+      %denominator = scalar.addf %one, %exponential : f32
+      %gate = scalar.divf %two, %denominator : f32
+      view.store %gate, %outputs[%token, %row] : f32, view<3x4xf32>
+    }
+    scf.for %column = [%c0 to %rank step %c1] {
+      view.store %zero, %ranks[%token, %column] : bf16, view<3x320xbf16>
+    }
+  }
+  func.return
+}
+
+check.scenario public @f32_injection {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %q8 = check.literal value(false) : i1
+    %epoch = check.generate.fill value(2) : tensor<1xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<3x10240xbf16>
+    %down = check.generate.fill value(0) : tensor<3481600xi8>
+    %weight = check.generate.fill value(0) : tensor<163840xi8>
+    check.generate<@fixture>(%q8, %weight) : (i1, tensor<163840xi8>) -> ()
+    %lowrank = check.generate.fill value(-17.0) : tensor<3x320xbf16>
+    %output = check.generate.fill value(-17.0) : tensor<3x4xf32>
+    check.compare<@hc_down_inject, @reference>(%epoch, %input, %down, %weight, %lowrank, %output) : (tensor<1xi32>, tensor<3x10240xbf16>, tensor<3481600xi8>, tensor<163840xi8>, tensor<3x320xbf16>, tensor<3x4xf32>) -> () {
+      check.expect.bitwise actual(%lowrank) expected(%lowrank) : tensor<3x320xbf16>
+      check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : tensor<3x4xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @q8_injection {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %q8 = check.literal value(true) : i1
+    %epoch = check.generate.fill value(2) : tensor<1xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<3x10240xbf16>
+    %down = check.generate.fill value(0) : tensor<3481600xi8>
+    %weight = check.generate.fill value(0) : tensor<43520xi8>
+    check.generate<@fixture>(%q8, %weight) : (i1, tensor<43520xi8>) -> ()
+    %lowrank = check.generate.fill value(-17.0) : tensor<3x320xbf16>
+    %output = check.generate.fill value(-17.0) : tensor<3x4xf32>
+    check.compare<@hc_down_inject_q8, @reference>(%epoch, %input, %down, %weight, %lowrank, %output) : (tensor<1xi32>, tensor<3x10240xbf16>, tensor<3481600xi8>, tensor<43520xi8>, tensor<3x320xbf16>, tensor<3x4xf32>) -> () {
+      check.expect.bitwise actual(%lowrank) expected(%lowrank) : tensor<3x320xbf16>
+      check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : tensor<3x4xf32>
+    }
+  }
+  check.return
+}
