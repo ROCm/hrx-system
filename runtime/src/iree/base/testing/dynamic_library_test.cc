@@ -110,6 +110,15 @@ TEST_F(DynamicLibraryTest, LoadLibraryFromMemory) {
 }
 
 #if defined(IREE_PLATFORM_WINDOWS)
+static BOOL CALLBACK PdbDiagnosticCallback(HANDLE process, ULONG action,
+                                           ULONG64 data, ULONG64 context) {
+  if (action != CBA_DEBUG_INFO) {
+    return FALSE;
+  }
+  std::cerr << "native DbgHelp: " << reinterpret_cast<const char*>(data);
+  return TRUE;
+}
+
 TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
   const auto* files = dynamic_library_test_library_create();
   ASSERT_EQ(2u, dynamic_library_test_library_size());
@@ -214,6 +223,10 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
       GetProcAddress(dbghelp, "SymGetOptions"));
   auto set_options = reinterpret_cast<DWORD(WINAPI*)(DWORD)>(
       GetProcAddress(dbghelp, "SymSetOptions"));
+  auto register_callback = reinterpret_cast<BOOL(WINAPI*)(
+      HANDLE, PSYMBOL_REGISTERED_CALLBACK64, ULONG64)>(
+      GetProcAddress(dbghelp, "SymRegisterCallback64"));
+  ASSERT_NE(nullptr, register_callback);
   ASSERT_NE(nullptr, get_file_index);
   ASSERT_NE(nullptr, unload_module);
   ASSERT_NE(nullptr, get_options);
@@ -224,7 +237,18 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
   pdb_index.sizeofstruct = sizeof(pdb_index);
   IMAGEHLP_MODULE64 registered_info = {};
   registered_info.SizeOfStruct = sizeof(registered_info);
+  IMAGEHLP_MODULE64 previous_info = {};
+  previous_info.SizeOfStruct = sizeof(previous_info);
+  SYMSRV_INDEX_INFO fixture_index = {};
+  fixture_index.sizeofstruct = sizeof(fixture_index);
   iree_symbol_resolver_lock();
+  BOOL callback_registered =
+      register_callback(resolver->process, PdbDiagnosticCallback, 0);
+  BOOL found_previous =
+      resolver->SymGetModuleInfo64(resolver->process, address, &previous_info);
+  BOOL indexed_fixture =
+      get_file_index(library_temp_path_.path().c_str(), &fixture_index, 0);
+  DWORD fixture_index_error = indexed_fixture ? ERROR_SUCCESS : GetLastError();
   BOOL indexed_image = get_file_index(module_path, &image_index, 0);
   DWORD image_index_error = indexed_image ? ERROR_SUCCESS : GetLastError();
   BOOL indexed_pdb = get_file_index(pdb_path.path().c_str(), &pdb_index, 0);
@@ -233,9 +257,9 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
                                 reinterpret_cast<DWORD64>(mapping.lpBaseOfDll));
   DWORD unload_error = unloaded ? ERROR_SUCCESS : GetLastError();
   DWORD options = get_options();
-  set_options(options & ~SYMOPT_DEFERRED_LOADS);
+  set_options((options & ~SYMOPT_DEFERRED_LOADS) | SYMOPT_DEBUG);
   DWORD64 loaded = resolver->SymLoadModuleEx(
-      resolver->process, pdb.get(), pdb_path.path().c_str(), nullptr,
+      resolver->process, nullptr, pdb_path.path().c_str(), nullptr,
       reinterpret_cast<DWORD64>(mapping.lpBaseOfDll), mapping.SizeOfImage,
       nullptr, 0);
   DWORD load_error = loaded ? ERROR_SUCCESS : GetLastError();
@@ -248,10 +272,20 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
                                               &line_displacement, &line);
   filename = found_line ? line.FileName : "";
   iree_symbol_resolver_unlock();
-  std::cout << "native PDB: image_index_error=" << image_index_error
+  std::cout << "native PDB: fixture_index_error=" << fixture_index_error
+            << " previous_type=" << previous_info.SymType
+            << " previous_age=" << previous_info.PdbAge
+            << " previous_signature_matches="
+            << !memcmp(&previous_info.PdbSig70, &pdb_index.guid, sizeof(GUID))
+            << " image_index_error=" << image_index_error
             << " pdb_index_error=" << pdb_index_error
             << " unload_error=" << unload_error << " load_error=" << load_error
             << " symbol_type=" << registered_info.SymType << "\n";
+  EXPECT_TRUE(callback_registered);
+  EXPECT_TRUE(found_previous);
+  EXPECT_TRUE(indexed_fixture);
+  EXPECT_EQ(0, memcmp(&fixture_index.guid, &pdb_index.guid, sizeof(GUID)));
+  EXPECT_EQ(fixture_index.age, pdb_index.age);
   EXPECT_TRUE(indexed_image);
   EXPECT_TRUE(indexed_pdb);
   EXPECT_EQ(0, memcmp(&image_index.guid, &pdb_index.guid, sizeof(GUID)));
