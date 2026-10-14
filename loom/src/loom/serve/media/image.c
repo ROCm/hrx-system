@@ -737,13 +737,26 @@ static bool loom_serve_media_image_info_equal(
          loom_serve_media_digest_equal(&lhs->digest, &rhs->digest);
 }
 
-iree_status_t loom_serve_media_image_decode(
+static iree_status_t loom_serve_media_image_pixel_length(
+    const loom_serve_media_image_info_t* info,
+    iree_host_size_t* out_pixel_length) {
+  *out_pixel_length = 0;
+  iree_host_size_t pixel_count = 0;
+  if (!iree_host_size_checked_mul((iree_host_size_t)info->width,
+                                  (iree_host_size_t)info->height,
+                                  &pixel_count) ||
+      !iree_host_size_checked_mul(pixel_count, 3, out_pixel_length)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "image pixel storage size overflow");
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_media_image_decode_into(
     iree_string_view_t escaped_data_url,
     const loom_serve_media_image_limits_t* limits,
-    const loom_serve_media_image_info_t* expected_info,
-    iree_allocator_t host_allocator, loom_serve_media_image_t* out_image) {
-  memset(out_image, 0, sizeof(*out_image));
-  out_image->host_allocator = host_allocator;
+    const loom_serve_media_image_info_t* expected_info, iree_byte_span_t pixels,
+    iree_allocator_t host_allocator) {
   loom_serve_media_compressed_image_t compressed;
   IREE_RETURN_IF_ERROR(loom_serve_media_image_data_url_decode(
       escaped_data_url, limits->compressed_bytes, host_allocator, &compressed));
@@ -755,46 +768,64 @@ iree_status_t loom_serve_media_image_decode(
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "image bytes changed after admission inspection");
   }
-  iree_host_size_t pixel_count = 0;
   iree_host_size_t pixel_length = 0;
-  if (iree_status_is_ok(status) &&
-      (!iree_host_size_checked_mul((iree_host_size_t)observed_info.width,
-                                   (iree_host_size_t)observed_info.height,
-                                   &pixel_count) ||
-       !iree_host_size_checked_mul(pixel_count, 3, &pixel_length))) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "image pixel storage size overflow");
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_media_image_pixel_length(&observed_info, &pixel_length);
   }
+  if (iree_status_is_ok(status) && pixels.data_length != pixel_length) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "RGB8 destination has %zu bytes but image requires %zu",
+        pixels.data_length, pixel_length);
+  }
+  if (iree_status_is_ok(status)) {
+    switch (observed_info.format) {
+      case LOOM_SERVE_MEDIA_IMAGE_FORMAT_PNG:
+        status = loom_serve_media_png_decode(compressed.data, &observed_info,
+                                             pixels);
+        break;
+      case LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG:
+        status = loom_serve_media_jpeg_decode(compressed.data, &observed_info,
+                                              pixels);
+        break;
+      case LOOM_SERVE_MEDIA_IMAGE_FORMAT_GIF:
+        status = loom_serve_media_gif_decode(compressed.data, &observed_info,
+                                             pixels);
+        break;
+      case LOOM_SERVE_MEDIA_IMAGE_FORMAT_WEBP:
+        status = loom_serve_media_webp_decode(compressed.data, &observed_info,
+                                              pixels);
+        break;
+    }
+  }
+  loom_serve_media_compressed_image_deinitialize(&compressed);
+  return status;
+}
+
+iree_status_t loom_serve_media_image_decode(
+    iree_string_view_t escaped_data_url,
+    const loom_serve_media_image_limits_t* limits,
+    const loom_serve_media_image_info_t* expected_info,
+    iree_allocator_t host_allocator, loom_serve_media_image_t* out_image) {
+  memset(out_image, 0, sizeof(*out_image));
+  out_image->host_allocator = host_allocator;
+  iree_host_size_t pixel_length = 0;
+  iree_status_t status =
+      loom_serve_media_image_pixel_length(expected_info, &pixel_length);
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(host_allocator, pixel_length,
                                    (void**)&out_image->pixels.data);
     out_image->pixels.data_length = pixel_length;
   }
   if (iree_status_is_ok(status)) {
-    switch (observed_info.format) {
-      case LOOM_SERVE_MEDIA_IMAGE_FORMAT_PNG:
-        status = loom_serve_media_png_decode(compressed.data, &observed_info,
-                                             out_image->pixels);
-        break;
-      case LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG:
-        status = loom_serve_media_jpeg_decode(compressed.data, &observed_info,
-                                              out_image->pixels);
-        break;
-      case LOOM_SERVE_MEDIA_IMAGE_FORMAT_GIF:
-        status = loom_serve_media_gif_decode(compressed.data, &observed_info,
-                                             out_image->pixels);
-        break;
-      case LOOM_SERVE_MEDIA_IMAGE_FORMAT_WEBP:
-        status = loom_serve_media_webp_decode(compressed.data, &observed_info,
-                                              out_image->pixels);
-        break;
-    }
+    status = loom_serve_media_image_decode_into(
+        escaped_data_url, limits, expected_info, out_image->pixels,
+        host_allocator);
   }
-  loom_serve_media_compressed_image_deinitialize(&compressed);
-  if (iree_status_is_ok(status)) {
-    out_image->info = observed_info;
-  } else {
+  if (!iree_status_is_ok(status)) {
     loom_serve_media_image_deinitialize(out_image);
+  } else {
+    out_image->info = *expected_info;
   }
   return status;
 }
