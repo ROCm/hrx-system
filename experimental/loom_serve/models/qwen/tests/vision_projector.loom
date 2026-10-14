@@ -1,4 +1,4 @@
-kernel.decl @qwen38_vision_patch_embedding() launch(%source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer)
+kernel.decl @qwen38_vision_patch_embedding() launch(%source_offset: offset, %source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer)
 
 kernel.decl @qwen38_vision_position_layernorm_statistics() launch(%position_table: buffer, %residual: buffer, %statistics: buffer)
 
@@ -23,13 +23,14 @@ kernel.decl @qwen38_vision_merger_down_64() launch(%activation: buffer, %weight:
 // Nonzero input and weights exercise both temporal patch contractions with an
 // exact analytic result: 2 * 768 * (-1) * (1 / 1024) + 1 / 4 = -1.25.
 check.case public @vision_patch_embedding_256 {
+  %origin = check.literal value(0) : offset
   %source = check.generate.fill value(0) : tensor<196608xi8>
   %weight0 = check.generate.fill value(0.0009765625) : tensor<1152x768xf16>
   %weight1 = check.generate.fill value(0.0009765625) : tensor<1152x768xf16>
   %bias = check.generate.fill value(0.25) : tensor<1152xf32>
   %output = check.generate.fill value(99.0) : tensor<256x1152xf32>
   %expected = check.generate.fill value(-1.25) : tensor<256x1152xf32>
-  kernel.launch @qwen38_vision_patch_embedding(%source, %weight0, %weight1, %bias, %output) : (tensor<196608xi8>, tensor<1152x768xf16>, tensor<1152x768xf16>, tensor<1152xf32>, tensor<256x1152xf32>)
+  kernel.launch @qwen38_vision_patch_embedding(%origin, %source, %weight0, %weight1, %bias, %output) : (offset, tensor<196608xi8>, tensor<1152x768xf16>, tensor<1152x768xf16>, tensor<1152xf32>, tensor<256x1152xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(different) : tensor<256x1152xf32>
   check.return
 }
