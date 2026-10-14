@@ -15,6 +15,42 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "continuation",
+    srcs = ["continuation.c"],
+    hdrs = ["continuation.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal/memory:maintenance",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "continuation_test",
+    srcs = ["continuation_test.cc"],
+    deps = [
+        ":continuation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/memory:maintenance",
+        "//runtime/src/iree/hal/memory:maintenance_thread",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "continuation_benchmark",
+    srcs = ["continuation_benchmark.cc"],
+    deps = [
+        ":continuation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/memory:maintenance",
+        "//runtime/src/iree/hal/memory:maintenance_thread",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "publisher",
     srcs = ["publisher.c"],
     hdrs = ["publisher.h"],

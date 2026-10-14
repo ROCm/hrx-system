@@ -11,6 +11,49 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    continuation
+  HDRS
+    "continuation.h"
+  SRCS
+    "continuation.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    continuation_test
+  SRCS
+    "continuation_test.cc"
+  DEPS
+    ::continuation
+    iree::base
+    iree::hal::memory::maintenance
+    iree::hal::memory::maintenance_thread
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    continuation_benchmark
+  SRCS
+    "continuation_benchmark.cc"
+  DEPS
+    ::continuation
+    iree::base
+    iree::hal::memory::maintenance
+    iree::hal::memory::maintenance_thread
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_library(
+  NAME
     publisher
   HDRS
     "publisher.h"
