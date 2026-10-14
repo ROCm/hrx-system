@@ -207,10 +207,16 @@ static bool iree_symbol_resolver_format_frame(void* address,
 
   // Query generic information like what module the address is located in and
   // what the offset of the address is within its parent symbol.
-  iree_alignas(iree_alignof(SYMBOL_INFO)) char symbol_buffer[512];
-  SYMBOL_INFO* symbol_info = (SYMBOL_INFO*)symbol_buffer;
+  union {
+    // The native header supplies the required alignment.
+    SYMBOL_INFO info;
+    // Trailing storage holds the variable-length symbol name.
+    char buffer[512];
+  } symbol_storage;
+  SYMBOL_INFO* symbol_info = &symbol_storage.info;
   symbol_info->SizeOfStruct = sizeof(*symbol_info);
-  symbol_info->MaxNameLen = sizeof(symbol_buffer) - sizeof(*symbol_info);
+  symbol_info->MaxNameLen =
+      sizeof(symbol_storage.buffer) - sizeof(*symbol_info);
   DWORD64 displacement64 = 0;
   iree_symbol_resolver_lock();
   BOOL result = resolver->SymFromAddr(process, (DWORD64)address,
