@@ -753,8 +753,12 @@ static void iree_hal_amd_xdna_queue_file_complete(
         iree_hal_amd_xdna_queue_failure_status(operation->queue));
   }
   operation->file.io_completed = true;
+  const iree_hal_amd_fabric_file_transfer_t* transfer =
+      operation->file.transfer;
   if (iree_status_is_ok(operation->status) &&
-      operation->file.transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
+      (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ ||
+       transfer->async.staging.data ||
+       transfer->async.bytes_transferred < transfer->length)) {
     iree_hal_amd_xdna_queue_service_enqueue(&operation->queue->host_worker,
                                             &operation->service_item);
   } else {

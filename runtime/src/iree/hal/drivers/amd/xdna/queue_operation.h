@@ -257,7 +257,7 @@ struct iree_hal_amd_xdna_operation_t {
     struct {
       // Arena-owned state retaining the file and logical buffer.
       iree_hal_amd_fabric_file_transfer_t* transfer;
-      // True after platform I/O retires and before final host publication.
+      // True after a chunk retires until host publication prepares another.
       bool io_completed;
     } file;
     // Captured host callback invoked after semaphore dependencies complete.

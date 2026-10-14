@@ -8,6 +8,8 @@
 
 #include <array>
 #include <cstring>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "iree/async/file.h"
@@ -182,10 +184,17 @@ struct BufferStorage {
   size_t release_count = 0;
 };
 
-class FileTransferTest
-    : public ::testing::TestWithParam<iree_hal_memory_access_t> {
+class FileTransferTest : public ::testing::TestWithParam<
+                             std::tuple<iree_hal_memory_access_t, bool>> {
  protected:
+  iree_hal_memory_access_t file_access() const {
+    return std::get<0>(GetParam());
+  }
+  bool is_direct() const { return std::get<1>(GetParam()); }
+
   void SetUp() override {
+    provider_.native_file.flags =
+        is_direct() ? IREE_ASYNC_FILE_FLAG_DIRECT : IREE_ASYNC_FILE_FLAG_NONE;
     storage_.contents.fill(0xA5);
     storage_.memory.contents =
         iree_make_byte_span(storage_.contents.data(), storage_.contents.size());
@@ -207,14 +216,14 @@ class FileTransferTest
         root, 16, 96, iree_allocator_system(), &buffer_);
     iree_hal_buffer_release(root);
     IREE_ASSERT_OK(status);
-    if (GetParam() == IREE_HAL_MEMORY_ACCESS_WRITE) {
+    if (file_access() == IREE_HAL_MEMORY_ACCESS_WRITE) {
       for (size_t i = 0; i < kLength; ++i) {
         storage_.contents[kNativeOffset + i] = uint8_t(i * 7);
       }
     }
     expected_buffer_ = storage_.contents;
     expected_file_ = provider_.contents;
-    if (GetParam() == IREE_HAL_MEMORY_ACCESS_READ) {
+    if (file_access() == IREE_HAL_MEMORY_ACCESS_READ) {
       memcpy(expected_buffer_.data() + kNativeOffset,
              expected_file_.data() + kFileOffset, kLength);
     } else {
@@ -241,10 +250,11 @@ class FileTransferTest
   }
 
   void Initialize(uint64_t file_offset = kFileOffset,
-                  iree_device_size_t buffer_offset = kBufferOffset) {
+                  iree_device_size_t buffer_offset = kBufferOffset,
+                  iree_allocator_t host_allocator = iree_allocator_system()) {
     IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
-        provider_.file(), GetParam(), file_offset, buffer_, buffer_offset,
-        kLength, &transfer_));
+        provider_.file(), file_access(), file_offset, buffer_, buffer_offset,
+        kLength, host_allocator, &transfer_));
     initialized_ = true;
   }
 
@@ -299,7 +309,7 @@ TEST_P(FileTransferTest, PartialTransfersRetainOperandsAndPublishExactRanges) {
   EXPECT_EQ(storage_.release_count, 0u);
   IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare(&transfer_));
   EXPECT_EQ(storage_.cache_operations.size(),
-            GetParam() == IREE_HAL_MEMORY_ACCESS_READ ? 0u : 1u);
+            file_access() == IREE_HAL_MEMORY_ACCESS_READ ? 0u : 1u);
   IREE_ASSERT_OK(Submit());
   provider_.Complete(7);
   EXPECT_EQ(completion_count_, 0u);
@@ -318,7 +328,7 @@ TEST_P(FileTransferTest, PartialTransfersRetainOperandsAndPublishExactRanges) {
   IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_finish(&transfer_));
   ASSERT_EQ(storage_.cache_operations.size(), 1u);
   EXPECT_EQ(storage_.cache_operations[0].operation,
-            GetParam() == IREE_HAL_MEMORY_ACCESS_READ
+            file_access() == IREE_HAL_MEMORY_ACCESS_READ
                 ? AMDF_HOST_CACHE_OPERATION_FLUSH
                 : AMDF_HOST_CACHE_OPERATION_INVALIDATE);
   EXPECT_EQ(storage_.cache_operations[0].offset, kNativeOffset);
@@ -340,7 +350,7 @@ TEST_P(FileTransferTest, ZeroProgressFailsTheExactRange) {
 }
 
 TEST_P(FileTransferTest, AlignedPartialCompletionContinues) {
-  auto& requirements = GetParam() == IREE_HAL_MEMORY_ACCESS_READ
+  auto& requirements = file_access() == IREE_HAL_MEMORY_ACCESS_READ
                            ? provider_.requirements.read
                            : provider_.requirements.write;
   requirements = {16, 8, 4};
@@ -362,7 +372,7 @@ TEST_P(FileTransferTest, AlignedPartialCompletionContinues) {
 }
 
 TEST_P(FileTransferTest, UnalignedPartialCompletionDoesNotResubmit) {
-  auto& requirements = GetParam() == IREE_HAL_MEMORY_ACCESS_READ
+  auto& requirements = file_access() == IREE_HAL_MEMORY_ACCESS_READ
                            ? provider_.requirements.read
                            : provider_.requirements.write;
   requirements = {16, 8, 4};
@@ -378,13 +388,13 @@ TEST_P(FileTransferTest, UnalignedPartialCompletionDoesNotResubmit) {
 }
 
 TEST_P(FileTransferTest, UnalignedInitialRequestKeepsCallerOwnership) {
-  auto& requirements = GetParam() == IREE_HAL_MEMORY_ACCESS_READ
+  auto& requirements = file_access() == IREE_HAL_MEMORY_ACCESS_READ
                            ? provider_.requirements.read
                            : provider_.requirements.write;
   requirements = {16, 8, 4};
   ASSERT_NO_FATAL_FAILURE(Initialize());
-  IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare(&transfer_));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Submit());
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_amd_fabric_file_transfer_prepare(&transfer_));
   EXPECT_TRUE(provider_.requests.empty());
   EXPECT_EQ(provider_.pending, nullptr);
   EXPECT_EQ(completion_count_, 0u);
@@ -424,7 +434,7 @@ TEST_P(FileTransferTest, RejectedSubmissionRetainsCallerOwnership) {
 TEST_P(FileTransferTest, CacheFailurePropagatesAtItsExecutionBoundary) {
   ASSERT_NO_FATAL_FAILURE(Initialize());
   storage_.cache_status = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-  if (GetParam() == IREE_HAL_MEMORY_ACCESS_WRITE) {
+  if (file_access() == IREE_HAL_MEMORY_ACCESS_WRITE) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_DATA_LOSS,
         iree_hal_amd_fabric_file_transfer_prepare(&transfer_));
@@ -439,12 +449,75 @@ TEST_P(FileTransferTest, CacheFailurePropagatesAtItsExecutionBoundary) {
   }
 }
 
+TEST_P(FileTransferTest, NativeIoUsesOnlyItsPreparedBacking) {
+  ASSERT_NO_FATAL_FAILURE(Initialize());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare(&transfer_));
+  const auto original_buffer = storage_.contents;
+  IREE_ASSERT_OK(Submit());
+  void* native_pointer =
+      file_access() == IREE_HAL_MEMORY_ACCESS_READ
+          ? iree_async_span_ptr(transfer_.async.read.buffer)
+          : iree_async_span_ptr(transfer_.async.write.buffer);
+  if (is_direct()) {
+    EXPECT_EQ(native_pointer, transfer_.async.staging.data);
+    EXPECT_NE(native_pointer, storage_.contents.data() + kNativeOffset);
+  } else {
+    EXPECT_EQ(native_pointer, storage_.contents.data() + kNativeOffset);
+    EXPECT_EQ(transfer_.async.staging.data, nullptr);
+  }
+  provider_.Complete(kLength);
+  EXPECT_EQ(completion_count_, 1u);
+  EXPECT_EQ(completion_code_, IREE_STATUS_OK);
+  if (is_direct()) {
+    // Only the host service copies successful reads into the device mapping.
+    EXPECT_EQ(storage_.contents, original_buffer);
+  }
+  IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_finish(&transfer_));
+  EXPECT_EQ(storage_.contents, expected_buffer_);
+  EXPECT_EQ(provider_.contents, expected_file_);
+  EXPECT_EQ(transfer_.async.staging.data, nullptr);
+}
+
+TEST_P(FileTransferTest, StagingAllocationFailureKeepsCallerOwnership) {
+  const iree_allocator_t failing_allocator = {
+      .self = nullptr,
+      .ctl =
+          +[](void*, iree_allocator_command_t, const void*, void**) {
+            return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                    "host allocation failed");
+          },
+  };
+  ASSERT_NO_FATAL_FAILURE(
+      Initialize(kFileOffset, kBufferOffset, failing_allocator));
+  if (is_direct()) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        iree_hal_amd_fabric_file_transfer_prepare(&transfer_));
+    EXPECT_EQ(transfer_.async.staging.data, nullptr);
+    EXPECT_TRUE(provider_.requests.empty());
+    EXPECT_EQ(completion_count_, 0u);
+  } else {
+    // Buffered transfers have no staging allocation dependency.
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare(&transfer_));
+    IREE_ASSERT_OK(Submit());
+    provider_.Complete(kLength);
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_finish(&transfer_));
+    EXPECT_EQ(completion_code_, IREE_STATUS_OK);
+    EXPECT_EQ(storage_.contents, expected_buffer_);
+    EXPECT_EQ(provider_.contents, expected_file_);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(
     ReadAndWrite, FileTransferTest,
-    ::testing::Values(IREE_HAL_MEMORY_ACCESS_READ,
-                      IREE_HAL_MEMORY_ACCESS_WRITE),
-    [](const ::testing::TestParamInfo<iree_hal_memory_access_t>& info) {
-      return info.param == IREE_HAL_MEMORY_ACCESS_READ ? "Read" : "Write";
+    ::testing::Combine(::testing::Values(IREE_HAL_MEMORY_ACCESS_READ,
+                                         IREE_HAL_MEMORY_ACCESS_WRITE),
+                       ::testing::Bool()),
+    [](const ::testing::TestParamInfo<FileTransferTest::ParamType>& info) {
+      std::string name = std::get<0>(info.param) == IREE_HAL_MEMORY_ACCESS_READ
+                             ? "Read"
+                             : "Write";
+      return name + (std::get<1>(info.param) ? "Direct" : "Buffered");
     });
 
 }  // namespace

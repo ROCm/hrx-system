@@ -15,6 +15,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_initialize(
     iree_hal_file_t* file, iree_hal_memory_access_t file_access,
     uint64_t file_offset, iree_hal_buffer_t* buffer,
     iree_device_size_t buffer_offset, iree_device_size_t length,
+    iree_allocator_t host_allocator,
     iree_hal_amd_fabric_file_transfer_t* out_transfer) {
   memset(out_transfer, 0, sizeof(*out_transfer));
   iree_async_file_t* async_file = iree_hal_file_async_handle(file);
@@ -28,6 +29,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_initialize(
     }
     IREE_RETURN_IF_ERROR(iree_hal_memory_file_contents(file, &file_contents));
   }
+  out_transfer->host_allocator = host_allocator;
   out_transfer->file = file;
   out_transfer->buffer = buffer;
   out_transfer->file_access = file_access;
@@ -43,30 +45,48 @@ iree_status_t iree_hal_amd_fabric_file_transfer_initialize(
 
 void iree_hal_amd_fabric_file_transfer_deinitialize(
     iree_hal_amd_fabric_file_transfer_t* transfer) {
+  iree_allocator_free_aligned(transfer->host_allocator,
+                              transfer->async.staging.data);
   iree_hal_buffer_release(transfer->buffer);
   iree_hal_file_release(transfer->file);
 }
 
 iree_status_t iree_hal_amd_fabric_file_transfer_finish(
     iree_hal_amd_fabric_file_transfer_t* transfer) {
+  const iree_host_size_t offset = transfer->async.chunk.offset;
+  const iree_host_size_t length =
+      transfer->async.file ? transfer->async.chunk.contents.data_length
+                           : transfer->buffer_contents.data_length;
+  iree_status_t status = iree_ok_status();
   if (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
-    return iree_hal_amd_fabric_buffer_flush_host_range(
-        transfer->buffer, transfer->buffer_offset, transfer->length);
+    if (transfer->async.staging.data) {
+      memcpy(transfer->buffer_contents.data + offset,
+             transfer->async.staging.data, length);
+    }
+    status = iree_hal_amd_fabric_buffer_flush_host_range(
+        transfer->buffer, transfer->buffer_offset + offset, length);
   }
-  return iree_ok_status();
+  if (transfer->async.bytes_transferred == transfer->length) {
+    iree_allocator_free_aligned(transfer->host_allocator,
+                                transfer->async.staging.data);
+    transfer->async.staging = iree_byte_span_empty();
+  }
+  return status;
 }
 
 iree_status_t iree_hal_amd_fabric_file_transfer_prepare(
     iree_hal_amd_fabric_file_transfer_t* transfer) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_buffer_native_host_span(
-              transfer->buffer, transfer->buffer_offset, transfer->length,
-              &transfer->buffer_contents));
-  if (transfer->file_access == IREE_HAL_MEMORY_ACCESS_WRITE) {
+  if (!transfer->buffer_contents.data) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_amd_fabric_buffer_invalidate_host_range(
-                transfer->buffer, transfer->buffer_offset, transfer->length));
+        z0, iree_hal_buffer_native_host_span(
+                transfer->buffer, transfer->buffer_offset, transfer->length,
+                &transfer->buffer_contents));
+    if (transfer->file_access == IREE_HAL_MEMORY_ACCESS_WRITE) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_hal_amd_fabric_buffer_invalidate_host_range(
+                  transfer->buffer, transfer->buffer_offset, transfer->length));
+    }
   }
   iree_status_t status = iree_ok_status();
   if (!transfer->async.file) {
@@ -79,6 +99,51 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare(
               transfer->buffer_contents.data_length);
     }
     status = iree_hal_amd_fabric_file_transfer_finish(transfer);
+  } else {
+    const iree_async_file_requirements_t* file_requirements =
+        iree_hal_file_requirements(transfer->file);
+    const iree_async_file_transfer_requirements_t* requirements =
+        transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
+            ? &file_requirements->read
+            : &file_requirements->write;
+    if (iree_any_bit_set(transfer->async.file->flags,
+                         IREE_ASYNC_FILE_FLAG_DIRECT) &&
+        !transfer->async.staging.data) {
+      // Device mappings may be CPU-accessible without supporting the page
+      // pins required by native uncached I/O. Keep that distinction private to
+      // this transfer instead of changing the buffer's allocation contract.
+      const iree_host_size_t capacity =
+          iree_min(transfer->buffer_contents.data_length, 1024 * 1024);
+      const iree_host_size_t alignment =
+          iree_max(requirements->buffer_alignment, sizeof(void*));
+      status = iree_allocator_malloc_aligned(
+          transfer->host_allocator, capacity, alignment, 0,
+          (void**)&transfer->async.staging.data);
+      if (iree_status_is_ok(status)) {
+        transfer->async.staging.data_length = capacity;
+      }
+    }
+    const iree_host_size_t offset = transfer->async.bytes_transferred;
+    uint8_t* data = transfer->async.staging.data
+                        ? transfer->async.staging.data
+                        : transfer->buffer_contents.data + offset;
+    const iree_host_size_t capacity = transfer->async.staging.data
+                                          ? transfer->async.staging.data_length
+                                          : UINT32_C(1) << 30;
+    iree_host_size_t length = 0;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_file_prepare_transfer(
+          requirements, transfer->file_offset + offset, data,
+          transfer->buffer_contents.data_length - offset, capacity, &length);
+    }
+    if (iree_status_is_ok(status)) {
+      transfer->async.chunk.offset = offset;
+      transfer->async.chunk.contents = iree_make_byte_span(data, length);
+      if (transfer->async.staging.data &&
+          transfer->file_access == IREE_HAL_MEMORY_ACCESS_WRITE) {
+        memcpy(data, transfer->buffer_contents.data + offset, length);
+      }
+    }
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -88,18 +153,10 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_issue(
     iree_hal_amd_fabric_file_transfer_t* transfer,
     iree_async_completion_fn_t completion) {
   const iree_host_size_t offset = transfer->async.bytes_transferred;
-  const iree_async_file_requirements_t* requirements =
-      iree_hal_file_requirements(transfer->file);
-  iree_host_size_t length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_file_prepare_transfer(
-      transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
-          ? &requirements->read
-          : &requirements->write,
-      transfer->file_offset + offset, transfer->buffer_contents.data + offset,
-      transfer->buffer_contents.data_length - offset, UINT32_C(1) << 30,
-      &length));
-  const iree_async_span_t span =
-      iree_async_span_from_ptr(transfer->buffer_contents.data + offset, length);
+  const iree_host_size_t chunk_offset = offset - transfer->async.chunk.offset;
+  const iree_async_span_t span = iree_async_span_from_ptr(
+      transfer->async.chunk.contents.data + chunk_offset,
+      transfer->async.chunk.contents.data_length - chunk_offset);
   iree_async_operation_t* operation = NULL;
   if (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
     iree_async_file_read_operation_t* read = &transfer->async.read;
@@ -147,9 +204,27 @@ static void iree_hal_amd_fabric_file_transfer_complete(
           transfer->async.bytes_transferred,
           transfer->buffer_contents.data_length);
     } else if (transfer->async.bytes_transferred <
-               transfer->buffer_contents.data_length) {
-      status = iree_hal_amd_fabric_file_transfer_issue(
-          transfer, iree_hal_amd_fabric_file_transfer_complete);
+               transfer->async.chunk.offset +
+                   transfer->async.chunk.contents.data_length) {
+      const iree_host_size_t offset = transfer->async.bytes_transferred;
+      const iree_host_size_t chunk_offset =
+          offset - transfer->async.chunk.offset;
+      const iree_host_size_t remaining =
+          transfer->async.chunk.contents.data_length - chunk_offset;
+      const iree_async_file_requirements_t* requirements =
+          iree_hal_file_requirements(transfer->file);
+      iree_host_size_t length = 0;
+      status = iree_hal_file_prepare_transfer(
+          transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
+              ? &requirements->read
+              : &requirements->write,
+          transfer->file_offset + offset,
+          transfer->async.chunk.contents.data + chunk_offset, remaining,
+          remaining, &length);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_amd_fabric_file_transfer_issue(
+            transfer, iree_hal_amd_fabric_file_transfer_complete);
+      }
       if (iree_status_is_ok(status)) {
         return;
       }

@@ -17,7 +17,7 @@ extern "C" {
 // Consumes terminal I/O status on the imported file's proactor. Successful
 // reads still require finish on the engine's host service before publication.
 typedef struct iree_hal_amd_fabric_file_transfer_callback_t {
-  // Called exactly once after accepted I/O has retired, including on failure.
+  // Called exactly once after an accepted chunk retires, including on failure.
   void (*fn)(void* user_data, iree_status_t status);
   // Borrowed engine operation owning the transfer storage.
   void* user_data;
@@ -25,9 +25,13 @@ typedef struct iree_hal_amd_fabric_file_transfer_callback_t {
 
 // Placed state for a file transfer through a prepared host execution binding.
 // The engine owns dependency resolution, host execution, and final signaling.
-// This state owns neither a worker nor staging allocations. Initialization and
-// deinitialization bracket accepted I/O and the engine's final cache work.
+// DIRECT files use bounded ordinary host staging because a device mapping need
+// not support native I/O page pinning. Allocation and payload copies run on the
+// engine's host service; native completion only advances I/O. Initialization
+// and deinitialization bracket accepted I/O and the engine's final cache work.
 typedef struct iree_hal_amd_fabric_file_transfer_t {
+  // Allocator for ordinary host staging, independent of device memory pools.
+  iree_allocator_t host_allocator;
   // Retained file keeping its imported handle or host allocation live.
   iree_hal_file_t* file;
   // Retained logical buffer; backing retirement remains caller-ordered.
@@ -48,6 +52,15 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
   struct {
     // Native handle retained through |file|; its proactor remains borrowed.
     iree_async_file_t* file;
+    // Owned ordinary host storage reused by DIRECT file chunks, or empty.
+    iree_byte_span_t staging;
+    // Current chunk, borrowed from staging or the buffer's host execution view.
+    struct {
+      // Transfer-relative position of the chunk's first byte.
+      iree_host_size_t offset;
+      // Complete chunk extent, including any successfully completed prefix.
+      iree_byte_span_t contents;
+    } chunk;
     // Byte count completed across all native requests.
     iree_host_size_t bytes_transferred;
     // Terminal callback returning ownership to the engine.
@@ -69,6 +82,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_initialize(
     iree_hal_file_t* file, iree_hal_memory_access_t file_access,
     uint64_t file_offset, iree_hal_buffer_t* buffer,
     iree_device_size_t buffer_offset, iree_device_size_t length,
+    iree_allocator_t host_allocator,
     iree_hal_amd_fabric_file_transfer_t* out_transfer);
 
 // Releases captured operands after all native I/O and host work have retired,
@@ -78,20 +92,24 @@ void iree_hal_amd_fabric_file_transfer_deinitialize(
 
 // Resolves committed buffer storage and acquires source bytes on the host
 // service, after dependencies and the caller's before barrier. Memory files
-// complete their copy and publication here. Platform files are ready to submit.
+// complete their copy and publication here. Platform files prepare one bounded
+// chunk for submission. After a successful chunk, call finish and then prepare
+// again while bytes_transferred is less than length. Staging is allocated once
+// on first preparation and reused until the transfer completes.
 iree_status_t iree_hal_amd_fabric_file_transfer_prepare(
     iree_hal_amd_fabric_file_transfer_t* transfer);
 
-// Submits prepared platform I/O, continuing partial requests until the exact
-// range completes or an error occurs. Failure retains caller ownership and does
+// Submits the prepared chunk, continuing partial requests until the exact
+// chunk completes or an error occurs. Failure retains caller ownership and does
 // not invoke |callback|. Success transfers ownership through the final callback
 // on the file's proactor, which may differ from the engine's progress owner.
 iree_status_t iree_hal_amd_fabric_file_transfer_submit(
     iree_hal_amd_fabric_file_transfer_t* transfer,
     iree_hal_amd_fabric_file_transfer_callback_t callback);
 
-// Publishes successfully read bytes on the host service before the engine's
-// after barrier and completion signal. Writes have no remaining host work.
+// Copies staged read bytes and publishes the completed chunk on the host
+// service before reuse. The final chunk releases staging; the engine applies
+// its after barrier and signals only after every chunk has completed.
 iree_status_t iree_hal_amd_fabric_file_transfer_finish(
     iree_hal_amd_fabric_file_transfer_t* transfer);
 

@@ -329,11 +329,18 @@ uint32_t iree_hal_amd_xdna_operation_execute_host(
       }
       break;
     case IREE_HAL_AMD_XDNA_OPERATION_FILE:
-      operation->status = operation->file.io_completed
-                              ? iree_hal_amd_fabric_file_transfer_finish(
-                                    operation->file.transfer)
-                              : iree_hal_amd_fabric_file_transfer_prepare(
-                                    operation->file.transfer);
+      if (operation->file.io_completed) {
+        operation->status =
+            iree_hal_amd_fabric_file_transfer_finish(operation->file.transfer);
+        operation->file.io_completed =
+            operation->file.transfer->async.bytes_transferred ==
+            operation->file.transfer->length;
+      }
+      if (iree_status_is_ok(operation->status) &&
+          !operation->file.io_completed) {
+        operation->status =
+            iree_hal_amd_fabric_file_transfer_prepare(operation->file.transfer);
+      }
       count =
           operation->file.io_completed || !operation->file.transfer->async.file;
       break;
@@ -441,6 +448,7 @@ static iree_status_t iree_hal_amd_xdna_queue_file_transfer(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_fabric_file_transfer_initialize(
         file, file_access, file_offset, buffer, buffer_offset, length,
+        iree_hal_device_host_allocator(operation->device),
         operation->file.transfer);
   }
   if (iree_status_is_ok(status)) {
