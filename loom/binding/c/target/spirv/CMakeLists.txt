@@ -10,9 +10,19 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
-loom_cc_library(
+iree_cc_library(
   NAME
     spirv
+  DEPS
+    loom::binding::c::loomc
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_cc_library(
+  NAME
+    spirv_impl
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/spirv.h"
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/spirv/base.h"
@@ -26,7 +36,7 @@ loom_cc_library(
     "spirv.c"
   DEPS
     iree::base
-    loom::binding::c::loomc
+    loom::binding::c::loomc_core
     loom::error::error_defs
     loom::target::arch::spirv::compiler_provider
     loom::target::arch::spirv::cooperative_properties

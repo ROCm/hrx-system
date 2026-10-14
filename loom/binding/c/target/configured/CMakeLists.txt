@@ -9,15 +9,23 @@
 
 iree_add_all_subdirs()
 
-loom_cc_library(
+iree_cc_library(
   NAME
     configured
+  DEPS
+    loom::binding::c::loomc
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    configured_impl
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/configured.h"
   SRCS
     "configured.c"
   DEPS
-    loom::binding::c::loomc
+    loom::binding::c::loomc_core
     loom::target::configured::compiler_provider_set
   ALWAYSLINK
   PUBLIC

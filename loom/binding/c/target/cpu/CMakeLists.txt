@@ -22,8 +22,6 @@ loom_cc_library(
     iree::hal::drivers::task::device_spec
     loom::binding::c::loomc
     loom::binding::c::target::iree_hal
-    loom::target::provider
-    loom::target::selection
   ALWAYSLINK
   PUBLIC
 )

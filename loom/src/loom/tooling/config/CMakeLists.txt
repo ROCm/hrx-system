@@ -11,19 +11,32 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    input
+  HDRS
+    "input.h"
+  SRCS
+    "input.c"
+  DEPS
+    iree::base
+    loom::config::text_binding
+    loom::tooling::io::file
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     config
   HDRS
     "config.h"
   SRCS
     "config.c"
   DEPS
+    ::input
     iree::base
     loom::config::application
-    loom::config::text_binding
     loom::format::text::printer
     loom::ir
     loom::ops::config
-    loom::tooling::io::file
     loom::util::json
     loom::util::stream
   PUBLIC

@@ -17,8 +17,18 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_cc_library(
+alias(
     name = "wasm",
+    actual = "//loom/binding/c:loomc",
+    tags = ["cmake-library-alias"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:wasm",
+        "//loom/config/emit:wasm",
+    ]),
+)
+
+loom_cc_library(
+    name = "wasm_impl",
     srcs = ["wasm.c"],
     hdrs = ["//loom/binding/c:include/loomc/target/wasm.h"],
     linkstatic = True,
@@ -26,8 +36,9 @@ loom_cc_library(
         "//loom/config/target/arch:wasm",
         "//loom/config/emit:wasm",
     ]),
+    visibility = ["//loom/binding/c:implementation"],
     deps = [
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:loomc_core",
         "//loom/src/loom/target/emit/wasm:module_compiler",
     ],
     alwayslink = True,
@@ -37,5 +48,5 @@ iree_assert_dependency_boundary(
     name = "wasm_has_no_tooling_target_dependencies",
     forbidden_subtrees = ["//loom/src/loom/tooling/target/..."],
     message = "The LoomC Wasm target package must compose compiler-owned target emission without tooling target adapters",
-    target = ":wasm",
+    target = ":wasm_impl",
 )

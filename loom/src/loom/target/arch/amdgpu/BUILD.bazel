@@ -47,7 +47,10 @@ _AMDGPU_RECORDS_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/records:__pkg_
 
 _AMDGPU_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/amdgpu:__pkg__"]
 
-_AMDGPU_BINDING_VISIBILITY = ["//loom/binding/c/target/amdgpu:__pkg__"]
+_AMDGPU_BINDING_VISIBILITY = [
+    "//loom/binding/c:__pkg__",
+    "//loom/binding/c/target/amdgpu:__pkg__",
+]
 
 _AMDGPU_PROVIDER_VISIBILITY = [
     "//loom/src/loom/target/all:__pkg__",

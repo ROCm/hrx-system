@@ -28,7 +28,7 @@ loom_cc_binary(
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/cli:loomc_options",
         "//loom/src/loom/tooling/cli:loomc_result",
-        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/tooling/config:input",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/io:source_path",
         "//loom/src/loom/tooling/pass:trace_cli",

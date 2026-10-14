@@ -12,9 +12,61 @@ set(IREE_PACKAGE_ROOT_PREFIX "loom/binding/c")
 
 iree_add_all_subdirs()
 
+set(_loomc_static_platform_deps "")
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _loomc_static_platform_deps loom::binding::c::target::vm::vm_impl)
+endif()
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+  list(APPEND _loomc_static_platform_deps loom::binding::c::target::amdgpu::amdgpu_impl)
+  list(APPEND _loomc_static_platform_deps loom::target::arch::amdgpu::artifact_key)
+  list(APPEND _loomc_static_platform_deps loom::target::arch::amdgpu::profile)
+  list(APPEND _loomc_static_platform_deps loom::target::arch::amdgpu::target_info)
+endif()
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+  list(APPEND _loomc_static_platform_deps loom::binding::c::target::spirv::spirv_impl)
+  list(APPEND _loomc_static_platform_deps loom::binding::c::target::spirv::vulkaninfo::vulkaninfo_impl)
+endif()
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA)
+  list(APPEND _loomc_static_platform_deps loom::binding::c::target::amd::xdna::xdna_impl)
+  list(APPEND _loomc_static_platform_deps loom::target::arch::amd::xdna::aie2p::target_profile)
+endif()
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
+  list(APPEND _loomc_static_platform_deps loom::binding::c::target::wasm::wasm_impl)
+endif()
 loom_cc_library(
   NAME
+    loomc_static
+  DEPS
+    ::loomc_core
+    loom::binding::c::target::cmd::cmd_impl
+    loom::binding::c::target::configured::configured_impl
+    loom::sanitizer::runtime_requirements
+    loom::target::profile
+    loom::target::provider
+    loom::target::selection
+    ${_loomc_static_platform_deps}
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     loomc
+  DEPS
+    ::loomc_static
+  PUBLIC
+)
+
+set(_loomc_core_platform_srcs "")
+if(LOOM_IMPORT_CXX)
+  list(APPEND _loomc_core_platform_srcs "${PROJECT_SOURCE_DIR}/loom/binding/c/import/cxx/cxx.c")
+endif()
+set(_loomc_core_platform_deps "")
+if(LOOM_IMPORT_CXX)
+  list(APPEND _loomc_core_platform_deps loom::import::cxx)
+endif()
+loom_cc_library(
+  NAME
+    loomc_core
   HDRS
     "include/loomc/artifact.h"
     "include/loomc/artifact_manifest.h"
@@ -26,6 +78,7 @@ loom_cc_library(
     "include/loomc/context.h"
     "include/loomc/diagnostic.h"
     "include/loomc/emit.h"
+    "include/loomc/import/cxx.h"
     "include/loomc/iree.h"
     "include/loomc/launch_config.h"
     "include/loomc/link.h"
@@ -98,6 +151,7 @@ loom_cc_library(
     "src/target.c"
     "src/task.c"
     "src/workspace.c"
+    ${_loomc_core_platform_srcs}
   DEPS
     iree::base
     iree::base::internal
@@ -169,6 +223,7 @@ loom_cc_library(
     loom::util::json
     loom::util::stream
     loom::verify
+    ${_loomc_core_platform_deps}
   INCLUDES
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/.>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/.>"
@@ -185,7 +240,7 @@ loom_cc_library(
   HDRS
     "include/loomc/interop.h"
   DEPS
-    ::loomc
+    ::loomc_core
     loom::error::source
     loom::ir
     loom::target::pipeline
@@ -212,6 +267,7 @@ loom_cc_library(
     "include/loomc/context.h"
     "include/loomc/diagnostic.h"
     "include/loomc/emit.h"
+    "include/loomc/import/cxx.h"
     "include/loomc/iree.h"
     "include/loomc/launch_config.h"
     "include/loomc/link.h"
@@ -353,41 +409,33 @@ function(_loomc_collect_shared_component_deps target_name)
   set(_loomc_direct_deps "${_loomc_direct_deps}" PARENT_SCOPE)
 endfunction()
 
-if(NOT TARGET loom_binding_c_loomc)
-  message(FATAL_ERROR "loomc shared package requires loom_binding_c_loomc")
-endif()
-
+# The generated static aggregate owns the configured compiler component list.
+get_target_property(_loomc_components loom_binding_c_loomc_static
+  INTERFACE_LINK_LIBRARIES)
 set(_loomc_component_targets)
 set(_loomc_object_sources)
 set(_loomc_object_targets)
-_loomc_add_shared_component(loom_binding_c_loomc)
-_loomc_add_shared_component(loom_binding_c_target_iree_hal_iree_hal)
-if(LOOM_IMPORT_CXX)
-  _loomc_add_shared_component(loom_binding_c_import_cxx_cxx)
-endif()
-if(LOOM_TARGET_ARCH_VM)
-  _loomc_add_shared_component(loom_binding_c_target_vm_vm)
-endif()
-if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
-  _loomc_add_shared_component(loom_binding_c_target_wasm_wasm)
-endif()
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
-  _loomc_add_shared_component(loom_binding_c_target_spirv_spirv)
-  _loomc_add_shared_component(loom_binding_c_target_spirv_vulkaninfo_vulkaninfo)
-  if(IREE_HAL_DRIVER_VULKAN)
-    _loomc_add_shared_component(loom_binding_c_target_spirv_iree_hal_iree_hal)
+foreach(_loomc_component IN LISTS _loomc_components)
+  if(TARGET "${_loomc_component}")
+    get_target_property(_loomc_aliased_component "${_loomc_component}" ALIASED_TARGET)
+    if(_loomc_aliased_component)
+      set(_loomc_component "${_loomc_aliased_component}")
+    endif()
+    get_target_property(_loomc_object_target "${_loomc_component}" IREE_CC_OBJECT_TARGET)
+    if(_loomc_object_target)
+      _loomc_add_shared_component("${_loomc_component}")
+    endif()
   endif()
-  if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-    _loomc_add_shared_component(loom_binding_c_target_spirv_vulkan_vulkan)
-  endif()
-endif()
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-  _loomc_add_shared_component(loom_binding_c_target_amdgpu_amdgpu)
-endif()
+endforeach()
 
 foreach(_loomc_object_target IN LISTS _loomc_object_targets)
   target_compile_definitions("${_loomc_object_target}" PRIVATE
     LOOMC_BUILDING_SHARED_LIBRARY)
+  if(NOT WIN32)
+    # Native adapter entry points have no LoomC annotation. The linker export
+    # list controls the ABI; permit those selected definitions to be exported.
+    target_compile_options("${_loomc_object_target}" PRIVATE -fvisibility=default)
+  endif()
 endforeach()
 
 # Link the shared library from the selected public binding objects directly.
@@ -443,6 +491,17 @@ if(NOT WIN32)
     VISIBILITY_INLINES_HIDDEN ON)
 endif()
 if(APPLE)
+  # Use the same symbol patterns as the ELF version script.
+  set(_loomc_export_file "${CMAKE_CURRENT_SOURCE_DIR}/cmake/loomc_exports.lds")
+  file(STRINGS "${_loomc_export_file}" _loomc_export_patterns
+    REGEX "^[ \t]+[A-Za-z_][A-Za-z0-9_*]*;")
+  foreach(_loomc_export_pattern IN LISTS _loomc_export_patterns)
+    string(STRIP "${_loomc_export_pattern}" _loomc_export_pattern)
+    string(REPLACE ";" "" _loomc_export_pattern "${_loomc_export_pattern}")
+    target_link_options(loomc_shared PRIVATE
+      "-Wl,-exported_symbol,_${_loomc_export_pattern}")
+  endforeach()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_loomc_export_file}")
   set_target_properties(loomc_shared PROPERTIES
     BUILD_RPATH "@loader_path"
     INSTALL_RPATH "@loader_path")

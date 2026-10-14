@@ -1172,9 +1172,54 @@ class BuildFileFunctions(object):
     # Each function that may be found in a BUILD file must be listed here.      #
     # ------------------------------------------------------------------------- #
 
+    def alias(
+        self,
+        name,
+        actual,
+        tags=None,
+        visibility=None,
+        testonly=None,
+        target_compatible_with=None,
+        **kwargs,
+    ):
+        # Bazel aliases may name libraries, executables, or files. Opt library
+        # aliases in explicitly; other aliases retain their existing projection.
+        if self._should_skip_target(tags=tags) or "cmake-library-alias" not in (
+            tags or []
+        ):
+            return
+        self._check_no_unhandled_kwargs("alias", kwargs)
+        if isinstance(actual, ConditionSelect):
+            deps = ConditionSelect(
+                {condition: [target] for condition, target in actual.conditions.items()}
+            )
+        else:
+            deps = [actual]
+        # A source-free cc_library becomes an INTERFACE forwarding target. This
+        # preserves package aliases and handles conditional dependencies using
+        # the same machinery as ordinary libraries.
+        self.cc_library(
+            name=name,
+            deps=deps,
+            testonly=testonly,
+            target_compatible_with=target_compatible_with,
+        )
+
+    def iree_code_link_options(self, linkopts=None):
+        # CMake applies the common sanitizer/link policy through its toolchain.
+        return linkopts or []
+
+    def cc_import(self, name, **kwargs):
+        if self._should_skip_target(**kwargs):
+            return
+        raise NotImplementedError(f"cc_import: {name}")
+
+    def cc_shared_library(self, name, **kwargs):
+        if self._should_skip_target(**kwargs):
+            return
+        raise NotImplementedError(f"cc_shared_library: {name}")
+
     # Functions with no mapping to CMake. Just ignore these.
-    def alias(self, *args, **kwargs):
-        pass
 
     def bool_flag(self, *args, **kwargs):
         pass
@@ -1445,6 +1490,8 @@ class BuildFileFunctions(object):
         self.iree_py_test(**kwargs)
 
     def filegroup(self, name, srcs, **kwargs):
+        if self._should_skip_target(**kwargs):
+            return
         if not srcs:
             return
         self._filegroup_srcs[name] = list(srcs)

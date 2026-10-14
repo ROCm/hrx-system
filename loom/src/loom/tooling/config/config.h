@@ -10,30 +10,13 @@
 #define LOOM_TOOLING_CONFIG_CONFIG_H_
 
 #include "iree/base/api.h"
-#include "loom/config/text_binding.h"
 #include "loom/ir/module.h"
+#include "loom/tooling/config/input.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Parses and appends one `key=value` command-line assignment to |binding_set|.
-//
-// The split happens at the first '='. Both sides are trimmed. A leading '@' on
-// the key is accepted and removed by the binding set so command-line spelling
-// matches IR spelling without forcing shell users to quote sigils.
-iree_status_t loom_tooling_config_text_binding_set_append_assignment(
-    loom_config_text_binding_set_t* binding_set, iree_string_view_t assignment);
-
-// Reads a JSON/JSONC config object file and appends flattened bindings.
-//
-// Empty paths and "-" are rejected. Command-line tools reserve those spellings
-// for stdin/stdout, but config loading is a filesystem-path operation so
-// accidental stdin consumption cannot race module input.
-iree_status_t loom_tooling_config_text_binding_set_append_json_file(
-    loom_config_text_binding_set_t* binding_set, iree_string_view_t path,
-    iree_allocator_t host_allocator);
 
 // Writes a stable JSON description of config symbols in |module|.
 //

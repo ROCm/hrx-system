@@ -7,14 +7,11 @@
 #ifndef LOOMC_VISIBILITY_H_
 #define LOOMC_VISIBILITY_H_
 
-// Marks implementation symbols shared between source files but not exported as
-// part of the public Loom C API dynamic library surface.
-#if defined(_WIN32)
-#define LOOMC_API_PRIVATE
-#elif defined(__GNUC__) || defined(__clang__)
-#define LOOMC_API_PRIVATE __attribute__((visibility("hidden")))
-#else
-#define LOOMC_API_PRIVATE
-#endif
+#include "loomc/base.h"
+
+// Internal interfaces used by separately linked LoomC target bindings. These
+// symbols are exported but require bindings built from the same source
+// revision; they are not part of the supported public Loom C API.
+#define LOOMC_API_PRIVATE LOOMC_API_EXPORT
 
 #endif  // LOOMC_VISIBILITY_H_

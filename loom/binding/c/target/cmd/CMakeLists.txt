@@ -9,9 +9,17 @@
 
 iree_add_all_subdirs()
 
-loom_cc_library(
+iree_cc_library(
   NAME
     cmd
+  DEPS
+    loom::binding::c::loomc
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    cmd_impl
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/cmd.h"
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/cmd/program.h"
@@ -21,7 +29,7 @@ loom_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
-    loom::binding::c::loomc
+    loom::binding::c::loomc_core
     loom::ir
     loom::link::module_index
     loom::pass::builtin_registry

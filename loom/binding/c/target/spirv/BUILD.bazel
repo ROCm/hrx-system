@@ -22,8 +22,15 @@ _SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/emit:spirv",
 ])
 
-loom_cc_library(
+alias(
     name = "spirv",
+    actual = "//loom/binding/c:loomc",
+    tags = ["cmake-library-alias"],
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+)
+
+loom_cc_library(
+    name = "spirv_impl",
     srcs = [
         "profile.c",
         "profile_rows.c",
@@ -39,8 +46,9 @@ loom_cc_library(
     ],
     linkstatic = True,
     target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+    visibility = ["//loom/binding/c:implementation"],
     deps = [
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:loomc_core",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv:compiler_provider",
@@ -57,5 +65,5 @@ iree_assert_dependency_boundary(
     name = "spirv_has_no_tooling_target_dependencies",
     forbidden_subtrees = ["//loom/src/loom/tooling/target/..."],
     message = "The LoomC SPIR-V target package must compose compiler-owned target emission without tooling target adapters",
-    target = ":spirv",
+    target = ":spirv_impl",
 )
