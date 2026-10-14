@@ -1,0 +1,223 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+// Accepted descriptors retain original packed starts, including rejected holes.
+// Publish a dense predictor batch and a separate map back to target hidden rows.
+kernel.def @flash_next_mtp_compact() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%accepted: buffer, %compact: buffer, %origins: buffer) {
+  %origin = index.constant 0 : offset
+  %records = index.constant 12 : offset
+  %header = buffer.view %accepted[%origin] : buffer -> view<3xi32>
+  %source = buffer.view %accepted[%records] : buffer -> view<16x5xi32>
+  %output_header = buffer.view %compact[%origin] : buffer -> view<3xi32>
+  %output = buffer.view %compact[%records] : buffer -> view<16x5xi32>
+  %mapping = buffer.view %origins[%origin] : buffer -> view<16xi32>
+  %count_word = view.load %header[1] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, 16)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %span_count, %token_count = scf.for %span = [%c0 to %count step %c1](%next_span = %c0 : index, %next_token = %initial : i32) -> (index, i32) {
+    %length = view.load %source[%span, 0] : view<16x5xi32> -> i32
+    %nonempty = scalar.cmpi ne, %length, %initial : i32
+    %spans, %tokens = scf.if %nonempty -> (index, i32) {
+      %slot = index.assume %next_span [range(%next_span, 0, 15)] : index
+      %position = view.load %source[%span, 1] : view<16x5xi32> -> i32
+      %begin = view.load %source[%span, 2] : view<16x5xi32> -> i32
+      %row = view.load %source[%span, 3] : view<16x5xi32> -> i32
+      %output_index = index.cast %slot : index to i32
+      view.store %length, %output[%slot, 0] : i32, view<16x5xi32>
+      view.store %position, %output[%slot, 1] : i32, view<16x5xi32>
+      view.store %next_token, %output[%slot, 2] : i32, view<16x5xi32>
+      view.store %row, %output[%slot, 3] : i32, view<16x5xi32>
+      view.store %output_index, %output[%slot, 4] : i32, view<16x5xi32>
+      view.store %begin, %mapping[%slot] : i32, view<16xi32>
+      %spans = index.add %next_span, %c1 : index
+      %tokens = scalar.addi %next_token, %length : i32
+      scf.yield %spans, %tokens : index, i32
+    } else {
+      scf.yield %next_span, %next_token : index, i32
+    }
+    scf.yield %spans, %tokens : index, i32
+  }
+  %span_word = index.cast %span_count : index to i32
+  view.store %token_count, %output_header[0] : i32, view<3xi32>
+  view.store %span_word, %output_header[1] : i32, view<3xi32>
+  view.store %span_word, %output_header[2] : i32, view<3xi32>
+  kernel.return
+}
+
+func.def inline @flash_next_mtp_span(%epoch: buffer, %span: index) -> (index, index, index, index) {
+  %capacity = config.get @flash_next.token_count : index
+  %records = index.constant 12 : offset
+  %view = buffer.view %epoch[%records] : buffer -> view<16x5xi32>
+  %length_word = view.load %view[%span, 0] : view<16x5xi32> -> i32
+  %position_word = view.load %view[%span, 1] : view<16x5xi32> -> i32
+  %begin_word = view.load %view[%span, 2] : view<16x5xi32> -> i32
+  %row_word = view.load %view[%span, 3] : view<16x5xi32> -> i32
+  %length_value = index.cast %length_word : i32 to index
+  %position_value = index.cast %position_word : i32 to index
+  %begin_value = index.cast %begin_word : i32 to index
+  %row_value = index.cast %row_word : i32 to index
+  %length = index.assume %length_value [range(%length_value, 1, %capacity)] : index
+  %position = index.assume %position_value [range(%position_value, 0, 262143)] : index
+  %begin = index.assume %begin_value [range(%begin_value, 0, 32767), lt(%begin_value, %capacity)] : index
+  %row = index.assume %row_value [range(%row_value, 0, 15)] : index
+  func.return %length, %position, %begin, %row : index, index, index, index
+}
+
+// Carry is 1280 raw-hidden packets followed by 48 partial-index packets, each
+// sixteen bytes. Only position%4 index rows are live. Restore them to the
+// working cache before proposing or replacing rejected speculative entries.
+// A fresh span synthesizes hidden zero and never reads its uninitialized carry.
+kernel.def @flash_next_mtp_restore() {
+  %spans = config.get @flash_next.span_capacity : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %carry: buffer, %cache: buffer, %hidden: buffer) {
+  %span = kernel.workgroup.id<x> : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %length, %position, %begin, %row = func.call @flash_next_mtp_span(%epoch, %span) : (buffer, index) -> (index, index, index, index)
+    %tokens = config.get @flash_next.token_count : index
+    %origin = index.constant 0 : offset
+    %source = buffer.view %carry[%origin] : buffer -> view<16x1328x4xi32>
+    %working = buffer.view %cache[%origin] : buffer -> view<16x48x4xi32>
+    %output = buffer.view %hidden[%origin] : buffer -> view<[%tokens]x1280x4xi32>
+    %thread = kernel.workitem.id<x> : index
+    %stride = index.constant 128 : index
+    %hidden_packets = index.constant 1280 : index
+    %c0 = index.constant 0 : index
+    %c4 = index.constant 4 : index
+    %c16 = index.constant 16 : index
+    %fresh = index.cmp eq, %position, %c0 : index
+    scf.for %packet = [%thread to %hidden_packets step %stride] {
+      %value = scf.if %fresh -> (vector<4xi32>) {
+        %empty = vector.constant 0 : vector<4xi32>
+        scf.yield %empty : vector<4xi32>
+      } else {
+        %value = vector.load %source[%row, %packet, %c0] : view<16x1328x4xi32> -> vector<4xi32>
+        scf.yield %value : vector<4xi32>
+      }
+      vector.store %value, %output[%begin, %packet, %c0] : vector<4xi32>, view<[%tokens]x1280x4xi32>
+    }
+    %tail_rows = index.rem %position, %c4 : index
+    %tail_packets = index.mul %tail_rows, %c16 : index
+    %copies_tail = index.cmp ult, %thread, %tail_packets : index
+    scf.if %copies_tail {
+      %packet = index.add %hidden_packets, %thread : index
+      %value = vector.load %source[%row, %packet, %c0] : view<16x1328x4xi32> -> vector<4xi32>
+      vector.store %value, %working[%row, %thread, %c0] : vector<4xi32>, view<16x48x4xi32>
+    }
+  }
+  kernel.return
+}
+
+// First hidden rows already came from committed carry. Remaining rows pair
+// token[P] with target_hidden[P-1], never with a rejected target row.
+kernel.def @flash_next_mtp_shift() {
+  %spans = config.get @flash_next.span_capacity : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %origins: buffer, %target: buffer, %target_tokens: buffer, %hidden: buffer, %tokens: buffer) {
+  %span = kernel.workgroup.id<x> : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %length, %position, %begin, %row = func.call @flash_next_mtp_span(%epoch, %span) : (buffer, index) -> (index, index, index, index)
+    %capacity = config.get @flash_next.token_count : index
+    %origin = index.constant 0 : offset
+    %mapping = buffer.view %origins[%origin] : buffer -> view<16xi32>
+    %source_begin_word = view.load %mapping[%span] : view<16xi32> -> i32
+    %source_begin = index.cast %source_begin_word : i32 to index
+    %source = buffer.view %target[%origin] : buffer -> view<[%capacity]x1280x4xi32>
+    %output = buffer.view %hidden[%origin] : buffer -> view<[%capacity]x1280x4xi32>
+    %source_ids = buffer.view %target_tokens[%origin] : buffer -> view<[%capacity]xi32>
+    %output_ids = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
+    %thread = kernel.workitem.id<x> : index
+    %stride = index.constant 128 : index
+    %packets = index.constant 1280 : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    scf.for %relative = [%thread to %length step %stride] {
+      %source_index_value = index.add %source_begin, %relative : index
+      %source_index = index.assume %source_index_value [range(%source_index_value, 0, 32767), lt(%source_index_value, %capacity)] : index
+      %output_index_value = index.add %begin, %relative : index
+      %output_index = index.assume %output_index_value [range(%output_index_value, 0, 32767), lt(%output_index_value, %capacity)] : index
+      %id = view.load %source_ids[%source_index] : view<[%capacity]xi32> -> i32
+      view.store %id, %output_ids[%output_index] : i32, view<[%capacity]xi32>
+    }
+    scf.for %relative = [%c1 to %length step %c1] {
+      %prior = index.sub %relative, %c1 : index
+      %source_index_value = index.add %source_begin, %prior : index
+      %source_index = index.assume %source_index_value [range(%source_index_value, 0, 32767), lt(%source_index_value, %capacity)] : index
+      %output_index_value = index.add %begin, %relative : index
+      %output_index = index.assume %output_index_value [range(%output_index_value, 0, 32767), lt(%output_index_value, %capacity)] : index
+      scf.for %packet = [%thread to %packets step %stride] {
+        %value = vector.load %source[%source_index, %packet, %c0] : view<[%capacity]x1280x4xi32> -> vector<4xi32>
+        vector.store %value, %output[%output_index, %packet, %c0] : vector<4xi32>, view<[%capacity]x1280x4xi32>
+      }
+    }
+  }
+  kernel.return
+}
+
+// Publish only after all old-carry readers and accepted cache appends finish.
+// Native session retention snapshots this complete carry record for forks.
+kernel.def @flash_next_mtp_commit() {
+  %spans = config.get @flash_next.span_capacity : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %origins: buffer, %target: buffer, %cache: buffer, %carry: buffer) {
+  %span = kernel.workgroup.id<x> : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %length, %position, %begin, %row = func.call @flash_next_mtp_span(%epoch, %span) : (buffer, index) -> (index, index, index, index)
+    %capacity = config.get @flash_next.token_count : index
+    %origin = index.constant 0 : offset
+    %mapping = buffer.view %origins[%origin] : buffer -> view<16xi32>
+    %source_begin_word = view.load %mapping[%span] : view<16xi32> -> i32
+    %source_begin = index.cast %source_begin_word : i32 to index
+    %source = buffer.view %target[%origin] : buffer -> view<[%capacity]x1280x4xi32>
+    %working = buffer.view %cache[%origin] : buffer -> view<16x48x4xi32>
+    %output = buffer.view %carry[%origin] : buffer -> view<16x1328x4xi32>
+    %thread = kernel.workitem.id<x> : index
+    %stride = index.constant 128 : index
+    %hidden_packets = index.constant 1280 : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c16 = index.constant 16 : index
+    %last = index.sub %length, %c1 : index
+    %source_index_value = index.add %source_begin, %last : index
+    %source_index = index.assume %source_index_value [range(%source_index_value, 0, 32767), lt(%source_index_value, %capacity)] : index
+    scf.for %packet = [%thread to %hidden_packets step %stride] {
+      %value = vector.load %source[%source_index, %packet, %c0] : view<[%capacity]x1280x4xi32> -> vector<4xi32>
+      vector.store %value, %output[%row, %packet, %c0] : vector<4xi32>, view<16x1328x4xi32>
+    }
+    %end = index.add %position, %length : index
+    %tail_rows = index.rem %end, %c4 : index
+    %tail_packets = index.mul %tail_rows, %c16 : index
+    %copies_tail = index.cmp ult, %thread, %tail_packets : index
+    scf.if %copies_tail {
+      %packet = index.add %hidden_packets, %thread : index
+      %value = vector.load %working[%row, %thread, %c0] : view<16x48x4xi32> -> vector<4xi32>
+      vector.store %value, %output[%row, %packet, %c0] : vector<4xi32>, view<16x1328x4xi32>
+    }
+  }
+  kernel.return
+}
