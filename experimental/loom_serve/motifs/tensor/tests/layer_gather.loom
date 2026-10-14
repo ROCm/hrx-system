@@ -1,0 +1,34 @@
+template.decl @projection.gather_12_bf16(%rows: index, %width: index, %row: index, %channel: index, %input: buffer) -> (vector<12xf32>)
+
+kernel.def @gather_layers() {
+  %rows = index.constant 2 : index
+  %width = index.constant 64 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %rows = index.constant 2 : index
+  %width = index.constant 64 : index
+  %layers = index.constant 12 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %channel = kernel.workitem.id<x> : index
+  %values = template.apply<@projection.gather_12_bf16>(%rows, %width, %row, %channel, %input) : (index, index, index, index, buffer) -> (vector<12xf32>)
+  %out = buffer.view %output[%origin] : buffer -> view<2x12x64xbf16>
+  scf.for %layer = [%begin to %layers step %step] unroll {
+    %value = vector.extract %values[%layer] : vector<12xf32> -> f32
+    %rounded = scalar.fptrunc %value : f32 to bf16
+    view.store %rounded, %out[%row, %layer, %channel] : bf16, view<2x12x64xbf16>
+    scf.yield
+  }
+  kernel.return
+}
+
+check.case @gather_layers_values {
+  %input = check.generate.iota offset(-127.0) step(0.25) : tensor<2x12x64xbf16>
+  %output = check.generate.fill value(-19.0) : tensor<2x12x64xbf16>
+  kernel.launch @gather_layers(%input, %output) : (tensor<2x12x64xbf16>, tensor<2x12x64xbf16>)
+  check.expect.equal actual(%output) expected(%input) : tensor<2x12x64xbf16>
+  check.return
+}
