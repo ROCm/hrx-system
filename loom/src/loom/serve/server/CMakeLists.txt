@@ -180,6 +180,7 @@ loom_cc_library(
     loom::serve::runtime::program::compilation
     loom::serve::runtime::storage::memory
     loom::serve::service
+    loom::serve::service::finite::component
     loom::serve::service::finite::decision::protocol
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model

@@ -179,6 +179,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/program:compilation",
         "//loom/src/loom/serve/runtime/storage:memory",
         "//loom/src/loom/serve/service",
+        "//loom/src/loom/serve/service/finite:component",
         "//loom/src/loom/serve/service/finite:model",
         "//loom/src/loom/serve/service/finite:service",
         "//loom/src/loom/serve/service/finite/decision:protocol",

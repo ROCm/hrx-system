@@ -20,11 +20,28 @@ typedef enum loom_serve_model_kind_e {
   LOOM_SERVE_MODEL_KIND_DECISION = 4,
 } loom_serve_model_kind_t;
 
+// Optional model-owned finite computation with independent preparation and
+// parameter residency. The enclosing deployment supplies the source package,
+// provider catalog, local path base and device. An empty prepare path means
+// absent; a present declaration owns all four strings.
+typedef struct loom_serve_finite_component_configuration_t {
+  // Owned cold VM program declaring component stages and parameter domains.
+  iree_string_view_t prepare;
+  // Owned warm VM program implementing the finite invocation contract.
+  iree_string_view_t control;
+  // Owned asset directory passed to the component's prepare function.
+  iree_string_view_t assets;
+  // Owned source-defined JSON object; omission becomes an empty object.
+  iree_string_view_t options;
+} loom_serve_finite_component_configuration_t;
+
 typedef struct loom_serve_text_configuration_t {
   // Owned checkpoint file path.
   iree_string_view_t weights;
   // Owned tokenizer JSON file path.
   iree_string_view_t tokenizer;
+  // Optional finite image component, prepared only by media demand.
+  loom_serve_finite_component_configuration_t image;
   // Maximum simultaneous execution rows for this model.
   iree_host_size_t rows;
   // Successful overtakes per blocked oldest text request; zero is FIFO.

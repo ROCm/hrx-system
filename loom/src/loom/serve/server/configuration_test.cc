@@ -90,6 +90,97 @@ TEST_F(ConfigurationTest, AdmissionIsAnIndependentRegistrationSetting) {
   }
 }
 
+TEST_F(ConfigurationTest, OptionalImageOwnsItsRootsAndOptions) {
+  IREE_ASSERT_OK(Parse(Text()));
+  EXPECT_EQ(model_.text.image.prepare.data, nullptr);
+  std::string json = Text(
+      R"(,"image":{"prepare":"vision/prepare.loombc","control":"vision/control.loom","assets":"vision","options":{"patch_size":14}})");
+  IREE_ASSERT_OK(Parse(json));
+  json.assign(json.size(), 'x');
+  EXPECT_EQ(String(model_.text.image.prepare), "vision/prepare.loombc");
+  EXPECT_EQ(String(model_.text.image.control), "vision/control.loom");
+  EXPECT_EQ(String(model_.text.image.assets), "vision");
+  EXPECT_EQ(String(model_.text.image.options), R"({"patch_size":14})");
+  EXPECT_EQ(String(model_.options), "{}");
+  EXPECT_EQ(String(model_.sources.base_directory), "models/local");
+  ASSERT_EQ(model_.sources.count, 2u);
+  IREE_ASSERT_OK(
+      Parse(Text(R"(,"image":{"prepare":"p","control":"c","assets":"."})")));
+  EXPECT_EQ(String(model_.text.image.options), "{}");
+}
+
+TEST_F(ConfigurationTest,
+       OptionalImageRejectsIncompleteOrIndependentDeployment) {
+  for (const char* image : {
+           R"(null)",
+           R"([])",
+           R"({})",
+           R"({"control":"c","assets":"."})",
+           R"({"prepare":"p","assets":"."})",
+           R"({"prepare":"p","control":"c"})",
+           R"({"prepare":"","control":"c","assets":"."})",
+           R"({"prepare":"p","control":0,"assets":"."})",
+           R"({"prepare":"p","control":"c","assets":"\u0000"})",
+           R"({"prepare":"p","control":"c","assets":".","options":[]})",
+           R"({"prepare":"p","control":"c","assets":".","prepare":"q"})",
+           R"({"prepare":"p","control":"c","assets":".","sources":["k"]})",
+           R"({"prepare":"p","control":"c","assets":".","device":0})",
+           R"({"prepare":"p","control":"c","assets":".","base_directory":"/"})",
+       }) {
+    SCOPED_TRACE(image);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          Parse(Text(std::string(",\"image\":") + image)));
+    EXPECT_EQ(model_.text.image.prepare.data, nullptr);
+    EXPECT_EQ(model_.sources.values, nullptr);
+  }
+  for (const char* kind : {"image", "embedding", "decision"}) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Parse(Document(
+            kind, R"(,"image":{"prepare":"p","control":"c","assets":"."})")));
+  }
+}
+
+TEST_F(ConfigurationTest, OptionalImageUsesTheEnclosingPackageAndPathBase) {
+  const loom_serve_package_file_t file = {
+      IREE_SV("model/vision/prepare.loombc"),
+      iree_make_const_byte_span("image", 5)};
+  loom_serve_package_t* package = nullptr;
+  IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model/model.json"), 1,
+                                           &file, iree_allocator_system(),
+                                           &package));
+  IREE_ASSERT_OK(Parse(
+      Document(
+          "text",
+          R"(,"weights":"//files/text.gguf","tokenizer":"tokenizer.json","image":{"prepare":"vision/prepare.loombc","control":"vision/control.loom","assets":"vision"})"),
+      {}, package));
+  loom_serve_package_release(package);
+  loomc_source_t* source = nullptr;
+  IREE_ASSERT_OK(loom_serve_sources_open(&model_.sources,
+                                         model_.text.image.prepare,
+                                         iree_allocator_system(), &source));
+  loom_serve_model_configuration_deinitialize(&model_);
+  const auto bytes = loomc_source_contents(source);
+  EXPECT_EQ(
+      std::string(reinterpret_cast<const char*>(bytes.data), bytes.data_length),
+      "image");
+  loomc_source_release(source);
+
+  const std::string prefix =
+      R"({"name":"text","definition":{"kind":"text","prepare":"//files/p","control":"//files/c","sources":["//files/k"],"weights":"//files/w","tokenizer":"//files/t","image":)";
+  const std::string component =
+      R"({"prepare":"//files/vision/p","control":"//files/vision/c","assets":"//files/vision"})";
+  IREE_ASSERT_OK(Parse(prefix + component + "}}", {}));
+  for (const char* path :
+       {"//files/vision/p", "//files/vision/c", "//files/vision"}) {
+    auto relative = component;
+    const auto quoted = std::string("\"") + path + "\"";
+    relative.replace(relative.find(quoted), quoted.size(), "\"relative\"");
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          Parse(prefix + relative + "}}", {}));
+  }
+}
+
 TEST_F(ConfigurationTest, UploadedSourcesSurviveTheirRegistrationRequest) {
   const loom_serve_package_file_t file = {
       IREE_SV("model/boot.loombc"), iree_make_const_byte_span("bytes", 5)};
