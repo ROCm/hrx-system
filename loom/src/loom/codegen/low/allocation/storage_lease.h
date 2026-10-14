@@ -94,7 +94,11 @@ typedef struct loom_low_allocation_storage_lease_state_t {
   // Number of initialized storage release actions.
   iree_host_size_t release_action_count;
   // Number of storage-lease records marked releasable for pressure.
-  iree_host_size_t pressure_release_record_count;
+  uint32_t pressure_release_record_count;
+  // Earliest start of an indexed, unexpired pressure-releasable lease, or
+  // UINT32_MAX when none are active. Zero permanently disables the summary
+  // after a pressure-releasable lease escapes the expiration/index owner.
+  uint32_t minimum_pressure_release_start_point;
 } loom_low_allocation_storage_lease_state_t;
 
 // Initializes |out_state| and builds the value-to-lease-record index for
@@ -119,6 +123,16 @@ bool loom_low_allocation_storage_lease_state_conflicts(
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
     loom_low_allocation_storage_release_policy_t policy);
+
+// Returns true unless lease state proves that no materialized
+// pressure-releasable lease overlaps a candidate ending at
+// |candidate_end_point|. Calls at the monotone allocation frontier advance the
+// existing ordered-availability expiration state. Heterogeneous and unindexed
+// lease tables conservatively retain the whole-function fact.
+bool loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+    loom_low_allocation_storage_lease_state_t* state,
+    const loom_low_descriptor_set_t* descriptor_set, uint32_t allocation_point,
+    uint32_t candidate_end_point);
 
 // Returns true when ordered lease availability can prove definite conflicts
 // for |candidate| under |policy|. The allowed policy remains candidate-specific

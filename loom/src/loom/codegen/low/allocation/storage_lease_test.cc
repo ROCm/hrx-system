@@ -210,6 +210,287 @@ loom_low_allocation_assignment_t Assignment(loom_value_id_t value_id,
   return assignment;
 }
 
+enum : iree_host_size_t { kPressureSummaryMaxRecordCount = 2 };
+
+// Complete allocation-side fixture for pressure-release availability. Records
+// retain scheduled start/end points and materialize through the production
+// value-to-lease index into one stable assignment array.
+struct PressureSummaryScenario {
+  // Module owning the scheduled values.
+  loom_module_t* module = nullptr;
+  // Synthetic function identity shared by the schedule and lease table.
+  const loom_op_t* function_op = nullptr;
+  // Module value IDs indexed by lease record ordinal.
+  loom_value_id_t value_ids[kPressureSummaryMaxRecordCount] = {};
+  // Allocation-local ordinal domain for |value_ids|.
+  loom_local_value_domain_t value_domain = {};
+  // One liveness block spanning every scheduled lease endpoint.
+  loom_liveness_block_info_t blocks[1] = {};
+  // Function liveness consumed by allocation-side lease materialization.
+  loom_liveness_analysis_t liveness = {};
+  // Schedule block containing every synthetic lease node.
+  loom_low_schedule_block_t schedule_blocks[1] = {};
+  // Scheduled operand node indexed by lease record ordinal.
+  loom_low_schedule_node_t schedule_nodes[kPressureSummaryMaxRecordCount] = {};
+  // Packet-order node ordinals.
+  uint32_t scheduled_node_indices[kPressureSummaryMaxRecordCount] = {};
+  // Producer nodes for |value_ids|; every synthetic value is external.
+  uint32_t value_producer_nodes[kPressureSummaryMaxRecordCount] = {};
+  // Complete schedule defining each lease start and endpoint.
+  loom_low_schedule_table_t schedule = {};
+  // Storage-lease records indexed by schedule/value ordinal.
+  loom_low_storage_lease_record_t records[kPressureSummaryMaxRecordCount] = {};
+  // Allocation input table borrowing |schedule| and |records|.
+  loom_low_storage_lease_table_t lease_table = {};
+  // Empty per-unit liveness; pressure-summary queries need only lease time.
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  // Mutable production lease state under test.
+  loom_low_allocation_storage_lease_state_t state = {};
+  // Stable assignments that materialize |records|.
+  loom_low_allocation_assignment_t assignments[kPressureSummaryMaxRecordCount] =
+      {};
+  // Initialized prefix length of every ordinal-indexed array.
+  iree_host_size_t record_count = 0;
+};
+
+class LowAllocationStoragePressureSummaryTest
+    : public LowAllocationStorageLeaseTest {
+ protected:
+  void InitializeScenario(const loom_low_descriptor_set_t* descriptor_set,
+                          iree_host_size_t record_count,
+                          const loom_low_storage_lease_flags_t* record_flags,
+                          const uint16_t* descriptor_reg_class_ids,
+                          const uint32_t* unit_counts,
+                          const uint32_t* start_points,
+                          const uint32_t* end_points,
+                          PressureSummaryScenario* scenario) {
+    ASSERT_LE(record_count, kPressureSummaryMaxRecordCount);
+    *scenario = PressureSummaryScenario{};
+    scenario->record_count = record_count;
+    scenario->module = AllocateModule();
+    scenario->function_op =
+        reinterpret_cast<const loom_op_t*>(static_cast<uintptr_t>(2));
+    for (iree_host_size_t i = 0; i < record_count; ++i) {
+      scenario->value_ids[i] = DefineValue(scenario->module);
+      scenario->value_producer_nodes[i] = LOOM_LOW_SCHEDULE_NODE_NONE;
+    }
+    AcquireValueDomain(scenario->module, scenario->value_ids, record_count,
+                       &scenario->value_domain);
+
+    scenario->blocks[0] = LivenessBlock(/*start_point=*/0, /*end_point=*/128);
+    scenario->liveness = Liveness(
+        scenario->blocks, IREE_ARRAYSIZE(scenario->blocks),
+        scenario->value_domain.value_ids, scenario->value_domain.value_count);
+    scenario->schedule_blocks[0] =
+        ScheduleBlock(/*scheduled_node_start=*/0,
+                      /*scheduled_node_count=*/(uint32_t)record_count);
+    uint32_t location_base = 0;
+    for (iree_host_size_t i = 0; i < record_count; ++i) {
+      scenario->schedule_nodes[i] = ScheduleOperandNode(
+          /*block_index=*/0, /*scheduled_ordinal=*/start_points[i],
+          /*operand=*/(loom_value_ordinal_t)i);
+      scenario->scheduled_node_indices[i] = (uint32_t)i;
+      scenario->records[i] = StorageLeaseRecord();
+      scenario->records[i].packet_index = i;
+      scenario->records[i].node_index = (uint32_t)i;
+      scenario->records[i].scheduled_ordinal = start_points[i];
+      scenario->records[i].attachment_index = 0;
+      scenario->records[i].unit_offset = 0;
+      scenario->records[i].unit_count = unit_counts[i];
+      scenario->records[i].flags |= record_flags[i];
+      scenario->records[i].release_before_scheduled_ordinal_plus_one =
+          end_points[i];
+      scenario->assignments[i] = Assignment(
+          scenario->value_ids[i], descriptor_reg_class_ids[i],
+          /*start_point=*/0, /*end_point=*/1, location_base, unit_counts[i]);
+      scenario->assignments[i].unit_count = unit_counts[i];
+      location_base += unit_counts[i];
+    }
+    scenario->schedule = Schedule(scenario->module, scenario->function_op,
+                                  scenario->liveness, scenario->schedule_blocks,
+                                  IREE_ARRAYSIZE(scenario->schedule_blocks),
+                                  scenario->schedule_nodes, record_count,
+                                  scenario->scheduled_node_indices,
+                                  record_count, scenario->value_producer_nodes);
+    scenario->schedule.target.descriptor_set = descriptor_set;
+    scenario->lease_table = StorageLeaseTable(
+        &scenario->schedule, scenario->records, scenario->record_count);
+    const loom_low_allocation_storage_identity_t storage_identity = {};
+    IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
+        &scenario->lease_table, scenario->module, scenario->function_op,
+        &scenario->value_domain, &scenario->liveness, &storage_identity,
+        &scenario->unit_liveness, &arena_, &scenario->state));
+  }
+
+  void RecordAssignments(const loom_low_descriptor_set_t* descriptor_set,
+                         PressureSummaryScenario* scenario) {
+    for (loom_value_ordinal_t i = 0; i < scenario->record_count; ++i) {
+      loom_low_allocation_storage_lease_state_record_assignment(
+          &scenario->state, descriptor_set, &scenario->liveness,
+          scenario->assignments, (uint32_t)i, i);
+    }
+  }
+
+  void DeinitializeScenario(PressureSummaryScenario* scenario) {
+    loom_local_value_domain_release(&scenario->value_domain);
+    loom_module_free(scenario->module);
+  }
+};
+
+TEST_F(LowAllocationStoragePressureSummaryTest,
+       TracksEarliestIndexedPressureLeaseAcrossExpiration) {
+  const loom_low_reg_class_t reg_classes[] = {RegClass(/*alias_set_id=*/1)};
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  const loom_low_storage_lease_flags_t record_flags[] = {
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE,
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE,
+  };
+  const uint16_t descriptor_reg_class_ids[] = {0, 0};
+  const uint32_t unit_counts[] = {16, 16};
+  const uint32_t start_points[] = {10, 30};
+  const uint32_t end_points[] = {20, 100};
+  PressureSummaryScenario scenario;
+  InitializeScenario(&descriptor_set, IREE_ARRAYSIZE(record_flags),
+                     record_flags, descriptor_reg_class_ids, unit_counts,
+                     start_points, end_points, &scenario);
+  RecordAssignments(&descriptor_set, &scenario);
+
+  ASSERT_NE(scenario.state.availability_expiration_heap, nullptr);
+  EXPECT_EQ(scenario.state.availability_expiration_count, 2u);
+  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 10u);
+  EXPECT_FALSE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/0,
+          /*candidate_end_point=*/10));
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/0,
+          /*candidate_end_point=*/11));
+
+  EXPECT_FALSE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/20,
+          /*candidate_end_point=*/30));
+  EXPECT_EQ(scenario.state.availability_expiration_count, 1u);
+  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 30u);
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/10,
+          /*candidate_end_point=*/10));
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/20,
+          /*candidate_end_point=*/31));
+
+  EXPECT_FALSE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/100,
+          /*candidate_end_point=*/101));
+  EXPECT_EQ(scenario.state.availability_expiration_count, 0u);
+  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, UINT32_MAX);
+  IREE_ASSERT_OK(
+      loom_low_allocation_storage_lease_state_finalize(&scenario.state));
+  DeinitializeScenario(&scenario);
+}
+
+TEST_F(LowAllocationStoragePressureSummaryTest,
+       RetainsPressureSearchForHeterogeneousLeaseTables) {
+  const loom_low_reg_class_t reg_classes[] = {RegClass(/*alias_set_id=*/1)};
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  const loom_low_storage_lease_flags_t record_flags[] = {
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE,
+      (loom_low_storage_lease_flags_t)0,
+  };
+  const uint16_t descriptor_reg_class_ids[] = {0, 0};
+  const uint32_t unit_counts[] = {16, 16};
+  const uint32_t start_points[] = {10, 30};
+  const uint32_t end_points[] = {20, 100};
+  PressureSummaryScenario scenario;
+  InitializeScenario(&descriptor_set, IREE_ARRAYSIZE(record_flags),
+                     record_flags, descriptor_reg_class_ids, unit_counts,
+                     start_points, end_points, &scenario);
+  RecordAssignments(&descriptor_set, &scenario);
+
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/0,
+          /*candidate_end_point=*/10));
+  IREE_ASSERT_OK(
+      loom_low_allocation_storage_lease_state_finalize(&scenario.state));
+  DeinitializeScenario(&scenario);
+}
+
+TEST_F(LowAllocationStoragePressureSummaryTest,
+       RetainsPressureSearchWithoutOrderedAvailability) {
+  const loom_low_reg_class_t reg_classes[] = {RegClass(/*alias_set_id=*/1)};
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  const loom_low_storage_lease_flags_t record_flags[] = {
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE,
+  };
+  const uint16_t descriptor_reg_class_ids[] = {0};
+  const uint32_t unit_counts[] = {1};
+  const uint32_t start_points[] = {10};
+  const uint32_t end_points[] = {20};
+  PressureSummaryScenario scenario;
+  InitializeScenario(&descriptor_set, IREE_ARRAYSIZE(record_flags),
+                     record_flags, descriptor_reg_class_ids, unit_counts,
+                     start_points, end_points, &scenario);
+  RecordAssignments(&descriptor_set, &scenario);
+
+  ASSERT_EQ(scenario.state.availability_expiration_heap, nullptr);
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/0,
+          /*candidate_end_point=*/10));
+  IREE_ASSERT_OK(
+      loom_low_allocation_storage_lease_state_finalize(&scenario.state));
+  DeinitializeScenario(&scenario);
+}
+
+TEST_F(LowAllocationStoragePressureSummaryTest,
+       UnindexedPressureLeasePermanentlyDisablesSummary) {
+  loom_low_reg_class_t reg_classes[] = {
+      RegClass(/*alias_set_id=*/1),
+      RegClass(/*alias_set_id=*/1),
+  };
+  reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS;
+  reg_classes[0].allocatable_count = 16;
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  const loom_low_storage_lease_flags_t record_flags[] = {
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE,
+      LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE,
+  };
+  const uint16_t descriptor_reg_class_ids[] = {0, 1};
+  const uint32_t unit_counts[] = {16, 16};
+  const uint32_t start_points[] = {10, 30};
+  const uint32_t end_points[] = {20, 100};
+  PressureSummaryScenario scenario;
+  InitializeScenario(&descriptor_set, IREE_ARRAYSIZE(record_flags),
+                     record_flags, descriptor_reg_class_ids, unit_counts,
+                     start_points, end_points, &scenario);
+  RecordAssignments(&descriptor_set, &scenario);
+
+  ASSERT_NE(scenario.state.availability_expiration_heap, nullptr);
+  EXPECT_EQ(scenario.state.availability_expiration_count, 1u);
+  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 0u);
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/0,
+          /*candidate_end_point=*/10));
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+          &scenario.state, &descriptor_set, /*allocation_point=*/20,
+          /*candidate_end_point=*/30));
+  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 0u);
+  IREE_ASSERT_OK(
+      loom_low_allocation_storage_lease_state_finalize(&scenario.state));
+  DeinitializeScenario(&scenario);
+}
+
 loom_low_placement_relation_t StorageRelation(
     loom_value_ordinal_t result_ordinal, loom_value_ordinal_t source_ordinal,
     uint32_t result_unit_offset, uint32_t source_unit_offset,
@@ -963,6 +1244,7 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
   schedule.target.descriptor_set = &descriptor_set;
   loom_low_storage_lease_record_t records[] = {StorageLeaseRecord()};
   records[0].unit_count = 32;
+  records[0].flags |= LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE;
   const loom_low_storage_lease_table_t lease_table =
       StorageLeaseTable(&schedule, records, IREE_ARRAYSIZE(records));
   const loom_low_allocation_storage_identity_t storage_identity = {};
@@ -1009,6 +1291,19 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
           &state, &descriptor_set, &candidate,
           LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN,
           /*minimum_base=*/11, /*maximum_base=*/11, &available_base));
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_find_next_available_location(
+          &state, &descriptor_set, &candidate,
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE,
+          /*minimum_base=*/11, /*maximum_base=*/11, &available_base));
+  EXPECT_EQ(available_base, 11u);
+  available_base = UINT32_MAX;
+  EXPECT_TRUE(
+      loom_low_allocation_storage_lease_state_find_previous_available_location(
+          &state, &descriptor_set, &candidate,
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE,
+          /*minimum_base=*/11, /*maximum_base=*/11, &available_base));
+  EXPECT_EQ(available_base, 11u);
 
   // Aggregate storage can be reserved before its earlier scalar definitions.
   // A release scheduled for the reservation still conflicts with those writes.
@@ -1047,6 +1342,13 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
                                     ? point.program_point
                                     : point.producer_program_point);
     EXPECT_EQ(state.availability_expiration_count, 0u);
+    // Start point zero is also the permanent conservative sentinel. Releasing
+    // that lease cannot turn the whole-attempt summary back into a proof.
+    EXPECT_EQ(state.minimum_pressure_release_start_point, 0u);
+    EXPECT_TRUE(
+        loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+            &state, &descriptor_set, /*allocation_point=*/point.program_point,
+            /*candidate_end_point=*/candidate.end_point));
     EXPECT_TRUE(
         loom_low_allocation_storage_lease_state_find_next_available_location(
             &state, &descriptor_set, &candidate,

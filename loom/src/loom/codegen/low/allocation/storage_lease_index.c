@@ -25,8 +25,12 @@ struct loom_low_allocation_storage_lease_index_node_t {
     struct {
       // Maximum earliest start over a dense run, or UINT32_MAX.
       uint32_t maximum_first_start;
-      // Equivalent summary excluding pressure-releasable leases.
-      uint32_t maximum_non_pressure_first_start;
+      union {
+        // Equivalent summary excluding pressure-releasable leases.
+        uint32_t maximum_non_pressure_first_start;
+        // Minimum active pressure-lease start in a homogeneous pressure table.
+        uint32_t minimum_pressure_first_start;
+      } policy;
       // Parent in this directory tree, or UINT32_MAX at a root.
       uint32_t parent;
     } directory;
@@ -177,7 +181,8 @@ static void loom_low_allocation_storage_lease_index_insert_at(
         index, branch_index);
   } else {
     branch->metadata.directory.maximum_first_start = UINT32_MAX;
-    branch->metadata.directory.maximum_non_pressure_first_start = UINT32_MAX;
+    branch->metadata.directory.policy.maximum_non_pressure_first_start =
+        UINT32_MAX;
     branch->metadata.directory.parent = parent;
     leaf->metadata.directory.parent = branch_index;
     index->nodes[previous_index].metadata.directory.parent = branch_index;
@@ -195,12 +200,12 @@ static uint32_t loom_low_allocation_storage_lease_directory_summary(
     loom_low_allocation_storage_lease_conflict_class_t conflict_class) {
   return conflict_class == LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_ALL
              ? node->metadata.directory.maximum_first_start
-             : node->metadata.directory.maximum_non_pressure_first_start;
+             : node->metadata.directory.policy.maximum_non_pressure_first_start;
 }
 
 static void loom_low_allocation_storage_lease_index_recompute_directory_node(
-    loom_low_allocation_storage_lease_unit_index_t* index,
-    uint32_t node_index) {
+    loom_low_allocation_storage_lease_unit_index_t* index, uint32_t node_index,
+    bool all_leases_pressure_releasable) {
   loom_low_allocation_storage_lease_index_node_t* node =
       &index->nodes[node_index];
   if (node->level == 0) {
@@ -217,39 +222,37 @@ static void loom_low_allocation_storage_lease_index_recompute_directory_node(
   // holes and remain conservative even when their own leaves are dense.
   const bool structurally_dense =
       left->level + 1u == node->level && right->level + 1u == node->level;
-  for (uint32_t conflict_class = LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_ALL;
-       conflict_class <=
-       LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_NON_PRESSURE;
-       ++conflict_class) {
-    const uint32_t left_summary =
-        loom_low_allocation_storage_lease_directory_summary(
-            left,
-            (loom_low_allocation_storage_lease_conflict_class_t)conflict_class);
-    const uint32_t right_summary =
-        loom_low_allocation_storage_lease_directory_summary(
-            right,
-            (loom_low_allocation_storage_lease_conflict_class_t)conflict_class);
-    uint32_t summary = UINT32_MAX;
-    if (structurally_dense && left_summary != UINT32_MAX &&
-        right_summary != UINT32_MAX) {
-      summary = iree_max(left_summary, right_summary);
-    }
-    if (conflict_class == LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_ALL) {
-      node->metadata.directory.maximum_first_start = summary;
-    } else {
-      node->metadata.directory.maximum_non_pressure_first_start = summary;
-    }
+  const uint32_t left_all = left->metadata.directory.maximum_first_start;
+  const uint32_t right_all = right->metadata.directory.maximum_first_start;
+  node->metadata.directory.maximum_first_start =
+      structurally_dense && left_all != UINT32_MAX && right_all != UINT32_MAX
+          ? iree_max(left_all, right_all)
+          : UINT32_MAX;
+  if (all_leases_pressure_releasable) {
+    node->metadata.directory.policy.minimum_pressure_first_start =
+        iree_min(left->metadata.directory.policy.minimum_pressure_first_start,
+                 right->metadata.directory.policy.minimum_pressure_first_start);
+  } else {
+    const uint32_t left_non_pressure =
+        left->metadata.directory.policy.maximum_non_pressure_first_start;
+    const uint32_t right_non_pressure =
+        right->metadata.directory.policy.maximum_non_pressure_first_start;
+    node->metadata.directory.policy.maximum_non_pressure_first_start =
+        structurally_dense && left_non_pressure != UINT32_MAX &&
+                right_non_pressure != UINT32_MAX
+            ? iree_max(left_non_pressure, right_non_pressure)
+            : UINT32_MAX;
   }
 }
 
 static void loom_low_allocation_storage_lease_index_refresh_directory_ancestors(
-    loom_low_allocation_storage_lease_unit_index_t* index,
-    uint32_t node_index) {
+    loom_low_allocation_storage_lease_unit_index_t* index, uint32_t node_index,
+    bool all_leases_pressure_releasable) {
   while (node_index != UINT32_MAX) {
     loom_low_allocation_storage_lease_index_node_t* node =
         &index->nodes[node_index];
     loom_low_allocation_storage_lease_index_recompute_directory_node(
-        index, node_index);
+        index, node_index, all_leases_pressure_releasable);
     node_index = node->metadata.directory.parent;
   }
 }
@@ -308,7 +311,7 @@ static uint32_t loom_low_allocation_storage_lease_index_unit(
   unit->data.unit.temporal_root = UINT32_MAX;
   unit->data.unit.next_unit = UINT32_MAX;
   unit->metadata.directory.maximum_first_start = UINT32_MAX;
-  unit->metadata.directory.maximum_non_pressure_first_start = UINT32_MAX;
+  unit->metadata.directory.policy.maximum_non_pressure_first_start = UINT32_MAX;
   loom_low_allocation_storage_lease_index_insert_at(
       index, link, parent, unit_index,
       LOOM_LOW_ALLOCATION_STORAGE_LEASE_TREE_DIRECTORY);
@@ -335,7 +338,8 @@ static uint32_t loom_low_allocation_storage_lease_index_unit(
     }
   }
   loom_low_allocation_storage_lease_index_refresh_directory_ancestors(
-      index, unit->metadata.directory.parent);
+      index, unit->metadata.directory.parent,
+      /*all_leases_pressure_releasable=*/false);
   return unit_index;
 }
 
@@ -497,7 +501,8 @@ static uint32_t loom_low_allocation_storage_lease_index_find_unit(
 void loom_low_allocation_storage_lease_unit_index_refresh_availability(
     loom_low_allocation_storage_lease_unit_index_t* index,
     const loom_low_descriptor_set_t* descriptor_set,
-    uint32_t storage_lease_index, uint32_t start_point) {
+    uint32_t storage_lease_index, uint32_t start_point,
+    bool all_leases_pressure_releasable) {
   const loom_low_allocation_storage_lease_t* lease =
       &index->instances[storage_lease_index];
   if (loom_low_reg_class_uses_explicit_physical_registers(
@@ -522,13 +527,33 @@ void loom_low_allocation_storage_lease_unit_index_refresh_availability(
         loom_low_allocation_storage_lease_index_first_unexpired_start(
             index, unit->data.unit.temporal_root, start_point,
             LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_ALL);
-    unit->metadata.directory.maximum_non_pressure_first_start =
-        loom_low_allocation_storage_lease_index_first_unexpired_start(
-            index, unit->data.unit.temporal_root, start_point,
-            LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_NON_PRESSURE);
+    if (all_leases_pressure_releasable) {
+      unit->metadata.directory.policy.minimum_pressure_first_start =
+          unit->metadata.directory.maximum_first_start;
+    } else {
+      unit->metadata.directory.policy.maximum_non_pressure_first_start =
+          loom_low_allocation_storage_lease_index_first_unexpired_start(
+              index, unit->data.unit.temporal_root, start_point,
+              LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_NON_PRESSURE);
+    }
     loom_low_allocation_storage_lease_index_refresh_directory_ancestors(
-        index, unit->metadata.directory.parent);
+        index, unit->metadata.directory.parent, all_leases_pressure_releasable);
   }
+}
+
+uint32_t
+loom_low_allocation_storage_lease_unit_index_minimum_pressure_start_point(
+    const loom_low_allocation_storage_lease_unit_index_t* index) {
+  uint32_t minimum_start_point = UINT32_MAX;
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(index->unit_roots); ++i) {
+    if (index->unit_roots[i] != UINT32_MAX) {
+      minimum_start_point =
+          iree_min(minimum_start_point,
+                   index->nodes[index->unit_roots[i]]
+                       .metadata.directory.policy.minimum_pressure_first_start);
+    }
+  }
+  return minimum_start_point;
 }
 
 static bool loom_low_allocation_storage_lease_index_find_first_available(

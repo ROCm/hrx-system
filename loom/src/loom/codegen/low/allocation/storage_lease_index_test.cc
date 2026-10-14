@@ -88,7 +88,8 @@ class LowAllocationStorageLeaseIndexTest : public ::testing::Test {
       uint32_t start_point) {
     for (uint32_t i = 0; i < leases.size(); ++i) {
       loom_low_allocation_storage_lease_unit_index_refresh_availability(
-          index, &descriptors_, i, start_point);
+          index, &descriptors_, i, start_point,
+          /*all_leases_pressure_releasable=*/false);
     }
   }
 

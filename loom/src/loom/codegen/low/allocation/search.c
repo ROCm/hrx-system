@@ -44,8 +44,16 @@ static bool loom_low_allocation_search_has_storage_release_records(
 
 static bool loom_low_allocation_search_has_pressure_release_records(
     const loom_low_allocation_search_context_t* context) {
-  return context->storage_leases &&
+  return context->storage_leases != NULL &&
          context->storage_leases->pressure_release_record_count != 0;
+}
+
+static bool loom_low_allocation_search_pressure_release_may_affect_candidate(
+    loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate) {
+  return loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+      context->storage_leases, context->descriptor_set,
+      context->active_set->live_range_sweep.point, candidate->end_point);
 }
 
 static loom_low_allocation_assignment_t
@@ -948,8 +956,15 @@ bool loom_low_allocation_search_find_free_location(
                 (uint32_t)reg_class->allocatable_count,
                 capacity.is_bounded ? capacity.max_units : UINT32_MAX)
           : 0;
+  const bool has_pressure_release_records =
+      loom_low_allocation_search_has_pressure_release_records(context);
+  const bool pressure_release_may_affect_candidate =
+      has_pressure_release_records &&
+      (uses_explicit_physical_registers ||
+       loom_low_allocation_search_pressure_release_may_affect_candidate(
+           context, &candidate_template));
   if (!uses_explicit_physical_registers &&
-      loom_low_allocation_search_has_pressure_release_records(context)) {
+      pressure_release_may_affect_candidate) {
     const loom_low_allocation_storage_release_policy_t policy =
         loom_low_allocation_search_find_linear_pressure_choice(
             context, &candidate_template, &query, last_base, alignment,
@@ -966,7 +981,7 @@ bool loom_low_allocation_search_find_free_location(
   }
   loom_low_allocation_search_location_choice_t pressure_release = {0};
   if (uses_explicit_physical_registers &&
-      loom_low_allocation_search_has_pressure_release_records(context) &&
+      pressure_release_may_affect_candidate &&
       (!release_free.found || release_free.first_candidate_ordinal != 0)) {
     loom_low_allocation_search_find_for_release_policy(
         context, &candidate_template, &query, uses_explicit_physical_registers,

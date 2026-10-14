@@ -741,6 +741,28 @@ static bool loom_low_allocation_storage_lease_expiration_less(
   return lhs_end < rhs_end || (lhs_end == rhs_end && lhs < rhs);
 }
 
+static bool loom_low_allocation_storage_lease_all_records_release_for_pressure(
+    const loom_low_allocation_storage_lease_state_t* state) {
+  return state->pressure_release_record_count != 0 &&
+         state->pressure_release_record_count ==
+             state->lease_table->record_count;
+}
+
+static void loom_low_allocation_storage_lease_refresh_pressure_summary(
+    loom_low_allocation_storage_lease_state_t* state) {
+  // Zero permanently disables the proof after any pressure-releasable lease
+  // escapes the expiration/index owner. Later indexed refreshes must not make
+  // that untracked lease disappear from the whole-attempt summary.
+  if (state->minimum_pressure_release_start_point == 0 ||
+      !loom_low_allocation_storage_lease_all_records_release_for_pressure(
+          state)) {
+    return;
+  }
+  state->minimum_pressure_release_start_point =
+      loom_low_allocation_storage_lease_unit_index_minimum_pressure_start_point(
+          state->unit_index);
+}
+
 static void loom_low_allocation_storage_lease_expiration_swap(
     loom_low_allocation_storage_lease_state_t* state, uint32_t lhs_position,
     uint32_t rhs_position) {
@@ -846,6 +868,7 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_state);
   *out_state = (loom_low_allocation_storage_lease_state_t){0};
+  out_state->minimum_pressure_release_start_point = UINT32_MAX;
   out_state->lease_table = lease_table;
   out_state->value_domain = value_domain;
   out_state->unit_liveness = unit_liveness;
@@ -987,6 +1010,8 @@ static void loom_low_allocation_storage_lease_state_advance_availability(
     const loom_low_descriptor_set_t* descriptor_set, uint32_t start_point) {
   IREE_ASSERT_GE(start_point, state->availability_start_point);
   state->availability_start_point = start_point;
+  const bool all_leases_pressure_releasable =
+      loom_low_allocation_storage_lease_all_records_release_for_pressure(state);
   while (state->availability_expiration_count != 0) {
     const uint32_t storage_lease_index = state->availability_expiration_heap[0];
     if (state->instances[storage_lease_index].end_point > start_point) {
@@ -995,8 +1020,33 @@ static void loom_low_allocation_storage_lease_state_advance_availability(
     loom_low_allocation_storage_lease_expiration_remove(state,
                                                         storage_lease_index);
     loom_low_allocation_storage_lease_unit_index_refresh_availability(
-        state->unit_index, descriptor_set, storage_lease_index, start_point);
+        state->unit_index, descriptor_set, storage_lease_index, start_point,
+        all_leases_pressure_releasable);
   }
+  loom_low_allocation_storage_lease_refresh_pressure_summary(state);
+}
+
+bool loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
+    loom_low_allocation_storage_lease_state_t* state,
+    const loom_low_descriptor_set_t* descriptor_set, uint32_t allocation_point,
+    uint32_t candidate_end_point) {
+  if (state == NULL || state->pressure_release_record_count == 0) {
+    return false;
+  }
+  const bool query_precedes_availability =
+      allocation_point < state->availability_start_point;
+  if (!query_precedes_availability &&
+      state->availability_expiration_heap != NULL) {
+    loom_low_allocation_storage_lease_state_advance_availability(
+        state, descriptor_set, allocation_point);
+  }
+  if (query_precedes_availability ||
+      state->availability_expiration_heap == NULL ||
+      !loom_low_allocation_storage_lease_all_records_release_for_pressure(
+          state)) {
+    return true;
+  }
+  return state->minimum_pressure_release_start_point < candidate_end_point;
 }
 
 static bool loom_low_allocation_storage_lease_candidate_is_continuous(
@@ -1074,6 +1124,12 @@ bool loom_low_allocation_storage_lease_state_find_next_available_location(
       state, descriptor_set, candidate, policy));
   loom_low_allocation_storage_lease_state_advance_availability(
       state, descriptor_set, candidate->start_point);
+  if (policy == LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE &&
+      loom_low_allocation_storage_lease_all_records_release_for_pressure(
+          state)) {
+    *out_base = minimum_base;
+    return true;
+  }
   return loom_low_allocation_storage_lease_unit_index_find_next_available_location(
       state->unit_index, descriptor_set, candidate->descriptor_reg_class_id,
       candidate->location_kind, candidate->end_point,
@@ -1091,6 +1147,12 @@ bool loom_low_allocation_storage_lease_state_find_previous_available_location(
       state, descriptor_set, candidate, policy));
   loom_low_allocation_storage_lease_state_advance_availability(
       state, descriptor_set, candidate->start_point);
+  if (policy == LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE &&
+      loom_low_allocation_storage_lease_all_records_release_for_pressure(
+          state)) {
+    *out_base = maximum_base;
+    return true;
+  }
   return loom_low_allocation_storage_lease_unit_index_find_previous_available_location(
       state->unit_index, descriptor_set, candidate->descriptor_reg_class_id,
       candidate->location_kind, candidate->end_point,
@@ -1177,7 +1239,10 @@ loom_low_allocation_storage_lease_state_record_release_action(
                                                             lease_record_index);
         loom_low_allocation_storage_lease_unit_index_refresh_availability(
             state->unit_index, descriptor_set, lease_record_index,
-            state->availability_start_point);
+            state->availability_start_point,
+            loom_low_allocation_storage_lease_all_records_release_for_pressure(
+                state));
+        loom_low_allocation_storage_lease_refresh_pressure_summary(state);
       } else {
         loom_low_allocation_storage_lease_expiration_sift_up(state, position);
       }
@@ -1335,17 +1400,25 @@ void loom_low_allocation_storage_lease_state_record_assignment(
     ++state->instance_count;
     loom_low_allocation_storage_lease_unit_index_insert(
         state->unit_index, descriptor_set, lease_record_index, record->flags);
-    if (state->availability_expiration_heap != NULL &&
+    const bool tracks_expiration =
+        state->availability_expiration_heap != NULL &&
         !loom_low_reg_class_uses_explicit_physical_registers(
-            &descriptor_set
-                 ->reg_classes[assignment->descriptor_reg_class_id])) {
+            &descriptor_set->reg_classes[assignment->descriptor_reg_class_id]);
+    if (tracks_expiration) {
       if (end_point > state->availability_start_point) {
         loom_low_allocation_storage_lease_expiration_insert(state,
                                                             lease_record_index);
       }
       loom_low_allocation_storage_lease_unit_index_refresh_availability(
           state->unit_index, descriptor_set, lease_record_index,
-          state->availability_start_point);
+          state->availability_start_point,
+          loom_low_allocation_storage_lease_all_records_release_for_pressure(
+              state));
+      loom_low_allocation_storage_lease_refresh_pressure_summary(state);
+    } else if (iree_all_bits_set(
+                   record->flags,
+                   LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE)) {
+      state->minimum_pressure_release_start_point = 0;
     }
     lease_record_index = state->next_record_indices[lease_record_index];
   }

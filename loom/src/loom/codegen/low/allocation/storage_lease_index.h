@@ -118,10 +118,22 @@ void loom_low_allocation_storage_lease_unit_index_update(
 // Refreshes ordered spatial summaries for every physical unit owned by one
 // lease at |start_point|. The temporal index must already contain the lease.
 // Calls are monotone in |start_point| at the owning allocation boundary.
+// |all_leases_pressure_releasable| is a table-wide mode that remains fixed
+// across refreshes. In that mode the non-pressure directory word instead owns
+// the minimum pressure-lease start, so non-pressure ordered queries are not
+// available and the owning lease state handles them directly.
 void loom_low_allocation_storage_lease_unit_index_refresh_availability(
     loom_low_allocation_storage_lease_unit_index_t* index,
     const loom_low_descriptor_set_t* descriptor_set,
-    uint32_t storage_lease_index, uint32_t start_point);
+    uint32_t storage_lease_index, uint32_t start_point,
+    bool all_leases_pressure_releasable);
+
+// Returns the earliest start among pressure-releasable leases active in the
+// ordered availability summary, or UINT32_MAX when none are active. Every
+// indexed lease must be pressure-releasable.
+uint32_t
+loom_low_allocation_storage_lease_unit_index_minimum_pressure_start_point(
+    const loom_low_allocation_storage_lease_unit_index_t* index);
 
 // Finds the first location in the inclusive range that is not a definite
 // conflict under |conflict_class| for a candidate ending at
