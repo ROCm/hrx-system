@@ -10,7 +10,7 @@ amdgpu.target<gfx11-generic> @flash_next_projection_wave32 {subgroup_size = 32}
 
 func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
-command.program.decl @flash_next_gdn_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %rows: buffer, %qkv: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer)
+command.program.decl @flash_next_gdn_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %rows: buffer, %qkv: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer, %capture: buffer)
 
 func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
 
@@ -115,7 +115,7 @@ kernel.def target(@flash_next_projection_wave32) @gdn_project_alpha_beta() {
 // and output have the model's hidden width; state/history advance only through
 // the active span. Scratch activation publications remain BF16 except for the
 // small per-head alpha/beta vectors and Q/K inverse norms.
-command.program.def public @flash_next_gdn_attention(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %input: buffer, %rows: buffer, %arena: buffer, %output: buffer) {
+command.program.def public @flash_next_gdn_attention(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %input: buffer, %rows: buffer, %arena: buffer, %output: buffer, %capture: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %hidden = index.constant 2560 : index
   %conv_width = index.constant 10240 : index
@@ -139,7 +139,7 @@ command.program.def public @flash_next_gdn_attention(%layer: index, %state_origi
   kernel.launch @flash_next_linear_q8[%conv_width](%hidden, %conv_width, %span, %input, %qkv_weight, %qkv) : [index](index, index, buffer, buffer, view<10240x80x34xi8>, buffer)
   kernel.launch @flash_next_linear_q8[%value_width](%hidden, %value_width, %span, %input, %z_weight, %z) : [index](index, index, buffer, buffer, view<6144x80x34xi8>, buffer)
   kernel.launch @gdn_project_alpha_beta(%span, %input, %alpha_weight, %beta_weight, %alpha, %beta) : (buffer, buffer, view<48x2560xf32>, view<48x2560xf32>, buffer, buffer)
-  command.program.launch @flash_next_gdn_state[%layer, %state_origin](%parameters, %span, %rows, %qkv, %z, %alpha, %beta, %arena, %gated) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_gdn_state[%layer, %state_origin](%parameters, %span, %rows, %qkv, %z, %alpha, %beta, %arena, %gated, %capture) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @flash_next_linear_q8[%hidden](%value_width, %hidden, %span, %gated, %output_weight, %output) : [index](index, index, buffer, buffer, view<2560x192x34xi8>, buffer)
   command.return
 }

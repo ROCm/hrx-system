@@ -1,0 +1,329 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+template.decl @flash_next.ple_convolve.body(%capacity: index, %verification: index, %history_origin: offset, %origins: buffer, %span_arg: buffer, %gated_arg: buffer, %normalized_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %residual_arg: buffer, %output_arg: buffer)
+
+// Five mixed spans: a known two-token prefix, then speculative prefixes that
+// accept one, two, three, and four inputs. Two rows share an immutable anchor,
+// one starts fresh, and one continues its writer. Capture leaves a known-span
+// gap; replay compacts descriptors without moving the corresponding inputs.
+kernel.decl @gdn_convolve() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %weight: buffer, %history: buffer, %convolved: buffer, %norm: buffer)
+
+kernel.decl @gdn_recur() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+
+kernel.decl @gdn_convolve_commit() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %weight: buffer, %history: buffer, %convolved: buffer, %norm: buffer)
+
+kernel.decl @gdn_recur_commit() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+
+kernel.decl @flash_next_ple_convolve() launch(%history_origin: offset, %origins: buffer, %span: buffer, %gated: buffer, %normalized: buffer, %weight: buffer, %history: buffer, %residual: buffer, %output: buffer)
+
+kernel.decl @flash_next_ple_publish_history() launch(%history_origin: offset, %span: buffer, %rows: buffer, %tokens: buffer, %arena: buffer)
+
+kernel.decl @flash_next_ple_publish_history_commit() launch(%history_origin: offset, %span: buffer, %rows: buffer, %tokens: buffer, %arena: buffer)
+
+kernel.decl @qsa_publish_tail() launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
+
+kernel.decl @qsa_publish_tail_commit() launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
+
+kernel.decl @flash_next_capture_rows(%span_capacity: index, %row_bytes: offset) launch(%source_capacity: index, %width: index, %row_bytes_value: offset, %epoch: buffer, %input: buffer, %capture: buffer, %capture_origin: offset)
+
+kernel.decl @flash_next_commit_ple_history() launch(%history_origin: offset, %epoch: buffer, %rows: buffer, %input: buffer, %arena: buffer)
+
+kernel.decl @qwen38_accept_spans() launch(%width: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
+
+// Direct reference execution publishes the prefix through the ordinary
+// convolution, independently of compact-history publication.
+kernel.def @reference_ple_convolve() {
+  %groups = index.constant 20 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%history_origin: offset, %origins: buffer, %span_arg: buffer, %gated_arg: buffer, %normalized_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %residual_arg: buffer, %output_arg: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %verification = index.constant 0 : index
+  template.apply<@flash_next.ple_convolve.body>(%capacity, %verification, %history_origin, %origins, %span_arg, %gated_arg, %normalized_arg, %weight_arg, %history_arg, %residual_arg, %output_arg) : (index, index, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def @fixture() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%epoch: buffer, %reference: buffer, %rows: buffer, %ids: buffer, %predictions: buffer, %expected_results: buffer) {
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %options_origin = index.constant 1804 : offset
+  %eos_origin = index.constant 2316 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %reference_header = buffer.view %reference[%origin] : buffer -> view<3xi32>
+  %descriptors = buffer.view %epoch[%descriptor_origin] : buffer -> view<5x5xi32>
+  %accepted = buffer.view %reference[%descriptor_origin] : buffer -> view<5x5xi32>
+  %options = buffer.view %epoch[%options_origin] : buffer -> view<5x2xi32>
+  %eos = buffer.view %epoch[%eos_origin] : buffer -> view<1xi32>
+  %origins = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
+  %tokens = buffer.view %ids[%origin] : buffer -> view<20xi32>
+  %selected = buffer.view %predictions[%origin] : buffer -> view<128xi32>
+  %results = buffer.view %expected_results[%origin] : buffer -> view<16x10xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c10 = index.constant 10 : index
+  %c20 = index.constant 20 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c5_i32 = scalar.constant 5 : i32
+  %c18_i32 = scalar.constant 18 : i32
+  %c17_i32 = scalar.constant 17 : i32
+  %none = scalar.constant -1 : i32
+  view.store %c18_i32, %header[0] : i32, view<3xi32>
+  view.store %c5_i32, %header[1] : i32, view<3xi32>
+  view.store %c17_i32, %header[2] : i32, view<3xi32>
+  view.store %c18_i32, %reference_header[0] : i32, view<3xi32>
+  view.store %c5_i32, %reference_header[1] : i32, view<3xi32>
+  view.store %none, %eos[0] : i32, view<1xi32>
+  %id_base = scalar.constant 100 : i32
+  scf.for %token = [%c0 to %c20 step %c1] {
+    %word = index.cast %token : index to i32
+    %id = scalar.addi %id_base, %word : i32
+    view.store %id, %tokens[%token] : i32, view<20xi32>
+  }
+  %stride = scalar.constant 3392512 : i64
+  %c0_i64 = scalar.constant 0 : i64
+  %frontier = scalar.constant 63 : i64
+  %known_prediction = scalar.constant 900 : i32
+  view.store %known_prediction, %selected[0] : i32, view<128xi32>
+  scf.for %span = [%c0 to %c5 step %c1] {
+    %known = index.cmp eq, %span, %c0 : index
+    %nonzero_span = scf.select %known, %c1, %span : index
+    %relative = index.sub %nonzero_span, %c1 : index
+    %row = scf.select %known, %c4, %relative : index
+    %row_word = index.cast %row : index to i32
+    %first_value = index.madd %relative, %c4, %c2 : index
+    %begin = scf.select %known, %c0, %first_value : index
+    %begin_word = index.cast %begin : index to i32
+    %length = scf.select %known, %c2, %c4 : index
+    %length_word = index.cast %length : index to i32
+    %consumed = scf.select %known, %c2, %span : index
+    %consumed_word = index.cast %consumed : index to i32
+    %row_zero = index.cmp eq, %row, %c0 : index
+    %continued = index.cmp eq, %row, %c3 : index
+    %p63 = index.constant 63 : index
+    %p64 = index.constant 64 : index
+    %p65 = index.constant 65 : index
+    %nonfresh = scf.select %continued, %p65, %p63 : index
+    %spec_position = scf.select %row_zero, %c0, %nonfresh : index
+    %position = scf.select %known, %p64, %spec_position : index
+    %position_word = index.cast %position : index to i32
+    %selection_value = index.madd %relative, %c4, %c1 : index
+    %selection = scf.select %known, %c0, %selection_value : index
+    %selection_word = index.cast %selection : index to i32
+    view.store %length_word, %descriptors[%span, 0] : i32, view<5x5xi32>
+    view.store %position_word, %descriptors[%span, 1] : i32, view<5x5xi32>
+    view.store %begin_word, %descriptors[%span, 2] : i32, view<5x5xi32>
+    view.store %row_word, %descriptors[%span, 3] : i32, view<5x5xi32>
+    view.store %selection_word, %descriptors[%span, 4] : i32, view<5x5xi32>
+    view.store %consumed_word, %accepted[%span, 0] : i32, view<5x5xi32>
+    view.store %position_word, %accepted[%span, 1] : i32, view<5x5xi32>
+    view.store %begin_word, %accepted[%span, 2] : i32, view<5x5xi32>
+    view.store %row_word, %accepted[%span, 3] : i32, view<5x5xi32>
+    view.store %none, %accepted[%span, 4] : i32, view<5x5xi32>
+    %flag = scf.select %known, %c0_i32, %c1_i32 : i32
+    %credit = scalar.constant 4 : i32
+    view.store %flag, %options[%span, 0] : i32, view<5x2xi32>
+    view.store %credit, %options[%span, 1] : i32, view<5x2xi32>
+    %slot = index.add %row, %c1 : index
+    %slot_word = index.cast %slot : index to i64
+    %writer = scalar.muli %slot_word, %stride : i64
+    view.store %c0_i64, %origins[%row, 0] : i64, view<16x4xi64>
+    view.store %writer, %origins[%row, 1] : i64, view<16x4xi64>
+    view.store %frontier, %origins[%row, 3] : i64, view<16x4xi64>
+    scf.for %i = [%c0 to %c10 step %c1] {
+      view.store %c0_i32, %results[%span, %i] : i32, view<16x10xi32>
+    }
+    %emitted = scf.select %known, %c1_i32, %consumed_word : i32
+    view.store %consumed_word, %results[%span, 0] : i32, view<16x10xi32>
+    view.store %emitted, %results[%span, 1] : i32, view<16x10xi32>
+    scf.if %known {
+      view.store %known_prediction, %results[%span, 2] : i32, view<16x10xi32>
+    } else {
+      scf.for %i = [%c0 to %c4 step %c1] {
+        %next = index.add %i, %c1 : index
+        %matches = index.cmp ult, %next, %consumed : index
+        %candidate = index.add %begin, %next : index
+        %candidate_word = index.cast %candidate : index to i32
+        %matching = scalar.addi %id_base, %candidate_word : i32
+        %mismatch = scalar.constant 777 : i32
+        %prediction = scf.select %matches, %matching, %mismatch : i32
+        %selected_index = index.add %selection, %i : index
+        view.store %prediction, %selected[%selected_index] : i32, view<128xi32>
+        %live = index.cmp ult, %i, %consumed : index
+        scf.if %live {
+          %output_index = index.add %i, %c2 : index
+          view.store %prediction, %results[%span, %output_index] : i32, view<16x10xi32>
+        }
+      }
+    }
+  }
+  kernel.return
+}
+
+// Distinct exact initial values make the immutable anchor and private writers
+// distinguishable. Their low halfwords are finite BF16 values for histories.
+kernel.def @initialize_arena() {
+  %groups = index.constant 3313 : index
+  %rows = index.constant 6 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%arena: buffer) {
+  %row = kernel.workgroup.id<y> : index
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %threads = index.constant 256 : index
+  %element = index.madd %group, %threads, %thread : index
+  %length = index.constant 848128 : index
+  %active = index.cmp ult, %element, %length : index
+  scf.if %active {
+    %row_word = index.cast %row : index to i32
+    %row_float = scalar.sitofp %row_word : i32 to f32
+    %one = scalar.constant 1.0 : f32
+    %quarter = scalar.constant 0.25 : f32
+    %base = scalar.addf %row_float, %one : f32
+    %value = scalar.mulf %base, %quarter : f32
+    %origin = index.constant 0 : offset
+    %view = buffer.view %arena[%origin] : buffer -> view<6x848128xf32>
+    view.store %value, %view[%row, %element] : f32, view<6x848128xf32>
+  }
+  kernel.return
+}
+
+kernel.def @untouched_speculation() {
+  %rows = index.constant 5 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%initial: buffer, %actual: buffer, %results: buffer) {
+  %row = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %threads = index.constant 256 : index
+  %length = index.constant 848128 : index
+  %origin = index.constant 0 : offset
+  %before = buffer.view %initial[%origin] : buffer -> view<6x848128xi32>
+  %after = buffer.view %actual[%origin] : buffer -> view<6x848128xi32>
+  %outputs = buffer.view %results[%origin] : buffer -> view<5xi32>
+  %one = scalar.constant 1 : i32
+  %same = scf.for %element = [%thread to %length step %threads](%prior = %one : i32) -> (i32) {
+    %a = view.load %before[%row, %element] : view<6x848128xi32> -> i32
+    %b = view.load %after[%row, %element] : view<6x848128xi32> -> i32
+    %equal = scalar.cmpi eq, %a, %b : i32
+    %word = scalar.extui %equal : i1 to i32
+    %next = scalar.andi %prior, %word : i32
+    scf.yield %next : i32
+  }
+  %all = kernel.workgroup.reduce<andi> %same : i32
+  %c0 = index.constant 0 : index
+  %leader = index.cmp eq, %thread, %c0 : index
+  scf.if %leader {
+    view.store %all, %outputs[%row] : i32, view<5xi32>
+  }
+  kernel.return
+}
+
+check.case public @accepted_prefixes_preserve_all_state {
+  %seed = check.param.seed base(7139) count(2) : i64
+  %capacity = check.literal value(20) : index
+  %spans = check.literal value(5) : index
+  %width = check.literal value(4) : index
+  %zero = check.literal value(0) : offset
+  %state_origin = check.literal value(0) : offset
+  %history_origin = check.literal value(3145728) : offset
+  %ple_origin = check.literal value(3207168) : offset
+  %qsa_origin = check.literal value(3391488) : offset
+  %ids_origin = check.literal value(3392256) : offset
+  %epoch = check.generate.fill value(-7) : tensor<1528xi32>
+  %reference = check.generate.fill value(-7) : tensor<387xi32>
+  %rows = check.generate.fill value(0) : tensor<64xi64>
+  %ids = check.generate.fill value(-7) : tensor<20xi32>
+  %predictions = check.generate.fill value(-7) : tensor<128xi32>
+  %expected_results = check.generate.fill value(-7) : tensor<16x10xi32>
+  kernel.launch @fixture(%epoch, %reference, %rows, %ids, %predictions, %expected_results) : (tensor<1528xi32>, tensor<387xi32>, tensor<64xi64>, tensor<20xi32>, tensor<128xi32>, tensor<16x10xi32>)
+  %initial = check.generate.fill value(0.0) : tensor<6x848128xf32>
+  %actual = check.generate.fill value(0.0) : tensor<6x848128xf32>
+  %expected = check.generate.fill value(0.0) : tensor<6x848128xf32>
+  kernel.launch @initialize_arena(%initial) : (tensor<6x848128xf32>)
+  kernel.launch @initialize_arena(%actual) : (tensor<6x848128xf32>)
+  kernel.launch @initialize_arena(%expected) : (tensor<6x848128xf32>)
+  %qkv = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<20x10240xbf16>
+  %weight = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<10240x4xf32>
+  %alpha = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<20x48xf32>
+  %beta = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<20x48xf32>
+  %a = check.generate.fill value(-0.25) : tensor<48xf32>
+  %bias = check.generate.fill value(0.125) : tensor<48xf32>
+  %ple = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<20x10240xbf16>
+  %raw_keys = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<20x128xbf16>
+  %convolved = check.generate.fill value(-7.0) : tensor<20x10240xbf16>
+  %norm = check.generate.fill value(-7.0) : tensor<20x32xf32>
+  %raw = check.generate.fill value(-7.0) : tensor<20x6144xbf16>
+  %ple_output = check.generate.fill value(-7.0) : tensor<20x10240xbf16>
+  kernel.launch @gdn_convolve(%epoch, %rows, %history_origin, %qkv, %weight, %actual, %convolved, %norm) : (tensor<1528xi32>, tensor<64xi64>, offset, tensor<20x10240xbf16>, tensor<10240x4xf32>, tensor<6x848128xf32>, tensor<20x10240xbf16>, tensor<20x32xf32>)
+  kernel.launch @gdn_recur(%epoch, %rows, %state_origin, %convolved, %norm, %alpha, %beta, %a, %bias, %actual, %raw) : (tensor<1528xi32>, tensor<64xi64>, offset, tensor<20x10240xbf16>, tensor<20x32xf32>, tensor<20x48xf32>, tensor<20x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<6x848128xf32>, tensor<20x6144xbf16>)
+  %gated = check.generate.random.uniform seed(%seed) range(-0.125 to 0.125) : tensor<20x10240xbf16>
+  %residual = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<20x10240xbf16>
+  kernel.launch @flash_next_ple_convolve(%ple_origin, %rows, %epoch, %gated, %ple, %weight, %actual, %residual, %ple_output) : (offset, tensor<64xi64>, tensor<1528xi32>, tensor<20x10240xbf16>, tensor<20x10240xbf16>, tensor<10240x4xf32>, tensor<6x848128xf32>, tensor<20x10240xbf16>, tensor<20x10240xbf16>)
+  kernel.launch @flash_next_ple_publish_history(%ids_origin, %epoch, %rows, %ids, %actual) : (offset, tensor<1528xi32>, tensor<64xi64>, tensor<20xi32>, tensor<6x848128xf32>)
+  kernel.launch @qsa_publish_tail(%qsa_origin, %epoch, %rows, %raw_keys, %actual) : (offset, tensor<1528xi32>, tensor<64xi64>, tensor<20x128xbf16>, tensor<6x848128xf32>)
+  %unchanged = check.generate.fill value(0) : tensor<5xi32>
+  %ones = check.generate.fill value(1) : tensor<5xi32>
+  kernel.launch @untouched_speculation(%initial, %actual, %unchanged) : (tensor<6x848128xf32>, tensor<6x848128xf32>, tensor<5xi32>)
+  check.expect.bitwise actual(%unchanged) expected(%ones) : tensor<5xi32>
+  %qkv_bytes = check.literal value(20480) : offset
+  %qkv_capture = check.generate.fill value(-7.0) : tensor<20x10240xbf16>
+  kernel.launch @flash_next_capture_rows[%spans, %qkv_bytes](%capacity, %width, %qkv_bytes, %epoch, %qkv, %qkv_capture, %zero) : [index, offset](index, index, offset, tensor<1528xi32>, tensor<20x10240xbf16>, tensor<20x10240xbf16>, offset)
+  %alpha_bytes = check.literal value(192) : offset
+  %alpha_capture = check.generate.fill value(-7.0) : tensor<20x48xf32>
+  kernel.launch @flash_next_capture_rows[%spans, %alpha_bytes](%capacity, %width, %alpha_bytes, %epoch, %alpha, %alpha_capture, %zero) : [index, offset](index, index, offset, tensor<1528xi32>, tensor<20x48xf32>, tensor<20x48xf32>, offset)
+  %beta_bytes = check.literal value(192) : offset
+  %beta_capture = check.generate.fill value(-7.0) : tensor<20x48xf32>
+  kernel.launch @flash_next_capture_rows[%spans, %beta_bytes](%capacity, %width, %beta_bytes, %epoch, %beta, %beta_capture, %zero) : [index, offset](index, index, offset, tensor<1528xi32>, tensor<20x48xf32>, tensor<20x48xf32>, offset)
+  %ple_bytes = check.literal value(20480) : offset
+  %ple_capture = check.generate.fill value(-7.0) : tensor<20x10240xbf16>
+  kernel.launch @flash_next_capture_rows[%spans, %ple_bytes](%capacity, %width, %ple_bytes, %epoch, %ple, %ple_capture, %zero) : [index, offset](index, index, offset, tensor<1528xi32>, tensor<20x10240xbf16>, tensor<20x10240xbf16>, offset)
+  %raw_keys_bytes = check.literal value(256) : offset
+  %raw_keys_capture = check.generate.fill value(-7.0) : tensor<20x128xbf16>
+  kernel.launch @flash_next_capture_rows[%spans, %raw_keys_bytes](%capacity, %width, %raw_keys_bytes, %epoch, %raw_keys, %raw_keys_capture, %zero) : [index, offset](index, index, offset, tensor<1528xi32>, tensor<20x128xbf16>, tensor<20x128xbf16>, offset)
+  %ids_bytes = check.literal value(4) : offset
+  %ids_capture = check.generate.fill value(-7) : tensor<20xi32>
+  kernel.launch @flash_next_capture_rows[%spans, %ids_bytes](%capacity, %width, %ids_bytes, %epoch, %ids, %ids_capture, %zero) : [index, offset](index, index, offset, tensor<1528xi32>, tensor<20xi32>, tensor<20xi32>, offset)
+  %committed = check.generate.fill value(-7) : tensor<387xi32>
+  %replay = check.generate.fill value(-7) : tensor<387xi32>
+  %results = check.generate.fill value(-7) : tensor<16x10xi32>
+  kernel.launch @qwen38_accept_spans(%width, %epoch, %ids, %predictions, %committed, %replay, %results) : (index, tensor<1528xi32>, tensor<20xi32>, tensor<128xi32>, tensor<387xi32>, tensor<387xi32>, tensor<16x10xi32>)
+  check.expect.bitwise actual(%results) expected(%expected_results) : tensor<16x10xi32>
+  kernel.launch @gdn_convolve_commit(%replay, %rows, %history_origin, %qkv_capture, %weight, %actual, %convolved, %norm) : (tensor<387xi32>, tensor<64xi64>, offset, tensor<20x10240xbf16>, tensor<10240x4xf32>, tensor<6x848128xf32>, tensor<20x10240xbf16>, tensor<20x32xf32>)
+  kernel.launch @gdn_recur_commit(%replay, %rows, %state_origin, %convolved, %norm, %alpha_capture, %beta_capture, %a, %bias, %actual, %raw) : (tensor<387xi32>, tensor<64xi64>, offset, tensor<20x10240xbf16>, tensor<20x32xf32>, tensor<20x48xf32>, tensor<20x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<6x848128xf32>, tensor<20x6144xbf16>)
+  kernel.launch @flash_next_commit_ple_history(%ple_origin, %replay, %rows, %ple_capture, %actual) : (offset, tensor<387xi32>, tensor<64xi64>, tensor<20x10240xbf16>, tensor<6x848128xf32>)
+  kernel.launch @flash_next_ple_publish_history_commit(%ids_origin, %replay, %rows, %ids_capture, %actual) : (offset, tensor<387xi32>, tensor<64xi64>, tensor<20xi32>, tensor<6x848128xf32>)
+  kernel.launch @qsa_publish_tail_commit(%qsa_origin, %replay, %rows, %raw_keys_capture, %actual) : (offset, tensor<387xi32>, tensor<64xi64>, tensor<20x128xbf16>, tensor<6x848128xf32>)
+
+  // Direct execution of the selected prefixes never sees rejected inputs.
+  // Compare the entire retained arena, including anchor and padding bytes.
+  kernel.launch @gdn_convolve_commit(%reference, %rows, %history_origin, %qkv, %weight, %expected, %convolved, %norm) : (tensor<387xi32>, tensor<64xi64>, offset, tensor<20x10240xbf16>, tensor<10240x4xf32>, tensor<6x848128xf32>, tensor<20x10240xbf16>, tensor<20x32xf32>)
+  kernel.launch @gdn_recur_commit(%reference, %rows, %state_origin, %convolved, %norm, %alpha, %beta, %a, %bias, %expected, %raw) : (tensor<387xi32>, tensor<64xi64>, offset, tensor<20x10240xbf16>, tensor<20x32xf32>, tensor<20x48xf32>, tensor<20x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<6x848128xf32>, tensor<20x6144xbf16>)
+  kernel.launch @reference_ple_convolve(%ple_origin, %rows, %reference, %gated, %ple, %weight, %expected, %residual, %ple_output) : (offset, tensor<64xi64>, tensor<387xi32>, tensor<20x10240xbf16>, tensor<20x10240xbf16>, tensor<10240x4xf32>, tensor<6x848128xf32>, tensor<20x10240xbf16>, tensor<20x10240xbf16>)
+  kernel.launch @flash_next_ple_publish_history_commit(%ids_origin, %reference, %rows, %ids, %expected) : (offset, tensor<387xi32>, tensor<64xi64>, tensor<20xi32>, tensor<6x848128xf32>)
+  kernel.launch @qsa_publish_tail_commit(%qsa_origin, %reference, %rows, %raw_keys, %expected) : (offset, tensor<387xi32>, tensor<64xi64>, tensor<20x128xbf16>, tensor<6x848128xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<6x848128xf32>
+  check.return
+}

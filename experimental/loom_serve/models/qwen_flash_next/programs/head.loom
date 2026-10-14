@@ -6,7 +6,7 @@
 
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
-config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+func.decl pure @flash_next_output_capacity() -> (index)
 
 amdgpu.target<gfx11-generic> @flash_next_head_wave32 {subgroup_size = 32}
 
@@ -23,7 +23,7 @@ template.decl @sampling.categorical_f32(%columns: index, %logits: buffer, %logit
 // The controller has already selected each requested last span row. Gather
 // only those rows before the final hyperconnection and vocabulary projection.
 kernel.def @flash_next_select_output_rows() {
-  %rows = config.get @flash_next.span_capacity : index
+  %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %threads = index.constant 128 : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
@@ -34,7 +34,7 @@ kernel.def @flash_next_select_output_rows() {
   %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
   %count_word = view.load %header[2] : view<3xi32> -> i32
   %count_value = index.cast %count_word : i32 to index
-  %rows = config.get @flash_next.span_capacity : index
+  %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %count = index.assume %count_value [range(%count_value, 0, %rows)] : index
   %c0 = index.constant 0 : index
   %first_row = index.cmp eq, %row, %c0 : index
@@ -68,7 +68,7 @@ kernel.def @flash_next_select_output_rows() {
 // streams into a low-rank SiLU publication, then reuses the stream mixer.
 kernel.def target(@flash_next_head_wave32) @flash_next_head_down() {
   %groups = index.constant 80 : index
-  %rows = config.get @flash_next.span_capacity : index
+  %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
   kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
@@ -108,12 +108,12 @@ kernel.def target(@flash_next_head_wave32) @flash_next_head_down() {
 
 kernel.def target(@flash_next_head_wave32) @flash_next_vocabulary() {
   %groups = index.constant 62080 : index
-  %rows = config.get @flash_next.span_capacity : index
+  %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
   kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
-  %rows = config.get @flash_next.span_capacity : index
+  %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %token = kernel.workgroup.id<y> : index
   %count = func.call @flash_next_token_count(%epoch, %rows) : (buffer, index) -> (index)
   %active = index.cmp ult, %token, %count : index
@@ -141,7 +141,7 @@ kernel.def target(@flash_next_head_wave32) @flash_next_vocabulary() {
 }
 
 kernel.def @flash_next_sample() {
-  %rows = config.get @flash_next.span_capacity : index
+  %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %c1 = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
@@ -183,8 +183,8 @@ kernel.def @flash_next_sample() {
     %c0 = index.constant 0 : index
     %publishes = index.cmp eq, %thread, %c0 : index
     scf.if %publishes {
-      %rows = config.get @flash_next.span_capacity : index
-      %output_row = index.assume %row [range(%row, 0, 15), lt(%row, %rows)] : index
+      %rows = func.call pure @flash_next_output_capacity() : () -> (index)
+      %output_row = index.assume %row [range(%row, 0, 127), lt(%row, %rows)] : index
       %ids = buffer.view %output[%origin] : buffer -> view<[%rows]xi32>
       view.store %selected, %ids[%output_row] : i32, view<[%rows]xi32>
     }
@@ -194,7 +194,7 @@ kernel.def @flash_next_sample() {
 
 command.program.def public @flash_next_output_head() launch(%parameters: buffer, %epoch: buffer, %residual: buffer, %outputs: buffer) {
   %tokens = config.get @flash_next.token_count : index
-  %rows = config.get @flash_next.span_capacity : index
+  %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %residual_stride = index.constant 20480 : offset
   %rank_stride = index.constant 640 : offset
   %hidden_stride = index.constant 5120 : offset

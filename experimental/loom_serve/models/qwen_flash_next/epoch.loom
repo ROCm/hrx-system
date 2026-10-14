@@ -12,19 +12,19 @@ kernel.decl @flash_next_map_tokens() launch(%epoch: buffer, %mapping: buffer)
 
 kernel.decl @flash_next_embedding_q8_0() launch(%epoch: buffer, %ids: buffer, %weight: buffer, %residual: buffer)
 
-command.program.decl @flash_next_ple_residual(%layer: index, %token_history_origin: offset, %convolution_history_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %residual: buffer, %arena: buffer, %output: buffer)
+command.program.decl @flash_next_ple_residual(%layer: index, %token_history_origin: offset, %convolution_history_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %residual: buffer, %arena: buffer, %output: buffer, %capture: buffer)
 
-command.program.decl @flash_next_qsa_residual(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %residual: buffer, %rows: buffer, %arena: buffer, %output: buffer)
+command.program.decl @flash_next_qsa_residual(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %residual: buffer, %rows: buffer, %arena: buffer, %output: buffer, %capture: buffer)
 
 command.program.decl @flash_next_ffn_residual(%layer: index) launch(%parameters: buffer, %span: buffer, %residual: buffer, %output: buffer)
 
-command.program.decl @flash_next_gdn_layer(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %residual: buffer, %rows: buffer, %arena: buffer, %output: buffer)
+command.program.decl @flash_next_gdn_layer(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %residual: buffer, %rows: buffer, %arena: buffer, %output: buffer, %capture: buffer)
 
 command.program.decl @flash_next_output_head() launch(%parameters: buffer, %epoch: buffer, %residual: buffer, %outputs: buffer)
 
 // All layer decisions are cold specialization. Runtime packets contain only
 // active tokens, span ownership, physical page IDs, and recurrent frontiers.
-command.program.def public @flash_next_epoch() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %output_tokens: buffer) {
+command.program.def public @flash_next_body() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %capture: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %pool = config.get @flash_next.pool_capacity : index
   %row_bytes = index.constant 20480 : offset
@@ -40,6 +40,7 @@ command.program.def public @flash_next_epoch() launch(%parameters: buffer, %resi
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
   %c4 = index.constant 4 : index
+  %last_layer = index.constant 47 : index
   %layers = index.constant 48 : index
   %main_planes = index.constant 24 : index
   %gdn_stride = index.constant 3207168 : offset
@@ -59,12 +60,18 @@ command.program.def public @flash_next_epoch() launch(%parameters: buffer, %resi
     %has_ple = index.cmp eq, %layer, %c1 : index
     %input = scf.if %has_ple -> (buffer) {
       %ple = buffer.alloca<global> align(256) %activation_bytes : buffer
-      command.program.launch @flash_next_ple_residual[%layer, %token_history, %conv_history](%parameters, %epoch, %mapping, %rows, %input_tokens, %current, %state, %ple) : [index, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+      command.program.launch @flash_next_ple_residual[%layer, %token_history, %conv_history](%parameters, %epoch, %mapping, %rows, %input_tokens, %current, %state, %ple, %capture) : [index, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
       scf.yield %ple : buffer
     } else {
       scf.yield %current : buffer
     }
-    %output = buffer.alloca<global> align(256) %activation_bytes : buffer
+    %last = index.cmp eq, %layer, %last_layer : index
+    %output = scf.if %last -> (buffer) {
+      scf.yield %residual : buffer
+    } else {
+      %temporary = buffer.alloca<global> align(256) %activation_bytes : buffer
+      scf.yield %temporary : buffer
+    }
     %ordinal = index.div %layer, %c4 : index
     %kind = index.rem %layer, %c4 : index
     %indexed = index.cmp eq, %kind, %c3 : index
@@ -77,15 +84,21 @@ command.program.def public @flash_next_epoch() launch(%parameters: buffer, %resi
       %tail_relative = index.scale %ordinal, %tail_stride : index, offset -> offset
       %tail_origin = index.add %tail_base, %tail_relative : offset
       %attention = buffer.alloca<global> align(256) %activation_bytes : buffer
-      command.program.launch @flash_next_qsa_residual[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %epoch, %mapping, %input, %rows, %state, %attention) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+      command.program.launch @flash_next_qsa_residual[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %epoch, %mapping, %input, %rows, %state, %attention, %capture) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
       command.program.launch @flash_next_ffn_residual[%layer](%parameters, %epoch, %attention, %output) : [index](buffer, buffer, buffer, buffer)
     } else {
       %gdn_ordinal = index.sub %layer, %ordinal : index
       %state_origin = index.scale %gdn_ordinal, %gdn_stride : index, offset -> offset
-      command.program.launch @flash_next_gdn_layer[%layer, %state_origin](%parameters, %epoch, %input, %rows, %state, %output) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer)
+      command.program.launch @flash_next_gdn_layer[%layer, %state_origin](%parameters, %epoch, %input, %rows, %state, %output, %capture) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     }
     scf.yield %output : buffer
   }
-  command.program.launch @flash_next_output_head(%parameters, %epoch, %final, %output_tokens) : (buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @flash_next_epoch() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %output_tokens: buffer) {
+  // Ordinary stages erase all capture calls; no separate capture allocation.
+  command.program.launch @flash_next_body(%parameters, %residual, %epoch, %rows, %state, %input_tokens, %residual) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_output_head(%parameters, %epoch, %residual, %output_tokens) : (buffer, buffer, buffer, buffer)
   command.return
 }

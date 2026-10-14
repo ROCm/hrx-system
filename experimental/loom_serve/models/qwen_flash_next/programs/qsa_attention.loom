@@ -12,6 +12,8 @@ config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4
 
 config.decl @qsa.query_tile : %value: index where [range(%value, 1, 32)]
 
+command.program.decl @flash_next_capture_inputs(%prefix_bytes: offset, %row_bytes: offset) launch(%epoch: buffer, %input: buffer, %capture: buffer)
+
 kernel.decl @qsa_linear_bf16(%output_capacity: index) launch(%width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qsa_prepare_queries(%head_capacity: index) launch(%width: index, %heads: index, %head_stride: index, %span: buffer, %mapping: buffer, %input: buffer, %weight: buffer, %output: buffer)
@@ -20,7 +22,7 @@ kernel.decl @qsa_pool_blocks() launch(%tail_origin: offset, %epoch: buffer, %map
 
 kernel.decl @qsa_prepare_blocks() launch(%index_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %pooled: buffer, %weight: buffer, %arena: buffer)
 
-kernel.decl @qsa_publish_tail() launch(%tail_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
+kernel.decl @qsa_publish_tail() launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
 
 kernel.decl @qsa_append_kv() launch(%key_origin: offset, %value_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %keys: buffer, %values: buffer, %weight: buffer, %arena: buffer)
 
@@ -34,7 +36,7 @@ kernel.decl @flash_next_linear_q8(%output_capacity: index) launch(%input_width: 
 
 kernel.decl @gdn_project_alpha_beta() launch(%span_arg: buffer, %input_arg: buffer, %alpha_weight_arg: buffer, %beta_weight_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer)
 
-command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %output: buffer) {
+command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %output: buffer, %capture: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %capacity = config.get @flash_next.context_capacity : index
   %c4 = index.constant 4 : index
@@ -85,9 +87,14 @@ command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin:
   %output_weight = command.parameter %parameters, "blk.{}.attn_output.weight"[%layer] : view<2560x192x34xi8>
   kernel.launch @qsa_linear_bf16[%small_width](%small_width, %span, %input, %index_query_weight, %index_query_raw) : [index](index, buffer, buffer, view<512x2560xbf16>, buffer)
   kernel.launch @qsa_linear_bf16[%index_width](%index_width, %span, %input, %index_key_weight, %index_key_raw) : [index](index, buffer, buffer, view<128x2560xbf16>, buffer)
+  %capture_base = index.constant 771584 : offset
+  %ordinal = index.div %layer, %c4 : index
+  %capture_relative = index.scale %ordinal, %index_key_bytes : index, offset -> offset
+  %capture_prefix = index.add %capture_base, %capture_relative : offset
+  command.program.launch @flash_next_capture_inputs[%capture_prefix, %index_key_bytes](%span, %index_key_raw, %capture) : [offset, offset](buffer, buffer, buffer)
   kernel.launch @qsa_pool_blocks(%tail_origin, %span, %mapping, %rows, %index_key_raw, %arena, %pooled) : (offset, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qsa_prepare_blocks(%index_origin, %span, %mapping, %rows, %pooled, %index_key_norm, %arena) : (offset, buffer, buffer, buffer, buffer, view<128xf32>, buffer)
-  kernel.launch @qsa_publish_tail(%tail_origin, %span, %mapping, %rows, %index_key_raw, %arena) : (offset, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qsa_publish_tail(%tail_origin, %span, %rows, %index_key_raw, %arena) : (offset, buffer, buffer, buffer, buffer)
   kernel.launch @qsa_prepare_queries[%c4](%index_width, %c4, %index_width, %span, %mapping, %index_query_raw, %index_query_norm, %index_query) : [index](index, index, index, buffer, buffer, buffer, view<128xf32>, buffer)
   kernel.launch @flash_next_linear_q8[%query_gate_width](%hidden_width, %query_gate_width, %span, %input, %query_weight, %query_gate) : [index](index, index, buffer, buffer, view<12288x80x34xi8>, buffer)
   kernel.launch @flash_next_linear_q8[%small_width](%hidden_width, %small_width, %span, %input, %key_weight, %keys) : [index](index, index, buffer, buffer, view<512x80x34xi8>, buffer)
