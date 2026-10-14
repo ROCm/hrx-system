@@ -126,7 +126,7 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
   IREE_ASSERT_OK(iree_dynamic_library_load_from_memory(
       IREE_SV("embedded_symbols"),
       iree_make_const_byte_span(files[0].data, files[0].size),
-      IREE_DYNAMIC_LIBRARY_FLAG_NONE, iree_allocator_system(), &library));
+      IREE_DYNAMIC_LIBRARY_FLAG_NODELETE, iree_allocator_system(), &library));
   std::unique_ptr<iree_dynamic_library_t,
                   decltype(&iree_dynamic_library_release)>
       owned_library(library, iree_dynamic_library_release);
@@ -296,6 +296,33 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
   EXPECT_EQ(SymPdb, registered_info.SymType);
   EXPECT_TRUE(found_symbol);
   EXPECT_STREQ("private_times_two", symbol->Name);
+  EXPECT_TRUE(found_line);
+  EXPECT_THAT(filename,
+              ::testing::HasSubstr("dynamic_library_test_library.cc"));
+
+  // Resolve a different function after releasing the caller's PDB handle and
+  // library wrapper. NODELETE keeps the real image available to the session.
+  int (*next_value)() = nullptr;
+  IREE_ASSERT_OK(iree_dynamic_library_lookup_symbol(
+      library, "next_value", reinterpret_cast<void**>(&next_value)));
+  pdb.reset();
+  owned_library.reset();
+  EXPECT_FALSE(std::filesystem::exists(pdb_path.path()));
+  EXPECT_EQ(1, next_value());
+  const DWORD64 delayed_address = reinterpret_cast<DWORD64>(next_value);
+  iree_symbol_resolver_lock();
+  found_symbol = resolver->SymFromAddr(resolver->process, delayed_address,
+                                       &symbol_displacement, symbol);
+  found_line = resolver->SymGetLineFromAddr64(
+      resolver->process, delayed_address, &line_displacement, &line);
+  filename = found_line ? line.FileName : "";
+  iree_symbol_resolver_unlock();
+  std::cout << "native delayed PDB: found_symbol=" << found_symbol
+            << " found_line=" << found_line
+            << " path_exists=" << std::filesystem::exists(pdb_path.path())
+            << "\n";
+  EXPECT_TRUE(found_symbol);
+  EXPECT_STREQ("next_value", symbol->Name);
   EXPECT_TRUE(found_line);
   EXPECT_THAT(filename,
               ::testing::HasSubstr("dynamic_library_test_library.cc"));
