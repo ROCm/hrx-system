@@ -1,0 +1,121 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_q8_dot(%width: index, %input_origin: offset, %weight_origin: offset, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+amdgpu.target<gfx11-generic> @flash_next_mtp_wave32 {subgroup_size = 32}
+
+// The predictor normalizes the entire four-stream hidden row together. Its
+// embedding has an independent 2560-wide norm. GGUF already folded 1+gamma.
+kernel.def @flash_next_mtp_normalize() {
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%width_value: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %width = index.assume %width_value [range(%width_value, 2560, 10240), multiple_of(%width_value, 256)] : index
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<x> : index
+  %count = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %thread = kernel.workitem.id<x> : index
+    %origin = index.constant 0 : offset
+    %c8 = index.constant 8 : index
+    %c0 = index.constant 0 : index
+    %stride = index.constant 128 : index
+    %packets = index.div %width, %c8 : index
+    %inputs = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%packets]x8xbf16>
+    %weights = buffer.view %weight[%origin] : buffer -> view<[%packets]x8xf32>
+    %outputs = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%packets]x8xbf16>
+    %initial_sum = scalar.constant 0.0 : f32
+    %initial = vector.constant 0.0 : vector<8xf32>
+    %parts = scf.for %packet = [%thread to %packets step %stride](%prior = %initial : vector<8xf32>) -> (vector<8xf32>) {
+      %packed = vector.load %inputs[%token, %packet, %c0] : view<[%tokens]x[%packets]x8xbf16> -> vector<8xbf16>
+      %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+      %next = vector.fmaf %values, %values, %prior : vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %partial = vector.reduce<addf> %parts, %initial_sum : vector<8xf32>, f32
+    %sum = kernel.workgroup.reduce<addf> %partial : f32
+    %width_word = index.cast %width : index to i32
+    %width_float = scalar.uitofp %width_word : i32 to f32
+    %mean = scalar.divf %sum, %width_float : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %biased = scalar.addf %mean, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %biased : f32
+    %inverse_vector = vector.splat %inverse : vector<8xf32>
+    scf.for %packet = [%thread to %packets step %stride] {
+      %packed = vector.load %inputs[%token, %packet, %c0] : view<[%tokens]x[%packets]x8xbf16> -> vector<8xbf16>
+      %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+      %gamma = vector.load %weights[%packet, %c0] : view<[%packets]x8xf32> -> vector<8xf32>
+      %unit = vector.mulf %values, %inverse_vector : vector<8xf32>
+      %scaled = vector.mulf %unit, %gamma : vector<8xf32>
+      %rounded = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+      vector.store %rounded, %outputs[%token, %packet, %c0] : vector<8xbf16>, view<[%tokens]x[%packets]x8xbf16>
+    }
+  }
+  kernel.return
+}
+
+// Each serialized row is [embedding projection | hidden projection]. Compute
+// the embedding once and share it across all four hidden streams. Parameter
+// byte origins select the two halves without transposing or duplicating it.
+// Both projections round to BF16 before the BF16 residual addition.
+kernel.def target(@flash_next_mtp_wave32) @flash_next_mtp_fuse() {
+  %groups = index.constant 640 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %token = kernel.workgroup.id<y> : index
+  %count = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c32 = index.constant 32 : index
+    %width = index.constant 2560 : index
+    %row = index.madd %group, %c4, %wave : index
+    %row_bytes = index.constant 5440 : offset
+    %half_bytes = index.constant 2720 : offset
+    %embedding_origin = index.scale %row, %row_bytes : index, offset -> offset
+    %hidden_origin = index.add %embedding_origin, %half_bytes : offset
+    %input_row_bytes = index.constant 5120 : offset
+    %embedding_input = index.scale %token, %input_row_bytes : index, offset -> offset
+    %embedding_partial = func.call @flash_next_q8_dot(%width, %embedding_input, %embedding_origin, %lane, %c32, %embedding, %weight) : (index, offset, offset, index, index, buffer, buffer) -> (f32)
+    %embedding_sum = kernel.subgroup.reduce<addf> %embedding_partial : f32
+    %embedding_packed = scalar.fptrunc %embedding_sum : f32 to bf16
+    %embedding_value = scalar.extf %embedding_packed : bf16 to f32
+    %origin = index.constant 0 : offset
+    %outputs = buffer.view %output[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %leader = index.cmp eq, %lane, %c0 : index
+    scf.for %stream = [%c0 to %c4 step %c1] unroll {
+      %input_row = index.madd %token, %c4, %stream : index
+      %hidden_input = index.scale %input_row, %input_row_bytes : index, offset -> offset
+      %hidden_partial = func.call @flash_next_q8_dot(%width, %hidden_input, %hidden_origin, %lane, %c32, %hidden, %weight) : (index, offset, offset, index, index, buffer, buffer) -> (f32)
+      %hidden_sum = kernel.subgroup.reduce<addf> %hidden_partial : f32
+      %hidden_packed = scalar.fptrunc %hidden_sum : f32 to bf16
+      %hidden_value = scalar.extf %hidden_packed : bf16 to f32
+      %sum = scalar.addf %embedding_value, %hidden_value : f32
+      %packed = scalar.fptrunc %sum : f32 to bf16
+      scf.if %leader {
+        view.store %packed, %outputs[%token, %stream, %row] : bf16, view<[%tokens]x4x2560xbf16>
+      }
+    }
+  }
+  kernel.return
+}
