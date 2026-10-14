@@ -106,6 +106,61 @@ typedef struct loom_serve_text_media_span_t {
   uint32_t input_count;
 } loom_serve_text_media_span_t;
 
+// Source-visible fields describing one projected row in a media-bearing
+// epoch. Records are serialized as little-endian u32 words and ordered by the
+// first epoch followed by its optional continuation. The source maps the plan
+// record and relative input offset into its model-specific packet record.
+typedef enum loom_serve_text_media_epoch_field_e {
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_PLAN_INDEX = 0,
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_SPAN_INPUT_OFFSET = 1,
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_OFFSET = 2,
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_LENGTH = 3,
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_METADATA_OFFSET = 4,
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_METADATA_LENGTH = 5,
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_COUNT = 6,
+} loom_serve_text_media_epoch_field_t;
+
+// Source-written device packet geometry for a media-bearing epoch. Every
+// logical packet slot has this fixed record extent; projected row payloads
+// begin after the complete first/continuation packet capacities.
+enum {
+  LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES = 32,
+  LOOM_SERVE_TEXT_MEDIA_PACKET_FEATURE_ALIGNMENT = 16,
+};
+
+// One projected image range in a prepared request. The logical input range is
+// absolute within the request's complete token array. row_offset selects the
+// first corresponding entry from the owning media input's row table.
+typedef struct loom_serve_text_media_input_span_t {
+  // First logical request input replaced by a projected row.
+  uint32_t input_offset;
+  // Number of contiguous projected rows in this image occurrence.
+  uint32_t input_count;
+  // First projected row view in the owning media input.
+  uint32_t row_offset;
+  // Source-private metadata byte offset in the owning media input.
+  uint32_t metadata_offset;
+  // Source-private metadata byte length for this image occurrence.
+  uint32_t metadata_length;
+} loom_serve_text_media_input_span_t;
+
+// Immutable projected media borrowed by scheduled epochs. Spans are sorted,
+// nonoverlapping request ranges. Each row view and the metadata bytes remain
+// stable until every epoch that borrowed them completes or terminal model
+// retirement proves its transfers no longer retain host payloads.
+typedef struct loom_serve_text_media_input_t {
+  // Borrowed sorted image ranges in absolute request input coordinates.
+  const loom_serve_text_media_input_span_t* spans;
+  // Number of populated image ranges.
+  iree_host_size_t span_count;
+  // Borrowed projected row byte views in span order.
+  const iree_const_byte_span_t* rows;
+  // Number of populated projected row views.
+  iree_host_size_t row_count;
+  // Borrowed concatenated source-private image metadata.
+  iree_const_byte_span_t metadata;
+} loom_serve_text_media_input_t;
+
 // Immutable ordered image identity independent of request/body storage. The
 // compact reference-counted storage contains content and source-plan digests,
 // exact placement, detail, marker and feature-count semantics. An empty

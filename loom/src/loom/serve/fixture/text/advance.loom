@@ -2,7 +2,9 @@ config.decl @fixture.context : %value: index where [range(%value, 1, 262144)]
 
 config.decl @fixture.rows : %value: index where [range(%value, 1, 16)]
 
-config.decl @fixture.tokens : %value: index where [range(%value, 1, 262144)]
+config.decl @fixture.tokens : %value: index where [range(%value, 1, 524288)]
+
+config.decl @fixture.media : %value: index where [range(%value, 0, 1)]
 
 target.decl @target
 
@@ -105,7 +107,8 @@ kernel.def target(@target) @consume() {
     }
     %bias_value = view.load %bias[0] : view<1xi32> -> i32
     %capacity = config.get @fixture.tokens : index
-    %ids = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
+    %media_mode = config.get @fixture.media : index
+    %is_media = index.cmp ne, %media_mode, %c0 : index
     %c5_i32 = scalar.constant 5 : i32
     %c7_i32 = scalar.constant 7 : i32
     %c1_i32 = scalar.constant 1 : i32
@@ -114,7 +117,28 @@ kernel.def target(@target) @consume() {
     %final_h, %final_k = scf.for %i = [%c0 to %length step %c1](%h = %initial_h : i32, %k = %initial_k : i32) -> (i32, i32) {
       %input_position = index.add %input, %i : index
       %bounded_input = index.assume %input_position [lt(%input_position, %capacity)] : index
-      %token = view.load %ids[%bounded_input] : view<[%capacity]xi32> -> i32
+      %token = scf.if %is_media -> (i32) {
+        %records = buffer.view %tokens[%origin] : buffer -> view<[%capacity]x8xi32>
+        %stored = view.load %records[%bounded_input, 0] : view<[%capacity]x8xi32> -> i32
+        %feature_length = view.load %records[%bounded_input, 2] : view<[%capacity]x8xi32> -> i32
+        %has_feature = scalar.cmpi ne, %feature_length, %c0_i32 : i32
+        %value = scf.if %has_feature -> (i32) {
+          %feature_offset32 = view.load %records[%bounded_input, 1] : view<[%capacity]x8xi32> -> i32
+          %feature_offset64 = scalar.extui %feature_offset32 : i32 to i64
+          %bounded_feature_offset = scalar.assume %feature_offset64 [range(%feature_offset64, 0, 4294967295)] : i64
+          %feature_offset = index.cast %bounded_feature_offset : i64 to offset
+          %feature = buffer.view %tokens[%feature_offset] : buffer -> view<1xi32>
+          %projected = view.load %feature[0] : view<1xi32> -> i32
+          scf.yield %projected : i32
+        } else {
+          scf.yield %stored : i32
+        }
+        scf.yield %value : i32
+      } else {
+        %ids = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
+        %stored = view.load %ids[%bounded_input] : view<[%capacity]xi32> -> i32
+        scf.yield %stored : i32
+      }
       %scaled_h = scalar.muli %h, %c5_i32 : i32
       %with_token = scalar.addi %scaled_h, %token : i32
       %with_bias = scalar.addi %with_token, %bias_value : i32
@@ -207,6 +231,13 @@ kernel.def target(@target) @select() {
 }
 
 command.program.def public @advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {
+  %bias = command.parameter %weights, "bias" : view<1xi32>
+  kernel.launch @consume(%bias, %residual, %metadata, %origins, %arena, %tokens) : (view<1xi32>, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @select(%residual, %metadata, %origins, %arena, %outputs) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @advance_media() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {
   %bias = command.parameter %weights, "bias" : view<1xi32>
   kernel.launch @consume(%bias, %residual, %metadata, %origins, %arena, %tokens) : (view<1xi32>, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @select(%residual, %metadata, %origins, %arena, %outputs) : (buffer, buffer, buffer, buffer, buffer)

@@ -142,6 +142,11 @@ typedef struct loom_serve_text_span_t {
   const int32_t* token_ids;
   // Output selection and optional device proposal generation for this span.
   loom_serve_text_span_flags_t flags;
+  // Absolute first input in the owning request's prepared token array.
+  iree_host_size_t input_offset;
+  // Borrowed projected request media, or NULL for ordinary text/decode input;
+  // retained through successful completion or terminal model retirement.
+  const loom_serve_text_media_input_t* media;
 } loom_serve_text_span_t;
 
 // A pre-issued second plan borrowing rows from the first plan. Known spans
@@ -472,16 +477,19 @@ const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
 // chunks or promotes a selected first result to speculation, stopping
 // speculative work at EOS, output credit or context bound.
 //
-// Accepted inputs and publication metadata are copied before return. Caller
-// storage may be reused immediately, even on submission failure. Success
-// returns a borrowed work/feedback frontier, not completed row state. The model
-// owns one outstanding invocation and its parameter pin until complete_epoch.
-// The owner excludes other model mutation and retains the model through both
-// the asynchronous ALL wait and completion consumption. Failure preserves
-// accepted work and ownership for
-// outer model destruction; it never waits or releases pins from this call.
-// Weights, commands and VM state are reused. Elastic backing grows only when
-// activating new row/page ranges; resident work allocates no physical memory.
+// Accepted token IDs and publication metadata are copied before return. Their
+// caller storage may be reused immediately, even on submission failure. Media
+// descriptors and projected row payloads remain borrowed through successful
+// complete_epoch or, after terminal submission/readiness failure, through
+// model retirement. Success returns a borrowed work/feedback frontier, not
+// completed row state. The model owns one outstanding invocation and its
+// parameter pin until complete_epoch. The owner excludes other model mutation
+// and retains the model through both the asynchronous ALL wait and completion
+// consumption. Failure preserves accepted work and ownership for outer model
+// destruction; it never waits or releases pins from this call. Weights,
+// commands and VM state are reused. Elastic backing grows only when activating
+// new row/page ranges; ordinary resident text work allocates no physical
+// memory. A media epoch uses one exact transient workspace root.
 iree_status_t loom_serve_text_model_submit_epoch(
     loom_serve_text_model_t* model, iree_host_size_t shape_index,
     iree_host_size_t span_count, const loom_serve_text_span_t* spans,
