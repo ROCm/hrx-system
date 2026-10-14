@@ -15,7 +15,8 @@ kernel.decl @flash_next_mtp_commit() launch(%epoch: buffer, %origins: buffer, %t
 kernel.decl @qsa_publish_tail() launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
 
 // Four original spans leave holes, one is empty, and physical owner order
-// differs from packed order. Positions cross both page and index boundaries.
+// differs from packed order. Positions cross both page and index boundaries;
+// source coordinates deliberately differ from those causal positions.
 kernel.def @fixture() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -49,6 +50,14 @@ kernel.def @fixture() {
   %c1011_word = scalar.constant 1011 : i32
   %c1014_word = scalar.constant 1014 : i32
   %c150000_word = scalar.constant 150000 : i32
+  // Source positions 9, 23, 31, and 32 occupy the upper descriptor bits.
+  %source0 = scalar.constant 9216 : i32
+  %source1 = scalar.constant 23552 : i32
+  %source2 = scalar.constant 31744 : i32
+  %source3 = scalar.constant 32768 : i32
+  %selected0 = scalar.constant 9217 : i32
+  %selected2 = scalar.constant 31746 : i32
+  %selected3 = scalar.constant 32771 : i32
   view.store %c16_word, %input[0] : i32, view<83xi32>
   view.store %c4_word, %input[1] : i32, view<83xi32>
   view.store %c0_word, %input[2] : i32, view<83xi32>
@@ -56,22 +65,22 @@ kernel.def @fixture() {
   view.store %c0_word, %input[4] : i32, view<83xi32>
   view.store %c1_word, %input[5] : i32, view<83xi32>
   view.store %c7_word, %input[6] : i32, view<83xi32>
-  view.store %c0_word, %input[7] : i32, view<83xi32>
+  view.store %source0, %input[7] : i32, view<83xi32>
   view.store %c0_word, %input[8] : i32, view<83xi32>
   view.store %c23_word, %input[9] : i32, view<83xi32>
   view.store %c5_word, %input[10] : i32, view<83xi32>
   view.store %c5_word, %input[11] : i32, view<83xi32>
-  view.store %c1_word, %input[12] : i32, view<83xi32>
+  view.store %source1, %input[12] : i32, view<83xi32>
   view.store %c3_word, %input[13] : i32, view<83xi32>
   view.store %c63_word, %input[14] : i32, view<83xi32>
   view.store %c9_word, %input[15] : i32, view<83xi32>
   view.store %c2_word, %input[16] : i32, view<83xi32>
-  view.store %c2_word, %input[17] : i32, view<83xi32>
+  view.store %source2, %input[17] : i32, view<83xi32>
   view.store %c1_word, %input[18] : i32, view<83xi32>
   view.store %c66_word, %input[19] : i32, view<83xi32>
   view.store %c14_word, %input[20] : i32, view<83xi32>
   view.store %c9_word, %input[21] : i32, view<83xi32>
-  view.store %c3_word, %input[22] : i32, view<83xi32>
+  view.store %source3, %input[22] : i32, view<83xi32>
   view.store %c6_word, %compact[0] : i32, view<83xi32>
   view.store %c3_word, %compact[1] : i32, view<83xi32>
   view.store %c3_word, %compact[2] : i32, view<83xi32>
@@ -79,17 +88,17 @@ kernel.def @fixture() {
   view.store %c0_word, %compact[4] : i32, view<83xi32>
   view.store %c0_word, %compact[5] : i32, view<83xi32>
   view.store %c7_word, %compact[6] : i32, view<83xi32>
-  view.store %c0_word, %compact[7] : i32, view<83xi32>
+  view.store %selected0, %compact[7] : i32, view<83xi32>
   view.store %c3_word, %compact[8] : i32, view<83xi32>
   view.store %c63_word, %compact[9] : i32, view<83xi32>
   view.store %c2_word, %compact[10] : i32, view<83xi32>
   view.store %c2_word, %compact[11] : i32, view<83xi32>
-  view.store %c1_word, %compact[12] : i32, view<83xi32>
+  view.store %selected2, %compact[12] : i32, view<83xi32>
   view.store %c1_word, %compact[13] : i32, view<83xi32>
   view.store %c66_word, %compact[14] : i32, view<83xi32>
   view.store %c5_word, %compact[15] : i32, view<83xi32>
   view.store %c9_word, %compact[16] : i32, view<83xi32>
-  view.store %c2_word, %compact[17] : i32, view<83xi32>
+  view.store %selected3, %compact[17] : i32, view<83xi32>
   view.store %c1_word, %origins[0] : i32, view<16xi32>
   view.store %c9_word, %origins[1] : i32, view<16xi32>
   view.store %c14_word, %origins[2] : i32, view<16xi32>
