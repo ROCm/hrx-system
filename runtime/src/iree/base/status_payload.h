@@ -55,9 +55,11 @@ typedef struct iree_status_payload_message_t {
 
 // A platform-dependent stack trace (IREE_STATUS_PAYLOAD_TYPE_STACK_TRACE).
 typedef struct iree_status_payload_stack_trace_t {
+  // Payload ownership and formatting interface.
   iree_status_payload_t header;
-  uint16_t skip_frames;
+  // Number of frames captured in addresses.
   uint16_t frame_count;
+  // Captured instruction addresses, starting at the innermost frame.
   uintptr_t addresses[];
 } iree_status_payload_stack_trace_t;
 

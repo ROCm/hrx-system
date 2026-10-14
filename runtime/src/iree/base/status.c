@@ -418,14 +418,10 @@ static void iree_status_payload_message_formatter(
 }
 
 // Captures the current stack and attaches it to the status storage.
-// A count of |skip_frames| will be skipped from the top of the stack.
-// Setting |skip_frames|=0 will include the caller in the stack while
-// |skip_frames|=1 will exclude it.
 //
 // Defined in status_stack_trace.c.
 iree_status_t iree_status_attach_stack_trace(iree_status_t status,
-                                             iree_status_storage_t* storage,
-                                             int skip_frames);
+                                             iree_status_storage_t* storage);
 
 IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t
 iree_status_allocate(iree_status_code_t code, const char* file, uint32_t line,
@@ -473,12 +469,12 @@ iree_status_allocate(iree_status_code_t code, const char* file, uint32_t line,
 
   return iree_status_attach_stack_trace(
       (iree_status_t)((uintptr_t)storage | (code & IREE_STATUS_CODE_MASK)),
-      storage, /*skip_frames=*/1);
+      storage);
 #endif  // has any IREE_STATUS_FEATURES
 }
 
 IREE_MUST_USE_RESULT static iree_status_t iree_status_allocate_vf_impl(
-    iree_status_code_t code, const char* file, uint32_t line, int skip_frames,
+    iree_status_code_t code, const char* file, uint32_t line,
     const char* format, va_list varargs) {
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) == 0
   // Annotations disabled; ignore the format string/args.
@@ -552,7 +548,7 @@ IREE_MUST_USE_RESULT static iree_status_t iree_status_allocate_vf_impl(
 
   return iree_status_attach_stack_trace(
       (iree_status_t)((uintptr_t)storage | (code & IREE_STATUS_CODE_MASK)),
-      storage, skip_frames);
+      storage);
 #endif  // has IREE_STATUS_FEATURE_ANNOTATIONS
 }
 
@@ -561,8 +557,8 @@ iree_status_allocate_f(iree_status_code_t code, const char* file, uint32_t line,
                        const char* format, ...) {
   va_list varargs;
   va_start(varargs, format);
-  iree_status_t ret = iree_status_allocate_vf_impl(
-      code, file, line, /*skip_frames=*/2, format, varargs);
+  iree_status_t ret =
+      iree_status_allocate_vf_impl(code, file, line, format, varargs);
   va_end(varargs);
   return ret;
 }
@@ -570,8 +566,7 @@ iree_status_allocate_f(iree_status_code_t code, const char* file, uint32_t line,
 IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t
 iree_status_allocate_vf(iree_status_code_t code, const char* file,
                         uint32_t line, const char* format, va_list varargs) {
-  return iree_status_allocate_vf_impl(code, file, line, /*skip_frames=*/1,
-                                      format, varargs);
+  return iree_status_allocate_vf_impl(code, file, line, format, varargs);
 }
 
 IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t
