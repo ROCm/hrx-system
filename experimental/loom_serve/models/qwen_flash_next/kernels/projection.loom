@@ -1,0 +1,145 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+amdgpu.target<gfx11-generic> @flash_next_projection_wave32 {subgroup_size = 32}
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+command.program.decl @flash_next_gdn_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %rows: buffer, %qkv: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer)
+
+func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+// A subgroup contracts one original Q8_0 row and publishes BF16. The span
+// selects active token rows without changing the packed activation geometry.
+kernel.def target(@flash_next_projection_wave32) @flash_next_linear_q8(%output_width: index) {
+  %outputs = index.assume %output_width [range(%output_width, 4, 262144), multiple_of(%output_width, 4)] : index
+  %c4 = index.constant 4 : index
+  %groups = index.div %outputs, %c4 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%input_width: index, %output_width: index, %span_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %span, %input, %weight, %output = buffer.assume.noalias %span_arg, %input_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
+  %inputs = index.assume %input_width [range(%input_width, 32, 10240), multiple_of(%input_width, 32)] : index
+  %outputs = index.assume %output_width [range(%output_width, 4, 262144), multiple_of(%output_width, 4)] : index
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c4 = index.constant 4 : index
+    %stride = index.constant 32 : index
+    %c0 = index.constant 0 : index
+    %row = index.madd %group, %c4, %wave : index
+    %valid = index.cmp ult, %row, %outputs : index
+    scf.if %valid {
+      %partial = func.call @flash_next_q8_partial(%inputs, %token, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+      %sum = kernel.subgroup.reduce<addf> %partial : f32
+      %leader = index.cmp eq, %lane, %c0 : index
+      scf.if %leader {
+        %origin = index.constant 0 : offset
+        %view = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%outputs]xbf16>
+        %packed = scalar.fptrunc %sum : f32 to bf16
+        view.store %packed, %view[%token, %row] : bf16, view<[%tokens]x[%outputs]xbf16>
+      }
+    }
+  }
+  kernel.return
+}
+
+// The small alpha/beta projections share activation loads while preserving
+// their original F32 weights, accumulators, and output publications.
+kernel.def target(@flash_next_projection_wave32) @gdn_project_alpha_beta() {
+  %groups = index.constant 12 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %input_arg: buffer, %alpha_weight_arg: buffer, %beta_weight_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer) {
+  %span, %input, %alpha_weight, %beta_weight, %alpha, %beta = buffer.assume.noalias %span_arg, %input_arg, %alpha_weight_arg, %beta_weight_arg, %alpha_arg, %beta_arg : buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0_index = index.constant 0 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %stride = index.constant 256 : index
+    %width = index.constant 2560 : index
+    %head = index.madd %group, %c4, %wave : index
+    %first = index.mul %lane, %c8 : index
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x2560xbf16>
+    %alpha_weight_view = buffer.view %alpha_weight[%origin] : buffer -> view<48x2560xf32>
+    %beta_weight_view = buffer.view %beta_weight[%origin] : buffer -> view<48x2560xf32>
+    %alpha_view = buffer.view %alpha[%origin] : buffer -> view<[%tokens]x48xf32>
+    %beta_view = buffer.view %beta[%origin] : buffer -> view<[%tokens]x48xf32>
+    %c0 = scalar.constant 0.0 : f32
+    %c0v = vector.constant 0.0 : vector<8xf32>
+    %alpha_partial, %beta_partial = scf.for %channel = [%first to %width step %stride](%alpha_acc = %c0v : vector<8xf32>, %beta_acc = %c0v : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
+      %packed = vector.load %input_view[%token, %channel] : view<[%tokens]x2560xbf16> -> vector<8xbf16>
+      %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+      %alpha_values = vector.load %alpha_weight_view[%head, %channel] : view<48x2560xf32> -> vector<8xf32>
+      %beta_values = vector.load %beta_weight_view[%head, %channel] : view<48x2560xf32> -> vector<8xf32>
+      %next_alpha = vector.fmaf %values, %alpha_values, %alpha_acc : vector<8xf32>
+      %next_beta = vector.fmaf %values, %beta_values, %beta_acc : vector<8xf32>
+      scf.yield %next_alpha, %next_beta : vector<8xf32>, vector<8xf32>
+    }
+    %alpha_lane = vector.reduce<addf> %alpha_partial, %c0 : vector<8xf32>, f32
+    %beta_lane = vector.reduce<addf> %beta_partial, %c0 : vector<8xf32>, f32
+    %alpha_result = kernel.subgroup.reduce<addf> %alpha_lane : f32
+    %beta_result = kernel.subgroup.reduce<addf> %beta_lane : f32
+    %leader = index.cmp eq, %lane, %c0_index : index
+    scf.if %leader {
+      view.store %alpha_result, %alpha_view[%token, %head] : f32, view<[%tokens]x48xf32>
+      view.store %beta_result, %beta_view[%token, %head] : f32, view<[%tokens]x48xf32>
+    }
+  }
+  kernel.return
+}
+
+// Original checkpoint projections surround the packed state command. Input
+// and output have the model's hidden width; state/history advance only through
+// the active span. Scratch activation publications remain BF16 except for the
+// small per-head alpha/beta vectors and Q/K inverse norms.
+command.program.def public @flash_next_gdn_attention(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %input: buffer, %rows: buffer, %arena: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %hidden = index.constant 2560 : index
+  %conv_width = index.constant 10240 : index
+  %value_width = index.constant 6144 : index
+  %qkv_row_bytes = index.constant 20480 : offset
+  %value_row_bytes = index.constant 12288 : offset
+  %scalar_row_bytes = index.constant 192 : offset
+  %qkv_bytes = index.scale %tokens, %qkv_row_bytes : index, offset -> offset
+  %value_bytes = index.scale %tokens, %value_row_bytes : index, offset -> offset
+  %scalar_bytes = index.scale %tokens, %scalar_row_bytes : index, offset -> offset
+  %qkv = buffer.alloca<global> align(256) %qkv_bytes : buffer
+  %z = buffer.alloca<global> align(256) %value_bytes : buffer
+  %alpha = buffer.alloca<global> align(256) %scalar_bytes : buffer
+  %beta = buffer.alloca<global> align(256) %scalar_bytes : buffer
+  %gated = buffer.alloca<global> align(256) %value_bytes : buffer
+  %qkv_weight = command.parameter %parameters, "blk.{}.attn_qkv.weight"[%layer] : view<10240x80x34xi8>
+  %z_weight = command.parameter %parameters, "blk.{}.attn_gate.weight"[%layer] : view<6144x80x34xi8>
+  %alpha_weight = command.parameter %parameters, "blk.{}.ssm_alpha.weight"[%layer] : view<48x2560xf32>
+  %beta_weight = command.parameter %parameters, "blk.{}.ssm_beta.weight"[%layer] : view<48x2560xf32>
+  %output_weight = command.parameter %parameters, "blk.{}.ssm_out.weight"[%layer] : view<2560x192x34xi8>
+  kernel.launch @flash_next_linear_q8[%conv_width](%hidden, %conv_width, %span, %input, %qkv_weight, %qkv) : [index](index, index, buffer, buffer, view<10240x80x34xi8>, buffer)
+  kernel.launch @flash_next_linear_q8[%value_width](%hidden, %value_width, %span, %input, %z_weight, %z) : [index](index, index, buffer, buffer, view<6144x80x34xi8>, buffer)
+  kernel.launch @gdn_project_alpha_beta(%span, %input, %alpha_weight, %beta_weight, %alpha, %beta) : (buffer, buffer, view<48x2560xf32>, view<48x2560xf32>, buffer, buffer)
+  command.program.launch @flash_next_gdn_state[%layer, %state_origin](%parameters, %span, %rows, %qkv, %z, %alpha, %beta, %arena, %gated) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_linear_q8[%hidden](%value_width, %hidden, %span, %gated, %output_weight, %output) : [index](index, index, buffer, buffer, view<2560x192x34xi8>, buffer)
+  command.return
+}
