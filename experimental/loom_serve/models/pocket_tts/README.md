@@ -35,24 +35,28 @@ The first waveform block includes a 120-sample linear fade. Its normalized
 latent is retained before applying the checkpoint's mean and scale for Mimi.
 Voice and text phases leave the waveform output untouched.
 
-State is 17,033,896 bytes, initially zero. Byte offsets 0, 4, and 8 hold the
+State is initially zero. Byte offsets 0, 4, and 8 hold the
 I32 absolute FlowLM, decoder, and encoder positions. Offset 16 holds the
 32-element normalized latent; offset 144 begins the six FlowLM key/value pairs.
 Subsequent ranges hold the independent Mimi caches and convolution histories.
+`layout.loom` computes the shared prefix and complete state sizes from context
+capacity: `144 + 49152 * capacity` and `4450984 + 49152 * capacity` bytes.
 Command-local scratch is allocated through `buffer.alloca`; command planning
 owns its reuse and lifetime.
 
-This numerical configuration has space for 256 total FlowLM positions,
-including BOS, voice, text, and generated frames. The caller must keep the
-position below 256 before every phase; a full context is an admission or
-termination boundary, never permission to discard earlier FlowLM positions.
-Encoder and decoder calls require their own position at most 2,032, so the
-complete 16-position block fits the rotary table. Mimi retains its actual
-250-position causal window independently of those absolute positions.
+`pocket.context_capacity` selects space for 1–65,536 total FlowLM positions,
+including BOS, voice, text, and generated frames. The caller reserves their
+combined extent and keeps the position below capacity before every phase.
+A full context is an admission or termination boundary, never permission to
+discard earlier FlowLM positions. `pocket.rotary_capacity` selects 16–1,048,576
+absolute positions and must cover the selected FlowLM context and each codec's
+16-position blocks. Mimi retains its actual 250-position causal window
+independently of those absolute positions.
 
 The separate rotary archive contains F32 `rotary.cosine` and `rotary.sine`,
-each shaped `[2048,32]`. Angles use a 64-channel head and maximum period 10,000,
-with F32 rounding at the frequency and angle boundaries. Cosine and sine are
+each shaped `[pocket.rotary_capacity,32]`. Angles use a 64-channel head and
+maximum period 10,000, with F32 rounding at the frequency and angle boundaries.
+Cosine and sine are
 evaluated at absolute positions; cache-slot wrapping never changes the angle.
 
 `pocket.threads` selects 1–256 workitems per workgroup. The complete numerical
@@ -73,9 +77,11 @@ pointwise maps, and recurrent state. Concrete model shapes wrap shared template
 bodies, keeping shape-dependent indexing constant in device code. `dispatch.loom`
 owns element assignment independently of any arithmetic family.
 
-The checkpoint-free tests use closed-form projection, strided-convolution, and
-normalization oracles. Streaming checks observe consecutive outputs and retained
-history, including startup replication, overlap bias, latent recurrence, and
+The checkpoint-free tests use closed-form projection, strided-convolution,
+normalization, and attention oracles. Attention checks retain positions beyond
+256, mask future slots, and reach the last configured absolute rotary row.
+Streaming checks observe consecutive outputs and retained history, including
+startup replication, overlap bias, latent recurrence, and
 fade behavior. Both hardware and memory-access-checking profiles run with:
 
 ```sh

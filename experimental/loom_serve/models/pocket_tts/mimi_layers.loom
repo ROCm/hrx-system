@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+config.decl @pocket.rotary_capacity : %value: index where [range(%value, 16, 1048576)]
+
 // Encoder and decoder share the 250-position causal-window contract. Their
 // state and precision are independent: encoder projections accumulate in F64,
 // decoder projections in F32. Both use F64 attention reductions.
@@ -30,6 +32,7 @@ template.decl @pocket.mimi_decoder_layer(%layer: index, %cache_origin: offset, %
 template.decl @pocket.mimi_encoder_layer(%layer: index, %cache_origin: offset, %phase: buffer, %rotary: buffer, %state: buffer, %input: view<512x16xf32>) -> (view<512x16xf32>)
 
 template.def<@pocket.mimi_encoder_layer> @pocket_mimi_encoder_layer(%layer: index, %cache_origin: offset, %phase: buffer, %rotary: buffer, %state: buffer, %input: view<512x16xf32>) -> (view<512x16xf32>) {
+  %rotary_capacity = config.get @pocket.rotary_capacity : index
   %tensor_offset = index.constant 8 : offset
   %tensor = buffer.view %state[%tensor_offset] : buffer -> view<1xi32>
   %normalization_storage_bytes = index.constant 32768 : offset
@@ -55,9 +58,9 @@ template.def<@pocket.mimi_encoder_layer> @pocket_mimi_encoder_layer(%layer: inde
   %projection_outputs = index.constant 1536 : index
   %projection_times = index.constant 16 : index
   kernel.launch @pocket.project_f64[%projection_outputs, %projection_times](%projection_inputs, %projection_outputs, %projection_times, %normalization_tensor, %projection_parameter, %projection_parameter, %projection_tensor) : [index, index](index, index, index, view<512x16xf32>, view<1536x512xbf16>, view<1536x512xbf16>, view<1536x16xf32>)
-  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<2048x32xf32>
-  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<2048x32xf32>
-  kernel.launch @pocket.rotary_cache_512x16_c265_p249(%projection_tensor, %attention_tensor_3, %attention_tensor, %attention_tensor_2, %tensor, %attention_parameter, %attention_parameter_2) : (view<1536x16xf32>, view<512x16xf32>, view<265x512xf32>, view<265x512xf32>, view<1xi32>, view<2048x32xf32>, view<2048x32xf32>)
+  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<[%rotary_capacity]x32xf32>
+  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<[%rotary_capacity]x32xf32>
+  kernel.launch @pocket.rotary_cache_512x16_c265_p249(%projection_tensor, %attention_tensor_3, %attention_tensor, %attention_tensor_2, %tensor, %attention_parameter, %attention_parameter_2) : (view<1536x16xf32>, view<512x16xf32>, view<265x512xf32>, view<265x512xf32>, view<1xi32>, view<[%rotary_capacity]x32xf32>, view<[%rotary_capacity]x32xf32>)
   %attention_storage_2_bytes = index.constant 135680 : offset
   %attention_storage_2 = buffer.alloca<global> align(16) %attention_storage_2_bytes : buffer
   %attention_tensor_4 = buffer.view %attention_storage_2[%normalization_tensor_offset] : buffer -> view<128x265xf32>
@@ -102,6 +105,7 @@ template.def<@pocket.mimi_encoder_layer> @pocket_mimi_encoder_layer(%layer: inde
 }
 
 template.def<@pocket.mimi_decoder_layer> @pocket_mimi_decoder_layer(%layer: index, %cache_origin: offset, %phase: buffer, %rotary: buffer, %state: buffer, %input: view<512x16xf32>) -> (view<512x16xf32>) {
+  %rotary_capacity = config.get @pocket.rotary_capacity : index
   %tensor_offset = index.constant 4 : offset
   %tensor = buffer.view %state[%tensor_offset] : buffer -> view<1xi32>
   %normalization_storage_bytes = index.constant 32768 : offset
@@ -127,9 +131,9 @@ template.def<@pocket.mimi_decoder_layer> @pocket_mimi_decoder_layer(%layer: inde
   %projection_outputs = index.constant 1536 : index
   %projection_times = index.constant 16 : index
   kernel.launch @pocket.project_f32[%projection_outputs, %projection_times](%projection_inputs, %projection_outputs, %projection_times, %normalization_tensor, %projection_parameter, %projection_parameter, %projection_tensor) : [index, index](index, index, index, view<512x16xf32>, view<1536x512xbf16>, view<1536x512xbf16>, view<1536x16xf32>)
-  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<2048x32xf32>
-  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<2048x32xf32>
-  kernel.launch @pocket.rotary_cache_512x16_c265_p249(%projection_tensor, %attention_tensor_3, %attention_tensor, %attention_tensor_2, %tensor, %attention_parameter, %attention_parameter_2) : (view<1536x16xf32>, view<512x16xf32>, view<265x512xf32>, view<265x512xf32>, view<1xi32>, view<2048x32xf32>, view<2048x32xf32>)
+  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<[%rotary_capacity]x32xf32>
+  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<[%rotary_capacity]x32xf32>
+  kernel.launch @pocket.rotary_cache_512x16_c265_p249(%projection_tensor, %attention_tensor_3, %attention_tensor, %attention_tensor_2, %tensor, %attention_parameter, %attention_parameter_2) : (view<1536x16xf32>, view<512x16xf32>, view<265x512xf32>, view<265x512xf32>, view<1xi32>, view<[%rotary_capacity]x32xf32>, view<[%rotary_capacity]x32xf32>)
   %attention_storage_2_bytes = index.constant 135680 : offset
   %attention_storage_2 = buffer.alloca<global> align(16) %attention_storage_2_bytes : buffer
   %attention_tensor_4 = buffer.view %attention_storage_2[%normalization_tensor_offset] : buffer -> view<128x265xf32>

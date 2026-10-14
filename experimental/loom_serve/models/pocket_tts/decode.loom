@@ -4,10 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+template.decl @pocket.flow_cache_origin(%layer: index) -> (offset)
+
+template.decl @pocket.codec_state_origin(%relative: offset) -> (offset)
+
 // One normalized FlowLM step followed by one 80 ms Mimi waveform block.
 // Request contains 32 F32 noise values and F32 flow times 0 and 1. Output contains
 // one F32 EOS score followed by 1,920 F32 mono samples at 24 kHz.
-// The caller bounds FlowLM position below 256 and decoder position below 2,033.
+// The caller bounds absolute positions by the selected context and rotary capacities.
 kernel.decl @pocket.advance_1() launch(%position_storage: buffer)
 
 kernel.decl @pocket.advance_16() launch(%position_storage: buffer)
@@ -126,21 +130,27 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   %projection_times = index.constant 1 : index
   kernel.launch @pocket.project_f64[%projection_outputs, %projection_times](%projection_inputs, %projection_outputs, %projection_times, %previous_latent_tensor_3, %projection_parameter, %projection_parameter, %projection_tensor) : [index, index](index, index, index, view<32x1xf32>, view<1024x32xbf16>, view<1024x32xbf16>, view<1024x1xf32>)
   %flow_layer_0 = index.constant 0 : index
-  %flow_cache_0 = index.constant 144 : offset
+  %flow_cache_0_layer = index.constant 0 : index
+  %flow_cache_0 = template.apply<@pocket.flow_cache_origin>(%flow_cache_0_layer) : (index) -> (offset)
   %flow_result = template.apply<@pocket.flow_layer>(%flow_layer_0, %flow_cache_0, %backbone, %rotary, %state, %projection_tensor) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
-  %flow_cache_1 = index.constant 2097296 : offset
+  %flow_cache_1_layer = index.constant 1 : index
+  %flow_cache_1 = template.apply<@pocket.flow_cache_origin>(%flow_cache_1_layer) : (index) -> (offset)
   %flow_result_2 = template.apply<@pocket.flow_layer>(%projection_times, %flow_cache_1, %backbone, %rotary, %state, %flow_result) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
   %flow_layer_2 = index.constant 2 : index
-  %flow_cache_2 = index.constant 4194448 : offset
+  %flow_cache_2_layer = index.constant 2 : index
+  %flow_cache_2 = template.apply<@pocket.flow_cache_origin>(%flow_cache_2_layer) : (index) -> (offset)
   %flow_result_3 = template.apply<@pocket.flow_layer>(%flow_layer_2, %flow_cache_2, %backbone, %rotary, %state, %flow_result_2) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
   %flow_layer_3 = index.constant 3 : index
-  %flow_cache_3 = index.constant 6291600 : offset
+  %flow_cache_3_layer = index.constant 3 : index
+  %flow_cache_3 = template.apply<@pocket.flow_cache_origin>(%flow_cache_3_layer) : (index) -> (offset)
   %flow_result_4 = template.apply<@pocket.flow_layer>(%flow_layer_3, %flow_cache_3, %backbone, %rotary, %state, %flow_result_3) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
   %flow_layer_4 = index.constant 4 : index
-  %flow_cache_4 = index.constant 8388752 : offset
+  %flow_cache_4_layer = index.constant 4 : index
+  %flow_cache_4 = template.apply<@pocket.flow_cache_origin>(%flow_cache_4_layer) : (index) -> (offset)
   %flow_result_5 = template.apply<@pocket.flow_layer>(%flow_layer_4, %flow_cache_4, %backbone, %rotary, %state, %flow_result_4) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
   %flow_layer_5 = index.constant 5 : index
-  %flow_cache_5 = index.constant 10485904 : offset
+  %flow_cache_5_layer = index.constant 5 : index
+  %flow_cache_5 = template.apply<@pocket.flow_cache_origin>(%flow_cache_5_layer) : (index) -> (offset)
   %flow_result_6 = template.apply<@pocket.flow_layer>(%flow_layer_5, %flow_cache_5, %backbone, %rotary, %state, %flow_result_5) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
   %tensor = buffer.view %state[%previous_latent_tensor_3_offset] : buffer -> view<1xi32>
   kernel.launch @pocket.advance_1(%tensor) : (view<1xi32>)
@@ -260,19 +270,23 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   %transpose_convolution_storage_2_bytes = index.constant 32768 : offset
   %transpose_convolution_storage_2 = buffer.alloca<global> align(16) %transpose_convolution_storage_2_bytes : buffer
   %transpose_convolution_tensor_2 = buffer.view %transpose_convolution_storage_2[%previous_latent_tensor_3_offset] : buffer -> view<512x16xf32>
-  %transpose_convolution_tensor_3_offset = index.constant 12583056 : offset
+  %transpose_convolution_tensor_3_offset_relative = index.constant 0 : offset
+  %transpose_convolution_tensor_3_offset = template.apply<@pocket.codec_state_origin>(%transpose_convolution_tensor_3_offset_relative) : (offset) -> (offset)
   %transpose_convolution_tensor_3 = buffer.view %state[%transpose_convolution_tensor_3_offset] : buffer -> view<512x16xf32>
   kernel.launch @pocket.transpose_convolution_512x512_t1_g1x1_s16(%projection_tensor_11, %transpose_convolution_parameter, %transpose_convolution_tensor) : (view<512x1xf32>, view<512x1x32xbf16>, view<512x32xf32>)
   kernel.launch @pocket.overlap_512x16_h16(%transpose_convolution_tensor, %transpose_convolution_tensor_3, %transpose_convolution_tensor_2) : (view<512x32xf32>, view<512x16xf32>, view<512x16xf32>)
-  %mimi_cache_0 = index.constant 12615824 : offset
+  %mimi_cache_0_relative = index.constant 32768 : offset
+  %mimi_cache_0 = template.apply<@pocket.codec_state_origin>(%mimi_cache_0_relative) : (offset) -> (offset)
   %mimi_result = template.apply<@pocket.mimi_decoder_layer>(%flow_layer_0, %mimi_cache_0, %phase, %rotary, %state, %transpose_convolution_tensor_2) : (index, offset, buffer, buffer, buffer, view<512x16xf32>) -> (view<512x16xf32>)
-  %mimi_cache_1 = index.constant 13701264 : offset
+  %mimi_cache_1_relative = index.constant 1118208 : offset
+  %mimi_cache_1 = template.apply<@pocket.codec_state_origin>(%mimi_cache_1_relative) : (offset) -> (offset)
   %mimi_result_2 = template.apply<@pocket.mimi_decoder_layer>(%projection_times, %mimi_cache_1, %phase, %rotary, %state, %mimi_result) : (index, offset, buffer, buffer, buffer, view<512x16xf32>) -> (view<512x16xf32>)
   %tensor_6 = buffer.view %state[%previous_latent_tensor_2_offset] : buffer -> view<1xi32>
   kernel.launch @pocket.advance_16(%tensor_6) : (view<1xi32>)
   %convolution_parameter = command.parameter %phase, "mimi.decoder.model.0.conv.weight" : view<512x512x7xbf16>
   %convolution_parameter_2 = command.parameter %phase, "mimi.decoder.model.0.conv.bias" : view<512xbf16>
-  %convolution_tensor_offset = index.constant 14786704 : offset
+  %convolution_tensor_offset_relative = index.constant 2203648 : offset
+  %convolution_tensor_offset = template.apply<@pocket.codec_state_origin>(%convolution_tensor_offset_relative) : (offset) -> (offset)
   %convolution_tensor = buffer.view %state[%convolution_tensor_offset] : buffer -> view<512x6xf32>
   %convolution_storage_bytes = index.constant 45056 : offset
   %convolution_storage = buffer.alloca<global> align(16) %convolution_storage_bytes : buffer
@@ -291,7 +305,8 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   %transpose_convolution_storage_4_bytes = index.constant 98304 : offset
   %transpose_convolution_storage_4 = buffer.alloca<global> align(16) %transpose_convolution_storage_4_bytes : buffer
   %transpose_convolution_tensor_5 = buffer.view %transpose_convolution_storage_4[%previous_latent_tensor_3_offset] : buffer -> view<256x96xf32>
-  %transpose_convolution_tensor_6_offset = index.constant 14798992 : offset
+  %transpose_convolution_tensor_6_offset_relative = index.constant 2215936 : offset
+  %transpose_convolution_tensor_6_offset = template.apply<@pocket.codec_state_origin>(%transpose_convolution_tensor_6_offset_relative) : (offset) -> (offset)
   %transpose_convolution_tensor_6 = buffer.view %state[%transpose_convolution_tensor_6_offset] : buffer -> view<256x6xf32>
   %transpose_convolution_parameter_3 = command.parameter %phase, "mimi.decoder.model.2.convtr.bias" : view<256xbf16>
   kernel.launch @pocket.transpose_convolution_bias_512x256_t16_g512x256_s6(%activation_tensor_4, %transpose_convolution_parameter_2, %transpose_convolution_tensor_4, %transpose_convolution_parameter_3) : (view<512x16xf32>, view<512x256x12xbf16>, view<256x102xf32>, view<256xbf16>)
@@ -301,7 +316,8 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   kernel.launch @pocket.elu_24576(%transpose_convolution_tensor_5, %activation_tensor_5) : (view<256x96xf32>, view<256x96xf32>)
   %convolution_parameter_3 = command.parameter %phase, "mimi.decoder.model.3.block.1.conv.weight" : view<128x256x3xbf16>
   %convolution_parameter_4 = command.parameter %phase, "mimi.decoder.model.3.block.1.conv.bias" : view<128xbf16>
-  %convolution_tensor_4_offset = index.constant 14805136 : offset
+  %convolution_tensor_4_offset_relative = index.constant 2222080 : offset
+  %convolution_tensor_4_offset = template.apply<@pocket.codec_state_origin>(%convolution_tensor_4_offset_relative) : (offset) -> (offset)
   %convolution_tensor_4 = buffer.view %state[%convolution_tensor_4_offset] : buffer -> view<256x2xf32>
   %convolution_storage_3_bytes = index.constant 100352 : offset
   %convolution_storage_3 = buffer.alloca<global> align(16) %convolution_storage_3_bytes : buffer
@@ -332,7 +348,8 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   %transpose_convolution_storage_6_bytes = index.constant 245760 : offset
   %transpose_convolution_storage_6 = buffer.alloca<global> align(16) %transpose_convolution_storage_6_bytes : buffer
   %transpose_convolution_tensor_8 = buffer.view %transpose_convolution_storage_6[%previous_latent_tensor_3_offset] : buffer -> view<128x480xf32>
-  %transpose_convolution_tensor_9_offset = index.constant 14807184 : offset
+  %transpose_convolution_tensor_9_offset_relative = index.constant 2224128 : offset
+  %transpose_convolution_tensor_9_offset = template.apply<@pocket.codec_state_origin>(%transpose_convolution_tensor_9_offset_relative) : (offset) -> (offset)
   %transpose_convolution_tensor_9 = buffer.view %state[%transpose_convolution_tensor_9_offset] : buffer -> view<128x5xf32>
   %transpose_convolution_parameter_5 = command.parameter %phase, "mimi.decoder.model.5.convtr.bias" : view<128xbf16>
   kernel.launch @pocket.transpose_convolution_bias_256x128_t96_g256x128_s5(%activation_tensor_7, %transpose_convolution_parameter_4, %transpose_convolution_tensor_7, %transpose_convolution_parameter_5) : (view<256x96xf32>, view<256x128x10xbf16>, view<128x485xf32>, view<128xbf16>)
@@ -342,7 +359,8 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   kernel.launch @pocket.elu_61440(%transpose_convolution_tensor_8, %activation_tensor_8) : (view<128x480xf32>, view<128x480xf32>)
   %convolution_parameter_7 = command.parameter %phase, "mimi.decoder.model.6.block.1.conv.weight" : view<64x128x3xbf16>
   %convolution_parameter_8 = command.parameter %phase, "mimi.decoder.model.6.block.1.conv.bias" : view<64xbf16>
-  %convolution_tensor_8_offset = index.constant 14809744 : offset
+  %convolution_tensor_8_offset_relative = index.constant 2226688 : offset
+  %convolution_tensor_8_offset = template.apply<@pocket.codec_state_origin>(%convolution_tensor_8_offset_relative) : (offset) -> (offset)
   %convolution_tensor_8 = buffer.view %state[%convolution_tensor_8_offset] : buffer -> view<128x2xf32>
   %convolution_storage_6_bytes = index.constant 246784 : offset
   %convolution_storage_6 = buffer.alloca<global> align(16) %convolution_storage_6_bytes : buffer
@@ -373,7 +391,8 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   %transpose_convolution_storage_8_bytes = index.constant 491520 : offset
   %transpose_convolution_storage_8 = buffer.alloca<global> align(16) %transpose_convolution_storage_8_bytes : buffer
   %transpose_convolution_tensor_11 = buffer.view %transpose_convolution_storage_8[%previous_latent_tensor_3_offset] : buffer -> view<64x1920xf32>
-  %transpose_convolution_tensor_12_offset = index.constant 14810768 : offset
+  %transpose_convolution_tensor_12_offset_relative = index.constant 2227712 : offset
+  %transpose_convolution_tensor_12_offset = template.apply<@pocket.codec_state_origin>(%transpose_convolution_tensor_12_offset_relative) : (offset) -> (offset)
   %transpose_convolution_tensor_12 = buffer.view %state[%transpose_convolution_tensor_12_offset] : buffer -> view<64x4xf32>
   %transpose_convolution_parameter_7 = command.parameter %phase, "mimi.decoder.model.8.convtr.bias" : view<64xbf16>
   kernel.launch @pocket.transpose_convolution_bias_128x64_t480_g128x64_s4(%activation_tensor_10, %transpose_convolution_parameter_6, %transpose_convolution_tensor_10, %transpose_convolution_parameter_7) : (view<128x480xf32>, view<128x64x8xbf16>, view<64x1924xf32>, view<64xbf16>)
@@ -383,7 +402,8 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   kernel.launch @pocket.elu_122880(%transpose_convolution_tensor_11, %activation_tensor_11) : (view<64x1920xf32>, view<64x1920xf32>)
   %convolution_parameter_11 = command.parameter %phase, "mimi.decoder.model.9.block.1.conv.weight" : view<32x64x3xbf16>
   %convolution_parameter_12 = command.parameter %phase, "mimi.decoder.model.9.block.1.conv.bias" : view<32xbf16>
-  %convolution_tensor_12_offset = index.constant 14811792 : offset
+  %convolution_tensor_12_offset_relative = index.constant 2228736 : offset
+  %convolution_tensor_12_offset = template.apply<@pocket.codec_state_origin>(%convolution_tensor_12_offset_relative) : (offset) -> (offset)
   %convolution_tensor_12 = buffer.view %state[%convolution_tensor_12_offset] : buffer -> view<64x2xf32>
   %convolution_storage_9_bytes = index.constant 492032 : offset
   %convolution_storage_9 = buffer.alloca<global> align(16) %convolution_storage_9_bytes : buffer
@@ -408,7 +428,8 @@ command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %
   kernel.launch @pocket.elu_122880(%residual_tensor_3, %activation_tensor_13) : (view<64x1920xf32>, view<64x1920xf32>)
   %convolution_parameter_15 = command.parameter %phase, "mimi.decoder.model.11.conv.weight" : view<1x64x3xbf16>
   %convolution_parameter_16 = command.parameter %phase, "mimi.decoder.model.11.conv.bias" : view<1xbf16>
-  %convolution_tensor_16_offset = index.constant 14812304 : offset
+  %convolution_tensor_16_offset_relative = index.constant 2229248 : offset
+  %convolution_tensor_16_offset = template.apply<@pocket.codec_state_origin>(%convolution_tensor_16_offset_relative) : (offset) -> (offset)
   %convolution_tensor_16 = buffer.view %state[%convolution_tensor_16_offset] : buffer -> view<64x2xf32>
   %convolution_storage_12 = buffer.alloca<global> align(16) %convolution_storage_9_bytes : buffer
   %convolution_tensor_17 = buffer.view %convolution_storage_12[%previous_latent_tensor_3_offset] : buffer -> view<64x1922xf32>

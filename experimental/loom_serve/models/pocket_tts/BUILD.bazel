@@ -75,3 +75,23 @@ loom_test(
         AMDGPU_ACCESS_PROFILE,
     ],
 )
+
+loom_test(
+    name = "attention_test",
+    srcs = [
+        "attention.loom",
+        "dispatch.loom",
+        "normalization.loom",
+        "tests/attention.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.context_capacity": "320",
+        "pocket.rotary_capacity": "4096",
+        "pocket.threads": "128",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)

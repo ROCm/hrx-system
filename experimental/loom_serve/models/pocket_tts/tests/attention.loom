@@ -1,0 +1,105 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+kernel.decl @pocket.attention_scores_flow() launch(%query: buffer, %keys: buffer, %position: buffer, %scores: buffer)
+
+kernel.decl @pocket.softmax_flow() launch(%scores: buffer, %probabilities: buffer)
+
+kernel.decl @pocket.attention_values_flow() launch(%values: buffer, %probabilities: buffer, %position: buffer, %output: buffer)
+
+kernel.decl @pocket.rotary_cache_512x16_c265_p249() launch(%input: buffer, %query: buffer, %keys: buffer, %values: buffer, %position: buffer, %cosine: buffer, %sine: buffer)
+
+// Zero queries and keys give uniform attention over exactly the populated
+// prefix. Values at position p and channel c are p - 1 + c/1024, so the
+// mean is last_position/2 - 1 + c/1024. Unpopulated future slots are finite
+// but nonzero, making an omitted causal mask observable.
+check.case public @causal_prefix {
+  %query = check.generate.fill value(0.0) : tensor<1024x1xf32>
+  %keys = check.generate.fill value(0.0) : tensor<320x1024xf32>
+  %values = check.generate.iota offset(-1.0) step(0.0009765625) : tensor<320x1024xf32>
+  %position = check.generate.fill value(127) : tensor<1xi32>
+  %scores = check.generate.fill value(-123.0) : tensor<16x320xf32>
+  %probabilities = check.generate.fill value(-123.0) : tensor<16x320xf32>
+  %output = check.generate.fill value(-123.0) : tensor<1024x1xf32>
+  %expected = check.generate.iota offset(62.5) step(0.0009765625) : tensor<1024x1xf32>
+  kernel.launch @pocket.attention_scores_flow(%query, %keys, %position, %scores) : (tensor<1024x1xf32>, tensor<320x1024xf32>, tensor<1xi32>, tensor<16x320xf32>)
+  kernel.launch @pocket.softmax_flow(%scores, %probabilities) : (tensor<16x320xf32>, tensor<16x320xf32>)
+  kernel.launch @pocket.attention_values_flow(%values, %probabilities, %position, %output) : (tensor<320x1024xf32>, tensor<16x320xf32>, tensor<1xi32>, tensor<1024x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0) nan(different) : tensor<1024x1xf32>
+  check.return
+}
+
+// FlowLM retains every earlier position when the context extends beyond 256.
+// A 256-position sliding window would raise this mean by 32.
+check.case public @full_context_beyond_256 {
+  %query = check.generate.fill value(0.0) : tensor<1024x1xf32>
+  %keys = check.generate.fill value(0.0) : tensor<320x1024xf32>
+  %values = check.generate.iota offset(-1.0) step(0.0009765625) : tensor<320x1024xf32>
+  %position = check.generate.fill value(319) : tensor<1xi32>
+  %scores = check.generate.fill value(-123.0) : tensor<16x320xf32>
+  %probabilities = check.generate.fill value(-123.0) : tensor<16x320xf32>
+  %output = check.generate.fill value(-123.0) : tensor<1024x1xf32>
+  %expected = check.generate.iota offset(158.5) step(0.0009765625) : tensor<1024x1xf32>
+  kernel.launch @pocket.attention_scores_flow(%query, %keys, %position, %scores) : (tensor<1024x1xf32>, tensor<320x1024xf32>, tensor<1xi32>, tensor<16x320xf32>)
+  kernel.launch @pocket.softmax_flow(%scores, %probabilities) : (tensor<16x320xf32>, tensor<16x320xf32>)
+  kernel.launch @pocket.attention_values_flow(%values, %probabilities, %position, %output) : (tensor<320x1024xf32>, tensor<16x320xf32>, tensor<1xi32>, tensor<1024x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0) nan(different) : tensor<1024x1xf32>
+  check.return
+}
+
+// A diagnostic table C[p,f] = p + f/32, S[p,f] = 1 and all-one input
+// distinguish absolute positions from cache slots. Its exact closed form is
+// p + f/32 - 1 for real channels and p + f/32 + 1 for imaginary channels.
+// The final block reaches the last configured rotary row, well beyond 2048.
+func.def @rotary_expected(%input: buffer, %query: buffer, %keys: buffer, %values: buffer, %position: buffer, %cosine: buffer, %sine: buffer) {
+  %origin = index.constant 0 : offset
+  %output = buffer.view %query[%origin] : buffer -> view<512x16xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %frequencies = index.constant 32 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 16 : index
+  %fraction = scalar.constant 0.03125 : f32
+  %real_start = scalar.constant 4079.0 : f32
+  %imaginary_start = scalar.constant 4081.0 : f32
+  scf.for %channel = [%zero to %channels step %one] {
+    %pair = index.div %channel, %two : index
+    %frequency = index.rem %pair, %frequencies : index
+    %frequency_word = index.cast %frequency : index to i32
+    %frequency_float = scalar.uitofp %frequency_word : i32 to f32
+    %frequency_delta = scalar.mulf %frequency_float, %fraction : f32
+    %parity = index.rem %channel, %two : index
+    %real = index.cmp eq, %parity, %zero : index
+    %first = scf.select %real, %real_start, %imaginary_start : f32
+    %start = scalar.addf %first, %frequency_delta : f32
+    scf.for %time = [%zero to %times step %one] {
+      %time_word = index.cast %time : index to i32
+      %time_float = scalar.uitofp %time_word : i32 to f32
+      %expected = scalar.addf %start, %time_float : f32
+      view.store %expected, %output[%channel, %time] : f32, view<512x16xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @absolute_rotary_extent {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(1.0) : tensor<1536x16xf32>
+    %query = check.generate.fill value(-123.0) : tensor<512x16xf32>
+    %keys = check.generate.fill value(0.0) : tensor<265x512xf32>
+    %values = check.generate.fill value(0.0) : tensor<265x512xf32>
+    %position = check.generate.fill value(4080) : tensor<1xi32>
+    %cosine = check.generate.iota offset(0.0) step(0.03125) : tensor<4096x32xf32>
+    %sine = check.generate.fill value(1.0) : tensor<4096x32xf32>
+    check.compare<@pocket.rotary_cache_512x16_c265_p249, @rotary_expected>(%input, %query, %keys, %values, %position, %cosine, %sine) : (tensor<1536x16xf32>, tensor<512x16xf32>, tensor<265x512xf32>, tensor<265x512xf32>, tensor<1xi32>, tensor<4096x32xf32>, tensor<4096x32xf32>) -> () {
+      check.expect.bitwise actual(%query) expected(%query) : tensor<512x16xf32>
+    }
+  }
+  check.return
+}
