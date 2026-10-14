@@ -1618,7 +1618,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
           model->context_capacity -
           model->rows[span->row_index].state->position;
       if (limit) {
-        if (limit > 2 * width || span->token_count != width ||
+        if (limit < 3 || limit > 2 * width || span->token_count != width ||
             span->flags != (LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
                             LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE) ||
             span->media ||
@@ -1628,8 +1628,10 @@ iree_status_t loom_serve_text_model_submit_epoch(
                                   "invalid speculative continuation span %zu",
                                   i);
         }
+        // Device continuation requires at least two outputs after the first
+        // result. Its largest advancing prefix is therefore limit - 2.
         const iree_host_size_t extent =
-            output_limits[first] ? iree_min(2 * width, limit + width - 1)
+            output_limits[first] ? iree_min(2 * width, limit + width - 2)
                                  : prior->token_count + width;
         extents[first] = (uint32_t)iree_min(remaining, extent);
         continued_speculative_mask |= 1u << first;

@@ -318,4 +318,48 @@ TEST(TextEpochTest, DraftWidthControlsContinuationCreditAndContextFrontier) {
   }
 }
 
+TEST(TextEpochTest, ContinuationLeavesFinalOutputToOrdinaryDecode) {
+  const loom_serve_packing_shape_t shape = {16, 1};
+  const int32_t input[] = {20, 21, 22};
+  for (iree_host_size_t depth = 1; depth <= 7; ++depth) {
+    SCOPED_TRACE(depth);
+    const iree_host_size_t width = depth + 1;
+    const loom_serve_text_epoch_options_t options = {
+        .context_capacity = 256,
+        .chunk_size = 8,
+        .continuation_epochs = 2,
+        .draft_depth = depth,
+        .shapes = &shape,
+        .shape_count = 1,
+    };
+    for (bool known : {false, true}) {
+      SCOPED_TRACE(known);
+      for (iree_host_size_t credit = 2; credit <= 2 * width; ++credit) {
+        SCOPED_TRACE(credit);
+        loom_serve_text_epoch_row_t rows[] = {{
+            .input_tokens = known ? input : nullptr,
+            .input_count = known ? IREE_ARRAYSIZE(input) : 0,
+            .output_count = credit,
+            .position = 60,
+            .token = 21,
+        }};
+        const loom_serve_packed_span_t scheduled[] = {
+            {0, known ? IREE_ARRAYSIZE(input) : width}};
+        loom_serve_text_epoch_t epoch;
+        loom_serve_text_epoch_continuation_t next;
+        loom_serve_text_epoch_prepare(&options, rows, 0, 1, scheduled, &epoch,
+                                      &next);
+        const bool continues = credit >= 3;
+        EXPECT_EQ(epoch.device_epochs, continues ? 2 : 1);
+        ASSERT_EQ(next.continuation.span_count, continues ? 1 : 0);
+        if (continues) {
+          EXPECT_EQ(next.spans[0].token_count, width);
+          EXPECT_EQ(next.output_limits[0],
+                    iree_min(credit, known ? width + 1 : 2 * width));
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
