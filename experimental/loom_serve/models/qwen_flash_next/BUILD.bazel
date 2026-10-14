@@ -107,6 +107,21 @@ loom_test(
 )
 
 loom_test(
+    name = "mtp_state_test",
+    srcs = ["tests/mtp_state.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "flash_next.span_capacity": "4",
+        "flash_next.token_count": "16",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
     name = "speculation_test",
     srcs = [
         "tests/speculation.loom",
