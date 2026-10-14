@@ -102,7 +102,6 @@ _KERNEL_SOURCES = [
     "numeric/conversion/narrow_vectors.loom",
     "numeric/conversion/quantization.loom",
     "numeric/float/approximate_extended.loom",
-    "numeric/float/extrema.loom",
     "numeric/float/narrow_reduction.loom",
     "numeric/integer/bitwise_divisibility.loom",
     "numeric/integer/narrow_consumers.loom",

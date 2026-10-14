@@ -71,6 +71,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/float/clamp.loom",
     "numeric/float/classification.loom",
     "numeric/float/exponential.loom",
+    "numeric/float/extrema.loom",
     "numeric/float/half_extrema.loom",
     "numeric/float/logarithm.loom",
     "numeric/float/rounding.loom",
@@ -244,7 +245,6 @@ _ALL_PROFILE_XFAILS = {
     "memory/view/subview.loom:@subview_atomic_origins": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16": "TARGET/002",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_wide_bf16": "TARGET/002",
-    "numeric/float/extrema.loom:@float_extrema_f32": "TARGET/003",
     "numeric/integer/wide/address_comparison.loom:@mixed_width_index_comparisons": "SPIRV/026",
     "numeric/predicate/extract.loom:@predicate_extract": "TARGET/032",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma": "TARGET/001",
@@ -392,7 +392,6 @@ _ALL_ROOTS_XFAIL = [
     "memory/atomic/workgroup/panel_stream.loom",
     "memory/storage/private.loom",
     "memory/storage/stability/switch.loom",
-    "numeric/float/extrema.loom",
     "numeric/integer/wide/address_comparison.loom",
 ]
 

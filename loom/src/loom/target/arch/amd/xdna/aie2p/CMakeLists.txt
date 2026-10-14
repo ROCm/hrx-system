@@ -971,7 +971,6 @@ loom_check_test_suite(
     "test/source_low/numeric_integer_shift_report.loom-test"
     "test/source_low/numeric_integer_widening.loom-test"
     "test/source_low/numeric_integer_widening_partial.loom-test"
-    "test/source_low/numeric_minmax.loom-test"
     "test/source_low/numeric_minmax_wide.loom-test"
     "test/source_low/numeric_nonlinear.loom-test"
     "test/source_low/numeric_offset_narrowing.loom-test"

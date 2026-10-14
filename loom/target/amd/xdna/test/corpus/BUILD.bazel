@@ -18,6 +18,9 @@ loom_corpus_test(
         XDNA_HARDWARE_PROFILE.name: [
             "memory/address/tiled_channel.loom",
             "numeric/conversion/float8_dequantization.loom",
+            "numeric/float/clamp.loom",
+            "numeric/float/extrema.loom",
+            "numeric/predicate/selection.loom",
             "numeric/vector/bfloat_extrema_reductions.loom",
             "numeric/vector/constants.loom",
             "numeric/vector/f32.loom",
@@ -38,6 +41,7 @@ loom_corpus_test(
             "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp8_grouped_values": "BACKEND/005",
             "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp8_wide_bf16_values": "BACKEND/005",
             "numeric/conversion/float8_dequantization.loom:@float8_dequantization_values": "XDNA/051",
+            "numeric/float/clamp.loom:@clamp_ieee_f32_values": "BACKEND/005",
             "numeric/vector/constants.loom:@vector_coordinate_constant_values": "XDNA/051",
             "numeric/vector/constants.loom:@vector_f64_constant_selection_values": "XDNA/051",
             "numeric/vector/constants.loom:@vector_predicate_constant_values": "XDNA/051",
