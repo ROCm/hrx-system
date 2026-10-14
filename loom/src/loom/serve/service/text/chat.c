@@ -646,28 +646,128 @@ static iree_status_t loom_serve_text_chat_render(
   return status;
 }
 
+// Message rendering additionally establishes the exact source marker plan.
+// The plan is checked before either the fragment or rendering state commits.
+static iree_status_t loom_serve_text_chat_render_message(
+    const loom_serve_text_chat_policy_t* policy, iree_host_size_t input_count,
+    const iree_string_view_t* inputs, iree_host_size_t scalar_count,
+    const int64_t* scalars, iree_host_size_t first_image,
+    loom_serve_text_chat_t* chat, int64_t* out_state) {
+  iree_vm_variant_t arguments[10] = {0};
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < input_count && iree_status_is_ok(status);
+       ++i) {
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_buffer_wrap(
+        IREE_VM_BUFFER_ACCESS_FLAG_READ,
+        iree_make_byte_span((void*)inputs[i].data, inputs[i].size),
+        iree_vm_buffer_release_callback_null(), chat->host_allocator, &buffer);
+    if (iree_status_is_ok(status)) {
+      arguments[i] =
+          iree_vm_buffer_variant_from_ptr_move(&policy->types, &buffer);
+    }
+  }
+  for (iree_host_size_t i = 0; i < scalar_count; ++i) {
+    arguments[input_count + i] = iree_vm_variant_from_i64(scalars[i]);
+  }
+  iree_vm_variant_t results[3] = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_invoke(
+        policy->invocation, policy->chat_message,
+        iree_vm_variant_span_from_ptr(arguments, input_count + scalar_count),
+        iree_vm_variant_span_from_array(results));
+  }
+  iree_vm_buffer_t* fragment = NULL;
+  iree_vm_buffer_t* plan = NULL;
+  int64_t state = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_ptr_from_variant_borrowed(&policy->types,
+                                                      results[0], &fragment);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_i64_from_variant(results[1], &state);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_ptr_from_variant_borrowed(&policy->types,
+                                                      results[2], &plan);
+  }
+  if (iree_status_is_ok(status) && (!fragment || !plan)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source returned null message storage");
+  }
+  iree_const_byte_span_t fragment_bytes = iree_const_byte_span_empty();
+  iree_const_byte_span_t plan_bytes = iree_const_byte_span_empty();
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_map_read(
+        fragment, 0, iree_vm_buffer_length(fragment), &fragment_bytes);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_map_read(plan, 0, iree_vm_buffer_length(plan),
+                                     &plan_bytes);
+  }
+  const iree_host_size_t prompt_offset =
+      iree_string_builder_size(&chat->prompt);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_media_apply_message_plan(
+        chat, first_image, prompt_offset, fragment_bytes.data_length,
+        plan_bytes);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_string(
+        &chat->prompt, iree_make_string_view((const char*)fragment_bytes.data,
+                                             fragment_bytes.data_length));
+  }
+  if (iree_status_is_ok(status)) {
+    *out_state = state;
+  }
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  return status;
+}
+
 iree_status_t loom_serve_text_chat_prepare_input(
-    const loom_serve_text_chat_policy_t* policy, iree_string_view_t text,
+    const loom_serve_text_chat_t* chat, iree_host_size_t prompt_offset,
     loom_serve_text_chat_input_format_t format,
     loom_serve_text_chat_boundary_t boundary, iree_host_size_t capacity,
-    iree_allocator_t host_allocator, int32_t* out_tokens,
-    iree_host_size_t* out_count) {
+    iree_host_size_t input_shift, iree_allocator_t host_allocator,
+    int32_t* out_tokens, iree_host_size_t* out_count,
+    loom_serve_text_media_span_t** out_media_spans,
+    iree_host_size_t* out_media_span_count) {
   *out_count = 0;
+  *out_media_spans = NULL;
+  *out_media_span_count = 0;
+  const loom_serve_text_chat_policy_t* policy = chat->policy;
+  const iree_string_view_t prompt = iree_string_builder_view(&chat->prompt);
+  if (prompt_offset > prompt.size) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "input begins beyond the rendered prompt");
+  }
+  const iree_string_view_t text =
+      iree_string_view_substr(prompt, prompt_offset, IREE_HOST_SIZE_MAX);
+  iree_vm_buffer_t* media_plan = NULL;
+  iree_host_size_t marker_count = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_text_media_build_input_plan(
+      chat, prompt_offset, host_allocator, &media_plan, &marker_count));
   iree_vm_buffer_t* input = NULL;
-  IREE_RETURN_IF_ERROR(iree_vm_buffer_wrap(
+  iree_status_t status = iree_vm_buffer_wrap(
       IREE_VM_BUFFER_ACCESS_FLAG_READ,
       iree_make_byte_span((void*)text.data, text.size),
-      iree_vm_buffer_release_callback_null(), host_allocator, &input));
+      iree_vm_buffer_release_callback_null(), host_allocator, &input);
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_move(&policy->types, &input),
-      iree_vm_variant_from_i32(format), iree_vm_variant_from_i32(boundary),
+      iree_vm_buffer_variant_from_ptr_borrowed(&policy->types, media_plan),
+      iree_vm_variant_from_i64((int64_t)marker_count),
+      iree_vm_variant_from_i32(format),
+      iree_vm_variant_from_i32(boundary),
       iree_vm_variant_from_i64(capacity)};
-  iree_vm_variant_t results[2] = {0};
-  iree_status_t status =
-      iree_vm_invoke(policy->invocation, policy->prepare_input,
-                     iree_vm_variant_span_from_array(arguments),
-                     iree_vm_variant_span_from_array(results));
+  iree_vm_variant_t results[3] = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_invoke(policy->invocation, policy->prepare_input,
+                            iree_vm_variant_span_from_array(arguments),
+                            iree_vm_variant_span_from_array(results));
+  }
   iree_vm_buffer_t* output = NULL;
+  iree_vm_buffer_t* media_spans = NULL;
   int64_t count = 0;
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_ptr_from_variant_borrowed(&policy->types,
@@ -676,8 +776,12 @@ iree_status_t loom_serve_text_chat_prepare_input(
   if (iree_status_is_ok(status)) {
     status = iree_vm_i64_from_variant(results[1], &count);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_ptr_from_variant_borrowed(&policy->types,
+                                                      results[2], &media_spans);
+  }
   if (iree_status_is_ok(status) &&
-      (!output || count < 0 || (uint64_t)count > capacity ||
+      (!output || !media_spans || count < 0 || (uint64_t)count > capacity ||
        (uint64_t)count > SIZE_MAX / sizeof(*out_tokens))) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source input returned invalid token storage");
@@ -687,14 +791,34 @@ iree_status_t loom_serve_text_chat_prepare_input(
     status =
         iree_vm_buffer_map_read(output, 0, count * sizeof(*out_tokens), &bytes);
   }
+  iree_const_byte_span_t plan_bytes = iree_const_byte_span_empty();
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_map_read(
+        media_plan, 0, iree_vm_buffer_length(media_plan), &plan_bytes);
+  }
+  iree_const_byte_span_t span_bytes = iree_const_byte_span_empty();
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_map_read(
+        media_spans, 0, iree_vm_buffer_length(media_spans), &span_bytes);
+  }
+  loom_serve_text_media_span_t* parsed_spans = NULL;
+  iree_host_size_t parsed_span_count = 0;
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_media_parse_spans(
+        plan_bytes, marker_count, span_bytes, (iree_host_size_t)count,
+        input_shift, host_allocator, &parsed_spans, &parsed_span_count);
+  }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < (iree_host_size_t)count; ++i) {
       out_tokens[i] = (int32_t)iree_unaligned_load_le_u32(bytes.data + i * 4);
     }
     *out_count = (iree_host_size_t)count;
+    *out_media_spans = parsed_spans;
+    *out_media_span_count = parsed_span_count;
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_buffer_release(media_plan);
   return status;
 }
 
@@ -822,6 +946,7 @@ static iree_status_t loom_serve_text_chat_history_message(
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
+  const iree_host_size_t first_image = history->chat->images.count;
   iree_host_size_t content_count = 0;
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_ordered_content(
       &fields[1], history->chat, index, &history->scratch,
@@ -845,10 +970,10 @@ static iree_status_t loom_serve_text_chat_history_message(
                                  (fields[3].value.data ? 2 : 0) |
                                  (fields[4].value.data ? 4 : 0),
                              (int64_t)content_count};
-  return loom_serve_text_chat_render(
-      history->chat->policy, history->chat->policy->chat_message,
-      IREE_ARRAYSIZE(inputs), inputs, IREE_ARRAYSIZE(scalars), scalars,
-      &history->chat->prompt, &history->state);
+  return loom_serve_text_chat_render_message(
+      history->chat->policy, IREE_ARRAYSIZE(inputs), inputs,
+      IREE_ARRAYSIZE(scalars), scalars, first_image, history->chat,
+      &history->state);
 }
 
 static iree_status_t loom_serve_text_chat_request_render(
@@ -993,6 +1118,7 @@ iree_status_t loom_serve_text_chat_initialize(
   out_chat->max_tokens = default_max_tokens;
   out_chat->host_allocator = host_allocator;
   iree_string_builder_initialize(host_allocator, &out_chat->prompt);
+  iree_string_builder_initialize(host_allocator, &out_chat->images.metadata);
   iree_string_builder_initialize(host_allocator, &out_chat->output.content);
   iree_string_builder_initialize(host_allocator, &out_chat->output.reasoning);
   chat_history_t history = {.model_name = model_name, .chat = out_chat};
@@ -1017,6 +1143,7 @@ iree_status_t loom_serve_text_chat_initialize(
 }
 
 void loom_serve_text_chat_deinitialize(loom_serve_text_chat_t* chat) {
+  iree_string_builder_deinitialize(&chat->images.metadata);
   iree_allocator_free(chat->host_allocator, chat->images.values);
   iree_allocator_free(chat->host_allocator, chat->tools);
   iree_vm_buffer_release(chat->options);
@@ -1024,106 +1151,6 @@ void loom_serve_text_chat_deinitialize(loom_serve_text_chat_t* chat) {
   iree_string_builder_deinitialize(&chat->output.content);
   iree_string_builder_deinitialize(&chat->prompt);
   memset(chat, 0, sizeof(*chat));
-}
-
-enum {
-  CHAT_MEDIA_IDENTITY_DIGEST_BYTES =
-      sizeof(((loom_serve_text_chat_image_t*)0)->info.digest.bytes),
-  CHAT_MEDIA_IDENTITY_DETAIL_OFFSET = CHAT_MEDIA_IDENTITY_DIGEST_BYTES,
-  CHAT_MEDIA_IDENTITY_MESSAGE_OFFSET = CHAT_MEDIA_IDENTITY_DETAIL_OFFSET + 1,
-  CHAT_MEDIA_IDENTITY_CONTENT_OFFSET = CHAT_MEDIA_IDENTITY_MESSAGE_OFFSET + 4,
-  CHAT_MEDIA_IDENTITY_TEXT_OFFSET = CHAT_MEDIA_IDENTITY_CONTENT_OFFSET + 4,
-  CHAT_MEDIA_IDENTITY_RECORD_BYTES = CHAT_MEDIA_IDENTITY_TEXT_OFFSET + 4,
-};
-
-iree_status_t loom_serve_text_chat_media_identity_initialize(
-    const loom_serve_text_chat_t* chat, iree_allocator_t host_allocator,
-    loom_serve_text_chat_media_identity_t* out_identity) {
-  memset(out_identity, 0, sizeof(*out_identity));
-  if (!chat->images.count) {
-    return iree_ok_status();
-  }
-  iree_host_size_t length = 0;
-  if (!iree_host_size_checked_mul(chat->images.count,
-                                  CHAT_MEDIA_IDENTITY_RECORD_BYTES, &length)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "media identity storage overflow");
-  }
-  iree_vm_buffer_t* storage = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_buffer_create(length, 1, host_allocator, &storage));
-  iree_byte_span_t bytes;
-  iree_status_t status = iree_vm_buffer_map_write(storage, 0, length, &bytes);
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < chat->images.count; ++i) {
-      uint8_t* record = bytes.data + i * CHAT_MEDIA_IDENTITY_RECORD_BYTES;
-      memcpy(record, chat->images.values[i].info.digest.bytes,
-             sizeof(chat->images.values[i].info.digest.bytes));
-      record[CHAT_MEDIA_IDENTITY_DETAIL_OFFSET] =
-          (uint8_t)chat->images.values[i].detail;
-      iree_unaligned_store_le_u32(record + CHAT_MEDIA_IDENTITY_MESSAGE_OFFSET,
-                                  chat->images.values[i].message_ordinal);
-      iree_unaligned_store_le_u32(record + CHAT_MEDIA_IDENTITY_CONTENT_OFFSET,
-                                  chat->images.values[i].content_ordinal);
-      iree_unaligned_store_le_u32(record + CHAT_MEDIA_IDENTITY_TEXT_OFFSET,
-                                  chat->images.values[i].text_offset);
-    }
-    *out_identity = (loom_serve_text_chat_media_identity_t){
-        .storage = storage, .count = chat->images.count};
-  } else {
-    iree_vm_buffer_release(storage);
-  }
-  return status;
-}
-
-void loom_serve_text_chat_media_identity_retain(
-    const loom_serve_text_chat_media_identity_t* source,
-    loom_serve_text_chat_media_identity_t* out_identity) {
-  *out_identity = *source;
-  iree_vm_buffer_retain(out_identity->storage);
-}
-
-void loom_serve_text_chat_media_identity_deinitialize(
-    loom_serve_text_chat_media_identity_t* identity) {
-  iree_vm_buffer_release(identity->storage);
-  memset(identity, 0, sizeof(*identity));
-}
-
-static bool loom_serve_text_chat_media_identity_prefix(
-    const loom_serve_text_chat_media_identity_t* identity,
-    const loom_serve_text_chat_t* chat) {
-  if (identity->count > chat->images.count) {
-    return false;
-  }
-  if (!identity->count) {
-    return true;
-  }
-  const uint8_t* bytes = iree_vm_buffer_const_data(identity->storage);
-  for (iree_host_size_t i = 0; i < identity->count; ++i) {
-    const uint8_t* record = bytes + i * CHAT_MEDIA_IDENTITY_RECORD_BYTES;
-    if (memcmp(record, chat->images.values[i].info.digest.bytes,
-               sizeof(chat->images.values[i].info.digest.bytes)) != 0 ||
-        record[CHAT_MEDIA_IDENTITY_DETAIL_OFFSET] !=
-            (uint8_t)chat->images.values[i].detail ||
-        iree_unaligned_load_le_u32(record +
-                                   CHAT_MEDIA_IDENTITY_MESSAGE_OFFSET) !=
-            chat->images.values[i].message_ordinal ||
-        iree_unaligned_load_le_u32(record +
-                                   CHAT_MEDIA_IDENTITY_CONTENT_OFFSET) !=
-            chat->images.values[i].content_ordinal ||
-        iree_unaligned_load_le_u32(record + CHAT_MEDIA_IDENTITY_TEXT_OFFSET) !=
-            chat->images.values[i].text_offset) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool loom_serve_text_chat_media_identity_equal_chat(
-    const loom_serve_text_chat_media_identity_t* identity,
-    const loom_serve_text_chat_t* chat) {
-  return identity->count == chat->images.count &&
-         loom_serve_text_chat_media_identity_prefix(identity, chat);
 }
 
 iree_status_t loom_serve_text_chat_output_next(
@@ -1207,7 +1234,8 @@ bool loom_serve_text_chat_completion_is_prefix(
     const loom_serve_text_chat_t* chat) {
   return iree_string_view_starts_with(iree_string_builder_view(&chat->prompt),
                                       completion->transcript) &&
-         loom_serve_text_chat_media_identity_prefix(&completion->media, chat);
+         loom_serve_text_chat_media_identity_is_prefix(&completion->media,
+                                                       chat);
 }
 
 // Returned buffers may alias any argument. Owned input clones make every such

@@ -9,8 +9,8 @@
 
 #include "iree/base/api.h"
 #include "iree/vm/buffer.h"
-#include "loom/serve/media/image.h"
 #include "loom/serve/runtime/program/program.h"
+#include "loom/serve/service/text/media.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,33 +27,6 @@ extern "C" {
 // body has an independent byte bound; this limits the compact source-policy
 // record set created from pathologically small JSON objects.
 #define LOOM_SERVE_TEXT_CHAT_MAX_CONTENT_PART_COUNT 4096
-
-// Model interpretation of the OpenAI image_url detail hint.
-typedef enum loom_serve_text_chat_image_detail_e {
-  LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_AUTO = 0,
-  LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_LOW = 1,
-  LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_HIGH = 2,
-} loom_serve_text_chat_image_detail_t;
-
-// Source-visible ordered content record fields. Each record is serialized as
-// this many little-endian u32 words. Text records name a span in the decoded
-// message content. Image records name a request image and its display geometry;
-// codec and encoded-orientation facts remain native preprocessing concerns.
-typedef enum loom_serve_text_chat_content_field_e {
-  LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_KIND = 0,
-  LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_TEXT_OFFSET = 1,
-  LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_TEXT_LENGTH = 2,
-  LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_IMAGE_INDEX = 3,
-  LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_DISPLAY_WIDTH = 4,
-  LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_DISPLAY_HEIGHT = 5,
-  LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_IMAGE_DETAIL = 6,
-  LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_COUNT = 7,
-} loom_serve_text_chat_content_field_t;
-
-typedef enum loom_serve_text_chat_content_kind_e {
-  LOOM_SERVE_TEXT_CHAT_CONTENT_TEXT = 0,
-  LOOM_SERVE_TEXT_CHAT_CONTENT_IMAGE = 1,
-} loom_serve_text_chat_content_kind_t;
 
 // Cold-resolved chat functions in the model's shared source VM. The model
 // serializes calls and outlives every request borrowing this policy.
@@ -138,16 +111,20 @@ typedef enum loom_serve_text_chat_boundary_e {
   LOOM_SERVE_TEXT_CHAT_BOUNDARY_TERMINATED = 2,
 } loom_serve_text_chat_boundary_t;
 
-// Frames and encodes the complete input in the shared source VM. Text is
-// borrowed only during this synchronous call. On success, copies at most
-// capacity IDs into tokens; on failure, tokens is untouched and count is zero.
-// Incomplete prefixes are rejected. No VM reference escapes into session state.
+// Frames and encodes the rendered prompt suffix beginning at prompt_offset in
+// the shared source VM. Source receives the exact checked marker plan and
+// returns token IDs plus one logical input span per included image. On success,
+// copies at most capacity IDs into tokens and allocates any media spans; on
+// failure all outputs are empty and tokens is untouched. input_shift accounts
+// for a retained prediction prepended by native code. No VM reference escapes.
 iree_status_t loom_serve_text_chat_prepare_input(
-    const loom_serve_text_chat_policy_t* policy, iree_string_view_t text,
+    const loom_serve_text_chat_t* chat, iree_host_size_t prompt_offset,
     loom_serve_text_chat_input_format_t format,
     loom_serve_text_chat_boundary_t boundary, iree_host_size_t capacity,
-    iree_allocator_t host_allocator, int32_t* out_tokens,
-    iree_host_size_t* out_count);
+    iree_host_size_t input_shift, iree_allocator_t host_allocator,
+    int32_t* out_tokens, iree_host_size_t* out_count,
+    loom_serve_text_media_span_t** out_media_spans,
+    iree_host_size_t* out_media_span_count);
 
 // Indexed function-tool schema borrowing the request body. Names are literal
 // ASCII identifiers. The optional XML codec uses property types to recover
@@ -160,34 +137,6 @@ typedef struct loom_serve_text_chat_tool_t {
   // JSON array of required parameter names, or empty when absent.
   iree_string_view_t required;
 } loom_serve_text_chat_tool_t;
-
-// One inspected image occurrence borrowing its escaped data URL from the HTTP
-// body. Pixel storage is deliberately absent until admission establishes that
-// the image-conditioned prefix is not already resident.
-typedef struct loom_serve_text_chat_image_t {
-  // Raw escaped JSON string contents, excluding surrounding quotes.
-  iree_string_view_t data_url;
-  // Source-visible processing hint participating in semantic identity.
-  loom_serve_text_chat_image_detail_t detail;
-  // Message ordinal containing this occurrence.
-  uint32_t message_ordinal;
-  // Ordered content-part ordinal within the message.
-  uint32_t content_ordinal;
-  // Decoded text bytes preceding this occurrence within the message.
-  uint32_t text_offset;
-  // Exact compressed identity and codec/display geometry.
-  loom_serve_media_image_info_t info;
-} loom_serve_text_chat_image_t;
-
-// Immutable ordered image identity independent of request/body storage. The
-// compact reference-counted storage contains content digests, source-visible
-// placement and detail hints; an empty identity owns no storage.
-typedef struct loom_serve_text_chat_media_identity_t {
-  // Owned immutable packed identity storage.
-  iree_vm_buffer_t* storage;
-  // Number of ordered image occurrences in storage.
-  iree_host_size_t count;
-} loom_serve_text_chat_media_identity_t;
 
 enum loom_serve_text_chat_flag_bits_e {
   // Publish incremental SSE output instead of one JSON completion.
@@ -241,6 +190,8 @@ typedef struct loom_serve_text_chat_t {
     iree_host_size_t capacity;
     // Dynamically sized descriptors in message/part order.
     loom_serve_text_chat_image_t* values;
+    // Owned concatenated source-private preprocessing metadata.
+    iree_string_builder_t metadata;
   } images;
 } loom_serve_text_chat_t;
 
@@ -258,27 +209,6 @@ iree_status_t loom_serve_text_chat_initialize(
     iree_host_size_t default_max_tokens, iree_allocator_t host_allocator,
     loom_serve_text_chat_t* out_chat);
 void loom_serve_text_chat_deinitialize(loom_serve_text_chat_t* chat);
-
-// Captures the request's ordered image semantics without retaining encoded
-// inputs. Failure zeros |out_identity|.
-iree_status_t loom_serve_text_chat_media_identity_initialize(
-    const loom_serve_text_chat_t* chat, iree_allocator_t host_allocator,
-    loom_serve_text_chat_media_identity_t* out_identity);
-
-// Copies an identity reference. Source and target may be released
-// independently.
-void loom_serve_text_chat_media_identity_retain(
-    const loom_serve_text_chat_media_identity_t* source,
-    loom_serve_text_chat_media_identity_t* out_identity);
-
-// Releases one identity reference; zero-initialized values are accepted.
-void loom_serve_text_chat_media_identity_deinitialize(
-    loom_serve_text_chat_media_identity_t* identity);
-
-// Whether the complete request image sequence has this exact identity.
-bool loom_serve_text_chat_media_identity_equal_chat(
-    const loom_serve_text_chat_media_identity_t* identity,
-    const loom_serve_text_chat_t* chat);
 
 // Source output phase. Final text releases incomplete marker prefixes; complete
 // tool syntax remains withheld for structured parsing in either phase.

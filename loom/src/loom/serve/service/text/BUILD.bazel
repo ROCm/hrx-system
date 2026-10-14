@@ -235,9 +235,16 @@ loom_cc_library(
 
 loom_cc_library(
     name = "chat",
-    srcs = ["chat.c"],
-    hdrs = ["chat.h"],
+    srcs = [
+        "chat.c",
+        "media.c",
+    ],
+    hdrs = [
+        "chat.h",
+        "media.h",
+    ],
     deps = [
+        "//loom/src/loom/serve/media:digest",
         "//loom/src/loom/serve/media:image",
         "//loom/src/loom/serve/runtime/program",
         "//loom/src/loom/util:json",
@@ -263,6 +270,17 @@ loom_cc_library(
 loom_cc_test(
     name = "chat_test",
     srcs = ["chat_test.cc"],
+    deps = [
+        ":chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "media_test",
+    srcs = ["media_test.cc"],
     deps = [
         ":chat",
         "//runtime/src/iree/base",
