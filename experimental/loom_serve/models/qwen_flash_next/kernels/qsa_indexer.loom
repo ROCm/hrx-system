@@ -1,0 +1,321 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_token_binding(%mapping: buffer, %token: index) -> (index, index, index, index)
+
+func.decl @flash_next_physical_token(%rows: buffer, %row: index, %position: index) -> (index)
+
+func.decl @flash_next_cache_origin(%rows: buffer, %row: index, %plane_origin: offset) -> (offset)
+
+func.decl @flash_next_row_state(%rows: buffer, %row: index, %position: index, %layer_origin: offset) -> (offset, offset)
+
+amdgpu.target<gfx11-generic> @qsa_wave32 {subgroup_size = 32}
+
+func.decl @qsa_rotary_coefficients(%position: index, %pair: index) -> (bf16, bf16)
+
+// Original packed BF16 parameters and activations with F32 dot accumulation.
+kernel.def target(@qsa_wave32) @qsa_linear_bf16(%width: index) {
+  %rows = index.assume %width [range(%width, 128, 512), multiple_of(%width, 4)] : index
+  %c4 = index.constant 4 : index
+  %groups = index.div %rows, %c4 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %rows = index.assume %width [range(%width, 128, 512), multiple_of(%width, 4)] : index
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0_index = index.constant 0 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %stride = index.constant 256 : index
+    %hidden = index.constant 2560 : index
+    %row = index.madd %group, %c4, %wave : index
+    %valid = index.cmp ult, %row, %rows : index
+    scf.if %valid {
+      %first = index.mul %lane, %c8 : index
+      %origin = index.constant 0 : offset
+      %inputs = buffer.view %input[%origin] : buffer -> view<[%tokens]x2560xbf16>
+      %weights = buffer.view %weight[%origin] : buffer -> view<[%rows]x2560xbf16>
+      %outputs = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%rows]xbf16>
+      %c0v = vector.constant 0.0 : vector<4xf32>
+      %partial = scf.for %channel = [%first to %hidden step %stride](%accumulator = %c0v : vector<4xf32>) -> (vector<4xf32>) {
+        %values = vector.load %inputs[%token, %channel] : view<[%tokens]x2560xbf16> -> vector<8xbf16>
+        %coefficients = vector.load %weights[%row, %channel] : view<[%rows]x2560xbf16> -> vector<8xbf16>
+        %next = vector.dot2f %values, %coefficients, %accumulator : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+        scf.yield %next : vector<4xf32>
+      }
+      %c0 = scalar.constant 0.0 : f32
+      %lane_sum = vector.reduce<addf> %partial, %c0 : vector<4xf32>, f32
+      %sum = kernel.subgroup.reduce<addf> %lane_sum : f32
+      %leader = index.cmp eq, %lane, %c0_index : index
+      scf.if %leader {
+        %packed = scalar.fptrunc %sum : f32 to bf16
+        view.store %packed, %outputs[%token, %row] : bf16, view<[%tokens]x[%rows]xbf16>
+      }
+    }
+  }
+  kernel.return
+}
+
+// One wave normalizes a packed head. Input/output regions are disjoint.
+// Normalization and trigonometric values round to BF16 before rotation.
+func.def public inline @qsa_normalize_rotate(%width_arg: index, %position: index, %input: buffer, %input_origin: offset, %weight: buffer, %output: buffer, %output_origin: offset) {
+  %width = index.assume %width_arg [range(%width_arg, 128, 256), multiple_of(%width_arg, 32)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %stride = index.constant 32 : index
+  %rotary = index.constant 64 : index
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%input_origin] : buffer -> view<[%width]xbf16>
+  %weights = buffer.view %weight[%origin] : buffer -> view<[%width]xf32>
+  %outputs = buffer.view %output[%output_origin] : buffer -> view<[%width]xbf16>
+  %c0 = scalar.constant 0.0 : f32
+  %partial = scf.for %channel = [%lane to %width step %stride](%accumulator = %c0 : f32) -> (f32) {
+    %packed = view.load %inputs[%channel] : view<[%width]xbf16> -> bf16
+    %value = scalar.extf %packed : bf16 to f32
+    %next = scalar.fmaf %value, %value, %accumulator : f32
+    scf.yield %next : f32
+  }
+  %sum = kernel.subgroup.reduce<addf> %partial : f32
+  %width_i32 = index.cast %width : index to i32
+  %width_f32 = scalar.uitofp %width_i32 : i32 to f32
+  %mean = scalar.divf %sum, %width_f32 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  %biased = scalar.addf %mean, %epsilon : f32
+  %inverse = scalar.rsqrtf<afn> %biased : f32
+  scf.for %channel = [%lane to %width step %stride] {
+    %stored = view.load %inputs[%channel] : view<[%width]xbf16> -> bf16
+    %value = scalar.extf %stored : bf16 to f32
+    %gamma = view.load %weights[%channel] : view<[%width]xf32> -> f32
+    %unit = scalar.mulf %value, %inverse : f32
+    %normalized = scalar.mulf %unit, %gamma : f32
+    %norm_bf16 = scalar.fptrunc %normalized : f32 to bf16
+    %norm = scalar.extf %norm_bf16 : bf16 to f32
+    %rotates = index.cmp ult, %channel, %rotary : index
+    %result = scf.if %rotates -> (f32) {
+      %low = index.cmp ult, %channel, %stride : index
+      %pair, %partner = scf.if %low -> (index, index) {
+        %other = index.add %channel, %stride : index
+        scf.yield %channel, %other : index, index
+      } else {
+        %other = index.sub %channel, %stride : index
+        scf.yield %other, %other : index, index
+      }
+      %other_stored = view.load %inputs[%partner] : view<[%width]xbf16> -> bf16
+      %other_value = scalar.extf %other_stored : bf16 to f32
+      %other_gamma = view.load %weights[%partner] : view<[%width]xf32> -> f32
+      %other_unit = scalar.mulf %other_value, %inverse : f32
+      %other_normalized = scalar.mulf %other_unit, %other_gamma : f32
+      %other_bf16 = scalar.fptrunc %other_normalized : f32 to bf16
+      %other = scalar.extf %other_bf16 : bf16 to f32
+      %sine_packed, %cosine_packed = func.call @qsa_rotary_coefficients(%position, %pair) : (index, index) -> (bf16, bf16)
+      %sine = scalar.extf %sine_packed : bf16 to f32
+      %cosine = scalar.extf %cosine_packed : bf16 to f32
+      %own_cosine = scalar.mulf %norm, %cosine : f32
+      %partner_sine = scalar.mulf %other, %sine : f32
+      %rotated = scf.if %low -> (f32) {
+        %value = scalar.subf %own_cosine, %partner_sine : f32
+        scf.yield %value : f32
+      } else {
+        %value = scalar.addf %own_cosine, %partner_sine : f32
+        scf.yield %value : f32
+      }
+      scf.yield %rotated : f32
+    } else {
+      scf.yield %norm : f32
+    }
+    %packed = scalar.fptrunc %result : f32 to bf16
+    view.store %packed, %outputs[%channel] : bf16, view<[%width]xbf16>
+  }
+  func.return
+}
+
+// Both indexer and main queries have compact append rows and absolute RoPE.
+kernel.def target(@qsa_wave32) @qsa_prepare_queries(%heads: index) {
+  %count = index.assume %heads [range(%heads, 4, 24)] : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%width: index, %heads: index, %head_stride: index, %span: buffer, %mapping: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %head = kernel.workgroup.id<x> : index
+    %position, %row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %linear_head = index.madd %token, %heads, %head : index
+    %input_element = index.mul %linear_head, %head_stride : index
+    %output_element = index.mul %linear_head, %width : index
+    %element_bytes = index.constant 2 : offset
+    %input_origin = index.scale %input_element, %element_bytes : index, offset -> offset
+    %output_origin = index.scale %output_element, %element_bytes : index, offset -> offset
+    func.call @qsa_normalize_rotate(%width, %position, %input, %input_origin, %weight, %output, %output_origin) : (index, index, buffer, offset, buffer, buffer, offset)
+  }
+  kernel.return
+}
+
+// Completed four-token blocks are published once. An append that crosses a
+// block boundary reads its old raw prefix from the immutable recurrent anchor.
+kernel.def target(@qsa_wave32) @qsa_pool_blocks() {
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%tail_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %raw: buffer, %arena: buffer, %pooled: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<x> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %position, %row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %c4 = index.constant 4 : index
+    %c3 = index.constant 3 : index
+    %member = index.rem %position, %c4 : index
+    %complete = index.cmp eq, %member, %c3 : index
+    scf.if %complete {
+      %reader, %writer = func.call @flash_next_row_state(%rows, %row, %first, %tail_origin) : (buffer, index, index, offset) -> (offset, offset)
+      %block_begin = index.sub %position, %c3 : index
+      %origin = index.constant 0 : offset
+      %raw_view = buffer.view %raw[%origin] : buffer -> view<[%tokens]x128xbf16>
+      %tail = buffer.view %arena[%reader] : buffer -> view<3x128xbf16>
+      %outputs = buffer.view %pooled[%origin] : buffer -> view<[%tokens]x128xbf16>
+      %lane = kernel.subgroup.lane.id : index
+      %channel = index.mul %lane, %c4 : index
+      %c0 = index.constant 0 : index
+      %c1 = index.constant 1 : index
+      %c0v = vector.constant 0.0 : vector<4xf32>
+      %total = scf.for %slot = [%c0 to %c4 step %c1](%sum = %c0v : vector<4xf32>) -> (vector<4xf32>) {
+        %logical = index.add %block_begin, %slot : index
+        %prior = index.cmp ult, %logical, %first : index
+        %packed = scf.if %prior -> (vector<4xbf16>) {
+          %tail_slot = index.assume %slot [range(%slot, 0, 2)] : index
+          %value = vector.load %tail[%tail_slot, %channel] : view<3x128xbf16> -> vector<4xbf16>
+          scf.yield %value : vector<4xbf16>
+        } else {
+          %relative = index.sub %logical, %first : index
+          %input_token_value = index.add %begin, %relative : index
+          %input_token = index.assume %input_token_value [range(%input_token_value, 0, 32767), lt(%input_token_value, %tokens)] : index
+          %value = vector.load %raw_view[%input_token, %channel] : view<[%tokens]x128xbf16> -> vector<4xbf16>
+          scf.yield %value : vector<4xbf16>
+        }
+        %value = vector.extf %packed : vector<4xbf16> to vector<4xf32>
+        %next = vector.addf %sum, %value : vector<4xf32>
+        scf.yield %next : vector<4xf32>
+      }
+      %quarter = vector.constant 0.25 : vector<4xf32>
+      %mean = vector.mulf %total, %quarter : vector<4xf32>
+      %packed = vector.fptrunc %mean : vector<4xf32> to vector<4xbf16>
+      vector.store %packed, %outputs[%token, %channel] : vector<4xbf16>, view<[%tokens]x128xbf16>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@qsa_wave32) @qsa_prepare_blocks() {
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%index_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %pooled: buffer, %weight: buffer, %arena: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%epoch, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<x> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %position, %row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %c4 = index.constant 4 : index
+    %c3 = index.constant 3 : index
+    %member = index.rem %position, %c4 : index
+    %complete = index.cmp eq, %member, %c3 : index
+    scf.if %complete {
+      %logical = index.sub %position, %c3 : index
+      %physical = func.call @flash_next_physical_token(%rows, %row, %logical) : (buffer, index, index) -> (index)
+      %block = index.div %physical, %c4 : index
+      %base = func.call @flash_next_cache_origin(%rows, %row, %index_origin) : (buffer, index, offset) -> (offset)
+      %row_bytes = index.constant 256 : offset
+      %input_origin = index.scale %token, %row_bytes : index, offset -> offset
+      %output_relative = index.scale %block, %row_bytes : index, offset -> offset
+      %output_origin = index.add %base, %output_relative : offset
+      %width = index.constant 128 : index
+      func.call @qsa_normalize_rotate(%width, %logical, %pooled, %input_origin, %weight, %arena, %output_origin) : (index, index, buffer, offset, buffer, buffer, offset)
+    }
+  }
+  kernel.return
+}
+
+// Only the live incomplete block is retained. No read touches uninitialized
+// history on a fresh span, and a fork publishes exclusively to its own writer.
+kernel.def target(@qsa_wave32) @qsa_publish_tail() {
+  %spans = index.constant 16 : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%tail_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %raw: buffer, %arena: buffer) {
+  %span = kernel.workgroup.id<x> : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %tokens = config.get @flash_next.token_count : index
+    %header = index.constant 12 : offset
+    %record_bytes = index.constant 20 : offset
+    %relative_origin = index.scale %span, %record_bytes : index, offset -> offset
+    %record_origin = index.add %header, %relative_origin : offset
+    %record = buffer.view %epoch[%record_origin] : buffer -> view<5xi32>
+    %length_word = view.load %record[0] : view<5xi32> -> i32
+    %begin_word = view.load %record[2] : view<5xi32> -> i32
+    %length_value = index.cast %length_word : i32 to index
+    %length = index.assume %length_value [range(%length_value, 1, %tokens)] : index
+    %begin = index.cast %begin_word : i32 to index
+    %position, %row, %unused_begin, %first = func.call @flash_next_token_binding(%mapping, %begin) : (buffer, index) -> (index, index, index, index)
+    %reader, %writer = func.call @flash_next_row_state(%rows, %row, %first, %tail_origin) : (buffer, index, index, offset) -> (offset, offset)
+    %logical_end = index.add %first, %length : index
+    %c4 = index.constant 4 : index
+    %tail_length = index.rem %logical_end, %c4 : index
+    %tail_begin = index.sub %logical_end, %tail_length : index
+    %origin = index.constant 0 : offset
+    %inputs = buffer.view %raw[%origin] : buffer -> view<[%tokens]x128xbf16>
+    %previous = buffer.view %arena[%reader] : buffer -> view<3x128xbf16>
+    %outputs = buffer.view %arena[%writer] : buffer -> view<3x128xbf16>
+    %lane = kernel.subgroup.lane.id : index
+    %channel = index.mul %lane, %c4 : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    scf.for %slot = [%c0 to %tail_length step %c1] {
+      %logical = index.add %tail_begin, %slot : index
+      %prior = index.cmp ult, %logical, %first : index
+      %packed = scf.if %prior -> (vector<4xbf16>) {
+        %value = vector.load %previous[%slot, %channel] : view<3x128xbf16> -> vector<4xbf16>
+        scf.yield %value : vector<4xbf16>
+      } else {
+        %relative = index.sub %logical, %first : index
+        %token_value = index.add %begin, %relative : index
+        %token = index.assume %token_value [range(%token_value, 0, 32767), lt(%token_value, %tokens)] : index
+        %value = vector.load %inputs[%token, %channel] : view<[%tokens]x128xbf16> -> vector<4xbf16>
+        scf.yield %value : vector<4xbf16>
+      }
+      vector.store %packed, %outputs[%slot, %channel] : vector<4xbf16>, view<3x128xbf16>
+    }
+  }
+  kernel.return
+}

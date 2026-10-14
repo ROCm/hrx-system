@@ -1,0 +1,129 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+// A single producer publishes direct token ownership for every packed row.
+// QSA kernels share this immutable map throughout the layer stack.
+kernel.def @flash_next_map_tokens() {
+  %spans = index.constant 16 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%epoch: buffer, %mapping: buffer) {
+  %span = kernel.workgroup.id<x> : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %tokens = config.get @flash_next.token_count : index
+    %header = index.constant 12 : offset
+    %record_bytes = index.constant 20 : offset
+    %record_relative = index.scale %span, %record_bytes : index, offset -> offset
+    %record_origin = index.add %header, %record_relative : offset
+    %record = buffer.view %epoch[%record_origin] : buffer -> view<5xi32>
+    %length_word = view.load %record[0] : view<5xi32> -> i32
+    %position_word = view.load %record[1] : view<5xi32> -> i32
+    %begin_word = view.load %record[2] : view<5xi32> -> i32
+    %row_word = view.load %record[3] : view<5xi32> -> i32
+    %length_value = index.cast %length_word : i32 to index
+    %length = index.assume %length_value [range(%length_value, 1, %tokens)] : index
+    %begin_value = index.cast %begin_word : i32 to index
+    %begin = index.assume %begin_value [range(%begin_value, 0, 32767), lt(%begin_value, %tokens)] : index
+    %origin = index.constant 0 : offset
+    %outputs = buffer.view %mapping[%origin] : buffer -> view<[%tokens]x4xi32>
+    %thread = kernel.workitem.id<x> : index
+    %threads = index.constant 128 : index
+    scf.for %relative = [%thread to %length step %threads] {
+      %relative_word = index.cast %relative : index to i32
+      %position = scalar.addi %position_word, %relative_word : i32
+      %token_value = index.add %begin, %relative : index
+      %token = index.assume %token_value [range(%token_value, 0, 32767), lt(%token_value, %tokens)] : index
+      view.store %position, %outputs[%token, 0] : i32, view<[%tokens]x4xi32>
+      view.store %row_word, %outputs[%token, 1] : i32, view<[%tokens]x4xi32>
+      view.store %begin_word, %outputs[%token, 2] : i32, view<[%tokens]x4xi32>
+      view.store %position_word, %outputs[%token, 3] : i32, view<[%tokens]x4xi32>
+    }
+  }
+  kernel.return
+}
+
+func.def public inline @flash_next_token_binding(%mapping: buffer, %token_arg: index) -> (index, index, index, index) {
+  %tokens = config.get @flash_next.token_count : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %origin = index.constant 0 : offset
+  %token = index.assume %token_arg [range(%token_arg, 0, 32767), lt(%token_arg, %tokens)] : index
+  %view = buffer.view %mapping[%origin] : buffer -> view<[%tokens]x4xi32>
+  %position_word = view.load %view[%token, 0] : view<[%tokens]x4xi32> -> i32
+  %row_word = view.load %view[%token, 1] : view<[%tokens]x4xi32> -> i32
+  %begin_word = view.load %view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %first_word = view.load %view[%token, 3] : view<[%tokens]x4xi32> -> i32
+  %position_value = index.cast %position_word : i32 to index
+  %position = index.assume %position_value [range(%position_value, 0, 262143), lt(%position_value, %capacity)] : index
+  %row_value = index.cast %row_word : i32 to index
+  %row = index.assume %row_value [range(%row_value, 0, 15)] : index
+  %begin_value = index.cast %begin_word : i32 to index
+  %first_value = index.cast %first_word : i32 to index
+  %begin = index.assume %begin_value [range(%begin_value, 0, 32767), lt(%begin_value, %tokens)] : index
+  %first = index.assume %first_value [range(%first_value, 0, 262143), lt(%first_value, %capacity)] : index
+  func.return %position, %row, %begin, %first : index, index, index, index
+}
+
+// Page IDs are owned by the host pool. Compression divides positions within a
+// page; it never changes page identity or requires a separate allocator.
+func.def public inline @flash_next_physical_token(%rows: buffer, %row: index, %position_arg: index) -> (index) {
+  %capacity = config.get @flash_next.context_capacity : index
+  %pool = config.get @flash_next.pool_capacity : index
+  %page_tokens = index.constant 64 : index
+  %pages = index.div %capacity, %page_tokens : index
+  %physical_pages = index.div %pool, %page_tokens : index
+  %position = index.assume %position_arg [range(%position_arg, 0, 262143), lt(%position_arg, %capacity)] : index
+  %page = index.div %position, %page_tokens : index
+  %within = index.rem %position, %page_tokens : index
+  %map_origin = index.constant 2048 : offset
+  %word_bytes = index.constant 4 : offset
+  %row_bytes = index.scale %pages, %word_bytes : index, offset -> offset
+  %row_relative = index.scale %row, %row_bytes : index, offset -> offset
+  %row_origin = index.add %map_origin, %row_relative : offset
+  %maps = buffer.view %rows[%row_origin] : buffer -> view<[%pages]xi32>
+  %id_word = view.load %maps[%page] : view<[%pages]xi32> -> i32
+  %id_value = index.cast %id_word : i32 to index
+  %id = index.assume %id_value [range(%id_value, 0, 65535), lt(%id_value, %physical_pages)] : index
+  %physical = index.madd %id, %page_tokens, %within : index
+  func.return %physical : index
+}
+
+func.def public inline @flash_next_cache_origin(%rows: buffer, %row: index, %plane_origin: offset) -> (offset) {
+  %origin = index.constant 0 : offset
+  %table = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
+  %base_word = view.load %table[%row, 2] : view<16x4xi64> -> i64
+  %base_value = scalar.assume %base_word [range(%base_word, 0, 9223372036854775807)] : i64
+  %base = index.cast %base_value : i64 to offset
+  %result = index.add %base, %plane_origin : offset
+  func.return %result : offset
+}
+
+func.def public inline @flash_next_row_state(%rows: buffer, %row: index, %position: index, %layer_origin: offset) -> (offset, offset) {
+  %origin = index.constant 0 : offset
+  %table = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
+  %anchor_word = view.load %table[%row, 0] : view<16x4xi64> -> i64
+  %writer_word = view.load %table[%row, 1] : view<16x4xi64> -> i64
+  %frontier = view.load %table[%row, 3] : view<16x4xi64> -> i64
+  %position_word = index.cast %position : index to i64
+  %first = scalar.cmpi eq, %position_word, %frontier : i64
+  %reader_word = scf.select %first, %anchor_word, %writer_word : i64
+  %reader_value = scalar.assume %reader_word [range(%reader_word, 0, 9223372036854775807)] : i64
+  %writer_value = scalar.assume %writer_word [range(%writer_word, 0, 9223372036854775807)] : i64
+  %reader_base = index.cast %reader_value : i64 to offset
+  %writer_base = index.cast %writer_value : i64 to offset
+  %reader = index.add %reader_base, %layer_origin : offset
+  %writer = index.add %writer_base, %layer_origin : offset
+  func.return %reader, %writer : offset, offset
+}

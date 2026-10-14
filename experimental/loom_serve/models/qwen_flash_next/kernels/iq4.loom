@@ -1,0 +1,42 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.def public inline @flash_next_iq4_codes(%weight: buffer, %block_origin: offset) -> (vector<32xbf16>, f32) {
+  %c0_index = index.constant 0 : index
+  %payload_delta = index.constant 2 : offset
+  %payload_origin = index.add %block_origin, %payload_delta : offset
+  %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+  %payload_view = buffer.view %weight[%payload_origin] : buffer -> view<16xi8>
+  %scale_f16 = view.load %scale_view[%c0_index] : view<1xf16> -> f16
+  %scale = scalar.extf %scale_f16 : f16 to f32
+  %payload = vector.load %payload_view[%c0_index] : view<16xi8> -> vector<16xi8>
+  %mask = vector.constant 15 : vector<16xi8>
+  %shift = vector.constant 4 : vector<16xi8>
+  %lower = vector.andi %payload, %mask : vector<16xi8>
+  %upper = vector.shrui %payload, %shift : vector<16xi8>
+  %indices = vector.concat<0> %lower, %upper : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %m0 = scalar.constant -127 : i8
+  %m1 = scalar.constant -104 : i8
+  %m2 = scalar.constant -83 : i8
+  %m3 = scalar.constant -65 : i8
+  %m4 = scalar.constant -49 : i8
+  %m5 = scalar.constant -35 : i8
+  %m6 = scalar.constant -22 : i8
+  %m7 = scalar.constant -10 : i8
+  %m8 = scalar.constant 1 : i8
+  %m9 = scalar.constant 13 : i8
+  %m10 = scalar.constant 25 : i8
+  %m11 = scalar.constant 38 : i8
+  %m12 = scalar.constant 53 : i8
+  %m13 = scalar.constant 69 : i8
+  %m14 = scalar.constant 89 : i8
+  %m15 = scalar.constant 113 : i8
+  %table = vector.from_elements %m0, %m1, %m2, %m3, %m4, %m5, %m6, %m7, %m8, %m9, %m10, %m11, %m12, %m13, %m14, %m15 : vector<16xi8>
+  %codes = vector.table.lookup %table[%indices] : vector<16xi8>, vector<32xi8> -> vector<32xi8>
+  %values = vector.sitofp %codes : vector<32xi8> to vector<32xf32>
+  %packed = vector.fptrunc %values : vector<32xf32> to vector<32xbf16>
+  func.return %packed, %scale : vector<32xbf16>, f32
+}

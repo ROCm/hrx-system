@@ -15,9 +15,33 @@ loom_library(
         "kernels/*.loom",
         "programs/*.loom",
     ]) + [
+        "config.loom",
         "//experimental/loom_serve/motifs/ggml:sources",
     ],
 )
+
+[
+    loom_test(
+        name = name + "_test",
+        srcs = ["tests/" + name + ".loom"],
+        benchmark_smoke = False,
+        configs = {
+            "flash_next.context_capacity": "2112",
+            "flash_next.pool_capacity": "2112",
+            "flash_next.token_count": "8",
+        },
+        execution_profiles = [
+            AMDGPU_HARDWARE_PROFILE,
+            AMDGPU_ACCESS_PROFILE,
+        ],
+        deps = [":residual_programs"],
+    )
+    for name in [
+        "iq4",
+        "retained",
+        "selection",
+    ]
+]
 
 loom_test(
     name = "gdn_test",
