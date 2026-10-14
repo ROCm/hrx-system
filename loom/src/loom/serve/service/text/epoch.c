@@ -33,7 +33,9 @@ static void loom_serve_text_epoch_prepare_continuation(
     } else {
       const iree_host_size_t minimum_consumed =
           output_limits[i] ? 1 : span->token_count;
-      if (options->draft_depth && remaining_output > 1 &&
+      // The first selected result consumes at least one output. Another
+      // verifier needs at least two left, as in ordinary request scheduling.
+      if (options->draft_depth && remaining_output > 2 &&
           options->context_capacity - row->position >=
               minimum_consumed + width) {
         ready[i] = (loom_serve_ready_span_t){width, width};

@@ -157,7 +157,8 @@ typedef struct loom_serve_text_continuation_t {
   // Borrowed next input chunks or device-produced speculative anchors.
   const loom_serve_text_span_t* spans;
   // Zero for known input; otherwise total output credit including the first
-  // plan's outputs. Device acceptance subtracts those before continuing.
+  // plan's outputs, at least three. Device acceptance subtracts the first
+  // result and continues speculation only when at least two outputs remain.
   const uint32_t* output_limits;
 } loom_serve_text_continuation_t;
 
