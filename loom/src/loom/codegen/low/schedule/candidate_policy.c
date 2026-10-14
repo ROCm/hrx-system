@@ -12,6 +12,7 @@
 #define LOOM_LOW_SCHEDULE_READY_VIEW_SEARCH_COUNT 16
 #define LOOM_LOW_SCHEDULE_READY_VIEW_NOMINEE_COUNT 2
 #define LOOM_LOW_SCHEDULE_READY_NOMINEE_CAPACITY 24
+#define LOOM_LOW_SCHEDULE_READY_CRITICAL_PATH_BAND_CYCLES 1
 
 typedef enum loom_low_schedule_candidate_compare_mode_e {
   LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT = 0,
@@ -642,13 +643,44 @@ void loom_low_schedule_candidate_policy_select(
   uint32_t nominees[LOOM_LOW_SCHEDULE_READY_NOMINEE_CAPACITY];
   loom_low_schedule_candidate_score_t
       nominee_scores[LOOM_LOW_SCHEDULE_READY_NOMINEE_CAPACITY];
-  uint8_t nominee_count =
+  const uint8_t source_view_nominee_count =
       loom_low_schedule_collect_source_nominees(ready_policy, nominees);
+  uint8_t nominee_count = source_view_nominee_count;
+  if (ready_candidate_count > nominee_count) {
+    // Add the best graph-ranked candidate to the bounded source nominees so
+    // equivalent dependency graphs do not select entirely from source order.
+    loom_low_schedule_add_ready_view_nominees(
+        ready_policy, LOOM_LOW_SCHEDULE_READY_VIEW_SCHEDULE,
+        /*search_count=*/1, /*nominee_limit=*/1, nominees, &nominee_count);
+  }
   IREE_ASSERT_NE(nominee_count, 0);
   for (uint8_t i = 0; i < nominee_count; ++i) {
     loom_low_schedule_pressure_score_candidate(state, pressure_state,
                                                ready_policy, indegrees,
                                                nominees[i], &nominee_scores[i]);
+  }
+  if (nominee_count > source_view_nominee_count) {
+    // The extra graph nominee repairs a source-window boundary within the
+    // current critical-path band. It must not use that escape hatch to enter a
+    // distant pressure-growing path: repeatedly selecting the head of such a
+    // path can accumulate every intermediate before ordinary pressure
+    // recovery begins. Non-growing work remains directly actionable.
+    uint32_t maximum_source_critical_path_cycles = 0;
+    for (uint8_t i = 0; i < source_view_nominee_count; ++i) {
+      maximum_source_critical_path_cycles =
+          iree_max(maximum_source_critical_path_cycles,
+                   nominee_scores[i].critical_path_cycles);
+    }
+    const loom_low_schedule_candidate_score_t* graph_score =
+        &nominee_scores[source_view_nominee_count];
+    if (graph_score->produced_live_units > graph_score->killed_live_units &&
+        graph_score->critical_path_cycles >
+            maximum_source_critical_path_cycles &&
+        graph_score->critical_path_cycles -
+                maximum_source_critical_path_cycles >
+            LOOM_LOW_SCHEDULE_READY_CRITICAL_PATH_BAND_CYCLES) {
+      nominee_count = source_view_nominee_count;
+    }
   }
   out_selection->scored_candidate_count = nominee_count;
   const loom_low_schedule_candidate_compare_mode_t compare_mode =
