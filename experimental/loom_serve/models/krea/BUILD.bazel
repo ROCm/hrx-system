@@ -76,3 +76,22 @@ loom_test(
         AMDGPU_ACCESS_PROFILE,
     ],
 )
+
+loom_test(
+    name = "vae_tiles_test",
+    srcs = [
+        "tests/vae_tiles.loom",
+        "vae_tiles.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "krea2.latent_height": "36",
+        "krea2.latent_width": "40",
+        "krea2.vae_tile_height": "32",
+        "krea2.vae_tile_width": "34",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
