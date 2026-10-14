@@ -1062,8 +1062,8 @@ def cleanup_try_scratch(scratch_dir: Path, execution_root: Path | None) -> None:
     # package concurrently, and their empty scaffolding has no retained payload.
 
 
-def wait_for_try_process(process_launch: BazelProcess) -> int:
-    """Keeps artifact ownership until the snippet exits, including on signals."""
+def wait_for_bazel_process(process_launch: BazelProcess) -> int:
+    """Keeps artifact ownership until the child exits, including on signals."""
     process = None
     pending_signal = None
 
@@ -1314,7 +1314,7 @@ class BazelFuzzStep:
                     ]
                 )
             )
-            lines.append("exec " + quote_command(["<Bazel launch script>"]))
+            lines.append("run " + quote_command(["<Bazel launch script>"]))
         return "\n".join(lines)
 
     def run(self, verbose: bool = False) -> int:
@@ -1391,7 +1391,19 @@ class BazelFuzzStep:
         )
         if launch_result != 0 or launch is None:
             return launch_result
-        return execute_bazel_launch(launch, env=self.env)
+        process_result, process_launch = prepare_bazel_process(launch, env=self.env)
+        if process_result != 0 or process_launch is None:
+            return process_result
+        # libFuzzer measures peak RSS through getrusage. A fresh child resets
+        # memory accounting that otherwise survives the launcher's exec chain.
+        try:
+            return wait_for_bazel_process(process_launch)
+        except (OSError, ValueError) as exc:
+            print(f"dev.py: failed to start fuzzer: {exc}", file=sys.stderr)
+            return 127
+        finally:
+            if process_launch.script_path is not None:
+                bazel_launcher.remove_launch_script(process_launch.script_path)
 
     def generate_fuzzer_launch(
         self,
@@ -1599,7 +1611,7 @@ class BazelTryStep:
             process_result, process_launch = prepare_bazel_process(launch, env=self.env)
             if process_result != 0 or process_launch is None:
                 return process_result
-            return wait_for_try_process(process_launch)
+            return wait_for_bazel_process(process_launch)
         finally:
             if launch is not None:
                 bazel_launcher.remove_launch_script(launch.script_path)
