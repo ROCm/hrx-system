@@ -74,6 +74,7 @@ loom_cc_library(
   DEPS
     iree::async
     iree::async::platform
+    iree::async::util::proactor_pool
     iree::base
     iree::base::internal::json
     iree::base::threading
@@ -93,6 +94,7 @@ loom_cc_library(
     loom::serve::service::finite::model
     loom::serve::service::text::chat
     loom::serve::service::text::input
+    loom::serve::service::text::media_projector
     loom::serve::service::text::model
     loom::serve::service::text::packing
     loom::serve::service::text::schedule
@@ -230,6 +232,22 @@ endif()
 if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_library(
   NAME
+    media_projector_tests
+  SRCS
+    "media_projector_test.cc"
+  DEPS
+    ::media_projector
+    ::source_service_fixture
+    iree::async::util::proactor_pool
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
     source_execution_tests
   SRCS
     "source_execution_test.cc"
@@ -356,6 +374,30 @@ loom_cc_library(
   DEPS
     ::input
     iree::base
+    loom::serve::service::finite::model
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    media_projector
+  HDRS
+    "media_projector.h"
+  SRCS
+    "media_projector.c"
+  DEPS
+    ::projected_media
+    ::readiness
+    iree::async
+    iree::base
+    iree::task
+    iree::vm
+    loom::serve::media::image_request
+    loom::serve::runtime::execution
+    loom::serve::runtime::parameter::residency
+    loom::serve::service::finite::component
     loom::serve::service::finite::model
   PUBLIC
 )

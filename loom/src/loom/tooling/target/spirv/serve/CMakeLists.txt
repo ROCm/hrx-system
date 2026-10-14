@@ -229,4 +229,35 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    source_text_media_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/project.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/tokenizer.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/weights.loom"
+  DEPS
+    ::test_compiler
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::service::text::media_projector_tests
+  ENV
+    "LOOM_SERVE_TEST_MODEL_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
+    "LOOM_SERVE_TEST_PROJECTOR_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/prepare.loom}}"
+  LABELS
+    "iree-run-requirement=vulkan.resource.device"
+    "iree-build-requirement=loom.target.arch.spirv"
+    "iree-build-requirement=loom.emit.spirv"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
