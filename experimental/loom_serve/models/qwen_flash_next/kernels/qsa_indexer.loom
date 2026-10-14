@@ -4,11 +4,17 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
 
 config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+func.decl @flash_next_span_publishes(%verification: index, %epoch: buffer, %span: index) -> (i1)
 
 func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
 
@@ -267,55 +273,85 @@ kernel.def target(@qsa_wave32) @qsa_prepare_blocks() {
 
 // Only the live incomplete block is retained. No read touches uninitialized
 // history on a fresh span, and a fork publishes exclusively to its own writer.
+template.decl @flash_next.qsa_publish_tail.body(%capacity: index, %verification: index, %tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
+
+template.def<@flash_next.qsa_publish_tail.body> device @qsa_publish_tail_body(%capacity: index, %verification: index, %tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer) {
+  %span = kernel.workgroup.id<x> : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %publish = func.call @flash_next_span_publishes(%verification, %epoch, %span) : (index, buffer, index) -> (i1)
+    scf.if %publish {
+      %header = index.constant 12 : offset
+      %record_bytes = index.constant 20 : offset
+      %relative_origin = index.scale %span, %record_bytes : index, offset -> offset
+      %record_origin = index.add %header, %relative_origin : offset
+      %record = buffer.view %epoch[%record_origin] : buffer -> view<5xi32>
+      %length_word = view.load %record[0] : view<5xi32> -> i32
+      %begin_word = view.load %record[2] : view<5xi32> -> i32
+      %length_value = index.cast %length_word : i32 to index
+      %length = index.assume %length_value [range(%length_value, 1, %capacity)] : index
+      %begin = index.cast %begin_word : i32 to index
+      %position_word = view.load %record[1] : view<5xi32> -> i32
+      %row_word = view.load %record[3] : view<5xi32> -> i32
+      %first_value = index.cast %position_word : i32 to index
+      %first = index.assume %first_value [range(%first_value, 0, 262143)] : index
+      %row_value = index.cast %row_word : i32 to index
+      %row = index.assume %row_value [range(%row_value, 0, 15)] : index
+      %reader, %writer = func.call @flash_next_row_state(%rows, %row, %first, %tail_origin) : (buffer, index, index, offset) -> (offset, offset)
+      %logical_end = index.add %first, %length : index
+      %c4 = index.constant 4 : index
+      %tail_length = index.rem %logical_end, %c4 : index
+      %tail_begin = index.sub %logical_end, %tail_length : index
+      %origin = index.constant 0 : offset
+      %inputs = buffer.view %raw[%origin] : buffer -> view<[%capacity]x128xbf16>
+      %previous = buffer.view %arena[%reader] : buffer -> view<3x128xbf16>
+      %outputs = buffer.view %arena[%writer] : buffer -> view<3x128xbf16>
+      %lane = kernel.subgroup.lane.id : index
+      %channel = index.mul %lane, %c4 : index
+      %c0 = index.constant 0 : index
+      %c1 = index.constant 1 : index
+      scf.for %slot = [%c0 to %tail_length step %c1] {
+        %logical = index.add %tail_begin, %slot : index
+        %prior = index.cmp ult, %logical, %first : index
+        %packed = scf.if %prior -> (vector<4xbf16>) {
+          %value = vector.load %previous[%slot, %channel] : view<3x128xbf16> -> vector<4xbf16>
+          scf.yield %value : vector<4xbf16>
+        } else {
+          %relative = index.sub %logical, %first : index
+          %token_value = index.add %begin, %relative : index
+          %token = index.assume %token_value [range(%token_value, 0, 32767), lt(%token_value, %capacity)] : index
+          %value = vector.load %inputs[%token, %channel] : view<[%capacity]x128xbf16> -> vector<4xbf16>
+          scf.yield %value : vector<4xbf16>
+        }
+        vector.store %packed, %outputs[%slot, %channel] : vector<4xbf16>, view<3x128xbf16>
+      }
+    }
+  }
+  template.return
+}
+
 kernel.def target(@qsa_wave32) @qsa_publish_tail() {
   %spans = index.constant 16 : index
   %threads = index.constant 32 : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%tail_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %raw: buffer, %arena: buffer) {
-  %span = kernel.workgroup.id<x> : index
-  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
-  scf.if %active {
-    %tokens = config.get @flash_next.token_count : index
-    %header = index.constant 12 : offset
-    %record_bytes = index.constant 20 : offset
-    %relative_origin = index.scale %span, %record_bytes : index, offset -> offset
-    %record_origin = index.add %header, %relative_origin : offset
-    %record = buffer.view %epoch[%record_origin] : buffer -> view<5xi32>
-    %length_word = view.load %record[0] : view<5xi32> -> i32
-    %begin_word = view.load %record[2] : view<5xi32> -> i32
-    %length_value = index.cast %length_word : i32 to index
-    %length = index.assume %length_value [range(%length_value, 1, %tokens)] : index
-    %begin = index.cast %begin_word : i32 to index
-    %position, %row, %unused_begin, %first = func.call @flash_next_token_binding(%mapping, %begin) : (buffer, index) -> (index, index, index, index)
-    %reader, %writer = func.call @flash_next_row_state(%rows, %row, %first, %tail_origin) : (buffer, index, index, offset) -> (offset, offset)
-    %logical_end = index.add %first, %length : index
-    %c4 = index.constant 4 : index
-    %tail_length = index.rem %logical_end, %c4 : index
-    %tail_begin = index.sub %logical_end, %tail_length : index
-    %origin = index.constant 0 : offset
-    %inputs = buffer.view %raw[%origin] : buffer -> view<[%tokens]x128xbf16>
-    %previous = buffer.view %arena[%reader] : buffer -> view<3x128xbf16>
-    %outputs = buffer.view %arena[%writer] : buffer -> view<3x128xbf16>
-    %lane = kernel.subgroup.lane.id : index
-    %channel = index.mul %lane, %c4 : index
-    %c0 = index.constant 0 : index
-    %c1 = index.constant 1 : index
-    scf.for %slot = [%c0 to %tail_length step %c1] {
-      %logical = index.add %tail_begin, %slot : index
-      %prior = index.cmp ult, %logical, %first : index
-      %packed = scf.if %prior -> (vector<4xbf16>) {
-        %value = vector.load %previous[%slot, %channel] : view<3x128xbf16> -> vector<4xbf16>
-        scf.yield %value : vector<4xbf16>
-      } else {
-        %relative = index.sub %logical, %first : index
-        %token_value = index.add %begin, %relative : index
-        %token = index.assume %token_value [range(%token_value, 0, 32767), lt(%token_value, %tokens)] : index
-        %value = vector.load %inputs[%token, %channel] : view<[%tokens]x128xbf16> -> vector<4xbf16>
-        scf.yield %value : vector<4xbf16>
-      }
-      vector.store %packed, %outputs[%slot, %channel] : vector<4xbf16>, view<3x128xbf16>
-    }
-  }
+} launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %verification = config.get @flash_next.verification_width : index
+  template.apply<@flash_next.qsa_publish_tail.body>(%capacity, %verification, %tail_origin, %epoch, %rows, %raw, %arena) : (index, index, offset, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qsa_wave32) @qsa_publish_tail_commit() {
+  %spans = index.constant 16 : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %verification = index.constant 0 : index
+  template.apply<@flash_next.qsa_publish_tail.body>(%capacity, %verification, %tail_origin, %epoch, %rows, %raw, %arena) : (index, index, offset, buffer, buffer, buffer, buffer)
   kernel.return
 }
