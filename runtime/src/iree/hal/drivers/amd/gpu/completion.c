@@ -17,6 +17,8 @@ enum {
 static int iree_hal_amd_gpu_completion_main(void* user_data) {
   iree_hal_amd_gpu_completion_t* completion = user_data;
   const iree_hal_amd_gpu_context_t* context = completion->context;
+  const iree_hal_amd_gpu_completion_exit_callback_t exit_callback =
+      completion->exit_callback;
   while (iree_atomic_load(&completion->state, iree_memory_order_acquire) ==
          IREE_HAL_AMD_GPU_COMPLETION_RUNNING) {
     IREE_TRACE_ZONE_BEGIN_NAMED(z_poll, "iree_hal_amd_gpu_completion_poll");
@@ -53,12 +55,17 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
   }
   iree_atomic_store(&completion->state, IREE_HAL_AMD_GPU_COMPLETION_STOPPED,
                     iree_memory_order_release);
+  if (exit_callback.fn) {
+    // This action may free completion, its sources, and the native context.
+    exit_callback.fn(exit_callback.user_data);
+  }
   return 0;
 }
 
 iree_status_t iree_hal_amd_gpu_completion_initialize(
     const iree_hal_amd_gpu_context_t* context, iree_host_size_t source_count,
     const iree_hal_amd_gpu_completion_source_t* sources,
+    iree_hal_amd_gpu_completion_exit_callback_t exit_callback,
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_completion_t* out_completion) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -66,6 +73,7 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
   out_completion->context = context;
   out_completion->source_count = source_count;
   out_completion->sources = sources;
+  out_completion->exit_callback = exit_callback;
   const iree_thread_create_params_t params = {
       .name = IREE_SV("hal-gpu-retire"),
       .create_suspended = true,
@@ -80,12 +88,11 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_completion_deinitialize(
+amdf_status_t iree_hal_amd_gpu_completion_request_stop(
     iree_hal_amd_gpu_completion_t* completion) {
   if (!completion->thread) {
-    return iree_ok_status();
+    return AMDF_STATUS_OK;
   }
-  IREE_TRACE_ZONE_BEGIN(z0);
   int32_t expected = IREE_HAL_AMD_GPU_COMPLETION_RUNNING;
   iree_atomic_compare_exchange_strong(
       &completion->state, &expected, IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED,
@@ -94,11 +101,21 @@ iree_status_t iree_hal_amd_gpu_completion_deinitialize(
     // A failed wake preserves the join obligation. Retrying must signal again
     // even when a previous call has already published STOP_REQUESTED.
     const iree_hal_amd_gpu_context_t* context = completion->context;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        IREE_HAL_AMD_STATUS_FROM_AMDF(
-            context->gpu->event_signal(context->event), "gpu.event_signal"));
+    return context->gpu->event_signal(context->event);
   }
+  return AMDF_STATUS_OK;
+}
+
+iree_status_t iree_hal_amd_gpu_completion_deinitialize(
+    iree_hal_amd_gpu_completion_t* completion) {
+  if (!completion->thread) {
+    return iree_ok_status();
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, IREE_HAL_AMD_STATUS_FROM_AMDF(
+              iree_hal_amd_gpu_completion_request_stop(completion),
+              "gpu.event_signal"));
   iree_thread_release(completion->thread);
   completion->thread = NULL;
   IREE_TRACE_ZONE_END(z0);
