@@ -1,0 +1,28 @@
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+global.rodata.def @root = bytes("70726f6a656374")
+
+global.rodata.def @checkpoint = bytes("776569676874732e7361666574656e736f7273")
+
+global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
+
+global.rodata.def @empty = bytes("")
+
+global.rodata.def @name = bytes("666978747572652d636f6d706f6e656e74")
+
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %c0_i32 = scalar.constant 0 : i32
+  %c0_i64 = scalar.constant 0 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %c16_i64 = scalar.constant 16 : i64
+  %root = global.load @root : buffer
+  %stage = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+  %checkpoint = global.load @checkpoint : buffer
+  %policy = global.load @policy : buffer
+  func.call @parameter(%stage, %c0_i32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  %empty = global.load @empty : buffer
+  %name = global.load @name : buffer
+  func.return %c1_i64, %c16_i64, %c16_i64, %c16_i64, %empty, %name, %empty : i64, i64, i64, i64, buffer, buffer, buffer
+}

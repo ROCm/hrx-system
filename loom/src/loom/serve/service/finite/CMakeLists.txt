@@ -9,6 +9,66 @@
 
 iree_add_all_subdirs()
 
+iree_package_target_name(_FILEGROUP_TARGET "::component_testdata")
+add_custom_command(OUTPUT component_testdata.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch component_testdata.stamp
+  DEPENDS
+    "testdata/component/control.loom"
+    "testdata/component/kernels.loom"
+    "testdata/component/policy.loom"
+    "testdata/component/prepare.loom"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS component_testdata.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/component_testdata.stamp"
+)
+
+loom_cc_library(
+  NAME
+    component_tests
+  SRCS
+    "component_test.cc"
+  DEPS
+    ::component
+    ::model
+    iree::base
+    iree::hal
+    iree::task
+    iree::testing::gtest
+    iree::testing::temp_file
+    iree::vm
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::host
+    loom::serve::runtime::parameter::residency
+    loom::serve::testing::device
+    loom::serve::testing::service_application
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    component
+  HDRS
+    "component.h"
+  SRCS
+    "component.c"
+  DEPS
+    ::model
+    iree::base
+    loom::serve::runtime::device
+    loom::serve::runtime::host::wake
+    loom::serve::runtime::parameter::residency
+    loom::serve::runtime::program::compilation
+  PUBLIC
+)
+
 loom_cc_library(
   NAME
     protocol

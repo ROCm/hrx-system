@@ -12,6 +12,61 @@ package(
     licenses = ["notice"],
 )
 
+filegroup(
+    name = "component_testdata",
+    testonly = True,
+    srcs = [
+        "testdata/component/control.loom",
+        "testdata/component/kernels.loom",
+        "testdata/component/policy.loom",
+        "testdata/component/prepare.loom",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["testdata/component/prepare.loom"],
+    visibility = ["//visibility:public"],
+)
+
+loom_cc_library(
+    name = "component_tests",
+    testonly = True,
+    srcs = ["component_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":component",
+        ":model",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/serve/testing:service_application",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+        "//runtime/src/iree/vm",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "component",
+    srcs = ["component.c"],
+    hdrs = ["component.h"],
+    deps = [
+        ":model",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/runtime/program:compilation",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_cc_library(
     name = "protocol",
     hdrs = ["protocol.h"],

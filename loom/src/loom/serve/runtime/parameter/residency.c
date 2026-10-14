@@ -65,6 +65,10 @@ void loom_serve_residency_set_pinned(loom_serve_residency_t* residency,
   residency->pinned = pinned;
 }
 
+bool loom_serve_residency_is_pinned(const loom_serve_residency_t* residency) {
+  return residency->pin_count || residency->pinned;
+}
+
 void loom_serve_residency_set_reclaimer(
     loom_serve_residency_t* residency,
     loom_serve_residency_reclaimer_t reclaimer) {

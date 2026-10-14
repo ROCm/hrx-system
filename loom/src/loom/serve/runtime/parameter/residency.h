@@ -68,6 +68,10 @@ loom_serve_residency_cache_t* loom_serve_residency_cache(
 void loom_serve_residency_set_pinned(loom_serve_residency_t* residency,
                                      bool pinned);
 
+// Whether accepted consumers or persistent retention exclude policy eviction.
+// Read on the serialized owner; this does not acquire or release protection.
+bool loom_serve_residency_is_pinned(const loom_serve_residency_t* residency);
+
 // Optional model-owned idle history, distinct from parameter pinning. Callbacks
 // run on the shared host owner inside a physical-capacity request. They never
 // allocate, submit device work, wait, or recurse into admission. The owner

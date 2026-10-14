@@ -73,6 +73,29 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "finite_component_test",
+    data = [
+        "//loom/src/loom/serve/service/finite:component_testdata",
+        "//loom/src/loom/serve/service/finite:testdata/component/prepare.loom",
+    ],
+    env = {
+        "LOOM_SERVE_TEST_COMPONENT_SOURCE": "$(rootpath //loom/src/loom/serve/service/finite:testdata/component/prepare.loom)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/finite:component_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "control_test",
     srcs = ["//loom/src/loom/serve/runtime/program:control_test.cc"],
     args = ["--control_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/control/kernels.loom)"],
