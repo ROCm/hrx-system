@@ -354,7 +354,7 @@ loom_cc_library(
     loom::sanitizer::options
     loom::tooling::cli::help
     loom::tooling::cli::loomc_options
-    loom::tooling::config
+    loom::tooling::config::input
     loom::tooling::context
   PUBLIC
 )

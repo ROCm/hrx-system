@@ -29,7 +29,7 @@ loom_cc_library(
     loom::tooling::cli::help
     loom::tooling::cli::loomc_options
     loom::tooling::cli::loomc_result
-    loom::tooling::config
+    loom::tooling::config::input
     loom::tooling::execution::hal::invocation
     loom::tooling::execution::hal::runtime
     loom::tooling::input

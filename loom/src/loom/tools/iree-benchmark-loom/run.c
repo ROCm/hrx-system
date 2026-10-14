@@ -15,7 +15,7 @@
 #include "loom/ir/module.h"
 #include "loom/tooling/cli/loomc_options.h"
 #include "loom/tooling/cli/loomc_result.h"
-#include "loom/tooling/config/config.h"
+#include "loom/tooling/config/input.h"
 #include "loom/tooling/input/loomc.h"
 #include "loom/tooling/io/file.h"
 #include "loom/tooling/testbench/device_event.h"

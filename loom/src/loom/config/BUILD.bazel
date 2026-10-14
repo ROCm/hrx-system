@@ -102,3 +102,29 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+loom_cc_library(
+    name = "schema",
+    srcs = ["schema.c"],
+    hdrs = ["schema.h"],
+    deps = [
+        ":application",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "schema_has_no_tooling_or_binding_dependencies",
+    forbidden_subtrees = [
+        "//loom/binding/...",
+        "//loom/src/loom/tooling/...",
+        "//loom/src/loom/tools/...",
+    ],
+    message = "Configuration schema reporting is compiler-owned and independent of command-line input handling",
+    target = ":schema",
+)

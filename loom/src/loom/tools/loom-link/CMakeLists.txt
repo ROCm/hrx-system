@@ -23,6 +23,7 @@ loom_cc_binary(
     loom::codegen::low::repr
     loom::codegen::low::text_asm
     loom::config::application
+    loom::config::schema
     loom::config::text
     loom::config::text_binding
     loom::error::diagnostic
@@ -41,7 +42,7 @@ loom_cc_binary(
     loom::target::provider
     loom::target::selection
     loom::tooling::cli::help
-    loom::tooling::config
+    loom::tooling::config::input
     loom::tooling::context
     loom::tooling::input::configured
     loom::tooling::input::flags

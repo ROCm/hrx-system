@@ -19,10 +19,10 @@ loom_cc_library(
     "schema.c"
   DEPS
     iree::base
+    loom::config::schema
     loom::config::text
     loom::config::text_binding
     loom::format::text::printer
-    loom::tooling::config
     loom::tools::loom-check::execute
     loom::util::stream
   TESTONLY

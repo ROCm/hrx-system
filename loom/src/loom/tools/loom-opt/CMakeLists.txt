@@ -26,6 +26,7 @@ loom_cc_binary(
     loom::codegen::low::verify
     loom::codegen::pass_environment
     loom::config::application
+    loom::config::schema
     loom::config::text
     loom::config::text_binding
     loom::error::diagnostic
@@ -48,7 +49,7 @@ loom_cc_binary(
     loom::tooling::cli::help
     loom::tooling::cli::loomc_diagnostic_json
     loom::tooling::cli::loomc_result
-    loom::tooling::config
+    loom::tooling::config::input
     loom::tooling::io::file
     loom::tooling::pass::trace_cli
     loom::transforms::cleanup::configured

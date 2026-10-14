@@ -4,8 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/config/schema.h"
+
 #include "iree/base/api.h"
-#include "loom/tooling/config/config.h"
 #include "loom/tools/loom-check/test/config/providers.h"
 #include "loom/util/stream.h"
 
@@ -28,8 +29,7 @@ static iree_status_t loom_check_test_config_schema_execute(
   loom_output_stream_t output_stream;
   loom_output_stream_for_builder(&request->result->actual_output,
                                  &output_stream);
-  return loom_tooling_config_format_schema_json(native_module->module,
-                                                &output_stream);
+  return loom_config_format_schema_json(native_module->module, &output_stream);
 }
 
 static iree_status_t loom_check_test_config_schema_append_names(

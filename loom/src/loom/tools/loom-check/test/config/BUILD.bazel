@@ -22,10 +22,10 @@ loom_cc_library(
     hdrs = ["providers.h"],
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
+        "//loom/src/loom/config:schema",
         "//loom/src/loom/config:text",
         "//loom/src/loom/config:text_binding",
         "//loom/src/loom/format/text:printer",
-        "//loom/src/loom/tooling/config",
         "//loom/src/loom/tools/loom-check:execute",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

@@ -14,5 +14,8 @@ package(
 
 loom_check_test_suite(
     name = "test",
-    srcs = ["materialize.loom-test"],
+    srcs = [
+        "materialize.loom-test",
+        "schema.loom-test",
+    ],
 )

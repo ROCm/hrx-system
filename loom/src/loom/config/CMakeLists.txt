@@ -72,4 +72,22 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+loom_cc_library(
+  NAME
+    schema
+  HDRS
+    "schema.h"
+  SRCS
+    "schema.c"
+  DEPS
+    ::application
+    iree::base
+    loom::format::text::printer
+    loom::ir
+    loom::ops::config
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

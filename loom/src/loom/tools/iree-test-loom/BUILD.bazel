@@ -145,7 +145,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/cli:loomc_options",
         "//loom/src/loom/tooling/cli:loomc_result",
-        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/tooling/config:input",
         "//loom/src/loom/tooling/execution/hal:scenario_profile",
         "//loom/src/loom/tooling/execution/hal:testbench_actual",
         "//loom/src/loom/tooling/input:flags",

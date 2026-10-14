@@ -17,7 +17,7 @@
 #include "loom/sanitizer/options.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/cli/loomc_options.h"
-#include "loom/tooling/config/config.h"
+#include "loom/tooling/config/input.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/file.h"

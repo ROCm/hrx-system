@@ -454,7 +454,7 @@ loom_cc_library(
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/cli:loomc_options",
-        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/tooling/config:input",
         "//loom/src/loom/tooling/context",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

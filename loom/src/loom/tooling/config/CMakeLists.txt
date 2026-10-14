@@ -11,31 +11,25 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    config
+    input
   HDRS
-    "config.h"
+    "input.h"
   SRCS
-    "config.c"
+    "input.c"
   DEPS
     iree::base
-    loom::config::application
     loom::config::text_binding
-    loom::format::text::printer
-    loom::ir
-    loom::ops::config
     loom::tooling::io::file
-    loom::util::json
-    loom::util::stream
   PUBLIC
 )
 
 loom_cc_test(
   NAME
-    config_test
+    input_test
   SRCS
-    "config_test.cc"
+    "input_test.cc"
   DEPS
-    ::config
+    ::input
     iree::base
     iree::io::file_handle
     iree::testing::gtest

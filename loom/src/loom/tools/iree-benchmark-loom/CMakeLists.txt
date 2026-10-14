@@ -96,7 +96,7 @@ loom_cc_library(
     loom::tooling::cli::loomc_diagnostic_json
     loom::tooling::cli::loomc_options
     loom::tooling::cli::loomc_result
-    loom::tooling::config
+    loom::tooling::config::input
     loom::tooling::execution::benchmark
     loom::tooling::execution::hal::artifact
     loom::tooling::execution::hal::benchmark

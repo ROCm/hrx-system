@@ -163,7 +163,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/cli:loomc_diagnostic_json",
         "//loom/src/loom/tooling/cli:loomc_options",
         "//loom/src/loom/tooling/cli:loomc_result",
-        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/tooling/config:input",
         "//loom/src/loom/tooling/execution:benchmark",
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:benchmark",

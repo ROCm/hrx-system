@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tooling/config/config.h"
+#include "loom/tooling/config/input.h"
 
 #include <string>
 
@@ -17,7 +17,7 @@
 namespace loom {
 namespace {
 
-TEST(ConfigToolingTest, AssignmentAdapterOwnsValuesAndRejectsDuplicates) {
+TEST(ConfigInputTest, AssignmentAdapterOwnsValuesAndRejectsDuplicates) {
   loom_config_text_binding_set_t text_set;
   loom_config_text_binding_set_initialize(iree_allocator_system(), &text_set);
 
@@ -38,7 +38,7 @@ TEST(ConfigToolingTest, AssignmentAdapterOwnsValuesAndRejectsDuplicates) {
   loom_config_text_binding_set_deinitialize(&text_set);
 }
 
-TEST(ConfigToolingTest, LoadsJsonObjectFiles) {
+TEST(ConfigInputTest, LoadsJsonObjectFiles) {
   iree::testing::TempFilePath config_file("loom_config_test", ".json");
   const std::string json = R"({
     "model36": {

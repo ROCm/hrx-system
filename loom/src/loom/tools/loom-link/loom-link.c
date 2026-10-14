@@ -18,6 +18,7 @@
 #include "loom/codegen/low/repr.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/config/application.h"
+#include "loom/config/schema.h"
 #include "loom/config/text.h"
 #include "loom/config/text_binding.h"
 #include "loom/error/diagnostic.h"
@@ -37,7 +38,7 @@
 #include "loom/target/provider.h"
 #include "loom/target/selection.h"
 #include "loom/tooling/cli/help.h"
-#include "loom/tooling/config/config.h"
+#include "loom/tooling/config/input.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tooling/input/configured.h"
 #include "loom/tooling/input/flags.h"
@@ -1032,8 +1033,7 @@ static iree_status_t loom_link_cli_print_config_schema(
   iree_string_builder_initialize(allocator, &builder);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
-  iree_status_t status =
-      loom_tooling_config_format_schema_json(module, &stream);
+  iree_status_t status = loom_config_format_schema_json(module, &stream);
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_string(&builder, IREE_SV("\n"));
   }
