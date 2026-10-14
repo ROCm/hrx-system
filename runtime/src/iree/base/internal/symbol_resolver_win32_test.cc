@@ -78,7 +78,14 @@ TEST(SymbolResolverTest, ConcurrentSymbolsAndStatus) {
 
         ASSERT_TRUE(found_symbol);
         ASSERT_TRUE(found_module);
-        EXPECT_STREQ("iree_symbol_resolver_test_capture", symbol->Name);
+        // An MSVC incremental link can point at the function's jump thunk.
+        EXPECT_THAT(
+            symbol->Name,
+            ::testing::AnyOf(
+                ::testing::StrEq("iree_symbol_resolver_test_capture"),
+                ::testing::AllOf(::testing::StartsWith("ILT+"),
+                                 ::testing::EndsWith(
+                                     "(iree_symbol_resolver_test_capture)"))));
         EXPECT_EQ(module.BaseOfImage, symbol->ModBase);
         EXPECT_NE('\0', module.ModuleName[0]);
         if (found_line) {
@@ -91,11 +98,12 @@ TEST(SymbolResolverTest, ConcurrentSymbolsAndStatus) {
         iree_status_t status = iree_symbol_resolver_test_capture();
         char text[16384];
         iree_host_size_t text_length = 0;
-        EXPECT_TRUE(
-            iree_status_format(status, sizeof(text), text, &text_length));
-        EXPECT_THAT(text,
-                    ::testing::HasSubstr("<iree_symbol_resolver_test_capture"));
+        bool formatted =
+            iree_status_format(status, sizeof(text), text, &text_length);
         iree_status_free(status);
+        ASSERT_TRUE(formatted);
+        EXPECT_THAT(std::string(text, text_length),
+                    ::testing::HasSubstr("<iree_symbol_resolver_test_capture"));
 #endif  // has IREE_STATUS_FEATURE_STACK_TRACE
       }
     });
