@@ -1,13 +1,13 @@
 # Source-defined finite vector models
 
-This service hosts computations whose final result is one or more
-small F32 vectors: an embedding is a final vector, while a decision model can
-produce question probabilities. The native runner owns source JIT, shared
-parameter residency, stage submission and result lifetime. The source owns
-tokenization/task framing, model shapes, pooling, normalization and learned
-heads. It does not require a decode loop, KV reservation or VM process per
-request. The HTTP consumers are [embeddings](embedding/protocol.h) and
-[SystemOne decisions](decision/README.md).
+This service hosts computations whose final result is one or more bounded F32
+vectors: an embedding is a final vector, a decision model can produce question
+probabilities, and a media component can project ordered feature rows. The
+native runner owns source JIT, shared parameter residency, stage submission and
+result lifetime. The source owns tokenization/task framing, model shapes,
+pooling, normalization and learned heads. It does not require a decode loop, KV
+reservation or VM process per request. The standalone HTTP consumers are
+[embeddings](embedding/protocol.h) and [SystemOne decisions](decision/README.md).
 
 The [source ABI](model.h) is implemented by the
 [deterministic embedding package](../../fixture/embedding/README.md).
@@ -103,9 +103,14 @@ queue pool only while executing. Interior record alignment remains source-owned.
 The input retires after work. Output retirement imports the feedback frontier
 onto the work timeline before `queue_dealloca`, so reuse follows the final
 reader rather than queue submission order. Private command workspace can retire
-earlier. The source payload survives upload; compact host feedback survives
-until the CPU encoding process's release callback. The transport copies final
-responses and does not retain a model's output allocation for a slow peer.
+earlier. The checked result plan determines one exact compact host-feedback
+allocation per cohort. Once both device frontiers retire, the scheduler detaches
+that allocation and its plan as an independently owned result. The serialized
+model can then bind a different exact destination and begin another cohort while
+a consumer retains old row views. The source payload survives upload; a detached
+result survives until its final CPU process or composed-model consumer releases
+it. The transport copies standalone responses and does not retain result storage
+for a slow peer.
 
 One reset client never edits an already submitted cohort. Its output is
 discarded while the other requests keep their original row associations.

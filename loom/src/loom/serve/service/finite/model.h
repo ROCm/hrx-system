@@ -192,19 +192,41 @@ iree_status_t loom_serve_finite_model_submit(
     loom_serve_execution_frontier_t* out_frontier);
 
 // Scheduler consumes successful ALL readiness, releasing the residency pin.
-// Borrowed result rows remain live until release_batch. If a CPU encoder has
-// accepted those views, release_batch follows its process release callback, not
-// merely its completion callback. When no consumers remain, the owner may
-// release the batch immediately.
 void loom_serve_finite_model_complete(loom_serve_finite_model_t* model);
 
-// Trusted queries into the checked plan. Request ordinals name the original
-// prepared cohort, not a filtered set of surviving clients. Row ordinals are
-// local to each original HTTP request.
-uint64_t loom_serve_finite_model_input_tokens(
-    const loom_serve_finite_model_t* model, iree_host_size_t request);
-iree_const_byte_span_t loom_serve_finite_model_row(
-    const loom_serve_finite_model_t* model, iree_host_size_t request,
+// Completed exact feedback detached from a model invocation. This value owns
+// its checked source plan and host row storage, allowing the serialized model
+// to begin another cohort while consumers retain result views.
+typedef struct loom_serve_finite_result_t {
+  // Allocator owning feedback storage and borrowed through deinitialization.
+  iree_allocator_t host_allocator;
+  // Owned source plan backing records.
+  iree_vm_buffer_t* plan;
+  // Borrowed checked plan bytes backed by plan.
+  iree_const_byte_span_t records;
+  // Owned exact compact feedback bytes.
+  iree_byte_span_t feedback;
+  // Original HTTP request count in stable cohort order.
+  iree_host_size_t request_count;
+} loom_serve_finite_result_t;
+
+// Transfers a successfully completed invocation into an independent result.
+// The caller has consumed successful ALL readiness and called complete. The
+// zero-initialized output must not already own a result.
+void loom_serve_finite_model_take_result(
+    loom_serve_finite_model_t* model, loom_serve_finite_result_t* out_result);
+
+// Releases a detached result after every borrowed row view retires. A
+// zero-initialized result is inert.
+void loom_serve_finite_result_deinitialize(loom_serve_finite_result_t* result);
+
+// Trusted queries into the checked result plan. Request ordinals name the
+// original prepared cohort, not a filtered set of surviving clients. Row
+// ordinals are local to each original HTTP request.
+uint64_t loom_serve_finite_result_input_tokens(
+    const loom_serve_finite_result_t* result, iree_host_size_t request);
+iree_const_byte_span_t loom_serve_finite_result_row(
+    const loom_serve_finite_result_t* result, iree_host_size_t request,
     iree_host_size_t row);
 
 // Releases an unsubmitted or successfully completed cohort. Never used after

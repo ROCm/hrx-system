@@ -46,8 +46,8 @@ typedef struct loom_serve_module_options_t {
   struct {
     // Number of addressable feedback slots.
     iree_host_size_t count;
-    // Descriptors are copied; payload storage remains borrowed through all
-    // accepted feedback, including partial submission failure and teardown.
+    // Initial descriptors are copied; payload storage remains borrowed through
+    // every accepted feedback targeting it.
     const iree_byte_span_t* values;
   } feedback;
 } loom_serve_module_options_t;
@@ -73,6 +73,15 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
                                        loom_serve_module_options_t options,
                                        iree_allocator_t host_allocator,
                                        iree_vm_module_t** out_module);
+
+// Rebinds one registered feedback slot between serialized model invocations.
+// The caller has joined every prior feedback submission targeting the slot;
+// their captured host spans remain live independently. The new payload remains
+// borrowed through every accepted feedback targeting it. Empty spans preserve
+// the registered slot while making nonempty feedback calls fail their bound.
+void loom_serve_module_bind_feedback(iree_vm_module_t* module,
+                                     iree_host_size_t slot,
+                                     iree_byte_span_t destination);
 
 // Rebinds the native stages of a module created above without changing its VM
 // declarations, process storage, feedback destinations or execution timeline.
