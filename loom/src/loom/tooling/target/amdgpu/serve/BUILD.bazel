@@ -75,11 +75,10 @@ loom_cc_library(
 
 loom_cc_test(
     name = "projector_fixture_test",
-    args = [
-        "--projector_source=$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
-        "--test_device=amdgpu",
-    ],
     data = PROJECTOR_SOURCES,
+    env = {
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
+    },
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
@@ -87,6 +86,8 @@ loom_cc_test(
         "//loom/config/execute:amdgpu_hal",
     ]),
     deps = [
+        ":test_compiler",
+        ":test_device",
         "//loom/src/loom/serve/fixture/projector:projector_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -111,6 +112,30 @@ loom_cc_test(
         ":test_compiler",
         ":test_device",
         "//loom/src/loom/serve/service/finite:component_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "finite_component_storage_test",
+    data = [
+        "//loom/src/loom/serve/service/finite:component_testdata",
+        "//loom/src/loom/serve/service/finite:testdata/component/prepare.loom",
+    ],
+    env = {
+        "LOOM_SERVE_TEST_COMPONENT_SOURCE": "$(rootpath //loom/src/loom/serve/service/finite:testdata/component/prepare.loom)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/finite:component_elastic_storage_tests",
+        "//loom/src/loom/serve/service/finite:component_storage_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
@@ -346,8 +371,8 @@ loom_cc_test(
     name = "source_text_media_test",
     data = TEXT_SOURCES + PROJECTOR_SOURCES,
     env = {
-        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
     },
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _ROCR_TEST_TAGS,
@@ -362,6 +387,54 @@ loom_cc_test(
         ":test_compiler",
         ":test_device",
         "//loom/src/loom/serve/service/text:media_projector_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_text_media_lifecycle_test",
+    data = TEXT_SOURCES + PROJECTOR_SOURCES,
+    env = {
+        "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/text:source_media_lifecycle_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_text_media_cache_test",
+    data = TEXT_SOURCES + PROJECTOR_SOURCES,
+    env = {
+        "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/text:source_media_cache_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )

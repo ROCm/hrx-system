@@ -118,11 +118,9 @@ loom_cc_library(
   NAME
     source_lifecycle_tests
   SRCS
-    "component_service_test.cc"
     "source_lifecycle_test.cc"
   DEPS
     ::source_service_fixture
-    loom::serve::service::finite::component
   TESTONLY
   ALWAYSLINK
   PUBLIC
@@ -220,11 +218,58 @@ endif()
 if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_library(
   NAME
-    source_reference_tests
+    image_service_fixture
+  HDRS
+    "image_service_test_fixture.h"
+  SRCS
+    "image_service_test_fixture.cc"
   DEPS
-    ::source_execution_tests
-    ::source_lifecycle_tests
+    ::source_service_fixture
+    loom::serve::service::finite::component
   TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    component_service_tests
+  SRCS
+    "component_service_test.cc"
+  DEPS
+    ::source_service_fixture
+    loom::serve::service::finite::component
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    source_media_cache_tests
+  SRCS
+    "source_media_cache_test.cc"
+  DEPS
+    ::image_service_fixture
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    source_media_lifecycle_tests
+  SRCS
+    "source_media_lifecycle_test.cc"
+  DEPS
+    ::image_service_fixture
+  TESTONLY
+  ALWAYSLINK
   PUBLIC
 )
 endif()
@@ -236,8 +281,8 @@ loom_cc_library(
   SRCS
     "media_projector_test.cc"
   DEPS
+    ::image_service_fixture
     ::media_projector
-    ::source_service_fixture
     iree::async::util::proactor_pool
   TESTONLY
   ALWAYSLINK
