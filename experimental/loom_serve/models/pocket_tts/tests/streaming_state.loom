@@ -1,0 +1,204 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+kernel.decl @pocket.previous_latent() launch(%previous: buffer, %position: buffer, %bos: buffer, %output: buffer)
+
+kernel.decl @pocket.latent_output() launch(%noise: buffer, %delta: buffer, %previous: buffer, %scale: buffer, %mean: buffer, %output: buffer)
+
+kernel.decl @pocket.advance_1() launch(%position: buffer)
+
+kernel.decl @pocket.advance_16() launch(%position: buffer)
+
+kernel.decl @pocket.history_1x1920_h6() launch(%input: buffer, %history: buffer, %padded: buffer)
+
+kernel.decl @pocket.history_replicate_512x16_h16() launch(%input: buffer, %history: buffer, %padded: buffer, %position: buffer)
+
+kernel.decl @pocket.overlap_512x16_h16() launch(%input: buffer, %history: buffer, %output: buffer)
+
+kernel.decl @pocket.overlap_bias_64x1920_h4() launch(%input: buffer, %history: buffer, %output: buffer, %bias: buffer)
+
+kernel.decl @pocket.fade() launch(%input: buffer, %position: buffer, %output: buffer)
+
+// Recurrent FlowLM input stays normalized. Only the codec input receives the
+// checkpoint's scale and mean; BOS is selected solely for the first frame.
+check.case public @latent_recurrence {
+  %previous = check.generate.fill value(-123.0) : tensor<32x1xf32>
+  %position = check.generate.fill value(0) : tensor<1xi32>
+  %bos = check.generate.iota offset(-1.0) step(0.0625) : tensor<32xbf16>
+  %bos_expected = check.generate.iota offset(-1.0) step(0.0625) : tensor<32x1xf32>
+  %output = check.generate.fill value(-123.0) : tensor<32x1xf32>
+  kernel.launch @pocket.previous_latent(%previous, %position, %bos, %output) : (tensor<32x1xf32>, tensor<1xi32>, tensor<32xbf16>, tensor<32x1xf32>)
+  check.expect.bitwise actual(%output) expected(%bos_expected) : tensor<32x1xf32>
+  %codec = check.generate.fill value(-123.0) : tensor<32x1xf32>
+  %next = check.generate.fill value(-123.0) : tensor<32x1xf32>
+  %noise = check.generate.iota offset(1.0) step(0.125) : tensor<32x1xf32>
+  %delta = check.generate.iota offset(-0.5) step(0.125) : tensor<32x1xf32>
+  %scale = check.generate.fill value(2.0) : tensor<32xbf16>
+  %mean = check.generate.fill value(-1.0) : tensor<32xbf16>
+  %next_expected = check.generate.iota offset(0.5) step(0.25) : tensor<32x1xf32>
+  %codec_expected = check.generate.iota offset(0.0) step(0.5) : tensor<32x1xf32>
+  kernel.launch @pocket.latent_output(%noise, %delta, %previous, %scale, %mean, %codec) : (tensor<32x1xf32>, tensor<32x1xf32>, tensor<32x1xf32>, tensor<32xbf16>, tensor<32xbf16>, tensor<32x1xf32>)
+  check.expect.bitwise actual(%previous) expected(%next_expected) : tensor<32x1xf32>
+  check.expect.bitwise actual(%codec) expected(%codec_expected) : tensor<32x1xf32>
+  kernel.launch @pocket.advance_1(%position) : (tensor<1xi32>)
+  kernel.launch @pocket.previous_latent(%previous, %position, %bos, %next) : (tensor<32x1xf32>, tensor<1xi32>, tensor<32xbf16>, tensor<32x1xf32>)
+  check.expect.bitwise actual(%next) expected(%next_expected) : tensor<32x1xf32>
+  %position_expected = check.generate.fill value(1) : tensor<1xi32>
+  check.expect.bitwise actual(%position) expected(%position_expected) : tensor<1xi32>
+  check.return
+}
+
+// The second block consumes the first block's tail, independent of its input.
+// Every retained sample and every sample of the padded block is observed.
+check.case public @causal_history_two_blocks {
+  %first = check.generate.iota offset(1.0) step(1.0) : tensor<1x1920xf32>
+  %second = check.generate.iota offset(100.0) step(1.0) : tensor<1x1920xf32>
+  %history = check.generate.iota offset(-6.0) step(1.0) : tensor<1x6xf32>
+  %initial = check.generate.iota offset(-6.0) step(1.0) : tensor<1x6xf32>
+  %padded = check.generate.fill value(-123.0) : tensor<1x1926xf32>
+  %prefix = check.tensor.view %padded offset(0) : tensor<1x1926xf32> -> tensor<1x6xf32>
+  %body = check.tensor.view %padded offset(24) : tensor<1x1926xf32> -> tensor<1x1920xf32>
+  %first_tail = check.generate.iota offset(1915.0) step(1.0) : tensor<1x6xf32>
+  %second_tail = check.generate.iota offset(2014.0) step(1.0) : tensor<1x6xf32>
+  kernel.launch @pocket.history_1x1920_h6(%first, %history, %padded) : (tensor<1x1920xf32>, tensor<1x6xf32>, tensor<1x1926xf32>)
+  check.expect.bitwise actual(%prefix) expected(%initial) : tensor<1x6xf32>
+  check.expect.bitwise actual(%body) expected(%first) : tensor<1x1920xf32>
+  %second_padded = check.generate.fill value(-123.0) : tensor<1x1926xf32>
+  %second_prefix = check.tensor.view %second_padded offset(0) : tensor<1x1926xf32> -> tensor<1x6xf32>
+  %second_body = check.tensor.view %second_padded offset(24) : tensor<1x1926xf32> -> tensor<1x1920xf32>
+  kernel.launch @pocket.history_1x1920_h6(%second, %history, %second_padded) : (tensor<1x1920xf32>, tensor<1x6xf32>, tensor<1x1926xf32>)
+  check.expect.bitwise actual(%second_prefix) expected(%first_tail) : tensor<1x6xf32>
+  check.expect.bitwise actual(%second_body) expected(%second) : tensor<1x1920xf32>
+  check.expect.bitwise actual(%history) expected(%second_tail) : tensor<1x6xf32>
+  check.return
+}
+
+// A closed-form two-level signal distinguishes startup replication from the
+// retained past. This kernel constructs expected data without running a codec.
+kernel.def target(@pocket) @replication_expected() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %output[%origin] : buffer -> view<512x32xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %channels = index.constant 512 : index
+  %length = index.constant 32 : index
+  %boundary = index.constant 16 : index
+  %past = scalar.constant 2.0 : f32
+  %present = scalar.constant 3.0 : f32
+  scf.for %channel = [%zero to %channels step %one] {
+    scf.for %time = [%zero to %length step %one] {
+      %prefix = index.cmp ult, %time, %boundary : index
+      %value = scf.select %prefix, %past, %present : f32
+      view.store %value, %view[%channel, %time] : f32, view<512x32xf32>
+    }
+  }
+  kernel.return
+}
+
+check.case public @replicated_history_two_blocks {
+  %first = check.generate.fill value(2.0) : tensor<512x16xf32>
+  %second = check.generate.fill value(3.0) : tensor<512x16xf32>
+  %history = check.generate.fill value(-123.0) : tensor<512x16xf32>
+  %position = check.generate.fill value(0) : tensor<1xi32>
+  %padded = check.generate.fill value(-123.0) : tensor<512x32xf32>
+  %first_expected = check.generate.fill value(2.0) : tensor<512x32xf32>
+  %second_expected = check.generate.fill value(-123.0) : tensor<512x32xf32>
+  kernel.launch @replication_expected(%second_expected) : (tensor<512x32xf32>)
+  kernel.launch @pocket.history_replicate_512x16_h16(%first, %history, %padded, %position) : (tensor<512x16xf32>, tensor<512x16xf32>, tensor<512x32xf32>, tensor<1xi32>)
+  check.expect.bitwise actual(%padded) expected(%first_expected) : tensor<512x32xf32>
+  kernel.launch @pocket.advance_16(%position) : (tensor<1xi32>)
+  %second_padded = check.generate.fill value(-123.0) : tensor<512x32xf32>
+  kernel.launch @pocket.history_replicate_512x16_h16(%second, %history, %second_padded, %position) : (tensor<512x16xf32>, tensor<512x16xf32>, tensor<512x32xf32>, tensor<1xi32>)
+  check.expect.bitwise actual(%second_padded) expected(%second_expected) : tensor<512x32xf32>
+  check.expect.bitwise actual(%history) expected(%second) : tensor<512x16xf32>
+  check.return
+}
+
+check.case public @overlap_two_blocks {
+  %input = check.generate.iota offset(0.25) step(0.125) period(32) : tensor<512x32xf32>
+  %history = check.generate.fill value(-0.5) : tensor<512x16xf32>
+  %output = check.generate.fill value(-123.0) : tensor<512x16xf32>
+  %first_expected = check.generate.iota offset(-0.25) step(0.125) period(16) : tensor<512x16xf32>
+  %tail_expected = check.generate.iota offset(2.25) step(0.125) period(16) : tensor<512x16xf32>
+  %second_expected = check.generate.iota offset(2.5) step(0.25) period(16) : tensor<512x16xf32>
+  kernel.launch @pocket.overlap_512x16_h16(%input, %history, %output) : (tensor<512x32xf32>, tensor<512x16xf32>, tensor<512x16xf32>)
+  check.expect.bitwise actual(%output) expected(%first_expected) : tensor<512x16xf32>
+  check.expect.bitwise actual(%history) expected(%tail_expected) : tensor<512x16xf32>
+  %second_output = check.generate.fill value(-123.0) : tensor<512x16xf32>
+  kernel.launch @pocket.overlap_512x16_h16(%input, %history, %second_output) : (tensor<512x32xf32>, tensor<512x16xf32>, tensor<512x16xf32>)
+  check.expect.bitwise actual(%second_output) expected(%second_expected) : tensor<512x16xf32>
+  check.expect.bitwise actual(%history) expected(%tail_expected) : tensor<512x16xf32>
+  check.return
+}
+
+kernel.def target(@pocket) @biased_overlap_expected() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%prefix_value: f32, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %output[%origin] : buffer -> view<64x1920xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %channels = index.constant 64 : index
+  %length = index.constant 1920 : index
+  %boundary = index.constant 4 : index
+  %present = scalar.constant 2.0 : f32
+  scf.for %channel = [%zero to %channels step %one] {
+    scf.for %time = [%zero to %length step %one] {
+      %prefix = index.cmp ult, %time, %boundary : index
+      %value = scf.select %prefix, %prefix_value, %present : f32
+      view.store %value, %view[%channel, %time] : f32, view<64x1920xf32>
+    }
+  }
+  kernel.return
+}
+
+// Transposed-convolution bias is already in the current block. Retaining it
+// in the overlap would add it again at each subsequent block boundary.
+check.case public @biased_overlap_two_blocks {
+  %input = check.generate.fill value(2.0) : tensor<64x1924xf32>
+  %history = check.generate.fill value(1.0) : tensor<64x4xf32>
+  %bias = check.generate.fill value(0.25) : tensor<64xbf16>
+  %output = check.generate.fill value(-123.0) : tensor<64x1920xf32>
+  %expected = check.generate.fill value(-123.0) : tensor<64x1920xf32>
+  %first_prefix = check.literal value(3.0) : f32
+  %second_prefix = check.literal value(3.75) : f32
+  %tail_expected = check.generate.fill value(1.75) : tensor<64x4xf32>
+  kernel.launch @biased_overlap_expected(%first_prefix, %expected) : (f32, tensor<64x1920xf32>)
+  kernel.launch @pocket.overlap_bias_64x1920_h4(%input, %history, %output, %bias) : (tensor<64x1924xf32>, tensor<64x4xf32>, tensor<64x1920xf32>, tensor<64xbf16>)
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<64x1920xf32>
+  check.expect.bitwise actual(%history) expected(%tail_expected) : tensor<64x4xf32>
+  %second_output = check.generate.fill value(-123.0) : tensor<64x1920xf32>
+  %second_expected = check.generate.fill value(-123.0) : tensor<64x1920xf32>
+  kernel.launch @biased_overlap_expected(%second_prefix, %second_expected) : (f32, tensor<64x1920xf32>)
+  kernel.launch @pocket.overlap_bias_64x1920_h4(%input, %history, %second_output, %bias) : (tensor<64x1924xf32>, tensor<64x4xf32>, tensor<64x1920xf32>, tensor<64xbf16>)
+  check.expect.bitwise actual(%second_output) expected(%second_expected) : tensor<64x1920xf32>
+  check.expect.bitwise actual(%history) expected(%tail_expected) : tensor<64x4xf32>
+  check.return
+}
+
+check.case public @waveform_startup_fade {
+  %input = check.generate.fill value(119.0) : tensor<1x1920xf32>
+  %position = check.generate.fill value(16) : tensor<1xi32>
+  %output = check.generate.fill value(-123.0) : tensor<1x1920xf32>
+  %prefix = check.tensor.view %output offset(0) : tensor<1x1920xf32> -> tensor<120xf32>
+  %body = check.tensor.view %output offset(480) : tensor<1x1920xf32> -> tensor<1800xf32>
+  %prefix_expected = check.generate.iota offset(0.0) step(1.0) : tensor<120xf32>
+  %body_expected = check.generate.fill value(119.0) : tensor<1800xf32>
+  kernel.launch @pocket.fade(%input, %position, %output) : (tensor<1x1920xf32>, tensor<1xi32>, tensor<1x1920xf32>)
+  check.expect.close actual(%prefix) expected(%prefix_expected) atol(2.0000000000000002e-05) rtol(0.0) nan(different) : tensor<120xf32>
+  check.expect.bitwise actual(%body) expected(%body_expected) : tensor<1800xf32>
+  %second_output = check.generate.fill value(-123.0) : tensor<1x1920xf32>
+  kernel.launch @pocket.advance_16(%position) : (tensor<1xi32>)
+  kernel.launch @pocket.fade(%input, %position, %second_output) : (tensor<1x1920xf32>, tensor<1xi32>, tensor<1x1920xf32>)
+  check.expect.bitwise actual(%second_output) expected(%input) : tensor<1x1920xf32>
+  check.return
+}
