@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_SERVICE_H_
 #define LOOM_SERVE_SERVICE_TEXT_SERVICE_H_
 
+#include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/schedule.h"
@@ -19,6 +20,10 @@ typedef struct loom_serve_text_service_options_t {
   // Borrowed deployment route name, outliving the service. Source identity and
   // chat policy remain owned by the model, independently of this HTTP name.
   iree_string_view_t name;
+  // Optional borrowed image component, outliving this service. Text creation,
+  // activation and ordinary requests do not start its preparation. Accepted
+  // preparation is advanced/joined by the service's serialized owner.
+  loom_serve_finite_component_t* image;
   // Number of reusable execution rows, matching the model residency.
   iree_host_size_t row_count;
   // Maximum known input tokens admitted from one row in an epoch.

@@ -81,6 +81,8 @@ loom_cc_library(
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:router",
+        "//loom/src/loom/serve/service/finite:component",
+        "//loom/src/loom/serve/service/finite:model",
         "//loom/src/loom/serve/service/text:chat",
         "//loom/src/loom/serve/service/text:input",
         "//loom/src/loom/serve/service/text:model",
@@ -112,10 +114,16 @@ loom_cc_library(
 loom_cc_library(
     name = "source_lifecycle_tests",
     testonly = True,
-    srcs = ["source_lifecycle_test.cc"],
+    srcs = [
+        "component_service_test.cc",
+        "source_lifecycle_test.cc",
+    ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//visibility:private"],
-    deps = [":source_service_fixture"],
+    deps = [
+        ":source_service_fixture",
+        "//loom/src/loom/serve/service/finite:component",
+    ],
     alwayslink = True,
 )
 
@@ -643,6 +651,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service:execution_reconfiguration",
+        "//loom/src/loom/serve/service/finite:component",
         "//loom/src/loom/serve/telemetry:record",
         "//loom/src/loom/serve/telemetry:stream",
         "//loom/src/loom/serve/transport/http:request",

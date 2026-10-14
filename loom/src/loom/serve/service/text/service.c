@@ -78,6 +78,8 @@ struct loom_serve_text_service_t {
   iree_allocator_t host_allocator;
   // Borrowed model residency and its single host execution owner.
   loom_serve_text_model_t* model;
+  // Borrowed optional image computation with independent preparation/residency.
+  loom_serve_finite_component_t* image;
   // Native choice pool and text policy, joined before model retirement.
   loom_serve_execution_reconfiguration_t* reconfiguration;
   // Borrowed deployment name, independent of the source policy identity.
@@ -1476,6 +1478,7 @@ iree_status_t loom_serve_text_service_allocate(
   *service = (loom_serve_text_service_t){
       .host_allocator = host_allocator,
       .model = model,
+      .image = options->image,
       .name = options->name,
       .isolated_shape = {loom_serve_text_model_prefill_capacity(model),
                          options->row_count},
@@ -1540,6 +1543,7 @@ static void loom_serve_text_set_observer(void* self,
 static bool loom_serve_text_is_pending(void* self) {
   loom_serve_text_service_t* service = self;
   return loom_serve_text_has_work(service) ||
+         loom_serve_finite_component_is_pending(service->image) ||
          loom_serve_execution_reconfiguration_pending(
              service->reconfiguration) ||
          loom_serve_text_heartbeat_is_pending(&service->heartbeat);
@@ -1723,6 +1727,9 @@ static iree_status_t loom_serve_text_advance_work(
 static iree_status_t loom_serve_text_advance(
     void* self, loom_serve_http_service_flags_t flags, bool* out_progress) {
   loom_serve_text_service_t* service = self;
+  const bool image_progress = loom_serve_finite_component_advance(
+      service->image,
+      iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
   const bool configuration_progress =
       loom_serve_execution_reconfiguration_advance(
           service->reconfiguration, /*quiescent=*/false,
@@ -1738,7 +1745,7 @@ static iree_status_t loom_serve_text_advance(
   iree_status_t work_status =
       loom_serve_text_advance_work(self, flags, &work_progress);
   // A new model failure needs another owner turn to stop a pending timer.
-  *out_progress |= configuration_progress || work_progress ||
+  *out_progress |= image_progress || configuration_progress || work_progress ||
                    !iree_status_is_ok(work_status);
   status = iree_status_join(status, work_status);
   if (!iree_status_is_ok(status)) {

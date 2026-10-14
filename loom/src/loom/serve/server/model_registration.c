@@ -8,6 +8,7 @@
 
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/storage/memory.h"
+#include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/finite/model.h"
@@ -398,6 +399,8 @@ typedef struct text_registration_t {
   loom_serve_text_load_t* load;
   // Partial or prepared model retained through actual consumer retirement.
   loom_serve_text_model_t* model;
+  // Owned dormant/on-demand image model, independent of text residency.
+  loom_serve_finite_component_t* image;
   // Service borrowing model state until all protocol claims are resolved.
   loom_serve_text_service_t* service;
   // Explicit warmup, joined before service/model retirement.
@@ -427,6 +430,7 @@ static iree_status_t loom_serve_text_registration_prepare(
     const loom_serve_text_configuration_t* text = &configuration->text;
     const loom_serve_text_service_options_t options = {
         .name = configuration->name,
+        .image = registration->image,
         .row_count = text->rows,
         .variant_capacity = configuration->variant_capacity,
         .chunk_size = text->prefill_capacity,
@@ -455,6 +459,15 @@ static iree_status_t loom_serve_text_registration_retire(void* self,
   *out_complete = true;
   loom_serve_text_service_free(registration->service, IREE_STATUS_OK);
   registration->service = NULL;
+  // Join one retirement domain before arming the other so a terminal cleanup
+  // error leaves no outstanding callback on the retained registration.
+  IREE_RETURN_IF_ERROR(
+      loom_serve_finite_component_retire(registration->image, out_complete));
+  if (!*out_complete) {
+    return iree_ok_status();
+  }
+  loom_serve_finite_component_free(registration->image);
+  registration->image = NULL;
   if (registration->model && !registration->retiring) {
     loom_serve_text_model_retire(registration->model,
                                  registration->observer.wake,
@@ -540,9 +553,23 @@ static iree_status_t loom_serve_text_registration_create(
           text->checkpoint_capacity + text->prefix_cache_capacity +
           (text->session_cache_capacity ? text->session_cache_capacity + 1 : 0),
       .options = configuration->options};
-  iree_status_t status = loom_serve_text_load_allocate(
-      registration->device, &model_options, observer.wake, observer.user_data,
-      host_allocator, &registration->load);
+  iree_status_t status = iree_ok_status();
+  if (text->image.prepare.size) {
+    loom_serve_finite_model_options_t image_options = {
+        .sources = configuration->sources,
+        .asset_directory = text->image.assets,
+        .options = text->image.options};
+    image_options.sources.prepare = text->image.prepare;
+    image_options.sources.control = text->image.control;
+    status = loom_serve_finite_component_allocate(
+        registration->device, &image_options, observer, host_allocator,
+        &registration->image);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_load_allocate(registration->device, &model_options,
+                                           observer.wake, observer.user_data,
+                                           host_allocator, &registration->load);
+  }
   if (iree_status_is_ok(status)) {
     *out_registration = (loom_serve_registration_t){
         .self = registration,
@@ -554,6 +581,7 @@ static iree_status_t loom_serve_text_registration_create(
         .deactivate = loom_serve_text_registration_deactivate,
         .destroy = loom_serve_text_registration_destroy};
   } else {
+    loom_serve_finite_component_free(registration->image);
     iree_allocator_free(host_allocator, registration);
   }
   return status;
