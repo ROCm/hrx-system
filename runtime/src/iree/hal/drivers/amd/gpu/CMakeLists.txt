@@ -9,4 +9,35 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    context
+  HDRS
+    "context.h"
+  SRCS
+    "context.c"
+  DEPS
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    context_test
+  SRCS
+    "context_test.cc"
+  DEPS
+    ::context
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::fabric
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
