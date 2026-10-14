@@ -5,7 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Packed epochs contain {tokens, spans, outputs}, then five-word span records
-// {length, absolute_position, packed_begin, resident_row, output_index}. The
+// {length, absolute_position, packed_begin, resident_row, source_and_selection}.
+// The final word uses the shared Qwen source-position/selection encoding. The
 // host owns distinct rows and immutable read/write origins through completion.
 // Stateless kernels visit the active packed prefix. Recurrent kernels advance
 // one span and publish only its private writer, including at a retained fork.
