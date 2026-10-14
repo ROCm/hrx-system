@@ -1,0 +1,386 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Two rows fork from the same immutable anchor while a third starts fresh.
+// A second trial enters beyond each fork frontier and must read its writer.
+// The empty trial and inactive capacity retain every sentinel byte.
+kernel.decl @flash_next_map_tokens() launch(%epoch: buffer, %mapping: buffer)
+
+kernel.decl @qsa_pool_blocks() launch(%tail_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %raw: buffer, %arena: buffer, %pooled: buffer)
+
+kernel.decl @qsa_publish_tail() launch(%tail_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
+
+kernel.decl @flash_next_ple_hash_ids() launch(%history_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %tokens: buffer, %arena: buffer, %hashes: buffer)
+
+kernel.decl @flash_next_ple_publish_history() launch(%history_origin: offset, %epoch: buffer, %rows: buffer, %tokens: buffer, %arena: buffer)
+
+kernel.def @fixture() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%trial: index, %epoch: buffer, %rows: buffer, %ids: buffer, %arena: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c3_i32 = scalar.constant 3 : i32
+  %c6_i32 = scalar.constant 6 : i32
+  %empty = index.cmp eq, %trial, %c2 : index
+  %continued = index.cmp eq, %trial, %c1 : index
+  %count = scf.select %empty, %c0_i32, %c6_i32 : i32
+  %spans = scf.select %empty, %c0_i32, %c3_i32 : i32
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  view.store %count, %header[0] : i32, view<3xi32>
+  view.store %spans, %header[1] : i32, view<3xi32>
+  %trial_word = index.cast %trial : index to i32
+  view.store %trial_word, %header[2] : i32, view<3xi32>
+  %descriptor_origin = index.constant 12 : offset
+  %descriptors = buffer.view %epoch[%descriptor_origin] : buffer -> view<3x5xi32>
+  %origins = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
+  %slot_bytes = index.constant 1280 : offset
+  %id_offset = index.constant 1024 : offset
+  %c0_i64 = scalar.constant 0 : i64
+  scf.for %row = [%c0 to %c3 step %c1] {
+    %first_row = index.cmp eq, %row, %c0 : index
+    %second_row = index.cmp eq, %row, %c1 : index
+    %length0 = scf.select %first_row, %c3, %c1 : index
+    %length = scf.select %second_row, %c1, %length0 : index
+    %fresh_row = index.cmp eq, %row, %c2 : index
+    %span_length = scf.select %fresh_row, %c2, %length : index
+    %begin0 = scf.select %first_row, %c0, %c3 : index
+    %begin = scf.select %fresh_row, %c4, %begin0 : index
+    %fork = index.constant 63 : index
+    %initial = scf.select %fresh_row, %c0, %fork : index
+    %advanced = index.add %initial, %span_length : index
+    %position = scf.select %continued, %advanced, %initial : index
+    %length_word = index.cast %span_length : index to i32
+    %position_word = index.cast %position : index to i32
+    %begin_word = index.cast %begin : index to i32
+    %row_word = index.cast %row : index to i32
+    view.store %length_word, %descriptors[%row, 0] : i32, view<3x5xi32>
+    view.store %position_word, %descriptors[%row, 1] : i32, view<3x5xi32>
+    view.store %begin_word, %descriptors[%row, 2] : i32, view<3x5xi32>
+    view.store %row_word, %descriptors[%row, 3] : i32, view<3x5xi32>
+    view.store %c0_i32, %descriptors[%row, 4] : i32, view<3x5xi32>
+    %writer_slot = index.add %row, %c1 : index
+    %writer_offset = index.scale %writer_slot, %slot_bytes : index, offset -> offset
+    %writer = index.cast %writer_offset : offset to i64
+    %frontier = index.cast %initial : index to i64
+    view.store %c0_i64, %origins[%row, 0] : i64, view<16x4xi64>
+    view.store %writer, %origins[%row, 1] : i64, view<16x4xi64>
+    view.store %c0_i64, %origins[%row, 2] : i64, view<16x4xi64>
+    view.store %frontier, %origins[%row, 3] : i64, view<16x4xi64>
+  }
+  // The first anchor ends in EOS. Other slots deliberately contain different IDs.
+  %eos = scalar.constant 248044 : i32
+  %c37 = scalar.constant 37 : i32
+  %c17 = scalar.constant 17 : i32
+  scf.for %slot = [%c0 to %c4 step %c1] {
+    %slot_origin = index.scale %slot, %slot_bytes : index, offset -> offset
+    %history_origin = index.add %slot_origin, %id_offset : offset
+    %history = buffer.view %arena[%history_origin] : buffer -> view<2xi32>
+    %slot_word = index.cast %slot : index to i32
+    %delta = scalar.muli %slot_word, %c17 : i32
+    %older = scalar.addi %c37, %delta : i32
+    %newest = scalar.addi %older, %c17 : i32
+    %anchor = index.cmp eq, %slot, %c0 : index
+    %previous = scf.select %anchor, %eos, %newest : i32
+    view.store %older, %history[0] : i32, view<2xi32>
+    view.store %previous, %history[1] : i32, view<2xi32>
+  }
+  %input = buffer.view %ids[%origin] : buffer -> view<8xi32>
+  view.store %eos, %input[1] : i32, view<8xi32>
+  kernel.return
+}
+
+// Scalar chronological traversal derives expected state directly from the
+// trial's ownership choice. It does not use the production map/state helpers.
+kernel.def @reference() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%epoch: buffer, %rows_input: buffer, %ids: buffer, %raw: buffer, %arena: buffer, %mapping: buffer, %pooled: buffer, %hashes: buffer) {
+  %origin = index.constant 0 : offset
+  %arena_bytes = index.constant 5120 : offset
+  %source = buffer.alloca<private> align(16) %arena_bytes : buffer
+  buffer.copy %arena[%origin], %source[%origin], %arena_bytes
+  %trial_header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %trial_word = view.load %trial_header[2] : view<3xi32> -> i32
+  %trial = index.cast %trial_word : i32 to index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %heads = index.constant 16 : index
+  %bigram_heads = index.constant 8 : index
+  %channels = index.constant 128 : index
+  %continued = index.cmp eq, %trial, %c1 : index
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %span_word = view.load %header[1] : view<3xi32> -> i32
+  %span_count_value = index.cast %span_word : i32 to index
+  %span_count = index.assume %span_count_value [range(%span_count_value, 0, 3)] : index
+  %descriptor_origin = index.constant 12 : offset
+  %descriptors = buffer.view %epoch[%descriptor_origin] : buffer -> view<3x5xi32>
+  %tokens = buffer.view %ids[%origin] : buffer -> view<8xi32>
+  %input = buffer.view %raw[%origin] : buffer -> view<8x128xbf16>
+  %map = buffer.view %mapping[%origin] : buffer -> view<8x4xi32>
+  %averages = buffer.view %pooled[%origin] : buffer -> view<8x128xbf16>
+  %rows = buffer.view %hashes[%origin] : buffer -> view<8x16xi32>
+  %slot_bytes = index.constant 1280 : offset
+  %id_offset = index.constant 1024 : offset
+  %eos = scalar.constant 248044 : i32
+  %multiplier0 = scalar.constant 23703573157769 : i64
+  %multiplier1 = scalar.constant 20109073645365 : i64
+  %multiplier2 = scalar.constant 8052911324071 : i64
+  %prime0 = scalar.constant 20000003 : i64
+  %offset0 = scalar.constant 0 : i32
+  %prime1 = scalar.constant 20000023 : i64
+  %offset1 = scalar.constant 20000003 : i32
+  %prime2 = scalar.constant 20000033 : i64
+  %offset2 = scalar.constant 40000026 : i32
+  %prime3 = scalar.constant 20000047 : i64
+  %offset3 = scalar.constant 60000059 : i32
+  %prime4 = scalar.constant 20000059 : i64
+  %offset4 = scalar.constant 80000106 : i32
+  %prime5 = scalar.constant 20000063 : i64
+  %offset5 = scalar.constant 100000165 : i32
+  %prime6 = scalar.constant 20000069 : i64
+  %offset6 = scalar.constant 120000228 : i32
+  %prime7 = scalar.constant 20000077 : i64
+  %offset7 = scalar.constant 140000297 : i32
+  %prime8 = scalar.constant 20000081 : i64
+  %offset8 = scalar.constant 160000374 : i32
+  %prime9 = scalar.constant 20000093 : i64
+  %offset9 = scalar.constant 180000455 : i32
+  %prime10 = scalar.constant 20000107 : i64
+  %offset10 = scalar.constant 200000548 : i32
+  %prime11 = scalar.constant 20000147 : i64
+  %offset11 = scalar.constant 220000655 : i32
+  %prime12 = scalar.constant 20000153 : i64
+  %offset12 = scalar.constant 240000802 : i32
+  %prime13 = scalar.constant 20000159 : i64
+  %offset13 = scalar.constant 260000955 : i32
+  %prime14 = scalar.constant 20000161 : i64
+  %offset14 = scalar.constant 280001114 : i32
+  %prime15 = scalar.constant 20000171 : i64
+  %offset15 = scalar.constant 300001275 : i32
+  %primes = vector.from_elements %prime0, %prime1, %prime2, %prime3, %prime4, %prime5, %prime6, %prime7, %prime8, %prime9, %prime10, %prime11, %prime12, %prime13, %prime14, %prime15 : vector<16xi64>
+  %offsets = vector.from_elements %offset0, %offset1, %offset2, %offset3, %offset4, %offset5, %offset6, %offset7, %offset8, %offset9, %offset10, %offset11, %offset12, %offset13, %offset14, %offset15 : vector<16xi32>
+  %c0_f64 = scalar.constant 0.0 : f64
+  %quarter = scalar.constant 0.25 : f64
+  scf.for %row = [%c0 to %span_count step %c1] {
+    %length_word = view.load %descriptors[%row, 0] : view<3x5xi32> -> i32
+    %position_word = view.load %descriptors[%row, 1] : view<3x5xi32> -> i32
+    %begin_word = view.load %descriptors[%row, 2] : view<3x5xi32> -> i32
+    %length_value = index.cast %length_word : i32 to index
+    %length = index.assume %length_value [range(%length_value, 1, 3)] : index
+    %position_value = index.cast %position_word : i32 to index
+    %position = index.assume %position_value [range(%position_value, 0, 66)] : index
+    %begin_value = index.cast %begin_word : i32 to index
+    %begin = index.assume %begin_value [range(%begin_value, 0, 4)] : index
+    %writer = index.add %row, %c1 : index
+    %reader = scf.select %continued, %writer, %c0 : index
+    %read_origin = index.scale %reader, %slot_bytes : index, offset -> offset
+    %write_origin = index.scale %writer, %slot_bytes : index, offset -> offset
+    %read_ids = index.add %read_origin, %id_offset : offset
+    %write_ids = index.add %write_origin, %id_offset : offset
+    %prior_ids = buffer.view %source[%read_ids] : buffer -> view<2xi32>
+    %output_ids = buffer.view %arena[%write_ids] : buffer -> view<2xi32>
+    %prior = buffer.view %source[%read_origin] : buffer -> view<3x128xbf16>
+    %tail = buffer.view %arena[%write_origin] : buffer -> view<3x128xbf16>
+    %fresh = index.cmp eq, %position, %c0 : index
+    %older, %previous = scf.if %fresh -> (i32, i32) {
+      scf.yield %eos, %eos : i32, i32
+    } else {
+      %old = view.load %prior_ids[0] : view<2xi32> -> i32
+      %prev = view.load %prior_ids[1] : view<2xi32> -> i32
+      scf.yield %old, %prev : i32, i32
+    }
+    %row_word = index.cast %row : index to i32
+    %final_older, %final_previous = scf.for %relative = [%c0 to %length step %c1](%old = %older : i32, %prev = %previous : i32) -> (i32, i32) {
+      %token_value = index.add %begin, %relative : index
+      %token = index.assume %token_value [range(%token_value, 0, 5)] : index
+      %logical = index.add %position, %relative : index
+      %logical_word = index.cast %logical : index to i32
+      view.store %logical_word, %map[%token, 0] : i32, view<8x4xi32>
+      view.store %row_word, %map[%token, 1] : i32, view<8x4xi32>
+      view.store %begin_word, %map[%token, 2] : i32, view<8x4xi32>
+      view.store %position_word, %map[%token, 3] : i32, view<8x4xi32>
+      %current = view.load %tokens[%token] : view<8xi32> -> i32
+      %cut = scalar.cmpi eq, %prev, %eos : i32
+      %masked = scf.select %cut, %eos, %old : i32
+      %current64 = scalar.extui %current : i32 to i64
+      %previous64 = scalar.extui %prev : i32 to i64
+      %older64 = scalar.extui %masked : i32 to i64
+      %product0 = scalar.muli %current64, %multiplier0 : i64
+      %product1 = scalar.muli %previous64, %multiplier1 : i64
+      %product2 = scalar.muli %older64, %multiplier2 : i64
+      %bigram = scalar.xori %product0, %product1 : i64
+      %trigram = scalar.xori %bigram, %product2 : i64
+      scf.for %head = [%c0 to %heads step %c1] unroll {
+        %short = index.cmp ult, %head, %bigram_heads : index
+        %hash = scf.select %short, %bigram, %trigram : i64
+        %prime = vector.extract %primes[%head] : vector<16xi64> -> i64
+        %offset = vector.extract %offsets[%head] : vector<16xi32> -> i32
+        %remainder = scalar.remui %hash, %prime : i64
+        %local = scalar.trunci %remainder : i64 to i32
+        %id = scalar.addi %local, %offset : i32
+        view.store %id, %rows[%token, %head] : i32, view<8x16xi32>
+      }
+      %member = index.rem %logical, %c4 : index
+      %complete = index.cmp eq, %member, %c3 : index
+      scf.if %complete {
+        %block_begin = index.sub %logical, %c3 : index
+        scf.for %channel = [%c0 to %channels step %c1] {
+          %sum = scf.for %slot = [%c0 to %c4 step %c1](%total = %c0_f64 : f64) -> (f64) {
+            %entry = index.add %block_begin, %slot : index
+            %retained = index.cmp ult, %entry, %position : index
+            %stored = scf.if %retained -> (bf16) {
+              %retained_slot = index.assume %slot [range(%slot, 0, 2)] : index
+              %value = view.load %prior[%retained_slot, %channel] : view<3x128xbf16> -> bf16
+              scf.yield %value : bf16
+            } else {
+              %delta = index.sub %entry, %position : index
+              %packed_value = index.add %begin, %delta : index
+              %packed = index.assume %packed_value [range(%packed_value, 0, 5)] : index
+              %value = view.load %input[%packed, %channel] : view<8x128xbf16> -> bf16
+              scf.yield %value : bf16
+            }
+            %value = scalar.extf %stored : bf16 to f64
+            %next = scalar.addf %total, %value : f64
+            scf.yield %next : f64
+          }
+          %mean = scalar.mulf %sum, %quarter : f64
+          %packed = scalar.fptrunc %mean : f64 to bf16
+          view.store %packed, %averages[%token, %channel] : bf16, view<8x128xbf16>
+        }
+      }
+      scf.yield %prev, %current : i32, i32
+    }
+    view.store %final_older, %output_ids[0] : i32, view<2xi32>
+    view.store %final_previous, %output_ids[1] : i32, view<2xi32>
+    %end = index.add %position, %length : index
+    %tail_count_value = index.rem %end, %c4 : index
+    %tail_count = index.assume %tail_count_value [range(%tail_count_value, 0, 3)] : index
+    %tail_begin = index.sub %end, %tail_count : index
+    scf.for %slot = [%c0 to %tail_count step %c1] {
+      %entry = index.add %tail_begin, %slot : index
+      %retained = index.cmp ult, %entry, %position : index
+      scf.for %channel = [%c0 to %channels step %c1] {
+        %stored = scf.if %retained -> (bf16) {
+          %value = view.load %prior[%slot, %channel] : view<3x128xbf16> -> bf16
+          scf.yield %value : bf16
+        } else {
+          %delta = index.sub %entry, %position : index
+          %packed_value = index.add %begin, %delta : index
+          %packed = index.assume %packed_value [range(%packed_value, 0, 5)] : index
+          %value = view.load %input[%packed, %channel] : view<8x128xbf16> -> bf16
+          scf.yield %value : bf16
+        }
+        view.store %stored, %tail[%slot, %channel] : bf16, view<3x128xbf16>
+      }
+    }
+  }
+  kernel.return
+}
+
+check.case public @retained_forks {
+  %trial = check.literal value(0) : index
+  %seed = check.literal value(75307) : i64
+  %tail_origin = check.literal value(0) : offset
+  %ids_origin = check.literal value(1024) : offset
+  %epoch = check.generate.fill value(-99) : tensor<18xi32>
+  %rows = check.generate.fill value(-99) : tensor<64xi64>
+  %ids = check.generate.iota offset(7) step(17) : tensor<8xi32>
+  %raw = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<8x128xbf16>
+  %arena = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<2560xbf16>
+  %expected_arena = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<2560xbf16>
+  kernel.launch @fixture(%trial, %epoch, %rows, %ids, %arena) : (index, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  kernel.launch @fixture(%trial, %epoch, %rows, %ids, %expected_arena) : (index, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+  %expected_mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+  %pooled = check.generate.fill value(-99.0) : tensor<8x128xbf16>
+  %expected_pooled = check.generate.fill value(-99.0) : tensor<8x128xbf16>
+  %hashes = check.generate.fill value(-99) : tensor<8x16xi32>
+  %expected_hashes = check.generate.fill value(-99) : tensor<8x16xi32>
+  kernel.launch @reference(%epoch, %rows, %ids, %raw, %expected_arena, %expected_mapping, %expected_pooled, %expected_hashes) : (tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x4xi32>, tensor<8x128xbf16>, tensor<8x16xi32>)
+  kernel.launch @flash_next_map_tokens(%epoch, %mapping) : (tensor<18xi32>, tensor<8x4xi32>)
+  kernel.launch @qsa_pool_blocks(%tail_origin, %epoch, %mapping, %rows, %raw, %arena, %pooled) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x128xbf16>)
+  kernel.launch @flash_next_ple_hash_ids(%ids_origin, %epoch, %mapping, %rows, %ids, %arena, %hashes) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>, tensor<8x16xi32>)
+  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %mapping, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
+  kernel.launch @flash_next_ple_publish_history(%ids_origin, %epoch, %rows, %ids, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  check.expect.bitwise actual(%mapping) expected(%expected_mapping) : tensor<8x4xi32>
+  check.expect.bitwise actual(%pooled) expected(%expected_pooled) : tensor<8x128xbf16>
+  check.expect.bitwise actual(%hashes) expected(%expected_hashes) : tensor<8x16xi32>
+  check.expect.bitwise actual(%arena) expected(%expected_arena) : tensor<2560xbf16>
+  check.return
+}
+
+check.case public @retained_writers {
+  %trial = check.literal value(1) : index
+  %seed = check.literal value(75307) : i64
+  %tail_origin = check.literal value(0) : offset
+  %ids_origin = check.literal value(1024) : offset
+  %epoch = check.generate.fill value(-99) : tensor<18xi32>
+  %rows = check.generate.fill value(-99) : tensor<64xi64>
+  %ids = check.generate.iota offset(7) step(17) : tensor<8xi32>
+  %raw = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<8x128xbf16>
+  %arena = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<2560xbf16>
+  %expected_arena = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<2560xbf16>
+  kernel.launch @fixture(%trial, %epoch, %rows, %ids, %arena) : (index, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  kernel.launch @fixture(%trial, %epoch, %rows, %ids, %expected_arena) : (index, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+  %expected_mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+  %pooled = check.generate.fill value(-99.0) : tensor<8x128xbf16>
+  %expected_pooled = check.generate.fill value(-99.0) : tensor<8x128xbf16>
+  %hashes = check.generate.fill value(-99) : tensor<8x16xi32>
+  %expected_hashes = check.generate.fill value(-99) : tensor<8x16xi32>
+  kernel.launch @reference(%epoch, %rows, %ids, %raw, %expected_arena, %expected_mapping, %expected_pooled, %expected_hashes) : (tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x4xi32>, tensor<8x128xbf16>, tensor<8x16xi32>)
+  kernel.launch @flash_next_map_tokens(%epoch, %mapping) : (tensor<18xi32>, tensor<8x4xi32>)
+  kernel.launch @qsa_pool_blocks(%tail_origin, %epoch, %mapping, %rows, %raw, %arena, %pooled) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x128xbf16>)
+  kernel.launch @flash_next_ple_hash_ids(%ids_origin, %epoch, %mapping, %rows, %ids, %arena, %hashes) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>, tensor<8x16xi32>)
+  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %mapping, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
+  kernel.launch @flash_next_ple_publish_history(%ids_origin, %epoch, %rows, %ids, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  check.expect.bitwise actual(%mapping) expected(%expected_mapping) : tensor<8x4xi32>
+  check.expect.bitwise actual(%pooled) expected(%expected_pooled) : tensor<8x128xbf16>
+  check.expect.bitwise actual(%hashes) expected(%expected_hashes) : tensor<8x16xi32>
+  check.expect.bitwise actual(%arena) expected(%expected_arena) : tensor<2560xbf16>
+  check.return
+}
+
+check.case public @retained_empty {
+  %trial = check.literal value(2) : index
+  %seed = check.literal value(75307) : i64
+  %tail_origin = check.literal value(0) : offset
+  %ids_origin = check.literal value(1024) : offset
+  %epoch = check.generate.fill value(-99) : tensor<18xi32>
+  %rows = check.generate.fill value(-99) : tensor<64xi64>
+  %ids = check.generate.iota offset(7) step(17) : tensor<8xi32>
+  %raw = check.generate.random.uniform seed(%seed) range(-0.25 to 0.25) : tensor<8x128xbf16>
+  %arena = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<2560xbf16>
+  %expected_arena = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<2560xbf16>
+  kernel.launch @fixture(%trial, %epoch, %rows, %ids, %arena) : (index, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  kernel.launch @fixture(%trial, %epoch, %rows, %ids, %expected_arena) : (index, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+  %expected_mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+  %pooled = check.generate.fill value(-99.0) : tensor<8x128xbf16>
+  %expected_pooled = check.generate.fill value(-99.0) : tensor<8x128xbf16>
+  %hashes = check.generate.fill value(-99) : tensor<8x16xi32>
+  %expected_hashes = check.generate.fill value(-99) : tensor<8x16xi32>
+  kernel.launch @reference(%epoch, %rows, %ids, %raw, %expected_arena, %expected_mapping, %expected_pooled, %expected_hashes) : (tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x4xi32>, tensor<8x128xbf16>, tensor<8x16xi32>)
+  kernel.launch @flash_next_map_tokens(%epoch, %mapping) : (tensor<18xi32>, tensor<8x4xi32>)
+  kernel.launch @qsa_pool_blocks(%tail_origin, %epoch, %mapping, %rows, %raw, %arena, %pooled) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>, tensor<8x128xbf16>)
+  kernel.launch @flash_next_ple_hash_ids(%ids_origin, %epoch, %mapping, %rows, %ids, %arena, %hashes) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>, tensor<8x16xi32>)
+  kernel.launch @qsa_publish_tail(%tail_origin, %epoch, %mapping, %rows, %raw, %arena) : (offset, tensor<18xi32>, tensor<8x4xi32>, tensor<64xi64>, tensor<8x128xbf16>, tensor<2560xbf16>)
+  kernel.launch @flash_next_ple_publish_history(%ids_origin, %epoch, %rows, %ids, %arena) : (offset, tensor<18xi32>, tensor<64xi64>, tensor<8xi32>, tensor<2560xbf16>)
+  check.expect.bitwise actual(%mapping) expected(%expected_mapping) : tensor<8x4xi32>
+  check.expect.bitwise actual(%pooled) expected(%expected_pooled) : tensor<8x128xbf16>
+  check.expect.bitwise actual(%hashes) expected(%expected_hashes) : tensor<8x16xi32>
+  check.expect.bitwise actual(%arena) expected(%expected_arena) : tensor<2560xbf16>
+  check.return
+}
