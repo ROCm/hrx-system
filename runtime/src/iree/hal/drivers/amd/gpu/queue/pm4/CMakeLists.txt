@@ -50,6 +50,43 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    signal
+  HDRS
+    "signal.h"
+  SRCS
+    "signal.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::threading
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    signal_test
+  SRCS
+    "signal_test.cc"
+  DEPS
+    ::signal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    signal_benchmark
+  SRCS
+    "signal_benchmark.cc"
+  DEPS
+    ::signal
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
     retirement_test
