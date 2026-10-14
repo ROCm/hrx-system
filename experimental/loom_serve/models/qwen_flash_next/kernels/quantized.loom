@@ -1,0 +1,131 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Original affine GGML weights contract with BF16 activations without adding
+// an activation quantization boundary. Integer codes are exact in BF16; block
+// scale and minimum corrections remain F32 through the subgroup reduction.
+func.decl @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %block: index, %group: index, %half: index) -> (vector<16xi8>, f32, f32)
+
+template.decl @ggml.q5k.chunk(%weight: buffer, %row_byte_base: offset, %block: index, %group: index, %half: index) -> (vector<16xi8>, f32, f32)
+
+func.def inline @flash_next_affine_dot16(%codes: vector<16xi8>, %values: vector<16xbf16>, %scale: f32, %minimum: f32) -> (f32) {
+  %c0 = scalar.constant 0.0 : f32
+  %c0v = vector.constant 0.0 : vector<8xf32>
+  %code_values = vector.uitofp %codes : vector<16xi8> to vector<16xf32>
+  %exact_codes = vector.fptrunc %code_values : vector<16xf32> to vector<16xbf16>
+  %pairs = vector.dot2f %exact_codes, %values, %c0v : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %dot = vector.reduce<addf> %pairs, %c0 : vector<8xf32>, f32
+  %expanded = vector.extf %values : vector<16xbf16> to vector<16xf32>
+  %sum = vector.reduce<addf> %expanded, %c0 : vector<16xf32>, f32
+  %correction = scalar.mulf %sum, %minimum : f32
+  %result = scalar.fmaf %dot, %scale, %correction : f32
+  func.return %result : f32
+}
+
+// Q4_K and Q5_K share group geometry. The caller supplies a constant format
+// choice so each kernel retains only its selected physical decoder.
+func.def public inline @flash_next_qk_partial(%q5_encoding: i1, %width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32) {
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c256 = index.constant 256 : index
+  %q4_bytes = index.constant 144 : offset
+  %q5_bytes = index.constant 176 : offset
+  %element_bytes = index.constant 2 : offset
+  %block_bytes = scf.select %q5_encoding, %q5_bytes, %q4_bytes : offset
+  %block_count = index.div %width, %c256 : index
+  %chunks = index.div %width, %c16 : index
+  %row_bytes = index.scale %block_count, %block_bytes : index, offset -> offset
+  %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
+  %input_origin = index.scale %token, %input_row_bytes : index, offset -> offset
+  %input_view = buffer.view %input[%input_origin] : buffer -> view<[%chunks]x16xbf16>
+  %c0 = scalar.constant 0.0 : f32
+  %result = scf.for %chunk = [%lane to %chunks step %stride](%accumulator = %c0 : f32) -> (f32) {
+    %block = index.div %chunk, %c16 : index
+    %group_index = index.div %chunk, %c2 : index
+    %group = index.rem %group_index, %c8 : index
+    %half = index.rem %chunk, %c2 : index
+    %codes, %scale, %minimum_magnitude = scf.if %q5_encoding -> (vector<16xi8>, f32, f32) {
+      %codes, %scale, %minimum = template.apply<@ggml.q5k.chunk>(%weight, %weight_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+      scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
+    } else {
+      %codes, %scale, %minimum = func.call @ggml_q4k_chunk(%weight, %weight_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+      scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
+    }
+    %values = vector.load %input_view[%chunk, 0] : view<[%chunks]x16xbf16> -> vector<16xbf16>
+    %minimum = scalar.negf %minimum_magnitude : f32
+    %contribution = func.call @flash_next_affine_dot16(%codes, %values, %scale, %minimum) : (vector<16xi8>, vector<16xbf16>, f32, f32) -> (f32)
+    %next = scalar.addf %accumulator, %contribution : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
+// Q5_1 stores two half scales, one high-bit word, and sixteen nibble pairs per
+// 32-element block. Each lane retains that header while visiting both halves.
+func.def public inline @flash_next_q51_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %block_bytes = index.constant 24 : offset
+  %high_add = index.constant 4 : offset
+  %code_add = index.constant 8 : offset
+  %element_bytes = index.constant 2 : offset
+  %block_count = index.div %width, %c32 : index
+  %row_bytes = index.scale %block_count, %block_bytes : index, offset -> offset
+  %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
+  %input_origin = index.scale %token, %input_row_bytes : index, offset -> offset
+  %input_view = buffer.view %input[%input_origin] : buffer -> view<[%block_count]x32xbf16>
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c4_i32 = scalar.constant 4 : i32
+  %c16_i32 = scalar.constant 16 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %mask15 = vector.constant 15 : vector<16xi8>
+  %mask1 = vector.constant 1 : vector<16xi32>
+  %shift4 = vector.constant 4 : vector<16xi32>
+  %result = scf.for %block = [%lane to %block_count step %stride](%accumulator = %c0_f32 : f32) -> (f32) {
+    %block_add = index.scale %block, %block_bytes : index, offset -> offset
+    %block_origin = index.add %weight_origin, %block_add : offset
+    %high_origin = index.add %block_origin, %high_add : offset
+    %code_origin = index.add %block_origin, %code_add : offset
+    %header = buffer.view %weight[%block_origin] : buffer -> view<2xf16>
+    %high_view = buffer.view %weight[%high_origin] : buffer -> view<1xi32>
+    %code_view = buffer.view %weight[%code_origin] : buffer -> view<16xi8>
+    %scale_half = view.load %header[0] : view<2xf16> -> f16
+    %minimum_half = view.load %header[1] : view<2xf16> -> f16
+    %scale = scalar.extf %scale_half : f16 to f32
+    %minimum = scalar.extf %minimum_half : f16 to f32
+    %high_word = view.load %high_view[0] : view<1xi32> -> i32
+    %high_words = vector.splat %high_word : vector<16xi32>
+    %packed = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+    %next = scf.for %half = [%c0 to %c2 step %c1](%partial = %accumulator : f32) -> (f32) {
+      %half_i32 = index.cast %half : index to i32
+      %nibble_shift = scalar.muli %half_i32, %c4_i32 : i32
+      %nibble_shift_i8 = scalar.trunci %nibble_shift : i32 to i8
+      %nibble_shifts = vector.splat %nibble_shift_i8 : vector<16xi8>
+      %shifted = vector.shrui %packed, %nibble_shifts : vector<16xi8>
+      %low_codes = vector.andi %shifted, %mask15 : vector<16xi8>
+      %first_bit = scalar.muli %half_i32, %c16_i32 : i32
+      %bit_positions = vector.iota %first_bit step %c1_i32 : vector<16xi32>
+      %high_shifted = vector.shrui %high_words, %bit_positions : vector<16xi32>
+      %high_bits = vector.andi %high_shifted, %mask1 : vector<16xi32>
+      %high_values = vector.shli %high_bits, %shift4 : vector<16xi32>
+      %high_codes = vector.trunci %high_values : vector<16xi32> to vector<16xi8>
+      %codes = vector.ori %low_codes, %high_codes : vector<16xi8>
+      %begin = index.mul %half, %c16 : index
+      %values = vector.load %input_view[%block, %begin] : view<[%block_count]x32xbf16> -> vector<16xbf16>
+      %contribution = func.call @flash_next_affine_dot16(%codes, %values, %scale, %minimum) : (vector<16xi8>, vector<16xbf16>, f32, f32) -> (f32)
+      %sum = scalar.addf %partial, %contribution : f32
+      scf.yield %sum : f32
+    }
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
