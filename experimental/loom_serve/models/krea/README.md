@@ -69,6 +69,25 @@ path; nonzero strength applies the loaded adapter. Arbitrary adapter ranks,
 multi-adapter request stacks and reference-image input need different source or
 request contracts and are not accepted by this package.
 
+## Low-memory VAE decoding
+
+The default deployment uses the untiled decoder. To trade additional decoder
+work for lower transient memory, give the model a positive workspace limit in
+bytes:
+
+```json
+"options": {
+  "workspace_limit_bytes": 805306368
+}
+```
+
+When the full decoder exceeds the limit, preparation selects an exact
+overlapping tile specialization. The tiled path preserves the untiled pixels;
+it does not blend or approximate tile boundaries. The compiler still enforces
+the limit for the complete stage and rejects a deployment that cannot satisfy
+it. This option can share the same `options` object with the INT8 checkpoint
+selection below.
+
 ## INT8 ConvRot DiT
 
 The encoder, tokenizer and VAE are unchanged. Instead of `turbo.safetensors`,
