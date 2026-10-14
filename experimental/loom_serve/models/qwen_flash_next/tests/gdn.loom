@@ -1,0 +1,320 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @gdn_convolve() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %weight: buffer, %history: buffer, %convolved: buffer, %norm: buffer)
+
+kernel.decl @gdn_recur() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+
+kernel.decl @gdn_gate() launch(%span: buffer, %raw: buffer, %z: buffer, %weight: buffer, %output: buffer)
+
+// Scalar channel traversal publishes every tap shift. The production wave
+// instead retains three vector histories across the complete span.
+kernel.def @reference_convolution() {
+  %heads = index.constant 80 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %weight: buffer, %history: buffer, %output: buffer, %norm: buffer) {
+  %head = kernel.workgroup.id<x> : index
+  %origin = index.constant 0 : offset
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %tokens = index.constant 5 : index
+  %width = index.constant 128 : index
+  %qk_heads = index.constant 32 : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<5x10240xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<10240x4xf32>
+  %history_view = buffer.view %history[%origin] : buffer -> view<3x10240xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<5x10240xbf16>
+  %norm_view = buffer.view %norm[%origin] : buffer -> view<5x32xf32>
+  %c0 = scalar.constant 0.0 : f32
+  %c1 = scalar.constant 1.0 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  %is_qk = index.cmp ult, %head, %qk_heads : index
+  scf.for %token = [%c0_index to %tokens step %c1_index] {
+    %squares = scf.for %component = [%c0_index to %width step %c1_index](%sum = %c0 : f32) -> (f32) {
+      %channel = index.madd %head, %width, %component : index
+      %stored0 = view.load %history_view[%c0_index, %channel] : view<3x10240xbf16> -> bf16
+      %stored1 = view.load %history_view[%c1_index, %channel] : view<3x10240xbf16> -> bf16
+      %stored2 = view.load %history_view[%c2, %channel] : view<3x10240xbf16> -> bf16
+      %stored3 = view.load %input_view[%token, %channel] : view<5x10240xbf16> -> bf16
+      %value0 = scalar.extf %stored0 : bf16 to f32
+      %value1 = scalar.extf %stored1 : bf16 to f32
+      %value2 = scalar.extf %stored2 : bf16 to f32
+      %value3 = scalar.extf %stored3 : bf16 to f32
+      %weight0 = view.load %weight_view[%channel, %c0_index] : view<10240x4xf32> -> f32
+      %weight1 = view.load %weight_view[%channel, %c1_index] : view<10240x4xf32> -> f32
+      %weight2 = view.load %weight_view[%channel, %c2] : view<10240x4xf32> -> f32
+      %weight3 = view.load %weight_view[%channel, %c3] : view<10240x4xf32> -> f32
+      %product = scalar.mulf %value0, %weight0 : f32
+      %sum1 = scalar.fmaf %value1, %weight1, %product : f32
+      %sum2 = scalar.fmaf %value2, %weight2, %sum1 : f32
+      %sum3 = scalar.fmaf %value3, %weight3, %sum2 : f32
+      %negative = scalar.negf %sum3 : f32
+      %exponential = scalar.expf<afn> %negative : f32
+      %denominator = scalar.addf %c1, %exponential : f32
+      %activated = scalar.divf %sum3, %denominator : f32
+      %packed = scalar.fptrunc %activated : f32 to bf16
+      view.store %packed, %output_view[%token, %channel] : bf16, view<5x10240xbf16>
+      view.store %stored1, %history_view[%c0_index, %channel] : bf16, view<3x10240xbf16>
+      view.store %stored2, %history_view[%c1_index, %channel] : bf16, view<3x10240xbf16>
+      view.store %stored3, %history_view[%c2, %channel] : bf16, view<3x10240xbf16>
+      %published = scalar.extf %packed : bf16 to f32
+      %next = scalar.fmaf %published, %published, %sum : f32
+      scf.yield %next : f32
+    }
+    scf.if %is_qk {
+      %biased = scalar.addf %squares, %epsilon : f32
+      %inverse = scalar.rsqrtf<afn> %biased : f32
+      view.store %inverse, %norm_view[%token, %head] : f32, view<5x32xf32>
+    }
+  }
+  kernel.return
+}
+
+// Each scalar thread owns one value column and traverses all key components
+// twice per token. There are no vector tiles, wave reductions, or retained
+// state registers, so the reference has a different reduction/storage path.
+kernel.def @reference_recurrence() {
+  %heads = index.constant 48 : index
+  %columns = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %c1, %c1) workgroup_size(%columns, %c1, %c1) : index
+} launch(%qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer) {
+  %head = kernel.workgroup.id<x> : index
+  %column = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %tokens = index.constant 5 : index
+  %width = index.constant 128 : index
+  %key_origin = index.constant 2048 : index
+  %value_origin = index.constant 4096 : index
+  %key_head = index.rem %head, %c16 : index
+  %key_norm_index = index.add %key_head, %c16 : index
+  %output_channel = index.madd %head, %width, %column : index
+  %value_channel = index.add %output_channel, %value_origin : index
+  %qkv_view = buffer.view %qkv[%origin] : buffer -> view<5x10240xbf16>
+  %norm_view = buffer.view %norm[%origin] : buffer -> view<5x32xf32>
+  %alpha_view = buffer.view %alpha[%origin] : buffer -> view<5x48xf32>
+  %beta_view = buffer.view %beta[%origin] : buffer -> view<5x48xf32>
+  %a_view = buffer.view %a[%origin] : buffer -> view<48xf32>
+  %bias_view = buffer.view %bias[%origin] : buffer -> view<48xf32>
+  %state_view = buffer.view %state[%origin] : buffer -> view<48x128x128xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<5x6144xbf16>
+  %stored_a = view.load %a_view[%head] : view<48xf32> -> f32
+  %stored_bias = view.load %bias_view[%head] : view<48xf32> -> f32
+  %c0 = scalar.constant 0.0 : f32
+  %c1 = scalar.constant 1.0 : f32
+  %query_factor = scalar.constant 0.088388347648318447 : f32
+  scf.for %token = [%c0_index to %tokens step %c1_index] {
+    %alpha_value = view.load %alpha_view[%token, %head] : view<5x48xf32> -> f32
+    %biased = scalar.addf %alpha_value, %stored_bias : f32
+    %alpha_exp = scalar.expf<afn> %biased : f32
+    %positive = scalar.addf %c1, %alpha_exp : f32
+    %softplus = scalar.logf<afn> %positive : f32
+    %log_decay = scalar.mulf %softplus, %stored_a : f32
+    %decay = scalar.expf<afn> %log_decay : f32
+    %beta_value = view.load %beta_view[%token, %head] : view<5x48xf32> -> f32
+    %negative_beta = scalar.negf %beta_value : f32
+    %beta_exp = scalar.expf<afn> %negative_beta : f32
+    %beta_denominator = scalar.addf %c1, %beta_exp : f32
+    %gate = scalar.divf %c1, %beta_denominator : f32
+    %query_inverse = view.load %norm_view[%token, %key_head] : view<5x32xf32> -> f32
+    %key_inverse = view.load %norm_view[%token, %key_norm_index] : view<5x32xf32> -> f32
+    %prediction = scf.for %component = [%c0_index to %width step %c1_index](%sum = %c0 : f32) -> (f32) {
+      %query_channel = index.madd %key_head, %width, %component : index
+      %key_channel = index.add %query_channel, %key_origin : index
+      %stored_key = view.load %qkv_view[%token, %key_channel] : view<5x10240xbf16> -> bf16
+      %key_value = scalar.extf %stored_key : bf16 to f32
+      %key = scalar.mulf %key_value, %key_inverse : f32
+      %old = view.load %state_view[%head, %column, %component] : view<48x128x128xf32> -> f32
+      %decayed = scalar.mulf %old, %decay : f32
+      %next = scalar.fmaf %decayed, %key, %sum : f32
+      scf.yield %next : f32
+    }
+    %stored_value = view.load %qkv_view[%token, %value_channel] : view<5x10240xbf16> -> bf16
+    %value = scalar.extf %stored_value : bf16 to f32
+    %residual = scalar.subf %value, %prediction : f32
+    %delta = scalar.mulf %residual, %gate : f32
+    %result = scf.for %component = [%c0_index to %width step %c1_index](%sum = %c0 : f32) -> (f32) {
+      %query_channel = index.madd %key_head, %width, %component : index
+      %key_channel = index.add %query_channel, %key_origin : index
+      %stored_query = view.load %qkv_view[%token, %query_channel] : view<5x10240xbf16> -> bf16
+      %stored_key = view.load %qkv_view[%token, %key_channel] : view<5x10240xbf16> -> bf16
+      %query_value = scalar.extf %stored_query : bf16 to f32
+      %key_value = scalar.extf %stored_key : bf16 to f32
+      %unit_query = scalar.mulf %query_value, %query_inverse : f32
+      %query = scalar.mulf %unit_query, %query_factor : f32
+      %key = scalar.mulf %key_value, %key_inverse : f32
+      %old = view.load %state_view[%head, %column, %component] : view<48x128x128xf32> -> f32
+      %decayed = scalar.mulf %old, %decay : f32
+      %updated = scalar.fmaf %key, %delta, %decayed : f32
+      view.store %updated, %state_view[%head, %column, %component] : f32, view<48x128x128xf32>
+      %next = scalar.fmaf %updated, %query, %sum : f32
+      scf.yield %next : f32
+    }
+    %packed = scalar.fptrunc %result : f32 to bf16
+    view.store %packed, %output_view[%token, %output_channel] : bf16, view<5x6144xbf16>
+  }
+  kernel.return
+}
+
+kernel.def @reference_gate() {
+  %heads = index.constant 48 : index
+  %tokens = index.constant 5 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%raw: buffer, %z: buffer, %weight: buffer, %output: buffer) {
+  %head = kernel.workgroup.id<x> : index
+  %token = kernel.workgroup.id<y> : index
+  %origin = index.constant 0 : offset
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %width = index.constant 128 : index
+  %raw_view = buffer.view %raw[%origin] : buffer -> view<5x48x128xbf16>
+  %z_view = buffer.view %z[%origin] : buffer -> view<5x48x128xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<5x48x128xbf16>
+  %c0 = scalar.constant 0.0 : f32
+  %c1 = scalar.constant 1.0 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  %reciprocal_width = scalar.constant 0.0078125 : f32
+  %squares = scf.for %component = [%c0_index to %width step %c1_index](%sum = %c0 : f32) -> (f32) {
+    %stored = view.load %raw_view[%token, %head, %component] : view<5x48x128xbf16> -> bf16
+    %value = scalar.extf %stored : bf16 to f32
+    %next = scalar.fmaf %value, %value, %sum : f32
+    scf.yield %next : f32
+  }
+  %mean = scalar.mulf %squares, %reciprocal_width : f32
+  %biased = scalar.addf %mean, %epsilon : f32
+  %inverse = scalar.rsqrtf<afn> %biased : f32
+  scf.for %component = [%c0_index to %width step %c1_index] {
+    %stored = view.load %raw_view[%token, %head, %component] : view<5x48x128xbf16> -> bf16
+    %stored_z = view.load %z_view[%token, %head, %component] : view<5x48x128xbf16> -> bf16
+    %scale = view.load %weight_view[%component] : view<128xf32> -> f32
+    %value = scalar.extf %stored : bf16 to f32
+    %z_value = scalar.extf %stored_z : bf16 to f32
+    %negative_z = scalar.negf %z_value : f32
+    %exponential = scalar.expf<afn> %negative_z : f32
+    %denominator = scalar.addf %c1, %exponential : f32
+    %unit = scalar.mulf %value, %inverse : f32
+    %scaled = scalar.mulf %unit, %scale : f32
+    %gated = scalar.divf %scaled, %denominator : f32
+    %packed = scalar.fptrunc %gated : f32 to bf16
+    view.store %packed, %output_view[%token, %head, %component] : bf16, view<5x48x128xbf16>
+  }
+  kernel.return
+}
+
+// Publish the same immutable span/row descriptors used by the source model.
+// A nonzero initial position preserves the deliberately nonzero reference state.
+kernel.def @prepare_single_span() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%begin: i32, %end: i32, %epoch: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<8xi32>
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %position = scalar.addi %begin, %c1 : i32
+  %length = scalar.subi %end, %begin : i32
+  view.store %end, %header[0] : i32, view<8xi32>
+  view.store %c1, %header[1] : i32, view<8xi32>
+  view.store %c0, %header[2] : i32, view<8xi32>
+  view.store %length, %header[3] : i32, view<8xi32>
+  view.store %position, %header[4] : i32, view<8xi32>
+  view.store %begin, %header[5] : i32, view<8xi32>
+  view.store %c0, %header[6] : i32, view<8xi32>
+  view.store %c0, %header[7] : i32, view<8xi32>
+  kernel.return
+}
+
+check.case public @gdn_state_continuation {
+  %rows = check.generate.fill value(0) : tensor<4xi64>
+  %layer_origin = check.literal value(0) : offset
+
+  %seed0 = check.literal value(14931) : i64
+  %seed1 = check.literal value(75307) : i64
+  %seed2 = check.literal value(21019) : i64
+  %seed3 = check.literal value(87107) : i64
+  %seed4 = check.literal value(37619) : i64
+  %whole = check.generate.fill value(-99) : tensor<8xi32>
+  %whole_begin = check.literal value(0) : i32
+  %whole_end = check.literal value(5) : i32
+  kernel.launch @prepare_single_span(%whole_begin, %whole_end, %whole) : (i32, i32, tensor<8xi32>)
+  %first = check.generate.fill value(-99) : tensor<8xi32>
+  %first_begin = check.literal value(0) : i32
+  %first_end = check.literal value(2) : i32
+  kernel.launch @prepare_single_span(%first_begin, %first_end, %first) : (i32, i32, tensor<8xi32>)
+  %second = check.generate.fill value(-99) : tensor<8xi32>
+  %second_begin = check.literal value(2) : i32
+  %second_end = check.literal value(4) : i32
+  kernel.launch @prepare_single_span(%second_begin, %second_end, %second) : (i32, i32, tensor<8xi32>)
+  %decode = check.generate.fill value(-99) : tensor<8xi32>
+  %decode_begin = check.literal value(4) : i32
+  %decode_end = check.literal value(5) : i32
+  kernel.launch @prepare_single_span(%decode_begin, %decode_end, %decode) : (i32, i32, tensor<8xi32>)
+  %qkv = check.generate.random.uniform seed(%seed0) range(-1.0 to 1.0) : tensor<5x10240xbf16>
+  %weight = check.generate.random.uniform seed(%seed1) range(-0.29999999999999999 to 0.29999999999999999) : tensor<10240x4xf32>
+  %history = check.generate.random.uniform seed(%seed2) range(-0.20000000000000001 to 0.20000000000000001) : tensor<3x10240xbf16>
+  %history_ref = check.generate.random.uniform seed(%seed2) range(-0.20000000000000001 to 0.20000000000000001) : tensor<3x10240xbf16>
+  %history_split = check.generate.random.uniform seed(%seed2) range(-0.20000000000000001 to 0.20000000000000001) : tensor<3x10240xbf16>
+  %convolved = check.generate.fill value(-17.0) : tensor<5x10240xbf16>
+  %convolved_ref = check.generate.fill value(19.0) : tensor<5x10240xbf16>
+  %convolved_split = check.generate.fill value(23.0) : tensor<5x10240xbf16>
+  %norm = check.generate.fill value(-17.0) : tensor<5x32xf32>
+  %norm_ref = check.generate.fill value(19.0) : tensor<5x32xf32>
+  %norm_split = check.generate.fill value(23.0) : tensor<5x32xf32>
+  kernel.launch @reference_convolution(%qkv, %weight, %history_ref, %convolved_ref, %norm_ref) : (tensor<5x10240xbf16>, tensor<10240x4xf32>, tensor<3x10240xbf16>, tensor<5x10240xbf16>, tensor<5x32xf32>)
+  kernel.launch @gdn_convolve(%whole, %rows, %layer_origin, %qkv, %weight, %history, %convolved, %norm) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<10240x4xf32>, tensor<3x10240xbf16>, tensor<5x10240xbf16>, tensor<5x32xf32>)
+  check.expect.close actual(%convolved) expected(%convolved_ref) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<5x10240xbf16>
+  check.expect.close actual(%norm) expected(%norm_ref) atol(1.9999999999999999e-06) rtol(2.0000000000000002e-05) nan(different) : tensor<5x32xf32>
+  check.expect.bitwise actual(%history) expected(%history_ref) : tensor<3x10240xbf16>
+
+  %alpha = check.generate.random.uniform seed(%seed0) range(-2.0 to 2.0) : tensor<5x48xf32>
+  %beta = check.generate.random.uniform seed(%seed1) range(-2.0 to 2.0) : tensor<5x48xf32>
+  %a = check.generate.random.uniform seed(%seed2) range(-2.0 to -0.10000000000000001) : tensor<48xf32>
+  %bias = check.generate.random.uniform seed(%seed3) range(-1.0 to 1.0) : tensor<48xf32>
+  %state = check.generate.random.uniform seed(%seed4) range(-0.02 to 0.02) : tensor<48x128x128xf32>
+  %state_ref = check.generate.random.uniform seed(%seed4) range(-0.02 to 0.02) : tensor<48x128x128xf32>
+  %state_split = check.generate.random.uniform seed(%seed4) range(-0.02 to 0.02) : tensor<48x128x128xf32>
+  %raw = check.generate.fill value(-17.0) : tensor<5x6144xbf16>
+  %raw_ref = check.generate.fill value(19.0) : tensor<5x6144xbf16>
+  %raw_split = check.generate.fill value(23.0) : tensor<5x6144xbf16>
+  kernel.launch @reference_recurrence(%convolved, %norm, %alpha, %beta, %a, %bias, %state_ref, %raw_ref) : (tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_recur(%whole, %rows, %layer_origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state, %raw) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  check.expect.close actual(%raw) expected(%raw_ref) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<5x6144xbf16>
+  check.expect.close actual(%state) expected(%state_ref) atol(1.9999999999999999e-06) rtol(2.0000000000000002e-05) nan(different) : tensor<48x128x128xf32>
+
+  %z = check.generate.random.uniform seed(%seed3) range(-3.0 to 3.0) : tensor<5x6144xbf16>
+  %gamma = check.generate.random.uniform seed(%seed4) range(0.5 to 1.5) : tensor<128xf32>
+  %gated = check.generate.fill value(-17.0) : tensor<5x6144xbf16>
+  %gated_ref = check.generate.fill value(19.0) : tensor<5x6144xbf16>
+  %gated_split = check.generate.fill value(23.0) : tensor<5x6144xbf16>
+  kernel.launch @reference_gate(%raw, %z, %gamma, %gated_ref) : (tensor<5x6144xbf16>, tensor<5x6144xbf16>, tensor<128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_gate(%whole, %raw, %z, %gamma, %gated) : (tensor<8xi32>, tensor<5x6144xbf16>, tensor<5x6144xbf16>, tensor<128xf32>, tensor<5x6144xbf16>)
+  check.expect.close actual(%gated) expected(%gated_ref) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<5x6144xbf16>
+
+  kernel.launch @gdn_convolve(%first, %rows, %layer_origin, %qkv, %weight, %history_split, %convolved_split, %norm_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<10240x4xf32>, tensor<3x10240xbf16>, tensor<5x10240xbf16>, tensor<5x32xf32>)
+  kernel.launch @gdn_recur(%first, %rows, %layer_origin, %convolved_split, %norm_split, %alpha, %beta, %a, %bias, %state_split, %raw_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_gate(%first, %raw_split, %z, %gamma, %gated_split) : (tensor<8xi32>, tensor<5x6144xbf16>, tensor<5x6144xbf16>, tensor<128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_convolve(%second, %rows, %layer_origin, %qkv, %weight, %history_split, %convolved_split, %norm_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<10240x4xf32>, tensor<3x10240xbf16>, tensor<5x10240xbf16>, tensor<5x32xf32>)
+  kernel.launch @gdn_recur(%second, %rows, %layer_origin, %convolved_split, %norm_split, %alpha, %beta, %a, %bias, %state_split, %raw_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_gate(%second, %raw_split, %z, %gamma, %gated_split) : (tensor<8xi32>, tensor<5x6144xbf16>, tensor<5x6144xbf16>, tensor<128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_convolve(%decode, %rows, %layer_origin, %qkv, %weight, %history_split, %convolved_split, %norm_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<10240x4xf32>, tensor<3x10240xbf16>, tensor<5x10240xbf16>, tensor<5x32xf32>)
+  kernel.launch @gdn_recur(%decode, %rows, %layer_origin, %convolved_split, %norm_split, %alpha, %beta, %a, %bias, %state_split, %raw_split) : (tensor<8xi32>, tensor<4xi64>, offset, tensor<5x10240xbf16>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<48x128x128xf32>, tensor<5x6144xbf16>)
+  kernel.launch @gdn_gate(%decode, %raw_split, %z, %gamma, %gated_split) : (tensor<8xi32>, tensor<5x6144xbf16>, tensor<5x6144xbf16>, tensor<128xf32>, tensor<5x6144xbf16>)
+  check.expect.bitwise actual(%convolved_split) expected(%convolved) : tensor<5x10240xbf16>
+  check.expect.bitwise actual(%norm_split) expected(%norm) : tensor<5x32xf32>
+  check.expect.bitwise actual(%history_split) expected(%history) : tensor<3x10240xbf16>
+  check.expect.bitwise actual(%raw_split) expected(%raw) : tensor<5x6144xbf16>
+  check.expect.bitwise actual(%state_split) expected(%state) : tensor<48x128x128xf32>
+  check.expect.bitwise actual(%gated_split) expected(%gated) : tensor<5x6144xbf16>
+  check.return
+}

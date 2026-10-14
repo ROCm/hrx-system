@@ -1,0 +1,299 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Original Q4_K/Q5_K gate/up and Q5_1/Q8_0 down weights stay compressed. Selected
+// experts publish BF16 SwiGLU and down results; routing and shared-expert
+// weighting accumulate in F32 before the final BF16 branch publication.
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+amdgpu.target<gfx11-generic> @flash_next_expert_wave32 {subgroup_size = 32}
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_qk_partial(%q5_encoding: i1, %width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+func.decl @flash_next_q51_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+kernel.decl @flash_next_linear_q8(%output_capacity: index) launch(%input_width: index, %output_width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+func.def inline @expert_swiglu(%gate: f32, %up: f32) -> (bf16) {
+  %c1 = scalar.constant 1.0 : f32
+  %negative = scalar.negf %gate : f32
+  %exponential = scalar.expf<afn> %negative : f32
+  %denominator = scalar.addf %c1, %exponential : f32
+  %silu = scalar.divf %gate, %denominator : f32
+  %product = scalar.mulf %silu, %up : f32
+  %packed = scalar.fptrunc %product : f32 to bf16
+  func.return %packed : bf16
+}
+
+func.def inline @expert_gate_up_body(%q5_encoding: i1, %span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
+  %span, %input, %ids, %gate_weight, %up_weight, %output = buffer.assume.noalias %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg : buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %slot = kernel.workgroup.id<z> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0 = index.constant 0 : index
+    %input_width = index.constant 2560 : index
+    %stride = index.constant 32 : index
+    %c4 = index.constant 4 : index
+    %width = index.constant 640 : index
+    %origin = index.constant 0 : offset
+    %feature = index.madd %group, %c4, %wave : index
+    %ids_view = buffer.view %ids[%origin] : buffer -> view<[%tokens]x10xi32>
+    %expert_i32 = view.load %ids_view[%token, %slot] : view<[%tokens]x10xi32> -> i32
+    %expert_index = index.cast %expert_i32 : i32 to index
+    %expert = index.assume %expert_index [range(%expert_index, 0, 511)] : index
+    %row = index.madd %expert, %width, %feature : index
+    %gate_partial = func.call @flash_next_qk_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %gate_weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
+    %up_partial = func.call @flash_next_qk_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %up_weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
+    %gate = kernel.subgroup.reduce<addf> %gate_partial : f32
+    %up = kernel.subgroup.reduce<addf> %up_partial : f32
+    %leader = index.cmp eq, %lane, %c0 : index
+    scf.if %leader {
+      %packed = func.call @expert_swiglu(%gate, %up) : (f32, f32) -> (bf16)
+      %view = buffer.view %output[%origin] : buffer -> view<[%tokens]x10x640xbf16>
+      view.store %packed, %view[%token, %slot, %feature] : bf16, view<[%tokens]x10x640xbf16>
+    }
+  }
+  func.return
+}
+
+kernel.def target(@flash_next_expert_wave32) @expert_gate_up_q4k() {
+  %groups = index.constant 160 : index
+  %tokens = config.get @flash_next.token_count : index
+  %selected = index.constant 10 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %selected) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
+  %q5_encoding = scalar.constant false : i1
+  func.call @expert_gate_up_body(%q5_encoding, %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg) : (i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@flash_next_expert_wave32) @expert_gate_up_q5k() {
+  %groups = index.constant 160 : index
+  %tokens = config.get @flash_next.token_count : index
+  %selected = index.constant 10 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %selected) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
+  %q5_encoding = scalar.constant true : i1
+  func.call @expert_gate_up_body(%q5_encoding, %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg) : (i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def inline @expert_down_body(%q8_weights: i1, %span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %span, %input, %ids, %weight, %output = buffer.assume.noalias %span_arg, %input_arg, %ids_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %slot = kernel.workgroup.id<z> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0 = index.constant 0 : index
+    %input_width = index.constant 640 : index
+    %stride = index.constant 32 : index
+    %c4 = index.constant 4 : index
+    %c10 = index.constant 10 : index
+    %width = index.constant 2560 : index
+    %origin = index.constant 0 : offset
+    %feature = index.madd %group, %c4, %wave : index
+    %ids_view = buffer.view %ids[%origin] : buffer -> view<[%tokens]x10xi32>
+    %expert_i32 = view.load %ids_view[%token, %slot] : view<[%tokens]x10xi32> -> i32
+    %expert_index = index.cast %expert_i32 : i32 to index
+    %expert = index.assume %expert_index [range(%expert_index, 0, 511)] : index
+    %row = index.madd %expert, %width, %feature : index
+    %input_row = index.madd %token, %c10, %slot : index
+    %partial = scf.if %q8_weights -> (f32) {
+      %value = func.call @flash_next_q8_partial(%input_width, %input_row, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+      scf.yield %value : f32
+    } else {
+      %value = func.call @flash_next_q51_partial(%input_width, %input_row, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+      scf.yield %value : f32
+    }
+    %sum = kernel.subgroup.reduce<addf> %partial : f32
+    %leader = index.cmp eq, %lane, %c0 : index
+    scf.if %leader {
+      %packed = scalar.fptrunc %sum : f32 to bf16
+      %view = buffer.view %output[%origin] : buffer -> view<[%tokens]x10x2560xbf16>
+      view.store %packed, %view[%token, %slot, %feature] : bf16, view<[%tokens]x10x2560xbf16>
+    }
+  }
+  func.return
+}
+
+kernel.def target(@flash_next_expert_wave32) @expert_down_q51() {
+  %groups = index.constant 640 : index
+  %tokens = config.get @flash_next.token_count : index
+  %selected = index.constant 10 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %selected) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %q8_weights = scalar.constant false : i1
+  func.call @expert_down_body(%q8_weights, %span_arg, %input_arg, %ids_arg, %weight_arg, %output_arg) : (i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@flash_next_expert_wave32) @expert_down_q8() {
+  %groups = index.constant 640 : index
+  %tokens = config.get @flash_next.token_count : index
+  %selected = index.constant 10 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %selected) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %q8_weights = scalar.constant true : i1
+  func.call @expert_down_body(%q8_weights, %span_arg, %input_arg, %ids_arg, %weight_arg, %output_arg) : (i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@flash_next_expert_wave32) @shared_gate_up() {
+  %groups = index.constant 160 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %input_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
+  %span, %input, %gate_weight, %up_weight, %output = buffer.assume.noalias %span_arg, %input_arg, %gate_weight_arg, %up_weight_arg, %output_arg : buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0 = index.constant 0 : index
+    %c4 = index.constant 4 : index
+    %stride = index.constant 32 : index
+    %width = index.constant 2560 : index
+    %origin = index.constant 0 : offset
+    %row = index.madd %group, %c4, %wave : index
+    %gate_partial = func.call @flash_next_q8_partial(%width, %token, %row, %lane, %stride, %input, %gate_weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+    %up_partial = func.call @flash_next_q8_partial(%width, %token, %row, %lane, %stride, %input, %up_weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+    %gate = kernel.subgroup.reduce<addf> %gate_partial : f32
+    %up = kernel.subgroup.reduce<addf> %up_partial : f32
+    %leader = index.cmp eq, %lane, %c0 : index
+    scf.if %leader {
+      %packed = func.call @expert_swiglu(%gate, %up) : (f32, f32) -> (bf16)
+      %view = buffer.view %output[%origin] : buffer -> view<[%tokens]x640xbf16>
+      view.store %packed, %view[%token, %row] : bf16, view<[%tokens]x640xbf16>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@flash_next_expert_wave32) @experts_combine() {
+  %groups = index.constant 5 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %experts_arg: buffer, %weights_arg: buffer, %shared_arg: buffer, %gate_arg: buffer, %output_arg: buffer) {
+  %span, %experts, %weights, %shared, %gate, %output = buffer.assume.noalias %span_arg, %experts_arg, %weights_arg, %shared_arg, %gate_arg, %output_arg : buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %thread = kernel.workitem.id<x> : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c10 = index.constant 10 : index
+    %threads = index.constant 64 : index
+    %feature = index.madd %group, %threads, %thread : index
+    %origin = index.constant 0 : offset
+    %experts_view = buffer.view %experts[%origin] : buffer -> view<[%tokens]x10x320x8xbf16>
+    %weights_view = buffer.view %weights[%origin] : buffer -> view<[%tokens]x10xf32>
+    %shared_view = buffer.view %shared[%origin] : buffer -> view<[%tokens]x320x8xbf16>
+    %gate_view = buffer.view %gate[%origin] : buffer -> view<[%tokens]xf32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x320x8xbf16>
+    %c0v = vector.constant 0.0 : vector<8xf32>
+    %routed = scf.for %slot = [%c0 to %c10 step %c1](%accumulator = %c0v : vector<8xf32>) -> (vector<8xf32>) {
+      %stored = vector.load %experts_view[%token, %slot, %feature, %c0] : view<[%tokens]x10x320x8xbf16> -> vector<8xbf16>
+      %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+      %weight = view.load %weights_view[%token, %slot] : view<[%tokens]x10xf32> -> f32
+      %weight_vector = vector.splat %weight : vector<8xf32>
+      %next = vector.fmaf %values, %weight_vector, %accumulator : vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %shared_stored = vector.load %shared_view[%token, %feature, %c0] : view<[%tokens]x320x8xbf16> -> vector<8xbf16>
+    %shared_values = vector.extf %shared_stored : vector<8xbf16> to vector<8xf32>
+    %gate_value = view.load %gate_view[%token] : view<[%tokens]xf32> -> f32
+    %gate_vector = vector.splat %gate_value : vector<8xf32>
+    %sum = vector.fmaf %shared_values, %gate_vector, %routed : vector<8xf32>
+    %packed = vector.fptrunc %sum : vector<8xf32> to vector<8xbf16>
+    vector.store %packed, %output_view[%token, %feature, %c0] : vector<8xbf16>, view<[%tokens]x320x8xbf16>
+  }
+  kernel.return
+}
+
+command.program.def public @flash_next_experts(%layer: index) launch(%parameters: buffer, %span: buffer, %input: buffer, %ids: buffer, %weights: buffer, %shared_gate: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %expert_hidden_row_bytes = index.constant 12800 : offset
+  %expert_output_row_bytes = index.constant 51200 : offset
+  %shared_hidden_row_bytes = index.constant 1280 : offset
+  %shared_output_row_bytes = index.constant 5120 : offset
+  %expert_hidden_bytes = index.scale %tokens, %expert_hidden_row_bytes : index, offset -> offset
+  %expert_output_bytes = index.scale %tokens, %expert_output_row_bytes : index, offset -> offset
+  %shared_hidden_bytes = index.scale %tokens, %shared_hidden_row_bytes : index, offset -> offset
+  %shared_output_bytes = index.scale %tokens, %shared_output_row_bytes : index, offset -> offset
+  %hidden = buffer.alloca<global> align(256) %expert_hidden_bytes : buffer
+  %down = buffer.alloca<global> align(256) %expert_output_bytes : buffer
+  %shared_hidden = buffer.alloca<global> align(256) %shared_hidden_bytes : buffer
+  %shared = buffer.alloca<global> align(256) %shared_output_bytes : buffer
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c30 = index.constant 30 : index
+  %c46 = index.constant 46 : index
+  %q5_encoding = index.cmp eq, %layer, %c2 : index
+  %q8_layer4 = index.cmp eq, %layer, %c4 : index
+  %q8_layer30 = index.cmp eq, %layer, %c30 : index
+  %q8_tail = index.cmp uge, %layer, %c46 : index
+  %q8_early = scalar.ori %q5_encoding, %q8_layer4 : i1
+  %q8_late = scalar.ori %q8_layer30, %q8_tail : i1
+  %q8_down = scalar.ori %q8_early, %q8_late : i1
+  scf.if %q5_encoding {
+    %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x10x176xi8>
+    %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x176xi8>
+    kernel.launch @expert_gate_up_q5k(%span, %input, %ids, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
+  } else {
+    %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x10x144xi8>
+    %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x144xi8>
+    kernel.launch @expert_gate_up_q4k(%span, %input, %ids, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
+  }
+  scf.if %q8_down {
+    %down_weight = command.parameter %parameters, "blk.{}.ffn_down_exps.weight"[%layer] : view<512x2560x20x34xi8>
+    kernel.launch @expert_down_q8(%span, %hidden, %ids, %down_weight, %down) : (buffer, buffer, buffer, view<512x2560x20x34xi8>, buffer)
+  } else {
+    %down_weight = command.parameter %parameters, "blk.{}.ffn_down_exps.weight"[%layer] : view<512x2560x20x24xi8>
+    kernel.launch @expert_down_q51(%span, %hidden, %ids, %down_weight, %down) : (buffer, buffer, buffer, view<512x2560x20x24xi8>, buffer)
+  }
+  %shared_gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_shexp.weight"[%layer] : view<640x80x34xi8>
+  %shared_up_weight = command.parameter %parameters, "blk.{}.ffn_up_shexp.weight"[%layer] : view<640x80x34xi8>
+  %shared_down_weight = command.parameter %parameters, "blk.{}.ffn_down_shexp.weight"[%layer] : view<2560x20x34xi8>
+  %hidden_width = index.constant 640 : index
+  %output_width = index.constant 2560 : index
+  kernel.launch @shared_gate_up(%span, %input, %shared_gate_weight, %shared_up_weight, %shared_hidden) : (buffer, buffer, view<640x80x34xi8>, view<640x80x34xi8>, buffer)
+  kernel.launch @flash_next_linear_q8[%output_width](%hidden_width, %output_width, %span, %shared_hidden, %shared_down_weight, %shared) : [index](index, index, buffer, buffer, view<2560x20x34xi8>, buffer)
+  kernel.launch @experts_combine(%span, %down, %weights, %shared, %shared_gate, %output) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

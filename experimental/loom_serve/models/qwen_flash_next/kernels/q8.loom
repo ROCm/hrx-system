@@ -1,0 +1,43 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Each lane consumes complete Q8_0 blocks. Integer codes are exact in BF16;
+// the shared F16 scale is applied to the block dot in F32. Neither activations
+// nor decoded weights acquire another quantization boundary.
+func.def public inline @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32) {
+  %c0_index = index.constant 0 : index
+  %block_size = index.constant 32 : index
+  %block_bytes = index.constant 34 : offset
+  %scale_bytes = index.constant 2 : offset
+  %element_bytes = index.constant 2 : offset
+  %blocks = index.div %width, %block_size : index
+  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+  %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
+  %input_origin = index.scale %token, %input_row_bytes : index, offset -> offset
+  %input_view = buffer.view %input[%input_origin] : buffer -> view<[%blocks]x32xbf16>
+  %c0 = scalar.constant 0.0 : f32
+  %c0_vector = vector.constant 0.0 : vector<16xf32>
+  %result = scf.for %block = [%lane to %blocks step %stride](%accumulator = %c0 : f32) -> (f32) {
+    %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+    %block_origin = index.add %weight_origin, %block_delta : offset
+    %payload_origin = index.add %block_origin, %scale_bytes : offset
+    %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+    %code_view = buffer.view %weight[%payload_origin] : buffer -> view<32xi8>
+    %scale_f16 = view.load %scale_view[%c0_index] : view<1xf16> -> f16
+    %scale = scalar.extf %scale_f16 : f16 to f32
+    %codes = vector.load %code_view[%c0_index] : view<32xi8> -> vector<32xi8>
+    %codes_f32 = vector.sitofp %codes : vector<32xi8> to vector<32xf32>
+    %codes_bf16 = vector.fptrunc %codes_f32 : vector<32xf32> to vector<32xbf16>
+    %values = vector.load %input_view[%block, %c0_index] : view<[%blocks]x32xbf16> -> vector<32xbf16>
+    %pairs = vector.dot2f %codes_bf16, %values, %c0_vector : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+    %dot = vector.reduce<addf> %pairs, %c0 : vector<16xf32>, f32
+    %scaled = scalar.mulf %dot, %scale : f32
+    %next = scalar.addf %accumulator, %scaled : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}

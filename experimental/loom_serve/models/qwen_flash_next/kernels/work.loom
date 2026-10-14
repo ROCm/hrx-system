@@ -1,0 +1,69 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Packed epochs contain {tokens, spans, outputs}, then five-word span records
+// {length, absolute_position, packed_begin, resident_row, output_index}. The
+// host owns distinct rows and immutable read/write origins through completion.
+// Stateless kernels visit the active packed prefix. Recurrent kernels advance
+// one span and publish only its private writer, including at a retained fork.
+func.def public inline @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = view.load %view[0] : view<3xi32> -> i32
+  %value = index.cast %word : i32 to index
+  %count = index.assume %value [range(%value, 0, %capacity)] : index
+  func.return %count : index
+}
+
+func.def public inline @flash_next_span_active(%epoch: buffer, %span: index) -> (i1) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = view.load %view[1] : view<3xi32> -> i32
+  %count = index.cast %word : i32 to index
+  %active = index.cmp ult, %span, %count : index
+  func.return %active : i1
+}
+
+// A fresh span has no readable history. Otherwise the fork frontier selects
+// the immutable anchor once; subsequent spans read their own advancing writer.
+// Origins are byte offsets in one retained arena, independent of token packing.
+func.def public inline @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset) {
+  %header_bytes = index.constant 12 : offset
+  %record_bytes = index.constant 20 : offset
+  %relative_origin = index.scale %span, %record_bytes : index, offset -> offset
+  %origin = index.add %header_bytes, %relative_origin : offset
+  %record = buffer.view %epoch[%origin] : buffer -> view<5xi32>
+  %length_word = view.load %record[0] : view<5xi32> -> i32
+  %position_word = view.load %record[1] : view<5xi32> -> i32
+  %begin_word = view.load %record[2] : view<5xi32> -> i32
+  %row_word = view.load %record[3] : view<5xi32> -> i32
+  %length_value = index.cast %length_word : i32 to index
+  %length = index.assume %length_value [range(%length_value, 1, %capacity)] : index
+  %begin_value = index.cast %begin_word : i32 to index
+  %begin = index.assume %begin_value [range(%begin_value, 0, %capacity)] : index
+  %end_value = index.add %begin, %length : index
+  %end = index.assume %end_value [range(%end_value, 1, %capacity)] : index
+  %row_value = index.cast %row_word : i32 to index
+  %row = index.assume %row_value [range(%row_value, 0, 15)] : index
+  %row_bytes = index.constant 32 : offset
+  %row_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %entry = buffer.view %rows[%row_origin] : buffer -> view<4xi64>
+  %anchor_word = view.load %entry[0] : view<4xi64> -> i64
+  %writer_word = view.load %entry[1] : view<4xi64> -> i64
+  %frontier = view.load %entry[3] : view<4xi64> -> i64
+  %position = scalar.extui %position_word : i32 to i64
+  %first = scalar.cmpi eq, %position, %frontier : i64
+  %reader_word = scf.select %first, %anchor_word, %writer_word : i64
+  %reader_value = scalar.assume %reader_word [range(%reader_word, 0, 9223372036854775807)] : i64
+  %writer_value = scalar.assume %writer_word [range(%writer_word, 0, 9223372036854775807)] : i64
+  %reader_base = index.cast %reader_value : i64 to offset
+  %writer_base = index.cast %writer_value : i64 to offset
+  %reader = index.add %reader_base, %layer_origin : offset
+  %writer = index.add %writer_base, %layer_origin : offset
+  %c0 = scalar.constant 0 : i64
+  %fresh = scalar.cmpi eq, %position, %c0 : i64
+  func.return %begin, %end, %fresh, %reader, %writer : index, index, i1, offset, offset
+}
