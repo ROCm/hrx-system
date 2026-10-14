@@ -1,0 +1,58 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @flash_next_select_output_rows() launch(%epoch: buffer, %residual: buffer, %head_epoch: buffer, %selected: buffer)
+
+// Four spans can request four verifier outputs apiece, but this packed shape
+// has only eight inputs. Exercise empty, partial, and full output prefixes,
+// reversed source rows, and preservation of inactive destination storage.
+kernel.def @fixture() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%count_value: index, %epoch: buffer, %expected_header: buffer, %expected: buffer) {
+  %count = index.assume %count_value [range(%count_value, 0, 8)] : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %output_header = buffer.view %expected_header[%origin] : buffer -> view<3xi32>
+  %count_word = index.cast %count : index to i32
+  view.store %count_word, %header[2] : i32, view<3xi32>
+  view.store %count_word, %output_header[0] : i32, view<3xi32>
+  %selection_origin = index.constant 1292 : offset
+  %selections = buffer.view %epoch[%selection_origin] : buffer -> view<128xi32>
+  %output = buffer.view %expected[%origin] : buffer -> view<8x5120xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %last = index.constant 7 : index
+  %columns = index.constant 5120 : index
+  %stride = scalar.constant 5120 : i32
+  scf.for %row = [%c0 to %count step %c1] {
+    %source = index.sub %last, %row : index
+    %source_word = index.cast %source : index to i32
+    view.store %source_word, %selections[%row] : i32, view<128xi32>
+    %base = scalar.muli %source_word, %stride : i32
+    scf.for %column = [%c0 to %columns step %c1] {
+      %word = index.cast %column : index to i32
+      %value = scalar.addi %base, %word : i32
+      view.store %value, %output[%row, %column] : i32, view<8x5120xi32>
+    }
+  }
+  kernel.return
+}
+
+check.case public @packed_output_capacity {
+  %count = check.param.choice values([0, 3, 8]) name("outputs") : index
+  %epoch = check.generate.fill value(0) : tensor<451xi32>
+  %source = check.generate.iota offset(0) step(1) : tensor<8x5120xi32>
+  %header = check.generate.fill value(-7) : tensor<3xi32>
+  %expected_header = check.generate.fill value(-7) : tensor<3xi32>
+  %output = check.generate.fill value(-7) : tensor<8x5120xi32>
+  %expected = check.generate.fill value(-7) : tensor<8x5120xi32>
+  kernel.launch @fixture(%count, %epoch, %expected_header, %expected) : (index, tensor<451xi32>, tensor<3xi32>, tensor<8x5120xi32>)
+  kernel.launch @flash_next_select_output_rows(%epoch, %source, %header, %output) : (tensor<451xi32>, tensor<8x5120xi32>, tensor<3xi32>, tensor<8x5120xi32>)
+  check.expect.bitwise actual(%header) expected(%expected_header) : tensor<3xi32>
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<8x5120xi32>
+  check.return
+}

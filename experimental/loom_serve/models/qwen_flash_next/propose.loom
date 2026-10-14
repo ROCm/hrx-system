@@ -1,0 +1,84 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+kernel.decl @qwen38_mtp_proposal_prepare() launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer)
+
+kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer)
+
+kernel.decl @flash_next_map_tokens() launch(%epoch: buffer, %mapping: buffer)
+
+kernel.decl @flash_next_mtp_restore() launch(%epoch: buffer, %carry: buffer, %cache: buffer, %hidden: buffer)
+
+kernel.decl @flash_next_mtp_sample() launch(%epoch: buffer, %logits: buffer, %output: buffer)
+
+kernel.decl @qwen38_continue_dispatch() launch(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer)
+
+command.program.decl @flash_next_mtp_input() launch(%parameters: buffer, %target_parameters: buffer, %epoch: buffer, %ids: buffer, %hidden: buffer, %residual: buffer)
+
+command.program.decl @flash_next_qsa_residual(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %residual: buffer, %rows: buffer, %arena: buffer, %output: buffer, %capture: buffer)
+
+command.program.decl @flash_next_ffn_residual(%layer: index) launch(%parameters: buffer, %span: buffer, %residual: buffer, %output: buffer)
+
+command.program.decl @flash_next_head_logits(%predictor: index) launch(%parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %residual: buffer, %logits: buffer)
+
+// Three recursive proposals use private working history. Committed carry is
+// read once and remains immutable until accepted target inputs warm the cache.
+// The raw four-stream output, before the final head mixer, is recursive hidden.
+command.program.def public @flash_next_mtp_propose() launch(%parameters: buffer, %embedding_parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer, %carry: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %pool = config.get @flash_next.pool_capacity : index
+  %hidden_stride = index.constant 20480 : offset
+  %logit_stride = index.constant 993280 : offset
+  %mapping_stride = index.constant 16 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %logit_bytes = index.scale %tokens, %logit_stride : index, offset -> offset
+  %mapping_bytes = index.scale %tokens, %mapping_stride : index, offset -> offset
+  %control_bytes = index.constant 1548 : offset
+  %origin_bytes = index.constant 64 : offset
+  %token_bytes = index.constant 2048 : offset
+  %draft = buffer.alloca<global> align(16) %control_bytes : buffer
+  %origins = buffer.alloca<global> align(16) %origin_bytes : buffer
+  %ids = buffer.alloca<global> align(16) %token_bytes : buffer
+  %predictions = buffer.alloca<global> align(16) %origin_bytes : buffer
+  %mapping = buffer.alloca<global> align(16) %mapping_bytes : buffer
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %attention = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %logits = buffer.alloca<global> align(256) %logit_bytes : buffer
+  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target_tokens, %draft, %origins, %ids) : (buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_mtp_restore(%draft, %carry, %cache, %hidden) : (buffer, buffer, buffer, buffer)
+  %layer = index.constant 48 : index
+  %key_origin = index.constant 0 : offset
+  %tail_origin = index.constant 0 : offset
+  %main_stride = index.constant 1024 : offset
+  %value_origin = index.scale %pool, %main_stride : index, offset -> offset
+  %index_origin = index.add %value_origin, %value_origin : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  scf.for %round = [%c0 to %c3 step %c1] unroll {
+    kernel.launch @flash_next_map_tokens(%draft, %mapping) : (buffer, buffer)
+    command.program.launch @flash_next_mtp_input(%parameters, %embedding_parameters, %draft, %ids, %hidden, %residual) : (buffer, buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @flash_next_qsa_residual[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %draft, %mapping, %residual, %rows, %cache, %attention, %hidden) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @flash_next_ffn_residual[%layer](%parameters, %draft, %attention, %hidden) : [index](buffer, buffer, buffer, buffer)
+    command.program.launch @flash_next_head_logits[%c1](%parameters, %vocabulary_parameters, %draft, %hidden, %logits) : [index](buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @flash_next_mtp_sample(%draft, %logits, %predictions) : (buffer, buffer, buffer)
+    kernel.launch @qwen38_mtp_proposal_advance[%round](%round, %draft, %origins, %predictions, %ids, %target_tokens) : [index](index, buffer, buffer, buffer, buffer, buffer)
+  }
+  command.return
+}
+
+command.program.def public @flash_next_continue() launch(%epoch: buffer, %tokens: buffer, %results: buffer) {
+  %context = config.get @flash_next.context_capacity : index
+  kernel.launch @qwen38_continue_dispatch(%context, %epoch, %tokens, %results) : (index, buffer, buffer, buffer)
+  command.return
+}
