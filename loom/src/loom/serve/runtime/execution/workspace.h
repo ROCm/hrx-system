@@ -88,8 +88,11 @@ iree_hal_pool_stats_t loom_serve_workspace_statistics(
 
 // Returns idle backing and retired pool generations without waiting on device
 // work. Native freeing runs asynchronously on HAL's maintenance owner. Live
-// roots and their source pools remain protected.
-void loom_serve_workspace_trim(loom_serve_workspace_t* workspace);
+// roots and their source pools remain protected. Returns the bytes still
+// retained by the logical pools after trim for budgeting further reclamation.
+// This excludes detached child slabs awaiting return to their backing cache;
+// workspace statistics may still count those until the queued sweep runs.
+iree_device_size_t loom_serve_workspace_trim(loom_serve_workspace_t* workspace);
 
 #ifdef __cplusplus
 }  // extern "C"

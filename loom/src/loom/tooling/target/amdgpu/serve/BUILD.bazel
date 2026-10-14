@@ -451,6 +451,7 @@ loom_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:maintenance",
         "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

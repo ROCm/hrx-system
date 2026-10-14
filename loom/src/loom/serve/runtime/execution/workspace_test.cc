@@ -7,7 +7,10 @@
 #include "loom/serve/runtime/execution/workspace.h"
 
 #include <array>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 #include "iree/hal/memory/maintenance.h"
@@ -22,6 +25,89 @@ TEST(WorkspaceLifetimeTest, NullLifetimeOperations) {
   loom_serve_workspace_retain(nullptr);
   loom_serve_workspace_release(nullptr);
 }
+
+// Pauses only the metadata allocator dependency, after the cold owner has
+// detached unused slabs and begun destroying their metadata. Native backing,
+// queues, suballocation, and cache retention all use their real
+// implementations.
+class WorkspaceAllocator : private iree_hal_memory_maintenance_entry_t {
+ public:
+  WorkspaceAllocator() { fn = Pause; }
+
+  iree_allocator_t allocator() { return {this, Control}; }
+
+  void PauseMaintenance(iree_hal_memory_maintenance_t* maintenance) {
+    iree_hal_memory_maintenance_enqueue(maintenance, this);
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return maintenance_.entered; });
+  }
+
+  void ResumeMaintenanceAndAwaitRelease() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    release_.armed = true;
+    maintenance_.resumed = true;
+    condition_.notify_all();
+    condition_.wait(lock, [&] { return release_.entered; });
+  }
+
+  void Resume() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    maintenance_.resumed = true;
+    release_.resumed = true;
+    condition_.notify_all();
+  }
+
+ private:
+  static void Pause(iree_hal_memory_maintenance_entry_t* entry) {
+    auto* self = static_cast<WorkspaceAllocator*>(entry);
+    std::unique_lock<std::mutex> lock(self->mutex_);
+    self->maintenance_.thread = std::this_thread::get_id();
+    self->maintenance_.entered = true;
+    self->condition_.notify_all();
+    self->condition_.wait(lock, [&] { return self->maintenance_.resumed; });
+  }
+
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* parameters, void** inout_pointer) {
+    auto* allocator = static_cast<WorkspaceAllocator*>(self);
+    if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+      std::unique_lock<std::mutex> lock(allocator->mutex_);
+      if (allocator->release_.armed &&
+          std::this_thread::get_id() == allocator->maintenance_.thread) {
+        allocator->release_.armed = false;
+        allocator->release_.entered = true;
+        allocator->condition_.notify_all();
+        allocator->condition_.wait(lock,
+                                   [&] { return allocator->release_.resumed; });
+      }
+    }
+    const auto system = iree_allocator_system();
+    return system.ctl(system.self, command, parameters, inout_pointer);
+  }
+
+  // Protects both handshakes with the captured cold owner.
+  std::mutex mutex_;
+  // Explicit entry and resumption notifications, without timing assumptions.
+  std::condition_variable condition_;
+  // Initial pause allowing several child returns to queue before maintenance.
+  struct {
+    // Only releases on this captured owner participate in the second gate.
+    std::thread::id thread;
+    // Whether the owner has entered the initial pause.
+    bool entered = false;
+    // Whether queued child returns may begin running.
+    bool resumed = false;
+  } maintenance_;
+  // One-shot pause during destruction of detached slab metadata.
+  struct {
+    // Whether the next metadata release on the owner must enter the gate.
+    bool armed = false;
+    // Whether destruction has reached the gate.
+    bool entered = false;
+    // Whether metadata destruction may complete.
+    bool resumed = false;
+  } release_;
+};
 
 class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
@@ -83,9 +169,9 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
     ASSERT_TRUE(iree_hal_memory_effects_is_empty(transition.acquire));
 
     const iree_hal_asan_pool_options_t asan_options = {};
-    IREE_ASSERT_OK(
-        loom_serve_workspace_create(hal_group, backing_pool_, &asan_options,
-                                    iree_allocator_system(), &workspace_));
+    IREE_ASSERT_OK(loom_serve_workspace_create(
+        hal_group, backing_pool_, &asan_options,
+        workspace_allocator_.allocator(), &workspace_));
     maintenance_ = backing_pool_->maintenance;
     // Only the workspace keeps the supplied source alive from this point on.
     iree_hal_pool_release(backing_pool_);
@@ -106,6 +192,7 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   void TearDown() override {
+    workspace_allocator_.Resume();
     if (gate_) {
       IREE_EXPECT_OK(iree_hal_semaphore_signal(gate_, 2, nullptr));
     }
@@ -196,6 +283,8 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
 
   // Application workers shared by both native CPU devices.
   loom_serve_host_t* host_ = nullptr;
+  // Controllable metadata dependency outliving workspace teardown.
+  WorkspaceAllocator workspace_allocator_;
   // One topology/frontier namespace enclosing all pools and execution domains.
   loom_serve_device_group_t* group_ = nullptr;
   // Owned only until its reference transfers to the shared workspace.
@@ -215,6 +304,64 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
   // Upload payload owned until all producer work has retired.
   std::array<uint32_t, 16> input_ = {};
 };
+
+TEST_P(WorkspaceTest, TrimReportsRetainedBackingBeforeColdReturnsComplete) {
+  const auto request = iree_hal_make_pool_reservation_request(kSlabBytes, 16);
+  for (auto* domain : {&producer_, &consumer_, &independent_}) {
+    IREE_ASSERT_OK(loom_serve_execution_alloca(domain->execution, &request,
+                                               &domain->buffer));
+    const auto frontier = loom_serve_execution_frontier(domain->execution);
+    IREE_ASSERT_OK(
+        loom_serve_execution_wait(domain->execution, frontier.values[0]));
+  }
+  const uint32_t pattern = 0x13579BDF;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill =
+          {
+              .target_buffer = producer_.buffer,
+              .length = sizeof(producer_.output),
+              .pattern = &pattern,
+              .pattern_length = sizeof(pattern),
+          },
+  };
+  uint64_t value = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(producer_.execution, 1, &fill, &value));
+  IREE_ASSERT_OK(loom_serve_execution_wait(producer_.execution, value));
+
+  workspace_allocator_.PauseMaintenance(maintenance_);
+  for (auto* domain : {&consumer_, &independent_}) {
+    IREE_ASSERT_OK(loom_serve_execution_dealloca(domain->execution,
+                                                 domain->buffer, &value));
+    iree_hal_buffer_release(domain->buffer);
+    domain->buffer = nullptr;
+    IREE_ASSERT_OK(loom_serve_execution_drain(domain->execution));
+  }
+  workspace_allocator_.ResumeMaintenanceAndAwaitRelease();
+
+  // TLSF detaches both unused slabs before returning either to the cache.
+  // Pausing destruction of the first leaves the second return outstanding.
+  // Trim removes the first from the cache, but must not charge the second
+  // against the caller's budget for other resources. The live slab still
+  // counts.
+  EXPECT_EQ(loom_serve_workspace_trim(workspace_), kSlabBytes);
+  const auto pending = loom_serve_workspace_statistics(workspace_);
+  EXPECT_EQ(pending.reservation_count, 1u);
+  EXPECT_EQ(pending.bytes_committed, 2 * kSlabBytes);
+
+  workspace_allocator_.Resume();
+  TrimAndDrainMaintenance();
+  EXPECT_EQ(loom_serve_workspace_statistics(workspace_).bytes_committed,
+            kSlabBytes);
+  IREE_ASSERT_OK(DownloadAndRelease(producer_));
+  IREE_ASSERT_OK(loom_serve_execution_drain(producer_.execution));
+  for (uint32_t value : producer_.output) {
+    EXPECT_EQ(value, pattern);
+  }
+  TrimAndDrainMaintenance();
+  EXPECT_EQ(loom_serve_workspace_statistics(workspace_).bytes_committed, 0u);
+}
 
 TEST_P(WorkspaceTest,
        SharedEscapeRetiresAfterLastReaderWithoutBlockingOtherWork) {

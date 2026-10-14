@@ -250,19 +250,16 @@ loom_serve_device_memory_statistics_t loom_serve_device_memory_statistics(
 
 iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
                                      uint64_t target_bytes) {
-  loom_serve_device_memory_statistics_t memory =
+  const loom_serve_device_memory_statistics_t memory =
       loom_serve_device_memory_statistics(device);
   if (memory.workspace.bytes_committed <= target_bytes &&
       memory.retained.committed_bytes <=
           target_bytes - memory.workspace.bytes_committed) {
     return iree_ok_status();
   }
-  loom_serve_workspace_trim(device->workspace);
-  memory = loom_serve_device_memory_statistics(device);
+  const uint64_t workspace_bytes = loom_serve_workspace_trim(device->workspace);
   const uint64_t retained_target =
-      memory.workspace.bytes_committed < target_bytes
-          ? target_bytes - memory.workspace.bytes_committed
-          : 0;
+      workspace_bytes < target_bytes ? target_bytes - workspace_bytes : 0;
   return loom_serve_residency_cache_trim(device->residency_cache,
                                          retained_target);
 }

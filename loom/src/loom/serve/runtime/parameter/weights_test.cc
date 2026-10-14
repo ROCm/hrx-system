@@ -15,6 +15,7 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/hal/memory/maintenance.h"
 #include "iree/task/executor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -447,6 +448,21 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[index]));
     ASSERT_NO_FATAL_FAILURE(Run(index, first));
     loom_serve_residency_release(residencies_[index]);
+  }
+
+  void DrainMaintenance() {
+    // Native returns and cascading cache sweeps complete independently of
+    // model consumers. Join them only for final backing-byte observations.
+    auto* maintenance =
+        loom_serve_device_storage_pool(device_owner_)->maintenance;
+    iree_hal_memory_maintenance_call(
+        maintenance,
+        [](void* user_data) {
+          auto* owner = static_cast<iree_hal_memory_maintenance_t*>(user_data);
+          while (iree_hal_memory_maintenance_run_one(owner)) {
+          }
+        },
+        maintenance);
   }
 
   iree_status_t Load(iree_host_size_t shared_count, iree_host_size_t count) {
@@ -1317,8 +1333,11 @@ TEST_P(WeightsTest,
   IREE_ASSERT_OK(
       loom_serve_device_trim(device_owner_, before.retained.committed_bytes));
   const auto idle = loom_serve_device_memory_statistics(device_owner_);
-  EXPECT_EQ(idle.retained.committed_bytes, before.retained.committed_bytes);
-  EXPECT_EQ(idle.workspace.bytes_committed, 0u);
+  ASSERT_EQ(idle.retained.committed_bytes, before.retained.committed_bytes);
+  DrainMaintenance();
+  EXPECT_EQ(loom_serve_device_memory_statistics(device_owner_)
+                .workspace.bytes_committed,
+            0u);
   ASSERT_NO_FATAL_FAILURE(Run(0, 70));
   ASSERT_NO_FATAL_FAILURE(Run(1, 70));
 
@@ -1342,6 +1361,7 @@ TEST_P(WeightsTest,
   workspace_ = nullptr;
   IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
   IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
+  DrainMaintenance();
   const auto cold = loom_serve_device_memory_statistics(device_owner_);
   EXPECT_EQ(cold.retained.committed_bytes, 0u);
   EXPECT_EQ(cold.workspace.bytes_committed, 0u);

@@ -406,13 +406,22 @@ void loom_serve_workspace_scope_retire(loom_serve_workspace_scope_t* scope) {
   iree_slim_mutex_unlock(&workspace->mutex);
 }
 
-void loom_serve_workspace_trim(loom_serve_workspace_t* workspace) {
+iree_device_size_t loom_serve_workspace_trim(
+    loom_serve_workspace_t* workspace) {
   iree_slim_mutex_lock(&workspace->mutex);
   loom_serve_workspace_collect(workspace, WORKSPACE_COLLECTION_COMPLETE);
+  iree_device_size_t retained_bytes = 0;
   for (workspace_generation_t* generation = workspace->current; generation;
        generation = generation->next) {
     iree_hal_pool_trim(generation->pool, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
     iree_hal_pool_trim(generation->cache, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
+    // The cache may still count a slab already detached by concurrent child
+    // maintenance. Its queued sweep will discard that return; only backing
+    // retained by the child contributes to further reclamation decisions.
+    iree_hal_pool_stats_t statistics;
+    iree_hal_pool_query_stats(generation->pool, &statistics);
+    retained_bytes += statistics.bytes_committed;
   }
   iree_slim_mutex_unlock(&workspace->mutex);
+  return retained_bytes;
 }

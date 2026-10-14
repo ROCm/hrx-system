@@ -521,6 +521,7 @@ loom_cc_test(
     iree::base
     iree::base::tooling::flags
     iree::hal
+    iree::hal::memory::maintenance
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main
