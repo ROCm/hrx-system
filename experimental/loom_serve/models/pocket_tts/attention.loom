@@ -4,6 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.rotary_capacity : %value: index where [range(%value, 16, 1048576)]
+
 // Cache slots wrap independently of absolute rotary positions. Each launch
 // writes its complete Q/K/V block before the attention launches consume it.
 // Capacity is past + block width, preserving the causal window throughout
@@ -28,8 +32,9 @@ template.def<@pocket.rotary_cache.body> device @rotary_cache_body(%elements: ind
     %keys_view = buffer.view %keys_storage[%origin] : buffer -> view<[%capacity]x[%channels]xf32>
     %values_view = buffer.view %values_storage[%origin] : buffer -> view<[%capacity]x[%channels]xf32>
     %position_view = buffer.view %position_storage[%origin] : buffer -> view<1xi32>
-    %cosine_view = buffer.view %cosine_storage[%origin] : buffer -> view<2048x32xf32>
-    %sine_view = buffer.view %sine_storage[%origin] : buffer -> view<2048x32xf32>
+    %rotary_capacity = config.get @pocket.rotary_capacity : index
+    %cosine_view = buffer.view %cosine_storage[%origin] : buffer -> view<[%rotary_capacity]x32xf32>
+    %sine_view = buffer.view %sine_storage[%origin] : buffer -> view<[%rotary_capacity]x32xf32>
     %row = index.div %element, %times : index
     %column = index.rem %element, %times : index
     %position32 = view.load %position_view[0] : view<1xi32> -> i32
@@ -52,9 +57,9 @@ template.def<@pocket.rotary_cache.body> device @rotary_cache_body(%elements: ind
     %within_head = index.rem %row, %head_width : index
     %frequency_index = index.div %within_head, %c2 : index
     %absolute = index.add %position_value, %column : index
-    %table_position = index.assume %absolute [range(%absolute, 0, 2047)] : index
-    %cosine = view.load %cosine_view[%table_position, %frequency_index] : view<2048x32xf32> -> f32
-    %sine = view.load %sine_view[%table_position, %frequency_index] : view<2048x32xf32> -> f32
+    %table_position = index.assume %absolute [ge(%absolute, 0), lt(%absolute, %rotary_capacity)] : index
+    %cosine = view.load %cosine_view[%table_position, %frequency_index] : view<[%rotary_capacity]x32xf32> -> f32
+    %sine = view.load %sine_view[%table_position, %frequency_index] : view<[%rotary_capacity]x32xf32> -> f32
     %qr_cos = scalar.mulf %qr, %cosine : f32
     %qi_sin = scalar.mulf %qi, %sine : f32
     %qr_sin = scalar.mulf %qr, %sine : f32
@@ -81,7 +86,7 @@ template.def<@pocket.rotary_cache.body> device @rotary_cache_body(%elements: ind
   template.return
 }
 
-kernel.def target(@pocket) @pocket.rotary_cache_1024x1_c256_p255() {
+kernel.def target(@pocket) @pocket.rotary_cache_flow() {
   %elements = index.constant 1024 : index
   %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
@@ -93,8 +98,10 @@ kernel.def target(@pocket) @pocket.rotary_cache_1024x1_c256_p255() {
   %elements = index.constant 1024 : index
   %channels = index.constant 1024 : index
   %times = index.constant 1 : index
-  %capacity = index.constant 256 : index
-  %past = index.constant 255 : index
+  %capacity = config.get @pocket.context_capacity : index
+  %past_capacity = config.get @pocket.context_capacity : index
+  %past_one = index.constant 1 : index
+  %past = index.sub %past_capacity, %past_one : index
   %packed_channels = index.constant 3072 : index
   %value_origin = index.constant 2048 : index
   template.apply<@pocket.rotary_cache.body>(%elements, %channels, %times, %capacity, %past, %packed_channels, %value_origin, %x_storage, %q_storage, %keys_storage, %values_storage, %position_storage, %cosine_storage, %sine_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
@@ -176,8 +183,10 @@ template.def<@pocket.attention_scores.body> device @attention_scores_body(%eleme
   template.return
 }
 
-kernel.def target(@pocket) @pocket.attention_scores_1024x1_c256_p255() {
-  %elements = index.constant 4096 : index
+kernel.def target(@pocket) @pocket.attention_scores_flow() {
+  %score_capacity = config.get @pocket.context_capacity : index
+  %heads = index.constant 16 : index
+  %elements = index.mul %score_capacity, %heads : index
   %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
   %tail = index.sub %threads, %one : index
@@ -185,11 +194,15 @@ kernel.def target(@pocket) @pocket.attention_scores_1024x1_c256_p255() {
   %groups = index.div %rounded, %threads : index
   kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer) {
-  %elements = index.constant 4096 : index
+  %score_capacity = config.get @pocket.context_capacity : index
+  %heads = index.constant 16 : index
+  %elements = index.mul %score_capacity, %heads : index
   %channels = index.constant 1024 : index
   %times = index.constant 1 : index
-  %capacity = index.constant 256 : index
-  %past = index.constant 255 : index
+  %capacity = config.get @pocket.context_capacity : index
+  %past_capacity = config.get @pocket.context_capacity : index
+  %past_one = index.constant 1 : index
+  %past = index.sub %past_capacity, %past_one : index
   %score_rows = index.constant 16 : index
   template.apply<@pocket.attention_scores.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %q_storage, %keys_storage, %position_storage, %scores_storage) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return
@@ -255,7 +268,7 @@ template.def<@pocket.attention_values.body> device @attention_values_body(%eleme
   template.return
 }
 
-kernel.def target(@pocket) @pocket.attention_values_1024x1_c256_p255() {
+kernel.def target(@pocket) @pocket.attention_values_flow() {
   %elements = index.constant 1024 : index
   %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
@@ -267,8 +280,10 @@ kernel.def target(@pocket) @pocket.attention_values_1024x1_c256_p255() {
   %elements = index.constant 1024 : index
   %channels = index.constant 1024 : index
   %times = index.constant 1 : index
-  %capacity = index.constant 256 : index
-  %past = index.constant 255 : index
+  %capacity = config.get @pocket.context_capacity : index
+  %past_capacity = config.get @pocket.context_capacity : index
+  %past_one = index.constant 1 : index
+  %past = index.sub %past_capacity, %past_one : index
   %score_rows = index.constant 16 : index
   template.apply<@pocket.attention_values.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %values_storage, %probabilities_storage, %position_storage, %y_storage) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return

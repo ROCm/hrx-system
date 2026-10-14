@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
 // One workitem owns a complete time column. F64 reductions produce F32
 // moments and outputs. Affine/plain paths center and use population variance;
 // variance scaling uses sample variance while preserving the input mean.
@@ -157,7 +159,7 @@ template.def<@pocket.softmax.body> device @softmax_body(%elements: index, %rows:
   template.return
 }
 
-kernel.def target(@pocket) @pocket.softmax_16x256() {
+kernel.def target(@pocket) @pocket.softmax_flow() {
   %elements = index.constant 16 : index
   %threads = config.get @pocket.threads : index
   %one = index.constant 1 : index
@@ -168,7 +170,7 @@ kernel.def target(@pocket) @pocket.softmax_16x256() {
 } launch(%scores_storage: buffer, %probabilities_storage: buffer) {
   %elements = index.constant 16 : index
   %rows = index.constant 16 : index
-  %capacity = index.constant 256 : index
+  %capacity = config.get @pocket.context_capacity : index
   template.apply<@pocket.softmax.body>(%elements, %rows, %capacity, %scores_storage, %probabilities_storage) : (index, index, index, buffer, buffer)
   kernel.return
 }
