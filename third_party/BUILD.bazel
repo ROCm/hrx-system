@@ -176,6 +176,30 @@ alias(
     visibility = [":libhrx_users"],
 )
 
+alias(
+    name = "giflib",
+    actual = "@giflib//:giflib",
+    visibility = [":loom_users"],
+)
+
+alias(
+    name = "libjpeg_turbo",
+    actual = "@libjpeg_turbo//:jpeg",
+    visibility = [":loom_users"],
+)
+
+alias(
+    name = "libpng",
+    actual = "@libpng//:png",
+    visibility = [":loom_users"],
+)
+
+alias(
+    name = "libwebp",
+    actual = "@libwebp//:libwebp",
+    visibility = [":loom_users"],
+)
+
 filegroup(
     name = "empty_aqlprofile_sdk_headers",
 )

@@ -1,0 +1,58 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//loom/src/loom/serve:implementation"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "digest",
+    srcs = ["digest.c"],
+    hdrs = ["digest.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "digest_test",
+    srcs = ["digest_test.cc"],
+    deps = [
+        ":digest",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "image",
+    srcs = ["image.c"],
+    hdrs = ["image.h"],
+    deps = [
+        ":digest",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/base/internal:json",
+        "//third_party:giflib",
+        "//third_party:libjpeg_turbo",
+        "//third_party:libpng",
+        "//third_party:libwebp",
+    ],
+)
+
+loom_cc_test(
+    name = "image_test",
+    srcs = ["image_test.cc"],
+    deps = [
+        ":image",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
