@@ -401,7 +401,9 @@ static void CheckMemoryExtraction(const char* temp_directory,
                                   const char* mode) {
   ASSERT_TRUE(SetEnvironmentVariableA("TMP", temp_directory));
   const auto* file = dynamic_library_test_library_create();
-  if (!strcmp(mode, "native-posix-close")) {
+  const bool close_while_mapped = !strcmp(mode, "native-posix-live-close") ||
+                                  !strcmp(mode, "native-posix-unlink");
+  if (!strcmp(mode, "native-posix-close") || close_while_mapped) {
     auto path = std::filesystem::path(temp_directory) / "native_image.dll";
     HANDLE writer =
         CreateFileA(path.string().c_str(), GENERIC_READ | GENERIC_WRITE,
@@ -431,19 +433,26 @@ static void CheckMemoryExtraction(const char* temp_directory,
     ASSERT_NE(nullptr, function);
     EXPECT_EQ(246, function(123));
     FILE_DISPOSITION_INFO_EX disposition = {};
-    disposition.Flags = FILE_DISPOSITION_FLAG_DELETE |
-                        FILE_DISPOSITION_FLAG_POSIX_SEMANTICS |
-                        FILE_DISPOSITION_FLAG_ON_CLOSE;
+    disposition.Flags =
+        FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS;
+    if (strcmp(mode, "native-posix-unlink")) {
+      disposition.Flags |= FILE_DISPOSITION_FLAG_ON_CLOSE;
+    }
     BOOL marked = SetFileInformationByHandle(image, FileDispositionInfoEx,
                                              &disposition, sizeof(disposition));
     DWORD mark_error = marked ? ERROR_SUCCESS : GetLastError();
-    std::cout << "native retained image: disposition_error=" << mark_error
-              << "\n";
+    std::cout << "native retained image: mode=" << mode
+              << " disposition_error=" << mark_error << "\n";
     EXPECT_TRUE(marked);
-    EXPECT_TRUE(std::filesystem::exists(path));
+    if (close_while_mapped) {
+      EXPECT_TRUE(CloseHandle(image_owner.release())) << GetLastError();
+      EXPECT_TRUE(std::filesystem::is_empty(temp_directory));
+    } else {
+      EXPECT_TRUE(std::filesystem::exists(path));
+      // Exercise OS process-exit cleanup with the image still mapped.
+      image_owner.release();
+    }
     EXPECT_EQ(246, function(123));
-    // Exercise OS process-exit cleanup with the image still mapped.
-    image_owner.release();
   } else if (!strcmp(mode, "release") || !strcmp(mode, "nodelete") ||
              !strcmp(mode, "nodelete-os-temp")) {
     iree_dynamic_library_flags_t flags =
@@ -652,12 +661,12 @@ TEST_P(DynamicLibraryMemoryTest, OwnsExtractedFile) {
 }
 
 #if defined(IREE_PLATFORM_WINDOWS)
-INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
-                         ::testing::Values("create-failure", "load-failure",
-                                           "allocation-failure", "empty-image",
-                                           "release", "nodelete",
-                                           "nodelete-os-temp",
-                                           "native-posix-close"));
+INSTANTIATE_TEST_SUITE_P(
+    Policies, DynamicLibraryMemoryTest,
+    ::testing::Values("create-failure", "load-failure", "allocation-failure",
+                      "empty-image", "release", "nodelete", "nodelete-os-temp",
+                      "native-posix-close", "native-posix-live-close",
+                      "native-posix-unlink"));
 #else
 INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
                          ::testing::Values("discard", "empty", "preserve",
