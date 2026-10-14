@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/src/loom/tooling/target/spirv:execution_profiles.bzl", "SPIRV_VULKAN_HARDWARE_PROFILE")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
@@ -14,6 +15,20 @@ filegroup(
     name = "sources",
     srcs = glob(["*.loom"]),
     visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "layer_gather_test",
+    srcs = [
+        "layer_mix.loom",
+        "tests/layer_gather.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        SPIRV_VULKAN_HARDWARE_PROFILE,
+    ],
 )
 
 loom_test(
