@@ -6,6 +6,7 @@
 
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -75,6 +76,16 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
+)
+
+loom_test(
+    name = "vae_workspace_test",
+    srcs = [
+        "prepare.loom",
+        "tests/vae_workspace.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
 )
 
 loom_test(

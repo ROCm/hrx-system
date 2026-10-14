@@ -281,6 +281,30 @@ endif()
 
 loom_test_module(
   NAME
+    vae_workspace_test_module
+  SRCS
+    "prepare.loom"
+    "tests/vae_workspace.loom"
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    vae_workspace_test_execute_vm_reference_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::vae_workspace_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
+
+loom_test_module(
+  NAME
     vae_tiles_test_module
   SRCS
     "tests/vae_tiles.loom"
