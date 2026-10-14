@@ -345,6 +345,36 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    projected_media
+  HDRS
+    "projected_media.h"
+  SRCS
+    "projected_media.c"
+  DEPS
+    ::input
+    iree::base
+    loom::serve::service::finite::model
+  PUBLIC
+)
+endif()
+
+loom_cc_test(
+  NAME
+    projected_media_test
+  SRCS
+    "projected_media_test.cc"
+  DEPS
+    ::projected_media
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    loom::serve::service::finite::model
+)
+
 loom_cc_test(
   NAME
     media_epoch_test
