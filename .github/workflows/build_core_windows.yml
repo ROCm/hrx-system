@@ -8,7 +8,7 @@ name: Build CMake Windows Core
 
 on:
   workflow_call:
-    inputs:
+    inputs: &windows_inputs
       name:
         type: string
         default: Default
@@ -54,6 +54,8 @@ on:
       package_suffix:
         type: string
         default: ""
+  workflow_dispatch:
+    inputs: *windows_inputs
 
 permissions:
   contents: read
