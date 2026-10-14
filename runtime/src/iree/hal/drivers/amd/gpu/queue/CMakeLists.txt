@@ -11,6 +11,61 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    host_wait
+  HDRS
+    "host_wait.h"
+  SRCS
+    "host_wait.c"
+  DEPS
+    iree::async
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::hal
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    host_wait_test
+  SRCS
+    "host_wait_test.cc"
+  DEPS
+    ::host_wait
+    iree::async
+    iree::async::platform
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::hal
+    iree::hal::memory::maintenance
+    iree::hal::memory::maintenance_thread
+    iree::hal::utils::host_semaphore
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    host_wait_benchmark
+  SRCS
+    "host_wait_benchmark.cc"
+  DEPS
+    ::host_wait
+    iree::async
+    iree::async::platform
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::hal
+    iree::hal::memory::maintenance
+    iree::hal::memory::maintenance_thread
+    iree::hal::utils::host_semaphore
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_library(
+  NAME
     continuation
   HDRS
     "continuation.h"
