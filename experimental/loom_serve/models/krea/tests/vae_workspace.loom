@@ -1,0 +1,50 @@
+func.decl @krea2.vae_workspace_tile(%height: i64, %width: i64, %limit: i64) -> (i64, i64)
+
+check.case public @vae_workspace_unrestricted {
+  %extent = check.literal value(128) : i64
+  %limit = check.literal value(0) : i64
+  %height, %width = func.call @krea2.vae_workspace_tile(%extent, %extent, %limit) : (i64, i64, i64) -> (i64, i64)
+  check.expect.equal actual(%height) expected(%extent) : i64
+  check.expect.equal actual(%width) expected(%extent) : i64
+  check.return
+}
+
+check.case public @vae_workspace_untiled_bound {
+  %extent = check.literal value(128) : i64
+  %limit = check.literal value(1610612736) : i64
+  %height, %width = func.call @krea2.vae_workspace_tile(%extent, %extent, %limit) : (i64, i64, i64) -> (i64, i64)
+  check.expect.equal actual(%height) expected(%extent) : i64
+  check.expect.equal actual(%width) expected(%extent) : i64
+  check.return
+}
+
+check.case public @vae_workspace_1024_constrained {
+  %extent = check.literal value(128) : i64
+  %limit = check.literal value(1610612735) : i64
+  %tile = check.literal value(80) : i64
+  %height, %width = func.call @krea2.vae_workspace_tile(%extent, %extent, %limit) : (i64, i64, i64) -> (i64, i64)
+  check.expect.equal actual(%height) expected(%tile) : i64
+  check.expect.equal actual(%width) expected(%tile) : i64
+  check.return
+}
+
+check.case public @vae_workspace_rectangular_constrained {
+  %height = check.literal value(192) : i64
+  %width = check.literal value(128) : i64
+  %limit = check.literal value(2415919103) : i64
+  %tile_height = check.literal value(112) : i64
+  %tile_width = check.literal value(80) : i64
+  %actual_height, %actual_width = func.call @krea2.vae_workspace_tile(%height, %width, %limit) : (i64, i64, i64) -> (i64, i64)
+  check.expect.equal actual(%actual_height) expected(%tile_height) : i64
+  check.expect.equal actual(%actual_width) expected(%tile_width) : i64
+  check.return
+}
+
+check.case public @vae_workspace_small_axis_stays_whole {
+  %extent = check.literal value(32) : i64
+  %limit = check.literal value(1) : i64
+  %height, %width = func.call @krea2.vae_workspace_tile(%extent, %extent, %limit) : (i64, i64, i64) -> (i64, i64)
+  check.expect.equal actual(%height) expected(%extent) : i64
+  check.expect.equal actual(%width) expected(%extent) : i64
+  check.return
+}
