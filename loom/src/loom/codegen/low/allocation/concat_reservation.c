@@ -216,6 +216,20 @@ static iree_status_t loom_low_allocation_concat_reservation_sources_fit(
         loom_low_allocation_concat_reservation_source_assignment_for_result(
             context, result, sibling_relation, sibling_interval,
             &sibling_capacity, &sibling_assignment, &found_location));
+    const loom_low_allocation_assignment_t* assigned_sibling =
+        loom_low_allocation_assignment_map_assignment_for_value_ordinal(
+            context->assignment_map, sibling_relation->source_ordinal, NULL);
+    if (assigned_sibling != NULL) {
+      // The committed assignment is the authoritative placement. Rechecking
+      // its original lifetime would ask the monotone active-set sweep about
+      // program points it has already consumed.
+      if (!found_location ||
+          !loom_low_allocation_storage_assignment_ranges_equal(
+              context->descriptor_set, assigned_sibling, &sibling_assignment)) {
+        return iree_ok_status();
+      }
+      continue;
+    }
     const uint32_t sibling_alignment =
         loom_low_allocation_live_range_interval_alignment(
             context->descriptor_set, context->liveness,

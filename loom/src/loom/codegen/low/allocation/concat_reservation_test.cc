@@ -299,6 +299,87 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
     EXPECT_EQ(reservation.value_id, LOOM_VALUE_ID_INVALID);
   }
 
+  // The first source committed at base 2 while an active sparse value was in
+  // a storage gap. After the monotone active-set sweep advances to the second
+  // source, the committed placement remains the authoritative assembly fact;
+  // reconstructing the first source's earlier lifetime would query history
+  // that the sweep has already consumed.
+  loom_liveness_segment_t
+      sparse_segments[LOOM_LOW_ALLOCATION_LIVE_RANGE_CURSOR_MIN_SEGMENT_COUNT] =
+          {{0, 1}};
+  for (uint32_t i = 1; i < IREE_ARRAYSIZE(sparse_segments); ++i) {
+    sparse_segments[i] = {10 + 2 * i, 11 + 2 * i};
+  }
+  loom_low_allocation_assignment_t sweep_assignments[] = {
+      {
+          .value_id = value_ids[0],
+          .descriptor_reg_class_id = value_class.register_class_id,
+          .start_point = 2,
+          .end_point = 4,
+          .unit_count = 2,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 2,
+          .location_count = 2,
+          .unit_point_start = 0,
+      },
+      {
+          .value_id = value_ids[3],
+          .descriptor_reg_class_id = value_class.register_class_id,
+          .start_point = 0,
+          .end_point = 44,
+          .unit_count = 2,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 2,
+          .location_count = 2,
+          .unit_point_start = 8,
+          .liveness_segments = {0, IREE_ARRAYSIZE(sparse_segments)},
+      },
+  };
+  const uint32_t sweep_assignment_indices[] = {0, UINT32_MAX, UINT32_MAX, 1};
+  assignments.assignments = sweep_assignments;
+  assignments.assignment_count = IREE_ARRAYSIZE(sweep_assignments);
+  assignments.assignment_indices_by_value_ordinal = sweep_assignment_indices;
+  intervals[2].end_point = 5;
+  intervals[3].start_point = 0;
+  intervals[3].end_point = 44;
+  unit_values[3].acquisition_start_point = 0;
+  unit_start_points[8] = unit_start_points[9] = 0;
+  unit_end_points[8] = unit_end_points[9] = 44;
+  unit_liveness.storage_segments.entries = sparse_segments;
+  operands[0].addressable_unit_count = 16;
+  high_water[0] = 6;
+  const loom_low_placement_predicate_t same_storage_predicate = {
+      0, 1, 0, 0, 1, LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE, 0};
+  const loom_low_placement_preference_t same_storage_preference = {
+      values, &same_storage_predicate, &clause, 2, 1};
+  const loom_low_placement_preference_use_t same_storage_use = {
+      &same_storage_preference, 0, 1, {2, 3}};
+  loom_low_placement_preference_index_t same_storage_preferences = preferences;
+  same_storage_preferences.uses = &same_storage_use;
+  loom_low_allocation_preference_workspace_t same_storage_workspace = {};
+  IREE_ASSERT_OK(loom_low_allocation_preference_workspace_initialize(
+      &same_storage_preferences, &arena, &same_storage_workspace));
+  context.preferences = &same_storage_preferences;
+  context.preference_workspace = &same_storage_workspace;
+  loom_low_allocation_active_set_t swept_active_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
+      &descriptors, IREE_ARRAYSIZE(sweep_assignments),
+      /*program_point_count=*/45, /*unit_capacity=*/16, &arena,
+      &swept_active_set));
+  loom_low_allocation_active_set_insert(
+      &swept_active_set, &descriptors, sweep_assignments,
+      IREE_ARRAYSIZE(sweep_assignments), /*assignment_index=*/1);
+  loom_low_allocation_active_set_expire(&swept_active_set, sweep_assignments,
+                                        IREE_ARRAYSIZE(sweep_assignments),
+                                        /*start_point=*/3);
+  context.active_set = &swept_active_set;
+  loom_low_allocation_assignment_t swept_reservation;
+  IREE_ASSERT_OK(loom_low_allocation_concat_reservation_find(
+      &context, &intervals[1], &relations[1], &intervals[2], &result_ranges[2],
+      &reservation_sources, &swept_reservation));
+  EXPECT_EQ(swept_reservation.value_id, value_ids[2]);
+  EXPECT_EQ(swept_reservation.location_base, 2u);
+
   for (loom_value_id_t value_id : value_ids) {
     loom_module_value_ordinal_scratch_clear(module, value_id);
   }
