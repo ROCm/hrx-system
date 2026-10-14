@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/src/loom/tooling/target/spirv:execution_profiles.bzl", "SPIRV_VULKAN_HARDWARE_PROFILE")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
@@ -13,6 +14,18 @@ filegroup(
     name = "sources",
     srcs = glob(["*.loom"]),
     visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "quantize_test",
+    srcs = ["quantize_q8_1_x4.loom"],
+    benchmark_smoke = False,
+    configs = {"ggml.quantize_q8_1_x4.group_capacity": "8192"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        SPIRV_VULKAN_HARDWARE_PROFILE,
+    ],
 )
 
 loom_test(
