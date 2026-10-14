@@ -589,6 +589,7 @@ jobs:
             HRX_ROCM_ROOT = $rocmRoot
             IREE_CI_BAZEL_EXECROOT_BACKING = Join-Path $outputDir 'bazel-execroot'
             IREE_CI_BAZEL_OUTPUT_BASE = (Join-Path $env:SystemDrive 'o').Replace('\', '/')
+            IREE_CI_BAZEL_REPOSITORY_CACHE = (Join-Path $outputDir 'caches\bazel-repository').Replace('\', '/')
             IREE_CI_FAILURE_ARTIFACT_DIR = Join-Path $outputDir 'failure-evidence'
             PIP_CACHE_DIR = Join-Path $outputDir 'caches\pip'
           }
@@ -648,6 +649,8 @@ jobs:
             Write-Output "Using short Bazel execroot $execroot backed by $backing."
           }
           "startup --output_base=$env:IREE_CI_BAZEL_OUTPUT_BASE" |
+            Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          "common --repository_cache=$env:IREE_CI_BAZEL_REPOSITORY_CACHE" |
             Out-File -FilePath .bazelrc.local -Encoding ascii -Append
           if ("${{ matrix.host_toolchain }}" -eq "msvc") {
             "build --config=windows-msvc" |
