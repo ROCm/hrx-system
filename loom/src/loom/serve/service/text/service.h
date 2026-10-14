@@ -101,6 +101,14 @@ iree_status_t loom_serve_text_service_allocate(
 // protected. Parked inputs retain compact host tokens, not device pins. Idle
 // history eviction invalidates their suffix and requires fresh preparation;
 // unchanged capacity retries never tokenize again.
+// Image-bearing suffixes are projected only after exact retained/automatic
+// prefix selection fixes the admitted candidate. A prefix covering prior image
+// spans therefore starts no image work. Projected rows belong to that request,
+// feed ordinary mixed text epochs, and retire as their input frontier
+// completes. Image decode and optional-component failures reject only their
+// request; they do not fail the text model timeline or disturb ordinary text
+// requests.
+//
 // POST/DELETE /v1/checkpoints/NAME pin an idle completed X-Loom-Session or
 // release that pin. Deletion refuses while queued requests borrow the endpoint.
 // A detached session shares its immutable endpoint with a new explicit pin;

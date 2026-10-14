@@ -127,15 +127,27 @@ class TextComponentServiceTest : public SourceTextServiceTest {
   }
 
   void CompleteTextRequest() {
-    const int client = Send(Request(Message("user", "abxa"), 2));
+    const std::string response =
+        CompleteRequest(Request(Message("user", "abxa"), 2));
+    EXPECT_EQ(Content(response), Oracle::Complete("abxa", 2));
+  }
+
+  std::string CompleteRequest(const std::string& body) {
+    const int client = Send(body);
     loom_serve_http_connection_t* connection = nullptr;
-    ASSERT_NO_FATAL_FAILURE(Accept(client, interface_, &connection));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    Accept(client, interface_, &connection);
+    if (HasFatalFailure()) {
+      return {};
+    }
+    AdvanceUntil(interface_, [&] {
       return !interface_.is_pending(interface_.self) &&
              !interface_.is_active(interface_.self) &&
              !interface_.snapshot(interface_.self).queued_requests;
-    }));
-    EXPECT_EQ(Content(Read(client)), Oracle::Complete("abxa", 2));
+    });
+    if (HasFatalFailure()) {
+      return {};
+    }
+    return Read(client);
   }
 
   // Owned optional computation, outliving the service that borrows it.
@@ -164,7 +176,15 @@ TEST_F(TextComponentServiceTest, ImageFailureDoesNotFailConcurrentText) {
   loom_serve_finite_model_t* model = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
                         loom_serve_finite_component_prepare(image_, &model));
+
+  const std::string message = ImageMessage("a", "image/png", kPng, "low", "b");
+  const std::string response = CompleteRequest(Request(message, 2));
+  EXPECT_EQ(response.find("HTTP/1.1 503"), 0u) << response;
+  EXPECT_NE(response.find("missing-vision"), std::string::npos) << response;
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 1u);
   EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
+  EXPECT_EQ(loom_serve_finite_component_phase(image_),
+            LOOM_SERVE_FINITE_COMPONENT_FAILED);
   ASSERT_NO_FATAL_FAILURE(CompleteTextRequest());
 }
 

@@ -183,11 +183,13 @@ TEST_F(SourceTextServiceTest,
   EXPECT_NE(actual, Oracle::Complete(prompt, 16, 2));
 }
 
-TEST_F(SourceTextServiceTest, OrderedImageContentReachesRetainedExecution) {
+TEST_F(SourceTextServiceTest, ImageInputRequiresAConfiguredComponent) {
   Start();
   const std::string message = ImageMessage("a", "image/png", kPng, "low", "b");
-  EXPECT_EQ(Content(Read(Send(Request(message, 2)))),
-            Oracle::Complete("axb", 2));
+  const std::string response = Read(Send(Request(message, 2)));
+  EXPECT_EQ(response.find("HTTP/1.1 400"), 0u) << response;
+  EXPECT_NE(response.find("model has no image component"), std::string::npos)
+      << response;
 }
 
 TEST_F(SourceTextServiceTest,

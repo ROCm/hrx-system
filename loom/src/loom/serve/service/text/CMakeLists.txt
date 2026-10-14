@@ -599,6 +599,7 @@ loom_cc_library(
   DEPS
     ::chat
     ::model
+    ::projected_media
     iree::base
     iree::tokenizer
     loom::serve::service::inspection
@@ -800,9 +801,11 @@ loom_cc_library(
     ::epoch
     ::heartbeat
     ::input
+    ::media_projector
     ::model
     ::packing
     ::prefix_cache
+    ::projected_media
     ::readiness
     ::reconfiguration
     ::response

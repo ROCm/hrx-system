@@ -17,43 +17,39 @@
 
 namespace {
 
+using loom_serve::testing::text::ImageComponentTextServiceTest;
+using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::SourceTextServiceTest;
 
-class MediaProjectorTest : public SourceTextServiceTest {
+static std::string Generate(Oracle& oracle, iree_host_size_t limit) {
+  std::string result;
+  for (iree_host_size_t i = 0; i < limit; ++i) {
+    const int32_t token = oracle.Predict();
+    if (token == 3) {
+      break;
+    }
+    result.push_back("abx"[token]);
+    oracle.Consume(token);
+  }
+  return result;
+}
+
+class MediaProjectorTest : public ImageComponentTextServiceTest {
  protected:
   void SetUp() override {
-    ASSERT_NO_FATAL_FAILURE(SourceTextServiceTest::SetUp());
-    const char* source_path = std::getenv("LOOM_SERVE_TEST_PROJECTOR_SOURCE");
-    ASSERT_NE(source_path, nullptr);
-    projector_directory_ =
-        std::filesystem::path(source_path).parent_path().string();
-    const loom_serve_finite_model_options_t options = {
-        .sources =
-            {
-                .base_directory =
-                    iree_make_cstring_view(projector_directory_.c_str()),
-                .prepare = IREE_SV("prepare.loom"),
-                .control = IREE_SV("control.loom"),
-                .count = 1,
-                .values = &projector_provider_,
-            },
-        .asset_directory = IREE_SV("."),
-        .options = IREE_SV("{}"),
-    };
+    ASSERT_NO_FATAL_FAILURE(ImageComponentTextServiceTest::SetUp());
+    iree_async_proactor_t* proactor = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_pool_get(
+        loom_serve_host_proactor_pool(host_), 0, &proactor));
+    IREE_ASSERT_OK(loom_serve_text_media_projector_allocate(
+        loom_serve_host_executor(host_), proactor, image_component_,
+        host_allocator_, &projector_));
     const loom_serve_wake_callback_t observer = {
         [](void* user_data) {
           iree_notification_post(static_cast<iree_notification_t*>(user_data),
                                  IREE_ALL_WAITERS);
         },
         loom_serve_http_server_notification(server_)};
-    IREE_ASSERT_OK(loom_serve_finite_component_allocate(
-        device_, &options, observer, host_allocator_, &component_));
-    iree_async_proactor_t* proactor = nullptr;
-    IREE_ASSERT_OK(iree_async_proactor_pool_get(
-        loom_serve_host_proactor_pool(host_), 0, &proactor));
-    IREE_ASSERT_OK(loom_serve_text_media_projector_allocate(
-        loom_serve_host_executor(host_), proactor, component_, host_allocator_,
-        &projector_));
     loom_serve_text_media_projector_set_observer(projector_, observer);
   }
 
@@ -67,11 +63,7 @@ class MediaProjectorTest : public SourceTextServiceTest {
       loom_serve_text_media_projector_set_observer(projector_, {});
       loom_serve_text_media_projector_free(projector_);
     }
-    if (component_) {
-      RetireComponent();
-      loom_serve_finite_component_free(component_);
-    }
-    SourceTextServiceTest::TearDown();
+    ImageComponentTextServiceTest::TearDown();
   }
 
   void PrepareChat() {
@@ -92,7 +84,8 @@ class MediaProjectorTest : public SourceTextServiceTest {
     auto* notification = loom_serve_http_server_notification(server_);
     for (;;) {
       const uint32_t ticket = iree_notification_prepare_wait(notification);
-      bool progress = loom_serve_finite_component_advance(component_, false);
+      bool progress =
+          loom_serve_finite_component_advance(image_component_, false);
       progress |= loom_serve_text_media_projector_advance(
           projector_, /*shared_activity=*/false);
       if (progress || loom_serve_text_media_projector_is_complete(projector_)) {
@@ -108,21 +101,6 @@ class MediaProjectorTest : public SourceTextServiceTest {
   void AdvanceProjector() {
     while (!loom_serve_text_media_projector_is_complete(projector_)) {
       WaitForProgress();
-    }
-  }
-
-  void RetireComponent() {
-    auto* notification = loom_serve_http_server_notification(server_);
-    bool complete = false;
-    while (!complete) {
-      const uint32_t ticket = iree_notification_prepare_wait(notification);
-      IREE_ASSERT_OK(loom_serve_finite_component_retire(component_, &complete));
-      if (complete) {
-        iree_notification_cancel_wait(notification);
-      } else {
-        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
-                                      IREE_TIME_INFINITE_FUTURE);
-      }
     }
   }
 
@@ -167,13 +145,7 @@ class MediaProjectorTest : public SourceTextServiceTest {
            kSecondPng + R"(","detail":"low"}},{"type":"text","text":"a"}]})";
   }
 
-  // Source package path borrowed by the component through retirement.
-  std::string projector_directory_;
-  // Direct numerical provider borrowed by the component through retirement.
-  iree_string_view_t projector_provider_ = IREE_SV("project.loom");
-  // Owned optional finite component, independent of the text model.
-  loom_serve_finite_component_t* component_ = nullptr;
-  // Owned serial request projector borrowing component_ and chat_.
+  // Owned serial request projector borrowing image_component_ and chat_.
   loom_serve_text_media_projector_t* projector_ = nullptr;
   // Request body backing image URL views through chat deinitialization.
   std::string body_;
@@ -194,7 +166,7 @@ TEST_F(MediaProjectorTest,
   IREE_ASSERT_OK(loom_serve_text_media_projector_begin(projector_, &chat_,
                                                        &input_, input_.count));
   EXPECT_FALSE(loom_serve_text_media_projector_is_active(projector_));
-  EXPECT_EQ(loom_serve_finite_component_phase(component_),
+  EXPECT_EQ(loom_serve_finite_component_phase(image_component_),
             LOOM_SERVE_FINITE_COMPONENT_DECLARED);
 
   IREE_ASSERT_OK(
@@ -204,7 +176,7 @@ TEST_F(MediaProjectorTest,
       projector_, /*shared_activity=*/false));
   ASSERT_TRUE(loom_serve_text_media_projector_is_complete(projector_));
   ASSERT_NO_FATAL_FAILURE(Take(/*expected_cancelled=*/true));
-  EXPECT_EQ(loom_serve_finite_component_phase(component_),
+  EXPECT_EQ(loom_serve_finite_component_phase(image_component_),
             LOOM_SERVE_FINITE_COMPONENT_DECLARED);
 
   const auto& first = input_.media_spans[0];
@@ -227,7 +199,7 @@ TEST_F(MediaProjectorTest,
   loom_serve_text_media_projector_cancel(projector_);
   ASSERT_NO_FATAL_FAILURE(AdvanceProjector());
   ASSERT_NO_FATAL_FAILURE(Take(/*expected_cancelled=*/true));
-  EXPECT_EQ(loom_serve_finite_component_phase(component_),
+  EXPECT_EQ(loom_serve_finite_component_phase(image_component_),
             LOOM_SERVE_FINITE_COMPONENT_READY);
 
   IREE_ASSERT_OK(
@@ -236,6 +208,213 @@ TEST_F(MediaProjectorTest,
   ASSERT_NO_FATAL_FAILURE(Take(/*expected_cancelled=*/false));
   ASSERT_NO_FATAL_FAILURE(
       ExpectRows({0, 1}, {{{255, 0, 0, 0}}, {{3, 127, 231, 0}}}));
+}
+
+class ImageTextServiceTest : public ImageComponentTextServiceTest {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(ImageComponentTextServiceTest::SetUp());
+    auto options = ServiceOptions();
+    options.prefix_cache_capacity = 2;
+    options.chunk_size = 4;
+    IREE_ASSERT_OK(loom_serve_text_service_allocate(
+        model_, &options, nullptr, host_allocator_, &service_));
+    interface_ = loom_serve_text_service_interface(service_);
+    Observe(interface_);
+  }
+
+  void TearDown() override {
+    if (service_) {
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+          interface_,
+          [&] {
+            return !interface_.is_pending(interface_.self) &&
+                   !interface_.is_active(interface_.self) &&
+                   !interface_.snapshot(interface_.self).queued_requests;
+          },
+          LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+      interface_.set_observer(interface_.self, {});
+      loom_serve_text_service_free(service_, IREE_STATUS_OK);
+      service_ = nullptr;
+    }
+    ImageComponentTextServiceTest::TearDown();
+  }
+
+  std::string CompleteRequest(const std::string& body,
+                              const std::string& headers = "") {
+    const int client = Send(body, headers);
+    loom_serve_http_connection_t* connection = nullptr;
+    Accept(client, interface_, &connection);
+    if (HasFatalFailure()) {
+      return {};
+    }
+    AdvanceUntil(interface_, [&] {
+      return !interface_.is_pending(interface_.self) &&
+             !interface_.is_active(interface_.self) &&
+             !interface_.snapshot(interface_.self).queued_requests;
+    });
+    if (HasFatalFailure()) {
+      return {};
+    }
+    return Read(client);
+  }
+
+  // Owned integrated text service borrowing image_component_.
+  loom_serve_text_service_t* service_ = nullptr;
+  // Borrowed callbacks invoked by this serialized test owner.
+  loom_serve_http_service_t interface_ = {};
+};
+
+TEST_F(ImageTextServiceTest,
+       ProjectsPixelsOnceAndKeepsRetainedHistoryIndependent) {
+  ASSERT_EQ(interface_.capabilities.input_modalities.count, 2u);
+  EXPECT_TRUE(iree_string_view_equal(
+      interface_.capabilities.input_modalities.values[0], IREE_SV("text")));
+  EXPECT_TRUE(iree_string_view_equal(
+      interface_.capabilities.input_modalities.values[1], IREE_SV("image")));
+  EXPECT_EQ(loom_serve_finite_component_phase(image_component_),
+            LOOM_SERVE_FINITE_COMPONENT_DECLARED);
+
+  const std::string image = ImageMessage("a", "image/png", kPng, "low", "b");
+  Oracle oracle;
+  oracle.Consume(Oracle::Id('a'));
+  oracle.Consume(255);
+  oracle.Consume(Oracle::Id('b'));
+  const std::string first_expected = Generate(oracle, 4);
+  const std::string first = Content(CompleteRequest(
+      Request(image, 4), "X-Loom-Session: projected-history\r\n"));
+  EXPECT_EQ(first, first_expected);
+  EXPECT_NE(first, Oracle::Complete("axb", 4));
+  EXPECT_EQ(loom_serve_finite_component_phase(image_component_),
+            LOOM_SERVE_FINITE_COMPONENT_READY);
+
+  loom_serve_finite_model_t* image_model = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_finite_component_prepare(image_component_, &image_model));
+  ASSERT_NE(image_model, nullptr);
+  const bool elastic = loom_serve_residency_snapshot(
+                           loom_serve_finite_model_residency(image_model))
+                           .elastic;
+  const uint64_t compilation_commands =
+      loom_serve_finite_component_report(image_component_)->commands;
+  ASSERT_NO_FATAL_FAILURE(TrimImageComponent());
+  const auto trimmed_phase =
+      loom_serve_finite_component_phase(image_component_);
+  EXPECT_EQ(trimmed_phase, elastic ? LOOM_SERVE_FINITE_COMPONENT_READY
+                                   : LOOM_SERVE_FINITE_COMPONENT_DECLARED);
+  if (elastic) {
+    EXPECT_FALSE(loom_serve_residency_snapshot(
+                     loom_serve_finite_model_residency(image_model))
+                     .active);
+  }
+
+  oracle.Consume("#b");
+  const std::string second_expected = Generate(oracle, 3);
+  const std::string continuation =
+      image + "," + Message("assistant", first) + "," + Message("user", "b");
+  const std::string second_response = CompleteRequest(
+      Request(continuation, 3), "X-Loom-Session: projected-history\r\n");
+  EXPECT_EQ(Content(second_response), second_expected);
+  EXPECT_NE(second_response.find(R"("cached_tokens":6})"), std::string::npos)
+      << second_response;
+  EXPECT_EQ(loom_serve_finite_component_phase(image_component_), trimmed_phase);
+  EXPECT_EQ(loom_serve_finite_component_report(image_component_)->commands,
+            compilation_commands);
+  if (elastic) {
+    EXPECT_FALSE(loom_serve_residency_snapshot(
+                     loom_serve_finite_model_residency(image_model))
+                     .active);
+  }
+
+  EXPECT_EQ(Content(CompleteRequest(Request(Message("user", "abxa"), 2))),
+            Oracle::Complete("abxa", 2));
+  EXPECT_EQ(loom_serve_finite_component_phase(image_component_), trimmed_phase);
+}
+
+TEST_F(ImageTextServiceTest, InputFailureAndDisconnectAreRequestLocal) {
+  const std::string invalid_image =
+      ImageMessage("a", "image/png", "bm90LWltYWdl", "low", "b");
+  const std::string response = CompleteRequest(Request(invalid_image, 2));
+  EXPECT_EQ(response.find("HTTP/1.1 400"), 0u) << response;
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
+
+  const std::string image = ImageMessage("a", "image/png", kPng, "low", "b");
+  const int client = Send(Request(image, 2));
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client, interface_, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return loom_serve_finite_component_phase(image_component_) !=
+           LOOM_SERVE_FINITE_COMPONENT_DECLARED;
+  }));
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+            0);
+  ASSERT_EQ(close(client), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* self) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(self));
+      },
+      connection, iree_infinite_timeout());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return !interface_.is_pending(interface_.self) &&
+           !interface_.is_active(interface_.self) &&
+           !interface_.snapshot(interface_.self).queued_requests;
+  }));
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
+  EXPECT_FALSE(loom_serve_finite_component_is_pending(image_component_));
+  EXPECT_EQ(Content(CompleteRequest(Request(Message("user", "abxa"), 2))),
+            Oracle::Complete("abxa", 2));
+}
+
+class ManagedImageTextServiceTest : public SourceTextServiceTest {};
+
+TEST_F(ManagedImageTextServiceTest, LazilyProjectsAnImageThroughTheRouter) {
+  StartManaged();
+  const char* source_path = std::getenv("LOOM_SERVE_TEST_PROJECTOR_SOURCE");
+  ASSERT_NE(source_path, nullptr);
+  const std::filesystem::path projector_directory =
+      std::filesystem::absolute(
+          source_path)
+          .parent_path();
+  const std::string image_fields =
+      ",\"image\":{\"prepare\":\"" +
+      (projector_directory / "prepare.loom").string() + "\",\"control\":\"" +
+      (projector_directory / "control.loom").string() + "\",\"assets\":\"" +
+      projector_directory.string() + "\"}";
+  std::string declaration =
+      Declaration("fixture-text", directory_, "open", image_fields);
+  const std::string source_list = "\"sources\":[\"advance.loom\"]";
+  const size_t source_position = declaration.find(source_list);
+  ASSERT_NE(source_position, std::string::npos);
+  declaration.replace(source_position, source_list.size(),
+                      "\"sources\":[\"advance.loom\",\"" +
+                          (projector_directory / "project.loom").string() +
+                          "\"]");
+  const std::string accepted =
+      Read(Send(declaration, "", "/v1/models/register"));
+  ASSERT_EQ(accepted.find("HTTP/1.1 202"), 0u) << accepted;
+  const std::string ready =
+      WaitModel("fixture-text", R"("registration":"ready")");
+  EXPECT_NE(ready.find(R"("input_modalities":["text","image"])"),
+            std::string::npos)
+      << ready;
+
+  Oracle oracle;
+  oracle.Consume(Oracle::Id('a'));
+  oracle.Consume(255);
+  oracle.Consume(Oracle::Id('b'));
+  const std::string message = ImageMessage("a", "image/png", kPng, "low", "b");
+  EXPECT_EQ(Content(Read(Send(Request(message, 3)))), Generate(oracle, 3));
+
+  const std::string removed =
+      Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/unregister"));
+  ASSERT_EQ(removed.find("HTTP/1.1 202"), 0u) << removed;
+  WaitModel("fixture-text", {});
 }
 
 }  // namespace

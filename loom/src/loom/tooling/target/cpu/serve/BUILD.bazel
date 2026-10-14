@@ -351,8 +351,9 @@ loom_cc_test(
 
 loom_cc_test(
     name = "source_text_prefix_test",
-    data = TEXT_SOURCES,
+    data = TEXT_SOURCES + PROJECTOR_SOURCES,
     env = {
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
     },
     target_compatible_with = loom_config_compatible_with([

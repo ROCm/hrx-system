@@ -11,6 +11,7 @@
 #include "loom/serve/service/inspection.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/model.h"
+#include "loom/serve/service/text/projected_media.h"
 #include "loom/serve/telemetry/record.h"
 #include "loom/serve/transport/http/server.h"
 
@@ -78,6 +79,8 @@ typedef struct loom_serve_text_session_t {
     loom_serve_http_connection_t* connection;
     // Validated chat borrowing the claimed request body.
     loom_serve_text_chat_t chat;
+    // Owned projected rows whose metadata borrows chat.
+    loom_serve_text_projected_media_t media;
     // Next completed-stage action or terminal output drain.
     loom_serve_text_request_phase_t phase;
     // Host input tokens prepared for this turn.
