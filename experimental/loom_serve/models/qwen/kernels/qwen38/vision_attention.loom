@@ -1,0 +1,712 @@
+amdgpu.target<gfx11-generic> @qwen38_vision_gfx11 {subgroup_size = 32}
+
+config.decl @qwen38.vision.image_height : %value: index where [range(%value, 256, 256)]
+
+config.decl @qwen38.vision.image_width : %value: index where [range(%value, 256, 256)]
+
+// Loads one transposed value tile without requiring padded global storage.
+// Every full tile remains one vector load; only the final partial tile takes
+// the scalar path.
+func.def inline @qwen38_vision_value_tile(%value: buffer, %rows: index, %channel: index, %key_origin: index) -> (vector<16xf16>) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %c0_f32 = vector.constant 0.0 : vector<16xf16>
+  %value_global = buffer.assume.memory_space<global> %value : buffer
+  %value_view = buffer.view %value_global[%origin] : buffer -> view<288x[%rows]xf16>
+  %key_end = index.add %key_origin, %c16 : index
+  %full = index.cmp ule, %key_end, %rows : index
+  %values = scf.if %full -> (vector<16xf16>) {
+    %loaded = vector.load %value_view[%channel, %key_origin] : view<288x[%rows]xf16> -> vector<16xf16>
+    scf.yield %loaded : vector<16xf16>
+  } else {
+    %loaded = scf.for %element = [%c0 to %c16 step %c1](%current = %c0_f32 : vector<16xf16>) -> (vector<16xf16>) unroll {
+      %row = index.add %key_origin, %element : index
+      %valid = index.cmp ult, %row, %rows : index
+      %next = scf.if %valid -> (vector<16xf16>) {
+        %scalar = view.load %value_view[%channel, %row] : view<288x[%rows]xf16> -> f16
+        %inserted = vector.insert %scalar into %current[%element] : f16, vector<16xf16>
+        scf.yield %inserted : vector<16xf16>
+      } else {
+        scf.yield %current : vector<16xf16>
+      }
+      scf.yield %next : vector<16xf16>
+    }
+    scf.yield %loaded : vector<16xf16>
+  }
+  func.return %values : vector<16xf16>
+}
+
+// Reconstructs one logical 16-value fragment from a densely stored cyclic-row
+// weight stage. The two eight-value reads preserve the bank geometry selected
+// by the cyclic-row K/V publication layout.
+func.def inline @qwen38_vision_swizzled_weight_fragment(%stage: buffer, %row: index, %fragment_column: index) -> (vector<16xf16>) {
+  %origin = index.constant 0 : offset
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c32 = index.constant 32 : index
+  %stage_local = buffer.assume.memory_space<workgroup> %stage : buffer
+  %stage_view = buffer.view %stage_local[%origin] : buffer -> view<288x32xf16>
+  %row_lane = index.rem %row, %c4 : index
+  %rotation = index.mul %row_lane, %c8 : index
+  %low_column0 = index.add %fragment_column, %rotation : index
+  %low_column_raw = index.rem %low_column0, %c32 : index
+  %low_column = index.assume %low_column_raw [range(%low_column_raw, 0, 24), multiple_of(%low_column_raw, 8)] : index
+  %logical_high_column = index.add %fragment_column, %c8 : index
+  %high_column0 = index.add %logical_high_column, %rotation : index
+  %high_column_raw = index.rem %high_column0, %c32 : index
+  %high_column = index.assume %high_column_raw [range(%high_column_raw, 0, 24), multiple_of(%high_column_raw, 8)] : index
+  %low = vector.load %stage_view[%row, %low_column] : view<288x32xf16> -> vector<8xf16>
+  %high = vector.load %stage_view[%row, %high_column] : view<288x32xf16> -> vector<8xf16>
+  %values = vector.concat<0> %low, %high : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+  func.return %values : vector<16xf16>
+}
+
+// Rotates one logical NEOX pair from the F32 query tile and returns its F16
+// destination values. The caller sequences rows so compact in-place stores
+// never overwrite an unread F32 row.
+func.def inline @qwen38_vision_rotate_query_pair(%query: buffer, %patch_width: index, %local_row: index, %row: index, %pair: index, %left_column: index, %right_column: index) -> (f16, f16) {
+  %origin = index.constant 0 : offset
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c18 = index.constant 18 : index
+  %query_local = buffer.assume.memory_space<workgroup> %query : buffer
+  %query_view = buffer.view %query_local[%origin] : buffer -> view<16x288xf32>
+  %left = view.load %query_view[%local_row, %left_column] : view<16x288xf32> -> f32
+  %right = view.load %query_view[%local_row, %right_column] : view<16x288xf32> -> f32
+  %uses_y = index.cmp ult, %pair, %c18 : index
+  %axis_pair = scf.if %uses_y -> (index) {
+    scf.yield %pair : index
+  } else {
+    %x_pair = index.sub %pair, %c18 : index
+    scf.yield %x_pair : index
+  }
+  %axis_pair_i32 = index.cast %axis_pair : index to i32
+  %axis_pair_f32 = scalar.uitofp %axis_pair_i32 : i32 to f32
+  %log_step = scalar.constant -0.51168557622089905 : f32
+  %log_frequency = scalar.mulf %axis_pair_f32, %log_step : f32
+  %frequency = scalar.expf<afn> %log_frequency : f32
+  %block_width = index.div %patch_width, %c2 : index
+  %merge_block = index.div %row, %c4 : index
+  %within_block = index.rem %row, %c4 : index
+  %block_y = index.div %merge_block, %block_width : index
+  %block_x = index.rem %merge_block, %block_width : index
+  %delta_y = index.div %within_block, %c2 : index
+  %delta_x = index.rem %within_block, %c2 : index
+  %patch_y = index.madd %block_y, %c2, %delta_y : index
+  %patch_x = index.madd %block_x, %c2, %delta_x : index
+  %coordinate = scf.select %uses_y, %patch_y, %patch_x : index
+  %coordinate_i32 = index.cast %coordinate : index to i32
+  %coordinate_f32 = scalar.uitofp %coordinate_i32 : i32 to f32
+  %angle = scalar.mulf %coordinate_f32, %frequency : f32
+  %sine = scalar.sinf<afn> %angle : f32
+  %cosine = scalar.cosf<afn> %angle : f32
+  %left_cosine = scalar.mulf %left, %cosine : f32
+  %right_sine = scalar.mulf %right, %sine : f32
+  %left_sine = scalar.mulf %left, %sine : f32
+  %right_cosine = scalar.mulf %right, %cosine : f32
+  %rotated_left0 = scalar.subf %left_cosine, %right_sine : f32
+  %rotated_right0 = scalar.addf %left_sine, %right_cosine : f32
+  %rotated_left = scalar.fptrunc %rotated_left0 : f32 to f16
+  %rotated_right = scalar.fptrunc %rotated_right0 : f32 to f16
+  func.return %rotated_left, %rotated_right : f16, f16
+}
+
+// Computes one four-head cohort with online softmax and publishes its disjoint
+// 288-column F16 context slice. One subgroup owns each head. The complete
+// context shares the following FFN activation workspace; a single output
+// projection consumes it after all four cohorts finish.
+kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_cohort(%cohort: index) {
+  %c1 = index.constant 1 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c128 = index.constant 128 : index
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height = index.div %image_height, %c16 : index
+  %patch_width = index.div %image_width, %c16 : index
+  %rows = index.mul %patch_height, %patch_width : index
+  %padded_rows = index.add %rows, %c15 : index
+  %query_tiles = index.div %padded_rows, %c16 : index
+  kernel.launch.config workgroups(%query_tiles, %c1, %c1) workgroup_size(%c128, %c1, %c1) : index
+} launch(%cohort: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer, %output_weight: buffer, %output_bias: buffer, %output: buffer) where [range(%cohort, 0, 3)] {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c36 = index.constant 36 : index
+  %c48 = index.constant 48 : index
+  %c64 = index.constant 64 : index
+  %c72 = index.constant 72 : index
+  %c128 = index.constant 128 : index
+  %c144 = index.constant 144 : index
+  %c18 = index.constant 18 : index
+  %c288 = index.constant 288 : index
+  %c1152 = index.constant 1152 : index
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %attention_scale = scalar.constant 0.11785113019775793 : f32
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c0_f16 = scalar.constant 0.0 : f16
+  %c0_f16x4 = vector.constant 0.0 : vector<4xf16>
+  %c0_f16x8 = vector.constant 0.0 : vector<8xf16>
+  %c0_f16x16 = vector.constant 0.0 : vector<16xf16>
+  %c0_f32x8 = vector.constant 0.0 : vector<8xf32>
+  %negative_vector = vector.splat %negative_large : vector<8xf32>
+  %scale_vector = vector.splat %attention_scale : vector<8xf32>
+
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height0 = index.div %image_height, %c16 : index
+  %patch_width0 = index.div %image_width, %c16 : index
+  %patch_height = index.assume %patch_height0 [range(%patch_height0, 2, 256), multiple_of(%patch_height0, 2)] : index
+  %patch_width = index.assume %patch_width0 [range(%patch_width0, 2, 256), multiple_of(%patch_width0, 2)] : index
+  %rows0 = index.mul %patch_height, %patch_width : index
+  %rows = index.assume %rows0 [range(%rows0, 4, 65536), multiple_of(%rows0, 4)] : index
+
+  %query_tile = kernel.workgroup.id<x> : index
+  %query_origin = index.mul %query_tile, %c16 : index
+  %query_end = index.add %query_origin, %c16 : index
+  %full_query_tile = index.cmp ule, %query_end, %rows : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %lane_column = index.rem %lane, %c16 : index
+  %lane_row_parity = index.div %lane, %c16 : index
+  %head_base = index.mul %subgroup, %c72 : index
+  %probability_column = index.mul %subgroup, %c16 : index
+  %query_token = index.add %query_origin, %lane_column : index
+  %query_valid = index.cmp ult, %query_token, %rows : index
+  %cohort_output_base = index.mul %cohort, %c288 : index
+  %first_cohort = index.cmp eq, %cohort, %c0 : index
+
+  %residual_noalias, %statistics_noalias, %layernorm_weight_noalias, %layernorm_bias_noalias, %qkv_weight_noalias, %qkv_bias_noalias, %key_noalias, %value_noalias, %output_weight_noalias, %output_bias_noalias, %output_noalias = buffer.assume.noalias %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value, %output_weight, %output_bias, %output : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %residual_global = buffer.assume.memory_space<global> %residual_noalias : buffer
+  %statistics_global = buffer.assume.memory_space<global> %statistics_noalias : buffer
+  %layernorm_weight_global = buffer.assume.memory_space<global> %layernorm_weight_noalias : buffer
+  %layernorm_bias_global = buffer.assume.memory_space<global> %layernorm_bias_noalias : buffer
+  %qkv_weight_global = buffer.assume.memory_space<global> %qkv_weight_noalias : buffer
+  %qkv_bias_global = buffer.assume.memory_space<global> %qkv_bias_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %output_weight_global = buffer.assume.memory_space<global> %output_weight_noalias : buffer
+  %output_bias_global = buffer.assume.memory_space<global> %output_bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %residual_view = buffer.view %residual_global[%origin] : buffer -> view<[%rows]x1152xf32>
+  %statistics_view = buffer.view %statistics_global[%origin] : buffer -> view<[%rows]x2xf32>
+  %layernorm_weight_view = buffer.view %layernorm_weight_global[%origin] : buffer -> view<1152xf32>
+  %layernorm_bias_view = buffer.view %layernorm_bias_global[%origin] : buffer -> view<1152xf32>
+  %qkv_weight_view = buffer.view %qkv_weight_global[%origin] : buffer -> view<3456x1152xf16>
+  %qkv_bias_view = buffer.view %qkv_bias_global[%origin] : buffer -> view<3456xf32>
+  %key_view = buffer.view %key_global[%origin] : buffer -> view<[%rows]x288xf16>
+  %output_weight_view = buffer.view %output_weight_global[%origin] : buffer -> view<1152x1152xf16>
+  %output_bias_view = buffer.view %output_bias_global[%origin] : buffer -> view<1152xf32>
+  %context_view = buffer.view %output_global[%origin] : buffer -> view<[%rows]x1152xf16>
+
+  %input_stage_bytes = index.constant 2048 : offset
+  %weight_stage_bytes = index.constant 18432 : offset
+  %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<16x32xf16>
+  %probability_view = buffer.view %input_stage[%origin] : buffer -> view<16x64xf16>
+  %weight_stage_view = buffer.view %weight_stage[%origin] : buffer -> view<288x32xf16>
+  %query_f32_view = buffer.view %weight_stage[%origin] : buffer -> view<16x288xf32>
+  %query_f16_view = buffer.view %weight_stage[%origin] : buffer -> view<16x288xf16>
+  %scratch_view = buffer.view %weight_stage[%origin] : buffer -> view<16x288xf16>
+
+  %initial = vector.fragment<init> %c0_f32x8 shape [%c16, %c16] : vector<8xf32>
+  %query_acc0, %query_acc1, %query_acc2, %query_acc3, %query_acc4 = scf.for %column_ordinal = [%c0 to %c1152 step %c32](%current0 = %initial : vector<8xf32>, %current1 = %initial : vector<8xf32>, %current2 = %initial : vector<8xf32>, %current3 = %initial : vector<8xf32>, %current4 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    scf.for %weight_round = [%c0 to %c18 step %c1] unroll schedule(linear) {
+      %packet = index.madd %weight_round, %c128, %workitem : index
+      %weight_row = index.div %packet, %c8 : index
+      %weight_packet = index.rem %packet, %c8 : index
+      %weight_column = index.mul %weight_packet, %c4 : index
+      %global_column0 = index.add %column_ordinal, %weight_column : index
+      %global_column = index.assume %global_column0 [range(%global_column0, 0, 1148), multiple_of(%global_column0, 4)] : index
+      %global_weight_row = index.add %cohort_output_base, %weight_row : index
+      %weights = vector.load %qkv_weight_view[%global_weight_row, %global_column] : view<3456x1152xf16> -> vector<4xf16>
+      %stage_lane = index.rem %weight_row, %c4 : index
+      %rotation = index.mul %stage_lane, %c8 : index
+      %physical_column0 = index.add %weight_column, %rotation : index
+      %physical_column_raw = index.rem %physical_column0, %c32 : index
+      %physical_column = index.assume %physical_column_raw [range(%physical_column_raw, 0, 28), multiple_of(%physical_column_raw, 4)] : index
+      vector.store %weights, %weight_stage_view[%weight_row, %physical_column] : vector<4xf16>, view<288x32xf16>
+    }
+    scf.for %input_round = [%c0 to %c1 step %c1] unroll {
+      %packet = index.madd %input_round, %c128, %workitem : index
+      %stage_row = index.div %packet, %c8 : index
+      %stage_packet = index.rem %packet, %c8 : index
+      %stage_column = index.mul %stage_packet, %c4 : index
+      %input_row = index.add %query_origin, %stage_row : index
+      %input_valid = index.cmp ult, %input_row, %rows : index
+      %rounded = scf.if %input_valid -> (vector<4xf16>) {
+        %mean = view.load %statistics_view[%input_row, %c0] : view<[%rows]x2xf32> -> f32
+        %inverse = view.load %statistics_view[%input_row, %c1] : view<[%rows]x2xf32> -> f32
+        %input_column0 = index.add %column_ordinal, %stage_column : index
+        %input_column = index.assume %input_column0 [range(%input_column0, 0, 1148), multiple_of(%input_column0, 4)] : index
+        %values = vector.load %residual_view[%input_row, %input_column] : view<[%rows]x1152xf32> -> vector<4xf32>
+        %scales = vector.load %layernorm_weight_view[%input_column] : view<1152xf32> -> vector<4xf32>
+        %shifts = vector.load %layernorm_bias_view[%input_column] : view<1152xf32> -> vector<4xf32>
+        %mean_vector = vector.splat %mean : vector<4xf32>
+        %inverse_vector = vector.splat %inverse : vector<4xf32>
+        %centered = vector.subf %values, %mean_vector : vector<4xf32>
+        %normalized = vector.mulf %centered, %inverse_vector : vector<4xf32>
+        %scaled = vector.mulf %normalized, %scales : vector<4xf32>
+        %shifted = vector.addf %scaled, %shifts : vector<4xf32>
+        %values_f16 = vector.fptrunc %shifted : vector<4xf32> to vector<4xf16>
+        scf.yield %values_f16 : vector<4xf16>
+      } else {
+        scf.yield %c0_f16x4 : vector<4xf16>
+      }
+      vector.store %rounded, %input_stage_view[%stage_row, %stage_column] : vector<4xf16>, view<16x32xf16>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    %next0, %next1, %next2, %next3, %next4 = scf.for %weight_fragment = [%c0 to %c2 step %c1](%fragment0 = %current0 : vector<8xf32>, %fragment1 = %current1 : vector<8xf32>, %fragment2 = %current2 : vector<8xf32>, %fragment3 = %current3 : vector<8xf32>, %fragment4 = %current4 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll {
+      %fragment_column = index.mul %weight_fragment, %c16 : index
+      %lhs = vector.fragment.load<lhs> %input_stage_view[%c0, %fragment_column] shape [%c16, %c16] : view<16x32xf16> -> vector<16xf16>
+      %weight_row00 = index.add %head_base, %lane_column : index
+      %weight_row0 = index.add %c0, %weight_row00 : index
+      %weight_row1 = index.add %c16, %weight_row00 : index
+      %weight_row2 = index.add %c32, %weight_row00 : index
+      %weight_row3 = index.add %c48, %weight_row00 : index
+      %weight_row4 = index.add %c64, %weight_row00 : index
+      %weights0 = func.call @qwen38_vision_swizzled_weight_fragment(%weight_stage, %weight_row0, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+      %weights1 = func.call @qwen38_vision_swizzled_weight_fragment(%weight_stage, %weight_row1, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+      %weights2 = func.call @qwen38_vision_swizzled_weight_fragment(%weight_stage, %weight_row2, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+      %weights3 = func.call @qwen38_vision_swizzled_weight_fragment(%weight_stage, %weight_row3, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+      %tail_valid = index.cmp ult, %lane_column, %c8 : index
+      %weights4 = scf.if %tail_valid -> (vector<16xf16>) {
+        %loaded = func.call @qwen38_vision_swizzled_weight_fragment(%weight_stage, %weight_row4, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+        scf.yield %loaded : vector<16xf16>
+      } else {
+        scf.yield %c0_f16x16 : vector<16xf16>
+      }
+      %rhs0 = vector.fragment<rhs> %weights0 shape [%c16, %c16] : vector<16xf16>
+      %rhs1 = vector.fragment<rhs> %weights1 shape [%c16, %c16] : vector<16xf16>
+      %rhs2 = vector.fragment<rhs> %weights2 shape [%c16, %c16] : vector<16xf16>
+      %rhs3 = vector.fragment<rhs> %weights3 shape [%c16, %c16] : vector<16xf16>
+      %rhs4 = vector.fragment<rhs> %weights4 shape [%c16, %c16] : vector<16xf16>
+      %updated0 = vector.mma %lhs, %rhs0, %fragment0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated1 = vector.mma %lhs, %rhs1, %fragment1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated2 = vector.mma %lhs, %rhs2, %fragment2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated3 = vector.mma %lhs, %rhs3, %fragment3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated4 = vector.mma %lhs, %rhs4, %fragment4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      scf.yield %updated0, %updated1, %updated2, %updated3, %updated4 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next0, %next1, %next2, %next3, %next4 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+
+  %query_channel00 = index.add %head_base, %lane_column : index
+  %query_channel0 = index.add %c0, %query_channel00 : index
+  %query_channel1 = index.add %c16, %query_channel00 : index
+  %query_channel2 = index.add %c32, %query_channel00 : index
+  %query_channel3 = index.add %c48, %query_channel00 : index
+  %query_channel4 = index.add %c64, %query_channel00 : index
+  %query_tail_valid = index.cmp ult, %lane_column, %c8 : index
+  %global_query_channel0 = index.add %cohort_output_base, %query_channel0 : index
+  %global_query_channel1 = index.add %cohort_output_base, %query_channel1 : index
+  %global_query_channel2 = index.add %cohort_output_base, %query_channel2 : index
+  %global_query_channel3 = index.add %cohort_output_base, %query_channel3 : index
+  %global_query_channel4 = index.add %cohort_output_base, %query_channel4 : index
+  %query_bias0 = view.load %qkv_bias_view[%global_query_channel0] : view<3456xf32> -> f32
+  %query_bias1 = view.load %qkv_bias_view[%global_query_channel1] : view<3456xf32> -> f32
+  %query_bias2 = view.load %qkv_bias_view[%global_query_channel2] : view<3456xf32> -> f32
+  %query_bias3 = view.load %qkv_bias_view[%global_query_channel3] : view<3456xf32> -> f32
+  %query_bias4 = scf.if %query_tail_valid -> (f32) {
+    %loaded = view.load %qkv_bias_view[%global_query_channel4] : view<3456xf32> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %c0_f32 : f32
+  }
+  %query_bias_vector0 = vector.splat %query_bias0 : vector<8xf32>
+  %query_bias_vector1 = vector.splat %query_bias1 : vector<8xf32>
+  %query_bias_vector2 = vector.splat %query_bias2 : vector<8xf32>
+  %query_bias_vector3 = vector.splat %query_bias3 : vector<8xf32>
+  %query_bias_vector4 = vector.splat %query_bias4 : vector<8xf32>
+  %biased_query0 = vector.addf %query_acc0, %query_bias_vector0 : vector<8xf32>
+  %biased_query1 = vector.addf %query_acc1, %query_bias_vector1 : vector<8xf32>
+  %biased_query2 = vector.addf %query_acc2, %query_bias_vector2 : vector<8xf32>
+  %biased_query3 = vector.addf %query_acc3, %query_bias_vector3 : vector<8xf32>
+  %biased_query4 = vector.addf %query_acc4, %query_bias_vector4 : vector<8xf32>
+  vector.fragment.store<result> %biased_query0, %query_f32_view[%c0, %head_base] shape [%c16, %c16] : vector<8xf32>, view<16x288xf32>
+  %query_fragment1 = index.add %head_base, %c16 : index
+  %query_fragment2 = index.add %head_base, %c32 : index
+  %query_fragment3 = index.add %head_base, %c48 : index
+  vector.fragment.store<result> %biased_query1, %query_f32_view[%c0, %query_fragment1] shape [%c16, %c16] : vector<8xf32>, view<16x288xf32>
+  vector.fragment.store<result> %biased_query2, %query_f32_view[%c0, %query_fragment2] shape [%c16, %c16] : vector<8xf32>, view<16x288xf32>
+  vector.fragment.store<result> %biased_query3, %query_f32_view[%c0, %query_fragment3] shape [%c16, %c16] : vector<8xf32>, view<16x288xf32>
+  scf.if %query_tail_valid {
+    scf.for %element = [%c0 to %c8 step %c1] unroll {
+      %local_row = index.madd %element, %c2, %lane_row_parity : index
+      %value4 = vector.extract %biased_query4[%element] : vector<8xf32> -> f32
+      view.store %value4, %query_f32_view[%local_row, %query_channel4] : f32, view<16x288xf32>
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+  %first_head = index.div %workitem, %c36 : index
+  %first_pair = index.rem %workitem, %c36 : index
+  %first_head_base = index.mul %first_head, %c72 : index
+  %first_left_column = index.add %first_head_base, %first_pair : index
+  %first_right_column0 = index.add %first_pair, %c36 : index
+  %first_right_column = index.add %first_head_base, %first_right_column0 : index
+  %second_pair0 = index.add %workitem, %c128 : index
+  %second_pair_valid = index.cmp ult, %second_pair0, %c144 : index
+  %second_linear_pair = scf.select %second_pair_valid, %second_pair0, %c0 : index
+  %second_head = index.div %second_linear_pair, %c36 : index
+  %second_pair = index.rem %second_linear_pair, %c36 : index
+  %second_head_base = index.mul %second_head, %c72 : index
+  %second_left_column = index.add %second_head_base, %second_pair : index
+  %second_right_column0 = index.add %second_pair, %c36 : index
+  %second_right_column = index.add %second_head_base, %second_right_column0 : index
+  scf.for %local_row = [%c0 to %c16 step %c1] {
+    %row = index.add %query_origin, %local_row : index
+    %rotated_left0, %rotated_right0 = func.call @qwen38_vision_rotate_query_pair(%weight_stage, %patch_width, %local_row, %row, %first_pair, %first_left_column, %first_right_column) : (buffer, index, index, index, index, index, index) -> (f16, f16)
+    %rotated_left1, %rotated_right1 = scf.if %second_pair_valid -> (f16, f16) {
+      %rotated_left, %rotated_right = func.call @qwen38_vision_rotate_query_pair(%weight_stage, %patch_width, %local_row, %row, %second_pair, %second_left_column, %second_right_column) : (buffer, index, index, index, index, index, index) -> (f16, f16)
+      scf.yield %rotated_left, %rotated_right : f16, f16
+    } else {
+      scf.yield %c0_f16, %c0_f16 : f16, f16
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    view.store %rotated_left0, %query_f16_view[%local_row, %first_left_column] : f16, view<16x288xf16>
+    view.store %rotated_right0, %query_f16_view[%local_row, %first_right_column] : f16, view<16x288xf16>
+    scf.if %second_pair_valid {
+      view.store %rotated_left1, %query_f16_view[%local_row, %second_left_column] : f16, view<16x288xf16>
+      view.store %rotated_right1, %query_f16_view[%local_row, %second_right_column] : f16, view<16x288xf16>
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+  %key_tile_count0 = index.add %rows, %c15 : index
+  %key_tile_count = index.div %key_tile_count0, %c16 : index
+  %final_max_even, %final_sum_even, %final_max_odd, %final_sum_odd, %final_acc0, %final_acc1, %final_acc2, %final_acc3, %final_acc4 = scf.for %key_tile = [%c0 to %key_tile_count step %c1](%current_max_even = %negative_vector : vector<8xf32>, %current_sum_even = %c0_f32x8 : vector<8xf32>, %current_max_odd = %negative_vector : vector<8xf32>, %current_sum_odd = %c0_f32x8 : vector<8xf32>, %current_acc0 = %initial : vector<8xf32>, %current_acc1 = %initial : vector<8xf32>, %current_acc2 = %initial : vector<8xf32>, %current_acc3 = %initial : vector<8xf32>, %current_acc4 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %key_origin = index.mul %key_tile, %c16 : index
+    %key_token = index.add %key_origin, %lane_column : index
+    %key_valid = index.cmp ult, %key_token, %rows : index
+    %raw_scores = scf.for %channel = [%c0 to %c72 step %c16](%current = %initial : vector<8xf32>) -> (vector<8xf32>) unroll {
+      %channel_end = index.add %channel, %c16 : index
+      %full_channel = index.cmp ule, %channel_end, %c72 : index
+      %global_channel = index.add %head_base, %channel : index
+      %tail_channel = index.add %head_base, %c64 : index
+      %query_values = scf.if %full_channel -> (vector<16xf16>) {
+        %full = vector.load %query_f16_view[%lane_column, %global_channel] : view<16x288xf16> -> vector<16xf16>
+        scf.yield %full : vector<16xf16>
+      } else {
+        %low = vector.load %query_f16_view[%lane_column, %tail_channel] : view<16x288xf16> -> vector<8xf16>
+        %tail = vector.concat<0> %low, %c0_f16x8 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        scf.yield %tail : vector<16xf16>
+      }
+      %key_values = scf.if %key_valid -> (vector<16xf16>) {
+        %loaded = scf.if %full_channel -> (vector<16xf16>) {
+          %full = vector.load %key_view[%key_token, %global_channel] : view<[%rows]x288xf16> -> vector<16xf16>
+          scf.yield %full : vector<16xf16>
+        } else {
+          %low = vector.load %key_view[%key_token, %tail_channel] : view<[%rows]x288xf16> -> vector<8xf16>
+          %tail = vector.concat<0> %low, %c0_f16x8 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+          scf.yield %tail : vector<16xf16>
+        }
+        scf.yield %loaded : vector<16xf16>
+      } else {
+        scf.yield %c0_f16x16 : vector<16xf16>
+      }
+      %lhs = vector.fragment<lhs> %query_values shape [%c16, %c16] : vector<16xf16>
+      %rhs = vector.fragment<rhs> %key_values shape [%c16, %c16] : vector<16xf16>
+      %next = vector.mma %lhs, %rhs, %current : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %scaled_scores0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %raw_scores, %scale_vector : vector<8xf32>
+    %scaled_scores = scf.if %key_valid -> (vector<8xf32>) {
+      scf.yield %scaled_scores0 : vector<8xf32>
+    } else {
+      scf.yield %negative_vector : vector<8xf32>
+    }
+    %lane_group_even = index.cmp eq, %lane_row_parity, %c0 : index
+    %even_scores = scf.select %lane_group_even, %scaled_scores, %negative_vector : vector<8xf32>
+    %odd_scores = scf.select %lane_group_even, %negative_vector, %scaled_scores : vector<8xf32>
+    %tile_max_even = kernel.subgroup.reduce<maxnumf> %even_scores : vector<8xf32>
+    %tile_max_odd = kernel.subgroup.reduce<maxnumf> %odd_scores : vector<8xf32>
+    %next_max_even = vector.maxnumf %current_max_even, %tile_max_even : vector<8xf32>
+    %next_max_odd = vector.maxnumf %current_max_odd, %tile_max_odd : vector<8xf32>
+    %selected_next_max = scf.select %lane_group_even, %next_max_even, %next_max_odd : vector<8xf32>
+    %score_delta = vector.subf<reassoc|nnan|ninf|nsz> %scaled_scores, %selected_next_max : vector<8xf32>
+    %raw_weight = vector.expf<afn> %score_delta : vector<8xf32>
+    %weight = scf.if %key_valid -> (vector<8xf32>) {
+      scf.yield %raw_weight : vector<8xf32>
+    } else {
+      scf.yield %c0_f32x8 : vector<8xf32>
+    }
+    %even_weight = scf.select %lane_group_even, %weight, %c0_f32x8 : vector<8xf32>
+    %odd_weight = scf.select %lane_group_even, %c0_f32x8, %weight : vector<8xf32>
+    %tile_sum_even = kernel.subgroup.reduce<addf> %even_weight : vector<8xf32>
+    %tile_sum_odd = kernel.subgroup.reduce<addf> %odd_weight : vector<8xf32>
+    %old_delta_even = vector.subf<reassoc|nnan|ninf|nsz> %current_max_even, %next_max_even : vector<8xf32>
+    %old_delta_odd = vector.subf<reassoc|nnan|ninf|nsz> %current_max_odd, %next_max_odd : vector<8xf32>
+    %old_scale_even = vector.expf<afn> %old_delta_even : vector<8xf32>
+    %old_scale_odd = vector.expf<afn> %old_delta_odd : vector<8xf32>
+    %scaled_sum_even = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum_even, %old_scale_even : vector<8xf32>
+    %scaled_sum_odd = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum_odd, %old_scale_odd : vector<8xf32>
+    %next_sum_even = vector.addf<reassoc|nnan|ninf|nsz> %scaled_sum_even, %tile_sum_even : vector<8xf32>
+    %next_sum_odd = vector.addf<reassoc|nnan|ninf|nsz> %scaled_sum_odd, %tile_sum_odd : vector<8xf32>
+    %selected_old_scale = scf.select %lane_group_even, %old_scale_even, %old_scale_odd : vector<8xf32>
+
+    vector.fragment.store<result> %weight, %probability_view[%c0, %probability_column] shape [%c16, %c16] : vector<8xf32>, view<16x64xf16>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %probability_lhs = vector.fragment.load<lhs> %probability_view[%c0, %probability_column] shape [%c16, %c16] : view<16x64xf16> -> vector<16xf16>
+
+    %value_channel00 = index.add %head_base, %lane_column : index
+    %value_channel0 = index.add %c0, %value_channel00 : index
+    %value_channel1 = index.add %c16, %value_channel00 : index
+    %value_channel2 = index.add %c32, %value_channel00 : index
+    %value_channel3 = index.add %c48, %value_channel00 : index
+    %value_channel4 = index.add %c64, %value_channel00 : index
+    %value_values0 = func.call @qwen38_vision_value_tile(%value_noalias, %rows, %value_channel0, %key_origin) : (buffer, index, index, index) -> (vector<16xf16>)
+    %value_values1 = func.call @qwen38_vision_value_tile(%value_noalias, %rows, %value_channel1, %key_origin) : (buffer, index, index, index) -> (vector<16xf16>)
+    %value_values2 = func.call @qwen38_vision_value_tile(%value_noalias, %rows, %value_channel2, %key_origin) : (buffer, index, index, index) -> (vector<16xf16>)
+    %value_values3 = func.call @qwen38_vision_value_tile(%value_noalias, %rows, %value_channel3, %key_origin) : (buffer, index, index, index) -> (vector<16xf16>)
+    %tail_channel_valid = index.cmp ult, %lane_column, %c8 : index
+    %value_values4 = scf.if %tail_channel_valid -> (vector<16xf16>) {
+      %loaded = func.call @qwen38_vision_value_tile(%value_noalias, %rows, %value_channel4, %key_origin) : (buffer, index, index, index) -> (vector<16xf16>)
+      scf.yield %loaded : vector<16xf16>
+    } else {
+      scf.yield %c0_f16x16 : vector<16xf16>
+    }
+    %value_rhs0 = vector.fragment<rhs> %value_values0 shape [%c16, %c16] : vector<16xf16>
+    %value_rhs1 = vector.fragment<rhs> %value_values1 shape [%c16, %c16] : vector<16xf16>
+    %value_rhs2 = vector.fragment<rhs> %value_values2 shape [%c16, %c16] : vector<16xf16>
+    %value_rhs3 = vector.fragment<rhs> %value_values3 shape [%c16, %c16] : vector<16xf16>
+    %value_rhs4 = vector.fragment<rhs> %value_values4 shape [%c16, %c16] : vector<16xf16>
+    %scaled_acc0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc0, %selected_old_scale : vector<8xf32>
+    %scaled_acc1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc1, %selected_old_scale : vector<8xf32>
+    %scaled_acc2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc2, %selected_old_scale : vector<8xf32>
+    %scaled_acc3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc3, %selected_old_scale : vector<8xf32>
+    %scaled_acc4 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc4, %selected_old_scale : vector<8xf32>
+    %scaled_init0 = vector.fragment<init> %scaled_acc0 shape [%c16, %c16] : vector<8xf32>
+    %scaled_init1 = vector.fragment<init> %scaled_acc1 shape [%c16, %c16] : vector<8xf32>
+    %scaled_init2 = vector.fragment<init> %scaled_acc2 shape [%c16, %c16] : vector<8xf32>
+    %scaled_init3 = vector.fragment<init> %scaled_acc3 shape [%c16, %c16] : vector<8xf32>
+    %scaled_init4 = vector.fragment<init> %scaled_acc4 shape [%c16, %c16] : vector<8xf32>
+    %next_acc0 = vector.mma %probability_lhs, %value_rhs0, %scaled_init0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    %next_acc1 = vector.mma %probability_lhs, %value_rhs1, %scaled_init1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    %next_acc2 = vector.mma %probability_lhs, %value_rhs2, %scaled_init2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    %next_acc3 = vector.mma %probability_lhs, %value_rhs3, %scaled_init3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    %next_acc4 = vector.mma %probability_lhs, %value_rhs4, %scaled_init4 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next_max_even, %next_sum_even, %next_max_odd, %next_sum_odd, %next_acc0, %next_acc1, %next_acc2, %next_acc3, %next_acc4 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+
+  %lane_group_even = index.cmp eq, %lane_row_parity, %c0 : index
+  %final_sum = scf.select %lane_group_even, %final_sum_even, %final_sum_odd : vector<8xf32>
+  %output0_f32 = vector.divf<nnan|ninf|nsz|arcp> %final_acc0, %final_sum : vector<8xf32>
+  %output1_f32 = vector.divf<nnan|ninf|nsz|arcp> %final_acc1, %final_sum : vector<8xf32>
+  %output2_f32 = vector.divf<nnan|ninf|nsz|arcp> %final_acc2, %final_sum : vector<8xf32>
+  %output3_f32 = vector.divf<nnan|ninf|nsz|arcp> %final_acc3, %final_sum : vector<8xf32>
+  %output4_f32 = vector.divf<nnan|ninf|nsz|arcp> %final_acc4, %final_sum : vector<8xf32>
+  %output0 = vector.fptrunc %output0_f32 : vector<8xf32> to vector<8xf16>
+  %output1 = vector.fptrunc %output1_f32 : vector<8xf32> to vector<8xf16>
+  %output2 = vector.fptrunc %output2_f32 : vector<8xf32> to vector<8xf16>
+  %output3 = vector.fptrunc %output3_f32 : vector<8xf32> to vector<8xf16>
+  %output4 = vector.fptrunc %output4_f32 : vector<8xf32> to vector<8xf16>
+  %context_column00 = index.add %head_base, %lane_column : index
+  %context_column0 = index.add %c0, %context_column00 : index
+  %context_column1 = index.add %c16, %context_column00 : index
+  %context_column2 = index.add %c32, %context_column00 : index
+  %context_column3 = index.add %c48, %context_column00 : index
+  %context_column4 = index.add %c64, %context_column00 : index
+  %global_context_column0 = index.add %cohort_output_base, %context_column0 : index
+  %global_context_column1 = index.add %cohort_output_base, %context_column1 : index
+  %global_context_column2 = index.add %cohort_output_base, %context_column2 : index
+  %global_context_column3 = index.add %cohort_output_base, %context_column3 : index
+  %global_context_column4 = index.add %cohort_output_base, %context_column4 : index
+  %tail_column_valid = index.cmp ult, %lane_column, %c8 : index
+  scf.for %element = [%c0 to %c8 step %c1] unroll {
+    %local_row = index.madd %element, %c2, %lane_row_parity : index
+    %context_row = index.add %query_origin, %local_row : index
+    %context_row_valid = index.cmp ult, %context_row, %rows : index
+    scf.if %context_row_valid {
+      %value0 = vector.extract %output0[%element] : vector<8xf16> -> f16
+      %value1 = vector.extract %output1[%element] : vector<8xf16> -> f16
+      %value2 = vector.extract %output2[%element] : vector<8xf16> -> f16
+      %value3 = vector.extract %output3[%element] : vector<8xf16> -> f16
+      view.store %value0, %context_view[%context_row, %global_context_column0] : f16, view<[%rows]x1152xf16>
+      view.store %value1, %context_view[%context_row, %global_context_column1] : f16, view<[%rows]x1152xf16>
+      view.store %value2, %context_view[%context_row, %global_context_column2] : f16, view<[%rows]x1152xf16>
+      view.store %value3, %context_view[%context_row, %global_context_column3] : f16, view<[%rows]x1152xf16>
+      scf.if %tail_column_valid {
+        %value4 = vector.extract %output4[%element] : vector<8xf16> -> f16
+        view.store %value4, %context_view[%context_row, %global_context_column4] : f16, view<[%rows]x1152xf16>
+      }
+    }
+  }
+  kernel.return
+}
+
+// Reconstructs one logical fragment from a densely stored cyclic-row weight
+// stage. Four row-owned matrix fragments share each staged 128-output tile.
+func.def inline @qwen38_vision_attention_output_weight_fragment(%stage: buffer, %row: index, %fragment_column: index) -> (vector<16xf16>) {
+  %origin = index.constant 0 : offset
+  %c8 = index.constant 8 : index
+  %c64 = index.constant 64 : index
+  %stage_local = buffer.assume.memory_space<workgroup> %stage : buffer
+  %stage_view = buffer.view %stage_local[%origin] : buffer -> view<128x64xf16>
+  %row_lane = index.rem %row, %c8 : index
+  %rotation = index.mul %row_lane, %c8 : index
+  %low_column0 = index.add %fragment_column, %rotation : index
+  %low_column_raw = index.rem %low_column0, %c64 : index
+  %low_column = index.assume %low_column_raw [range(%low_column_raw, 0, 56), multiple_of(%low_column_raw, 8)] : index
+  %logical_high_column = index.add %fragment_column, %c8 : index
+  %high_column0 = index.add %logical_high_column, %rotation : index
+  %high_column_raw = index.rem %high_column0, %c64 : index
+  %high_column = index.assume %high_column_raw [range(%high_column_raw, 0, 56), multiple_of(%high_column_raw, 8)] : index
+  %low = vector.load %stage_view[%row, %low_column] : view<128x64xf16> -> vector<8xf16>
+  %high = vector.load %stage_view[%row, %high_column] : view<128x64xf16> -> vector<8xf16>
+  %values = vector.concat<0> %low, %high : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+  func.return %values : vector<16xf16>
+}
+
+// Projects the complete compact attention context once after all four head
+// cohorts publish their disjoint columns. The context occupies the beginning
+// of the FFN activation workspace and is overwritten by the following FFN-up
+// launch, so this separation adds no command-level allocation.
+kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_output_256() {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c9 = index.constant 9 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%c4, %c9, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%context: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %c1152 = index.constant 1152 : index
+  %input_stage_bytes = index.constant 8192 : offset
+  %weight_stage_bytes = index.constant 16384 : offset
+  %c0_f32x8 = vector.constant 0.0 : vector<8xf32>
+
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %lane_column = index.rem %lane, %c16 : index
+  %wave_row_group = index.div %subgroup, %c2 : index
+  %wave_output_group = index.rem %subgroup, %c2 : index
+  %wave_row = index.mul %wave_row_group, %c16 : index
+  %wave_output = index.mul %wave_output_group, %c64 : index
+  %weight_stage_row0 = index.add %wave_output, %lane_column : index
+  %weight_stage_row1 = index.add %weight_stage_row0, %c16 : index
+  %weight_stage_row2 = index.add %weight_stage_row1, %c16 : index
+  %weight_stage_row3 = index.add %weight_stage_row2, %c16 : index
+  %row_origin = index.mul %row_tile, %c64 : index
+  %output_origin = index.mul %output_tile, %c128 : index
+  %result_row = index.add %row_origin, %wave_row : index
+  %result_column0 = index.add %output_origin, %wave_output : index
+  %result_column1 = index.add %result_column0, %c16 : index
+  %result_column2 = index.add %result_column1, %c16 : index
+  %result_column3 = index.add %result_column2, %c16 : index
+
+  %context_noalias, %weight_noalias, %bias_noalias, %residual_noalias, %output_noalias = buffer.assume.noalias %context, %weight, %bias, %residual, %output : buffer, buffer, buffer, buffer, buffer
+  %context_view = buffer.view %context_noalias[%origin] : buffer -> view<256x1152xf16>
+  %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<1152x1152xf16>
+  %bias_view = buffer.view %bias_noalias[%origin] : buffer -> view<1152xf32>
+  %residual_view = buffer.view %residual_noalias[%origin] : buffer -> view<256x1152xf32>
+  %output_view = buffer.view %output_noalias[%origin] : buffer -> view<256x1152xf32>
+  %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<64x64xf16>
+  %weight_stage_view = buffer.view %weight_stage[%origin] : buffer -> view<128x64xf16>
+
+  %initial = vector.fragment<init> %c0_f32x8 shape [%c16, %c16] : vector<8xf32>
+  %accumulated0, %accumulated1, %accumulated2, %accumulated3 = scf.for %column_origin = [%c0 to %c1152 step %c64](%current0 = %initial : vector<8xf32>, %current1 = %initial : vector<8xf32>, %current2 = %initial : vector<8xf32>, %current3 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    scf.for %input_round = [%c0 to %c4 step %c1] unroll schedule(linear) {
+      %input_packet = index.madd %input_round, %c256, %workitem : index
+      %input_stage_row = index.div %input_packet, %c16 : index
+      %input_stage_packet = index.rem %input_packet, %c16 : index
+      %input_stage_column = index.mul %input_stage_packet, %c4 : index
+      %global_input_row = index.add %row_origin, %input_stage_row : index
+      %global_input_column = index.add %column_origin, %input_stage_column : index
+      %input_values = vector.load %context_view[%global_input_row, %global_input_column] : view<256x1152xf16> -> vector<4xf16>
+      vector.store %input_values, %input_stage_view[%input_stage_row, %input_stage_column] : vector<4xf16>, view<64x64xf16>
+    }
+
+    scf.for %weight_round = [%c0 to %c8 step %c1] unroll schedule(linear) {
+      %packet = index.madd %weight_round, %c256, %workitem : index
+      %stage_row = index.div %packet, %c16 : index
+      %stage_packet = index.rem %packet, %c16 : index
+      %stage_column = index.mul %stage_packet, %c4 : index
+      %global_weight_row = index.add %output_origin, %stage_row : index
+      %global_weight_column = index.add %column_origin, %stage_column : index
+      %weight_values = vector.load %weight_view[%global_weight_row, %global_weight_column] : view<1152x1152xf16> -> vector<4xf16>
+      %row_lane = index.rem %stage_row, %c8 : index
+      %rotation = index.mul %row_lane, %c8 : index
+      %physical_column0 = index.add %stage_column, %rotation : index
+      %physical_column_raw = index.rem %physical_column0, %c64 : index
+      %physical_column = index.assume %physical_column_raw [range(%physical_column_raw, 0, 60), multiple_of(%physical_column_raw, 4)] : index
+      vector.store %weight_values, %weight_stage_view[%stage_row, %physical_column] : vector<4xf16>, view<128x64xf16>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    %next0, %next1, %next2, %next3 = scf.for %fragment_column = [%c0 to %c64 step %c16](%fragment0 = %current0 : vector<8xf32>, %fragment1 = %current1 : vector<8xf32>, %fragment2 = %current2 : vector<8xf32>, %fragment3 = %current3 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll {
+      %lhs = vector.fragment.load<lhs> %input_stage_view[%wave_row, %fragment_column] shape [%c16, %c16] : view<64x64xf16> -> vector<16xf16>
+      %weight_values0 = func.call @qwen38_vision_attention_output_weight_fragment(%weight_stage, %weight_stage_row0, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+      %weight_values1 = func.call @qwen38_vision_attention_output_weight_fragment(%weight_stage, %weight_stage_row1, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+      %weight_values2 = func.call @qwen38_vision_attention_output_weight_fragment(%weight_stage, %weight_stage_row2, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+      %weight_values3 = func.call @qwen38_vision_attention_output_weight_fragment(%weight_stage, %weight_stage_row3, %fragment_column) : (buffer, index, index) -> (vector<16xf16>)
+      %rhs0 = vector.fragment<rhs> %weight_values0 shape [%c16, %c16] : vector<16xf16>
+      %rhs1 = vector.fragment<rhs> %weight_values1 shape [%c16, %c16] : vector<16xf16>
+      %rhs2 = vector.fragment<rhs> %weight_values2 shape [%c16, %c16] : vector<16xf16>
+      %rhs3 = vector.fragment<rhs> %weight_values3 shape [%c16, %c16] : vector<16xf16>
+      %updated0 = vector.mma %lhs, %rhs0, %fragment0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated1 = vector.mma %lhs, %rhs1, %fragment1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated2 = vector.mma %lhs, %rhs2, %fragment2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %updated3 = vector.mma %lhs, %rhs3, %fragment3 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      scf.yield %updated0, %updated1, %updated2, %updated3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+
+  %bias_column0 = index.add %result_column0, %lane_column : index
+  %bias_column1 = index.add %result_column1, %lane_column : index
+  %bias_column2 = index.add %result_column2, %lane_column : index
+  %bias_column3 = index.add %result_column3, %lane_column : index
+  %bias0 = view.load %bias_view[%bias_column0] : view<1152xf32> -> f32
+  %bias1 = view.load %bias_view[%bias_column1] : view<1152xf32> -> f32
+  %bias2 = view.load %bias_view[%bias_column2] : view<1152xf32> -> f32
+  %bias3 = view.load %bias_view[%bias_column3] : view<1152xf32> -> f32
+  %bias_vector0 = vector.splat %bias0 : vector<8xf32>
+  %bias_vector1 = vector.splat %bias1 : vector<8xf32>
+  %bias_vector2 = vector.splat %bias2 : vector<8xf32>
+  %bias_vector3 = vector.splat %bias3 : vector<8xf32>
+  %biased0 = vector.addf %accumulated0, %bias_vector0 : vector<8xf32>
+  %biased1 = vector.addf %accumulated1, %bias_vector1 : vector<8xf32>
+  %biased2 = vector.addf %accumulated2, %bias_vector2 : vector<8xf32>
+  %biased3 = vector.addf %accumulated3, %bias_vector3 : vector<8xf32>
+  %residual_values0 = vector.fragment.load<result> %residual_view[%result_row, %result_column0] shape [%c16, %c16] : view<256x1152xf32> -> vector<8xf32>
+  %residual_values1 = vector.fragment.load<result> %residual_view[%result_row, %result_column1] shape [%c16, %c16] : view<256x1152xf32> -> vector<8xf32>
+  %residual_values2 = vector.fragment.load<result> %residual_view[%result_row, %result_column2] shape [%c16, %c16] : view<256x1152xf32> -> vector<8xf32>
+  %residual_values3 = vector.fragment.load<result> %residual_view[%result_row, %result_column3] shape [%c16, %c16] : view<256x1152xf32> -> vector<8xf32>
+  %result0 = vector.addf %residual_values0, %biased0 : vector<8xf32>
+  %result1 = vector.addf %residual_values1, %biased1 : vector<8xf32>
+  %result2 = vector.addf %residual_values2, %biased2 : vector<8xf32>
+  %result3 = vector.addf %residual_values3, %biased3 : vector<8xf32>
+  vector.fragment.store<result> %result0, %output_view[%result_row, %result_column0] shape [%c16, %c16] : vector<8xf32>, view<256x1152xf32>
+  vector.fragment.store<result> %result1, %output_view[%result_row, %result_column1] shape [%c16, %c16] : vector<8xf32>, view<256x1152xf32>
+  vector.fragment.store<result> %result2, %output_view[%result_row, %result_column2] shape [%c16, %c16] : vector<8xf32>, view<256x1152xf32>
+  vector.fragment.store<result> %result3, %output_view[%result_row, %result_column3] shape [%c16, %c16] : vector<8xf32>, view<256x1152xf32>
+  kernel.return
+}
