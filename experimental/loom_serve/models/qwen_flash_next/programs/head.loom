@@ -192,33 +192,52 @@ kernel.def @flash_next_sample() {
   kernel.return
 }
 
+command.program.def public @flash_next_head_logits(%predictor: index) launch(%parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %residual: buffer, %logits: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %residual_stride = index.constant 20480 : offset
+  %rank_stride = index.constant 640 : offset
+  %hidden_stride = index.constant 5120 : offset
+  %residual_bytes = index.scale %tokens, %residual_stride : index, offset -> offset
+  %rank_bytes = index.scale %tokens, %rank_stride : index, offset -> offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %residual_bytes : buffer
+  %lowrank = buffer.alloca<global> align(256) %rank_bytes : buffer
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %c0 = index.constant 0 : index
+  %draft = index.cmp ne, %predictor, %c0 : index
+  %gamma, %down, %up = scf.if %draft -> (view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>) {
+    %gamma = command.parameter %parameters, "blk.48.nextn.hc_head_norm.weight" : view<4x2560xf32>
+    %down = command.parameter %parameters, "blk.48.nextn.hc_head_down.weight" : view<3481600xi8>
+    %up = command.parameter %parameters, "blk.48.nextn.hc_head_up.weight" : view<3481600xi8>
+    scf.yield %gamma, %down, %up : view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>
+  } else {
+    %gamma = command.parameter %parameters, "output_hc_norm.weight" : view<4x2560xf32>
+    %down = command.parameter %parameters, "output_hc_down.weight" : view<3481600xi8>
+    %up = command.parameter %parameters, "output_hc_up.weight" : view<3481600xi8>
+    scf.yield %gamma, %down, %up : view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>
+  }
+  %head = command.parameter %vocabulary_parameters, "output.weight" : view<675430400xi8>
+  kernel.launch @hc_normalize(%epoch, %residual, %gamma, %normalized) : (buffer, buffer, view<4x2560xf32>, buffer)
+  kernel.launch @flash_next_head_down(%epoch, %normalized, %down, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
+  kernel.launch @hc_up_mix(%epoch, %normalized, %lowrank, %up, %hidden) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
+  kernel.launch @flash_next_vocabulary(%epoch, %hidden, %head, %logits) : (buffer, buffer, view<675430400xi8>, buffer)
+  command.return
+}
+
 command.program.def public @flash_next_output_head() launch(%parameters: buffer, %epoch: buffer, %residual: buffer, %outputs: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %residual_stride = index.constant 20480 : offset
-  %rank_stride = index.constant 640 : offset
-  %hidden_stride = index.constant 5120 : offset
   %logit_stride = index.constant 993280 : offset
   %residual_bytes = index.scale %tokens, %residual_stride : index, offset -> offset
-  %rank_bytes = index.scale %tokens, %rank_stride : index, offset -> offset
-  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
   %logit_bytes = index.scale %rows, %logit_stride : index, offset -> offset
   %header_bytes = index.constant 12 : offset
   %selected = buffer.alloca<global> align(256) %residual_bytes : buffer
   %head_epoch = buffer.alloca<global> align(16) %header_bytes : buffer
-  %normalized = buffer.alloca<global> align(256) %residual_bytes : buffer
-  %lowrank = buffer.alloca<global> align(256) %rank_bytes : buffer
-  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %logits = buffer.alloca<global> align(256) %logit_bytes : buffer
-  %gamma = command.parameter %parameters, "output_hc_norm.weight" : view<4x2560xf32>
-  %down = command.parameter %parameters, "output_hc_down.weight" : view<3481600xi8>
-  %up = command.parameter %parameters, "output_hc_up.weight" : view<3481600xi8>
-  %head = command.parameter %parameters, "output.weight" : view<675430400xi8>
   kernel.launch @flash_next_select_output_rows(%epoch, %residual, %head_epoch, %selected) : (buffer, buffer, buffer, buffer)
-  kernel.launch @hc_normalize(%head_epoch, %selected, %gamma, %normalized) : (buffer, buffer, view<4x2560xf32>, buffer)
-  kernel.launch @flash_next_head_down(%head_epoch, %normalized, %down, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
-  kernel.launch @hc_up_mix(%head_epoch, %normalized, %lowrank, %up, %hidden) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
-  kernel.launch @flash_next_vocabulary(%head_epoch, %hidden, %head, %logits) : (buffer, buffer, view<675430400xi8>, buffer)
+  %target = index.constant 0 : index
+  command.program.launch @flash_next_head_logits[%target](%parameters, %parameters, %head_epoch, %selected, %logits) : [index](buffer, buffer, buffer, buffer, buffer)
   kernel.launch @flash_next_sample(%epoch, %logits, %outputs) : (buffer, buffer, buffer)
   command.return
 }

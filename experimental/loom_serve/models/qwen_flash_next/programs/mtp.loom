@@ -1,0 +1,37 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+kernel.decl @flash_next_mtp_embedding() launch(%span: buffer, %token_ids: buffer, %weight: buffer, %residual: buffer)
+
+kernel.decl @flash_next_mtp_normalize() launch(%width_value: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @flash_next_mtp_fuse() launch(%epoch: buffer, %embedding: buffer, %hidden: buffer, %weight: buffer, %output: buffer)
+
+// The sidecar stores only predictor-specific parameters. Embedding and output
+// tables are byte-identical to the target's tensors and share its parameter bank.
+command.program.def public @flash_next_mtp_input() launch(%parameters: buffer, %target_parameters: buffer, %epoch: buffer, %ids: buffer, %hidden: buffer, %residual: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %embedding_stride = index.constant 5120 : offset
+  %hidden_stride = index.constant 20480 : offset
+  %embedding_bytes = index.scale %tokens, %embedding_stride : index, offset -> offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %embedding = buffer.alloca<global> align(256) %embedding_bytes : buffer
+  %normalized_embedding = buffer.alloca<global> align(256) %embedding_bytes : buffer
+  %normalized_hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %embedding_weight = command.parameter %target_parameters, "token_embd.weight" : view<675430400xi8>
+  %embedding_norm = command.parameter %parameters, "blk.48.nextn.enorm.weight" : view<2560xf32>
+  %hidden_norm = command.parameter %parameters, "blk.48.nextn.hnorm.weight" : view<10240xf32>
+  %projection = command.parameter %parameters, "blk.48.nextn.eh_proj.weight" : view<2560x160x34xi8>
+  %embedding_width = index.constant 2560 : index
+  %hidden_width = index.constant 10240 : index
+  kernel.launch @flash_next_mtp_embedding(%epoch, %ids, %embedding_weight, %embedding) : (buffer, buffer, view<675430400xi8>, buffer)
+  kernel.launch @flash_next_mtp_normalize(%embedding_width, %epoch, %embedding, %embedding_norm, %normalized_embedding) : (index, buffer, buffer, view<2560xf32>, buffer)
+  kernel.launch @flash_next_mtp_normalize(%hidden_width, %epoch, %hidden, %hidden_norm, %normalized_hidden) : (index, buffer, buffer, view<10240xf32>, buffer)
+  kernel.launch @flash_next_mtp_fuse(%epoch, %normalized_embedding, %normalized_hidden, %projection, %residual) : (buffer, buffer, buffer, view<2560x160x34xi8>, buffer)
+  command.return
+}
