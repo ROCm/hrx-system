@@ -120,6 +120,9 @@ TEST(TextMediaEpochTest, BuildsExactCrossChunkPlanAndPacketLayout) {
   EXPECT_EQ(
       LoadPlanField(plan, 0, LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_METADATA_LENGTH),
       4u);
+  EXPECT_EQ(
+      LoadPlanField(plan, 0, LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_INDEX),
+      0u);
 
   for (iree_host_size_t record = 1; record < 3; ++record) {
     EXPECT_EQ(LoadPlanField(plan, record,
@@ -135,6 +138,9 @@ TEST(TextMediaEpochTest, BuildsExactCrossChunkPlanAndPacketLayout) {
     EXPECT_EQ(LoadPlanField(plan, record,
                             LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_METADATA_LENGTH),
               4u);
+    EXPECT_EQ(LoadPlanField(plan, record,
+                            LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_INDEX),
+              record);
   }
   EXPECT_EQ(
       LoadPlanField(plan, 1, LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_OFFSET),
@@ -154,6 +160,65 @@ TEST(TextMediaEpochTest, BuildsExactCrossChunkPlanAndPacketLayout) {
       std::memcmp(plan.data + 3 * kPlanRecordBytes + 4, metadata.data() + 1, 4),
       0);
 
+  loom_serve_text_media_epoch_deinitialize(&epoch);
+}
+
+TEST(TextMediaEpochTest,
+     KeepsImageCoordinatesSeparateFromPacketAndTableOffsets) {
+  const uint32_t values[] = {5, 7, 15};
+  const iree_const_byte_span_t rows[] = {
+      iree_make_const_byte_span(&values[0], sizeof(values[0])),
+      iree_make_const_byte_span(&values[1], sizeof(values[1])),
+      iree_make_const_byte_span(&values[2], sizeof(values[2])),
+  };
+  const loom_serve_text_media_input_span_t images[] = {
+      {.input_offset = 1, .input_count = 1, .row_offset = 0},
+      {.input_offset = 3, .input_count = 2, .row_offset = 1},
+  };
+  const loom_serve_text_media_input_t media = {
+      .spans = images,
+      .span_count = IREE_ARRAYSIZE(images),
+      .rows = rows,
+      .row_count = IREE_ARRAYSIZE(rows),
+  };
+  const loom_serve_text_media_epoch_span_t first = {
+      .plan_index = 2,
+      .input_offset = 0,
+      .input_count = 4,
+      .media = &media,
+  };
+  const loom_serve_text_media_epoch_span_t next = {
+      .plan_index = 16,
+      .input_offset = 4,
+      .input_count = 2,
+      .media = &media,
+  };
+  loom_serve_text_media_epoch_t epoch = {};
+  IREE_ASSERT_OK(loom_serve_text_media_epoch_initialize(
+      1, &first, 8, 1, &next, 4, iree_allocator_system(), &epoch));
+  EXPECT_EQ(epoch.first_feature_count, 2u);
+  EXPECT_EQ(epoch.next_feature_count, 1u);
+  iree_const_byte_span_t plan;
+  IREE_ASSERT_OK(iree_vm_buffer_map_read(
+      epoch.plan, 0, iree_vm_buffer_length(epoch.plan), &plan));
+  ASSERT_EQ(plan.data_length, 3u * kPlanRecordBytes);
+
+  const uint32_t plan_indices[] = {2, 2, 16};
+  const uint32_t scheduled_offsets[] = {1, 3, 0};
+  const uint32_t feature_indices[] = {0, 0, 1};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(rows); ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(
+        LoadPlanField(plan, i, LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_PLAN_INDEX),
+        plan_indices[i]);
+    EXPECT_EQ(LoadPlanField(
+                  plan, i, LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_SPAN_INPUT_OFFSET),
+              scheduled_offsets[i]);
+    EXPECT_EQ(
+        LoadPlanField(plan, i, LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_INDEX),
+        feature_indices[i]);
+    EXPECT_EQ(epoch.features[i].source.data, rows[i].data);
+  }
   loom_serve_text_media_epoch_deinitialize(&epoch);
 }
 

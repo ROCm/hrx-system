@@ -74,6 +74,22 @@ Insufficient capacity queues or rejects the request before successful output
 headers. Slow output readers backpressure their own row without preventing
 credited peers from advancing.
 
+### Mixed media epochs
+
+Projected image rows replace source-declared logical input ranges. The native
+[media epoch builder](media_epoch.h) intersects those ranges with scheduled
+chunks and passes one seven-word record per projected row to source control.
+The [record fields](media.h) identify the text plan, the input offset within
+that scheduled span, the projected payload offset/length, the image metadata
+offset/length, and the projected row index within the original image.
+
+That last index stays image-relative across dispatch boundaries. It is neither
+the scheduled input offset, which restarts with each chunk, nor the index into
+the request's concatenated projected-row table. Source control uses it with
+image metadata to encode model-specific spatial positions; native scheduling
+does not reconstruct those positions. Projected payloads remain borrowed until
+accepted work retires, and packet upload joins the model's existing timeline.
+
 ## Retained state and checkpoints
 
 [Storage geometry](storage.h) describes byte ranges, pages and recurrent slots
@@ -112,11 +128,12 @@ storage. The receipt serial supplies a distinct nonce when source needs an
 implicit seed. Native code does not decode the packet or implement sampling.
 
 After row admission, `bind_request(control_state, row, options)` binds that
-policy to the source-owned row table. `encode_epoch(control_state, plan, inputs,
-first_count, next_count, eos, metadata, tokens)` then includes the policy in its
-ordinary retained upload. The serialized model owner excludes outstanding
-execution while changing those packets. Device selection returns only selected
-IDs through the existing completion path; logits and RNG state stay on device.
+policy to the source-owned row table. `encode_epoch` combines the text plan,
+known inputs, media plan, and each cohort's counts and packet capacity with
+that policy in its ordinary upload. The serialized model owner excludes
+outstanding execution while changing those packets. Device selection returns
+only selected IDs through the existing completion path; logits and RNG state
+stay on device.
 
 [Telemetry](telemetry.h) observes committed work, while
 [heartbeats](heartbeat.h) report copied state independently of device readiness.

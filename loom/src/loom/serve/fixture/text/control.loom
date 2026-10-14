@@ -505,13 +505,14 @@ func.def @encode_mixed_media(%plan: buffer, %media_plan: buffer, %media_count: i
   %bounded_packet_capacity = scalar.assume %packet_capacity [range(%packet_capacity, 1, 524288)] : i32
   %packet_extent = index.cast %bounded_packet_capacity : i32 to index
   %requests = buffer.view %plan[%origin] : buffer -> view<32x9xi32>
-  %media = buffer.view %media_plan[%origin] : buffer -> view<[%media_extent]x6xi32>
+  %media = buffer.view %media_plan[%origin] : buffer -> view<[%media_extent]x7xi32>
   %records = buffer.view %packet[%origin] : buffer -> view<[%packet_extent]x8xi32>
   scf.for %i = [%c0 to %media_extent step %c1] {
-    %plan_index32 = view.load %media[%i, 0] : view<[%media_extent]x6xi32> -> i32
-    %relative32 = view.load %media[%i, 1] : view<[%media_extent]x6xi32> -> i32
-    %feature_offset = view.load %media[%i, 2] : view<[%media_extent]x6xi32> -> i32
-    %feature_length = view.load %media[%i, 3] : view<[%media_extent]x6xi32> -> i32
+    %plan_index32 = view.load %media[%i, 0] : view<[%media_extent]x7xi32> -> i32
+    %relative32 = view.load %media[%i, 1] : view<[%media_extent]x7xi32> -> i32
+    %feature_offset = view.load %media[%i, 2] : view<[%media_extent]x7xi32> -> i32
+    %feature_length = view.load %media[%i, 3] : view<[%media_extent]x7xi32> -> i32
+    %feature_index = view.load %media[%i, 6] : view<[%media_extent]x7xi32> -> i32
     %bounded_plan_index = scalar.assume %plan_index32 [range(%plan_index32, 0, 31)] : i32
     %bounded_relative = scalar.assume %relative32 [range(%relative32, 0, 524287)] : i32
     %plan_index = index.cast %bounded_plan_index : i32 to index
@@ -523,7 +524,7 @@ func.def @encode_mixed_media(%plan: buffer, %media_plan: buffer, %media_count: i
     %packet_position = index.assume %position [lt(%position, %packet_extent)] : index
     view.store %feature_offset, %records[%packet_position, 1] : i32, view<[%packet_extent]x8xi32>
     view.store %feature_length, %records[%packet_position, 2] : i32, view<[%packet_extent]x8xi32>
-    view.store %relative32, %records[%packet_position, 3] : i32, view<[%packet_extent]x8xi32>
+    view.store %feature_index, %records[%packet_position, 3] : i32, view<[%packet_extent]x8xi32>
   }
   func.return
 }

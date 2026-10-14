@@ -129,7 +129,9 @@ kernel.def target(@target) @consume() {
           %feature_offset = index.cast %bounded_feature_offset : i64 to offset
           %feature = buffer.view %tokens[%feature_offset] : buffer -> view<1xi32>
           %projected = view.load %feature[0] : view<1xi32> -> i32
-          scf.yield %projected : i32
+          %feature_index = view.load %records[%bounded_input, 3] : view<[%capacity]x8xi32> -> i32
+          %positioned = scalar.addi %projected, %feature_index : i32
+          scf.yield %positioned : i32
         } else {
           scf.yield %stored : i32
         }
