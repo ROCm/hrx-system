@@ -20,7 +20,7 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_patch_embedding() {
   %rows = index.mul %patch_height, %patch_width : index
   %row_groups = index.div %rows, %c64 : index
   kernel.launch.config workgroups(%row_groups, %c18, %c1) workgroup_size(%c256, %c1, %c1) : index
-} launch(%source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer) {
+} launch(%source_offset: offset, %source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -75,7 +75,7 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_patch_embedding() {
   %result_column1 = index.add %result_column0, %c16 : index
 
   %source_noalias, %weight0_noalias, %weight1_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %source, %weight0, %weight1, %bias, %output : buffer, buffer, buffer, buffer, buffer
-  %source_view = buffer.view %source_noalias[%origin] : buffer -> view<[%source_elements]xi8>
+  %source_view = buffer.view %source_noalias[%source_offset] : buffer -> view<[%source_elements]xi8>
   %weight0_view = buffer.view %weight0_noalias[%origin] : buffer -> view<1152x768xf16>
   %weight1_view = buffer.view %weight1_noalias[%origin] : buffer -> view<1152x768xf16>
   %bias_view = buffer.view %bias_noalias[%origin] : buffer -> view<1152xf32>
