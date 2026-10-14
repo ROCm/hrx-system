@@ -64,6 +64,61 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    semaphore
+  HDRS
+    "semaphore.h"
+  SRCS
+    "semaphore.c"
+  DEPS
+    ::signal
+    iree::async
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::utils::host_semaphore
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    semaphore_test
+  SRCS
+    "semaphore_test.cc"
+  DEPS
+    ::semaphore
+    ::signal
+    iree::async
+    iree::async::platform
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::queue::host_wait
+    iree::hal::memory::maintenance
+    iree::hal::memory::maintenance_thread
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    semaphore_benchmark
+  SRCS
+    "semaphore_benchmark.cc"
+  DEPS
+    ::semaphore
+    ::signal
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
     signal_test
