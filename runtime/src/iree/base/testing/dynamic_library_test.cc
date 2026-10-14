@@ -10,6 +10,7 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "iree/base/api.h"
@@ -307,7 +308,10 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
       library, "next_value", reinterpret_cast<void**>(&next_value)));
   pdb.reset();
   owned_library.reset();
-  EXPECT_FALSE(std::filesystem::exists(pdb_path.path()));
+  std::error_code path_error;
+  bool path_exists = std::filesystem::exists(pdb_path.path(), path_error);
+  EXPECT_FALSE(path_error) << path_error.message();
+  EXPECT_FALSE(path_exists);
   EXPECT_EQ(1, next_value());
   const DWORD64 delayed_address = reinterpret_cast<DWORD64>(next_value);
   iree_symbol_resolver_lock();
@@ -317,10 +321,10 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
       resolver->process, delayed_address, &line_displacement, &line);
   filename = found_line ? line.FileName : "";
   iree_symbol_resolver_unlock();
+  path_exists = std::filesystem::exists(pdb_path.path(), path_error);
   std::cout << "native delayed PDB: found_symbol=" << found_symbol
-            << " found_line=" << found_line
-            << " path_exists=" << std::filesystem::exists(pdb_path.path())
-            << "\n";
+            << " found_line=" << found_line << " path_exists=" << path_exists
+            << " path_error=" << path_error.value() << "\n";
   EXPECT_TRUE(found_symbol);
   EXPECT_STREQ("next_value", symbol->Name);
   EXPECT_TRUE(found_line);
