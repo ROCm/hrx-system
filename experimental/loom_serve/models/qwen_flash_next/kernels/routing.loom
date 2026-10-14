@@ -1,0 +1,180 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+amdgpu.target<gfx11-generic> @flash_next_route_wave32 {subgroup_size = 32}
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+// Original F32 parameters contract the same packed BF16 activation used by
+// both the routed and shared expert branches.
+func.def inline @route_partial(%token0: index, %row0: index, %rows0: index, %lane0: index, %input: buffer, %weight: buffer) -> (f32) {
+  %tokens = config.get @flash_next.token_count : index
+  %rows = index.assume %rows0 [range(%rows0, 1, 512)] : index
+  %row = index.assume %row0 [lt(%row0, %rows)] : index
+  %token = index.assume %token0 [lt(%token0, %tokens)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %origin = index.constant 0 : offset
+  %c0_index = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c10 = index.constant 10 : index
+  %c8 = index.constant 8 : index
+  %stride = index.constant 256 : index
+  %depth = index.constant 2 : index
+  %lane_begin = index.mul %lane, %c8 : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x2560xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%rows]x2560xf32>
+  %c0v = vector.constant 0.0 : vector<8xf32>
+  %partial = scf.for %block = [%c0_index to %c10 step %c1](%sum = %c0v : vector<8xf32>) -> (vector<8xf32>) pipeline(%depth) {
+    %channel = index.madd %block, %stride, %lane_begin : index
+    %stored = vector.load %input_view[%token, %channel] : view<[%tokens]x2560xbf16> -> vector<8xbf16>
+    %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+    %weights = vector.load %weight_view[%row, %channel] : view<[%rows]x2560xf32> -> vector<8xf32>
+    %next = vector.fmaf %values, %weights, %sum : vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  %c0 = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf> %partial, %c0 : vector<8xf32>, f32
+  func.return %sum : f32
+}
+
+kernel.def target(@flash_next_route_wave32) @route_project() {
+  %groups = index.constant 129 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %input_arg: buffer, %route_weight_arg: buffer, %shared_weight_arg: buffer, %logits_arg: buffer, %gate_arg: buffer) {
+  %span, %input, %route_weight, %shared_weight, %logits, %gate = buffer.assume.noalias %span_arg, %input_arg, %route_weight_arg, %shared_weight_arg, %logits_arg, %gate_arg : buffer, buffer, buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %group = kernel.workgroup.id<x> : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %c4 = index.constant 4 : index
+  %rows = index.constant 512 : index
+  %last = index.constant 513 : index
+  %row = index.madd %group, %c4, %wave : index
+  %active_token = index.cmp ult, %token, %end : index
+  %valid_row = index.cmp ult, %row, %last : index
+  %active = scalar.andi %active_token, %valid_row : i1
+  scf.if %active {
+    %c0_index = index.constant 0 : index
+    %c1_index = index.constant 1 : index
+    %is_route = index.cmp ult, %row, %rows : index
+    %partial = scf.if %is_route -> (f32) {
+      %bounded_row = index.assume %row [range(%row, 0, 511)] : index
+      %value = func.call @route_partial(%token, %bounded_row, %rows, %lane, %input, %route_weight) : (index, index, index, index, buffer, buffer) -> (f32)
+      scf.yield %value : f32
+    } else {
+      %value = func.call @route_partial(%token, %c0_index, %c1_index, %lane, %input, %shared_weight) : (index, index, index, index, buffer, buffer) -> (f32)
+      scf.yield %value : f32
+    }
+    %sum = kernel.subgroup.reduce<addf> %partial : f32
+    %leader = index.cmp eq, %lane, %c0_index : index
+    scf.if %leader {
+      %origin = index.constant 0 : offset
+      scf.if %is_route {
+        %bounded_row = index.assume %row [range(%row, 0, 511)] : index
+        %output = buffer.view %logits[%origin] : buffer -> view<[%tokens]x512xf32>
+        view.store %sum, %output[%token, %bounded_row] : f32, view<[%tokens]x512xf32>
+      } else {
+        %c1 = scalar.constant 1.0 : f32
+        %negative = scalar.negf %sum : f32
+        %exponential = scalar.expf<afn> %negative : f32
+        %denominator = scalar.addf %c1, %exponential : f32
+        %sigmoid = scalar.divf %c1, %denominator : f32
+        %output = buffer.view %gate[%origin] : buffer -> view<[%tokens]xf32>
+        view.store %sigmoid, %output[%token] : f32, view<[%tokens]xf32>
+      }
+    }
+  }
+  kernel.return
+}
+
+// Selecting logits before normalizing cancels the full softmax denominator.
+// Ties choose the lower expert ID; selected probabilities remain F32.
+kernel.def target(@flash_next_route_wave32) @route_top10() {
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %logits_arg: buffer, %ids_arg: buffer, %weights_arg: buffer) {
+  %span, %logits, %ids, %weights = buffer.assume.noalias %span_arg, %logits_arg, %ids_arg, %weights_arg : buffer, buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<x> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %thread = kernel.workitem.id<x> : index
+    %c0_index = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c10 = index.constant 10 : index
+    %threads = index.constant 256 : index
+    %origin = index.constant 0 : offset
+    %second = index.add %thread, %threads : index
+    %first_id = index.cast %thread : index to i32
+    %second_id = index.cast %second : index to i32
+    %largest_id = scalar.constant 2147483647 : i32
+    %negative_infinity = scalar.constant -inf : f32
+    %c0 = scalar.constant 0.0 : f32
+    %logits_view = buffer.view %logits[%origin] : buffer -> view<[%tokens]x512xf32>
+    %ids_view = buffer.view %ids[%origin] : buffer -> view<[%tokens]x10xi32>
+    %weights_view = buffer.view %weights[%origin] : buffer -> view<[%tokens]x10xf32>
+    %first_score = view.load %logits_view[%token, %thread] : view<[%tokens]x512xf32> -> f32
+    %second_score = view.load %logits_view[%token, %second] : view<[%tokens]x512xf32> -> f32
+    %leader = index.cmp eq, %thread, %c0_index : index
+    %unused_first, %unused_second = scf.for %selection = [%c0_index to %c10 step %c1](%first = %first_score : f32, %other = %second_score : f32) -> (f32, f32) {
+      %second_precedes = scalar.cmpf ogt, %other, %first : f32
+      %local_score = scf.select %second_precedes, %other, %first : f32
+      %local_id = scf.select %second_precedes, %second_id, %first_id : i32
+      %score = kernel.workgroup.reduce<maxnumf> %local_score : f32
+      %has_score = scalar.cmpf oeq, %local_score, %score : f32
+      %candidate_id = scf.select %has_score, %local_id, %largest_id : i32
+      %selected_id = kernel.workgroup.reduce<minui> %candidate_id : i32
+      scf.if %leader {
+        view.store %selected_id, %ids_view[%token, %selection] : i32, view<[%tokens]x10xi32>
+        view.store %score, %weights_view[%token, %selection] : f32, view<[%tokens]x10xf32>
+      }
+      %selected_first = scalar.cmpi eq, %selected_id, %first_id : i32
+      %selected_second = scalar.cmpi eq, %selected_id, %second_id : i32
+      %next_first = scf.select %selected_first, %negative_infinity, %first : f32
+      %next_second = scf.select %selected_second, %negative_infinity, %other : f32
+      scf.yield %next_first, %next_second : f32, f32
+    }
+    scf.if %leader {
+      %maximum = view.load %weights_view[%token, %c0_index] : view<[%tokens]x10xf32> -> f32
+      %sum = scf.for %selection = [%c0_index to %c10 step %c1](%total = %c0 : f32) -> (f32) {
+        %score = view.load %weights_view[%token, %selection] : view<[%tokens]x10xf32> -> f32
+        %shifted = scalar.subf %score, %maximum : f32
+        %exponential = scalar.expf<afn> %shifted : f32
+        view.store %exponential, %weights_view[%token, %selection] : f32, view<[%tokens]x10xf32>
+        %next = scalar.addf %total, %exponential : f32
+        scf.yield %next : f32
+      }
+      scf.for %selection = [%c0_index to %c10 step %c1] {
+        %exponential = view.load %weights_view[%token, %selection] : view<[%tokens]x10xf32> -> f32
+        %normalized = scalar.divf %exponential, %sum : f32
+        view.store %normalized, %weights_view[%token, %selection] : f32, view<[%tokens]x10xf32>
+      }
+    }
+  }
+  kernel.return
+}
+
+command.program.def public @flash_next_route(%layer: index) launch(%parameters: buffer, %span: buffer, %input: buffer, %ids: buffer, %weights: buffer, %shared_gate: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %row_bytes = index.constant 2048 : offset
+  %bytes = index.scale %tokens, %row_bytes : index, offset -> offset
+  %logits = buffer.alloca<global> align(256) %bytes : buffer
+  %route_weight = command.parameter %parameters, "blk.{}.ffn_gate_inp.weight"[%layer] : view<512x2560xf32>
+  %shared_weight = command.parameter %parameters, "blk.{}.ffn_gate_inp_shexp.weight"[%layer] : view<2560xf32>
+  kernel.launch @route_project(%span, %input, %route_weight, %shared_weight, %logits, %shared_gate) : (buffer, buffer, view<512x2560xf32>, view<2560xf32>, buffer, buffer)
+  kernel.launch @route_top10(%span, %logits, %ids, %weights) : (buffer, buffer, buffer, buffer)
+  command.return
+}

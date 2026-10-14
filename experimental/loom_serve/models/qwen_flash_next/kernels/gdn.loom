@@ -1,0 +1,302 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+amdgpu.target<gfx11-generic> @flash_next_gdn_wave32 {subgroup_size = 32}
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset)
+
+// Each wave owns 128 channels and carries three packed-input histories over
+// the complete span. Only the final histories are published to global memory.
+kernel.def target(@flash_next_gdn_wave32) @gdn_convolve() {
+  %groups = index.constant 20 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %convolved_arg: buffer, %norm_arg: buffer) {
+  %span, %origins, %qkv, %weight, %history, %convolved, %norm = buffer.assume.noalias %span_arg, %origins_arg, %qkv_arg, %weight_arg, %history_arg, %convolved_arg, %norm_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %span_index = kernel.workgroup.id<y> : index
+  %active = func.call @flash_next_span_active(%span, %span_index) : (buffer, index) -> (i1)
+  scf.if %active {
+    %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%span, %origins, %span_index, %layer_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
+    %origin = index.constant 0 : offset
+    %c0_index = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c2 = index.constant 2 : index
+    %c4 = index.constant 4 : index
+    %c32 = index.constant 32 : index
+    %width = index.constant 128 : index
+    %group = kernel.workgroup.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %head = index.madd %group, %c4, %wave : index
+    %lane_channel = index.mul %lane, %c4 : index
+    %channel = index.madd %head, %width, %lane_channel : index
+    %input_view = buffer.view %qkv[%origin] : buffer -> view<[%capacity]x10240xbf16>
+    %weight_view = buffer.view %weight[%origin] : buffer -> view<10240x4xf32>
+    %history_view = buffer.view %history[%reader] : buffer -> view<3x10240xbf16>
+    %write_history = buffer.view %history[%writer] : buffer -> view<3x10240xbf16>
+    %output_view = buffer.view %convolved[%origin] : buffer -> view<[%capacity]x10240xbf16>
+    %norm_view = buffer.view %norm[%origin] : buffer -> view<[%capacity]x32xf32>
+    %weights = vector.load %weight_view[%channel, %c0_index] : view<10240x4xf32> -> vector<4x4xf32>
+    %taps = vector.transpose<[1, 0]> %weights : vector<4x4xf32> -> vector<4x4xf32>
+    %weight0 = vector.extract %taps[0] : vector<4x4xf32> -> vector<4xf32>
+    %weight1 = vector.extract %taps[1] : vector<4x4xf32> -> vector<4xf32>
+    %weight2 = vector.extract %taps[2] : vector<4x4xf32> -> vector<4xf32>
+    %weight3 = vector.extract %taps[3] : vector<4x4xf32> -> vector<4xf32>
+    %initial0, %initial1, %initial2 = scf.if %fresh -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+      %c0v = vector.constant 0.0 : vector<4xf32>
+      scf.yield %c0v, %c0v, %c0v : vector<4xf32>, vector<4xf32>, vector<4xf32>
+    } else {
+      %stored0 = vector.load %history_view[%c0_index, %channel] : view<3x10240xbf16> -> vector<4xbf16>
+      %stored1 = vector.load %history_view[%c1, %channel] : view<3x10240xbf16> -> vector<4xbf16>
+      %stored2 = vector.load %history_view[%c2, %channel] : view<3x10240xbf16> -> vector<4xbf16>
+      %extended0 = vector.extf %stored0 : vector<4xbf16> to vector<4xf32>
+      %extended1 = vector.extf %stored1 : vector<4xbf16> to vector<4xf32>
+      %extended2 = vector.extf %stored2 : vector<4xbf16> to vector<4xf32>
+      scf.yield %extended0, %extended1, %extended2 : vector<4xf32>, vector<4xf32>, vector<4xf32>
+    }
+    %c0 = scalar.constant 0.0 : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %is_qk = index.cmp ult, %head, %c32 : index
+    %leader = index.cmp eq, %lane, %c0_index : index
+    %final0, %final1, %final2 = scf.for %token = [%begin to %end step %c1](%history0 = %initial0 : vector<4xf32>, %history1 = %initial1 : vector<4xf32>, %history2 = %initial2 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+      %stored = vector.load %input_view[%token, %channel] : view<[%capacity]x10240xbf16> -> vector<4xbf16>
+      %current = vector.extf %stored : vector<4xbf16> to vector<4xf32>
+      %product = vector.mulf %history0, %weight0 : vector<4xf32>
+      %sum1 = vector.fmaf %history1, %weight1, %product : vector<4xf32>
+      %sum2 = vector.fmaf %history2, %weight2, %sum1 : vector<4xf32>
+      %sum = vector.fmaf %current, %weight3, %sum2 : vector<4xf32>
+      %activated = vector.siluf<afn> %sum : vector<4xf32>
+      %packed = vector.fptrunc %activated : vector<4xf32> to vector<4xbf16>
+      vector.store %packed, %output_view[%token, %channel] : vector<4xbf16>, view<[%capacity]x10240xbf16>
+      scf.if %is_qk {
+        %published = vector.extf %packed : vector<4xbf16> to vector<4xf32>
+        %squares = vector.mulf %published, %published : vector<4xf32>
+        %partial = vector.reduce<addf> %squares, %c0 : vector<4xf32>, f32
+        %length_squared = kernel.subgroup.reduce<addf> %partial : f32
+        scf.if %leader {
+          %biased = scalar.addf %length_squared, %epsilon : f32
+          %inverse = scalar.rsqrtf<afn> %biased : f32
+          view.store %inverse, %norm_view[%token, %head] : f32, view<[%capacity]x32xf32>
+        }
+      }
+      scf.yield %history1, %history2, %current : vector<4xf32>, vector<4xf32>, vector<4xf32>
+    }
+    %packed0 = vector.fptrunc %final0 : vector<4xf32> to vector<4xbf16>
+    %packed1 = vector.fptrunc %final1 : vector<4xf32> to vector<4xbf16>
+    %packed2 = vector.fptrunc %final2 : vector<4xf32> to vector<4xbf16>
+    vector.store %packed0, %write_history[%c0_index, %channel] : vector<4xbf16>, view<3x10240xbf16>
+    vector.store %packed1, %write_history[%c1, %channel] : vector<4xbf16>, view<3x10240xbf16>
+    vector.store %packed2, %write_history[%c2, %channel] : vector<4xbf16>, view<3x10240xbf16>
+  }
+  kernel.return
+}
+
+// GGUF tiles V heads over K heads. Persistent state is [head, value, key]; a
+// wave retains four value columns as one 4x4 F32 tile per lane across the span.
+// The stored ssm_a is already -exp(A_log), not the original logarithm.
+kernel.def target(@flash_next_gdn_wave32) @gdn_recur() {
+  %heads = index.constant 48 : index
+  %columns = index.constant 32 : index
+  %lanes = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%heads, %columns, %spans) workgroup_size(%lanes, %c1, %c1) : index
+} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer) {
+  %span, %origins, %qkv, %norm, %alpha, %beta, %a, %bias, %state, %output = buffer.assume.noalias %span_arg, %origins_arg, %qkv_arg, %norm_arg, %alpha_arg, %beta_arg, %a_arg, %bias_arg, %state_arg, %output_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %span_index = kernel.workgroup.id<z> : index
+  %active = func.call @flash_next_span_active(%span, %span_index) : (buffer, index) -> (i1)
+  scf.if %active {
+    %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%span, %origins, %span_index, %layer_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
+    %c0_index = index.constant 0 : index
+    %c1_index = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c16 = index.constant 16 : index
+    %width = index.constant 128 : index
+    %key_origin = index.constant 2048 : index
+    %value_origin = index.constant 4096 : index
+    %origin = index.constant 0 : offset
+    %qkv_view = buffer.view %qkv[%origin] : buffer -> view<[%capacity]x10240xbf16>
+    %norm_view = buffer.view %norm[%origin] : buffer -> view<[%capacity]x32xf32>
+    %alpha_view = buffer.view %alpha[%origin] : buffer -> view<[%capacity]x48xf32>
+    %beta_view = buffer.view %beta[%origin] : buffer -> view<[%capacity]x48xf32>
+    %a_view = buffer.view %a[%origin] : buffer -> view<48xf32>
+    %bias_view = buffer.view %bias[%origin] : buffer -> view<48xf32>
+    %state_view = buffer.view %state[%reader] : buffer -> view<786432xf32>
+    %write_state = buffer.view %state[%writer] : buffer -> view<786432xf32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x6144xbf16>
+    %head = kernel.workgroup.id<x> : index
+    %tile = kernel.workgroup.id<y> : index
+    %lane = kernel.subgroup.lane.id : index
+    %key_head = index.rem %head, %c16 : index
+    %key_norm_index = index.add %key_head, %c16 : index
+    %query_channel = index.madd %key_head, %width, %lane : index
+    %key_channel = index.add %query_channel, %key_origin : index
+    %column_base = index.mul %tile, %c4 : index
+    %value_column = index.madd %head, %width, %column_base : index
+    %value_channel = index.add %value_column, %value_origin : index
+    %state_index = index.madd %value_column, %width, %lane : index
+    %c0_i32 = scalar.constant 0 : i32
+    %row_step = scalar.constant 32 : i32
+    %column_step = scalar.constant 128 : i32
+    %row_offsets = vector.iota %c0_i32 step %row_step : vector<4xi32>
+    %column_offsets = vector.iota %c0_i32 step %column_step : vector<4xi32>
+    %rows_broadcast = vector.broadcast %row_offsets : vector<4xi32> -> vector<4x4xi32>
+    %rows = vector.transpose<[1, 0]> %rows_broadcast : vector<4x4xi32> -> vector<4x4xi32>
+    %columns = vector.broadcast %column_offsets : vector<4xi32> -> vector<4x4xi32>
+    %state_offsets = vector.addi %rows, %columns : vector<4x4xi32>
+    %initial = scf.if %fresh -> (vector<4x4xf32>) {
+      %c0v = vector.constant 0.0 : vector<4x4xf32>
+      scf.yield %c0v : vector<4x4xf32>
+    } else {
+      %stored = vector.gather %state_view[%state_index][%state_offsets] : view<786432xf32>, vector<4x4xi32> -> vector<4x4xf32>
+      scf.yield %stored : vector<4x4xf32>
+    }
+    %stored_a = view.load %a_view[%head] : view<48xf32> -> f32
+    %stored_bias = view.load %bias_view[%head] : view<48xf32> -> f32
+    %query_factor = scalar.constant 0.088388347648318447 : f32
+    %c1 = scalar.constant 1.0 : f32
+    %empty_columns = vector.constant 0.0 : vector<4xf32>
+    %leader = index.cmp eq, %lane, %c0_index : index
+    %final = scf.for %token = [%begin to %end step %c1_index](%old = %initial : vector<4x4xf32>) -> (vector<4x4xf32>) {
+      %packed_query = vector.gather %qkv_view[%token, %query_channel][%row_offsets] : view<[%capacity]x10240xbf16>, vector<4xi32> -> vector<4xbf16>
+      %packed_key = vector.gather %qkv_view[%token, %key_channel][%row_offsets] : view<[%capacity]x10240xbf16>, vector<4xi32> -> vector<4xbf16>
+      %query_values = vector.extf %packed_query : vector<4xbf16> to vector<4xf32>
+      %key_values = vector.extf %packed_key : vector<4xbf16> to vector<4xf32>
+      %query_inverse = view.load %norm_view[%token, %key_head] : view<[%capacity]x32xf32> -> f32
+      %key_inverse = view.load %norm_view[%token, %key_norm_index] : view<[%capacity]x32xf32> -> f32
+      %query_scale = scalar.mulf %query_inverse, %query_factor : f32
+      %query_scales = vector.splat %query_scale : vector<4xf32>
+      %key_scales = vector.splat %key_inverse : vector<4xf32>
+      %query_rows = vector.mulf %query_values, %query_scales : vector<4xf32>
+      %key_rows = vector.mulf %key_values, %key_scales : vector<4xf32>
+      %query_broadcast = vector.broadcast %query_rows : vector<4xf32> -> vector<4x4xf32>
+      %query_tile = vector.transpose<[1, 0]> %query_broadcast : vector<4x4xf32> -> vector<4x4xf32>
+      %key_broadcast = vector.broadcast %key_rows : vector<4xf32> -> vector<4x4xf32>
+      %key_tile = vector.transpose<[1, 0]> %key_broadcast : vector<4x4xf32> -> vector<4x4xf32>
+      %alpha_value = view.load %alpha_view[%token, %head] : view<[%capacity]x48xf32> -> f32
+      %biased = scalar.addf %alpha_value, %stored_bias : f32
+      %positive = scalar.softplusf<afn> %biased : f32
+      %log_decay = scalar.mulf %positive, %stored_a : f32
+      %decay = scalar.expf<afn> %log_decay : f32
+      %decay_tile = vector.splat %decay : vector<4x4xf32>
+      %decayed = vector.mulf %old, %decay_tile : vector<4x4xf32>
+      %prediction_tile = vector.mulf %decayed, %key_tile : vector<4x4xf32>
+      %prediction_partial = vector.reduce.axes<addf> %prediction_tile, %empty_columns axes [0] : vector<4x4xf32>, vector<4xf32>
+      %prediction = kernel.subgroup.reduce<addf> %prediction_partial : vector<4xf32>
+      %packed_values = vector.load %qkv_view[%token, %value_channel] : view<[%capacity]x10240xbf16> -> vector<4xbf16>
+      %values = vector.extf %packed_values : vector<4xbf16> to vector<4xf32>
+      %beta_value = view.load %beta_view[%token, %head] : view<[%capacity]x48xf32> -> f32
+      %negative_beta = scalar.negf %beta_value : f32
+      %beta_exp = scalar.expf<afn> %negative_beta : f32
+      %beta_denominator = scalar.addf %c1, %beta_exp : f32
+      %beta_gate = scalar.divf %c1, %beta_denominator : f32
+      %beta_vector = vector.splat %beta_gate : vector<4xf32>
+      %residual = vector.subf %values, %prediction : vector<4xf32>
+      %delta = vector.mulf %residual, %beta_vector : vector<4xf32>
+      %delta_tile = vector.broadcast %delta : vector<4xf32> -> vector<4x4xf32>
+      %next = vector.fmaf %key_tile, %delta_tile, %decayed : vector<4x4xf32>
+      %output_tile = vector.mulf %next, %query_tile : vector<4x4xf32>
+      %output_partial = vector.reduce.axes<addf> %output_tile, %empty_columns axes [0] : vector<4x4xf32>, vector<4xf32>
+      %output_values = kernel.subgroup.reduce<addf> %output_partial : vector<4xf32>
+      scf.if %leader {
+        %packed_output = vector.fptrunc %output_values : vector<4xf32> to vector<4xbf16>
+        vector.store %packed_output, %output_view[%token, %value_column] : vector<4xbf16>, view<[%capacity]x6144xbf16>
+      }
+      scf.yield %next : vector<4x4xf32>
+    }
+    vector.scatter %final, %write_state[%state_index][%state_offsets] : vector<4x4xf32>, view<786432xf32>, vector<4x4xi32>
+  }
+  kernel.return
+}
+
+// Normalization and the model's sigmoid gate share the final BF16 publication.
+kernel.def target(@flash_next_gdn_wave32) @gdn_gate() {
+  %heads = index.constant 48 : index
+  %tokens = config.get @flash_next.token_count : index
+  %lanes = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %c1) workgroup_size(%lanes, %c1, %c1) : index
+} launch(%span_arg: buffer, %raw_arg: buffer, %z_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %span, %raw, %z, %weight, %output = buffer.assume.noalias %span_arg, %raw_arg, %z_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %head = kernel.workgroup.id<x> : index
+    %lane = kernel.subgroup.lane.id : index
+    %c4 = index.constant 4 : index
+    %width = index.constant 128 : index
+    %origin = index.constant 0 : offset
+    %component = index.mul %lane, %c4 : index
+    %channel = index.madd %head, %width, %component : index
+    %raw_view = buffer.view %raw[%origin] : buffer -> view<[%capacity]x6144xbf16>
+    %z_view = buffer.view %z[%origin] : buffer -> view<[%capacity]x6144xbf16>
+    %weight_view = buffer.view %weight[%origin] : buffer -> view<128xf32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x6144xbf16>
+    %packed_raw = vector.load %raw_view[%token, %channel] : view<[%capacity]x6144xbf16> -> vector<4xbf16>
+    %packed_z = vector.load %z_view[%token, %channel] : view<[%capacity]x6144xbf16> -> vector<4xbf16>
+    %values = vector.extf %packed_raw : vector<4xbf16> to vector<4xf32>
+    %z_values = vector.extf %packed_z : vector<4xbf16> to vector<4xf32>
+    %weights = vector.load %weight_view[%component] : view<128xf32> -> vector<4xf32>
+    %c0 = scalar.constant 0.0 : f32
+    %one_over_width = scalar.constant 0.0078125 : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %squares = vector.mulf %values, %values : vector<4xf32>
+    %partial = vector.reduce<addf> %squares, %c0 : vector<4xf32>, f32
+    %sum = kernel.subgroup.reduce<addf> %partial : f32
+    %mean = scalar.mulf %sum, %one_over_width : f32
+    %biased = scalar.addf %mean, %epsilon : f32
+    %inverse = scalar.rsqrtf<afn> %biased : f32
+    %inverses = vector.splat %inverse : vector<4xf32>
+    %unit = vector.mulf %values, %inverses : vector<4xf32>
+    %scaled = vector.mulf %unit, %weights : vector<4xf32>
+    %negative = vector.negf %z_values : vector<4xf32>
+    %exponential = vector.expf<afn> %negative : vector<4xf32>
+    %c1v = vector.constant 1.0 : vector<4xf32>
+    %denominator = vector.addf %c1v, %exponential : vector<4xf32>
+    %gated = vector.divf %scaled, %denominator : vector<4xf32>
+    %packed = vector.fptrunc %gated : vector<4xf32> to vector<4xbf16>
+    vector.store %packed, %output_view[%token, %channel] : vector<4xbf16>, view<[%capacity]x6144xbf16>
+  }
+  kernel.return
+}
+
+// A layer stores its F32 recurrence followed by three BF16 convolution rows.
+// Rows publish into a private writer selected by the retained-state pool. A
+// fresh conversation synthesizes zeros in registers without clearing storage.
+command.program.def public @flash_next_gdn_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %qkv: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer) where [range(%layer, 0, 47)] {
+  %tokens = config.get @flash_next.token_count : index
+  %qkv_row_bytes = index.constant 20480 : offset
+  %norm_row_bytes = index.constant 128 : offset
+  %value_row_bytes = index.constant 12288 : offset
+  %state_bytes = index.constant 3145728 : offset
+  %history_origin = index.add %state_origin, %state_bytes : offset
+  %qkv_bytes = index.scale %tokens, %qkv_row_bytes : index, offset -> offset
+  %norm_bytes = index.scale %tokens, %norm_row_bytes : index, offset -> offset
+  %value_bytes = index.scale %tokens, %value_row_bytes : index, offset -> offset
+  %convolved = buffer.alloca<global> align(256) %qkv_bytes : buffer
+  %inverse_norm = buffer.alloca<global> align(256) %norm_bytes : buffer
+  %raw = buffer.alloca<global> align(256) %value_bytes : buffer
+  %conv_weight = command.parameter %parameters, "blk.{}.ssm_conv1d.weight"[%layer] : view<10240x4xf32>
+  %a = command.parameter %parameters, "blk.{}.ssm_a"[%layer] : view<48xf32>
+  %bias = command.parameter %parameters, "blk.{}.ssm_dt.bias"[%layer] : view<48xf32>
+  %norm_weight = command.parameter %parameters, "blk.{}.ssm_norm.weight"[%layer] : view<128xf32>
+  kernel.launch @gdn_convolve(%epoch, %rows, %history_origin, %qkv, %conv_weight, %arena, %convolved, %inverse_norm) : (buffer, buffer, offset, buffer, view<10240x4xf32>, buffer, buffer, buffer)
+  kernel.launch @gdn_recur(%epoch, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %arena, %raw) : (buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
+  kernel.launch @gdn_gate(%epoch, %raw, %z, %norm_weight, %output) : (buffer, buffer, buffer, view<128xf32>, buffer)
+  command.return
+}

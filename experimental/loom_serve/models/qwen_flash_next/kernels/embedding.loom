@@ -1,0 +1,81 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+// Expands each selected GGML Q8_0 row directly into the four identical BF16
+// streams consumed by the first hyperconnection. A block contains an F16 scale
+// and 32 signed bytes. Their product is exact in F32; only publication rounds.
+// Token IDs are validated against the vocabulary before command submission.
+// Input, immutable weights, and output have disjoint storage. No intermediate
+// dense embedding or repeated weight image is materialized.
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+kernel.def @flash_next_embedding_q8_0() {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span: buffer, %token_ids: buffer, %weight: buffer, %residual: buffer) {
+  %ids_buffer, %weight_buffer, %residual_buffer = buffer.assume.noalias %token_ids, %weight, %residual : buffer, buffer, buffer
+  %tokens = config.get @flash_next.token_count : index
+  %token0 = kernel.workgroup.id<x> : index
+  %token = index.assume %token0 [lt(%token0, %tokens)] : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %thread0 = kernel.workitem.id<x> : index
+    %thread = index.assume %thread0 [range(%thread0, 0, 255)] : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %threads = index.constant 256 : index
+    %words = index.constant 640 : index
+    %origin = index.constant 0 : offset
+    %row_bytes = index.constant 2720 : offset
+    %block_bytes = index.constant 34 : offset
+    %word_bytes = index.constant 4 : offset
+    %scale_bytes = index.constant 2 : offset
+    %ids = buffer.view %ids_buffer[%origin] : buffer -> view<[%tokens]xi32>
+    %output = buffer.view %residual_buffer[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+    %id_i32 = view.load %ids[%token] : view<[%tokens]xi32> -> i32
+    %id0 = index.cast %id_i32 : i32 to index
+    %id = index.assume %id0 [range(%id0, 0, 248319)] : index
+    %row = index.scale %id, %row_bytes : index, offset -> offset
+    scf.for %word = [%thread to %words step %threads] {
+      %block = index.div %word, %c8 : index
+      %block_word = index.rem %word, %c8 : index
+      %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+      %block_origin = index.add %row, %block_delta : offset
+      %word_delta = index.scale %block_word, %word_bytes : index, offset -> offset
+      %payload = index.add %block_origin, %scale_bytes : offset
+      %word_origin = index.add %payload, %word_delta : offset
+      %scale_view = buffer.view %weight_buffer[%block_origin] : buffer -> view<1xf16>
+      %code_view = buffer.view %weight_buffer[%word_origin] : buffer -> view<4xi8>
+      %scale_f16 = view.load %scale_view[%c0] : view<1xf16> -> f16
+      %scale = scalar.extf %scale_f16 : f16 to f32
+      %codes = vector.load %code_view[%c0] : view<4xi8> -> vector<4xi8>
+      %values = vector.sitofp %codes : vector<4xi8> to vector<4xf32>
+      %scales = vector.splat %scale : vector<4xf32>
+      %expanded = vector.mulf %values, %scales : vector<4xf32>
+      %packed = vector.fptrunc %expanded : vector<4xf32> to vector<4xbf16>
+      %channel = index.mul %word, %c4 : index
+      scf.for %stream = [%c0 to %c4 step %c1] {
+        vector.store %packed, %output[%token, %stream, %channel] : vector<4xbf16>, view<[%tokens]x4x2560xbf16>
+      }
+    }
+  }
+  kernel.return
+}
+
+// The checkpoint keeps 80 Q8_0 blocks per vocabulary row. Command reflection
+// owns the immutable allocation and the loader supplies its original bytes.
+command.program.def public @flash_next_embed() launch(%parameters: buffer, %span: buffer, %token_ids: buffer, %residual: buffer) {
+  %embedding = command.parameter %parameters, "token_embd.weight" : view<675430400xi8>
+  kernel.launch @flash_next_embedding_q8_0(%span, %token_ids, %embedding, %residual) : (buffer, buffer, view<675430400xi8>, buffer)
+  command.return
+}

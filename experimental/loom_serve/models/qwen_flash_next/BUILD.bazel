@@ -1,0 +1,43 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+
+package(default_visibility = ["//visibility:private"])
+
+loom_library(
+    name = "residual_programs",
+    srcs = glob([
+        "kernels/*.loom",
+        "programs/*.loom",
+    ]) + [
+        "//experimental/loom_serve/motifs/ggml:sources",
+    ],
+)
+
+loom_test(
+    name = "gdn_test",
+    srcs = ["tests/gdn.loom"],
+    benchmark_smoke = False,
+    configs = {"flash_next.token_count": "5"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
+    name = "quantized_test",
+    srcs = ["tests/quantized.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
