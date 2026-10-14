@@ -129,16 +129,20 @@ kernel.def @fixture() {
     %selection_value = index.madd %relative, %c4, %c1 : index
     %selection = scf.select %known, %c0, %selection_value : index
     %selection_word = index.cast %selection : index to i32
+    %shift = scalar.constant 10 : i32
+    %source_bits = scalar.shli %position_word, %shift : i32
+    %selection_code = scalar.addi %selection_word, %c1_i32 : i32
+    %descriptor_word = scalar.ori %source_bits, %selection_code : i32
     view.store %length_word, %descriptors[%span, 0] : i32, view<5x5xi32>
     view.store %position_word, %descriptors[%span, 1] : i32, view<5x5xi32>
     view.store %begin_word, %descriptors[%span, 2] : i32, view<5x5xi32>
     view.store %row_word, %descriptors[%span, 3] : i32, view<5x5xi32>
-    view.store %selection_word, %descriptors[%span, 4] : i32, view<5x5xi32>
+    view.store %descriptor_word, %descriptors[%span, 4] : i32, view<5x5xi32>
     view.store %consumed_word, %accepted[%span, 0] : i32, view<5x5xi32>
     view.store %position_word, %accepted[%span, 1] : i32, view<5x5xi32>
     view.store %begin_word, %accepted[%span, 2] : i32, view<5x5xi32>
     view.store %row_word, %accepted[%span, 3] : i32, view<5x5xi32>
-    view.store %none, %accepted[%span, 4] : i32, view<5x5xi32>
+    view.store %source_bits, %accepted[%span, 4] : i32, view<5x5xi32>
     %flag = scf.select %known, %c0_i32, %c1_i32 : i32
     %credit = scalar.constant 4 : i32
     view.store %flag, %options[%span, 0] : i32, view<5x2xi32>

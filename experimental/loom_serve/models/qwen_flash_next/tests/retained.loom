@@ -66,7 +66,9 @@ kernel.def @fixture() {
     view.store %position_word, %descriptors[%row, 1] : i32, view<3x5xi32>
     view.store %begin_word, %descriptors[%row, 2] : i32, view<3x5xi32>
     view.store %row_word, %descriptors[%row, 3] : i32, view<3x5xi32>
-    view.store %c0_i32, %descriptors[%row, 4] : i32, view<3x5xi32>
+    %shift = scalar.constant 10 : i32
+    %source_bits = scalar.shli %position_word, %shift : i32
+    view.store %source_bits, %descriptors[%row, 4] : i32, view<3x5xi32>
     %writer_slot = index.add %row, %c1 : index
     %writer_offset = index.scale %writer_slot, %slot_bytes : index, offset -> offset
     %writer = index.cast %writer_offset : offset to i64
