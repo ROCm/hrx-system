@@ -89,6 +89,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/codegen/low/allocation:unit_location",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/error:x86_error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",

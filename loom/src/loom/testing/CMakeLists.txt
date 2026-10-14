@@ -142,7 +142,7 @@ loom_cc_library(
     iree::testing::gtest
     loom::error::diagnostic
     loom::error::emitter
-    loom::error::error_defs
+    loom::error::parameter
   TESTONLY
   PUBLIC
 )

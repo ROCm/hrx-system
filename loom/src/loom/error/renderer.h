@@ -38,7 +38,7 @@
 #define LOOM_ERROR_RENDERER_H_
 
 #include "iree/base/api.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/util/stream.h"
 
 #ifdef __cplusplus

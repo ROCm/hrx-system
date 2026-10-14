@@ -8,7 +8,7 @@
 #define LOOM_FORMAT_TEXT_PARSER_DIAGNOSTICS_H_
 
 #include "iree/base/api.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/format/text/parser/context.h"
 
 #ifdef __cplusplus

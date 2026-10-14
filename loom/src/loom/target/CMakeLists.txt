@@ -507,6 +507,7 @@ loom_cc_library(
     loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::target
@@ -556,7 +557,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::descriptors
-    loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::func
     loom::util::fact_table
@@ -628,6 +629,7 @@ loom_cc_library(
     loom::analysis::view_regions
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::buffer
     loom::ops::cfg
@@ -656,6 +658,7 @@ loom_cc_library(
     loom::codegen::low::packet
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
   PUBLIC
 )
@@ -859,7 +862,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts
-    loom::error::error_defs
+    loom::error::parameter
     loom::error::source
     loom::format::text::parser
     loom::ir

@@ -436,7 +436,7 @@ loom_cc_test(
     ::report
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::op_defs
     loom::ops::test

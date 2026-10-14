@@ -130,6 +130,7 @@ loom_cc_library(
     loom::codegen::low::storage_relation
     loom::codegen::low::target_binding
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::low
     loom::ops::op_defs
@@ -160,6 +161,7 @@ loom_cc_library(
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::target_binding
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::global

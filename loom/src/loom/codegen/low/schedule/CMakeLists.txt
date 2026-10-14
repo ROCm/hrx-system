@@ -190,6 +190,7 @@ loom_cc_library(
     loom::codegen::low::text_asm
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::low
     loom::ops::op_defs

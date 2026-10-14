@@ -14,7 +14,7 @@
 #include "iree/testing/gtest.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/emitter.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 
 namespace loom::testing {
 

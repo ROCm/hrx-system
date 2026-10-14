@@ -8,6 +8,7 @@
 
 #include "iree/base/alignment.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 
 static uint8_t loom_task_parameter_size(loom_type_t type,

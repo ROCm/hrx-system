@@ -17,6 +17,7 @@
 #include "loom/codegen/low/register_parts.h"
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"

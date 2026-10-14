@@ -38,6 +38,7 @@ loom_generated_cc_library(
   DEPS
     iree::base::core_headers
     loom::error::error_defs
+    loom::error::parameter
     loom::format::location
     loom::ir
     loom::ops::callable_effects

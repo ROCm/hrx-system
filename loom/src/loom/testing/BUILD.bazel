@@ -125,7 +125,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:emitter",
-        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
     ],

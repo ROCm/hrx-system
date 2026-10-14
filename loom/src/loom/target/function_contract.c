@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/facts_builder.h"

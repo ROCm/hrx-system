@@ -10,6 +10,7 @@
 
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/analysis/view_regions.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"

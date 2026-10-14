@@ -392,7 +392,7 @@ loom_cc_test(
         ":interpreter",
         ":program",
         ":report",
-        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/test",

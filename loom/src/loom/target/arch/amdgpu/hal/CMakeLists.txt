@@ -24,6 +24,7 @@ loom_cc_library(
     loom::codegen::low::function
     loom::codegen::low::representation_binding
     loom::error::emitter
+    loom::error::parameter
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::error_defs

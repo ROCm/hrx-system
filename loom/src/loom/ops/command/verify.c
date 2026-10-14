@@ -8,6 +8,7 @@
 
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ops/command/ops.h"
 #include "loom/ops/function_contract_verify.h"

@@ -746,6 +746,7 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::codegen::low::storage_layout
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::refs::target_refs

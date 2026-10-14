@@ -10,7 +10,7 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "test/util.h"
 
 namespace {

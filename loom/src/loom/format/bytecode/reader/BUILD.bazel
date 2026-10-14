@@ -578,6 +578,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/format/bytecode:diagnostic",
         "//loom/src/loom/format/bytecode:varint",
         "//runtime/src/iree/base",

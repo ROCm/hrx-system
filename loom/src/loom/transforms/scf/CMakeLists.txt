@@ -109,6 +109,7 @@ loom_cc_library(
     iree::base
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ops::index
@@ -139,6 +140,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::cfg
     loom::ops::index
@@ -167,6 +169,7 @@ loom_cc_library(
     iree::base
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ops::index
@@ -197,6 +200,7 @@ loom_cc_library(
     loom::analysis::movement
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::op_defs
     loom::ops::scf

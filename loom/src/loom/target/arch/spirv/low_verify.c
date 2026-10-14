@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"

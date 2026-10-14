@@ -9,6 +9,7 @@
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 
 static iree_status_t loom_low_allocation_emit_failure(

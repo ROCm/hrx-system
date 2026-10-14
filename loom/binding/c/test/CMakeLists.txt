@@ -113,7 +113,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::binding::c::loomc
     loom::binding::c::test::testdata::diagnostic_testdata
-    loom::error::error_defs
+    loom::error::parameter
     loom::ir
 )
 
@@ -127,7 +127,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::binding::c::loomc
-    loom::error::error_defs
+    loom::error::parameter
 )
 
 loom_cc_test(
@@ -319,7 +319,7 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
     loom::binding::c::loomc
-    loom::error::error_defs
+    loom::error::parameter
     loom::ops::op_defs
     loom::ops::test
     loom::target::function_version

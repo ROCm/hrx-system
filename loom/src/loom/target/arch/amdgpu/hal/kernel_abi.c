@@ -11,6 +11,7 @@
 
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/representation_binding.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"

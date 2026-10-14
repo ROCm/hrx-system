@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/ops/target.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ops/target/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"

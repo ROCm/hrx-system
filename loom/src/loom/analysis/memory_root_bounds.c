@@ -7,6 +7,7 @@
 #include "loom/analysis/memory_root_bounds.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 
 static iree_string_view_t loom_memory_root_bounds_op_name(

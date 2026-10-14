@@ -77,6 +77,7 @@ loom_generated_cc_library(
         ":op_defs",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:combining",

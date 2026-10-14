@@ -12,7 +12,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/error/renderer.h"
 
 namespace loom {

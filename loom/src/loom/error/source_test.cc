@@ -11,7 +11,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/linker.h"

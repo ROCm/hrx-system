@@ -13,7 +13,7 @@
 #include "iree/base/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/temp_file.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"

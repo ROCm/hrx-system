@@ -23,7 +23,7 @@
 #define LOOM_FORMAT_TEXT_LOW_ASM_H_
 
 #include "iree/base/api.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/format/low_repr.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/op_defs.h"

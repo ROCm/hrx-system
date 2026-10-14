@@ -13,7 +13,7 @@
 #include "iree/testing/gtest.h"
 #include "loom/binding/c/src/product.h"
 #include "loom/binding/c/test/testdata/diagnostic_testdata.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loomc/context.h"
 #include "loomc/module.h"
 #include "loomc/pass.h"

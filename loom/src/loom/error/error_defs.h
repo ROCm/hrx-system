@@ -26,8 +26,6 @@
 #define LOOM_ERROR_ERROR_DEFS_H_
 
 #include "iree/base/api.h"
-#include "loom/error/emitter.h"
-#include "loom/ir/types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -308,102 +306,6 @@ static inline const char* loom_error_def_param_name(
 static inline loom_param_kind_t loom_error_def_param_kind(
     const loom_error_def_t* error, iree_host_size_t index) {
   return loom_error_param_def_kind(loom_error_def_param(error, index));
-}
-
-typedef struct loom_diagnostic_string_list_t {
-  // Values in stable display and serialization order.
-  const iree_string_view_t* values;
-  // Number of values in the list.
-  iree_host_size_t count;
-} loom_diagnostic_string_list_t;
-
-// A runtime parameter value matching an error definition's parameter entry.
-// The kind is redundant with the def but avoids chasing the def pointer
-// during rendering.
-typedef struct loom_diagnostic_param_t {
-  loom_param_kind_t kind;  // Active parameter value variant.
-  // Optional structured metadata describing the op field this param names.
-  loom_diagnostic_field_ref_t field_ref;
-  union {
-    iree_string_view_t string;                  // LOOM_PARAM_STRING payload.
-    int64_t i64;                                // LOOM_PARAM_I64 payload.
-    uint32_t u32;                               // LOOM_PARAM_U32 payload.
-    bool boolean;                               // LOOM_PARAM_BOOL payload.
-    loom_type_t type;                           // LOOM_PARAM_TYPE payload.
-    uint64_t u64;                               // LOOM_PARAM_U64 payload.
-    loom_diagnostic_string_list_t string_list;  // LOOM_PARAM_STRING_LIST.
-  };
-} loom_diagnostic_param_t;
-
-// Inline constructors for diagnostic params. Portable across C and C++
-// without relying on designated initializers for anonymous union members.
-
-static inline loom_diagnostic_param_t loom_param_string(
-    iree_string_view_t value) {
-  loom_diagnostic_param_t param;
-  memset(&param, 0, sizeof(param));
-  param.kind = LOOM_PARAM_STRING;
-  param.string = value;
-  return param;
-}
-
-static inline loom_diagnostic_param_t loom_param_i64(int64_t value) {
-  loom_diagnostic_param_t param;
-  memset(&param, 0, sizeof(param));
-  param.kind = LOOM_PARAM_I64;
-  param.i64 = value;
-  return param;
-}
-
-static inline loom_diagnostic_param_t loom_param_u32(uint32_t value) {
-  loom_diagnostic_param_t param;
-  memset(&param, 0, sizeof(param));
-  param.kind = LOOM_PARAM_U32;
-  param.u32 = value;
-  return param;
-}
-
-static inline loom_diagnostic_param_t loom_param_u64(uint64_t value) {
-  loom_diagnostic_param_t param;
-  memset(&param, 0, sizeof(param));
-  param.kind = LOOM_PARAM_U64;
-  param.u64 = value;
-  return param;
-}
-
-static inline loom_diagnostic_param_t loom_param_string_list(
-    const iree_string_view_t* values, iree_host_size_t count) {
-  loom_diagnostic_param_t param;
-  memset(&param, 0, sizeof(param));
-  param.kind = LOOM_PARAM_STRING_LIST;
-  param.string_list.values = values;
-  param.string_list.count = count;
-  return param;
-}
-
-static inline loom_diagnostic_param_t loom_param_bool(bool value) {
-  loom_diagnostic_param_t param;
-  memset(&param, 0, sizeof(param));
-  param.kind = LOOM_PARAM_BOOL;
-  param.boolean = value;
-  return param;
-}
-
-static inline loom_diagnostic_param_t loom_param_type(loom_type_t value) {
-  loom_diagnostic_param_t param;
-  memset(&param, 0, sizeof(param));
-  param.kind = LOOM_PARAM_TYPE;
-  param.type = value;
-  return param;
-}
-
-// Attaches structured field-ref metadata to an existing diagnostic parameter.
-// The parameter's rendered value remains unchanged; sinks can consume the
-// metadata for highlighting and machine-oriented JSON metadata.
-static inline loom_diagnostic_param_t loom_param_with_field_ref(
-    loom_diagnostic_param_t param, loom_diagnostic_field_ref_t field_ref) {
-  param.field_ref = field_ref;
-  return param;
 }
 
 // Returns the error def for a (domain, code) pair in |catalog|'s fallback

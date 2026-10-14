@@ -90,6 +90,7 @@ loom_cc_library(
     loom::codegen::low::frame
     loom::codegen::low::packet
     loom::codegen::low::storage_layout
+    loom::error::parameter
     loom::error::x86_error_defs
     loom::ir
     loom::ops::low

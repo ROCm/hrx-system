@@ -7,6 +7,7 @@
 #include "loom/ops/cache.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 
 loom_cache_policy_t loom_cache_policy_cast(const loom_module_t* module,

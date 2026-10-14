@@ -10,7 +10,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/error/source.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"

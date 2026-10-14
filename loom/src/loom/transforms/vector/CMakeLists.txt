@@ -165,6 +165,7 @@ loom_cc_library(
     loom::analysis::matrix_fragment_layout
     loom::analysis::motion
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::combining
     loom::ops::encoding

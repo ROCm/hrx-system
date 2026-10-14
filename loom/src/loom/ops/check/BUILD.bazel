@@ -32,6 +32,7 @@ loom_generated_cc_library(
     deps = [
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:function_contract_verify",
         "//loom/src/loom/ops:op_defs",

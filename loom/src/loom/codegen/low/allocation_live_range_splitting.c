@@ -12,6 +12,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/representation_binding.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/rewriter.h"

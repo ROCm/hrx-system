@@ -8,6 +8,7 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/storage_layout.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/type_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"

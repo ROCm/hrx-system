@@ -1116,6 +1116,7 @@ loom_cc_library(
     loom::codegen::low::target_binding
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::low
     loom::target::registers
@@ -1394,6 +1395,7 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
   PUBLIC
 )

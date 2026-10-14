@@ -22,6 +22,7 @@ loom_cc_library(
     iree::base::internal::arena
     iree::hal::drivers::task::executable::library::abi
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
   PUBLIC
 )

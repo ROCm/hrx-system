@@ -10,6 +10,7 @@
 
 #include "iree/base/alignment.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/format/location.h"
 #include "loom/ir/context.h"
 #include "loom/ops/func/ops.h"

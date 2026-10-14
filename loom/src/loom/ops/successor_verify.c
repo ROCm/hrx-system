@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
 

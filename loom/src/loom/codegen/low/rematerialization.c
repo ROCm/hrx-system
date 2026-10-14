@@ -17,6 +17,7 @@
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/ops/op_defs.h"

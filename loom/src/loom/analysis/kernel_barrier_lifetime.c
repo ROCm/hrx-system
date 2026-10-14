@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"

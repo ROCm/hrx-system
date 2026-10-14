@@ -58,6 +58,7 @@ loom_cc_library(
     loom::codegen::low::pipeline::pass_environment
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::index
     loom::ops::kernel

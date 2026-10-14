@@ -10,6 +10,7 @@
 #include "loom/analysis/control_uniformity.h"
 #include "loom/analysis/movement.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/kernel/launch_config.h"

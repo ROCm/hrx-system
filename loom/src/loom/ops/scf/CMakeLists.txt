@@ -129,6 +129,7 @@ loom_generated_cc_library(
     loom::analysis::condition_facts
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ops::op_defs

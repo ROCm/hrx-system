@@ -7,6 +7,7 @@
 #include "loom/ops/view/access_verifier.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 
 static iree_status_t loom_view_access_verify_emit(

@@ -12,6 +12,7 @@
 #include "loom/analysis/movement.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"

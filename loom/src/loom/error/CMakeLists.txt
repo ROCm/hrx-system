@@ -28,7 +28,7 @@ loom_cc_library(
     "diagnostic.c"
   DEPS
     ::emitter
-    ::error_defs
+    ::parameter
     ::renderer
     iree::base
     loom::util::stream
@@ -42,7 +42,7 @@ loom_cc_test(
     "diagnostic_test.cc"
   DEPS
     ::diagnostic
-    ::error_defs
+    ::parameter
     ::renderer
     iree::testing::gtest
     iree::testing::gtest_main
@@ -71,7 +71,7 @@ loom_cc_test(
   SRCS
     "source_test.cc"
   DEPS
-    ::error_defs
+    ::parameter
     ::source
     iree::base
     iree::base::internal::arena
@@ -107,9 +107,7 @@ loom_generated_cc_library(
   EXTRA_OUTPUTS
     "error_catalog.json"
   DEPS
-    ::emitter
     iree::base
-    loom::ir
 )
 
 loom_generated_cc_library(
@@ -167,8 +165,8 @@ loom_cc_test(
   SRCS
     "json_sink_test.cc"
   DEPS
-    ::error_defs
     ::json_sink
+    ::parameter
     iree::testing::gtest
     iree::testing::gtest_main
     loom::util::stream
@@ -182,7 +180,7 @@ loom_cc_library(
   SRCS
     "renderer.c"
   DEPS
-    ::error_defs
+    ::parameter
     iree::base
     loom::util::stream
   PUBLIC
@@ -199,6 +197,19 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::util::stream
+)
+
+loom_cc_library(
+  NAME
+    parameter
+  HDRS
+    "parameter.h"
+  DEPS
+    ::emitter
+    ::error_defs
+    iree::base
+    loom::ir
+  PUBLIC
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -45,6 +45,7 @@ loom_generated_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::callable_effects
     loom::ops::func_symbol_facts

@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ops/encoding/auxiliary.h"
 #include "loom/ops/encoding/operand.h"

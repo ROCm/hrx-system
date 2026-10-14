@@ -7,6 +7,7 @@
 #include "loom/ops/low/schedule_scope.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 
 iree_status_t loom_low_schedule_scope_builder_append(

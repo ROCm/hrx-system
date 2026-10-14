@@ -33,7 +33,7 @@
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/representation_plan.h"
 #include "loom/error/emitter.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"

@@ -21,6 +21,7 @@
 #include "loom/analysis/symbolic_projection.h"
 #include "loom/analysis/vector_memory_mask_bounds.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"

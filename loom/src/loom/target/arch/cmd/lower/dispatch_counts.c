@@ -7,6 +7,7 @@
 #include "loom/target/arch/cmd/lower/dispatch_counts.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/command/ops.h"

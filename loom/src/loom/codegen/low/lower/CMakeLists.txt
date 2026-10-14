@@ -114,6 +114,7 @@ loom_cc_library(
     loom::decision::predicate
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ir::symbol_map

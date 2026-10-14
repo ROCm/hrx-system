@@ -350,6 +350,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::diagnostics
     loom::codegen::low::verify
+    loom::error::parameter
     loom::ir
     loom::ops::low
     loom::target::arch::spirv::descriptors

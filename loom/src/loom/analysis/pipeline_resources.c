@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"

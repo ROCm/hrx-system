@@ -40,6 +40,7 @@ loom_generated_cc_library(
     loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::op_defs
     loom::target::condition

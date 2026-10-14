@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/target/ops.h"

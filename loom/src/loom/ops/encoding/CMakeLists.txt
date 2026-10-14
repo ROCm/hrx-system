@@ -55,6 +55,7 @@ loom_generated_cc_library(
     iree::base
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::op_defs
     loom::rewrite::rewriter
@@ -169,7 +170,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::diagnostic
-    loom::error::error_defs
+    loom::error::parameter
     loom::format::text::parser
     loom::ir
     loom::ops::func

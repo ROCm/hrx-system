@@ -8,6 +8,7 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 
 struct loom_target_low_packet_diagnostic_context_t {
   // Emission frame being diagnosed.

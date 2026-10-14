@@ -435,6 +435,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu:facts",
         "//loom/src/loom/target/arch/amdgpu/encoding",

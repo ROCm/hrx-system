@@ -11,6 +11,7 @@
 
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"

@@ -40,6 +40,7 @@ loom_generated_cc_library(
   DEPS
     iree::base
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::op_defs
     loom::ops::target

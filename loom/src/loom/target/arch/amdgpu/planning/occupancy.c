@@ -11,6 +11,7 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/occupancy_model.h"

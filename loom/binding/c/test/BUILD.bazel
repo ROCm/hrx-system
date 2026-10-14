@@ -111,7 +111,7 @@ loom_cc_test(
         ":test_util",
         "//loom/binding/c:loomc",
         "//loom/binding/c/test/testdata:diagnostic_testdata",
-        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -124,7 +124,7 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
-        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -301,7 +301,7 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
-        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target:function_version",

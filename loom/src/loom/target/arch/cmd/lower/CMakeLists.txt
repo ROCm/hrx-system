@@ -39,6 +39,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ops::buffer
@@ -108,6 +109,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ops::buffer

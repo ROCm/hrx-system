@@ -36,6 +36,7 @@ loom_generated_cc_library(
     iree::base
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ops::function_contract_verify

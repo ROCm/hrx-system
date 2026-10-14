@@ -247,6 +247,7 @@ loom_cc_library(
     loom::analysis::symbol_references
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::func
     loom::ops::kernel

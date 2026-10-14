@@ -50,6 +50,7 @@ loom_cc_library(
     loom::analysis::symbol_references
     loom::error::diagnostic
     loom::error::error_defs
+    loom::error::parameter
     loom::error::renderer
     loom::format::text::low_asm
     loom::format::text::tokenizer

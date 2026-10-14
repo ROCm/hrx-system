@@ -317,6 +317,7 @@ loom_cc_library(
     loom::codegen::low::packet
     loom::codegen::low::verify
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::func
     loom::ops::global
@@ -390,6 +391,7 @@ loom_cc_library(
     loom::codegen::low::storage_layout
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ops::combining
@@ -581,6 +583,7 @@ loom_cc_library(
     iree::base
     loom::analysis::symbolic_expr
     loom::analysis::view_regions
+    loom::error::parameter
     loom::ir
     loom::ops::buffer
     loom::ops::channel
@@ -626,6 +629,7 @@ loom_cc_library(
     loom::analysis::storage_geometry
     loom::codegen::low::builder
     loom::codegen::low::launch_config_program
+    loom::error::parameter
     loom::ir
     loom::ops::buffer
     loom::ops::channel

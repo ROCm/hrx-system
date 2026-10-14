@@ -109,6 +109,7 @@ loom_cc_library(
     iree::base
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::target::condition
     loom::target::projection
@@ -213,6 +214,7 @@ loom_cc_library(
     iree::base
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
   PUBLIC
 )
@@ -240,6 +242,7 @@ loom_cc_library(
     iree::base
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
   PUBLIC
 )

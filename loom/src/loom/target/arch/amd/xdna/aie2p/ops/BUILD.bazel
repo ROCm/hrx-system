@@ -40,6 +40,7 @@ loom_generated_cc_library(
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:__pkg__"],
     deps = [
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",

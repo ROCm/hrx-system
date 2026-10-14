@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ops/atomic.h"
 #include "loom/ops/index/ops.h"

@@ -8,6 +8,7 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"

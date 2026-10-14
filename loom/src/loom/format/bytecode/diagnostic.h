@@ -16,7 +16,7 @@
 
 #include "iree/base/api.h"
 #include "loom/error/diagnostic.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 
 #ifdef __cplusplus
 extern "C" {

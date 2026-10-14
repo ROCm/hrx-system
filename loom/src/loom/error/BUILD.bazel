@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_generated_cc_library")
 
 package(
@@ -26,7 +27,7 @@ loom_cc_library(
     hdrs = ["diagnostic.h"],
     deps = [
         ":emitter",
-        ":error_defs",
+        ":parameter",
         ":renderer",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
@@ -38,7 +39,7 @@ loom_cc_test(
     srcs = ["diagnostic_test.cc"],
     deps = [
         ":diagnostic",
-        ":error_defs",
+        ":parameter",
         ":renderer",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/testing:gtest",
@@ -63,7 +64,7 @@ loom_cc_test(
     name = "source_test",
     srcs = ["source_test.cc"],
     deps = [
-        ":error_defs",
+        ":parameter",
         ":source",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:linker",
@@ -102,8 +103,6 @@ loom_generated_cc_library(
     generator = "//loom/py/loom/gen/error:c_errors",
     source = "error_catalog.c",
     deps = [
-        ":emitter",
-        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
     ],
 )
@@ -153,8 +152,8 @@ loom_cc_test(
     name = "json_sink_test",
     srcs = ["json_sink_test.cc"],
     deps = [
-        ":error_defs",
         ":json_sink",
+        ":parameter",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -166,7 +165,7 @@ loom_cc_library(
     srcs = ["renderer.c"],
     hdrs = ["renderer.h"],
     deps = [
-        ":error_defs",
+        ":parameter",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
     ],
@@ -182,4 +181,28 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+loom_cc_library(
+    name = "parameter",
+    hdrs = ["parameter.h"],
+    deps = [
+        ":emitter",
+        ":error_defs",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "error_defs_has_no_compiler_dependencies",
+    forbidden_subtrees = [
+        "//loom/src/loom/codegen/...",
+        "//loom/src/loom/format/...",
+        "//loom/src/loom/ir/...",
+        "//loom/src/loom/ops/...",
+        "//loom/src/loom/target/...",
+    ],
+    message = "Error catalogs describe immutable diagnostic metadata independently of compiler IR and runtime parameter values",
+    target = ":error_defs",
 )

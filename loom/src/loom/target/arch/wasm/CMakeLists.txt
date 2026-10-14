@@ -38,6 +38,7 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::codegen::low::verify
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::low
     loom::target::arch::wasm::descriptors::descriptors_ids

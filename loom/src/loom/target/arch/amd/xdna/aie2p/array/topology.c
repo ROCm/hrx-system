@@ -11,6 +11,7 @@
 #include "loom/analysis/scc.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/facts.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"

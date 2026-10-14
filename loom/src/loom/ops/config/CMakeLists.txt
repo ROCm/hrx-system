@@ -38,6 +38,7 @@ loom_generated_cc_library(
     loom::analysis::symbol_value_constraints
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ops::encoding

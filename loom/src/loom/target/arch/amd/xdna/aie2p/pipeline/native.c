@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 
 #include "loom/analysis/storage_geometry.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/pipeline/ops.h"

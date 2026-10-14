@@ -12,6 +12,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"

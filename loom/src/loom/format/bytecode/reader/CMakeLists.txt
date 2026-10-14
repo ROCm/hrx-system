@@ -621,6 +621,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::error::error_defs
+    loom::error::parameter
     loom::format::bytecode::diagnostic
     loom::format::bytecode::varint
   PUBLIC

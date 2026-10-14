@@ -10,6 +10,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 
 static bool loom_low_addressability_assignment_exceeds_operand_range(
     const loom_low_operand_t* operand,

@@ -20,7 +20,7 @@
 
 #include "iree/base/api.h"
 #include "loom/error/emitter.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/contract.h"

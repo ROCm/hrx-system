@@ -52,6 +52,7 @@ loom_cc_library(
     iree::base
     loom::error::diagnostic
     loom::error::error_defs
+    loom::error::parameter
   PUBLIC
 )
 

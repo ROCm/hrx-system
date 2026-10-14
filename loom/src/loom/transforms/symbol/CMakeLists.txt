@@ -110,6 +110,7 @@ loom_cc_library(
     loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::func
     loom::ops::op_defs
@@ -303,6 +304,7 @@ loom_cc_library(
     loom::analysis::scc
     loom::analysis::type_refinement
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ir::facts
     loom::ir::type_refinement

@@ -24,7 +24,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/descriptors.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/func/ops.h"

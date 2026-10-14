@@ -10,6 +10,7 @@
 #include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/storage_layout.h"
+#include "loom/error/parameter.h"
 #include "loom/error/x86_error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"

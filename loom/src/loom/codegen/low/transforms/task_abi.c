@@ -9,6 +9,7 @@
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"

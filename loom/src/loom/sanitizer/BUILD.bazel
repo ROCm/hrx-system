@@ -46,6 +46,7 @@ loom_cc_library(
         ":site_location",
         ":site_payload",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/sanitizer",
@@ -70,6 +71,7 @@ loom_cc_library(
     hdrs = ["materialize_assertions.h"],
     deps = [
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/index",
@@ -93,6 +95,7 @@ loom_cc_library(
         ":site_location",
         ":site_payload",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:atomic",
         "//loom/src/loom/ops/index",

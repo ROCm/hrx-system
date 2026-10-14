@@ -7,6 +7,7 @@
 #include "loom/transforms/kernel/resolve_launches.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"

@@ -14,7 +14,7 @@
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/emitter.h"
-#include "loom/error/error_defs.h"
+#include "loom/error/parameter.h"
 #include "loom/error/source.h"
 #include "loom/ir/module.h"
 #include "loom/testing/test_diagnostic.h"

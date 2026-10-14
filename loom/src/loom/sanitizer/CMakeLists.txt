@@ -53,6 +53,7 @@ loom_cc_library(
     ::site_payload
     iree::base
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::index
     loom::ops::sanitizer
@@ -80,6 +81,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::index
     loom::ops::kernel
@@ -106,6 +108,7 @@ loom_cc_library(
     ::site_payload
     iree::base
     loom::error::error_defs
+    loom::error::parameter
     loom::ir
     loom::ops::atomic
     loom::ops::index
