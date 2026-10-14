@@ -1,0 +1,64 @@
+kernel.decl @qwen38_prepare_q5k_channel8(%outputs: index) launch(%weight: buffer)
+
+func.def @prepare_q5k_channel_count(%trial: index) -> (index) {
+  %group = index.constant 8 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %several = index.constant 40 : index
+  %full = index.constant 17408 : index
+  %small = index.mul %trial, %group : index
+  %is_several = index.cmp eq, %trial, %three : index
+  %small_count = scf.select %is_several, %several, %small : index
+  %is_full = index.cmp eq, %trial, %four : index
+  %count = scf.select %is_full, %full, %small_count : index
+  func.return %count : index
+}
+
+// Copy whole canonical Q5_K blocks into their grouped logical positions. The
+// reference captures the original bytes before changing any destination, and
+// does not use the subject's thread or vector-packet decomposition.
+func.def @prepare_q5k_channel8_oracle(%weight: buffer) {
+  %origin = index.constant 0 : offset
+  %length = buffer.length %weight
+  %source = buffer.alloca<private> align(16) %length : buffer
+  buffer.copy %weight[%origin], %source[%origin], %length
+  %row_bytes = index.constant 3520 : offset
+  %row_size = index.constant 3520 : index
+  %byte_count = index.cast %length : offset to index
+  %channels = index.div %byte_count, %row_size : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %group_channels = index.constant 8 : index
+  %blocks = index.constant 20 : index
+  %block_bytes = index.constant 176 : offset
+  %group_bytes = index.constant 28160 : offset
+  %group_block_bytes = index.constant 1408 : offset
+  scf.for %channel = [%begin to %channels step %step] {
+    %group = index.div %channel, %group_channels : index
+    %member = index.rem %channel, %group_channels : index
+    %source_row = index.scale %channel, %row_bytes : index, offset -> offset
+    %target_group = index.scale %group, %group_bytes : index, offset -> offset
+    %target_member = index.scale %member, %block_bytes : index, offset -> offset
+    %target_row = index.add %target_group, %target_member : offset
+    scf.for %block = [%begin to %blocks step %step] {
+      %source_column = index.scale %block, %block_bytes : index, offset -> offset
+      %source_offset = index.add %source_row, %source_column : offset
+      %target_column = index.scale %block, %group_block_bytes : index, offset -> offset
+      %target_offset = index.add %target_row, %target_column : offset
+      buffer.copy %source[%source_offset], %weight[%target_offset], %block_bytes
+    }
+  }
+  func.return
+}
+
+check.scenario public @prepare_q5k_channel8_layout {
+  check.trial[5](%trial: index, %entropy: check.entropy) {
+    %channels = check.generate<@prepare_q5k_channel_count>(%trial) : (index) -> (index)
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %weight = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<[%channels]x20x176xi8>
+    check.compare<@qwen38_prepare_q5k_channel8, @prepare_q5k_channel8_oracle>[%channels](%weight) : [index](tensor<[%channels]x20x176xi8>) -> () {
+      check.expect.bitwise actual(%weight) expected(%weight) : tensor<[%channels]x20x176xi8>
+    }
+  }
+  check.return
+}

@@ -215,6 +215,20 @@ loom_test(
 )
 
 loom_test(
+    name = "weights_prepare_test",
+    srcs = [
+        "tests/weights_prepare.loom",
+        "weights_prepare.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        SPIRV_VULKAN_HARDWARE_PROFILE,
+    ],
+)
+
+loom_test(
     name = "gdn_state_test",
     srcs = [
         "kernels/qwen38/gdn_common.loom",
