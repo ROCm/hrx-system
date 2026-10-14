@@ -302,6 +302,32 @@ TEST_F(FiniteComponentTest, PreparationFailureIsRetainedWithoutRetrying) {
   EXPECT_FALSE(loom_serve_finite_component_advance(component_, false));
 }
 
+TEST_F(FiniteComponentTest, InvocationFailureRetiresOnlyTheComponent) {
+  loom_serve_finite_model_t* model = nullptr;
+  IREE_ASSERT_OK(Prepare(component_, &model));
+  bool started = false;
+  IREE_ASSERT_OK(owner_.Run(
+      loom_serve_host_executor(host_), [&](bool* complete) -> iree_status_t {
+        if (!started) {
+          loom_serve_finite_component_fail(
+              component_,
+              iree_make_status(IREE_STATUS_ABORTED, "fixture invocation"));
+          started = true;
+        } else {
+          loom_serve_finite_component_advance(component_, false);
+        }
+        *complete = loom_serve_finite_component_phase(component_) ==
+                    LOOM_SERVE_FINITE_COMPONENT_FAILED;
+        return iree_ok_status();
+      }));
+  EXPECT_FALSE(loom_serve_finite_component_is_pending(component_));
+  loom_serve_finite_model_t* unavailable = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      loom_serve_finite_component_prepare(component_, &unavailable));
+  EXPECT_EQ(unavailable, nullptr);
+}
+
 TEST_F(FiniteComponentTest, RemovalJoinsAcceptedPreparation) {
   bool started = false;
   IREE_ASSERT_OK(owner_.Run(

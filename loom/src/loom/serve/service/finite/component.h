@@ -23,6 +23,7 @@ typedef enum loom_serve_finite_component_phase_e {
   LOOM_SERVE_FINITE_COMPONENT_DECLARED = 0,
   LOOM_SERVE_FINITE_COMPONENT_PREPARING,
   LOOM_SERVE_FINITE_COMPONENT_READY,
+  LOOM_SERVE_FINITE_COMPONENT_FAILING,
   LOOM_SERVE_FINITE_COMPONENT_FAILED,
   LOOM_SERVE_FINITE_COMPONENT_RELEASING,
   LOOM_SERVE_FINITE_COMPONENT_RETIRED,
@@ -53,16 +54,25 @@ iree_status_t loom_serve_finite_component_prepare(
     loom_serve_finite_component_t* component,
     loom_serve_finite_model_t** out_model);
 
-// Advances accepted preparation without starting a dormant component. Returns
-// whether a terminal outcome was consumed. Failures remain component-owned;
-// prepare returns them to affected requests without failing the parent service.
-// stopping is irreversible deployment shutdown, never request cancellation.
-// It cancels subsequent load phases and joins accepted work. NULL is inert.
+// Transfers a terminal invocation failure to a ready component and begins
+// retiring the finite model's actual queue ownership. The caller relinquishes
+// every model borrow and transfers |status|, which must be non-OK. Later
+// prepare calls clone the retained diagnostic instead of recreating a model.
+// Parent services can continue independently while retirement is pending.
+void loom_serve_finite_component_fail(loom_serve_finite_component_t* component,
+                                      iree_status_t status);
+
+// Advances accepted preparation or failed-model retirement without starting a
+// dormant component. Returns whether a terminal outcome was consumed. Failures
+// remain component-owned; prepare returns them to affected requests without
+// failing the parent service. stopping is irreversible deployment shutdown,
+// never request cancellation. It cancels subsequent load phases and joins
+// accepted work. NULL is inert.
 bool loom_serve_finite_component_advance(
     loom_serve_finite_component_t* component, bool stopping);
 
-// Accepted CPU/JIT work still needs owner turns. Does not include finite model
-// invocations: the borrowing service owns and joins those separately.
+// Accepted CPU/JIT work or failed-model retirement still needs owner turns.
+// Healthy finite model invocations remain owned and joined by their borrower.
 bool loom_serve_finite_component_is_pending(
     const loom_serve_finite_component_t* component);
 

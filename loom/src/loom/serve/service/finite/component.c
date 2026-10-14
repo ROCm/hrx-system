@@ -53,7 +53,9 @@ loom_serve_finite_component_phase_t loom_serve_finite_component_phase(
 
 bool loom_serve_finite_component_is_pending(
     const loom_serve_finite_component_t* component) {
-  return component && component->phase == LOOM_SERVE_FINITE_COMPONENT_PREPARING;
+  return component &&
+         (component->phase == LOOM_SERVE_FINITE_COMPONENT_PREPARING ||
+          component->phase == LOOM_SERVE_FINITE_COMPONENT_FAILING);
 }
 
 const loom_serve_compilation_report_t* loom_serve_finite_component_report(
@@ -69,6 +71,19 @@ bool loom_serve_finite_component_advance(
   component->stopping |= stopping;
   if (!loom_serve_finite_component_is_pending(component)) {
     return false;
+  }
+  if (component->phase == LOOM_SERVE_FINITE_COMPONENT_FAILING) {
+    if (!loom_serve_finite_model_is_retired(component->model)) {
+      return false;
+    }
+    iree_status_t cleanup =
+        loom_serve_finite_model_free_retired(component->model);
+    if (iree_status_is_ok(cleanup)) {
+      component->model = NULL;
+    }
+    component->status = iree_status_join(component->status, cleanup);
+    component->phase = LOOM_SERVE_FINITE_COMPONENT_FAILED;
+    return true;
   }
   bool complete = false;
   component->status = loom_serve_finite_load_advance(
@@ -114,6 +129,18 @@ iree_status_t loom_serve_finite_component_prepare(
     *out_model = component->model;
   }
   return iree_status_clone(component->status);
+}
+
+void loom_serve_finite_component_fail(loom_serve_finite_component_t* component,
+                                      iree_status_t status) {
+  IREE_ASSERT(component->phase == LOOM_SERVE_FINITE_COMPONENT_READY &&
+              !iree_status_is_ok(status));
+  iree_status_free(component->status);
+  component->status = status;
+  component->phase = LOOM_SERVE_FINITE_COMPONENT_FAILING;
+  loom_serve_finite_model_retire(component->model, component->observer.wake,
+                                 component->observer.user_data);
+  loom_serve_finite_component_advance(component, false);
 }
 
 static iree_status_t loom_serve_finite_component_release_model(
