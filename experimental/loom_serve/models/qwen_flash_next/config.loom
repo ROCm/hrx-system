@@ -81,3 +81,6 @@ config.def @flash_next.ple.offset_15 = 300001275 : i32
 
 // Bound sparse score scratch independently of the packed token capacity.
 config.def @qsa.query_tile = 4 : index
+
+// Zero removes speculative publication and capture from ordinary target stages.
+config.def @flash_next.verification_width = 0 : index

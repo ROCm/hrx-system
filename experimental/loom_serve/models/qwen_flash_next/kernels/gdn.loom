@@ -4,9 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 amdgpu.target<gfx11-generic> @flash_next_gdn_wave32 {subgroup_size = 32}
+
+func.decl @flash_next_span_publishes(%verification: index, %epoch: buffer, %span: index) -> (i1)
 
 func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
@@ -14,17 +20,14 @@ func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
 
 func.decl @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset)
 
+command.program.decl @flash_next_capture_inputs(%prefix_bytes: offset, %row_bytes: offset) launch(%epoch: buffer, %input: buffer, %capture: buffer)
+
 // Each wave owns 128 channels and carries three packed-input histories over
 // the complete span. Only the final histories are published to global memory.
-kernel.def target(@flash_next_gdn_wave32) @gdn_convolve() {
-  %groups = index.constant 20 : index
-  %threads = index.constant 128 : index
-  %c1 = index.constant 1 : index
-  %spans = index.constant 16 : index
-  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %convolved_arg: buffer, %norm_arg: buffer) {
+template.decl @flash_next.gdn_convolve.body(%capacity: index, %verification: index, %span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %convolved_arg: buffer, %norm_arg: buffer)
+
+template.def<@flash_next.gdn_convolve.body> device @gdn_convolve_body(%capacity: index, %verification: index, %span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %convolved_arg: buffer, %norm_arg: buffer) {
   %span, %origins, %qkv, %weight, %history, %convolved, %norm = buffer.assume.noalias %span_arg, %origins_arg, %qkv_arg, %weight_arg, %history_arg, %convolved_arg, %norm_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer
-  %capacity = config.get @flash_next.token_count : index
   %span_index = kernel.workgroup.id<y> : index
   %active = func.call @flash_next_span_active(%span, %span_index) : (buffer, index) -> (i1)
   scf.if %active {
@@ -93,29 +96,54 @@ kernel.def target(@flash_next_gdn_wave32) @gdn_convolve() {
       }
       scf.yield %history1, %history2, %current : vector<4xf32>, vector<4xf32>, vector<4xf32>
     }
-    %packed0 = vector.fptrunc %final0 : vector<4xf32> to vector<4xbf16>
-    %packed1 = vector.fptrunc %final1 : vector<4xf32> to vector<4xbf16>
-    %packed2 = vector.fptrunc %final2 : vector<4xf32> to vector<4xbf16>
-    vector.store %packed0, %write_history[%c0_index, %channel] : vector<4xbf16>, view<3x10240xbf16>
-    vector.store %packed1, %write_history[%c1, %channel] : vector<4xbf16>, view<3x10240xbf16>
-    vector.store %packed2, %write_history[%c2, %channel] : vector<4xbf16>, view<3x10240xbf16>
+    %publish = func.call @flash_next_span_publishes(%verification, %span, %span_index) : (index, buffer, index) -> (i1)
+    scf.if %publish {
+      %packed0 = vector.fptrunc %final0 : vector<4xf32> to vector<4xbf16>
+      %packed1 = vector.fptrunc %final1 : vector<4xf32> to vector<4xbf16>
+      %packed2 = vector.fptrunc %final2 : vector<4xf32> to vector<4xbf16>
+      vector.store %packed0, %write_history[%c0_index, %channel] : vector<4xbf16>, view<3x10240xbf16>
+      vector.store %packed1, %write_history[%c1, %channel] : vector<4xbf16>, view<3x10240xbf16>
+      vector.store %packed2, %write_history[%c2, %channel] : vector<4xbf16>, view<3x10240xbf16>
+    }
   }
+  template.return
+}
+
+kernel.def target(@flash_next_gdn_wave32) @gdn_convolve() {
+  %groups = index.constant 20 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %convolved_arg: buffer, %norm_arg: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %verification = config.get @flash_next.verification_width : index
+  template.apply<@flash_next.gdn_convolve.body>(%capacity, %verification, %span_arg, %origins_arg, %layer_origin, %qkv_arg, %weight_arg, %history_arg, %convolved_arg, %norm_arg) : (index, index, buffer, buffer, offset, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@flash_next_gdn_wave32) @gdn_convolve_commit() {
+  %groups = index.constant 20 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %convolved_arg: buffer, %norm_arg: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %verification = index.constant 0 : index
+  template.apply<@flash_next.gdn_convolve.body>(%capacity, %verification, %span_arg, %origins_arg, %layer_origin, %qkv_arg, %weight_arg, %history_arg, %convolved_arg, %norm_arg) : (index, index, buffer, buffer, offset, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
 // GGUF tiles V heads over K heads. Persistent state is [head, value, key]; a
 // wave retains four value columns as one 4x4 F32 tile per lane across the span.
 // The stored ssm_a is already -exp(A_log), not the original logarithm.
-kernel.def target(@flash_next_gdn_wave32) @gdn_recur() {
-  %heads = index.constant 48 : index
-  %columns = index.constant 32 : index
-  %lanes = index.constant 32 : index
-  %c1 = index.constant 1 : index
-  %spans = index.constant 16 : index
-  kernel.launch.config workgroups(%heads, %columns, %spans) workgroup_size(%lanes, %c1, %c1) : index
-} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer) {
+template.decl @flash_next.gdn_recur.body(%capacity: index, %verification: index, %span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer)
+
+template.def<@flash_next.gdn_recur.body> device @gdn_recur_body(%capacity: index, %verification: index, %span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer) {
   %span, %origins, %qkv, %norm, %alpha, %beta, %a, %bias, %state, %output = buffer.assume.noalias %span_arg, %origins_arg, %qkv_arg, %norm_arg, %alpha_arg, %beta_arg, %a_arg, %bias_arg, %state_arg, %output_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
-  %capacity = config.get @flash_next.token_count : index
   %span_index = kernel.workgroup.id<z> : index
   %active = func.call @flash_next_span_active(%span, %span_index) : (buffer, index) -> (i1)
   scf.if %active {
@@ -217,8 +245,41 @@ kernel.def target(@flash_next_gdn_wave32) @gdn_recur() {
       }
       scf.yield %next : vector<4x4xf32>
     }
-    vector.scatter %final, %write_state[%state_index][%state_offsets] : vector<4x4xf32>, view<786432xf32>, vector<4x4xi32>
+    %publish = func.call @flash_next_span_publishes(%verification, %span, %span_index) : (index, buffer, index) -> (i1)
+    scf.if %publish {
+      vector.scatter %final, %write_state[%state_index][%state_offsets] : vector<4x4xf32>, view<786432xf32>, vector<4x4xi32>
+    }
   }
+  template.return
+}
+
+kernel.def target(@flash_next_gdn_wave32) @gdn_recur() {
+  %heads = index.constant 48 : index
+  %columns = index.constant 32 : index
+  %lanes = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%heads, %columns, %spans) workgroup_size(%lanes, %c1, %c1) : index
+} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %verification = config.get @flash_next.verification_width : index
+  template.apply<@flash_next.gdn_recur.body>(%capacity, %verification, %span_arg, %origins_arg, %layer_origin, %qkv_arg, %norm_arg, %alpha_arg, %beta_arg, %a_arg, %bias_arg, %state_arg, %output_arg) : (index, index, buffer, buffer, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@flash_next_gdn_wave32) @gdn_recur_commit() {
+  %heads = index.constant 48 : index
+  %columns = index.constant 32 : index
+  %lanes = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%heads, %columns, %spans) workgroup_size(%lanes, %c1, %c1) : index
+} launch(%span_arg: buffer, %origins_arg: buffer, %layer_origin: offset, %qkv_arg: buffer, %norm_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer, %a_arg: buffer, %bias_arg: buffer, %state_arg: buffer, %output_arg: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %verification = index.constant 0 : index
+  template.apply<@flash_next.gdn_recur.body>(%capacity, %verification, %span_arg, %origins_arg, %layer_origin, %qkv_arg, %norm_arg, %alpha_arg, %beta_arg, %a_arg, %bias_arg, %state_arg, %output_arg) : (index, index, buffer, buffer, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -278,8 +339,20 @@ kernel.def target(@flash_next_gdn_wave32) @gdn_gate() {
 // A layer stores its F32 recurrence followed by three BF16 convolution rows.
 // Rows publish into a private writer selected by the retained-state pool. A
 // fresh conversation synthesizes zeros in registers without clearing storage.
-command.program.def public @flash_next_gdn_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %qkv: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer) where [range(%layer, 0, 47)] {
+command.program.def public @flash_next_gdn_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %epoch: buffer, %rows: buffer, %qkv: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer, %capture: buffer) where [range(%layer, 0, 47)] {
   %tokens = config.get @flash_next.token_count : index
+  %layer_group_size = index.constant 4 : index
+  %prior_qsa = index.div %layer, %layer_group_size : index
+  %ordinal = index.sub %layer, %prior_qsa : index
+  %transition_bytes = index.constant 20864 : offset
+  %prefix = index.scale %ordinal, %transition_bytes : index, offset -> offset
+  %qkv_extent = index.constant 20480 : offset
+  %gate_extent = index.constant 192 : offset
+  %alpha_prefix = index.add %prefix, %qkv_extent : offset
+  %beta_prefix = index.add %alpha_prefix, %gate_extent : offset
+  command.program.launch @flash_next_capture_inputs[%prefix, %qkv_extent](%epoch, %qkv, %capture) : [offset, offset](buffer, buffer, buffer)
+  command.program.launch @flash_next_capture_inputs[%alpha_prefix, %gate_extent](%epoch, %alpha, %capture) : [offset, offset](buffer, buffer, buffer)
+  command.program.launch @flash_next_capture_inputs[%beta_prefix, %gate_extent](%epoch, %beta, %capture) : [offset, offset](buffer, buffer, buffer)
   %qkv_row_bytes = index.constant 20480 : offset
   %norm_row_bytes = index.constant 128 : offset
   %value_row_bytes = index.constant 12288 : offset

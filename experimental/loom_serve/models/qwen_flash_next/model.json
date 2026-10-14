@@ -24,6 +24,7 @@
       "kernels/qsa_selection.loom",
       "kernels/quantized.loom",
       "kernels/routing.loom",
+      "kernels/speculation.loom",
       "kernels/work.loom",
       "programs/attention.loom",
       "programs/ffn.loom",
@@ -36,7 +37,10 @@
       "../../motifs/ggml/linear_qk_common.loom",
       "../../motifs/ggml/linear_q5k_q8_1_x4.loom",
       "../../motifs/tensor/random.loom",
-      "../../motifs/tensor/sampling.loom"
+      "../../motifs/tensor/sampling.loom",
+      "verify.loom",
+      "programs/speculation.loom",
+      "../qwen/kernels/qwen38/accept.loom"
     ],
     "weights": "UD-Q4_K_XL",
     "tokenizer": "tokenizer.json",

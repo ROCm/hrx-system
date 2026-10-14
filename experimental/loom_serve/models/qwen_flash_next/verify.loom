@@ -1,0 +1,44 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+command.program.decl @flash_next_body() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %capture: buffer)
+
+command.program.decl @flash_next_output_head() launch(%parameters: buffer, %epoch: buffer, %residual: buffer, %outputs: buffer)
+
+command.program.decl @flash_next_capture_inputs(%prefix_bytes: offset, %row_bytes: offset) launch(%epoch: buffer, %input: buffer, %capture: buffer)
+
+command.program.decl @flash_next_commit_state() launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer)
+
+kernel.decl @qwen38_accept_spans() launch(%width: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
+
+// Target sampling remains authoritative. Speculative cache writes become
+// visible only through the accepted frontier; all non-page state commits from
+// compact captured inputs. The caller-owned final hidden rows and original
+// accepted offsets then feed the predictor's separate catch-up stage.
+command.program.def public @flash_next_verify() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %committed: buffer, %results: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %capture_stride = index.constant 774660 : offset
+  %word_bytes = index.constant 4 : offset
+  %capture_bytes = index.scale %capacity, %capture_stride : index, offset -> offset
+  %prediction_bytes = index.scale %capacity, %word_bytes : index, offset -> offset
+  %replay_bytes = index.constant 1548 : offset
+  %capture = buffer.alloca<global> align(256) %capture_bytes : buffer
+  %predictions = buffer.alloca<global> align(256) %prediction_bytes : buffer
+  %replay = buffer.alloca<global> align(256) %replay_bytes : buffer
+  %ids_prefix = index.constant 774656 : offset
+  command.program.launch @flash_next_capture_inputs[%ids_prefix, %word_bytes](%epoch, %input_tokens, %capture) : [offset, offset](buffer, buffer, buffer)
+  command.program.launch @flash_next_body(%parameters, %residual, %epoch, %rows, %state, %input_tokens, %capture) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_output_head(%parameters, %epoch, %residual, %predictions) : (buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_accept_spans(%width, %epoch, %input_tokens, %predictions, %committed, %replay, %results) : (index, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_commit_state(%parameters, %capture, %replay, %rows, %state) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

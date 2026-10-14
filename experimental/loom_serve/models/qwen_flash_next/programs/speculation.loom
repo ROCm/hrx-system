@@ -1,0 +1,126 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+kernel.decl @flash_next_capture_rows(%span_capacity: index, %row_bytes: offset) launch(%source_capacity: index, %width: index, %row_bytes_value: offset, %epoch: buffer, %input: buffer, %capture: buffer, %capture_origin: offset)
+
+kernel.decl @gdn_convolve_commit() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %weight: buffer, %history: buffer, %convolved: buffer, %norm: buffer)
+
+kernel.decl @gdn_recur_commit() launch(%span: buffer, %origins: buffer, %layer_origin: offset, %qkv: buffer, %norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+
+kernel.decl @flash_next_commit_ple_history() launch(%history_origin: offset, %epoch: buffer, %rows: buffer, %input: buffer, %arena: buffer)
+
+kernel.decl @flash_next_ple_publish_history_commit() launch(%history_origin: offset, %epoch: buffer, %rows: buffer, %tokens: buffer, %arena: buffer)
+
+kernel.decl @qsa_publish_tail_commit() launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
+
+// Capture planes share a single bounded allocation. Prefixes are bytes per
+// capture token: 36 GDN projections, PLE normalized inputs, twelve raw index
+// keys, then token IDs. Width zero erases this command and its dispatches.
+command.program.def public @flash_next_capture_inputs(%prefix_bytes: offset, %row_bytes: offset) launch(%epoch: buffer, %input: buffer, %capture: buffer) {
+  %width = config.get @flash_next.verification_width : index
+  %c0 = index.constant 0 : index
+  %enabled = index.cmp ugt, %width, %c0 : index
+  scf.if %enabled {
+    %tokens = config.get @flash_next.token_count : index
+    %spans = config.get @flash_next.span_capacity : index
+    %capacity = index.mul %spans, %width : index
+    %origin = index.scale %capacity, %prefix_bytes : index, offset -> offset
+    kernel.launch @flash_next_capture_rows[%spans, %row_bytes](%tokens, %width, %row_bytes, %epoch, %input, %capture, %origin) : [index, offset](index, index, offset, buffer, buffer, buffer, offset)
+  }
+  command.return
+}
+
+// Replay uses the same convolution and recurrence templates as target
+// traversal. The descriptor selects only the accepted speculative prefix;
+// known spans already published and are absent from this control packet.
+command.program.def @flash_next_commit_gdn(%layer: index, %ordinal: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %transition_stride = index.constant 20864 : offset
+  %qkv_stride = index.constant 20480 : offset
+  %gate_stride = index.constant 192 : offset
+  %norm_stride = index.constant 128 : offset
+  %output_stride = index.constant 12288 : offset
+  %layer_bytes = index.scale %capacity, %transition_stride : index, offset -> offset
+  %qkv_bytes = index.scale %capacity, %qkv_stride : index, offset -> offset
+  %gate_bytes = index.scale %capacity, %gate_stride : index, offset -> offset
+  %norm_bytes = index.scale %capacity, %norm_stride : index, offset -> offset
+  %output_bytes = index.scale %capacity, %output_stride : index, offset -> offset
+  %qkv_origin = index.scale %ordinal, %layer_bytes : index, offset -> offset
+  %alpha_origin = index.add %qkv_origin, %qkv_bytes : offset
+  %beta_origin = index.add %alpha_origin, %gate_bytes : offset
+  %qkv = buffer.view %capture[%qkv_origin] : buffer -> view<[%capacity]x10240xbf16>
+  %alpha = buffer.view %capture[%alpha_origin] : buffer -> view<[%capacity]x48xf32>
+  %beta = buffer.view %capture[%beta_origin] : buffer -> view<[%capacity]x48xf32>
+  %convolved = buffer.alloca<global> align(256) %qkv_bytes : buffer
+  %inverse_norm = buffer.alloca<global> align(256) %norm_bytes : buffer
+  %output = buffer.alloca<global> align(256) %output_bytes : buffer
+  %state_stride = index.constant 3207168 : offset
+  %history_offset = index.constant 3145728 : offset
+  %state_origin = index.scale %ordinal, %state_stride : index, offset -> offset
+  %history_origin = index.add %state_origin, %history_offset : offset
+  %conv_weight = command.parameter %parameters, "blk.{}.ssm_conv1d.weight"[%layer] : view<10240x4xf32>
+  %a = command.parameter %parameters, "blk.{}.ssm_a"[%layer] : view<48xf32>
+  %bias = command.parameter %parameters, "blk.{}.ssm_dt.bias"[%layer] : view<48xf32>
+  kernel.launch @gdn_convolve_commit(%replay, %rows, %history_origin, %qkv, %conv_weight, %state, %convolved, %inverse_norm) : (buffer, buffer, offset, view<[%capacity]x10240xbf16>, view<10240x4xf32>, buffer, buffer, buffer)
+  kernel.launch @gdn_recur_commit(%replay, %rows, %state_origin, %convolved, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output) : (buffer, buffer, offset, buffer, buffer, view<[%capacity]x48xf32>, view<[%capacity]x48xf32>, view<48xf32>, view<48xf32>, buffer, buffer)
+  command.return
+}
+
+command.program.def public @flash_next_commit_state() launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %groups = index.constant 12 : index
+  scf.for %group = [%c0 to %groups step %c1] unroll {
+    %layer0 = index.mul %group, %c4 : index
+    %layer1 = index.add %layer0, %c1 : index
+    %layer2 = index.add %layer0, %c2 : index
+    %ordinal0 = index.mul %group, %c3 : index
+    %ordinal1 = index.add %ordinal0, %c1 : index
+    %ordinal2 = index.add %ordinal0, %c2 : index
+    command.program.launch @flash_next_commit_gdn[%layer0, %ordinal0](%parameters, %capture, %replay, %rows, %state) : [index, index](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @flash_next_commit_gdn[%layer1, %ordinal1](%parameters, %capture, %replay, %rows, %state) : [index, index](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @flash_next_commit_gdn[%layer2, %ordinal2](%parameters, %capture, %replay, %rows, %state) : [index, index](buffer, buffer, buffer, buffer, buffer)
+  }
+  %ple_prefix = index.constant 751104 : offset
+  %id_prefix = index.constant 774656 : offset
+  %ple_capture_origin = index.scale %capacity, %ple_prefix : index, offset -> offset
+  %id_capture_origin = index.scale %capacity, %id_prefix : index, offset -> offset
+  %ple = buffer.view %capture[%ple_capture_origin] : buffer -> view<[%capacity]x10240xbf16>
+  %ids = buffer.view %capture[%id_capture_origin] : buffer -> view<[%capacity]xi32>
+  %token_history = index.constant 115458048 : offset
+  %conv_history = index.constant 115458304 : offset
+  kernel.launch @flash_next_ple_publish_history_commit(%token_history, %replay, %rows, %ids, %state) : (offset, buffer, buffer, view<[%capacity]xi32>, buffer)
+  kernel.launch @flash_next_commit_ple_history(%conv_history, %replay, %rows, %ple, %state) : (offset, buffer, buffer, view<[%capacity]x10240xbf16>, buffer)
+  %qsa_prefix = index.constant 771584 : offset
+  %raw_stride = index.constant 256 : offset
+  %qsa_base = index.scale %capacity, %qsa_prefix : index, offset -> offset
+  %qsa_bytes = index.scale %capacity, %raw_stride : index, offset -> offset
+  %tail_base = index.constant 115642624 : offset
+  %tail_stride = index.constant 768 : offset
+  scf.for %ordinal = [%c0 to %groups step %c1] unroll {
+    %raw_relative = index.scale %ordinal, %qsa_bytes : index, offset -> offset
+    %raw_origin = index.add %qsa_base, %raw_relative : offset
+    %raw = buffer.view %capture[%raw_origin] : buffer -> view<[%capacity]x128xbf16>
+    %tail_relative = index.scale %ordinal, %tail_stride : index, offset -> offset
+    %tail_origin = index.add %tail_base, %tail_relative : offset
+    kernel.launch @qsa_publish_tail_commit(%tail_origin, %replay, %rows, %raw, %state) : (offset, buffer, buffer, view<[%capacity]x128xbf16>, buffer)
+  }
+  command.return
+}
