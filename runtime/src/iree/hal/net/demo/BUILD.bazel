@@ -1,0 +1,66 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_test")
+load("//build_tools/bazel:select.bzl", "iree_select")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+_COMPATIBLE_WITH = iree_select({
+    "//runtime/config/hal:driver_task": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+iree_runtime_cc_library(
+    name = "worker",
+    srcs = ["worker.c"],
+    hdrs = ["worker.h"],
+    target_compatible_with = _COMPATIBLE_WITH,
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task:device",
+        "//runtime/src/iree/hal/memory:slab_cache",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
+        "//runtime/src/iree/hal/net:channel_provider",
+        "//runtime/src/iree/net/carrier/tcp:factory",
+        "//runtime/src/iree/task",
+    ],
+)
+
+iree_runtime_cc_binary(
+    name = "iree-hal-collective-demo",
+    srcs = ["main.c"],
+    target_compatible_with = _COMPATIBLE_WITH,
+    deps = [
+        ":worker",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_py_test(
+    name = "projection_test",
+    srcs = ["projection_test.py"],
+    args = [
+        "--binary=$(location :iree-hal-collective-demo)",
+        "--launcher=$(location launch.py)",
+    ],
+    data = [
+        "launch.py",
+        ":iree-hal-collective-demo",
+    ],
+    target_compatible_with = _COMPATIBLE_WITH,
+)
