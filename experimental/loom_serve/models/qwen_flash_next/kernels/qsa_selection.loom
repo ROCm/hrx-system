@@ -1,0 +1,216 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_token_binding(%mapping: buffer, %token: index) -> (index, index, index, index)
+
+func.decl @flash_next_physical_token(%rows: buffer, %row: index, %position: index) -> (index)
+
+func.decl @flash_next_cache_origin(%rows: buffer, %row: index, %plane_origin: offset) -> (offset)
+
+func.decl @flash_next_row_state(%rows: buffer, %row: index, %position: index, %layer_origin: offset) -> (offset, offset)
+
+config.decl @qsa.query_tile : %value: index where [range(%value, 1, 32)]
+
+amdgpu.target<gfx11-generic> @qsa_selection_wave32 {subgroup_size = 32}
+
+// Each wave scores one completed block through the resident row page map.
+kernel.def target(@qsa_selection_wave32) @qsa_score_blocks() {
+  %tokens = config.get @flash_next.token_count : index
+  %tile_limit = config.get @qsa.query_tile : index
+  %short = index.cmp ult, %tokens, %tile_limit : index
+  %query_capacity = scf.select %short, %tokens, %tile_limit : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %c4 = index.constant 4 : index
+  %blocks = index.div %capacity, %c4 : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%blocks, %query_capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%query_begin_arg: index, %index_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %arena: buffer, %scores: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %tile_limit = config.get @qsa.query_tile : index
+  %short = index.cmp ult, %tokens, %tile_limit : index
+  %query_capacity = scf.select %short, %tokens, %tile_limit : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %query_begin = index.assume %query_begin_arg [range(%query_begin_arg, 0, %tokens)] : index
+  %row = kernel.workgroup.id<y> : index
+  %token = index.add %query_begin, %row : index
+  %block = kernel.workgroup.id<x> : index
+  %active_row = index.cmp ult, %token, %end : index
+  scf.if %active_row {
+    %c0_index = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %budget = index.constant 512 : index
+    %position, %resident_row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %visible = index.add %position, %c1 : index
+    %complete_value = index.div %visible, %c4 : index
+    %capacity_blocks = index.div %capacity, %c4 : index
+    %complete = index.assume %complete_value [range(%complete_value, 0, %capacity_blocks)] : index
+    %block_capacity = index.div %capacity, %c4 : index
+    %sparse = index.cmp ugt, %complete, %budget : index
+    %causal = index.cmp ult, %block, %complete : index
+    %active_block = scalar.andi %active_row, %causal : i1
+    %active = scalar.andi %active_block, %sparse : i1
+    scf.if %active {
+      %lane = kernel.subgroup.lane.id : index
+      %channel = index.mul %lane, %c4 : index
+      %origin = index.constant 0 : offset
+      %query_view = buffer.view %queries[%origin] : buffer -> view<[%tokens]x4x128xbf16>
+      %logical = index.mul %block, %c4 : index
+      %physical_token = func.call @flash_next_physical_token(%rows, %resident_row, %logical) : (buffer, index, index) -> (index)
+      %physical_block = index.div %physical_token, %c4 : index
+      %cache_origin = func.call @flash_next_cache_origin(%rows, %resident_row, %index_origin) : (buffer, index, offset) -> (offset)
+      %pool = config.get @flash_next.pool_capacity : index
+      %physical_blocks = index.div %pool, %c4 : index
+      %block_view = buffer.view %arena[%cache_origin] : buffer -> view<[%physical_blocks]x128xbf16>
+      %score_view = buffer.view %scores[%origin] : buffer -> view<[%query_capacity]x[%block_capacity]xf32>
+      %key = vector.load %block_view[%physical_block, %channel] : view<[%physical_blocks]x128xbf16> -> vector<4xbf16>
+      %c0v = vector.constant 0.0 : vector<2xf32>
+      %c0 = scalar.constant 0.0 : f32
+      %score = scf.for %head = [%c0_index to %c4 step %c1](%accumulator = %c0 : f32) -> (f32) {
+        %query = vector.load %query_view[%token, %head, %channel] : view<[%tokens]x4x128xbf16> -> vector<4xbf16>
+        %pairs = vector.dot2f %query, %key, %c0v : vector<4xbf16>, vector<4xbf16>, vector<2xf32>
+        %partial = vector.reduce<addf> %pairs, %c0 : vector<2xf32>, f32
+        %dot = kernel.subgroup.reduce<addf> %partial : f32
+        %positive = scalar.maxnumf %dot, %c0 : f32
+        %next = scalar.addf %accumulator, %positive : f32
+        scf.yield %next : f32
+      }
+      %leader = index.cmp eq, %lane, %c0_index : index
+      scf.if %leader {
+        view.store %score, %score_view[%row, %block] : f32, view<[%query_capacity]x[%block_capacity]xf32>
+      }
+    }
+  }
+  kernel.return
+}
+
+// Positive F32 score bits preserve order. Find the exact Kth value, then
+// compact all greater scores and the earliest threshold ties in logical order.
+kernel.def target(@qsa_selection_wave32) @qsa_select_blocks() {
+  %tokens = config.get @flash_next.token_count : index
+  %tile_limit = config.get @qsa.query_tile : index
+  %short = index.cmp ult, %tokens, %tile_limit : index
+  %query_capacity = scf.select %short, %tokens, %tile_limit : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%query_capacity, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%query_begin_arg: index, %span: buffer, %mapping: buffer, %scores: buffer, %selected: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %tile_limit = config.get @qsa.query_tile : index
+  %short = index.cmp ult, %tokens, %tile_limit : index
+  %query_capacity = scf.select %short, %tokens, %tile_limit : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %query_begin = index.assume %query_begin_arg [range(%query_begin_arg, 0, %tokens)] : index
+  %row = kernel.workgroup.id<x> : index
+  %token = index.add %query_begin, %row : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %thread = kernel.workitem.id<x> : index
+    %c0_index = index.constant 0 : index
+    %c1_index = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %threads = index.constant 256 : index
+    %budget = index.constant 512 : index
+    %bits = index.constant 31 : index
+    %position, %resident_row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %visible = index.add %position, %c1_index : index
+    %complete_value = index.div %visible, %c4 : index
+    %capacity_blocks = index.div %capacity, %c4 : index
+    %complete = index.assume %complete_value [range(%complete_value, 0, %capacity_blocks)] : index
+    %block_capacity = index.div %capacity, %c4 : index
+    %origin = index.constant 0 : offset
+    %score_view = buffer.view %scores[%origin] : buffer -> view<[%query_capacity]x[%block_capacity]xf32>
+    %selected_view = buffer.view %selected[%origin] : buffer -> view<[%tokens]x512xi32>
+    %c0 = scalar.constant 0 : i32
+    %c1 = scalar.constant 1 : i32
+    %c30 = scalar.constant 30 : i32
+    %wanted = scalar.constant 512 : i32
+    %sparse = index.cmp ugt, %complete, %budget : index
+    scf.if %sparse {
+      %threshold = scf.for %bit = [%c0_index to %bits step %c1_index](%prefix = %c0 : i32) -> (i32) {
+        %bit_i32 = index.cast %bit : index to i32
+        %shift = scalar.subi %c30, %bit_i32 : i32
+        %mask = scalar.shli %c1, %shift : i32
+        %trial = scalar.ori %prefix, %mask : i32
+        %local_count = scf.for %block = [%thread to %complete step %threads](%count = %c0 : i32) -> (i32) {
+          %score = view.load %score_view[%row, %block] : view<[%query_capacity]x[%block_capacity]xf32> -> f32
+          %key = scalar.bitcast %score : f32 to i32
+          %above = scalar.cmpi uge, %key, %trial : i32
+          %increment = scf.select %above, %c1, %c0 : i32
+          %next = scalar.addi %count, %increment : i32
+          scf.yield %next : i32
+        }
+        %count = kernel.workgroup.reduce<addi> %local_count : i32
+        %enough = scalar.cmpi uge, %count, %wanted : i32
+        %next = scf.select %enough, %trial, %prefix : i32
+        scf.yield %next : i32
+      }
+      %local_greater = scf.for %block = [%thread to %complete step %threads](%count = %c0 : i32) -> (i32) {
+        %score = view.load %score_view[%row, %block] : view<[%query_capacity]x[%block_capacity]xf32> -> f32
+        %key = scalar.bitcast %score : f32 to i32
+        %above = scalar.cmpi ugt, %key, %threshold : i32
+        %increment = scf.select %above, %c1, %c0 : i32
+        %next = scalar.addi %count, %increment : i32
+        scf.yield %next : i32
+      }
+      %greater_count = kernel.workgroup.reduce<addi> %local_greater : i32
+      %ties_needed = scalar.subi %wanted, %greater_count : i32
+      %unused_ties, %unused_selected = scf.for %chunk = [%c0_index to %complete step %threads](%seen_ties = %c0 : i32, %seen_selected = %c0 : i32) -> (i32, i32) {
+        %block = index.add %chunk, %thread : index
+        %valid = index.cmp ult, %block, %complete : index
+        %is_greater, %is_equal = scf.if %valid -> (i1, i1) {
+          %score = view.load %score_view[%row, %block] : view<[%query_capacity]x[%block_capacity]xf32> -> f32
+          %key = scalar.bitcast %score : f32 to i32
+          %greater = scalar.cmpi ugt, %key, %threshold : i32
+          %equal = scalar.cmpi eq, %key, %threshold : i32
+          scf.yield %greater, %equal : i1, i1
+        } else {
+          %no = scalar.constant false : i1
+          scf.yield %no, %no : i1, i1
+        }
+        %equal_flag = scf.select %is_equal, %c1, %c0 : i32
+        %equal_prefix = kernel.workgroup.scan<addi> %equal_flag {direction = forward, mode = inclusive} : i32
+        %equal_rank = scalar.addi %seen_ties, %equal_prefix : i32
+        %tie_fits = scalar.cmpi ule, %equal_rank, %ties_needed : i32
+        %chosen_tie = scalar.andi %is_equal, %tie_fits : i1
+        %chosen = scalar.ori %is_greater, %chosen_tie : i1
+        %chosen_flag = scf.select %chosen, %c1, %c0 : i32
+        %chosen_prefix = kernel.workgroup.scan<addi> %chosen_flag {direction = forward, mode = inclusive} : i32
+        %chosen_rank = scalar.addi %seen_selected, %chosen_prefix : i32
+        scf.if %chosen {
+          %rank_i32 = scalar.subi %chosen_rank, %c1 : i32
+          %rank_value = index.cast %rank_i32 : i32 to index
+          %rank = index.assume %rank_value [range(%rank_value, 0, 511)] : index
+          %id = index.cast %block : index to i32
+          view.store %id, %selected_view[%token, %rank] : i32, view<[%tokens]x512xi32>
+        }
+        %equal_count = kernel.workgroup.reduce<addi> %equal_flag : i32
+        %chosen_count = kernel.workgroup.reduce<addi> %chosen_flag : i32
+        %next_ties = scalar.addi %seen_ties, %equal_count : i32
+        %next_selected = scalar.addi %seen_selected, %chosen_count : i32
+        scf.yield %next_ties, %next_selected : i32, i32
+      }
+    } else {
+      %dense_count = index.assume %complete [range(%complete, 0, 512)] : index
+      scf.for %slot = [%thread to %dense_count step %threads] {
+        %result = index.cast %slot : index to i32
+        view.store %result, %selected_view[%token, %slot] : i32, view<[%tokens]x512xi32>
+      }
+    }
+  }
+  kernel.return
+}

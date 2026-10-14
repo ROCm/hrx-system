@@ -1,0 +1,170 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_token_binding(%mapping: buffer, %token: index) -> (index, index, index, index)
+
+func.decl @flash_next_physical_token(%rows: buffer, %row: index, %position: index) -> (index)
+
+func.decl @flash_next_cache_origin(%rows: buffer, %row: index, %plane_origin: offset) -> (offset)
+
+func.decl @flash_next_row_state(%rows: buffer, %row: index, %position: index, %layer_origin: offset) -> (offset, offset)
+
+amdgpu.target<gfx11-generic> @qsa_attention_wave32 {subgroup_size = 32}
+
+func.decl @qsa_normalize_rotate(%width: index, %position: index, %input: buffer, %input_origin: offset, %weight: buffer, %output: buffer, %output_origin: offset)
+
+kernel.def target(@qsa_attention_wave32) @qsa_append_kv() {
+  %heads = index.constant 2 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%key_origin: offset, %value_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %keys: buffer, %values: buffer, %weight: buffer, %arena: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %head = kernel.workgroup.id<x> : index
+    %position, %row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %physical = func.call @flash_next_physical_token(%rows, %row, %position) : (buffer, index, index) -> (index)
+    %key_base = func.call @flash_next_cache_origin(%rows, %row, %key_origin) : (buffer, index, offset) -> (offset)
+    %value_base = func.call @flash_next_cache_origin(%rows, %row, %value_origin) : (buffer, index, offset) -> (offset)
+    %pool = config.get @flash_next.pool_capacity : index
+    %c2 = index.constant 2 : index
+    %width = index.constant 256 : index
+    %input_head = index.madd %token, %c2, %head : index
+    %output_head = index.madd %physical, %c2, %head : index
+    %head_bytes = index.constant 512 : offset
+    %input_origin = index.scale %input_head, %head_bytes : index, offset -> offset
+    %output_relative = index.scale %output_head, %head_bytes : index, offset -> offset
+    %output_origin = index.add %key_base, %output_relative : offset
+    func.call @qsa_normalize_rotate(%width, %position, %keys, %input_origin, %weight, %arena, %output_origin) : (index, index, buffer, offset, buffer, buffer, offset)
+    %origin = index.constant 0 : offset
+    %input_view = buffer.view %values[%origin] : buffer -> view<[%tokens]x2x256xbf16>
+    %output_view = buffer.view %arena[%value_base] : buffer -> view<[%pool]x2x256xbf16>
+    %lane = kernel.subgroup.lane.id : index
+    %c8 = index.constant 8 : index
+    %channel = index.mul %lane, %c8 : index
+    %packed = vector.load %input_view[%token, %head, %channel] : view<[%tokens]x2x256xbf16> -> vector<8xbf16>
+    vector.store %packed, %output_view[%physical, %head, %channel] : vector<8xbf16>, view<[%pool]x2x256xbf16>
+  }
+  kernel.return
+}
+
+// Online softmax consumes selected logical positions without an attention
+// matrix. Main heads are grouped twelve-to-one over two packed KV heads.
+kernel.def target(@qsa_attention_wave32) @qsa_selected_attention() {
+  %heads = index.constant 24 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%key_origin: offset, %value_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %head = kernel.workgroup.id<x> : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0_index = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %c12 = index.constant 12 : index
+    %width = index.constant 256 : index
+    %channel = index.mul %lane, %c8 : index
+    %gate_channel = index.add %width, %channel : index
+    %kv_head = index.div %head, %c12 : index
+    %position, %row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %key_base = func.call @flash_next_cache_origin(%rows, %row, %key_origin) : (buffer, index, offset) -> (offset)
+    %value_base = func.call @flash_next_cache_origin(%rows, %row, %value_origin) : (buffer, index, offset) -> (offset)
+    %pool = config.get @flash_next.pool_capacity : index
+    %visible_value = index.add %position, %c1 : index
+    %visible = index.assume %visible_value [range(%visible_value, 1, %capacity)] : index
+    %origin = index.constant 0 : offset
+    %query_view = buffer.view %queries[%origin] : buffer -> view<[%tokens]x24x256xbf16>
+    %gate_view = buffer.view %query_gate[%origin] : buffer -> view<[%tokens]x24x512xbf16>
+    %key_view = buffer.view %arena[%key_base] : buffer -> view<[%pool]x2x256xbf16>
+    %value_view = buffer.view %arena[%value_base] : buffer -> view<[%pool]x2x256xbf16>
+    %ids_view = buffer.view %selected_blocks[%origin] : buffer -> view<[%tokens]x512xi32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x24x256xbf16>
+    %query = vector.load %query_view[%token, %head, %channel] : view<[%tokens]x24x256xbf16> -> vector<8xbf16>
+    %budget = index.constant 512 : index
+    %complete = index.div %visible, %c4 : index
+    %sparse = index.cmp ugt, %complete, %budget : index
+    %selected_block_count = scf.select %sparse, %budget, %complete : index
+    %selected_block_tokens = index.mul %selected_block_count, %c4 : index
+    %tail_tokens = index.rem %visible, %c4 : index
+    %selected_tokens = index.add %selected_block_tokens, %tail_tokens : index
+    %tail_origin = index.mul %complete, %c4 : index
+    %c0 = scalar.constant 0.0 : f32
+    %initial_maximum = scalar.constant -3.4028234660000002e+38 : f32
+    %c0v = vector.constant 0.0 : vector<8xf32>
+    %dot_zeros = vector.constant 0.0 : vector<4xf32>
+    %scale = scalar.constant 0.0625 : f32
+    %maximum, %denominator, %accumulated = scf.for %slot = [%c0_index to %selected_tokens step %c1](%old_maximum = %initial_maximum : f32, %old_denominator = %c0 : f32, %old_accumulated = %c0v : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
+      %from_block = index.cmp ult, %slot, %selected_block_tokens : index
+      %key_position = scf.if %from_block -> (index) {
+        %block_slot = index.div %slot, %c4 : index
+        %id = view.load %ids_view[%token, %block_slot] : view<[%tokens]x512xi32> -> i32
+        %block = index.cast %id : i32 to index
+        %member = index.rem %slot, %c4 : index
+        %position = index.madd %block, %c4, %member : index
+        scf.yield %position : index
+      } else {
+        %relative = index.sub %slot, %selected_block_tokens : index
+        %position = index.add %tail_origin, %relative : index
+        scf.yield %position : index
+      }
+      %logical_token = index.assume %key_position [lt(%key_position, %visible)] : index
+      %key_token = func.call @flash_next_physical_token(%rows, %row, %logical_token) : (buffer, index, index) -> (index)
+      %key = vector.load %key_view[%key_token, %kv_head, %channel] : view<[%pool]x2x256xbf16> -> vector<8xbf16>
+      %pairs = vector.dot2f %query, %key, %dot_zeros : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+      %partial = vector.reduce<addf> %pairs, %c0 : vector<4xf32>, f32
+      %dot = kernel.subgroup.reduce<addf> %partial : f32
+      %logit = scalar.mulf %dot, %scale : f32
+      %new_maximum = scalar.maxnumf %logit, %old_maximum : f32
+      %old_delta = scalar.subf %old_maximum, %new_maximum : f32
+      %new_delta = scalar.subf %logit, %new_maximum : f32
+      %rescale = scalar.expf<afn> %old_delta : f32
+      %weight = scalar.expf<afn> %new_delta : f32
+      %new_denominator = scalar.fmaf %old_denominator, %rescale, %weight : f32
+      %packed = vector.load %value_view[%key_token, %kv_head, %channel] : view<[%pool]x2x256xbf16> -> vector<8xbf16>
+      %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+      %rescale_vector = vector.splat %rescale : vector<8xf32>
+      %weight_vector = vector.splat %weight : vector<8xf32>
+      %previous = vector.mulf %old_accumulated, %rescale_vector : vector<8xf32>
+      %new_accumulated = vector.fmaf %values, %weight_vector, %previous : vector<8xf32>
+      scf.yield %new_maximum, %new_denominator, %new_accumulated : f32, f32, vector<8xf32>
+    }
+    %denominators = vector.splat %denominator : vector<8xf32>
+    %weighted = vector.divf %accumulated, %denominators : vector<8xf32>
+    %attention_bf16 = vector.fptrunc %weighted : vector<8xf32> to vector<8xbf16>
+    %attention = vector.extf %attention_bf16 : vector<8xbf16> to vector<8xf32>
+    %gate_packed = vector.load %gate_view[%token, %head, %gate_channel] : view<[%tokens]x24x512xbf16> -> vector<8xbf16>
+    %gate = vector.extf %gate_packed : vector<8xbf16> to vector<8xf32>
+    %negative = vector.negf %gate : vector<8xf32>
+    %exponential = vector.expf<afn> %negative : vector<8xf32>
+    %c1v = vector.constant 1.0 : vector<8xf32>
+    %gate_denominator = vector.addf %c1v, %exponential : vector<8xf32>
+    %gated = vector.divf %attention, %gate_denominator : vector<8xf32>
+    %output_packed = vector.fptrunc %gated : vector<8xf32> to vector<8xbf16>
+    vector.store %output_packed, %output_view[%token, %head, %channel] : vector<8xbf16>, view<[%tokens]x24x256xbf16>
+  }
+  kernel.return
+}
