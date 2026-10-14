@@ -189,6 +189,82 @@ TEST_F(DynamicLibraryTest, AttachSymbolsFromMemory) {
   EXPECT_GT(line.LineNumber, 0u);
   EXPECT_THAT(filename,
               ::testing::HasSubstr("dynamic_library_test_library.cc"));
+
+  // Qualify the native PDB ownership/registration mechanism with the real
+  // image.
+  auto pdb_path = iree::testing::TempFilePath("owned_debug_database", ".pdb");
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      pdb_path.path_view(),
+      iree_make_const_byte_span(files[1].data, files[1].size),
+      iree_allocator_system()));
+  HANDLE pdb_handle =
+      CreateFileA(pdb_path.path().c_str(), GENERIC_READ | DELETE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+  ASSERT_NE(INVALID_HANDLE_VALUE, pdb_handle) << GetLastError();
+  std::unique_ptr<void, decltype(&CloseHandle)> pdb(pdb_handle, CloseHandle);
+  HMODULE dbghelp = GetModuleHandleA("dbghelp.dll");
+  ASSERT_NE(nullptr, dbghelp);
+  auto get_file_index =
+      reinterpret_cast<BOOL(WINAPI*)(PCSTR, PSYMSRV_INDEX_INFO, DWORD)>(
+          GetProcAddress(dbghelp, "SymSrvGetFileIndexInfo"));
+  auto unload_module = reinterpret_cast<BOOL(WINAPI*)(HANDLE, DWORD64)>(
+      GetProcAddress(dbghelp, "SymUnloadModule64"));
+  auto get_options = reinterpret_cast<DWORD(WINAPI*)(void)>(
+      GetProcAddress(dbghelp, "SymGetOptions"));
+  auto set_options = reinterpret_cast<DWORD(WINAPI*)(DWORD)>(
+      GetProcAddress(dbghelp, "SymSetOptions"));
+  ASSERT_NE(nullptr, get_file_index);
+  ASSERT_NE(nullptr, unload_module);
+  ASSERT_NE(nullptr, get_options);
+  ASSERT_NE(nullptr, set_options);
+  SYMSRV_INDEX_INFO image_index = {};
+  image_index.sizeofstruct = sizeof(image_index);
+  SYMSRV_INDEX_INFO pdb_index = {};
+  pdb_index.sizeofstruct = sizeof(pdb_index);
+  IMAGEHLP_MODULE64 registered_info = {};
+  registered_info.SizeOfStruct = sizeof(registered_info);
+  iree_symbol_resolver_lock();
+  BOOL indexed_image = get_file_index(module_path, &image_index, 0);
+  DWORD image_index_error = indexed_image ? ERROR_SUCCESS : GetLastError();
+  BOOL indexed_pdb = get_file_index(pdb_path.path().c_str(), &pdb_index, 0);
+  DWORD pdb_index_error = indexed_pdb ? ERROR_SUCCESS : GetLastError();
+  BOOL unloaded = unload_module(resolver->process,
+                                reinterpret_cast<DWORD64>(mapping.lpBaseOfDll));
+  DWORD unload_error = unloaded ? ERROR_SUCCESS : GetLastError();
+  DWORD options = get_options();
+  set_options(options & ~SYMOPT_DEFERRED_LOADS);
+  DWORD64 loaded = resolver->SymLoadModuleEx(
+      resolver->process, pdb.get(), pdb_path.path().c_str(), nullptr,
+      reinterpret_cast<DWORD64>(mapping.lpBaseOfDll), mapping.SizeOfImage,
+      nullptr, 0);
+  DWORD load_error = loaded ? ERROR_SUCCESS : GetLastError();
+  set_options(options);
+  BOOL found_module = resolver->SymGetModuleInfo64(resolver->process, address,
+                                                   &registered_info);
+  found_symbol = resolver->SymFromAddr(resolver->process, address,
+                                       &symbol_displacement, symbol);
+  found_line = resolver->SymGetLineFromAddr64(resolver->process, address,
+                                              &line_displacement, &line);
+  filename = found_line ? line.FileName : "";
+  iree_symbol_resolver_unlock();
+  std::cout << "native PDB: image_index_error=" << image_index_error
+            << " pdb_index_error=" << pdb_index_error
+            << " unload_error=" << unload_error << " load_error=" << load_error
+            << " symbol_type=" << registered_info.SymType << "\n";
+  EXPECT_TRUE(indexed_image);
+  EXPECT_TRUE(indexed_pdb);
+  EXPECT_EQ(0, memcmp(&image_index.guid, &pdb_index.guid, sizeof(GUID)));
+  EXPECT_EQ(image_index.age, pdb_index.age);
+  EXPECT_TRUE(unloaded);
+  EXPECT_NE(0u, loaded);
+  EXPECT_TRUE(found_module);
+  EXPECT_EQ(SymPdb, registered_info.SymType);
+  EXPECT_TRUE(found_symbol);
+  EXPECT_STREQ("private_times_two", symbol->Name);
+  EXPECT_TRUE(found_line);
+  EXPECT_THAT(filename,
+              ::testing::HasSubstr("dynamic_library_test_library.cc"));
 }
 #endif  // IREE_PLATFORM_WINDOWS
 
