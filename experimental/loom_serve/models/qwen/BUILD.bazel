@@ -16,17 +16,28 @@ package(
     licenses = ["notice"],
 )
 
+# Shared chat, sampling, and packed-epoch policy for Qwen model families.
+filegroup(
+    name = "text_control",
+    srcs = ["control.loom"],
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "sources",
     srcs = [
         "model.json",
+        ":text_control",
         "//experimental/loom_serve/motifs/ggml:sources",
         "//experimental/loom_serve/motifs/tensor:sources",
-    ] + glob([
-        "*.loom",
-        "kernels/qwen38/*.loom",
-        "programs/qwen38/*.loom",
-    ]),
+    ] + glob(
+        [
+            "*.loom",
+            "kernels/qwen38/*.loom",
+            "programs/qwen38/*.loom",
+        ],
+        exclude = ["control.loom"],
+    ),
     visibility = ["//visibility:public"],
 )
 

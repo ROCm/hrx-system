@@ -9,19 +9,39 @@
 
 iree_add_all_subdirs()
 
-file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
-file(GLOB _GLOB_KERNELS_QWEN38_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/qwen38/*.loom)
-file(GLOB _GLOB_PROGRAMS_QWEN38_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS programs/qwen38/*.loom)
+iree_package_target_name(_FILEGROUP_TARGET "::text_control")
+add_custom_command(OUTPUT text_control.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch text_control.stamp
+  DEPENDS
+    "control.loom"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS text_control.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/text_control.stamp"
+)
+
+file(GLOB _GLOB_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
+file(GLOB _GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/qwen38/*.loom)
+file(GLOB _GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS programs/qwen38/*.loom)
+file(GLOB _GLOB_CONTROL_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS control.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_EA9AE811 ${_GLOB_CONTROL_LOOM_EA9AE811})
+list(REMOVE_ITEM _GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811 ${_GLOB_CONTROL_LOOM_EA9AE811})
+list(REMOVE_ITEM _GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811 ${_GLOB_CONTROL_LOOM_EA9AE811})
 iree_package_target_name(_FILEGROUP_TARGET "::sources")
 add_custom_command(OUTPUT sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch sources.stamp
   DEPENDS
     "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/ggml/sources.stamp"
     "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/tensor/sources.stamp"
-    "${_GLOB_KERNELS_QWEN38_X_LOOM}"
-    "${_GLOB_PROGRAMS_QWEN38_X_LOOM}"
-    "${_GLOB_X_LOOM}"
+    "${_GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811}"
+    "${_GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811}"
+    "${_GLOB_X_LOOM_EA9AE811}"
     "model.json"
+    "text_control.stamp"
 )
 
 add_custom_target(${_FILEGROUP_TARGET}

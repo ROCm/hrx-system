@@ -1610,18 +1610,20 @@ func.def public @step(%state: buffer, %initialize: i32, %source_position: i32, %
   func.return %completion, %next_source_position : i64, i32
 }
 
-// Catalog order is isolated prefill/decode, target shapes, then optional
-// proposal, catch-up shapes and verifier shapes. All sessions share these
-// commands and one process; descriptors and buffers carry their live state.
+// Cold state supplies the first target shape, allowing models to omit
+// isolated stages. Optional proposal, catch-up, and verifier catalogs retain
+// their explicit origins. All sessions share these commands and one process;
+// descriptors and buffers carry their live state.
 // Feedback slot zero holds ordinary tokens; slots one/two hold separate
 // verification banks. Neither branch waits: the owner joins both timelines
 // before advancing host frontiers.
 func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %feedback_slot: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer) -> (i64) {
   %origin = index.constant 0 : offset
-  %view = buffer.view %control_state[%origin] : buffer -> view<5xi32>
-  %shape_count = view.load %view[2] : view<5xi32> -> i32
-  %draft_first = view.load %view[3] : view<5xi32> -> i32
-  %draft_kind = view.load %view[4] : view<5xi32> -> i32
+  %view = buffer.view %control_state[%origin] : buffer -> view<6xi32>
+  %shape_count = view.load %view[2] : view<6xi32> -> i32
+  %draft_first = view.load %view[3] : view<6xi32> -> i32
+  %draft_kind = view.load %view[4] : view<6xi32> -> i32
+  %target_first = view.load %view[5] : view<6xi32> -> i32
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32
@@ -1650,7 +1652,7 @@ func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verif
     %feedback = func.call @feedback(%feedback_slot, %results, %c0_2, %length) : (i32, hal.buffer, i64, i64) -> (i64)
     scf.yield %completion : i64
   } else {
-    %target_stage = scalar.addi %shape, %c2 : i32
+    %target_stage = scalar.addi %shape, %target_first : i32
     %completion = func.call @execute_6(%target_stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %has_output = scalar.cmpi ne, %output_count, %c0 : i32
     scf.if %has_output {
@@ -1696,9 +1698,9 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   %continues = scalar.cmpi eq, %epoch_count, %c2 : i32
   %completion = scf.if %continues -> (i64) {
     %origin = index.constant 0 : offset
-    %view = buffer.view %control_state[%origin] : buffer -> view<5xi32>
-    %shape_count = view.load %view[2] : view<5xi32> -> i32
-    %proposal = view.load %view[3] : view<5xi32> -> i32
+    %view = buffer.view %control_state[%origin] : buffer -> view<6xi32>
+    %shape_count = view.load %view[2] : view<6xi32> -> i32
+    %proposal = view.load %view[3] : view<6xi32> -> i32
     %shapes = scalar.muli %shape_count, %c2 : i32
     %after_shapes = scalar.addi %proposal, %shapes : i32
     %continuation = scalar.addi %after_shapes, %c1 : i32
