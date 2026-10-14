@@ -11,6 +11,61 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    executable
+  HDRS
+    "executable.h"
+  SRCS
+    "executable.c"
+  DEPS
+    ::context
+    ::kernarg
+    amdf::headers
+    iree::base
+    iree::base::core_headers
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amd::fabric::buffer
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::fabric::memory_transition
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::image::hsaco
+    iree::hal::drivers::amd::gpu::image::metadata
+    iree::hal::drivers::amd::gpu::queue::pm4::launch
+    iree::hal::drivers::amd::gpu::target::identity
+    iree::hal::drivers::amd::status
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    executable_test
+  SRCS
+    "executable_test.cc"
+  DEPS
+    ::context
+    ::executable
+    ::kernarg
+    amdf::headers
+    iree::base
+    iree::base::core_headers
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::image::hsaco
+    iree::hal::drivers::amd::gpu::image::hsaco_test_util
+    iree::hal::drivers::amd::gpu::image::metadata
+    iree::hal::drivers::amd::gpu::queue::pm4::launch
+    iree::hal::drivers::amd::gpu::target::identity
+    iree::hal::memory::maintenance
+    iree::hal::memory::maintenance_thread
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     kernarg
   HDRS
     "kernarg.h"

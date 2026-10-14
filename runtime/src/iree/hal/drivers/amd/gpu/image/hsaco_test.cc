@@ -226,8 +226,12 @@ TEST_P(HsacoTest, LoadsRealHipGlobalsAndDescriptors) {
     ASSERT_NE(pointer, nullptr);
     ASSERT_NE(zero, nullptr);
     EXPECT_EQ(value->length, 4u);
+    EXPECT_EQ(value->access, IREE_HAL_AMD_GPU_IMAGE_ACCESS_READ |
+                                 IREE_HAL_AMD_GPU_IMAGE_ACCESS_WRITE);
     EXPECT_EQ(pointer->length, 8u);
+    EXPECT_EQ(pointer->access, value->access);
     EXPECT_EQ(zero->length, 17u * 4);
+    EXPECT_EQ(zero->access, value->access);
     EXPECT_EQ(
         iree_hal_amd_gpu_image_find_symbol(&image.value, IREE_SV("absent")),
         nullptr);

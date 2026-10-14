@@ -82,6 +82,9 @@ typedef struct iree_hal_amd_gpu_image_symbol_t {
   iree_hal_amd_gpu_image_symbol_kind_t kind;
   // Cross-image visibility retained for the caller's linking policy.
   iree_hal_amd_gpu_image_symbol_visibility_t visibility;
+  // Permissions of the containing image segment, or zero for absolute/import
+  // addresses whose storage contract belongs to their external owner.
+  iree_hal_amd_gpu_image_access_t access;
   // Whether a stronger definition may replace this symbol during linking.
   bool weak;
 } iree_hal_amd_gpu_image_symbol_t;

@@ -877,6 +877,7 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_symbols(
         : type == 2 ? IREE_HAL_AMD_GPU_IMAGE_SYMBOL_FUNCTION
                     : IREE_HAL_AMD_GPU_IMAGE_SYMBOL_UNSPECIFIED;
     iree_hal_amd_gpu_image_address_t address = {0};
+    iree_hal_amd_gpu_image_access_t access = 0;
     if (!section) {
       if (!binding || !name.size) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -907,6 +908,7 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_symbols(
       }
       address.kind = IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMAGE;
       address.offset = value - reader->virtual_base;
+      access = image->segments[segment_ordinal].access;
     }
     reader->symbol_addresses[i] = address;
     if (name.size && binding && type <= 2) {
@@ -917,7 +919,9 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_symbols(
           .kind = kind,
           .visibility =
               (iree_hal_amd_gpu_image_symbol_visibility_t)(data[5] & 3),
-          .weak = binding == 2};
+          .access = access,
+          .weak = binding == 2,
+      };
     }
   }
   qsort(image->symbols, image->symbol_count, sizeof(*image->symbols),
