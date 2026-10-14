@@ -29,6 +29,7 @@ add_custom_command(OUTPUT speculation_kernels.stamp
     COMMAND ${CMAKE_COMMAND} -E touch speculation_kernels.stamp
   DEPENDS
     "kernels/qwen38/accept.loom"
+    "kernels/qwen38/continuation.loom"
     "kernels/qwen38/mtp_proposal.loom"
 )
 
