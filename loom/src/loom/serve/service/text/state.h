@@ -53,12 +53,14 @@ typedef struct loom_serve_text_state_row_t {
   } recurrent;
   // Old partial KV tail owned through COW retirement, or UINT32_MAX.
   uint32_t retiring_tail;
+  // Source-owned logical position at the consumed frontier.
+  uint32_t source_position;
   // Number of inputs actually consumed into KV/recurrent state.
-  iree_host_size_t position;
+  uint32_t position;
   // Owned physical pages, including any in-flight speculative suffix.
   uint32_t block_count;
   // Request high-water in token positions; zero outside a reservation.
-  iree_host_size_t reserved_extent;
+  uint32_t reserved_extent;
   // Owned capture payload, or NULL. Successful suspension releases physical
   // IDs; terminal transfer failure preserves both until teardown.
   loom_serve_snapshot_t* snapshot;
@@ -70,7 +72,9 @@ typedef struct loom_serve_text_state_checkpoint_t {
   // Borrowed storage owner, outliving this endpoint.
   loom_serve_text_state_t* owner;
   // Exact consumed input frontier.
-  iree_host_size_t position;
+  uint32_t position;
+  // Exact source-owned logical position at that frontier.
+  uint32_t source_position;
   // Retained recurrent slot, or UINT32_MAX while suspended.
   uint32_t recurrent_slot;
   // Number of retained physical pages; zero while suspended.

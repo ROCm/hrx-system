@@ -197,8 +197,8 @@ iree_status_t loom_serve_text_epoch_complete(
       loom_serve_text_model_row(model, span->row_index);
   IREE_RETURN_IF_ERROR(loom_serve_text_row_complete_step(row));
   loom_serve_text_result_t* result = &epoch->results[epoch->cursor];
-  result->consumed_count = span->token_count;
-  result->known_count = span->token_count;
+  result->consumed_count = (uint32_t)span->token_count;
+  result->known_count = (uint32_t)span->token_count;
   if (iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT)) {
     result->output_count = 1;
     result->tokens[0] = loom_serve_text_row_token(row);

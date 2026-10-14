@@ -166,14 +166,14 @@ typedef struct loom_serve_text_continuation_t {
 // pending. Consumed and output counts therefore agree for speculative spans.
 typedef struct loom_serve_text_result_t {
   // Inputs consumed into retained target and draft state.
-  iree_host_size_t consumed_count;
+  uint32_t consumed_count;
   // Consumed caller-supplied inputs, excluding speculative anchor/draft work.
   // This separates prompt progress when a cohort also starts generation.
-  iree_host_size_t known_count;
+  uint32_t known_count;
   // Selected output IDs, including an EOS or the first rejected replacement.
-  iree_host_size_t output_count;
+  uint32_t output_count;
   // Number of speculative verifications that advanced this span.
-  iree_host_size_t verification_count;
+  uint32_t verification_count;
   // Valid prefix of output_count IDs across at most two device-fed epochs.
   int32_t tokens[16];
 } loom_serve_text_result_t;

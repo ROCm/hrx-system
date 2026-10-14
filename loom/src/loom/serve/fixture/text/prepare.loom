@@ -120,7 +120,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
     func.call @allocation(%allocations, %i, %c0_i64, %c0_i64) : (buffer, index, i64, i64)
   }
   %residual_bytes = scalar.constant 64 : i64
-  %metadata_bytes = scalar.constant 528 : i64
+  %metadata_bytes = scalar.constant 592 : i64
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
   %c4 = index.constant 4 : index

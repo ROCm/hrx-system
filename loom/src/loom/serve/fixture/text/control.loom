@@ -462,12 +462,12 @@ func.def public @encode_state(%bindings: buffer, %count: i32, %origins: buffer) 
   func.return
 }
 
-// Device packets retain the first cohort's eight-field plan records. Feedback
+// Device packets retain the first cohort's nine-field plan records. Feedback
 // slots are span-indexed, including unselected input-only spans.
 func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %first_count: i32, %next_count: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32) {
   %origin = index.constant 0 : offset
   %header_bytes = index.constant 16 : offset
-  %plan_bytes = index.constant 512 : offset
+  %plan_bytes = index.constant 576 : offset
   %token_bytes = buffer.length %tokens
   %header = buffer.view %metadata[%origin] : buffer -> view<4xi32>
   %c0 = scalar.constant 0 : i32
@@ -486,36 +486,44 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
   %c1 = index.constant 1 : index
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
+  %c2_i32 = scalar.constant 2 : i32
   %progress_bytes = buffer.length %progress
   buffer.fill %c0_i32, %progress[%origin], %progress_bytes : i32
   %bounded_count = scalar.assume %count [range(%count, 1, 16)] : i32
   %length = index.cast %bounded_count : i32 to index
-  %requests = buffer.view %plan[%origin] : buffer -> view<32x8xi32>
+  %requests = buffer.view %plan[%origin] : buffer -> view<32x9xi32>
   %outputs = buffer.view %ordinary[%origin] : buffer -> view<16xi32>
-  %published = buffer.view %progress[%origin] : buffer -> view<16x20xi32>
+  %published = buffer.view %progress[%origin] : buffer -> view<16x21xi32>
   scf.for %i = [%c0 to %length step %c1] {
-    %consumed = view.load %requests[%i, 0] : view<32x8xi32> -> i32
-    %flags = view.load %requests[%i, 5] : view<32x8xi32> -> i32
+    %consumed = view.load %requests[%i, 0] : view<32x9xi32> -> i32
+    %source_position = view.load %requests[%i, 2] : view<32x9xi32> -> i32
+    %source_advance = scalar.muli %consumed, %c2_i32 : i32
+    %next_source_position = scalar.addi %source_position, %source_advance : i32
+    %flags = view.load %requests[%i, 6] : view<32x9xi32> -> i32
     %bits = scalar.andi %flags, %c1_i32 : i32
     %selected = scalar.cmpi ne, %bits, %c0_i32 : i32
     %selected_count = scalar.extui %selected : i1 to i32
-    view.store %consumed, %published[%i, 0] : i32, view<16x20xi32>
-    view.store %consumed, %published[%i, 1] : i32, view<16x20xi32>
-    view.store %selected_count, %published[%i, 2] : i32, view<16x20xi32>
+    view.store %consumed, %published[%i, 0] : i32, view<16x21xi32>
+    view.store %consumed, %published[%i, 1] : i32, view<16x21xi32>
+    view.store %selected_count, %published[%i, 2] : i32, view<16x21xi32>
+    view.store %next_source_position, %published[%i, 4] : i32, view<16x21xi32>
     scf.if %selected {
       %token = view.load %outputs[%i] : view<16xi32> -> i32
-      view.store %token, %published[%i, 4] : i32, view<16x20xi32>
+      view.store %token, %published[%i, 5] : i32, view<16x21xi32>
     }
   }
   func.return
 }
 
-func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %control: hal.buffer, %recurrent: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64) {
+func.def public @step(%state: buffer, %initialize: i32, %source_position: i32, %input_count: i32, %residual: hal.buffer, %control: hal.buffer, %recurrent: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64, i32) {
   %c0 = scalar.constant 0 : i32
+  %c2 = scalar.constant 2 : i32
   %c0_i64 = scalar.constant 0 : i64
+  %source_advance = scalar.muli %input_count, %c2 : i32
+  %next_source_position = scalar.addi %source_position, %source_advance : i32
   %error = global.load @unsupported : buffer
   func.call @require(%c0, %error) : (i32, buffer)
-  func.return %c0_i64 : i64
+  func.return %c0_i64, %next_source_position : i64, i32
 }
 
 func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %epoch_count: i32, %continuation_shape: i32, %continuation_proposes: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer, %next_results: hal.buffer) -> (i64) {

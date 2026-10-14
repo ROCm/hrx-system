@@ -22,9 +22,9 @@ class Oracle {
 
   void Consume(int32_t token) {
     hidden_ = (5 * hidden_ + token + bias_) % 97;
-    history_ = (7 * history_ + hidden_ + position_) % 101;
+    history_ = (7 * history_ + hidden_ + source_position_ / 2) % 101;
     sum_ += history_;
-    ++position_;
+    source_position_ += 2;
   }
 
   void Consume(const std::string& text) {
@@ -34,7 +34,7 @@ class Oracle {
   }
 
   int32_t Predict() const {
-    return position_ % 11 == 0 ? 3 : (hidden_ + sum_) % 3;
+    return (source_position_ / 2) % 11 == 0 ? 3 : (hidden_ + sum_) % 3;
   }
 
   static int32_t Id(char character) {
@@ -69,8 +69,8 @@ class Oracle {
   uint32_t history_ = 0;
   // Sum of all cached history values used by selection.
   uint32_t sum_ = 0;
-  // Number of consumed inputs, excluding a pending prediction.
-  uint32_t position_ = 0;
+  // Source-defined logical position advancing twice per consumed input.
+  uint32_t source_position_ = 0;
 };
 
 }  // namespace loom_serve::testing::text

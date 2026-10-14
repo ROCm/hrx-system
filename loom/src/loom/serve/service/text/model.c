@@ -47,6 +47,29 @@ enum {
   TEXT_HOST_BUFFER_COUNT = 10,
 };
 
+enum {
+  TEXT_PLAN_FIELD_LENGTH = 0,
+  TEXT_PLAN_FIELD_POSITION = 1,
+  TEXT_PLAN_FIELD_SOURCE_POSITION = 2,
+  TEXT_PLAN_FIELD_ROW = 3,
+  TEXT_PLAN_FIELD_INPUT_BEGIN = 4,
+  TEXT_PLAN_FIELD_INPUT_COUNT = 5,
+  TEXT_PLAN_FIELD_FLAGS = 6,
+  TEXT_PLAN_FIELD_OUTPUT_LIMIT = 7,
+  TEXT_PLAN_FIELD_FIRST_SPAN = 8,
+  TEXT_PLAN_FIELD_COUNT = 9,
+};
+
+enum {
+  TEXT_PROGRESS_FIELD_CONSUMED_COUNT = 0,
+  TEXT_PROGRESS_FIELD_KNOWN_COUNT = 1,
+  TEXT_PROGRESS_FIELD_OUTPUT_COUNT = 2,
+  TEXT_PROGRESS_FIELD_VERIFICATION_COUNT = 3,
+  TEXT_PROGRESS_FIELD_SOURCE_POSITION = 4,
+  TEXT_PROGRESS_FIELD_TOKENS = 5,
+  TEXT_PROGRESS_FIELD_COUNT = 21,
+};
+
 enum text_epoch_flag_bits_e {
   TEXT_EPOCH_FLAG_VERIFY = 1u << 0,
   TEXT_EPOCH_FLAG_CONTINUATION = 1u << 1,
@@ -159,6 +182,8 @@ struct loom_serve_text_row_t {
   struct {
     // Source command and completed metric category.
     text_step_kind_t kind;
+    // Absolute source-owned position to publish after successful readiness.
+    uint32_t source_position;
     // Number of consumed inputs published only after readiness.
     iree_host_size_t token_count;
     // Submission start, including activation and feedback retirement.
@@ -220,7 +245,7 @@ static iree_status_t loom_serve_text_create_program(
     }
   }
   const iree_host_size_t lengths[TEXT_HOST_BUFFER_COUNT] = {
-      2 * TEXT_ROW_CAPACITY * 8 * sizeof(int32_t),
+      2 * TEXT_ROW_CAPACITY * TEXT_PLAN_FIELD_COUNT * sizeof(int32_t),
       input_length,
       runner->shape_count
           ? iree_hal_buffer_byte_length(runner->state.epoch.buffers[1])
@@ -237,7 +262,7 @@ static iree_status_t loom_serve_text_create_program(
       iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT)
           ? iree_hal_buffer_byte_length(runner->state.draft.next_results)
           : 0,
-      TEXT_ROW_CAPACITY * 20 * sizeof(int32_t),
+      TEXT_ROW_CAPACITY * TEXT_PROGRESS_FIELD_COUNT * sizeof(int32_t),
       TEXT_ROW_CAPACITY * 4 * sizeof(int64_t),
       runner->shape_count
           ? runner->state.storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS]
@@ -1271,19 +1296,28 @@ static iree_status_t loom_serve_text_submit_step(
     loom_serve_execution_frontier_t* out_frontier) {
   loom_serve_text_model_t* model = row->model;
   IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
-  iree_vm_variant_t arguments[TEXT_BINDING_COUNT + 2] = {
+  iree_vm_variant_t arguments[TEXT_BINDING_COUNT + 4] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->source.vm_types,
                                                model->source.control_state),
       iree_vm_variant_from_i32(initialize),
+      iree_vm_variant_from_i32((int32_t)row->state->source_position),
+      iree_vm_variant_from_i32((int32_t)row->step.token_count),
   };
   for (iree_host_size_t i = 0; i < TEXT_BINDING_COUNT; ++i) {
-    arguments[i + 2] = iree_hal_buffer_variant_from_ptr_borrowed(
+    arguments[i + 4] = iree_hal_buffer_variant_from_ptr_borrowed(
         &model->source.types, row->state->buffers[i]);
   }
-  iree_vm_variant_t results[1] = {0};
+  iree_vm_variant_t results[2] = {0};
   iree_status_t status = loom_serve_text_invoke(
       model, model->step, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_array(results));
+  int32_t source_position = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_i32_from_variant(results[1], &source_position);
+  }
+  if (iree_status_is_ok(status)) {
+    row->step.source_position = (uint32_t)source_position;
+  }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   const iree_hal_transfer_operation_t downloads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
@@ -1375,10 +1409,10 @@ iree_status_t loom_serve_text_row_bind_request(loom_serve_text_row_t* row,
                                 iree_vm_variant_span_empty());
 }
 
-// The semantic host record is {length, position, row, input_begin, input_count,
-// flags, output_credit, first_span}. Known IDs are copied once into a
-// contiguous host stream. Source owns all device packet offsets and selection
-// policy.
+// The semantic host record is {length, position, source_position, row,
+// input_begin, input_count, flags, output_credit, first_span}. Known IDs are
+// copied once into a contiguous host stream. Source owns all device packet
+// offsets, logical positions and selection policy.
 static iree_host_size_t loom_serve_text_prepare_plan(
     loom_serve_text_model_t* model, iree_host_size_t span_count,
     const loom_serve_text_span_t* spans, const uint32_t* output_limits,
@@ -1392,15 +1426,18 @@ static iree_host_size_t loom_serve_text_prepare_plan(
         span->token_ids && !(first_indices && generates)
             ? (generates ? 1 : span->token_count)
             : 0;
-    const uint32_t fields[] = {
-        (uint32_t)span->token_count,
-        (uint32_t)model->rows[span->row_index].state->position,
-        (uint32_t)span->row_index,
-        (uint32_t)input_begin,
-        (uint32_t)input_count,
-        span->flags,
-        output_limits ? output_limits[i] : 0,
-        first_indices ? first_indices[i] : (uint32_t)i,
+    const loom_serve_text_state_row_t* row = model->rows[span->row_index].state;
+    const uint32_t fields[TEXT_PLAN_FIELD_COUNT] = {
+        [TEXT_PLAN_FIELD_LENGTH] = (uint32_t)span->token_count,
+        [TEXT_PLAN_FIELD_POSITION] = row->position,
+        [TEXT_PLAN_FIELD_SOURCE_POSITION] = row->source_position,
+        [TEXT_PLAN_FIELD_ROW] = (uint32_t)span->row_index,
+        [TEXT_PLAN_FIELD_INPUT_BEGIN] = (uint32_t)input_begin,
+        [TEXT_PLAN_FIELD_INPUT_COUNT] = (uint32_t)input_count,
+        [TEXT_PLAN_FIELD_FLAGS] = span->flags,
+        [TEXT_PLAN_FIELD_OUTPUT_LIMIT] = output_limits ? output_limits[i] : 0,
+        [TEXT_PLAN_FIELD_FIRST_SPAN] =
+            first_indices ? first_indices[i] : (uint32_t)i,
     };
     uint8_t* record = model->host.bytes[TEXT_HOST_PLAN].data +
                       (record_begin + i) * sizeof(fields);
@@ -1719,23 +1756,30 @@ iree_status_t loom_serve_text_model_complete_epoch(
                              iree_vm_variant_span_from_array(publish_arguments),
                              iree_vm_variant_span_empty()));
   for (iree_host_size_t i = 0; i < model->invocation.span_count; ++i) {
-    const uint8_t* record =
-        model->host.bytes[TEXT_HOST_PROGRESS].data + i * 20 * sizeof(int32_t);
+    const uint8_t* record = model->host.bytes[TEXT_HOST_PROGRESS].data +
+                            i * TEXT_PROGRESS_FIELD_COUNT * sizeof(int32_t);
     loom_serve_text_result_t result = {
-        .consumed_count = iree_unaligned_load_le_u32(record),
-        .known_count = iree_unaligned_load_le_u32(record + 4),
-        .output_count = iree_unaligned_load_le_u32(record + 8),
-        .verification_count = iree_unaligned_load_le_u32(record + 12),
+        .consumed_count = iree_unaligned_load_le_u32(
+            record + TEXT_PROGRESS_FIELD_CONSUMED_COUNT * sizeof(int32_t)),
+        .known_count = iree_unaligned_load_le_u32(
+            record + TEXT_PROGRESS_FIELD_KNOWN_COUNT * sizeof(int32_t)),
+        .output_count = iree_unaligned_load_le_u32(
+            record + TEXT_PROGRESS_FIELD_OUTPUT_COUNT * sizeof(int32_t)),
+        .verification_count = iree_unaligned_load_le_u32(
+            record + TEXT_PROGRESS_FIELD_VERIFICATION_COUNT * sizeof(int32_t)),
     };
+    const uint32_t source_position = iree_unaligned_load_le_u32(
+        record + TEXT_PROGRESS_FIELD_SOURCE_POSITION * sizeof(int32_t));
     for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(result.tokens); ++j) {
-      result.tokens[j] =
-          (int32_t)iree_unaligned_load_le_u32(record + 16 + j * 4);
+      result.tokens[j] = (int32_t)iree_unaligned_load_le_u32(
+          record + (TEXT_PROGRESS_FIELD_TOKENS + j) * sizeof(int32_t));
     }
     if (out_results) {
       out_results[i] = result;
     }
     loom_serve_text_row_t* row = &model->rows[model->invocation.row_indices[i]];
     row->state->position += result.consumed_count;
+    row->state->source_position = source_position;
     loom_serve_text_state_row_trim(row->state);
     row->has_prediction = result.output_count != 0;
     if (row->has_prediction) {
@@ -1908,6 +1952,7 @@ iree_status_t loom_serve_text_row_complete_step(loom_serve_text_row_t* row) {
     IREE_RETURN_IF_ERROR(loom_serve_text_model_complete_epoch(model, NULL));
   } else {
     row->state->position += row->step.token_count;
+    row->state->source_position = row->step.source_position;
     row->has_prediction = true;
     loom_serve_residency_release(model->residency);
   }
