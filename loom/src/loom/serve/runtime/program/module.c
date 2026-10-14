@@ -419,3 +419,11 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
   }
   return status;
 }
+
+void loom_serve_module_bind_feedback(iree_vm_module_t* base,
+                                     iree_host_size_t slot,
+                                     iree_byte_span_t destination) {
+  loom_serve_module_t* module = (loom_serve_module_t*)base;
+  IREE_ASSERT(slot < module->feedback_count);
+  module->feedback[slot] = destination;
+}

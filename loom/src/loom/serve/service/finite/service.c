@@ -91,6 +91,8 @@ struct loom_serve_finite_service_t {
   loom_serve_finite_prepared_t* prepared;
   // Protocol result row counts captured alongside the cohort.
   iree_host_size_t* rows;
+  // Detached exact result retained through CPU encoding process release.
+  loom_serve_finite_result_t result;
   // Completion publication; callbacks only publish and wake.
   struct {
     // Joins final callback accesses with owner collection/destruction.
@@ -278,6 +280,7 @@ static void loom_serve_finite_finish(loom_serve_finite_service_t* service,
                                      const iree_status_t terminal_status) {
   loom_serve_residency_cancel_admission(
       loom_serve_finite_model_residency(service->model));
+  loom_serve_finite_result_deinitialize(&service->result);
   for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
     loom_serve_finite_job_destroy(service, service->cohort[i], terminal_status);
   }
@@ -331,8 +334,8 @@ static iree_status_t loom_serve_finite_cpu_run(
       job->body = iree_string_view_empty();
     } else {
       for (iree_host_size_t row = 0; row < job->request->count; ++row) {
-        job->rows[row] =
-            loom_serve_finite_model_row(service->model, job->result_index, row);
+        job->rows[row] = loom_serve_finite_result_row(&service->result,
+                                                      job->result_index, row);
       }
       status = loom_serve_finite_begin(&job->response, "200 OK");
       if (iree_status_is_ok(status)) {
@@ -560,12 +563,14 @@ static void loom_serve_finite_cancel_peers(
 static void loom_serve_finite_complete_execution(
     loom_serve_finite_service_t* service) {
   loom_serve_finite_model_complete(service->model);
+  loom_serve_finite_model_take_result(service->model, &service->result);
   loom_serve_finite_batch_event(service, &LOOM_SERVE_TELEMETRY_BATCH_END,
                                 ++service->telemetry.counters.batches);
   iree_host_size_t retained = 0;
   for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
     finite_job_t* job = service->cohort[i];
-    job->input_tokens = loom_serve_finite_model_input_tokens(service->model, i);
+    job->input_tokens =
+        loom_serve_finite_result_input_tokens(&service->result, i);
     service->telemetry.counters.input_tokens += job->input_tokens;
     if (!job->connection) {
       loom_serve_finite_job_destroy(service, job, iree_ok_status());
@@ -581,7 +586,6 @@ static void loom_serve_finite_complete_execution(
   if (retained) {
     loom_serve_finite_schedule_cpu(service, FINITE_ENCODING);
   } else {
-    loom_serve_finite_model_release_batch(service->model);
     loom_serve_finite_finish(service, iree_ok_status());
   }
 }
@@ -627,7 +631,6 @@ static iree_status_t loom_serve_finite_collect(
         job->connection = NULL;
       }
     }
-    loom_serve_finite_model_release_batch(service->model);
     loom_serve_finite_finish(service, iree_ok_status());
   }
   return status;

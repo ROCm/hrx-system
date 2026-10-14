@@ -162,14 +162,15 @@ class FiniteComponentTest : public ::testing::Test {
     });
   }
 
-  void Invoke(loom_serve_finite_model_t* model) {
+  void Project(loom_serve_finite_model_t* model, float first,
+               loom_serve_finite_result_t* out_result) {
     iree_vm_buffer_t* input = nullptr;
     IREE_ASSERT_OK(iree_vm_buffer_create(16, 16, host_allocator_, &input));
     iree_byte_span_t bytes;
     IREE_ASSERT_OK(iree_vm_buffer_map_write(input, 0, 16, &bytes));
     for (uint32_t i = 0; i < 4; ++i) {
       iree_unaligned_store_le_f32(bytes.data + i * 4,
-                                  static_cast<float>(i + 1));
+                                  first + static_cast<float>(i));
     }
     loom_serve_finite_prepared_t prepared = {};
     IREE_ASSERT_OK(
@@ -190,13 +191,23 @@ class FiniteComponentTest : public ::testing::Test {
         {2, frontier.semaphores, frontier.values}, iree_infinite_timeout(),
         IREE_ASYNC_WAIT_FLAG_NONE));
     loom_serve_finite_model_complete(model);
-    const auto output = loom_serve_finite_model_row(model, 0, 0);
+    loom_serve_finite_model_take_result(model, out_result);
+  }
+
+  void ExpectResult(const loom_serve_finite_result_t* result, float first) {
+    const auto output = loom_serve_finite_result_row(result, 0, 0);
     ASSERT_EQ(output.data_length, 16u);
     for (uint32_t i = 0; i < 4; ++i) {
       EXPECT_EQ(iree_unaligned_load_le_f32(output.data + i * 4),
-                static_cast<float>((i + 1) * 2));
+                (first + static_cast<float>(i)) * 2.0f);
     }
-    loom_serve_finite_model_release_batch(model);
+  }
+
+  void Invoke(loom_serve_finite_model_t* model) {
+    loom_serve_finite_result_t result = {};
+    ASSERT_NO_FATAL_FAILURE(Project(model, 1.0f, &result));
+    ExpectResult(&result, 1.0f);
+    loom_serve_finite_result_deinitialize(&result);
   }
 
   // Allocation policy for this real source/JIT/device fixture.
@@ -260,6 +271,20 @@ TEST_F(FiniteComponentTest, RepeatedDemandSharesOneUnactivatedPreparation) {
   EXPECT_EQ(loom_serve_finite_component_report(component_)->commands,
             report.commands);
   ASSERT_NO_FATAL_FAILURE(Invoke(model));
+}
+
+TEST_F(FiniteComponentTest, CompletedResultSurvivesNextInvocation) {
+  loom_serve_finite_model_t* model = nullptr;
+  IREE_ASSERT_OK(Prepare(component_, &model));
+  loom_serve_finite_result_t first = {};
+  loom_serve_finite_result_t second = {};
+  ASSERT_NO_FATAL_FAILURE(Project(model, 1.0f, &first));
+  ASSERT_NO_FATAL_FAILURE(Project(model, 9.0f, &second));
+  ExpectResult(&first, 1.0f);
+  ExpectResult(&second, 9.0f);
+  EXPECT_NE(first.feedback.data, second.feedback.data);
+  loom_serve_finite_result_deinitialize(&second);
+  loom_serve_finite_result_deinitialize(&first);
 }
 
 TEST_F(FiniteComponentTest, PreparationFailureIsRetainedWithoutRetrying) {

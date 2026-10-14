@@ -45,6 +45,8 @@ struct loom_serve_finite_model_t {
   iree_host_size_t input_capacity;
   // Maximum device output geometry, independent of compact feedback.
   iree_host_size_t output_capacity;
+  // Maximum compact feedback bytes accepted from a source result plan.
+  iree_host_size_t feedback_capacity;
   // Immutable tokenizer reused by each independent request encoder.
   iree_tokenizer_t* tokenizer;
   // Borrowed shared device/backing owner, outliving the model.
@@ -69,6 +71,8 @@ struct loom_serve_finite_model_t {
     iree_host_size_t feedback_length;
     // Original HTTP request count in stable cohort order.
     iree_host_size_t request_count;
+    // Exact compact feedback allocation for this cohort.
+    iree_byte_span_t feedback;
   } invocation;
   // Cold live-source compiler borrowing the shared host task pool.
   loom_serve_jit_t* jit;
@@ -119,8 +123,6 @@ struct loom_serve_finite_model_t {
   } weights;
   // Queue-allocated cohort input/output roots, released before execution drain.
   iree_hal_buffer_t* buffers[2];
-  // Compact vector feedback, exclusive through the encoder process release.
-  iree_byte_span_t output;
 };
 
 // Releases model-owned consumers, not borrowed upload/feedback payloads or the
@@ -201,8 +203,7 @@ static iree_status_t loom_serve_finite_model_destroy_resources(
     iree_allocator_free(model->host_allocator, model->stages.values);
     iree_allocator_free(model->host_allocator, model->stages.bindings);
     loom_serve_preparation_free(model->preparation);
-    iree_vm_buffer_release(model->invocation.plan);
-    iree_vm_buffer_release(model->invocation.payload);
+    loom_serve_finite_model_release_batch(model);
     iree_vm_environment_free(model->control.environment);
     loom_serve_execution_release(model->execution);
     iree_allocator_free(model->host_allocator, model->weights.values);
@@ -210,7 +211,6 @@ static iree_status_t loom_serve_finite_model_destroy_resources(
     iree_allocator_free(model->host_allocator, (void*)model->name.data);
     loom_serve_jit_free(model->jit);
     iree_tokenizer_free(model->tokenizer);
-    iree_allocator_free(model->host_allocator, model->output.data);
     iree_allocator_free(model->host_allocator, model);
   }
   return status;
@@ -334,7 +334,7 @@ static iree_status_t loom_serve_finite_prepare(
     model->batch_limit = (uint64_t)capacities[0];
     model->input_capacity = (iree_host_size_t)capacities[1];
     model->output_capacity = (iree_host_size_t)capacities[2];
-    model->output.data_length = (iree_host_size_t)capacities[3];
+    model->feedback_capacity = (iree_host_size_t)capacities[3];
   }
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_ptr_from_variant_move(
@@ -493,7 +493,7 @@ static iree_status_t loom_serve_finite_create_control(
   const loom_serve_module_options_t options = {
       .binding_capacity = 2,
       .stages = {model->stages.count, stages},
-      .feedback = {1, &model->output},
+      .feedback = {1, &model->invocation.feedback},
   };
   iree_vm_module_t* native_modules[3] = {0};
   iree_vm_buffer_t* read_only_tags = NULL;
@@ -800,8 +800,6 @@ static iree_status_t loom_serve_finite_load_prepare(
   loom_serve_finite_model_t* model = load->model;
   const iree_allocator_t host_allocator = model->host_allocator;
   IREE_RETURN_IF_ERROR(loom_serve_finite_prepare(model, &load->options));
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, model->output.data_length, (void**)&model->output.data));
   const iree_vm_ref_type_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_module_register_types(model->control.environment, &table));
@@ -1111,7 +1109,7 @@ static iree_status_t loom_serve_finite_check_plan(
   const uint64_t count = iree_unaligned_load_le_u64(bytes.data + 16);
   const uint64_t rows = iree_unaligned_load_le_u64(bytes.data + 24);
   if (!output_length || output_length > model->output_capacity ||
-      !feedback_length || feedback_length > model->output.data_length ||
+      !feedback_length || feedback_length > model->feedback_capacity ||
       feedback_length > output_length || count != request_count ||
       count > (bytes.data_length - 32) / 24 ||
       rows != (bytes.data_length - 32 - count * 24) / 16 ||
@@ -1152,6 +1150,11 @@ static iree_status_t loom_serve_finite_check_plan(
 }
 
 void loom_serve_finite_model_release_batch(loom_serve_finite_model_t* model) {
+  if (model->control.runner) {
+    loom_serve_module_bind_feedback(model->control.runner, 0,
+                                    iree_byte_span_empty());
+  }
+  iree_allocator_free(model->host_allocator, model->invocation.feedback.data);
   iree_vm_buffer_release(model->invocation.payload);
   iree_vm_buffer_release(model->invocation.plan);
   memset(&model->invocation, 0, sizeof(model->invocation));
@@ -1240,6 +1243,17 @@ iree_status_t loom_serve_finite_model_prepare_batch(
     model->invocation.stage = (uint32_t)stage;
     status = loom_serve_finite_check_plan(model, count, expected_rows);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(model->host_allocator,
+                                   model->invocation.feedback_length,
+                                   (void**)&model->invocation.feedback.data);
+    if (iree_status_is_ok(status)) {
+      model->invocation.feedback.data_length =
+          model->invocation.feedback_length;
+      loom_serve_module_bind_feedback(model->control.runner, 0,
+                                      model->invocation.feedback);
+    }
+  }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   if (!iree_status_is_ok(status)) {
@@ -1324,21 +1338,45 @@ void loom_serve_finite_model_complete(loom_serve_finite_model_t* model) {
   loom_serve_residency_release(model->residency);
 }
 
-uint64_t loom_serve_finite_model_input_tokens(
-    const loom_serve_finite_model_t* model, iree_host_size_t request) {
-  return iree_unaligned_load_le_u64(model->invocation.records.data + 32 +
-                                    request * 24 + 16);
+void loom_serve_finite_model_take_result(
+    loom_serve_finite_model_t* model, loom_serve_finite_result_t* out_result) {
+  *out_result = (loom_serve_finite_result_t){
+      .host_allocator = model->host_allocator,
+      .plan = model->invocation.plan,
+      .records = model->invocation.records,
+      .feedback = model->invocation.feedback,
+      .request_count = model->invocation.request_count,
+  };
+  loom_serve_module_bind_feedback(model->control.runner, 0,
+                                  iree_byte_span_empty());
+  iree_vm_buffer_release(model->invocation.payload);
+  model->invocation.payload = NULL;
+  model->invocation.plan = NULL;
+  model->invocation.feedback = iree_byte_span_empty();
+  memset(&model->invocation, 0, sizeof(model->invocation));
 }
 
-iree_const_byte_span_t loom_serve_finite_model_row(
-    const loom_serve_finite_model_t* model, iree_host_size_t request,
+void loom_serve_finite_result_deinitialize(loom_serve_finite_result_t* result) {
+  iree_allocator_free(result->host_allocator, result->feedback.data);
+  iree_vm_buffer_release(result->plan);
+  memset(result, 0, sizeof(*result));
+}
+
+uint64_t loom_serve_finite_result_input_tokens(
+    const loom_serve_finite_result_t* result, iree_host_size_t request) {
+  return iree_unaligned_load_le_u64(result->records.data + 32 + request * 24 +
+                                    16);
+}
+
+iree_const_byte_span_t loom_serve_finite_result_row(
+    const loom_serve_finite_result_t* result, iree_host_size_t request,
     iree_host_size_t row) {
-  const uint8_t* records = model->invocation.records.data;
+  const uint8_t* records = result->records.data;
   const uint64_t first =
       iree_unaligned_load_le_u64(records + 32 + request * 24);
   const uint8_t* vector =
-      records + 32 + model->invocation.request_count * 24 + (first + row) * 16;
+      records + 32 + result->request_count * 24 + (first + row) * 16;
   return iree_make_const_byte_span(
-      model->output.data + iree_unaligned_load_le_u64(vector),
+      result->feedback.data + iree_unaligned_load_le_u64(vector),
       iree_unaligned_load_le_u64(vector + 8) * 4);
 }
