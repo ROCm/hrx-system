@@ -1,0 +1,110 @@
+config.decl @qwen38.vision.image_height : %value: index where [range(%value, 256, 256)]
+
+config.decl @qwen38.vision.image_width : %value: index where [range(%value, 256, 256)]
+
+kernel.decl @qwen38_vision_patch_embedding() launch(%source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @qwen38_vision_position_layernorm_statistics() launch(%position_table: buffer, %residual: buffer, %statistics: buffer)
+
+kernel.decl @qwen38_vision_statistics() launch(%residual: buffer, %statistics: buffer)
+
+kernel.decl @qwen38_vision_key_value_cohort(%cohort: index) launch(%cohort_argument: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer) where [range(%cohort_argument, 0, 3)]
+
+kernel.decl @qwen38_vision_attention_cohort(%cohort: index) launch(%cohort_argument: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer, %output_weight: buffer, %output_bias: buffer, %output: buffer) where [range(%cohort_argument, 0, 3)]
+
+kernel.decl @qwen38_vision_attention_output_256() launch(%context: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+
+kernel.decl @qwen38_vision_ffn_up_256() launch(%residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %up_weight: buffer, %up_bias: buffer, %activation: buffer)
+
+kernel.decl @qwen38_vision_ffn_down_256() launch(%activation: buffer, %down_weight: buffer, %down_bias: buffer, %residual: buffer)
+
+kernel.decl @qwen38_vision_layernorm_apply() launch(%residual: buffer, %statistics: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @qwen38_vision_merger_up_64() launch(%input: buffer, %weight: buffer, %bias: buffer, %activation: buffer)
+
+kernel.decl @qwen38_vision_merger_down_64() launch(%activation: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+template.decl @qwen38_vision_block_256(%layer: index, %parameters: buffer, %input: buffer, %output: buffer, %statistics: buffer, %context: view<256x1152xf16>, %key: view<256x288xf16>, %value: view<288x256xf16>, %activation: buffer)
+
+// Statistics for the input are prepared by the caller. Block zero reuses the
+// position-add reduction; later blocks run the ordinary statistics kernel.
+template.def<@qwen38_vision_block_256> @qwen38_vision_block_256_impl(%layer: index, %parameters: buffer, %input: buffer, %output: buffer, %statistics: buffer, %context: view<256x1152xf16>, %key: view<256x288xf16>, %value: view<288x256xf16>, %activation: buffer) {
+  %ln1_weight = command.parameter %parameters, "v.blk.{}.ln1.weight"[%layer] : view<1152xf32>
+  %ln1_bias = command.parameter %parameters, "v.blk.{}.ln1.bias"[%layer] : view<1152xf32>
+  %qkv_weight = command.parameter %parameters, "v.blk.{}.attn_qkv.weight"[%layer] : view<3456x1152xf16>
+  %qkv_bias = command.parameter %parameters, "v.blk.{}.attn_qkv.bias"[%layer] : view<3456xf32>
+  %attention_weight = command.parameter %parameters, "v.blk.{}.attn_out.weight"[%layer] : view<1152x1152xf16>
+  %attention_bias = command.parameter %parameters, "v.blk.{}.attn_out.bias"[%layer] : view<1152xf32>
+  %ln2_weight = command.parameter %parameters, "v.blk.{}.ln2.weight"[%layer] : view<1152xf32>
+  %ln2_bias = command.parameter %parameters, "v.blk.{}.ln2.bias"[%layer] : view<1152xf32>
+  %up_weight = command.parameter %parameters, "v.blk.{}.ffn_up.weight"[%layer] : view<4304x1152xf16>
+  %up_bias = command.parameter %parameters, "v.blk.{}.ffn_up.bias"[%layer] : view<4304xf32>
+  %down_weight = command.parameter %parameters, "v.blk.{}.ffn_down.weight"[%layer] : view<1152x4304xf16>
+  %down_bias = command.parameter %parameters, "v.blk.{}.ffn_down.bias"[%layer] : view<1152xf32>
+
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  scf.for %cohort = [%c0 to %c4 step %c1] unroll {
+    kernel.launch @qwen38_vision_key_value_cohort[%cohort](%cohort, %input, %statistics, %ln1_weight, %ln1_bias, %qkv_weight, %qkv_bias, %key, %value) : [index](index, buffer, buffer, view<1152xf32>, view<1152xf32>, view<3456x1152xf16>, view<3456xf32>, view<256x288xf16>, view<288x256xf16>)
+    kernel.launch @qwen38_vision_attention_cohort[%cohort](%cohort, %input, %statistics, %ln1_weight, %ln1_bias, %qkv_weight, %qkv_bias, %key, %value, %attention_weight, %attention_bias, %context) : [index](index, buffer, buffer, view<1152xf32>, view<1152xf32>, view<3456x1152xf16>, view<3456xf32>, view<256x288xf16>, view<288x256xf16>, view<1152x1152xf16>, view<1152xf32>, view<256x1152xf16>)
+  }
+  kernel.launch @qwen38_vision_attention_output_256(%context, %attention_weight, %attention_bias, %input, %output) : (view<256x1152xf16>, view<1152x1152xf16>, view<1152xf32>, buffer, buffer)
+  kernel.launch @qwen38_vision_statistics(%output, %statistics) : (buffer, buffer)
+  kernel.launch @qwen38_vision_ffn_up_256(%output, %statistics, %ln2_weight, %ln2_bias, %up_weight, %up_bias, %activation) : (buffer, buffer, view<1152xf32>, view<1152xf32>, view<4304x1152xf16>, view<4304xf32>, buffer)
+  kernel.launch @qwen38_vision_ffn_down_256(%activation, %down_weight, %down_bias, %output) : (buffer, view<1152x4304xf16>, view<1152xf32>, buffer)
+  template.return
+}
+
+// Complete 256x256 projector. The public output root doubles as
+// one transformer residual bank and is overwritten in place by the final
+// merger only after its post-normalized input has moved to the scratch bank.
+// Compact context, K/V cohorts, FFN activation, and merger activation occupy
+// disjoint ranges or lifetimes within one request-owned workspace.
+command.program.def public @qwen38_vision_projector_256() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %key_offset = index.constant 589824 : offset
+  %value_offset = index.constant 737280 : offset
+  %residual_bytes = index.constant 1179648 : offset
+  %statistics_bytes = index.constant 2048 : offset
+  %activation_bytes = index.constant 2203648 : offset
+  %state = buffer.alloca<global> align(256) %residual_bytes : buffer
+  %statistics = buffer.alloca<global> align(256) %statistics_bytes : buffer
+  %activation = buffer.alloca<global> align(256) %activation_bytes : buffer
+  %context = buffer.view %activation[%origin] : buffer -> view<256x1152xf16>
+  %key = buffer.view %activation[%key_offset] : buffer -> view<256x288xf16>
+  %value = buffer.view %activation[%value_offset] : buffer -> view<288x256xf16>
+
+  %patch_weight0 = command.parameter %parameters, "v.patch_embd.weight" : view<1152x768xf16>
+  %patch_weight1 = command.parameter %parameters, "v.patch_embd.weight.1" : view<1152x768xf16>
+  %patch_bias = command.parameter %parameters, "v.patch_embd.bias" : view<1152xf32>
+  %position = command.parameter %parameters, "v.position_embd.weight" : view<2304x1152xf32>
+  kernel.launch @qwen38_vision_patch_embedding(%input, %patch_weight0, %patch_weight1, %patch_bias, %state) : (buffer, view<1152x768xf16>, view<1152x768xf16>, view<1152xf32>, buffer)
+  kernel.launch @qwen38_vision_position_layernorm_statistics(%position, %state, %statistics) : (view<2304x1152xf32>, buffer, buffer)
+
+  %layer0 = index.constant 0 : index
+  template.apply<@qwen38_vision_block_256>(%layer0, %parameters, %state, %output, %statistics, %context, %key, %value, %activation) : (index, buffer, buffer, buffer, buffer, view<256x1152xf16>, view<256x288xf16>, view<288x256xf16>, buffer)
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c27 = index.constant 27 : index
+  scf.for %odd_layer = [%c1 to %c27 step %c2] unroll {
+    kernel.launch @qwen38_vision_statistics(%output, %statistics) : (buffer, buffer)
+    template.apply<@qwen38_vision_block_256>(%odd_layer, %parameters, %output, %state, %statistics, %context, %key, %value, %activation) : (index, buffer, buffer, buffer, buffer, view<256x1152xf16>, view<256x288xf16>, view<288x256xf16>, buffer)
+    %even_layer = index.add %odd_layer, %c1 : index
+    kernel.launch @qwen38_vision_statistics(%state, %statistics) : (buffer, buffer)
+    template.apply<@qwen38_vision_block_256>(%even_layer, %parameters, %state, %output, %statistics, %context, %key, %value, %activation) : (index, buffer, buffer, buffer, buffer, view<256x1152xf16>, view<256x288xf16>, view<288x256xf16>, buffer)
+  }
+
+  %postnorm_weight = command.parameter %parameters, "v.post_ln.weight" : view<1152xf32>
+  %postnorm_bias = command.parameter %parameters, "v.post_ln.bias" : view<1152xf32>
+  kernel.launch @qwen38_vision_statistics(%output, %statistics) : (buffer, buffer)
+  kernel.launch @qwen38_vision_layernorm_apply(%output, %statistics, %postnorm_weight, %postnorm_bias, %state) : (buffer, buffer, view<1152xf32>, view<1152xf32>, buffer)
+
+  %merger_up_weight = command.parameter %parameters, "mm.0.weight" : view<4608x4608xf16>
+  %merger_up_bias = command.parameter %parameters, "mm.0.bias" : view<4608xf32>
+  %merger_down_weight = command.parameter %parameters, "mm.2.weight" : view<5120x4608xf16>
+  %merger_down_bias = command.parameter %parameters, "mm.2.bias" : view<5120xf32>
+  kernel.launch @qwen38_vision_merger_up_64(%state, %merger_up_weight, %merger_up_bias, %activation) : (buffer, view<4608x4608xf16>, view<4608xf32>, buffer)
+  kernel.launch @qwen38_vision_merger_down_64(%activation, %merger_down_weight, %merger_down_bias, %output) : (buffer, view<5120x4608xf16>, view<5120xf32>, buffer)
+  command.return
+}
