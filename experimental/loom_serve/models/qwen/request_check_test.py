@@ -130,6 +130,25 @@ class RequestCheckTest(unittest.TestCase):
         self.assertEqual(value["output_cursor"], 3)
         self.assertEqual(value["tool_calls"], [])
 
+    def test_ordered_text_parts_use_the_same_qwen_prompt(self):
+        request = self.request(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Hello "},
+                        {"type": "text", "text": "λ."},
+                    ],
+                }
+            ]
+        )
+        value = self.success(self.execute(PACKAGE / "control.loom", request))
+        self.assertEqual(
+            value["prompt"],
+            "<|im_start|>user\nHello λ.<|im_end|>\n"
+            "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+        )
+
     def test_production_xml_completion(self):
         call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
         value = self.success(
