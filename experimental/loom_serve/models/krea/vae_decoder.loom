@@ -6,6 +6,10 @@ config.decl @krea2.vae_tile_height : %value: index where [range(%value, 2, 1024)
 
 config.decl @krea2.vae_tile_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
 
+template.decl @krea2.vae_tile_axis_plan(%extent: index, %tile: index) -> (index, index)
+
+template.decl @krea2.vae_tile_axis_interval(%extent: index, %tile: index, %stride: index, %ordinal: index) -> (index, index, index)
+
 command.program.decl @vae_input_attention() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
 
 command.program.decl @krea2.vae_mid_residual(%block: index, %tile: i1) launch(%parameters: buffer, %input: buffer, %output: buffer)
@@ -27,6 +31,10 @@ command.program.decl @krea2.vae_up3_residual(%block: index) launch(%parameters: 
 command.program.decl @krea2.vae_output_norm() launch(%parameters: buffer, %input: buffer, %output: buffer)
 
 command.program.decl @krea2.vae_output_convolution() launch(%parameters: buffer, %input: buffer, %output: buffer)
+
+command.program.decl @krea2.vae_extract_tile(%origin_y: index, %origin_x: index) launch(%input: buffer, %output: buffer) where [range(%origin_y, 0, 1022), range(%origin_x, 0, 1022)]
+
+command.program.decl @krea2.vae_stitch_tile(%origin_y: index, %origin_x: index, %crop_y_begin: index, %crop_y_end: index, %crop_x_begin: index, %crop_x_end: index) launch(%input: buffer, %output: buffer) where [range(%origin_y, 0, 1022), range(%origin_x, 0, 1022), range(%crop_y_begin, 0, 1024), range(%crop_y_end, 0, 1024), range(%crop_x_begin, 0, 1024), range(%crop_x_end, 0, 1024)]
 
 amdgpu.target<gfx11-generic> @vae_decoder_wave32 {subgroup_size = 32}
 
@@ -126,11 +134,39 @@ command.program.def public @vae_decoder_body() launch(%parameters: buffer, %inpu
 command.program.def public @vae_decode() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer) {
   %height = config.get @krea2.latent_height : index
   %width = config.get @krea2.latent_width : index
+  %tile_height = config.get @krea2.vae_tile_height : index
+  %tile_width = config.get @krea2.vae_tile_width : index
   %pixels = index.mul %height, %width : index
   %pixel_bytes = index.constant 1536 : offset
   %bytes = index.scale %pixels, %pixel_bytes : index, offset -> offset
   %features = buffer.alloca<global> align(256) %bytes : buffer
   command.program.launch @vae_input_attention(%parameters, %input, %affine, %features) : (buffer, buffer, buffer, buffer)
-  command.program.launch @vae_decoder_body(%parameters, %features, %output) : (buffer, buffer, buffer)
+  %height_tiled = index.cmp ne, %height, %tile_height : index
+  %width_tiled = index.cmp ne, %width, %tile_width : index
+  %tiled = scalar.ori %height_tiled, %width_tiled : i1
+  scf.if %tiled {
+    %height_stride, %height_count = template.apply<@krea2.vae_tile_axis_plan>(%height, %tile_height) : (index, index) -> (index, index)
+    %width_stride, %width_count = template.apply<@krea2.vae_tile_axis_plan>(%width, %tile_width) : (index, index) -> (index, index)
+    %tile_pixels = index.mul %tile_height, %tile_width : index
+    %feature_pixel_bytes = index.constant 1536 : offset
+    %feature_bytes = index.scale %tile_pixels, %feature_pixel_bytes : index, offset -> offset
+    %tile_features = buffer.alloca<global> align(256) %feature_bytes : buffer
+    %output_pixel_bytes = index.constant 768 : offset
+    %output_bytes = index.scale %tile_pixels, %output_pixel_bytes : index, offset -> offset
+    %tile_output = buffer.alloca<global> align(256) %output_bytes : buffer
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    scf.for %row = [%c0 to %height_count step %c1] unroll {
+      %origin_y, %crop_y_begin, %crop_y_end = template.apply<@krea2.vae_tile_axis_interval>(%height, %tile_height, %height_stride, %row) : (index, index, index, index) -> (index, index, index)
+      scf.for %column = [%c0 to %width_count step %c1] unroll {
+        %origin_x, %crop_x_begin, %crop_x_end = template.apply<@krea2.vae_tile_axis_interval>(%width, %tile_width, %width_stride, %column) : (index, index, index, index) -> (index, index, index)
+        command.program.launch @krea2.vae_extract_tile[%origin_y, %origin_x](%features, %tile_features) : [index, index](buffer, buffer)
+        command.program.launch @vae_decoder_body(%parameters, %tile_features, %tile_output) : (buffer, buffer, buffer)
+        command.program.launch @krea2.vae_stitch_tile[%origin_y, %origin_x, %crop_y_begin, %crop_y_end, %crop_x_begin, %crop_x_end](%tile_output, %output) : [index, index, index, index, index, index](buffer, buffer)
+      }
+    }
+  } else {
+    command.program.launch @vae_decoder_body(%parameters, %features, %output) : (buffer, buffer, buffer)
+  }
   command.return
 }
