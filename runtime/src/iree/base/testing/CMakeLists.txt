@@ -70,8 +70,9 @@ iree_cc_test(
     iree::base::internal::dynamic_library
     iree::base::internal::symbol_resolver_win32
     iree::io::file_handle
+    iree::testing::coordinated_test
+    iree::testing::coordinated_test_main
     iree::testing::gtest
-    iree::testing::gtest_main
     iree::testing::temp_file
   LABELS
     "requires-filesystem"

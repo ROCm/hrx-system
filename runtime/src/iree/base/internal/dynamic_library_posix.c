@@ -14,7 +14,6 @@
 
 #include "iree/base/internal/atomics.h"
 #include "iree/base/internal/dynamic_library.h"
-#include "iree/base/internal/path.h"
 #include "iree/base/threading/call_once.h"
 
 #if defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_APPLE) || \
@@ -23,12 +22,15 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 struct iree_dynamic_library_t {
+  // Number of outstanding library references.
   iree_atomic_ref_count_t ref_count;
+  // Allocator used for the library wrapper.
   iree_allocator_t allocator;
 
   // Flags controlling module lifetime.
@@ -38,84 +40,71 @@ struct iree_dynamic_library_t {
   void* handle;
 };
 
-// Allocate a new string from |allocator| returned in |out_file_path| containing
-// a path to a unique file on the filesystem.
-static iree_status_t iree_dynamic_library_make_temp_file_path(
-    const char* prefix, const char* extension, iree_allocator_t allocator,
-    const char* tmpdir, char** out_file_path) {
-  // Stamp in a unique file name (replacing XXXXXX in the string).
-  char temp_path[512];
-  if (iree_snprintf(temp_path, sizeof(temp_path), "%s/iree_dylib_XXXXXX",
-                    tmpdir) >= sizeof(temp_path)) {
-    // NOTE: we could dynamically allocate things, but didn't seem worth it.
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "TMPDIR name too long (>%zu chars); keep it reasonable",
-        sizeof(temp_path));
-  }
-  int fd = mkstemp(temp_path);
-  if (fd < 0) {
-    return iree_make_status(iree_status_code_from_errno(errno),
-                            "unable to mkstemp file");
-  }
-
-  // Allocate storage for the full file path and format it in.
-  int file_path_length =
-      iree_snprintf(NULL, 0, "%s_%s.%s", temp_path, prefix, extension);
-  if (file_path_length < 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unable to form temp path string");
-  }
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      allocator, file_path_length + /*NUL=*/1, (void**)out_file_path));
-  iree_snprintf(*out_file_path, file_path_length + /*NUL=*/1, "%s_%s.%s",
-                temp_path, prefix, extension);
-
-  // Canonicalize away any double path separators.
-  iree_file_path_canonicalize(*out_file_path, file_path_length);
-
-  return iree_ok_status();
-}
-
-// Creates a temp file and writes the |source_data| into it.
-// The file path is returned in |out_file_path|.
+// Writes an image through the descriptor that exclusively created its path.
+// On success the caller owns the path and file; failure retires both.
 static iree_status_t iree_dynamic_library_write_temp_file(
-    iree_const_byte_span_t source_data, const char* prefix,
-    const char* extension, iree_allocator_t allocator, const char* tmpdir,
-    char** out_file_path) {
+    iree_const_byte_span_t source_data, const char* temp_directory,
+    iree_allocator_t allocator, char** out_file_path) {
+  *out_file_path = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Reserve a temp file path we can write to.
+  int path_length =
+      iree_snprintf(NULL, 0, "%s/iree_dylib_XXXXXX", temp_directory);
+  if (path_length < 0) {
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "unable to form temp path string"));
+  }
+  char* file_path = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_dynamic_library_make_temp_file_path(prefix, extension, allocator,
-                                                   tmpdir, out_file_path));
+      z0, iree_allocator_malloc(allocator, (iree_host_size_t)path_length + 1,
+                                (void**)&file_path));
+  iree_snprintf(file_path, (iree_host_size_t)path_length + 1,
+                "%s/iree_dylib_XXXXXX", temp_directory);
 
   iree_status_t status = iree_ok_status();
-
-  // Open the file for writing.
-  FILE* file_handle = fopen(*out_file_path, "wb");
-  if (file_handle == NULL) {
-    status = iree_make_status(iree_status_code_from_errno(errno),
-                              "unable to open file '%s'", *out_file_path);
+  int file_descriptor = mkstemp(file_path);
+  if (file_descriptor < 0) {
+    status =
+        iree_make_status(iree_status_code_from_errno(errno),
+                         "unable to create temp file in '%s'", temp_directory);
   }
 
-  // Write all file bytes.
-  if (iree_status_is_ok(status)) {
-    if (fwrite((char*)source_data.data, source_data.data_length, 1,
-               file_handle) != 1) {
-      status = iree_make_status(iree_status_code_from_errno(errno),
-                                "unable to write file span of %" PRIhsz
-                                " bytes to '%s'",
-                                source_data.data_length, *out_file_path);
+  iree_host_size_t offset = 0;
+  while (iree_status_is_ok(status) && offset < source_data.data_length) {
+    iree_host_size_t write_length =
+        iree_min(source_data.data_length - offset, (iree_host_size_t)SSIZE_MAX);
+    ssize_t written =
+        write(file_descriptor, source_data.data + offset, write_length);
+    if (written < 0) {
+      if (errno != EINTR) {
+        status = iree_make_status(iree_status_code_from_errno(errno),
+                                  "unable to write temp file '%s'", file_path);
+      }
+    } else if (written == 0) {
+      status =
+          iree_make_status(IREE_STATUS_DATA_LOSS,
+                           "zero-length write to temp file '%s'", file_path);
+    } else {
+      offset += (iree_host_size_t)written;
     }
   }
-
-  if (file_handle != NULL) {
-    fclose(file_handle);
-    file_handle = NULL;
+  if (file_descriptor >= 0 && close(file_descriptor) != 0) {
+    status = iree_status_join(
+        status, iree_make_status(iree_status_code_from_errno(errno),
+                                 "unable to close temp file '%s'", file_path));
   }
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(allocator, *out_file_path);
+
+  if (iree_status_is_ok(status)) {
+    *out_file_path = file_path;
+  } else {
+    if (file_descriptor >= 0 && unlink(file_path) != 0) {
+      status = iree_status_join(
+          status,
+          iree_make_status(iree_status_code_from_errno(errno),
+                           "unable to remove temp file '%s'", file_path));
+    }
+    iree_allocator_free(allocator, file_path);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -211,7 +200,7 @@ static void iree_dynamic_library_init_temp_dir(void) {
   //     ...
   const char* path = getenv("IREE_PRESERVE_DYLIB_TEMP_FILES");
   bool preserve = !iree_dynamic_library_path_is_null_or_empty(path);
-  if (!path || !strcmp(path, "1")) {
+  if (iree_dynamic_library_path_is_null_or_empty(path) || !strcmp(path, "1")) {
     // TMPDIR is a unix semi-standard thing. It's even defined by default on
     // Android for the regular shell user (but not root).
     path = getenv("TMPDIR");
@@ -259,9 +248,9 @@ iree_status_t iree_dynamic_library_load_from_memory(
   // Extract the library to a temp file.
   char* temp_path = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_dynamic_library_write_temp_file(
-              buffer, "mem_", "so", allocator,
-              iree_dynamic_library_temp_dir_path_, &temp_path));
+      z0,
+      iree_dynamic_library_write_temp_file(
+          buffer, iree_dynamic_library_temp_dir_path_, allocator, &temp_path));
 
   // Load using the normal load from file routine.
   iree_status_t status = iree_dynamic_library_load_from_file(
@@ -271,8 +260,12 @@ iree_status_t iree_dynamic_library_load_from_memory(
   // accessible to anyone else and will be deleted once the library is
   // unloaded. Note that we don't remove the file if the user requested we keep
   // it around for tooling to access.
-  if (!iree_dynamic_library_temp_dir_preserve_) {
-    remove(temp_path);
+  if (!iree_dynamic_library_temp_dir_preserve_ && unlink(temp_path) != 0) {
+    status = iree_status_join(
+        status, iree_make_status(iree_status_code_from_errno(errno),
+                                 "unable to remove temp file '%s'", temp_path));
+    iree_dynamic_library_release(*out_library);
+    *out_library = NULL;
   }
   iree_allocator_free(allocator, temp_path);
 
