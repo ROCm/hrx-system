@@ -73,9 +73,21 @@
       "programs/qwen38/gdn_layer_prefill.loom",
       "programs/qwen38/model_decode.loom",
       "programs/qwen38/model_prefill.loom",
-      "programs/qwen38/output_head_decode.loom"
+      "programs/qwen38/output_head_decode.loom",
+      "kernels/qwen38/vision_attention.loom",
+      "kernels/qwen38/vision_ffn.loom",
+      "kernels/qwen38/vision_key_value.loom",
+      "kernels/qwen38/vision_merger.loom",
+      "kernels/qwen38/vision_normalization.loom",
+      "kernels/qwen38/vision_patch_embedding.loom",
+      "programs/qwen38/vision_projector.loom"
     ],
     "weights": "model.gguf",
-    "tokenizer": "tokenizer.json"
+    "tokenizer": "tokenizer.json",
+    "image": {
+      "prepare": "vision_prepare.loom",
+      "control": "vision_control.loom",
+      "assets": "."
+    }
   }
 }
