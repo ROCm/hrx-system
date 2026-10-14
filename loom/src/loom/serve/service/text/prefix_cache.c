@@ -29,6 +29,7 @@ void loom_serve_text_prefix_cache_reset(loom_serve_text_prefix_cache_t* cache,
       loom_serve_text_checkpoint_release(entry->state);
     }
     iree_allocator_free(cache->host_allocator, entry->tokens);
+    loom_serve_text_chat_media_identity_deinitialize(&entry->media);
     memset(entry, 0, sizeof(*entry));
   }
   cache->count = 0;
@@ -41,13 +42,14 @@ void loom_serve_text_prefix_cache_deinitialize(
 }
 
 loom_serve_text_prefix_entry_t* loom_serve_text_prefix_cache_find(
-    loom_serve_text_prefix_cache_t* cache, iree_host_size_t count,
-    const int32_t* tokens) {
+    loom_serve_text_prefix_cache_t* cache, const loom_serve_text_chat_t* chat,
+    iree_host_size_t count, const int32_t* tokens) {
   loom_serve_text_prefix_entry_t* selected = NULL;
   for (iree_host_size_t i = 0; i < cache->capacity; ++i) {
     loom_serve_text_prefix_entry_t* entry = &cache->entries[i];
     if (entry->state && entry->count < count &&
         (!selected || entry->count > selected->count) &&
+        loom_serve_text_chat_media_identity_equal_chat(&entry->media, chat) &&
         !memcmp(entry->tokens, tokens, entry->count * sizeof(*tokens))) {
       selected = entry;
     }
@@ -65,6 +67,7 @@ void loom_serve_text_prefix_cache_release(
     loom_serve_text_prefix_entry_t* entry) {
   loom_serve_text_checkpoint_release(entry->state);
   iree_allocator_free(cache->host_allocator, entry->tokens);
+  loom_serve_text_chat_media_identity_deinitialize(&entry->media);
   memset(entry, 0, sizeof(*entry));
   --cache->count;
 }
@@ -96,14 +99,14 @@ bool loom_serve_text_prefix_cache_evict(
 }
 
 iree_status_t loom_serve_text_prefix_cache_submit(
-    loom_serve_text_prefix_cache_t* cache, loom_serve_text_row_t* row,
-    iree_host_size_t count, const int32_t* tokens,
+    loom_serve_text_prefix_cache_t* cache, const loom_serve_text_chat_t* chat,
+    loom_serve_text_row_t* row, iree_host_size_t count, const int32_t* tokens,
     const loom_serve_text_prefix_entry_t* protected_entry, bool* out_evicted,
     loom_serve_execution_frontier_t* out_frontier) {
   *out_evicted = false;
   *out_frontier = (loom_serve_execution_frontier_t){0};
   // Include equality when checking ancestors; admission itself is strict.
-  if (loom_serve_text_prefix_cache_find(cache, count + 1, tokens)) {
+  if (loom_serve_text_prefix_cache_find(cache, chat, count + 1, tokens)) {
     return iree_ok_status();
   }
   loom_serve_text_prefix_entry_t* entry = NULL;
@@ -123,19 +126,27 @@ iree_status_t loom_serve_text_prefix_cache_submit(
       cache->host_allocator,
       iree_make_const_byte_span(tokens, count * sizeof(*tokens)),
       (void**)&copy));
+  loom_serve_text_chat_media_identity_t media = {0};
+  iree_status_t status = loom_serve_text_chat_media_identity_initialize(
+      chat, cache->host_allocator, &media);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(cache->host_allocator, copy);
+    return status;
+  }
   if (entry->state) {
     loom_serve_text_prefix_cache_release(cache, entry);
     *out_evicted = true;
   }
-  iree_status_t status =
-      loom_serve_text_row_submit_pin(row, &entry->state, out_frontier);
+  status = loom_serve_text_row_submit_pin(row, &entry->state, out_frontier);
   if (iree_status_is_ok(status) && entry->state) {
     entry->tokens = copy;
     entry->count = count;
+    entry->media = media;
     loom_serve_text_prefix_cache_touch(cache, entry);
     ++cache->count;
   } else {
     iree_allocator_free(cache->host_allocator, copy);
+    loom_serve_text_chat_media_identity_deinitialize(&media);
   }
   return status;
 }

@@ -15,6 +15,10 @@ from pathlib import Path
 
 CHECKER = Path(sys.argv.pop(1)).resolve()
 PACKAGE = Path(sys.argv.pop(1)).resolve().parent
+PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DA8J+"
+    "BkYHh////DAAe9gT9Ce00PgAAAABJRU5ErkJggg=="
+)
 
 
 class RequestTest(unittest.TestCase):
@@ -103,6 +107,52 @@ class RequestTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("at most 4096 function objects", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_ordered_image_content_reaches_source_policy(self):
+        image = {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/png;base64,{PNG}",
+                "detail": "high",
+            },
+        }
+        result = self.execute(
+            self.request(
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "a"},
+                            image,
+                            {"type": "text", "text": "b"},
+                            image,
+                        ],
+                    }
+                ]
+            )
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value["prompt"], "axbx")
+        self.assertEqual(value["tokens"], [0, 2, 1, 2])
+
+        malformed = self.request(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "https://example.com/a.png"},
+                        }
+                    ],
+                }
+            ]
+        )
+        result = self.execute(malformed)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("base64 PNG, JPEG, GIF or WebP data URL", result.stderr)
         self.assertEqual(result.stdout, "")
 
     def test_policy_errors_publish_no_partial_success(self):

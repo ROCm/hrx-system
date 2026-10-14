@@ -159,12 +159,12 @@ static iree_status_t loom_serve_text_request_check_run(
         environment, host_allocator, &libraries[2]);
   }
   const iree_string_view_t roots[] = {
-      IREE_SVL("model_name"),     IREE_SVL("chat_begin"),
-      IREE_SVL("chat_message"),   IREE_SVL("chat_end"),
-      IREE_SVL("render_tool"),    IREE_SVL("parse_tools"),
-      IREE_SVL("prepare_input"),  IREE_SVL("output_next"),
-      IREE_SVL("complete_text"),  IREE_SVL("request_defaults"),
-      IREE_SVL("request_options")};
+      IREE_SVL("model_name"),       IREE_SVL("chat_image_limits"),
+      IREE_SVL("chat_begin"),       IREE_SVL("chat_message"),
+      IREE_SVL("chat_end"),         IREE_SVL("render_tool"),
+      IREE_SVL("parse_tools"),      IREE_SVL("prepare_input"),
+      IREE_SVL("output_next"),      IREE_SVL("complete_text"),
+      IREE_SVL("request_defaults"), IREE_SVL("request_options")};
   loom_serve_program_t* program = NULL;
   const loom_serve_sources_t sources = {.base_directory = IREE_SV(".")};
   if (iree_status_is_ok(status)) {

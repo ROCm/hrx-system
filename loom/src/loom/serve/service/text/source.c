@@ -215,6 +215,7 @@ iree_status_t loom_serve_text_source_initialize(
                                       IREE_SVL("output_next"),
                                       IREE_SVL("complete_text"),
                                       IREE_SVL("model_name"),
+                                      IREE_SVL("chat_image_limits"),
                                       IREE_SVL("chat_begin"),
                                       IREE_SVL("chat_message"),
                                       IREE_SVL("chat_end"),

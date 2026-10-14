@@ -19,7 +19,7 @@ TEST_F(SourceTextServiceTest, DiscoveryReportsConfiguredSessionCapacity) {
   const auto models = Read(Send("", "", "/v1/models", "GET"));
   EXPECT_NE(
       models.find(
-          R"("input_modalities":["text"],"output_modalities":["text"],"context_length":96,"limits":{"max_output_tokens":96})"),
+          R"("input_modalities":["text","image"],"output_modalities":["text"],"context_length":96,"limits":{"max_output_tokens":96})"),
       std::string::npos)
       << models;
 }

@@ -70,8 +70,7 @@ iree_status_t loom_serve_text_checkpoint_entry_submit_pin(
   IREE_RETURN_IF_ERROR(
       loom_serve_text_row_submit_pin(row, &entry->state, out_frontier));
   if (entry->state) {
-    entry->completion = *completion;
-    iree_vm_buffer_retain(entry->completion.storage);
+    loom_serve_text_chat_completion_retain(completion, &entry->completion);
     entry->position = loom_serve_text_row_position(row);
     entry->token = loom_serve_text_row_token(row);
     entry->boundary = loom_serve_text_row_is_eos(row)
@@ -90,14 +89,13 @@ void loom_serve_text_checkpoint_entry_publish(
 void loom_serve_text_checkpoint_entry_retain(
     const loom_serve_text_checkpoint_entry_t* source,
     loom_serve_text_checkpoint_entry_t* target) {
-  *target =
-      (loom_serve_text_checkpoint_entry_t){.state = source->state,
-                                           .completion = source->completion,
-                                           .position = source->position,
-                                           .token = source->token,
-                                           .boundary = source->boundary};
+  *target = (loom_serve_text_checkpoint_entry_t){.state = source->state,
+                                                 .position = source->position,
+                                                 .token = source->token,
+                                                 .boundary = source->boundary};
   loom_serve_text_checkpoint_retain(target->state);
-  iree_vm_buffer_retain(target->completion.storage);
+  loom_serve_text_chat_completion_retain(&source->completion,
+                                         &target->completion);
 }
 
 void loom_serve_text_checkpoint_entry_release(

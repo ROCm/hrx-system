@@ -275,6 +275,7 @@ loom_cc_library(
     iree::base::internal::json
     iree::base::internal::unicode
     iree::vm
+    loom::serve::media::image
     loom::serve::runtime::program
     loom::util::json
     loom::util::stream
@@ -564,6 +565,7 @@ loom_cc_library(
   SRCS
     "prefix_cache.c"
   DEPS
+    ::chat
     ::model
     iree::base
     loom::serve::runtime::execution

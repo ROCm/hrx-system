@@ -162,6 +162,15 @@ func.def public @bind_request(%state: buffer, %row: i32, %options: buffer) {
   func.return
 }
 
+func.def public @chat_image_limits() -> (i64, i64, i64, i64, i64) {
+  %maximum_count = scalar.constant 4 : i64
+  %compressed_bytes = scalar.constant 1048576 : i64
+  %width = scalar.constant 4096 : i64
+  %height = scalar.constant 4096 : i64
+  %pixels = scalar.constant 16777216 : i64
+  func.return %maximum_count, %compressed_bytes, %width, %height, %pixels : i64, i64, i64, i64, i64
+}
+
 func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
   %c0 = index.constant 0 : offset
   %c0_index = index.constant 0 : index
@@ -227,7 +236,48 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
   func.return %rendered_tools, %c0_i64 : buffer, i64
 }
 
-func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64) -> (buffer, i64) {
+func.def @ordered_content(%content: buffer, %parts: buffer, %part_count: i64) -> (buffer) {
+  %c0 = index.constant 0 : offset
+  %c0_index = index.constant 0 : index
+  %c1 = index.constant 1 : offset
+  %c1_index = index.constant 1 : index
+  %text_kind = scalar.constant 0 : i32
+  %image_marker = scalar.constant 120 : i32
+  %bounded_count64 = scalar.assume %part_count [range(%part_count, 1, 4096)] : i64
+  %count = index.cast %bounded_count64 : i64 to index
+  %count_bytes = index.cast %bounded_count64 : i64 to offset
+  %content_length = buffer.length %content
+  %capacity = index.add %content_length, %count_bytes : offset
+  %scratch = buffer.alloca<private> align(1) %capacity : buffer
+  %records = buffer.view %parts[%c0] : buffer -> view<[%count]x7xi32>
+  %used = scf.for %i = [%c0_index to %count step %c1_index](%cursor = %c0 : offset) -> (offset) {
+    %kind = view.load %records[%i, 0] : view<[%count]x7xi32> -> i32
+    %is_text = scalar.cmpi eq, %kind, %text_kind : i32
+    %next = scf.if %is_text -> (offset) {
+      %source32 = view.load %records[%i, 1] : view<[%count]x7xi32> -> i32
+      %length32 = view.load %records[%i, 2] : view<[%count]x7xi32> -> i32
+      %source64 = scalar.extui %source32 : i32 to i64
+      %length64 = scalar.extui %length32 : i32 to i64
+      %source_bounded = scalar.assume %source64 [range(%source64, 0, 4294967295)] : i64
+      %length_bounded = scalar.assume %length64 [range(%length64, 0, 4294967295)] : i64
+      %source = index.cast %source_bounded : i64 to offset
+      %length = index.cast %length_bounded : i64 to offset
+      buffer.copy %content[%source], %scratch[%cursor], %length
+      %after_text = index.add %cursor, %length : offset
+      scf.yield %after_text : offset
+    } else {
+      buffer.store.i8 %image_marker, %scratch[%cursor]
+      %after_image = index.add %cursor, %c1 : offset
+      scf.yield %after_image : offset
+    }
+    scf.yield %next : offset
+  }
+  %ordered = buffer.alloca<private> align(1) %used : buffer
+  buffer.copy %scratch[%c0], %ordered[%c0], %used
+  func.return %ordered : buffer
+}
+
+func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64) {
   %c0_i64 = scalar.constant 0 : i64
   %plain = scalar.cmpi eq, %fields, %c0_i64 : i64
   func.call @check(%plain) : (i1)
@@ -243,7 +293,14 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %re
   %terminal = global.load @terminal : buffer
   %empty = global.load @empty : buffer
   %suffix = scf.select %assistant, %terminal, %empty : buffer
-  %fragment = func.call @join(%content, %suffix) : (buffer, buffer) -> (buffer)
+  %has_parts = scalar.cmpi ne, %part_count, %c0_i64 : i64
+  %ordered = scf.if %has_parts -> (buffer) {
+    %value = func.call @ordered_content(%content, %parts, %part_count) : (buffer, buffer, i64) -> (buffer)
+    scf.yield %value : buffer
+  } else {
+    scf.yield %content : buffer
+  }
+  %fragment = func.call @join(%ordered, %suffix) : (buffer, buffer) -> (buffer)
   func.return %fragment, %state : buffer, i64
 }
 
