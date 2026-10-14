@@ -9,9 +9,9 @@
 #include <string.h>
 
 #include "iree/base/internal/atomics.h"
+#include "iree/base/internal/csprng.h"
 #include "iree/base/internal/dynamic_library.h"
 #include "iree/base/internal/path.h"
-#include "iree/base/threading/call_once.h"
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
@@ -25,7 +25,9 @@
 #endif  // TRACY_ENABLE
 
 struct iree_dynamic_library_t {
+  // Number of references to the library wrapper.
   iree_atomic_ref_count_t ref_count;
+  // Allocator owning the wrapper and its path strings.
   iree_allocator_t allocator;
 
   // Flags controlling module lifetime.
@@ -45,119 +47,101 @@ struct iree_dynamic_library_t {
   // Windows module handle.
   HMODULE module;
 
-  // 0 or more file paths that were created as part of the loading of the
-  // library or attaching of symbols from memory.
-  //
-  // Each path string is allocated using the |allocator| and freed during
-  // library deletion.
-  iree_host_size_t temp_file_count;
-  char* temp_file_paths[2];
+  // Delete-on-close handle retaining an extracted module until it is unmapped.
+  // NULL when the module was loaded from a caller-owned file.
+  HANDLE module_file;
+
+  // Delete-on-close handle retaining an extracted debug database.
+  // NULL when no debug database was extracted from memory.
+  HANDLE symbol_file;
 };
 
-static iree_once_flag iree_dynamic_library_temp_path_flag_ =
-    IREE_ONCE_FLAG_INIT;
-static char iree_dynamic_library_temp_path_base_[MAX_PATH + 1];
-static void iree_dynamic_library_init_temp_paths(void) {
-  // Query the temp path from the OS. This can be overridden with the following
-  // environment variables: [TMP, TEMP, USERPROFILE].
-  //
-  // See:
-  // https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppatha
-  char temp_path[MAX_PATH];
-  GetTempPathA(IREE_ARRAYSIZE(temp_path), temp_path);
-
-  // Append the process ID to the path; this is like what _mktemp does but
-  // without all the hoops.
-  iree_snprintf(iree_dynamic_library_temp_path_base_,
-                sizeof(iree_dynamic_library_temp_path_base_),
-                "%s\\iree_dylib_%08X", temp_path,
-                (uint32_t)GetCurrentProcessId());
-
-  // Canonicalize away any double path separators.
-  iree_file_path_canonicalize(iree_dynamic_library_temp_path_base_,
-                              strlen(iree_dynamic_library_temp_path_base_));
-}
-
-// Allocate a new string from |allocator| returned in |out_file_path| containing
-// a path to a unique file on the filesystem.
-static iree_status_t iree_dynamic_library_make_temp_file_path(
-    const char* prefix, const char* extension, iree_allocator_t allocator,
-    char** out_file_path) {
-  // Ensure the root temp paths are queried/initialized.
-  iree_call_once(&iree_dynamic_library_temp_path_flag_,
-                 iree_dynamic_library_init_temp_paths);
-
-  // Generate a per-file unique identifier only unique **within** the current
-  // process. We combine this with the _mktemp path that should be unique to the
-  // process itself.
-  static iree_atomic_int32_t next_unique_id = IREE_ATOMIC_VAR_INIT(0);
-  // relaxed because we only care about uniqueness, we don't care about ordering
-  // of accesses to unique_id w.r.t. other memory operations.
-  uint32_t unique_id = (uint32_t)iree_atomic_fetch_add(
-      &next_unique_id, 1, iree_memory_order_relaxed);
-
-  // Allocate storage for the full file path and format it in.
-  int file_path_length = iree_snprintf(NULL, 0, "%s_%s_%08X.%s",
-                                       iree_dynamic_library_temp_path_base_,
-                                       prefix, unique_id, extension);
-  if (file_path_length < 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unable to form temp path string");
-  }
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      allocator, file_path_length + /*NUL=*/1, (void**)out_file_path));
-  iree_snprintf(*out_file_path, file_path_length + /*NUL=*/1, "%s_%s_%08X.%s",
-                iree_dynamic_library_temp_path_base_, prefix, unique_id,
-                extension);
-
-  return iree_ok_status();
-}
-
-// Creates a temp file and writes the |source_data| into it.
-// The file path is returned in |out_file_path|.
+// Writes an exclusive temporary file and returns a read-only delete-on-close
+// handle. The caller keeps the handle open while the loader or symbol handler
+// may need to reopen the path. Output ownership transfers only on success.
 static iree_status_t iree_dynamic_library_write_temp_file(
-    iree_const_byte_span_t source_data, const char* prefix,
-    const char* extension, iree_allocator_t allocator, char** out_file_path) {
-  IREE_TRACE_ZONE_BEGIN(z0);
+    iree_const_byte_span_t source_data, const char* extension,
+    iree_host_size_t file_path_capacity, char* file_path, HANDLE* out_file) {
+  *out_file = NULL;
+  file_path[0] = 0;
 
-  // Reserve a temp file path we can write to.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_dynamic_library_make_temp_file_path(prefix, extension, allocator,
-                                                   out_file_path));
-
-  iree_status_t status = iree_ok_status();
-
-  // Open the file for writing.
-  HANDLE file_handle = CreateFileA(
-      /*lpFileName=*/*out_file_path, /*dwDesiredAccess=*/GENERIC_WRITE,
-      /*dwShareMode=*/FILE_SHARE_DELETE, /*lpSecurityAttributes=*/NULL,
-      /*dwCreationDisposition=*/CREATE_ALWAYS,
-      /*dwFlagsAndAttributes=*/FILE_ATTRIBUTE_TEMPORARY,
-      /*hTemplateFile=*/NULL);
-  if (file_handle == INVALID_HANDLE_VALUE) {
-    status = iree_make_status(iree_status_code_from_win32_error(GetLastError()),
-                              "unable to open file '%s'", *out_file_path);
+  char temp_path[MAX_PATH + 1];
+  DWORD temp_path_length = GetTempPathA(sizeof(temp_path), temp_path);
+  if (!temp_path_length) {
+    return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                            "querying temporary directory");
+  }
+  if (temp_path_length >= sizeof(temp_path)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "temporary directory path is too long");
   }
 
-  // Write all file bytes.
-  if (iree_status_is_ok(status)) {
-    if (WriteFile(file_handle, source_data.data, (DWORD)source_data.data_length,
-                  NULL, NULL) == FALSE) {
-      status = iree_make_status(
-          iree_status_code_from_win32_error(GetLastError()),
-          "unable to write file span of %" PRIhsz " bytes to '%s'",
-          source_data.data_length, *out_file_path);
+  uint64_t unique_id[2];
+  IREE_RETURN_IF_ERROR(
+      iree_csprng_fill(iree_make_byte_span(unique_id, sizeof(unique_id))));
+  int file_path_length =
+      iree_snprintf(file_path, file_path_capacity,
+                    "%siree_dylib_%016" PRIX64 "%016" PRIX64 ".%s", temp_path,
+                    unique_id[0], unique_id[1], extension);
+  if (file_path_length < 0 ||
+      (iree_host_size_t)file_path_length >= file_path_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "temporary library path is too long");
+  }
+
+  // Never overwrite an existing path. The write handle prevents other writers
+  // until all bytes have been installed; executable mappings require it closed.
+  HANDLE writer = CreateFileA(file_path, GENERIC_READ | GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,
+                              CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, NULL);
+  if (writer == INVALID_HANDLE_VALUE) {
+    return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                            "creating temporary file '%s'", file_path);
+  }
+
+  // Reopen the same file, without another path lookup, before writing.
+  // The read handle owns cleanup on both write failure and eventual unload.
+  HANDLE file =
+      ReOpenFile(writer, GENERIC_READ | DELETE,
+                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                 FILE_FLAG_DELETE_ON_CLOSE);
+  iree_status_t status = iree_ok_status();
+  if (file == INVALID_HANDLE_VALUE) {
+    status = iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                              "retaining temporary file '%s'", file_path);
+    if (!DeleteFileA(file_path)) {
+      status = iree_status_join(
+          status,
+          iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                           "removing temporary file '%s'", file_path));
     }
   }
 
-  if (file_handle != NULL) {
-    CloseHandle(file_handle);
-    file_handle = NULL;
+  iree_host_size_t position = 0;
+  while (iree_status_is_ok(status) && position < source_data.data_length) {
+    DWORD write_length = (DWORD)iree_min(source_data.data_length - position,
+                                         (iree_host_size_t)MAXDWORD);
+    DWORD written = 0;
+    if (!WriteFile(writer, source_data.data + position, write_length, &written,
+                   NULL)) {
+      status =
+          iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                           "writing temporary file '%s'", file_path);
+    } else if (!written) {
+      status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "no progress writing temporary file '%s'",
+                                file_path);
+    } else {
+      position += written;
+    }
   }
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(allocator, *out_file_path);
+  CloseHandle(writer);
+
+  if (iree_status_is_ok(status)) {
+    *out_file = file;
+  } else if (file != INVALID_HANDLE_VALUE) {
+    CloseHandle(file);
   }
-  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -259,23 +243,18 @@ iree_status_t iree_dynamic_library_load_from_memory(
   IREE_ASSERT_ARGUMENT(out_library);
   *out_library = NULL;
 
-  // Extract the library to a temp file.
-  char* temp_path = NULL;
+  char temp_path[MAX_PATH + 64];
+  HANDLE file = NULL;
   iree_status_t status = iree_dynamic_library_write_temp_file(
-      buffer, "mem", "dll", allocator, &temp_path);
-
+      buffer, "dll", sizeof(temp_path), temp_path, &file);
   if (iree_status_is_ok(status)) {
-    // Load using the normal load from file routine.
     status = iree_dynamic_library_load_from_file(temp_path, flags, allocator,
                                                  out_library);
   }
   if (iree_status_is_ok(status)) {
-    // Associate the temp path to the library; the temp_path string and the
-    // backing file will be deleted when the library is closed.
-    iree_dynamic_library_t* library = *out_library;
-    library->temp_file_paths[library->temp_file_count++] = temp_path;
-  } else {
-    iree_allocator_free(allocator, temp_path);
+    (*out_library)->module_file = file;
+  } else if (file) {
+    CloseHandle(file);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -286,29 +265,25 @@ static void iree_dynamic_library_delete(iree_dynamic_library_t* library) {
   iree_allocator_t allocator = library->allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  bool retain_mapping =
+      iree_any_bit_set(library->flags, IREE_DYNAMIC_LIBRARY_FLAG_NODELETE);
 #if (IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION) || \
     defined(IREE_SANITIZER_ADDRESS)
-  // Leak the library when tracing, since the profiler may still be reading it.
-  // Under ASAN, keep libraries mapped so LSAN can resolve module names.
-  // TODO(benvanik): move to an atexit handler instead, verify with ASAN/MSAN
-  // TODO(scotttodd): Make this compatible with testing:
-  //     two test cases, one for each function in the same executable
-  //     first test case passes, second fails to open the file (already open)
-#else
-  // Close the library first as it may be loaded from one of the temp files we
-  // are about to delete.
-  if (library->module != NULL &&
-      !iree_any_bit_set(library->flags, IREE_DYNAMIC_LIBRARY_FLAG_NODELETE)) {
+  // Profilers and sanitizer reports can inspect the image after wrapper
+  // release.
+  retain_mapping = true;
+#endif
+  if (!retain_mapping) {
     FreeLibrary(library->module);
+    if (library->module_file) {
+      CloseHandle(library->module_file);
+    }
+    if (library->symbol_file) {
+      CloseHandle(library->symbol_file);
+    }
   }
-#endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION
-
-  // Cleanup all temp files.
-  for (iree_host_size_t i = 0; i < library->temp_file_count; ++i) {
-    char* file_path = library->temp_file_paths[i];
-    DeleteFileA(file_path);
-    iree_allocator_free(allocator, file_path);
-  }
+  // Retained mappings and their non-inheritable backing handles live until
+  // process exit. Windows closes the handles and retires their temporary files.
 
   iree_allocator_free(allocator, library);
 
@@ -426,22 +401,20 @@ iree_status_t iree_dynamic_library_attach_symbols_from_memory(
   IREE_ASSERT_ARGUMENT(library);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (library->temp_file_count + 1 > IREE_ARRAYSIZE(library->temp_file_paths)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "too many temp files attached");
-  }
-
-  // Extract the library to a temp file.
-  char* temp_path = NULL;
+  char temp_path[MAX_PATH + 64];
+  HANDLE file = NULL;
   iree_status_t status = iree_dynamic_library_write_temp_file(
-      buffer, "mem", "pdb", library->allocator, &temp_path);
+      buffer, "pdb", sizeof(temp_path), temp_path, &file);
   if (iree_status_is_ok(status)) {
-    // Associate the temp path to the library; the temp_path string and the
-    // backing file will be deleted when the library is closed.
-    library->temp_file_paths[library->temp_file_count++] = temp_path;
-
-    // Attempt to attach the extracted temp file to the module.
     status = iree_dynamic_library_attach_symbols_from_file(library, temp_path);
+  }
+  if (iree_status_is_ok(status)) {
+    if (library->symbol_file) {
+      CloseHandle(library->symbol_file);
+    }
+    library->symbol_file = file;
+  } else if (file) {
+    CloseHandle(file);
   }
 
   IREE_TRACE_ZONE_END(z0);

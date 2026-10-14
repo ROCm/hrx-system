@@ -269,6 +269,7 @@ iree_runtime_cc_library(
     ],
     hdrs = ["dynamic_library.h"],
     deps = [
+        ":csprng",
         ":internal",
         ":path",
         ":symbol_resolver_win32",

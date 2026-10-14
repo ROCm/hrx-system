@@ -291,55 +291,64 @@ static void CheckMemoryExtraction(const char* temp_directory,
                                   const char* mode) {
   ASSERT_TRUE(SetEnvironmentVariableA("TMP", temp_directory));
   const auto* file = dynamic_library_test_library_create();
-  if (!strcmp(mode, "delete-on-close")) {
-    std::string path = std::string(temp_directory) + "/candidate.dll";
-    HANDLE write_handle =
-        CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, nullptr);
-    ASSERT_NE(INVALID_HANDLE_VALUE, write_handle) << GetLastError();
-    std::unique_ptr<void, decltype(&CloseHandle)> writer(write_handle,
-                                                         CloseHandle);
-    ASSERT_LE(file->size, MAXDWORD);
-    DWORD written = 0;
-    ASSERT_TRUE(WriteFile(writer.get(), file->data,
-                          static_cast<DWORD>(file->size), &written, nullptr))
-        << GetLastError();
-    ASSERT_EQ(file->size, written);
-    HANDLE read_handle =
-        ReOpenFile(writer.get(), GENERIC_READ | DELETE,
-                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                   FILE_FLAG_DELETE_ON_CLOSE);
-    ASSERT_NE(INVALID_HANDLE_VALUE, read_handle) << GetLastError();
-    std::unique_ptr<void, decltype(&CloseHandle)> image(read_handle,
-                                                        CloseHandle);
-    writer.reset();
-    HMODULE module = LoadLibraryA(path.c_str());
-    ASSERT_NE(nullptr, module) << GetLastError();
-    auto function =
-        reinterpret_cast<int (*)(int)>(GetProcAddress(module, "times_two"));
-    ASSERT_NE(nullptr, function);
+  if (!strcmp(mode, "release") || !strcmp(mode, "nodelete")) {
+    iree_dynamic_library_flags_t flags =
+        !strcmp(mode, "nodelete") ? IREE_DYNAMIC_LIBRARY_FLAG_NODELETE
+                                  : IREE_DYNAMIC_LIBRARY_FLAG_NONE;
+    iree_dynamic_library_t* library = nullptr;
+    IREE_ASSERT_OK(iree_dynamic_library_load_from_memory(
+        IREE_SV("extraction_lifetime"),
+        iree_make_const_byte_span(file->data, file->size), flags,
+        iree_allocator_system(), &library));
+    std::unique_ptr<iree_dynamic_library_t,
+                    decltype(&iree_dynamic_library_release)>
+        owned_library(library, iree_dynamic_library_release);
+    int (*function)(int) = nullptr;
+    IREE_ASSERT_OK(iree_dynamic_library_lookup_symbol(
+        library, "times_two", reinterpret_cast<void**>(&function)));
     EXPECT_EQ(246, function(123));
-    EXPECT_TRUE(FreeLibrary(module));
-    image.reset();
+    std::vector<std::filesystem::path> paths;
+    for (const auto& entry :
+         std::filesystem::directory_iterator(temp_directory)) {
+      paths.push_back(entry.path());
+    }
+    ASSERT_EQ(1u, paths.size());
+    owned_library.reset();
+    bool retained = flags == IREE_DYNAMIC_LIBRARY_FLAG_NODELETE;
+#if (IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION) || \
+    defined(IREE_SANITIZER_ADDRESS)
+    retained = true;
+#endif
+    EXPECT_EQ(retained, std::filesystem::exists(paths[0]));
+    if (retained) {
+      EXPECT_EQ(246, function(123));
+    }
   } else {
     const char invalid_image[] = "not a shared library";
     iree_const_byte_span_t data =
         iree_make_const_byte_span(invalid_image, sizeof(invalid_image));
+    iree_allocator_t allocator = iree_allocator_system();
+    iree_status_code_t expected_status = IREE_STATUS_NOT_FOUND;
     if (!strcmp(mode, "create-failure")) {
       std::string missing_directory = std::string(temp_directory) + "/missing";
       ASSERT_TRUE(SetEnvironmentVariableA("TMP", missing_directory.c_str()));
       data = iree_make_const_byte_span(file->data, file->size);
+    } else if (!strcmp(mode, "allocation-failure")) {
+      allocator = iree_allocator_null();
+      data = iree_make_const_byte_span(file->data, file->size);
+      expected_status = IREE_STATUS_INVALID_ARGUMENT;
+    } else if (!strcmp(mode, "empty-image")) {
+      data = iree_const_byte_span_empty();
     }
     iree_dynamic_library_t* library = nullptr;
     IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_NOT_FOUND,
+        expected_status,
         iree_dynamic_library_load_from_memory(
             IREE_SV("extraction_failure"), data, IREE_DYNAMIC_LIBRARY_FLAG_NONE,
-            iree_allocator_system(), &library));
+            allocator, &library));
     EXPECT_EQ(nullptr, library);
+    EXPECT_TRUE(std::filesystem::is_empty(temp_directory));
   }
-  EXPECT_TRUE(std::filesystem::is_empty(temp_directory));
 }
 
 #elif defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID) || \
@@ -438,7 +447,11 @@ static void CheckMemoryExtraction(const char* temp_directory,
 
 static int MemoryExtractionRole(int argc, char** argv,
                                 const char* temp_directory) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  CheckMemoryExtraction(argv[argc - 2], argv[argc - 1]);
+#else
   CheckMemoryExtraction(temp_directory, argv[argc - 1]);
+#endif
   return ::testing::Test::HasFailure() ? 1 : 0;
 }
 
@@ -457,16 +470,29 @@ TEST_P(DynamicLibraryMemoryTest, OwnsExtractedFile) {
   int argc = iree_coordinated_test_argc();
   char** argv = iree_coordinated_test_argv();
   std::vector<char*> arguments(argv, argv + argc);
+#if defined(IREE_PLATFORM_WINDOWS)
+  // This directory belongs to the parent, outside the child harness's cleanup.
+  // Observing it after process exit proves that Windows retired retained files.
+  auto directory = iree::testing::MakeTempFilePath("memory_extraction");
+  ASSERT_TRUE(std::filesystem::create_directory(directory));
+  arguments.push_back(directory.data());
+#endif
   arguments.push_back(mode.data());
   arguments.push_back(nullptr);
-  EXPECT_EQ(0, iree_coordinated_test_run(argc + 1, arguments.data(),
-                                         &kMemoryExtractionConfig));
+  EXPECT_EQ(
+      0, iree_coordinated_test_run(static_cast<int>(arguments.size() - 1),
+                                   arguments.data(), &kMemoryExtractionConfig));
+#if defined(IREE_PLATFORM_WINDOWS)
+  EXPECT_TRUE(std::filesystem::is_empty(directory));
+  EXPECT_TRUE(std::filesystem::remove(directory));
+#endif
 }
 
 #if defined(IREE_PLATFORM_WINDOWS)
 INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
                          ::testing::Values("create-failure", "load-failure",
-                                           "delete-on-close"));
+                                           "allocation-failure", "empty-image",
+                                           "release", "nodelete"));
 #else
 INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
                          ::testing::Values("discard", "empty", "preserve",

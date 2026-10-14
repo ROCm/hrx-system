@@ -294,6 +294,7 @@ iree_cc_library(
     "dynamic_library_win32.c"
   DEPS
     ${CMAKE_DL_LIBS}
+    ::csprng
     ::internal
     ::path
     ::symbol_resolver_win32
