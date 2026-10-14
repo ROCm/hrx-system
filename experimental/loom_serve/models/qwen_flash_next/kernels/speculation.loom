@@ -1,0 +1,157 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset)
+
+// Ordinary stages specialize this query to true without reading speculative
+// metadata. Verification keeps known spans writable and speculative endpoints
+// immutable until device acceptance has selected their consumed prefix.
+func.def public inline @flash_next_span_publishes(%verification: index, %epoch: buffer, %span: index) -> (i1) {
+  %c0 = index.constant 0 : index
+  %ordinary = index.cmp eq, %verification, %c0 : index
+  %publish = scf.if %ordinary -> (i1) {
+    %yes = scalar.constant true : i1
+    scf.yield %yes : i1
+  } else {
+    %origin = index.constant 1804 : offset
+    %options = buffer.view %epoch[%origin] : buffer -> view<64x2xi32>
+    %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
+    %known = scalar.constant 0 : i32
+    %publish = scalar.cmpi eq, %flag, %known : i32
+    scf.yield %publish : i1
+  }
+  func.return %publish : i1
+}
+
+// Capture preserves transition inputs, not recurrent endpoints. Every source
+// span has a stable width-sized slot, including gaps occupied by known spans.
+// Acceptance emits replay descriptors into these slots without copying data.
+kernel.def @flash_next_capture_rows(%span_capacity: index, %row_bytes: offset) {
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 16)] : index
+  %bytes = index.cast %row_bytes : offset to index
+  %rounding = index.constant 511 : index
+  %group_bytes = index.constant 512 : index
+  %rounded = index.add %bytes, %rounding : index
+  %groups = index.div %rounded, %group_bytes : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%source_capacity_value: index, %width_value: index, %row_bytes_value: offset, %epoch: buffer, %input: buffer, %capture: buffer, %capture_origin: offset) {
+  %source_capacity = index.assume %source_capacity_value [range(%source_capacity_value, 1, 32768)] : index
+  %width = index.assume %width_value [range(%width_value, 1, 8)] : index
+  %row_bytes = index.assume %row_bytes_value [range(%row_bytes_value, 4, 20480), multiple_of(%row_bytes_value, 4)] : offset
+  %span_value = kernel.workgroup.id<y> : index
+  %span = index.assume %span_value [range(%span_value, 0, 15)] : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %known = func.call @flash_next_span_publishes(%width, %epoch, %span) : (index, buffer, index) -> (i1)
+    %no = scalar.constant false : i1
+    %speculative = scalar.cmpi eq, %known, %no : i1
+    scf.if %speculative {
+      %origin = index.constant 12 : offset
+      %descriptors = buffer.view %epoch[%origin] : buffer -> view<64x5xi32>
+      %count_word = view.load %descriptors[%span, 0] : view<64x5xi32> -> i32
+      %begin_word = view.load %descriptors[%span, 2] : view<64x5xi32> -> i32
+      %count_value = index.cast %count_word : i32 to index
+      %count = index.assume %count_value [range(%count_value, 1, %width)] : index
+      %begin = index.cast %begin_word : i32 to index
+      %c0 = index.constant 0 : index
+      %c1 = index.constant 1 : index
+      %packet_bytes = index.constant 4 : offset
+      %threads = index.constant 128 : index
+      %group = kernel.workgroup.id<x> : index
+      %thread = kernel.workitem.id<x> : index
+      %packet = index.madd %group, %threads, %thread : index
+      %byte = index.scale %packet, %packet_bytes : index, offset -> offset
+      %inside = index.cmp ult, %byte, %row_bytes : offset
+      scf.if %inside {
+        %first = index.mul %span, %width : index
+        scf.for %token = [%c0 to %count step %c1] {
+          %source_value = index.add %begin, %token : index
+          %source = index.assume %source_value [range(%source_value, 0, 32767), lt(%source_value, %source_capacity)] : index
+          %destination = index.add %first, %token : index
+          %source_row = index.scale %source, %row_bytes : index, offset -> offset
+          %source_origin = index.add %source_row, %byte : offset
+          %destination_row = index.scale %destination, %row_bytes : index, offset -> offset
+          %destination_base = index.add %capture_origin, %destination_row : offset
+          %destination_origin = index.add %destination_base, %byte : offset
+          %input_view = buffer.view %input[%source_origin] : buffer -> view<4xi8>
+          %output_view = buffer.view %capture[%destination_origin] : buffer -> view<4xi8>
+          %value = vector.load %input_view[%c0] : view<4xi8> -> vector<4xi8>
+          vector.store %value, %output_view[%c0] : vector<4xi8>, view<4xi8>
+        }
+      }
+    }
+  }
+  kernel.return
+}
+
+// The PLE convolution retains nine chronological normalized input rows. Commit
+// them after acceptance without recomputing the PLE table, gate, or convolution.
+// Ascending publication reads strictly later old-history slots, so reader and
+// writer may be the same retained slot without a scratch history.
+kernel.def @flash_next_commit_ple_history() {
+  %groups = index.constant 20 : index
+  %threads = index.constant 128 : index
+  %spans = index.constant 16 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%history_origin: offset, %epoch: buffer, %rows: buffer, %input: buffer, %arena: buffer) {
+  %spans = config.get @flash_next.span_capacity : index
+  %width = config.get @flash_next.verification_width : index
+  %capacity = index.mul %spans, %width : index
+  %span_value = kernel.workgroup.id<y> : index
+  %span = index.assume %span_value [range(%span_value, 0, 15)] : index
+  %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%epoch, %rows, %span, %history_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c9 = index.constant 9 : index
+    %threads = index.constant 128 : index
+    %group = kernel.workgroup.id<x> : index
+    %thread = kernel.workitem.id<x> : index
+    %packet = index.madd %group, %threads, %thread : index
+    %channel = index.mul %packet, %c4 : index
+    %origin = index.constant 0 : offset
+    %source = buffer.view %input[%origin] : buffer -> view<[%capacity]x10240xbf16>
+    %previous = buffer.view %arena[%reader] : buffer -> view<9x10240xbf16>
+    %output = buffer.view %arena[%writer] : buffer -> view<9x10240xbf16>
+    %count = index.sub %end, %begin : index
+    %empty = vector.constant 0.0 : vector<4xbf16>
+    // The oldest retained row always comes from a later old-history slot.
+    // Ascending publication cannot overwrite a subsequent source row.
+    scf.for %slot = [%c0 to %c9 step %c1] {
+      %relative = index.add %slot, %count : index
+      %old = index.cmp ult, %relative, %c9 : index
+      %value = scf.if %old -> (vector<4xbf16>) {
+        %value = scf.if %fresh -> (vector<4xbf16>) {
+          scf.yield %empty : vector<4xbf16>
+        } else {
+          %old_slot = index.assume %relative [range(%relative, 0, 8)] : index
+          %loaded = vector.load %previous[%old_slot, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+          scf.yield %loaded : vector<4xbf16>
+        }
+        scf.yield %value : vector<4xbf16>
+      } else {
+        %tail = index.sub %relative, %c9 : index
+        %token_value = index.add %begin, %tail : index
+        %token = index.assume %token_value [range(%token_value, 0, 32767), lt(%token_value, %capacity)] : index
+        %loaded = vector.load %source[%token, %channel] : view<[%capacity]x10240xbf16> -> vector<4xbf16>
+        scf.yield %loaded : vector<4xbf16>
+      }
+      vector.store %value, %output[%slot, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    }
+  }
+  kernel.return
+}
