@@ -1,0 +1,275 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset)
+
+// The signed square root uses sign(0)=0 before sigmoid. Copying the sign of
+// zero onto the clamped magnitude would instead bias an orthogonal gate.
+func.def public inline @flash_next_ple_gate(%dot: f32) -> (f32) {
+  %c0 = scalar.constant 0.0 : f32
+  %c1 = scalar.constant 1.0 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  %inverse_width = scalar.constant 0.019764235243201256 : f32
+  %scaled = scalar.mulf %dot, %inverse_width : f32
+  %absolute = scalar.absf %scaled : f32
+  %clamped = scalar.maxnumf %absolute, %epsilon : f32
+  %root = scalar.sqrtf<afn> %clamped : f32
+  %signed = scalar.copysignf %root, %scaled : f32
+  %is_zero = scalar.cmpf oeq, %scaled, %c0 : f32
+  %value = scf.select %is_zero, %c0, %signed : f32
+  %negative = scalar.negf %value : f32
+  %exponential = scalar.expf<afn> %negative : f32
+  %denominator = scalar.addf %c1, %exponential : f32
+  %gate = scalar.divf %c1, %denominator : f32
+  func.return %gate : f32
+}
+
+// One workgroup owns a token/stream. Normalized key/query and gated values
+// round to BF16 before consumption; their reductions accumulate in F32.
+// GGUF has already folded 1+gamma into each original F32 norm weight.
+kernel.def @flash_next_ple_gate_normalize() {
+  %tokens = config.get @flash_next.token_count : index
+  %streams = index.constant 4 : index
+  %threads = index.constant 320 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%streams, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %key_arg: buffer, %value_arg: buffer, %residual_arg: buffer, %key_gamma_arg: buffer, %query_gamma_arg: buffer, %conv_gamma_arg: buffer, %gated_arg: buffer, %normalized_arg: buffer) {
+  %span, %key, %value, %residual, %key_gamma, %query_gamma, %conv_gamma, %gated, %normalized = buffer.assume.noalias %span_arg, %key_arg, %value_arg, %residual_arg, %key_gamma_arg, %query_gamma_arg, %conv_gamma_arg, %gated_arg, %normalized_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %stream = kernel.workgroup.id<x> : index
+    %thread = kernel.workitem.id<x> : index
+    %c8 = index.constant 8 : index
+    %channel = index.mul %thread, %c8 : index
+    %origin = index.constant 0 : offset
+    %key_view = buffer.view %key[%origin] : buffer -> view<[%capacity]x4x2560xbf16>
+    %value_view = buffer.view %value[%origin] : buffer -> view<[%capacity]x2560xbf16>
+    %residual_view = buffer.view %residual[%origin] : buffer -> view<[%capacity]x4x2560xbf16>
+    %key_gamma_view = buffer.view %key_gamma[%origin] : buffer -> view<4x2560xf32>
+    %query_gamma_view = buffer.view %query_gamma[%origin] : buffer -> view<4x2560xf32>
+    %conv_gamma_view = buffer.view %conv_gamma[%origin] : buffer -> view<4x2560xf32>
+    %gated_view = buffer.view %gated[%origin] : buffer -> view<[%capacity]x4x2560xbf16>
+    %normalized_view = buffer.view %normalized[%origin] : buffer -> view<[%capacity]x4x2560xbf16>
+    %key_packed = vector.load %key_view[%token, %stream, %channel] : view<[%capacity]x4x2560xbf16> -> vector<8xbf16>
+    %query_packed = vector.load %residual_view[%token, %stream, %channel] : view<[%capacity]x4x2560xbf16> -> vector<8xbf16>
+    %key_values = vector.extf %key_packed : vector<8xbf16> to vector<8xf32>
+    %query_values = vector.extf %query_packed : vector<8xbf16> to vector<8xf32>
+    %key_squares = vector.mulf %key_values, %key_values : vector<8xf32>
+    %query_squares = vector.mulf %query_values, %query_values : vector<8xf32>
+    %c0 = scalar.constant 0.0 : f32
+    %reciprocal_width = scalar.constant 0.00039062500000000002 : f32
+    %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+    %key_partial = vector.reduce<addf> %key_squares, %c0 : vector<8xf32>, f32
+    %query_partial = vector.reduce<addf> %query_squares, %c0 : vector<8xf32>, f32
+    %key_total = kernel.workgroup.reduce<addf> %key_partial : f32
+    %query_total = kernel.workgroup.reduce<addf> %query_partial : f32
+    %key_mean = scalar.mulf %key_total, %reciprocal_width : f32
+    %query_mean = scalar.mulf %query_total, %reciprocal_width : f32
+    %key_biased = scalar.addf %key_mean, %epsilon : f32
+    %query_biased = scalar.addf %query_mean, %epsilon : f32
+    %key_inverse = scalar.rsqrtf<afn> %key_biased : f32
+    %query_inverse = scalar.rsqrtf<afn> %query_biased : f32
+    %key_inverse_vector = vector.splat %key_inverse : vector<8xf32>
+    %query_inverse_vector = vector.splat %query_inverse : vector<8xf32>
+    %key_weights = vector.load %key_gamma_view[%stream, %channel] : view<4x2560xf32> -> vector<8xf32>
+    %query_weights = vector.load %query_gamma_view[%stream, %channel] : view<4x2560xf32> -> vector<8xf32>
+    %key_unit = vector.mulf %key_values, %key_inverse_vector : vector<8xf32>
+    %query_unit = vector.mulf %query_values, %query_inverse_vector : vector<8xf32>
+    %key_scaled = vector.mulf %key_unit, %key_weights : vector<8xf32>
+    %query_scaled = vector.mulf %query_unit, %query_weights : vector<8xf32>
+    %key_normalized = vector.fptrunc %key_scaled : vector<8xf32> to vector<8xbf16>
+    %query_normalized = vector.fptrunc %query_scaled : vector<8xf32> to vector<8xbf16>
+    %c0v = vector.constant 0.0 : vector<4xf32>
+    %products = vector.dot2f %key_normalized, %query_normalized, %c0v : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+    %dot_partial = vector.reduce<addf> %products, %c0 : vector<4xf32>, f32
+    %dot = kernel.workgroup.reduce<addf> %dot_partial : f32
+    %gate = func.call @flash_next_ple_gate(%dot) : (f32) -> (f32)
+    %gates = vector.splat %gate : vector<8xf32>
+    %value_packed = vector.load %value_view[%token, %channel] : view<[%capacity]x2560xbf16> -> vector<8xbf16>
+    %values = vector.extf %value_packed : vector<8xbf16> to vector<8xf32>
+    %gated_values = vector.mulf %values, %gates : vector<8xf32>
+    %gated_packed = vector.fptrunc %gated_values : vector<8xf32> to vector<8xbf16>
+    vector.store %gated_packed, %gated_view[%token, %stream, %channel] : vector<8xbf16>, view<[%capacity]x4x2560xbf16>
+    %gated_rounded = vector.extf %gated_packed : vector<8xbf16> to vector<8xf32>
+    %gated_squares = vector.mulf %gated_rounded, %gated_rounded : vector<8xf32>
+    %gated_partial = vector.reduce<addf> %gated_squares, %c0 : vector<8xf32>, f32
+    %gated_total = kernel.workgroup.reduce<addf> %gated_partial : f32
+    %gated_mean = scalar.mulf %gated_total, %reciprocal_width : f32
+    %gated_biased = scalar.addf %gated_mean, %epsilon : f32
+    %gated_inverse = scalar.rsqrtf<afn> %gated_biased : f32
+    %gated_inverse_vector = vector.splat %gated_inverse : vector<8xf32>
+    %conv_weights = vector.load %conv_gamma_view[%stream, %channel] : view<4x2560xf32> -> vector<8xf32>
+    %gated_unit = vector.mulf %gated_rounded, %gated_inverse_vector : vector<8xf32>
+    %gated_normalized = vector.mulf %gated_unit, %conv_weights : vector<8xf32>
+    %normalized_packed = vector.fptrunc %gated_normalized : vector<8xf32> to vector<8xbf16>
+    vector.store %normalized_packed, %normalized_view[%token, %stream, %channel] : vector<8xbf16>, view<[%capacity]x4x2560xbf16>
+  }
+  kernel.return
+}
+
+// A thread owns four channels and advances their nine chronological histories
+// through the active span. The recurrence stays packed; only the three older
+// convolution taps and current input widen for arithmetic. No other workgroup
+// reads these histories, so the final publication needs no device-wide barrier.
+kernel.def @flash_next_ple_convolve() {
+  %groups = index.constant 20 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  %spans = index.constant 16 : index
+  kernel.launch.config workgroups(%groups, %spans, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%history_origin: offset, %origins: buffer, %span_arg: buffer, %gated_arg: buffer, %normalized_arg: buffer, %weight_arg: buffer, %history_arg: buffer, %residual_arg: buffer, %output_arg: buffer) {
+  %span, %gated, %normalized, %weight, %history, %residual, %output = buffer.assume.noalias %span_arg, %gated_arg, %normalized_arg, %weight_arg, %history_arg, %residual_arg, %output_arg : buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %slot = kernel.workgroup.id<y> : index
+  %active = func.call @flash_next_span_active(%span, %slot) : (buffer, index) -> (i1)
+  scf.if %active {
+    %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%span, %origins, %slot, %history_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
+    %origin = index.constant 0 : offset
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %threads = index.constant 128 : index
+    %group = kernel.workgroup.id<x> : index
+    %thread = kernel.workitem.id<x> : index
+    %linear = index.madd %group, %threads, %thread : index
+    %channel = index.mul %linear, %c4 : index
+    %gated_view = buffer.view %gated[%origin] : buffer -> view<[%capacity]x10240xbf16>
+    %normalized_view = buffer.view %normalized[%origin] : buffer -> view<[%capacity]x10240xbf16>
+    %weight_view = buffer.view %weight[%origin] : buffer -> view<10240x4xf32>
+    %history_view = buffer.view %history[%reader] : buffer -> view<9x10240xbf16>
+    %history_output = buffer.view %history[%writer] : buffer -> view<9x10240xbf16>
+    %residual_view = buffer.view %residual[%origin] : buffer -> view<[%capacity]x10240xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x10240xbf16>
+    %weights = vector.load %weight_view[%channel, %c0] : view<10240x4xf32> -> vector<4x4xf32>
+    %taps = vector.transpose<[1, 0]> %weights : vector<4x4xf32> -> vector<4x4xf32>
+    %weight0 = vector.extract %taps[0] : vector<4x4xf32> -> vector<4xf32>
+    %weight1 = vector.extract %taps[1] : vector<4x4xf32> -> vector<4xf32>
+    %weight2 = vector.extract %taps[2] : vector<4x4xf32> -> vector<4xf32>
+    %weight3 = vector.extract %taps[3] : vector<4x4xf32> -> vector<4xf32>
+    %initial0 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[0, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %initial1 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[1, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %initial2 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[2, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %initial3 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[3, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %initial4 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[4, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %initial5 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[5, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %initial6 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[6, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %initial7 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[7, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %initial8 = scf.if %fresh -> (vector<4xbf16>) {
+      %c0v = vector.constant 0.0 : vector<4xbf16>
+      scf.yield %c0v : vector<4xbf16>
+    } else {
+      %value = vector.load %history_view[8, %channel] : view<9x10240xbf16> -> vector<4xbf16>
+      scf.yield %value : vector<4xbf16>
+    }
+    %final0, %final1, %final2, %final3, %final4, %final5, %final6, %final7, %final8 = scf.for %token = [%begin to %end step %c1](%old0 = %initial0 : vector<4xbf16>, %old1 = %initial1 : vector<4xbf16>, %old2 = %initial2 : vector<4xbf16>, %old3 = %initial3 : vector<4xbf16>, %old4 = %initial4 : vector<4xbf16>, %old5 = %initial5 : vector<4xbf16>, %old6 = %initial6 : vector<4xbf16>, %old7 = %initial7 : vector<4xbf16>, %old8 = %initial8 : vector<4xbf16>) -> (vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>) {
+      %packed3 = vector.load %normalized_view[%token, %channel] : view<[%capacity]x10240xbf16> -> vector<4xbf16>
+      %value0 = vector.extf %old0 : vector<4xbf16> to vector<4xf32>
+      %value1 = vector.extf %old3 : vector<4xbf16> to vector<4xf32>
+      %value2 = vector.extf %old6 : vector<4xbf16> to vector<4xf32>
+      %value3 = vector.extf %packed3 : vector<4xbf16> to vector<4xf32>
+      %product = vector.mulf %value0, %weight0 : vector<4xf32>
+      %sum1 = vector.fmaf %value1, %weight1, %product : vector<4xf32>
+      %sum2 = vector.fmaf %value2, %weight2, %sum1 : vector<4xf32>
+      %sum = vector.fmaf %value3, %weight3, %sum2 : vector<4xf32>
+      %activated = vector.siluf<afn> %sum : vector<4xf32>
+      %activated_packed = vector.fptrunc %activated : vector<4xf32> to vector<4xbf16>
+      %activated_rounded = vector.extf %activated_packed : vector<4xbf16> to vector<4xf32>
+      %gated_packed = vector.load %gated_view[%token, %channel] : view<[%capacity]x10240xbf16> -> vector<4xbf16>
+      %gated_values = vector.extf %gated_packed : vector<4xbf16> to vector<4xf32>
+      %combined = vector.addf %gated_values, %activated_rounded : vector<4xf32>
+      %combined_packed = vector.fptrunc %combined : vector<4xf32> to vector<4xbf16>
+      %combined_rounded = vector.extf %combined_packed : vector<4xbf16> to vector<4xf32>
+      %residual_packed = vector.load %residual_view[%token, %channel] : view<[%capacity]x10240xbf16> -> vector<4xbf16>
+      %residual_values = vector.extf %residual_packed : vector<4xbf16> to vector<4xf32>
+      %result = vector.addf %residual_values, %combined_rounded : vector<4xf32>
+      %result_packed = vector.fptrunc %result : vector<4xf32> to vector<4xbf16>
+      vector.store %result_packed, %output_view[%token, %channel] : vector<4xbf16>, view<[%capacity]x10240xbf16>
+      scf.yield %old1, %old2, %old3, %old4, %old5, %old6, %old7, %old8, %packed3 : vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>, vector<4xbf16>
+    }
+    vector.store %final0, %history_output[0, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    vector.store %final1, %history_output[1, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    vector.store %final2, %history_output[2, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    vector.store %final3, %history_output[3, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    vector.store %final4, %history_output[4, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    vector.store %final5, %history_output[5, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    vector.store %final6, %history_output[6, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    vector.store %final7, %history_output[7, %channel] : vector<4xbf16>, view<9x10240xbf16>
+    vector.store %final8, %history_output[8, %channel] : vector<4xbf16>, view<9x10240xbf16>
+  }
+  kernel.return
+}
+
+command.program.def public @flash_next_ple_consume(%layer: index, %history_origin: offset) launch(%parameters: buffer, %span: buffer, %origins: buffer, %key: buffer, %value: buffer, %residual: buffer, %history: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %row_bytes = index.constant 20480 : offset
+  %bytes = index.scale %capacity, %row_bytes : index, offset -> offset
+  %gated = buffer.alloca<global> align(256) %bytes : buffer
+  %normalized = buffer.alloca<global> align(256) %bytes : buffer
+  %key_gamma = command.parameter %parameters, "blk.{}.ple_norm_key.weight"[%layer] : view<4x2560xf32>
+  %query_gamma = command.parameter %parameters, "blk.{}.ple_norm_query.weight"[%layer] : view<4x2560xf32>
+  %conv_gamma = command.parameter %parameters, "blk.{}.ple_norm_conv.weight"[%layer] : view<4x2560xf32>
+  %conv_weight = command.parameter %parameters, "blk.{}.ple_conv1d.weight"[%layer] : view<10240x4xf32>
+  kernel.launch @flash_next_ple_gate_normalize(%span, %key, %value, %residual, %key_gamma, %query_gamma, %conv_gamma, %gated, %normalized) : (buffer, buffer, buffer, buffer, view<4x2560xf32>, view<4x2560xf32>, view<4x2560xf32>, buffer, buffer)
+  kernel.launch @flash_next_ple_convolve(%history_origin, %origins, %span, %gated, %normalized, %conv_weight, %history, %residual, %output) : (offset, buffer, buffer, buffer, buffer, view<10240x4xf32>, buffer, buffer, buffer)
+  command.return
+}
