@@ -76,6 +76,17 @@ iree_status_t loom_serve_media_image_inspect(
     const loom_serve_media_image_limits_t* limits,
     iree_allocator_t host_allocator, loom_serve_media_image_info_t* out_info);
 
+// Decodes a previously inspected immutable data URL directly into an exact
+// width * height * 3 packed RGB8 destination. The descriptor is
+// re-established from the bytes and must exactly match |expected_info| before
+// codec output is accepted. Orientation remains metadata for device
+// preprocessing. The destination contents are undefined on codec failure.
+iree_status_t loom_serve_media_image_decode_into(
+    iree_string_view_t escaped_data_url,
+    const loom_serve_media_image_limits_t* limits,
+    const loom_serve_media_image_info_t* expected_info, iree_byte_span_t pixels,
+    iree_allocator_t host_allocator);
+
 // Decodes a previously inspected immutable data URL to packed RGB8. The
 // descriptor is re-established from the bytes and must exactly match
 // |expected_info| before codec output is accepted. Orientation remains metadata

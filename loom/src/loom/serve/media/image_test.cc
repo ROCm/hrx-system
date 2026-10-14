@@ -127,6 +127,27 @@ TEST(ImageTest, PreservesOrientationForDeviceSampling) {
   loom_serve_media_image_deinitialize(&image);
 }
 
+TEST(ImageTest, DecodesIntoCallerOwnedExactStorage) {
+  const std::string url = DataUrl("image/png", kPng);
+  loom_serve_media_image_info_t info;
+  IREE_ASSERT_OK(loom_serve_media_image_inspect(
+      View(url), &kLimits, iree_allocator_system(), &info));
+  std::vector<uint8_t> pixels(12);
+  IREE_ASSERT_OK(loom_serve_media_image_decode_into(
+      View(url), &kLimits, &info,
+      iree_make_byte_span(pixels.data(), pixels.size()),
+      iree_allocator_system()));
+  EXPECT_EQ(pixels, (std::vector<uint8_t>{255, 0, 0, 0, 255, 0, 0, 0, 255, 255,
+                                          255, 255}));
+
+  pixels.pop_back();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_media_image_decode_into(
+                            View(url), &kLimits, &info,
+                            iree_make_byte_span(pixels.data(), pixels.size()),
+                            iree_allocator_system()));
+}
+
 TEST(ImageTest, AcceptsEscapedJsonStringContent) {
   std::string url = DataUrl("image/png", kPng);
   for (iree_host_size_t position = 0;
