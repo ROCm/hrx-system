@@ -14,6 +14,11 @@ set(IREE_DEPENDENCY_IDS
   "google_benchmark"
   "googletest"
   "libbacktrace"
+  "giflib"
+  "libjpeg_turbo"
+  "libpng"
+  "libwebp"
+  "zlib"
   "zstd"
   "catch2"
   "tracy_client"
@@ -92,6 +97,86 @@ set(IREE_DEP_LIBBACKTRACE_STRIP_PREFIX "libbacktrace-793921876c981ce49759114d7bb
 set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "")
 set(IREE_DEP_LIBBACKTRACE_PATCHES "")
 set(IREE_DEP_LIBBACKTRACE_PATCH_ARGS "")
+
+set(IREE_DEP_GIFLIB_KIND "bazel_dep")
+set(IREE_DEP_GIFLIB_OWNER "shared")
+set(IREE_DEP_GIFLIB_MODULE_NAME "giflib")
+set(IREE_DEP_GIFLIB_REPO_NAME "giflib")
+set(IREE_DEP_GIFLIB_VERSION "5.2.1.bcr.1")
+set(IREE_DEP_GIFLIB_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_GIFLIB_SOURCE_URL "https://bcr.bazel.build/modules/giflib/5.2.1.bcr.1/source.json")
+set(IREE_DEP_GIFLIB_URLS
+  "https://github.com/arthenica/giflib/archive/refs/tags/5.2.1.tar.gz"
+)
+set(IREE_DEP_GIFLIB_SHA256 "b606fd11f489ecf343cbd3d810f47f99f51754b2c09de4904253ffb235e3df4a")
+set(IREE_DEP_GIFLIB_STRIP_PREFIX "giflib-5.2.1")
+set(IREE_DEP_GIFLIB_BUILD_FILE "")
+set(IREE_DEP_GIFLIB_PATCHES "")
+set(IREE_DEP_GIFLIB_PATCH_ARGS "")
+
+set(IREE_DEP_LIBJPEG_TURBO_KIND "bazel_dep")
+set(IREE_DEP_LIBJPEG_TURBO_OWNER "shared")
+set(IREE_DEP_LIBJPEG_TURBO_MODULE_NAME "libjpeg_turbo")
+set(IREE_DEP_LIBJPEG_TURBO_REPO_NAME "libjpeg_turbo")
+set(IREE_DEP_LIBJPEG_TURBO_VERSION "3.1.3.bcr.6")
+set(IREE_DEP_LIBJPEG_TURBO_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_LIBJPEG_TURBO_SOURCE_URL "https://bcr.bazel.build/modules/libjpeg_turbo/3.1.3.bcr.6/source.json")
+set(IREE_DEP_LIBJPEG_TURBO_URLS
+  "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.3/libjpeg-turbo-3.1.3.tar.gz"
+)
+set(IREE_DEP_LIBJPEG_TURBO_SHA256 "075920b826834ac4ddf97661cc73491047855859affd671d52079c6867c1c6c0")
+set(IREE_DEP_LIBJPEG_TURBO_STRIP_PREFIX "libjpeg-turbo-3.1.3")
+set(IREE_DEP_LIBJPEG_TURBO_BUILD_FILE "")
+set(IREE_DEP_LIBJPEG_TURBO_PATCHES "")
+set(IREE_DEP_LIBJPEG_TURBO_PATCH_ARGS "")
+
+set(IREE_DEP_LIBPNG_KIND "bazel_dep")
+set(IREE_DEP_LIBPNG_OWNER "shared")
+set(IREE_DEP_LIBPNG_MODULE_NAME "libpng")
+set(IREE_DEP_LIBPNG_REPO_NAME "libpng")
+set(IREE_DEP_LIBPNG_VERSION "1.6.58.bcr.1")
+set(IREE_DEP_LIBPNG_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_LIBPNG_SOURCE_URL "https://bcr.bazel.build/modules/libpng/1.6.58.bcr.1/source.json")
+set(IREE_DEP_LIBPNG_URLS
+  "https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.58.tar.gz"
+)
+set(IREE_DEP_LIBPNG_SHA256 "a9d4df463d36a6e5f9c29bd6f4967312d17e996c1854f3511f833924eb1993cf")
+set(IREE_DEP_LIBPNG_STRIP_PREFIX "libpng-1.6.58")
+set(IREE_DEP_LIBPNG_BUILD_FILE "")
+set(IREE_DEP_LIBPNG_PATCHES "")
+set(IREE_DEP_LIBPNG_PATCH_ARGS "")
+
+set(IREE_DEP_LIBWEBP_KIND "bazel_dep")
+set(IREE_DEP_LIBWEBP_OWNER "shared")
+set(IREE_DEP_LIBWEBP_MODULE_NAME "libwebp")
+set(IREE_DEP_LIBWEBP_REPO_NAME "libwebp")
+set(IREE_DEP_LIBWEBP_VERSION "1.6.0.bcr.1")
+set(IREE_DEP_LIBWEBP_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_LIBWEBP_SOURCE_URL "https://bcr.bazel.build/modules/libwebp/1.6.0.bcr.1/source.json")
+set(IREE_DEP_LIBWEBP_URLS
+  "https://github.com/webmproject/libwebp/archive/refs/tags/v1.6.0.tar.gz"
+)
+set(IREE_DEP_LIBWEBP_SHA256 "93a852c2b3efafee3723efd4636de855b46f9fe1efddd607e1f42f60fc8f2136")
+set(IREE_DEP_LIBWEBP_STRIP_PREFIX "libwebp-1.6.0")
+set(IREE_DEP_LIBWEBP_BUILD_FILE "")
+set(IREE_DEP_LIBWEBP_PATCHES "")
+set(IREE_DEP_LIBWEBP_PATCH_ARGS "")
+
+set(IREE_DEP_ZLIB_KIND "bazel_dep")
+set(IREE_DEP_ZLIB_OWNER "shared")
+set(IREE_DEP_ZLIB_MODULE_NAME "zlib")
+set(IREE_DEP_ZLIB_REPO_NAME "zlib")
+set(IREE_DEP_ZLIB_VERSION "1.3.2")
+set(IREE_DEP_ZLIB_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_ZLIB_SOURCE_URL "https://bcr.bazel.build/modules/zlib/1.3.2/source.json")
+set(IREE_DEP_ZLIB_URLS
+  "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz"
+)
+set(IREE_DEP_ZLIB_SHA256 "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16")
+set(IREE_DEP_ZLIB_STRIP_PREFIX "zlib-1.3.2")
+set(IREE_DEP_ZLIB_BUILD_FILE "")
+set(IREE_DEP_ZLIB_PATCHES "")
+set(IREE_DEP_ZLIB_PATCH_ARGS "")
 
 set(IREE_DEP_ZSTD_KIND "bazel_dep")
 set(IREE_DEP_ZSTD_OWNER "shared")
