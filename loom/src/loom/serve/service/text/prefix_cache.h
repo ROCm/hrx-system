@@ -7,14 +7,16 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_PREFIX_CACHE_H_
 #define LOOM_SERVE_SERVICE_TEXT_PREFIX_CACHE_H_
 
+#include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/model.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// An exact consumed-token frontier, independent of canonical chat histories.
-// The service owner protects a selected record through reservation readiness.
+// An exact consumed-token and complete ordered-media frontier, independent of
+// canonical chat histories. The service owner protects a selected record
+// through reservation readiness.
 typedef struct loom_serve_text_prefix_entry_t {
   // Owned immutable endpoint; NULL denotes an available record.
   loom_serve_text_checkpoint_t* state;
@@ -22,6 +24,8 @@ typedef struct loom_serve_text_prefix_entry_t {
   int32_t* tokens;
   // Consumed positions and number of IDs in tokens.
   iree_host_size_t count;
+  // Exact ordered request media identity contributing to state.
+  loom_serve_text_chat_media_identity_t media;
   // Monotonic last successful admission or capture, for cold LRU eviction.
   uint64_t serial;
 } loom_serve_text_prefix_entry_t;
@@ -52,26 +56,29 @@ void loom_serve_text_prefix_cache_reset(loom_serve_text_prefix_cache_t* cache,
 void loom_serve_text_prefix_cache_deinitialize(
     loom_serve_text_prefix_cache_t* cache);
 
-// Finds the longest exact strict prefix. At least one known input remains so
-// selection runs normally; this never synthesizes a selected pending token.
-// Lookup is cold admission work and does not change recency on failed retries.
+// Finds the longest exact strict token prefix with the same complete ordered
+// media identity. At least one known input remains so selection runs normally;
+// this never synthesizes a selected pending token. Lookup is cold admission
+// work and does not change recency on failed retries.
 loom_serve_text_prefix_entry_t* loom_serve_text_prefix_cache_find(
-    loom_serve_text_prefix_cache_t* cache, iree_host_size_t count,
-    const int32_t* tokens);
+    loom_serve_text_prefix_cache_t* cache, const loom_serve_text_chat_t* chat,
+    iree_host_size_t count, const int32_t* tokens);
 
 // Records one successful admission using an endpoint, not a lookup attempt.
 void loom_serve_text_prefix_cache_touch(loom_serve_text_prefix_cache_t* cache,
                                         loom_serve_text_prefix_entry_t* entry);
 
-// Captures a natural intermediate prefill frontier unless an ancestor already
-// represents it. The row has completed accepted work; its active completion
-// reservation survives capture. A full table evicts its oldest unprotected
-// entry. Capacity denial is ordinary: a zero frontier means no submitted pin.
-// Any returned frontier must retire before lookup, eviction or further model
-// mutation. Failure leaves accepted native ownership with the outer model.
+// Captures a natural intermediate prefill frontier unless an ancestor with the
+// same complete request media already represents it. The whole-request media
+// key prevents a partial frontier from aliasing differently placed media. The
+// row has completed accepted work; its active completion reservation survives
+// capture. A full table evicts its oldest unprotected entry. Capacity denial is
+// ordinary: a zero frontier means no submitted pin. Any returned frontier must
+// retire before lookup, eviction or further model mutation. Failure leaves
+// accepted native ownership with the outer model.
 iree_status_t loom_serve_text_prefix_cache_submit(
-    loom_serve_text_prefix_cache_t* cache, loom_serve_text_row_t* row,
-    iree_host_size_t count, const int32_t* tokens,
+    loom_serve_text_prefix_cache_t* cache, const loom_serve_text_chat_t* chat,
+    loom_serve_text_row_t* row, iree_host_size_t count, const int32_t* tokens,
     const loom_serve_text_prefix_entry_t* protected_entry, bool* out_evicted,
     loom_serve_execution_frontier_t* out_frontier);
 

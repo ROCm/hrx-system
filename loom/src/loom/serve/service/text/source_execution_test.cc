@@ -183,4 +183,11 @@ TEST_F(SourceTextServiceTest,
   EXPECT_NE(actual, Oracle::Complete(prompt, 16, 2));
 }
 
+TEST_F(SourceTextServiceTest, OrderedImageContentReachesRetainedExecution) {
+  Start();
+  const std::string message = ImageMessage("a", "image/png", kPng, "low", "b");
+  EXPECT_EQ(Content(Read(Send(Request(message, 2)))),
+            Oracle::Complete("axb", 2));
+}
+
 }  // namespace

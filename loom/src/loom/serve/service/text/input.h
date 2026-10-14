@@ -14,8 +14,8 @@ extern "C" {
 #endif
 
 // Borrowed completed frontier, stable during one exclusive preparation call.
-// Its immutable transcript storage identifies the exact completed history,
-// independently of the row or cache entry currently holding native state.
+// Its immutable transcript and media identity describe the exact completed
+// history independently of the row or cache entry holding native state.
 typedef struct loom_serve_text_input_prefix_t {
   // Canonical transcript; null means no retained continuation is available.
   const loom_serve_text_chat_completion_t* completion;
@@ -52,7 +52,8 @@ bool loom_serve_text_input_is_current(const loom_serve_text_input_t* input,
 
 // Prepares once per actual history identity. Capacity retries with the same
 // history reuse tokens; eviction prepares full replay instead of using stale
-// suffix tokens. Required prefixes reject mismatching canonical histories.
+// suffix tokens. Required prefixes reject mismatching canonical histories or
+// ordered media semantics.
 // Scratch holds context_capacity IDs and is borrowed only during this call.
 // Input remains unchanged on failure; new storage uses host_allocator.
 iree_status_t loom_serve_text_input_prepare(

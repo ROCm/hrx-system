@@ -125,9 +125,10 @@ static bool loom_serve_text_chat_is_identifier(iree_string_view_t name) {
   return true;
 }
 
-static iree_status_t loom_serve_text_chat_content_part(
-    void* user_data, iree_host_size_t index, iree_json_value_type_t type,
-    iree_string_view_t value) {
+static iree_status_t loom_serve_text_chat_text_part(void* user_data,
+                                                    iree_host_size_t index,
+                                                    iree_json_value_type_t type,
+                                                    iree_string_view_t value) {
   if (type != IREE_JSON_VALUE_TYPE_OBJECT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "chat content parts must be text objects");
@@ -143,7 +144,7 @@ static iree_status_t loom_serve_text_chat_content_part(
   return loom_serve_text_chat_append_decoded(user_data, fields[1].value);
 }
 
-static iree_status_t loom_serve_text_chat_content(
+static iree_status_t loom_serve_text_chat_text_content(
     const chat_field_t* field, iree_string_builder_t* output) {
   iree_string_builder_reset(output);
   if (!field->value.data || field->type == IREE_JSON_VALUE_TYPE_NULL) {
@@ -153,7 +154,204 @@ static iree_status_t loom_serve_text_chat_content(
     return loom_serve_text_chat_append_decoded(output, field->value);
   }
   return iree_json_enumerate_array_typed(
-      field->value, loom_serve_text_chat_content_part, output);
+      field->value, loom_serve_text_chat_text_part, output);
+}
+
+typedef struct chat_content_t {
+  // Request receiving inspected image descriptors.
+  loom_serve_text_chat_t* chat;
+  // Message ordinal containing these parts.
+  iree_host_size_t message_ordinal;
+  // Decoded text concatenated in content-part order.
+  iree_string_builder_t* text;
+  // Little-endian source-policy content records.
+  iree_string_builder_t* records;
+  // Number of complete records in records.
+  iree_host_size_t count;
+} chat_content_t;
+
+static iree_status_t loom_serve_text_chat_content_record(
+    chat_content_t* content, loom_serve_text_chat_content_kind_t kind,
+    uint32_t text_offset, uint32_t text_length, uint32_t image_index,
+    uint32_t display_width, uint32_t display_height,
+    loom_serve_text_chat_image_detail_t detail) {
+  if (content->count >= LOOM_SERVE_TEXT_CHAT_MAX_CONTENT_PART_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "chat messages support at most %d ordered content parts",
+        LOOM_SERVE_TEXT_CHAT_MAX_CONTENT_PART_COUNT);
+  }
+  uint8_t record[LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_COUNT * sizeof(uint32_t)] =
+      {0};
+  iree_unaligned_store_le_u32(
+      record + LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_KIND * sizeof(uint32_t),
+      kind);
+  iree_unaligned_store_le_u32(
+      record +
+          LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_TEXT_OFFSET * sizeof(uint32_t),
+      text_offset);
+  iree_unaligned_store_le_u32(
+      record +
+          LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_TEXT_LENGTH * sizeof(uint32_t),
+      text_length);
+  iree_unaligned_store_le_u32(
+      record +
+          LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_IMAGE_INDEX * sizeof(uint32_t),
+      image_index);
+  iree_unaligned_store_le_u32(
+      record +
+          LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_DISPLAY_WIDTH * sizeof(uint32_t),
+      display_width);
+  iree_unaligned_store_le_u32(
+      record +
+          LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_DISPLAY_HEIGHT * sizeof(uint32_t),
+      display_height);
+  iree_unaligned_store_le_u32(
+      record +
+          LOOM_SERVE_TEXT_CHAT_CONTENT_FIELD_IMAGE_DETAIL * sizeof(uint32_t),
+      detail);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+      content->records,
+      iree_make_string_view((const char*)record, sizeof(record))));
+  ++content->count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_text_chat_image_part(
+    chat_content_t* content, iree_host_size_t content_ordinal,
+    iree_string_view_t value) {
+  if (content->message_ordinal > UINT32_MAX || content_ordinal > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "chat content ordinal exceeds 32 bits");
+  }
+  if (!content->chat->policy->images.maximum_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "this model does not accept image input");
+  }
+  if (content->chat->images.count >=
+      content->chat->policy->images.maximum_count) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "chat request supports at most %zu image occurrences",
+        content->chat->policy->images.maximum_count);
+  }
+  chat_field_t fields[] = {{"url", CHAT_STRING}, {"detail", CHAT_STRING}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
+      value, IREE_ARRAYSIZE(fields), fields, 0));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
+  loom_serve_text_chat_image_detail_t detail =
+      LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_AUTO;
+  if (fields[1].value.data &&
+      !iree_string_view_equal(fields[1].value, IREE_SV("auto"))) {
+    if (iree_string_view_equal(fields[1].value, IREE_SV("low"))) {
+      detail = LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_LOW;
+    } else if (iree_string_view_equal(fields[1].value, IREE_SV("high"))) {
+      detail = LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_HIGH;
+    } else {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "image detail must be auto, low or high");
+    }
+  }
+  loom_serve_media_image_info_t info;
+  IREE_RETURN_IF_ERROR(loom_serve_media_image_inspect(
+      fields[0].value, &content->chat->policy->images.limits,
+      content->chat->host_allocator, &info));
+  const iree_host_size_t image_index = content->chat->images.count;
+  iree_host_size_t required_capacity = 0;
+  if (!iree_host_size_checked_add(image_index, 1, &required_capacity)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "image descriptor capacity overflow");
+  }
+  if (required_capacity > content->chat->images.capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        content->chat->host_allocator, required_capacity,
+        sizeof(*content->chat->images.values), &content->chat->images.capacity,
+        (void**)&content->chat->images.values));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_content_record(
+      content, LOOM_SERVE_TEXT_CHAT_CONTENT_IMAGE, 0, 0, (uint32_t)image_index,
+      info.display_width, info.display_height, detail));
+  content->chat->images.values[image_index] = (loom_serve_text_chat_image_t){
+      .data_url = fields[0].value,
+      .detail = detail,
+      .message_ordinal = (uint32_t)content->message_ordinal,
+      .content_ordinal = (uint32_t)content_ordinal,
+      .text_offset = (uint32_t)content->text->size,
+      .info = info,
+  };
+  ++content->chat->images.count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_text_chat_ordered_content_part(
+    void* user_data, iree_host_size_t index, iree_json_value_type_t type,
+    iree_string_view_t value) {
+  chat_content_t* content = user_data;
+  if (type != IREE_JSON_VALUE_TYPE_OBJECT) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "chat content parts must be objects");
+  }
+  chat_field_t fields[] = {
+      {"type", CHAT_STRING}, {"text", CHAT_STRING}, {"image_url", CHAT_OBJECT}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
+      value, IREE_ARRAYSIZE(fields), fields, 0));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
+  if (iree_string_view_equal(fields[0].value, IREE_SV("text"))) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
+    if (fields[2].value.data) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "text content parts cannot contain image_url");
+    }
+    if (content->text->size > UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "decoded chat content exceeds 4 GiB");
+    }
+    const uint32_t offset = (uint32_t)content->text->size;
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_chat_append_decoded(content->text, fields[1].value));
+    if (content->text->size > UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "decoded chat content exceeds 4 GiB");
+    }
+    const iree_host_size_t length = content->text->size - offset;
+    return loom_serve_text_chat_content_record(
+        content, LOOM_SERVE_TEXT_CHAT_CONTENT_TEXT, offset, (uint32_t)length, 0,
+        0, 0, LOOM_SERVE_TEXT_CHAT_IMAGE_DETAIL_AUTO);
+  }
+  if (iree_string_view_equal(fields[0].value, IREE_SV("image_url"))) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[2]));
+    if (fields[1].value.data) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "image content parts cannot contain text");
+    }
+    return loom_serve_text_chat_image_part(content, index, fields[2].value);
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "content part type must be text or image_url");
+}
+
+static iree_status_t loom_serve_text_chat_ordered_content(
+    const chat_field_t* field, loom_serve_text_chat_t* chat,
+    iree_host_size_t message_ordinal, iree_string_builder_t* text,
+    iree_string_builder_t* records, iree_host_size_t* out_count) {
+  iree_string_builder_reset(text);
+  iree_string_builder_reset(records);
+  *out_count = 0;
+  if (!field->value.data || field->type == IREE_JSON_VALUE_TYPE_NULL) {
+    return iree_ok_status();
+  }
+  if (field->type == IREE_JSON_VALUE_TYPE_STRING) {
+    return loom_serve_text_chat_append_decoded(text, field->value);
+  }
+  chat_content_t content = {.chat = chat,
+                            .message_ordinal = message_ordinal,
+                            .text = text,
+                            .records = records,
+                            .count = 0};
+  IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
+      field->value, loom_serve_text_chat_ordered_content_part, &content));
+  *out_count = content.count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_text_chat_tool_schema(
@@ -276,21 +474,20 @@ iree_status_t loom_serve_text_chat_policy_initialize(
   out_policy->invocation = loom_serve_program_invocation(program);
   iree_vm_function_t name_function = {0};
   iree_vm_function_t defaults_function = {0};
-  const char* names[] = {"model_name",       "chat_begin",     "chat_message",
-                         "chat_end",         "parse_tools",    "render_tool",
-                         "prepare_input",    "output_next",    "complete_text",
-                         "request_defaults", "request_options"};
-  iree_vm_function_t* functions[] = {&name_function,
-                                     &out_policy->chat_begin,
-                                     &out_policy->chat_message,
-                                     &out_policy->chat_end,
-                                     &out_policy->parse_tools,
-                                     &out_policy->render_tool,
-                                     &out_policy->prepare_input,
-                                     &out_policy->output_next,
-                                     &out_policy->complete_text,
-                                     &defaults_function,
-                                     &out_policy->request_options};
+  iree_vm_function_t image_limits_function = {0};
+  const char* names[] = {
+      "model_name",  "chat_image_limits", "chat_begin",       "chat_message",
+      "chat_end",    "parse_tools",       "render_tool",      "prepare_input",
+      "output_next", "complete_text",     "request_defaults", "request_options",
+  };
+  iree_vm_function_t* functions[] = {
+      &name_function,           &image_limits_function,
+      &out_policy->chat_begin,  &out_policy->chat_message,
+      &out_policy->chat_end,    &out_policy->parse_tools,
+      &out_policy->render_tool, &out_policy->prepare_input,
+      &out_policy->output_next, &out_policy->complete_text,
+      &defaults_function,       &out_policy->request_options,
+  };
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(names) && iree_status_is_ok(status); ++i) {
@@ -343,6 +540,44 @@ iree_status_t loom_serve_text_chat_policy_initialize(
     }
   }
   iree_vm_variant_reset(&result);
+  iree_vm_variant_t image_limits[5] = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_invoke(out_policy->invocation, image_limits_function,
+                            iree_vm_variant_span_empty(),
+                            iree_vm_variant_span_from_array(image_limits));
+  }
+  int64_t limits[IREE_ARRAYSIZE(image_limits)] = {0};
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(image_limits) && iree_status_is_ok(status); ++i) {
+    status = iree_vm_i64_from_variant(image_limits[i], &limits[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    const bool disabled = limits[0] == 0;
+    const bool valid_disabled = disabled && limits[1] == 0 && limits[2] == 0 &&
+                                limits[3] == 0 && limits[4] == 0;
+    const bool valid_enabled =
+        !disabled && limits[0] > 0 &&
+        limits[0] <= LOOM_SERVE_TEXT_CHAT_MAX_CONTENT_PART_COUNT &&
+        limits[1] > 0 && (uint64_t)limits[1] <= SIZE_MAX && limits[2] > 0 &&
+        (uint64_t)limits[2] <= UINT32_MAX && limits[3] > 0 &&
+        (uint64_t)limits[3] <= UINT32_MAX && limits[4] > 0 &&
+        (uint64_t)limits[4] <= (uint64_t)limits[2] * (uint64_t)limits[3];
+    if (!valid_disabled && !valid_enabled) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "source image limits must be all zero or positive bounded count, "
+          "compressed bytes, width, height and pixels");
+    } else if (valid_enabled) {
+      out_policy->images.maximum_count = (iree_host_size_t)limits[0];
+      out_policy->images.limits = (loom_serve_media_image_limits_t){
+          .compressed_bytes = (iree_host_size_t)limits[1],
+          .width = (uint32_t)limits[2],
+          .height = (uint32_t)limits[3],
+          .pixels = (uint64_t)limits[4],
+      };
+    }
+  }
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(image_limits));
   if (!iree_status_is_ok(status)) {
     loom_serve_text_chat_policy_deinitialize(out_policy);
   }
@@ -524,8 +759,10 @@ typedef struct chat_history_t {
   iree_string_view_t model_name;
   // Request being rendered.
   loom_serve_text_chat_t* chat;
-  // Decoded content, reasoning and argument scratch.
+  // Decoded message content scratch.
   iree_string_builder_t scratch;
+  // Ordered source-policy content records for one message.
+  iree_string_builder_t content_records;
   // Decoded JSON argument document, stable while its values are rendered.
   iree_string_builder_t arguments;
   // Decoded reasoning content for one message.
@@ -585,23 +822,29 @@ static iree_status_t loom_serve_text_chat_history_message(
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
+  iree_host_size_t content_count = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_ordered_content(
+      &fields[1], history->chat, index, &history->scratch,
+      &history->content_records, &content_count));
   IREE_RETURN_IF_ERROR(
-      loom_serve_text_chat_content(&fields[1], &history->scratch));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_chat_content(&fields[2], &history->reasoning));
+      loom_serve_text_chat_text_content(&fields[2], &history->reasoning));
   iree_string_builder_reset(&history->calls);
   if (fields[3].value.data) {
     IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
         fields[3].value, loom_serve_text_chat_history_tool, history));
   }
   const iree_string_view_t inputs[] = {
-      value, fields[0].value, iree_string_builder_view(&history->scratch),
+      value,
+      fields[0].value,
+      iree_string_builder_view(&history->scratch),
+      iree_string_builder_view(&history->content_records),
       iree_string_builder_view(&history->reasoning),
       iree_string_builder_view(&history->calls)};
   const int64_t scalars[] = {history->state, (int64_t)index,
                              (fields[2].value.data ? 1 : 0) |
                                  (fields[3].value.data ? 2 : 0) |
-                                 (fields[4].value.data ? 4 : 0)};
+                                 (fields[4].value.data ? 4 : 0),
+                             (int64_t)content_count};
   return loom_serve_text_chat_render(
       history->chat->policy, history->chat->policy->chat_message,
       IREE_ARRAYSIZE(inputs), inputs, IREE_ARRAYSIZE(scalars), scalars,
@@ -754,6 +997,7 @@ iree_status_t loom_serve_text_chat_initialize(
   iree_string_builder_initialize(host_allocator, &out_chat->output.reasoning);
   chat_history_t history = {.model_name = model_name, .chat = out_chat};
   iree_string_builder_initialize(host_allocator, &history.scratch);
+  iree_string_builder_initialize(host_allocator, &history.content_records);
   iree_string_builder_initialize(host_allocator, &history.arguments);
   iree_string_builder_initialize(host_allocator, &history.reasoning);
   iree_string_builder_initialize(host_allocator, &history.calls);
@@ -764,6 +1008,7 @@ iree_status_t loom_serve_text_chat_initialize(
   iree_string_builder_deinitialize(&history.calls);
   iree_string_builder_deinitialize(&history.reasoning);
   iree_string_builder_deinitialize(&history.arguments);
+  iree_string_builder_deinitialize(&history.content_records);
   iree_string_builder_deinitialize(&history.scratch);
   if (!iree_status_is_ok(status)) {
     loom_serve_text_chat_deinitialize(out_chat);
@@ -772,12 +1017,113 @@ iree_status_t loom_serve_text_chat_initialize(
 }
 
 void loom_serve_text_chat_deinitialize(loom_serve_text_chat_t* chat) {
+  iree_allocator_free(chat->host_allocator, chat->images.values);
   iree_allocator_free(chat->host_allocator, chat->tools);
   iree_vm_buffer_release(chat->options);
   iree_string_builder_deinitialize(&chat->output.reasoning);
   iree_string_builder_deinitialize(&chat->output.content);
   iree_string_builder_deinitialize(&chat->prompt);
   memset(chat, 0, sizeof(*chat));
+}
+
+enum {
+  CHAT_MEDIA_IDENTITY_DIGEST_BYTES =
+      sizeof(((loom_serve_text_chat_image_t*)0)->info.digest.bytes),
+  CHAT_MEDIA_IDENTITY_DETAIL_OFFSET = CHAT_MEDIA_IDENTITY_DIGEST_BYTES,
+  CHAT_MEDIA_IDENTITY_MESSAGE_OFFSET = CHAT_MEDIA_IDENTITY_DETAIL_OFFSET + 1,
+  CHAT_MEDIA_IDENTITY_CONTENT_OFFSET = CHAT_MEDIA_IDENTITY_MESSAGE_OFFSET + 4,
+  CHAT_MEDIA_IDENTITY_TEXT_OFFSET = CHAT_MEDIA_IDENTITY_CONTENT_OFFSET + 4,
+  CHAT_MEDIA_IDENTITY_RECORD_BYTES = CHAT_MEDIA_IDENTITY_TEXT_OFFSET + 4,
+};
+
+iree_status_t loom_serve_text_chat_media_identity_initialize(
+    const loom_serve_text_chat_t* chat, iree_allocator_t host_allocator,
+    loom_serve_text_chat_media_identity_t* out_identity) {
+  memset(out_identity, 0, sizeof(*out_identity));
+  if (!chat->images.count) {
+    return iree_ok_status();
+  }
+  iree_host_size_t length = 0;
+  if (!iree_host_size_checked_mul(chat->images.count,
+                                  CHAT_MEDIA_IDENTITY_RECORD_BYTES, &length)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "media identity storage overflow");
+  }
+  iree_vm_buffer_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_vm_buffer_create(length, 1, host_allocator, &storage));
+  iree_byte_span_t bytes;
+  iree_status_t status = iree_vm_buffer_map_write(storage, 0, length, &bytes);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < chat->images.count; ++i) {
+      uint8_t* record = bytes.data + i * CHAT_MEDIA_IDENTITY_RECORD_BYTES;
+      memcpy(record, chat->images.values[i].info.digest.bytes,
+             sizeof(chat->images.values[i].info.digest.bytes));
+      record[CHAT_MEDIA_IDENTITY_DETAIL_OFFSET] =
+          (uint8_t)chat->images.values[i].detail;
+      iree_unaligned_store_le_u32(record + CHAT_MEDIA_IDENTITY_MESSAGE_OFFSET,
+                                  chat->images.values[i].message_ordinal);
+      iree_unaligned_store_le_u32(record + CHAT_MEDIA_IDENTITY_CONTENT_OFFSET,
+                                  chat->images.values[i].content_ordinal);
+      iree_unaligned_store_le_u32(record + CHAT_MEDIA_IDENTITY_TEXT_OFFSET,
+                                  chat->images.values[i].text_offset);
+    }
+    *out_identity = (loom_serve_text_chat_media_identity_t){
+        .storage = storage, .count = chat->images.count};
+  } else {
+    iree_vm_buffer_release(storage);
+  }
+  return status;
+}
+
+void loom_serve_text_chat_media_identity_retain(
+    const loom_serve_text_chat_media_identity_t* source,
+    loom_serve_text_chat_media_identity_t* out_identity) {
+  *out_identity = *source;
+  iree_vm_buffer_retain(out_identity->storage);
+}
+
+void loom_serve_text_chat_media_identity_deinitialize(
+    loom_serve_text_chat_media_identity_t* identity) {
+  iree_vm_buffer_release(identity->storage);
+  memset(identity, 0, sizeof(*identity));
+}
+
+static bool loom_serve_text_chat_media_identity_prefix(
+    const loom_serve_text_chat_media_identity_t* identity,
+    const loom_serve_text_chat_t* chat) {
+  if (identity->count > chat->images.count) {
+    return false;
+  }
+  if (!identity->count) {
+    return true;
+  }
+  const uint8_t* bytes = iree_vm_buffer_const_data(identity->storage);
+  for (iree_host_size_t i = 0; i < identity->count; ++i) {
+    const uint8_t* record = bytes + i * CHAT_MEDIA_IDENTITY_RECORD_BYTES;
+    if (memcmp(record, chat->images.values[i].info.digest.bytes,
+               sizeof(chat->images.values[i].info.digest.bytes)) != 0 ||
+        record[CHAT_MEDIA_IDENTITY_DETAIL_OFFSET] !=
+            (uint8_t)chat->images.values[i].detail ||
+        iree_unaligned_load_le_u32(record +
+                                   CHAT_MEDIA_IDENTITY_MESSAGE_OFFSET) !=
+            chat->images.values[i].message_ordinal ||
+        iree_unaligned_load_le_u32(record +
+                                   CHAT_MEDIA_IDENTITY_CONTENT_OFFSET) !=
+            chat->images.values[i].content_ordinal ||
+        iree_unaligned_load_le_u32(record + CHAT_MEDIA_IDENTITY_TEXT_OFFSET) !=
+            chat->images.values[i].text_offset) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool loom_serve_text_chat_media_identity_equal_chat(
+    const loom_serve_text_chat_media_identity_t* identity,
+    const loom_serve_text_chat_t* chat) {
+  return identity->count == chat->images.count &&
+         loom_serve_text_chat_media_identity_prefix(identity, chat);
 }
 
 iree_status_t loom_serve_text_chat_output_next(
@@ -842,8 +1188,26 @@ iree_status_t loom_serve_text_chat_output_next(
 
 void loom_serve_text_chat_completion_deinitialize(
     loom_serve_text_chat_completion_t* completion) {
+  loom_serve_text_chat_media_identity_deinitialize(&completion->media);
   iree_vm_buffer_release(completion->storage);
   memset(completion, 0, sizeof(*completion));
+}
+
+void loom_serve_text_chat_completion_retain(
+    const loom_serve_text_chat_completion_t* source,
+    loom_serve_text_chat_completion_t* out_completion) {
+  *out_completion = *source;
+  iree_vm_buffer_retain(out_completion->storage);
+  loom_serve_text_chat_media_identity_retain(&source->media,
+                                             &out_completion->media);
+}
+
+bool loom_serve_text_chat_completion_is_prefix(
+    const loom_serve_text_chat_completion_t* completion,
+    const loom_serve_text_chat_t* chat) {
+  return iree_string_view_starts_with(iree_string_builder_view(&chat->prompt),
+                                      completion->transcript) &&
+         loom_serve_text_chat_media_identity_prefix(&completion->media, chat);
 }
 
 // Returned buffers may alias any argument. Owned input clones make every such
@@ -1311,6 +1675,10 @@ iree_status_t loom_serve_text_chat_complete(
     status = loom_serve_text_chat_checkpoint(
         chat, iree_string_builder_view(&tools.rendered), tool_calls->allocator,
         &result);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_chat_media_identity_initialize(
+        chat, tool_calls->allocator, &result.media);
   }
   iree_string_builder_deinitialize(&tools.arguments);
   iree_string_builder_deinitialize(&tools.rendered);

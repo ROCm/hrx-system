@@ -11,9 +11,8 @@
 static iree_vm_buffer_t* loom_serve_text_input_history(
     const loom_serve_text_chat_t* chat, loom_serve_text_input_prefix_t prefix) {
   return prefix.completion && prefix.completion->reusable &&
-                 iree_string_view_starts_with(
-                     iree_string_builder_view(&chat->prompt),
-                     prefix.completion->transcript)
+                 loom_serve_text_chat_completion_is_prefix(prefix.completion,
+                                                           chat)
              ? prefix.completion->storage
              : NULL;
 }

@@ -238,6 +238,7 @@ loom_cc_library(
     srcs = ["chat.c"],
     hdrs = ["chat.h"],
     deps = [
+        "//loom/src/loom/serve/media:image",
         "//loom/src/loom/serve/runtime/program",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
@@ -506,6 +507,7 @@ loom_cc_library(
     hdrs = ["prefix_cache.h"],
     visibility = ["//visibility:private"],
     deps = [
+        ":chat",
         ":model",
         "//loom/src/loom/serve/runtime/execution",
         "//runtime/src/iree/base",

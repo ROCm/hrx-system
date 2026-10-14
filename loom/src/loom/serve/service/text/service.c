@@ -896,7 +896,8 @@ static iree_status_t loom_serve_text_admit_pending(
     }
     if (!checkpoint && !retained_count) {
       service->pending.prepared.prefix = loom_serve_text_prefix_cache_find(
-          &service->prefixes, pending->input.count, pending->input.tokens);
+          &service->prefixes, &pending->chat, pending->input.count,
+          pending->input.tokens);
       if (service->pending.prepared.prefix) {
         checkpoint = service->pending.prepared.prefix->state;
       }
@@ -1298,8 +1299,8 @@ static iree_status_t loom_serve_text_capture_prefix(
     bool evicted = false;
     loom_serve_execution_frontier_t frontier;
     status = loom_serve_text_prefix_cache_submit(
-        &service->prefixes, session->row, count, session->tokens,
-        service->pending.prepared.prefix, &evicted, &frontier);
+        &service->prefixes, &session->request.chat, session->row, count,
+        session->tokens, service->pending.prepared.prefix, &evicted, &frontier);
     service->pool.trim.pending |= evicted;
     if (iree_status_is_ok(status) && frontier.semaphores[0]) {
       service->completion.frontier = frontier;
@@ -1841,7 +1842,18 @@ static bool loom_serve_text_session_at(
 
 loom_serve_http_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service) {
-  static const iree_string_view_t modalities[] = {IREE_SVL("text")};
+  static const iree_string_view_t text_modalities[] = {IREE_SVL("text")};
+  static const iree_string_view_t image_modalities[] = {IREE_SVL("text"),
+                                                        IREE_SVL("image")};
+  const bool accepts_images =
+      loom_serve_text_model_chat_policy(service->model)->images.maximum_count !=
+      0;
+  const iree_string_view_list_t input_modalities =
+      accepts_images
+          ? (iree_string_view_list_t){IREE_ARRAYSIZE(image_modalities),
+                                      image_modalities}
+          : (iree_string_view_list_t){IREE_ARRAYSIZE(text_modalities),
+                                      text_modalities};
   return (loom_serve_http_service_t){
       .name = service->name,
       .self = service,
@@ -1853,10 +1865,9 @@ loom_serve_http_service_t loom_serve_text_service_interface(
       .tokenizer = loom_serve_text_model_tokenizer(service->model),
       .kind = "text",
       .endpoint = "/v1/chat/completions",
-      .capabilities = {.input_modalities = {IREE_ARRAYSIZE(modalities),
-                                            modalities},
-                       .output_modalities = {IREE_ARRAYSIZE(modalities),
-                                             modalities},
+      .capabilities = {.input_modalities = input_modalities,
+                       .output_modalities = {IREE_ARRAYSIZE(text_modalities),
+                                             text_modalities},
                        .context_length = service->scheduling.context_capacity,
                        .max_output_tokens =
                            iree_min(service->scheduling.context_capacity,

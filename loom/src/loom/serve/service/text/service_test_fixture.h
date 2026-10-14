@@ -207,6 +207,24 @@ class SourceTextServiceTest : public ::testing::Test {
     return "{\"role\":\"" + role + "\",\"content\":\"" + content + "\"}";
   }
 
+  static std::string ImageMessage(const std::string& before,
+                                  const std::string& mime_type,
+                                  const std::string& base64,
+                                  const std::string& detail,
+                                  const std::string& after) {
+    return "{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"" +
+           before +
+           "\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:" +
+           mime_type + ";base64," + base64 + "\",\"detail\":\"" + detail +
+           "\"}},{\"type\":\"text\",\"text\":\"" + after + "\"}]}";
+  }
+
+  static constexpr char kPng[] =
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DA8J+"
+      "BkYHh////DAAe9gT9Ce00PgAAAABJRU5ErkJggg==";
+  static constexpr char kGif[] =
+      "R0lGODdhAgACAIEAAP///wD/AP8AAAAA/ywAAAAAAgACAAAIBwAFBBgAICAAOw==";
+
   static std::string Request(const std::string& messages, size_t limit = 16) {
     return "{\"model\":\"fixture-text\",\"stream\":true,\"stream_options\":{"
            "\"include_usage\":true},\"max_tokens\":" +

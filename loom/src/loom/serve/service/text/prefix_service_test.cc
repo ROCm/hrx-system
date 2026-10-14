@@ -65,6 +65,25 @@ TEST_F(PrefixServiceTest, SharesActiveSourceWithIndependentDivergentRequests) {
   EXPECT_NE(log.find(R"("event":"prefix_capture")"), std::string::npos) << log;
 }
 
+TEST_F(PrefixServiceTest, SeparatesTokenIdenticalMediaPrefixes) {
+  Start(4);
+  const std::string prompt = "abxxabb";
+  const auto run = [&](const std::string& before, const std::string& mime_type,
+                       const std::string& base64, const std::string& detail,
+                       const std::string& after, size_t cached) {
+    const std::string message =
+        ImageMessage(before, mime_type, base64, detail, after);
+    ExpectResponse(Read(Send(Request(message, 2))), prompt, 2, cached);
+  };
+  run("abx", "image/png", kPng, "low", "abb", 0);
+  run("ab", "image/png", kPng, "low", "xabb", 0);
+  run("abx", "image/png", kPng, "low", "abb", 4);
+  run("abx", "image/gif", kGif, "low", "abb", 0);
+  run("abx", "image/png", kPng, "low", "abb", 4);
+  run("abx", "image/png", kPng, "high", "abb", 0);
+  run("abx", "image/png", kPng, "low", "abb", 4);
+}
+
 TEST_F(PrefixServiceTest, PreservesNamedCompletedHistoryAfterAutomaticReuse) {
   Start(4);
   ExpectResponse(Read(Send(Request(Message("user", "abxabb"), 2))), "abxabb", 2,
