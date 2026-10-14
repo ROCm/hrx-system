@@ -122,6 +122,8 @@ static iree_status_t loom_serve_text_media_epoch_store_spans(
                 (uint32_t)*metadata_offset,
             [LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_METADATA_LENGTH] =
                 media_span->metadata_length,
+            [LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_INDEX] =
+                (uint32_t)media_offset,
         };
         uint8_t* record = plan_bytes + *record_index * MEDIA_EPOCH_RECORD_BYTES;
         for (iree_host_size_t field = 0;

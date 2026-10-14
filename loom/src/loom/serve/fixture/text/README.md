@@ -63,10 +63,18 @@ removes the duplicated leading delimiter from the suffix. Full replay and
 retained execution therefore consume identical histories. Tool and reasoning
 features are rejected.
 
-The integration test uses fixed physical backing while exercising the actual
-logical pool and copy-on-write sharing. It does not establish live virtual
-remapping, offload, MTP, neural accuracy or NPU execution. Those contracts have
-separate real-model/backend witnesses.
+For image input, source control encodes the native media plan's projected row
+index into the device packet. The numerical input is the first projected i32
+plus that image-relative index, replacing the placeholder token. Two images
+therefore start at index zero independently, and an image split between epochs
+continues at its original index. The dense oracle observes the same positioned
+values without interpreting native packet or row-table offsets.
+
+The CPU integration leaf uses fixed physical backing while exercising the
+actual logical pool and copy-on-write sharing. AMDGPU additionally exercises
+elastic component release and reactivation. These fixtures establish neither
+neural accuracy nor NPU execution; those contracts have separate model/backend
+witnesses.
 
 ## First output without a download
 

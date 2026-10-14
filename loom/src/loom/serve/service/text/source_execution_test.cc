@@ -194,28 +194,31 @@ TEST_F(SourceTextServiceTest, ImageInputRequiresAConfiguredComponent) {
 
 TEST_F(SourceTextServiceTest,
        ProjectedMediaRowsReplacePlaceholderIdsAcrossChunks) {
-  const int32_t projected[] = {7, 11};
+  const int32_t projected[] = {5, 7, 15};
   const iree_const_byte_span_t rows[] = {
       iree_make_const_byte_span(&projected[0], sizeof(projected[0])),
       iree_make_const_byte_span(&projected[1], sizeof(projected[1])),
+      iree_make_const_byte_span(&projected[2], sizeof(projected[2])),
   };
-  const loom_serve_text_media_input_span_t media_spans[] = {{
-      .input_offset = 1,
-      .input_count = 2,
-      .row_offset = 0,
-  }};
+  const loom_serve_text_media_input_span_t media_spans[] = {
+      {.input_offset = 1, .input_count = 1, .row_offset = 0},
+      {.input_offset = 3, .input_count = 2, .row_offset = 1},
+  };
   const loom_serve_text_media_input_t media = {
       .spans = media_spans,
       .span_count = IREE_ARRAYSIZE(media_spans),
       .rows = rows,
       .row_count = IREE_ARRAYSIZE(rows),
   };
-  const int32_t tokens[] = {Oracle::Id('a'), Oracle::Id('x'), Oracle::Id('x'),
-                            Oracle::Id('b')};
+  const int32_t tokens[] = {Oracle::Id('a'), Oracle::Id('x'), Oracle::Id('b'),
+                            Oracle::Id('x'), Oracle::Id('x'), Oracle::Id('b')};
+  // The second image starts in the first epoch and finishes in the next. Its
+  // row-table indices are 1/2, image-relative indices are 0/1, and scheduled
+  // offsets are 3/0. Device arithmetic must consume the image-relative pair.
   const loom_serve_text_span_t first[] = {
       {
           .row_index = 0,
-          .token_count = 2,
+          .token_count = 4,
           .token_ids = tokens,
           .input_offset = 0,
           .media = &media,
@@ -232,9 +235,9 @@ TEST_F(SourceTextServiceTest,
   const loom_serve_text_span_t second = {
       .row_index = 0,
       .token_count = 2,
-      .token_ids = tokens + 2,
+      .token_ids = tokens + 4,
       .flags = LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
-      .input_offset = 2,
+      .input_offset = 4,
       .media = &media,
   };
   IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, 1, &second));
@@ -242,8 +245,10 @@ TEST_F(SourceTextServiceTest,
   Oracle projected_oracle;
   projected_oracle.Consume(tokens[0]);
   projected_oracle.Consume(projected[0]);
+  projected_oracle.Consume(tokens[2]);
   projected_oracle.Consume(projected[1]);
-  projected_oracle.Consume(tokens[3]);
+  projected_oracle.Consume(projected[2] + 1);
+  projected_oracle.Consume(tokens[5]);
   Oracle placeholder_oracle;
   for (int32_t token : tokens) {
     placeholder_oracle.Consume(token);

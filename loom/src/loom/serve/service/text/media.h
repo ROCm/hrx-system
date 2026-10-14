@@ -117,7 +117,10 @@ typedef enum loom_serve_text_media_epoch_field_e {
   LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_LENGTH = 3,
   LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_METADATA_OFFSET = 4,
   LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_METADATA_LENGTH = 5,
-  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_COUNT = 6,
+  // Zero-based projected row within the complete image occurrence, unchanged
+  // by epoch chunking. This is not the request-wide projected-row table index.
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_FEATURE_INDEX = 6,
+  LOOM_SERVE_TEXT_MEDIA_EPOCH_FIELD_COUNT = 7,
 } loom_serve_text_media_epoch_field_t;
 
 // Source-written device packet geometry for a media-bearing epoch. Every
