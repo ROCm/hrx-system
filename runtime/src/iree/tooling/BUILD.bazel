@@ -34,6 +34,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base/internal:span",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:heap_pool",
+        "//runtime/src/iree/hal/testing:mapped_transfer_buffer",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

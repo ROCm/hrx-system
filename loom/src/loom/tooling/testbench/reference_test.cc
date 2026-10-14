@@ -12,6 +12,7 @@
 #include "iree/base/internal/math.h"
 #include "iree/hal/api.h"
 #include "iree/hal/memory/heap_pool.h"
+#include "iree/hal/testing/mapped_transfer_buffer.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
@@ -216,6 +217,78 @@ class ReferenceTest : public ::testing::Test {
   iree_hal_pool_t* pool_ = nullptr;
   loom_testbench_reference_matmul_oracle_options_t reference_options_ = {};
 };
+
+TEST_F(ReferenceTest, ObservesCompletedDeviceWritesAndCacheFailures) {
+  for (iree_hal_memory_type_t coherence :
+       {0u, static_cast<uint32_t>(IREE_HAL_MEMORY_TYPE_HOST_COHERENT)}) {
+    for (bool tiled : {false, true}) {
+      auto lhs = iree::hal::testing::MakeMappedTransferBuffer(coherence);
+      auto rhs = iree::hal::testing::MakeMappedTransferBuffer(coherence);
+      auto init = iree::hal::testing::MakeMappedTransferBuffer(coherence);
+      iree::hal::testing::MappedTransferBuffer* buffers[] = {
+          lhs.get(), rhs.get(), init.get()};
+      loom_testbench_value_t inputs[3] = {};
+      for (size_t i = 0; i < IREE_ARRAYSIZE(inputs); ++i) {
+        const iree_hal_dim_t shape[] = {1, 1, 1, 1};
+        iree_hal_buffer_view_t* view = nullptr;
+        IREE_ASSERT_OK(iree_hal_buffer_view_create(
+            buffers[i], tiled ? 4 : 2, shape, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+            IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, host_allocator_, &view));
+        IREE_ASSERT_OK(
+            loom_testbench_value_set_buffer_view_move(view, &inputs[i]));
+      }
+      loom_testbench_oracle_provider_t provider = {};
+      if (tiled) {
+        loom_testbench_reference_tiled_matmul_oracle_provider_initialize(
+            &reference_options_, &provider);
+      } else {
+        loom_testbench_reference_matmul_oracle_provider_initialize(
+            &reference_options_, &provider);
+      }
+      loom_testbench_invocation_plan_t invocation = {.module = module_};
+      for (float value : {2.0f, 3.0f}) {
+        for (auto* buffer : buffers) {
+          buffer->host_contents.fill(0);
+          memcpy(buffer->device_contents.data(), &value, sizeof(value));
+        }
+        loom_testbench_value_t result = {};
+        IREE_ASSERT_OK(provider.provider.invoke(
+            provider.provider.user_data, &invocation, 0, nullptr,
+            IREE_ARRAYSIZE(inputs), inputs, 1, &result));
+        ExpectF32BufferView(result,
+                            tiled ? std::vector<iree_hal_dim_t>{1, 1, 1, 1}
+                                  : std::vector<iree_hal_dim_t>{1, 1},
+                            {value * value + value});
+        loom_testbench_value_deinitialize(&result);
+        for (auto* buffer : buffers) {
+          EXPECT_EQ(buffer->mapping_count, 0u);
+        }
+      }
+      for (auto* buffer : buffers) {
+        EXPECT_EQ(buffer->invalidate_count, coherence ? 0u : 2u);
+      }
+      for (auto* buffer : buffers) {
+        if (!coherence) {
+          buffer->invalidate_code = IREE_STATUS_DATA_LOSS;
+          loom_testbench_value_t result = {};
+          IREE_EXPECT_STATUS_IS(
+              IREE_STATUS_DATA_LOSS,
+              provider.provider.invoke(provider.provider.user_data, &invocation,
+                                       0, nullptr, IREE_ARRAYSIZE(inputs),
+                                       inputs, 1, &result));
+          loom_testbench_value_deinitialize(&result);
+          buffer->invalidate_code = IREE_STATUS_OK;
+          for (auto* mapped : buffers) {
+            EXPECT_EQ(mapped->mapping_count, 0u);
+          }
+        }
+      }
+      for (auto& input : inputs) {
+        loom_testbench_value_deinitialize(&input);
+      }
+    }
+  }
+}
 
 TEST_F(ReferenceTest, ComputesF16MatmulWithF32Accumulator) {
   std::vector<uint16_t> lhs_values = {

@@ -14,6 +14,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/hal/memory/heap_pool.h"
+#include "iree/hal/testing/mapped_transfer_buffer.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/format/text/parser.h"
@@ -52,8 +53,8 @@ class ExpectationTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  using DialectVtablesFn = const loom_op_vtable_t* const* (*)(iree_host_size_t *
-                                                              out_count);
+  using DialectVtablesFn =
+      const loom_op_vtable_t* const* (*)(iree_host_size_t*);
 
   void RegisterDialect(loom_dialect_id_t dialect_id, DialectVtablesFn fn) {
     iree_host_size_t vtable_count = 0;
@@ -377,6 +378,98 @@ TEST_F(ExpectationTest, ComparesBufferReferencesByLogicalIdentity) {
   loom_testbench_expectation_report_deinitialize(&report);
   loom_testbench_value_table_deinitialize(&table);
   loom_module_free(module);
+}
+
+TEST_F(ExpectationTest, ObservesCompletedDeviceWritesAndCacheFailures) {
+  for (iree_hal_memory_type_t coherence :
+       {0u, static_cast<uint32_t>(IREE_HAL_MEMORY_TYPE_HOST_COHERENT)}) {
+    for (auto kind :
+         {LOOM_TESTBENCH_EXPECTATION_EQUAL, LOOM_TESTBENCH_EXPECTATION_BITWISE,
+          LOOM_TESTBENCH_EXPECTATION_CLOSE}) {
+      SCOPED_TRACE(loom_testbench_expectation_kind_name(kind));
+      auto actual = iree::hal::testing::MakeMappedTransferBuffer(coherence);
+      auto expected = iree::hal::testing::MakeMappedTransferBuffer(coherence);
+      loom_module_t* module = nullptr;
+      IREE_ASSERT_OK(loom_module_allocate(
+          &context_, IREE_SV("mapped_expectation"), &block_pool_, nullptr,
+          host_allocator_, &module));
+      loom_testbench_expectation_plan_t expectation = {
+          .kind = kind,
+          .type = loom_type_shaped_1d(LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32,
+                                      loom_dim_pack_static(1), 0),
+          .close = {.nan_policy = LOOM_CHECK_EXPECT_CLOSE_NAN_DIFFERENT},
+      };
+      IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
+                                              &expectation.actual_value_id));
+      IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
+                                              &expectation.expected_value_id));
+      loom_testbench_case_plan_t case_plan = {
+          .expectations = &expectation,
+          .expectation_count = 1,
+      };
+      loom_testbench_value_table_t table = {};
+      IREE_ASSERT_OK(loom_testbench_value_table_initialize_case(
+          module, &case_plan, host_allocator_, &table));
+      const loom_value_id_t value_ids[] = {expectation.actual_value_id,
+                                           expectation.expected_value_id};
+      iree_hal_buffer_t* buffers[] = {actual.get(), expected.get()};
+      for (size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
+        iree_hal_buffer_t* subspan = nullptr;
+        IREE_ASSERT_OK(iree_hal_buffer_subspan(buffers[i], 16, sizeof(float),
+                                               host_allocator_, &subspan));
+        const iree_hal_dim_t shape[] = {1};
+        iree_hal_buffer_view_t* view = nullptr;
+        IREE_ASSERT_OK(iree_hal_buffer_view_create(
+            subspan, 1, shape, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+            IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, host_allocator_, &view));
+        iree_hal_buffer_release(subspan);
+        loom_testbench_value_t value = {};
+        IREE_ASSERT_OK(loom_testbench_value_set_buffer_view_move(view, &value));
+        IREE_ASSERT_OK(loom_testbench_value_table_assign_move(
+            &table, value_ids[i], &value));
+      }
+      loom_testbench_expectation_report_t report = {};
+      IREE_ASSERT_OK(loom_testbench_expectation_report_initialize(
+          1, host_allocator_, &report));
+      for (float value : {2.0f, 3.0f}) {
+        // Both stale caches differ from the completed device write and from
+        // each other, so invalidating only one operand cannot pass.
+        const float stale_actual = -1024.0f;
+        const float stale_expected = -2048.0f;
+        memcpy(actual->host_contents.data() + 16, &stale_actual, sizeof(float));
+        memcpy(expected->host_contents.data() + 16, &stale_expected,
+               sizeof(float));
+        memcpy(actual->device_contents.data() + 16, &value, sizeof(float));
+        memcpy(expected->device_contents.data() + 16, &value, sizeof(float));
+        IREE_ASSERT_OK(loom_testbench_evaluate_case_expectations(
+            &case_plan, &table, nullptr, &report));
+        EXPECT_EQ(report.passed_count, 1u);
+        EXPECT_EQ(report.failure_count, 0u);
+        EXPECT_EQ(actual->mapping_count, 0u);
+        EXPECT_EQ(expected->mapping_count, 0u);
+      }
+      EXPECT_EQ(actual->invalidate_count, coherence ? 0u : 2u);
+      EXPECT_EQ(expected->invalidate_count, coherence ? 0u : 2u);
+      if (!coherence) {
+        for (auto* failed : {actual.get(), expected.get()}) {
+          failed->invalidate_code = IREE_STATUS_DATA_LOSS;
+          IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                                loom_testbench_evaluate_case_expectations(
+                                    &case_plan, &table, nullptr, &report));
+          EXPECT_EQ(actual->mapping_count, 0u);
+          EXPECT_EQ(expected->mapping_count, 0u);
+          failed->invalidate_code = IREE_STATUS_OK;
+        }
+        EXPECT_EQ(actual->maintenance_range.offset, 16u);
+        EXPECT_EQ(actual->maintenance_range.length, sizeof(float));
+        EXPECT_EQ(expected->maintenance_range.offset, 16u);
+        EXPECT_EQ(expected->maintenance_range.length, sizeof(float));
+      }
+      loom_testbench_expectation_report_deinitialize(&report);
+      loom_testbench_value_table_deinitialize(&table);
+      loom_module_free(module);
+    }
+  }
 }
 
 TEST_F(ExpectationTest, EvaluatesBufferShapeAndCloseExpectations) {

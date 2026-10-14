@@ -183,6 +183,7 @@ iree_runtime_cc_test(
     srcs = ["buffer_test.cc"],
     deps = [
         ":hal",
+        "//runtime/src/iree/hal/testing:mapped_transfer_buffer",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

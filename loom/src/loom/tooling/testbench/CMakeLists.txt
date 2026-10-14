@@ -299,6 +299,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::hal
     iree::hal::memory::heap_pool
+    iree::hal::testing::mapped_transfer_buffer
     iree::testing::gtest
     iree::testing::gtest_main
     loom::format::text::parser
@@ -338,6 +339,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::hal
     iree::hal::memory::heap_pool
+    iree::hal::testing::mapped_transfer_buffer
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir

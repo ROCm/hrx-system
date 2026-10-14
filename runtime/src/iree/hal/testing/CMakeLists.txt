@@ -24,4 +24,15 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    mapped_transfer_buffer
+  HDRS
+    "mapped_transfer_buffer.h"
+  DEPS
+    iree::hal
+  TESTONLY
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

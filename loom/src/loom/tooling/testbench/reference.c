@@ -820,10 +820,22 @@ static iree_status_t loom_testbench_reference_read_rhs_transposed(
 
 static iree_status_t loom_testbench_reference_map_view_read(
     iree_hal_buffer_view_t* view, iree_hal_buffer_mapping_t* out_mapping) {
-  return iree_hal_buffer_map_range(
-      iree_hal_buffer_view_buffer(view), IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_MAP_FLAG_NONE, 0,
-      IREE_HAL_WHOLE_BUFFER, out_mapping);
+  iree_hal_buffer_t* buffer = iree_hal_buffer_view_buffer(view);
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
+      buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+      IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, iree_hal_buffer_view_byte_length(view),
+      out_mapping));
+  iree_status_t status = iree_ok_status();
+  if (out_mapping->contents.data_length > 0 &&
+      !iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
+                         IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+    status = iree_hal_buffer_mapping_invalidate_range(out_mapping, 0,
+                                                      IREE_HAL_WHOLE_BUFFER);
+  }
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_join(status, iree_hal_buffer_unmap_range(out_mapping));
+  }
+  return status;
 }
 
 static iree_status_t loom_testbench_reference_store_accumulator(

@@ -10,6 +10,7 @@
 #include "iree/base/internal/math.h"
 #include "iree/base/internal/span.h"
 #include "iree/hal/memory/heap_pool.h"
+#include "iree/hal/testing/mapped_transfer_buffer.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -250,6 +251,78 @@ class BufferViewMatchersTest : public ::testing::Test {
 //===----------------------------------------------------------------------===//
 // iree_hal_buffer_equality_t
 //===----------------------------------------------------------------------===//
+
+TEST_F(BufferViewMatchersTest, ObservesCompletedDeviceWritesAndCacheFailures) {
+  for (iree_hal_memory_type_t coherence :
+       {0u, static_cast<uint32_t>(IREE_HAL_MEMORY_TYPE_HOST_COHERENT)}) {
+    auto actual = iree::hal::testing::MakeMappedTransferBuffer(coherence);
+    auto expected = iree::hal::testing::MakeMappedTransferBuffer(coherence);
+    const iree_hal_dim_t shape[] = {1};
+    BufferView actual_view;
+    BufferView expected_view;
+    IREE_ASSERT_OK(iree_hal_buffer_view_create(
+        actual.get(), 1, shape, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+        IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, iree_allocator_system(),
+        &actual_view));
+    IREE_ASSERT_OK(iree_hal_buffer_view_create(
+        expected.get(), 1, shape, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+        IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, iree_allocator_system(),
+        &expected_view));
+    for (int mode = 0; mode < 3; ++mode) {
+      SCOPED_TRACE(mode);
+      auto builder = StringBuilder::MakeSystem();
+      bool matched = false;
+      float value = 0.0f;
+      auto compare = [&]() {
+        switch (mode) {
+          case 0:
+            return iree_hal_buffer_view_match_elements(
+                kExactEquality, iree_hal_make_buffer_element_f32(value),
+                actual_view, builder, &matched);
+          case 1:
+            return iree_hal_buffer_view_match_array(
+                kExactEquality, IREE_HAL_ELEMENT_TYPE_FLOAT_32, 1,
+                iree_make_const_byte_span(&value, sizeof(value)), actual_view,
+                builder, &matched);
+          default:
+            return iree_hal_buffer_view_match_equal(
+                kExactEquality, expected_view, actual_view, builder, &matched);
+        }
+      };
+      for (float next : {2.0f, 3.0f}) {
+        value = next;
+        actual->host_contents.fill(0);
+        expected->host_contents.fill(0xFF);
+        memcpy(actual->device_contents.data(), &value, sizeof(value));
+        memcpy(expected->device_contents.data(), &value, sizeof(value));
+        IREE_ASSERT_OK(compare());
+        EXPECT_TRUE(matched);
+        EXPECT_EQ(actual->mapping_count, 0u);
+        EXPECT_EQ(expected->mapping_count, 0u);
+      }
+      if (!coherence) {
+        actual->invalidate_code = IREE_STATUS_DATA_LOSS;
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, compare());
+        EXPECT_FALSE(matched);
+        EXPECT_EQ(actual->mapping_count, 0u);
+        EXPECT_EQ(expected->mapping_count, 0u);
+        actual->invalidate_code = IREE_STATUS_OK;
+        if (mode == 2) {
+          expected->invalidate_code = IREE_STATUS_DATA_LOSS;
+          IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, compare());
+          EXPECT_FALSE(matched);
+          EXPECT_EQ(actual->mapping_count, 0u);
+          EXPECT_EQ(expected->mapping_count, 0u);
+          expected->invalidate_code = IREE_STATUS_OK;
+        }
+      }
+    }
+    if (coherence) {
+      EXPECT_EQ(actual->invalidate_count, 0u);
+      EXPECT_EQ(expected->invalidate_count, 0u);
+    }
+  }
+}
 
 TEST_F(BufferViewMatchersTest, CompareBroadcastI8EQ) {
   const int8_t lhs = 1;
@@ -948,6 +1021,14 @@ TEST_F(BufferViewMatchersTest, MatchEmpty) {
   bool match = false;
   IREE_ASSERT_OK(
       iree_hal_buffer_view_match_equal(kExactEquality, lhs, rhs, sb, &match));
+  EXPECT_TRUE(match);
+  EXPECT_TRUE(sb.ToString().empty());
+  IREE_ASSERT_OK(iree_hal_buffer_view_match_elements(
+      kExactEquality, iree_hal_make_buffer_element_f32(0.0f), rhs, sb, &match));
+  EXPECT_TRUE(match);
+  IREE_ASSERT_OK(iree_hal_buffer_view_match_array(
+      kExactEquality, IREE_HAL_ELEMENT_TYPE_FLOAT_32, 0,
+      iree_const_byte_span_empty(), rhs, sb, &match));
   EXPECT_TRUE(match);
   EXPECT_TRUE(sb.ToString().empty());
 }

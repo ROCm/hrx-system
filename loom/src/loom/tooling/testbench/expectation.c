@@ -521,6 +521,20 @@ static iree_status_t loom_testbench_compare_buffer_close(
   }
   if (iree_status_is_ok(status)) {
     expected_mapped = true;
+    if (actual_mapping.contents.data_length > 0 &&
+        !iree_all_bits_set(iree_hal_buffer_memory_type(actual_mapping.buffer),
+                           IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+      status = iree_hal_buffer_mapping_invalidate_range(&actual_mapping, 0,
+                                                        IREE_HAL_WHOLE_BUFFER);
+    }
+  }
+  if (iree_status_is_ok(status) && expected_mapping.contents.data_length > 0 &&
+      !iree_all_bits_set(iree_hal_buffer_memory_type(expected_mapping.buffer),
+                         IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+    status = iree_hal_buffer_mapping_invalidate_range(&expected_mapping, 0,
+                                                      IREE_HAL_WHOLE_BUFFER);
+  }
+  if (iree_status_is_ok(status)) {
     iree_host_size_t element_count =
         iree_hal_buffer_view_element_count(actual_buffer_view);
     iree_host_size_t element_size =

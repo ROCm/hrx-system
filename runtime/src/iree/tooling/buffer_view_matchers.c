@@ -8,6 +8,28 @@
 
 #include "iree/base/internal/math.h"
 
+// Maps completed device output for host observation. Mapping alone does not
+// establish visibility for allocations with a noncoherent host cache.
+static iree_status_t iree_hal_buffer_view_map_read(
+    iree_hal_buffer_view_t* view, iree_hal_buffer_mapping_t* out_mapping) {
+  iree_hal_buffer_t* buffer = iree_hal_buffer_view_buffer(view);
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
+      buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
+      IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, iree_hal_buffer_view_byte_length(view),
+      out_mapping));
+  iree_status_t status = iree_ok_status();
+  if (out_mapping->contents.data_length > 0 &&
+      !iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
+                         IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+    status = iree_hal_buffer_mapping_invalidate_range(out_mapping, 0,
+                                                      IREE_HAL_WHOLE_BUFFER);
+  }
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_join(status, iree_hal_buffer_unmap_range(out_mapping));
+  }
+  return status;
+}
+
 //===----------------------------------------------------------------------===//
 // iree_hal_buffer_equality_t
 //===----------------------------------------------------------------------===//
@@ -406,10 +428,7 @@ iree_status_t iree_hal_buffer_view_element_matcher_match(
   }
 
   iree_hal_buffer_mapping_t actual_mapping;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
-      iree_hal_buffer_view_buffer(matchee), IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_MAP_FLAG_NONE, 0,
-      IREE_HAL_WHOLE_BUFFER, &actual_mapping));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_view_map_read(matchee, &actual_mapping));
   iree_const_byte_span_t actual_contents = iree_make_const_byte_span(
       actual_mapping.contents.data, actual_mapping.contents.data_length);
 
@@ -417,18 +436,19 @@ iree_status_t iree_hal_buffer_view_element_matcher_match(
   const bool all_match = iree_hal_compare_buffer_elements_broadcast(
       matcher->equality, matcher->value,
       iree_hal_buffer_view_element_count(matchee), actual_contents, &i);
-  iree_hal_buffer_element_t actual_element = iree_hal_buffer_element_at(
-      iree_hal_buffer_view_element_type(matchee), actual_contents, i);
-
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_unmap_range(&actual_mapping));
-
+  iree_status_t status = iree_ok_status();
   if (!all_match) {
-    IREE_RETURN_IF_ERROR(iree_hal_append_element_mismatch_string(
-        i, matcher->value, actual_element, builder));
+    iree_hal_buffer_element_t actual_element = iree_hal_buffer_element_at(
+        iree_hal_buffer_view_element_type(matchee), actual_contents, i);
+    status = iree_hal_append_element_mismatch_string(i, matcher->value,
+                                                     actual_element, builder);
   }
-
-  *out_matched = all_match;
-  return iree_ok_status();
+  status =
+      iree_status_join(status, iree_hal_buffer_unmap_range(&actual_mapping));
+  if (iree_status_is_ok(status)) {
+    *out_matched = all_match;
+  }
+  return status;
 }
 
 iree_status_t iree_hal_buffer_view_match_elements(
@@ -529,10 +549,7 @@ iree_status_t iree_hal_buffer_view_array_matcher_match(
   }
 
   iree_hal_buffer_mapping_t actual_mapping;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
-      iree_hal_buffer_view_buffer(matchee), IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_MAP_FLAG_NONE, 0,
-      IREE_HAL_WHOLE_BUFFER, &actual_mapping));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_view_map_read(matchee, &actual_mapping));
   iree_const_byte_span_t actual_contents = iree_make_const_byte_span(
       actual_mapping.contents.data, actual_mapping.contents.data_length);
 
@@ -541,20 +558,21 @@ iree_status_t iree_hal_buffer_view_array_matcher_match(
       matcher->equality, iree_hal_buffer_view_element_type(matchee),
       iree_hal_buffer_view_element_count(matchee), matcher->elements,
       actual_contents, &i);
-  iree_hal_buffer_element_t actual_element = iree_hal_buffer_element_at(
-      iree_hal_buffer_view_element_type(matchee), actual_contents, i);
-  iree_hal_buffer_element_t expected_element = iree_hal_buffer_element_at(
-      iree_hal_buffer_view_element_type(matchee), matcher->elements, i);
-
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_unmap_range(&actual_mapping));
-
+  iree_status_t status = iree_ok_status();
   if (!all_match) {
-    IREE_RETURN_IF_ERROR(iree_hal_append_element_mismatch_string(
-        i, expected_element, actual_element, builder));
+    iree_hal_buffer_element_t actual_element = iree_hal_buffer_element_at(
+        iree_hal_buffer_view_element_type(matchee), actual_contents, i);
+    iree_hal_buffer_element_t expected_element = iree_hal_buffer_element_at(
+        iree_hal_buffer_view_element_type(matchee), matcher->elements, i);
+    status = iree_hal_append_element_mismatch_string(i, expected_element,
+                                                     actual_element, builder);
   }
-
-  *out_matched = all_match;
-  return iree_ok_status();
+  status =
+      iree_status_join(status, iree_hal_buffer_unmap_range(&actual_mapping));
+  if (iree_status_is_ok(status)) {
+    *out_matched = all_match;
+  }
+  return status;
 }
 
 iree_status_t iree_hal_buffer_view_match_array(
@@ -634,18 +652,13 @@ iree_status_t iree_hal_buffer_view_matcher_match(
   if (!*out_matched) {
     return iree_ok_status();
   }
+  *out_matched = false;
 
   iree_hal_buffer_mapping_t actual_mapping;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
-      iree_hal_buffer_view_buffer(matchee), IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_MAP_FLAG_NONE, 0,
-      IREE_HAL_WHOLE_BUFFER, &actual_mapping));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_view_map_read(matchee, &actual_mapping));
   iree_hal_buffer_mapping_t expected_mapping;
-  iree_status_t status = iree_hal_buffer_map_range(
-      iree_hal_buffer_view_buffer(matcher->expected),
-      IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ,
-      IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, IREE_HAL_WHOLE_BUFFER,
-      &expected_mapping);
+  iree_status_t status =
+      iree_hal_buffer_view_map_read(matcher->expected, &expected_mapping);
   if (!iree_status_is_ok(status)) {
     return iree_status_join(status,
                             iree_hal_buffer_unmap_range(&actual_mapping));
@@ -660,24 +673,22 @@ iree_status_t iree_hal_buffer_view_matcher_match(
       matcher->equality, iree_hal_buffer_view_element_type(matchee),
       iree_hal_buffer_view_element_count(matchee), expected_contents,
       actual_contents, &i);
-  iree_hal_buffer_element_t actual_element = iree_hal_buffer_element_at(
-      iree_hal_buffer_view_element_type(matchee), actual_contents, i);
-  iree_hal_buffer_element_t expected_element = iree_hal_buffer_element_at(
-      iree_hal_buffer_view_element_type(matchee), expected_contents, i);
-
+  if (!all_match) {
+    iree_hal_buffer_element_t actual_element = iree_hal_buffer_element_at(
+        iree_hal_buffer_view_element_type(matchee), actual_contents, i);
+    iree_hal_buffer_element_t expected_element = iree_hal_buffer_element_at(
+        iree_hal_buffer_view_element_type(matchee), expected_contents, i);
+    status = iree_hal_append_element_mismatch_string(i, expected_element,
+                                                     actual_element, builder);
+  }
   status =
       iree_status_join(status, iree_hal_buffer_unmap_range(&actual_mapping));
   status =
       iree_status_join(status, iree_hal_buffer_unmap_range(&expected_mapping));
-  IREE_RETURN_IF_ERROR(status);
-
-  if (!all_match) {
-    IREE_RETURN_IF_ERROR(iree_hal_append_element_mismatch_string(
-        i, expected_element, actual_element, builder));
+  if (iree_status_is_ok(status)) {
+    *out_matched = all_match;
   }
-
-  *out_matched = all_match;
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_hal_buffer_view_match_equal(

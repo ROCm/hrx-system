@@ -166,6 +166,7 @@ iree_cc_test(
     "buffer_test.cc"
   DEPS
     ::hal
+    iree::hal::testing::mapped_transfer_buffer
     iree::testing::gtest
     iree::testing::gtest_main
 )
