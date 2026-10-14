@@ -1,0 +1,427 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// One normalized FlowLM step followed by one 80 ms Mimi waveform block.
+// Request contains 32 F32 noise values and F32 flow times 0 and 1. Output contains
+// one F32 EOS score followed by 1,920 F32 mono samples at 24 kHz.
+// The caller bounds FlowLM position below 256 and decoder position below 2,033.
+kernel.decl @pocket.advance_1() launch(%position_storage: buffer)
+
+kernel.decl @pocket.advance_16() launch(%position_storage: buffer)
+
+kernel.decl @pocket.conditioning() launch(%c_storage: buffer, %s_storage: buffer, %t_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.convolution_f32_bias_128x256_t96_k1_s1() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.convolution_f32_bias_128x64_t480_k3_s1() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.convolution_f32_bias_256x128_t96_k3_s1() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.convolution_f32_bias_32x64_t1920_k1_s1() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.convolution_f32_bias_512x512_t16_k7_s1() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.convolution_f32_bias_64x128_t480_k1_s1() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.convolution_f32_bias_64x1_t1920_k3_s1() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.convolution_f32_bias_64x32_t1920_k3_s1() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.copy_1() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.copy_1920() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.elu_12288() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.elu_122880() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.elu_24576() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.elu_30720() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.elu_61440() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.elu_8192() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.fade() launch(%x_storage: buffer, %position_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.history_128x480_h2() launch(%x_storage: buffer, %history_storage: buffer, %padded_storage: buffer)
+
+kernel.decl @pocket.history_256x96_h2() launch(%x_storage: buffer, %history_storage: buffer, %padded_storage: buffer)
+
+kernel.decl @pocket.history_512x16_h6() launch(%x_storage: buffer, %history_storage: buffer, %padded_storage: buffer)
+
+kernel.decl @pocket.history_64x1920_h2() launch(%x_storage: buffer, %history_storage: buffer, %padded_storage: buffer)
+
+kernel.decl @pocket.latent_output() launch(%noise_storage: buffer, %delta_storage: buffer, %previous_storage: buffer, %scale_storage: buffer, %mean_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.modulation() launch(%x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.normalization_affine_1024x1_e1em05() launch(%x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer)
+
+kernel.decl @pocket.normalization_plain_512x1_e1em06() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.normalization_variance_512x1_e1em05() launch(%x_storage: buffer, %y_storage: buffer, %scale_storage: buffer)
+
+kernel.decl @pocket.overlap_512x16_h16() launch(%x_storage: buffer, %history_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.overlap_bias_128x480_h5() launch(%x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.overlap_bias_256x96_h6() launch(%x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.overlap_bias_64x1920_h4() launch(%x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.previous_latent() launch(%previous_storage: buffer, %position_storage: buffer, %bos_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.project_bias_f64(%output_rows: index, %time_steps: index) launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.project_f32(%output_rows: index, %time_steps: index) launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.project_f64(%output_rows: index, %time_steps: index) launch(%inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.residual_128x480() launch(%x_storage: buffer, %update_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.residual_256x96() launch(%x_storage: buffer, %update_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.residual_64x1920() launch(%x_storage: buffer, %update_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.silu_512() launch(%x_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.time_embedding() launch(%time_storage: buffer, %frequencies_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.transpose_convolution_512x512_t1_g1x1_s16() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer)
+
+kernel.decl @pocket.transpose_convolution_bias_128x64_t480_g128x64_s4() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.transpose_convolution_bias_256x128_t96_g256x128_s5() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+kernel.decl @pocket.transpose_convolution_bias_512x256_t16_g512x256_s6() launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+
+template.decl @pocket.flow_layer(%layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: view<1024x1xf32>) -> (view<1024x1xf32>)
+
+template.decl @pocket.flow_residual(%layer: index, %phase: buffer, %condition: view<512x1xf32>, %input: view<512x1xf32>) -> (view<512x1xf32>)
+
+template.decl @pocket.mimi_decoder_layer(%layer: index, %cache_origin: offset, %phase: buffer, %rotary: buffer, %state: buffer, %input: view<512x16xf32>) -> (view<512x16xf32>)
+
+command.program.def public @decode() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %previous_latent_tensor_offset = index.constant 16 : offset
+  %previous_latent_tensor = buffer.view %state[%previous_latent_tensor_offset] : buffer -> view<32x1xf32>
+  %previous_latent_tensor_2_offset = index.constant 4 : offset
+  %previous_latent_tensor_2 = buffer.view %state[%previous_latent_tensor_2_offset] : buffer -> view<1xi32>
+  %previous_latent_parameter = command.parameter %phase, "flow_lm.bos_emb" : view<32xbf16>
+  %previous_latent_storage_bytes = index.constant 128 : offset
+  %previous_latent_storage = buffer.alloca<global> align(16) %previous_latent_storage_bytes : buffer
+  %previous_latent_tensor_3_offset = index.constant 0 : offset
+  %previous_latent_tensor_3 = buffer.view %previous_latent_storage[%previous_latent_tensor_3_offset] : buffer -> view<32x1xf32>
+  kernel.launch @pocket.previous_latent(%previous_latent_tensor, %previous_latent_tensor_2, %previous_latent_parameter, %previous_latent_tensor_3) : (view<32x1xf32>, view<1xi32>, view<32xbf16>, view<32x1xf32>)
+  %projection_parameter = command.parameter %phase, "flow_lm.input_linear.weight" : view<1024x32xbf16>
+  %projection_storage_bytes = index.constant 4096 : offset
+  %projection_storage = buffer.alloca<global> align(16) %projection_storage_bytes : buffer
+  %projection_tensor = buffer.view %projection_storage[%previous_latent_tensor_3_offset] : buffer -> view<1024x1xf32>
+  %projection_inputs = index.constant 32 : index
+  %projection_outputs = index.constant 1024 : index
+  %projection_times = index.constant 1 : index
+  kernel.launch @pocket.project_f64[%projection_outputs, %projection_times](%projection_inputs, %projection_outputs, %projection_times, %previous_latent_tensor_3, %projection_parameter, %projection_parameter, %projection_tensor) : [index, index](index, index, index, view<32x1xf32>, view<1024x32xbf16>, view<1024x32xbf16>, view<1024x1xf32>)
+  %flow_layer_0 = index.constant 0 : index
+  %flow_cache_0 = index.constant 144 : offset
+  %flow_result = template.apply<@pocket.flow_layer>(%flow_layer_0, %flow_cache_0, %backbone, %rotary, %state, %projection_tensor) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_cache_1 = index.constant 2097296 : offset
+  %flow_result_2 = template.apply<@pocket.flow_layer>(%projection_times, %flow_cache_1, %backbone, %rotary, %state, %flow_result) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_2 = index.constant 2 : index
+  %flow_cache_2 = index.constant 4194448 : offset
+  %flow_result_3 = template.apply<@pocket.flow_layer>(%flow_layer_2, %flow_cache_2, %backbone, %rotary, %state, %flow_result_2) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_3 = index.constant 3 : index
+  %flow_cache_3 = index.constant 6291600 : offset
+  %flow_result_4 = template.apply<@pocket.flow_layer>(%flow_layer_3, %flow_cache_3, %backbone, %rotary, %state, %flow_result_3) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_4 = index.constant 4 : index
+  %flow_cache_4 = index.constant 8388752 : offset
+  %flow_result_5 = template.apply<@pocket.flow_layer>(%flow_layer_4, %flow_cache_4, %backbone, %rotary, %state, %flow_result_4) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %flow_layer_5 = index.constant 5 : index
+  %flow_cache_5 = index.constant 10485904 : offset
+  %flow_result_6 = template.apply<@pocket.flow_layer>(%flow_layer_5, %flow_cache_5, %backbone, %rotary, %state, %flow_result_5) : (index, offset, buffer, buffer, buffer, view<1024x1xf32>) -> (view<1024x1xf32>)
+  %tensor = buffer.view %state[%previous_latent_tensor_3_offset] : buffer -> view<1xi32>
+  kernel.launch @pocket.advance_1(%tensor) : (view<1xi32>)
+  %normalization_storage = buffer.alloca<global> align(16) %projection_storage_bytes : buffer
+  %normalization_tensor = buffer.view %normalization_storage[%previous_latent_tensor_3_offset] : buffer -> view<1024x1xf32>
+  %normalization_parameter = command.parameter %phase, "flow_lm.out_norm.weight" : view<1024xbf16>
+  %normalization_parameter_2 = command.parameter %phase, "flow_lm.out_norm.bias" : view<1024xbf16>
+  kernel.launch @pocket.normalization_affine_1024x1_e1em05(%flow_result_6, %normalization_tensor, %normalization_parameter, %normalization_parameter_2) : (view<1024x1xf32>, view<1024x1xf32>, view<1024xbf16>, view<1024xbf16>)
+  %projection_parameter_2 = command.parameter %phase, "flow_lm.out_eos.weight" : view<1x1024xbf16>
+  %projection_storage_2 = buffer.alloca<global> align(16) %previous_latent_tensor_2_offset : buffer
+  %projection_tensor_2 = buffer.view %projection_storage_2[%previous_latent_tensor_3_offset] : buffer -> view<1x1xf32>
+  %projection_parameter_3 = command.parameter %phase, "flow_lm.out_eos.bias" : view<1xbf16>
+  kernel.launch @pocket.project_bias_f64[%projection_times, %projection_times](%projection_outputs, %projection_times, %projection_times, %normalization_tensor, %projection_parameter_2, %projection_parameter_3, %projection_tensor_2) : [index, index](index, index, index, view<1024x1xf32>, view<1x1024xbf16>, view<1xbf16>, view<1x1xf32>)
+  %tensor_2 = buffer.view %output[%previous_latent_tensor_3_offset] : buffer -> view<1x1xf32>
+  kernel.launch @pocket.copy_1(%projection_tensor_2, %tensor_2) : (view<1x1xf32>, view<1x1xf32>)
+  %tensor_3 = buffer.view %request[%previous_latent_tensor_3_offset] : buffer -> view<32x1xf32>
+  %tensor_4 = buffer.view %request[%previous_latent_storage_bytes] : buffer -> view<1xf32>
+  %tensor_5_offset = index.constant 132 : offset
+  %tensor_5 = buffer.view %request[%tensor_5_offset] : buffer -> view<1xf32>
+  %timestep_parameter = command.parameter %phase, "flow_lm.flow_net.time_embed.0.freqs" : view<128xbf16>
+  %timestep_storage_bytes = index.constant 1024 : offset
+  %timestep_storage = buffer.alloca<global> align(16) %timestep_storage_bytes : buffer
+  %timestep_tensor = buffer.view %timestep_storage[%previous_latent_tensor_3_offset] : buffer -> view<256x1xf32>
+  kernel.launch @pocket.time_embedding(%tensor_4, %timestep_parameter, %timestep_tensor) : (view<1xf32>, view<128xbf16>, view<256x1xf32>)
+  %projection_parameter_4 = command.parameter %phase, "flow_lm.flow_net.time_embed.0.mlp.0.weight" : view<512x256xbf16>
+  %projection_storage_3_bytes = index.constant 2048 : offset
+  %projection_storage_3 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %projection_tensor_3 = buffer.view %projection_storage_3[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  %projection_parameter_5 = command.parameter %phase, "flow_lm.flow_net.time_embed.0.mlp.0.bias" : view<512xbf16>
+  %projection_inputs_3 = index.constant 256 : index
+  %projection_outputs_3 = index.constant 512 : index
+  kernel.launch @pocket.project_bias_f64[%projection_outputs_3, %projection_times](%projection_inputs_3, %projection_outputs_3, %projection_times, %timestep_tensor, %projection_parameter_4, %projection_parameter_5, %projection_tensor_3) : [index, index](index, index, index, view<256x1xf32>, view<512x256xbf16>, view<512xbf16>, view<512x1xf32>)
+  %activation_storage = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %activation_tensor = buffer.view %activation_storage[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  kernel.launch @pocket.silu_512(%projection_tensor_3, %activation_tensor) : (view<512x1xf32>, view<512x1xf32>)
+  %projection_parameter_6 = command.parameter %phase, "flow_lm.flow_net.time_embed.0.mlp.2.weight" : view<512x512xbf16>
+  %projection_storage_4 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %projection_tensor_4 = buffer.view %projection_storage_4[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  %projection_parameter_7 = command.parameter %phase, "flow_lm.flow_net.time_embed.0.mlp.2.bias" : view<512xbf16>
+  kernel.launch @pocket.project_bias_f64[%projection_outputs_3, %projection_times](%projection_outputs_3, %projection_outputs_3, %projection_times, %activation_tensor, %projection_parameter_6, %projection_parameter_7, %projection_tensor_4) : [index, index](index, index, index, view<512x1xf32>, view<512x512xbf16>, view<512xbf16>, view<512x1xf32>)
+  %normalization_storage_2 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %normalization_tensor_2 = buffer.view %normalization_storage_2[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  %normalization_parameter_3 = command.parameter %phase, "flow_lm.flow_net.time_embed.0.mlp.3.alpha" : view<512xbf16>
+  kernel.launch @pocket.normalization_variance_512x1_e1em05(%projection_tensor_4, %normalization_tensor_2, %normalization_parameter_3) : (view<512x1xf32>, view<512x1xf32>, view<512xbf16>)
+  %timestep_parameter_2 = command.parameter %phase, "flow_lm.flow_net.time_embed.1.freqs" : view<128xbf16>
+  %timestep_storage_2 = buffer.alloca<global> align(16) %timestep_storage_bytes : buffer
+  %timestep_tensor_2 = buffer.view %timestep_storage_2[%previous_latent_tensor_3_offset] : buffer -> view<256x1xf32>
+  kernel.launch @pocket.time_embedding(%tensor_5, %timestep_parameter_2, %timestep_tensor_2) : (view<1xf32>, view<128xbf16>, view<256x1xf32>)
+  %projection_parameter_8 = command.parameter %phase, "flow_lm.flow_net.time_embed.1.mlp.0.weight" : view<512x256xbf16>
+  %projection_storage_5 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %projection_tensor_5 = buffer.view %projection_storage_5[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  %projection_parameter_9 = command.parameter %phase, "flow_lm.flow_net.time_embed.1.mlp.0.bias" : view<512xbf16>
+  kernel.launch @pocket.project_bias_f64[%projection_outputs_3, %projection_times](%projection_inputs_3, %projection_outputs_3, %projection_times, %timestep_tensor_2, %projection_parameter_8, %projection_parameter_9, %projection_tensor_5) : [index, index](index, index, index, view<256x1xf32>, view<512x256xbf16>, view<512xbf16>, view<512x1xf32>)
+  %activation_storage_2 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %activation_tensor_2 = buffer.view %activation_storage_2[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  kernel.launch @pocket.silu_512(%projection_tensor_5, %activation_tensor_2) : (view<512x1xf32>, view<512x1xf32>)
+  %projection_parameter_10 = command.parameter %phase, "flow_lm.flow_net.time_embed.1.mlp.2.weight" : view<512x512xbf16>
+  %projection_storage_6 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %projection_tensor_6 = buffer.view %projection_storage_6[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  %projection_parameter_11 = command.parameter %phase, "flow_lm.flow_net.time_embed.1.mlp.2.bias" : view<512xbf16>
+  kernel.launch @pocket.project_bias_f64[%projection_outputs_3, %projection_times](%projection_outputs_3, %projection_outputs_3, %projection_times, %activation_tensor_2, %projection_parameter_10, %projection_parameter_11, %projection_tensor_6) : [index, index](index, index, index, view<512x1xf32>, view<512x512xbf16>, view<512xbf16>, view<512x1xf32>)
+  %normalization_storage_3 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %normalization_tensor_3 = buffer.view %normalization_storage_3[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  %normalization_parameter_4 = command.parameter %phase, "flow_lm.flow_net.time_embed.1.mlp.3.alpha" : view<512xbf16>
+  kernel.launch @pocket.normalization_variance_512x1_e1em05(%projection_tensor_6, %normalization_tensor_3, %normalization_parameter_4) : (view<512x1xf32>, view<512x1xf32>, view<512xbf16>)
+  %projection_parameter_12 = command.parameter %phase, "flow_lm.flow_net.input_proj.weight" : view<512x32xbf16>
+  %projection_storage_7 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %projection_tensor_7 = buffer.view %projection_storage_7[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  %projection_parameter_13 = command.parameter %phase, "flow_lm.flow_net.input_proj.bias" : view<512xbf16>
+  kernel.launch @pocket.project_bias_f64[%projection_outputs_3, %projection_times](%projection_inputs, %projection_outputs_3, %projection_times, %tensor_3, %projection_parameter_12, %projection_parameter_13, %projection_tensor_7) : [index, index](index, index, index, view<32x1xf32>, view<512x32xbf16>, view<512xbf16>, view<512x1xf32>)
+  %projection_parameter_14 = command.parameter %phase, "flow_lm.flow_net.cond_embed.weight" : view<512x1024xbf16>
+  %projection_storage_8 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %projection_tensor_8 = buffer.view %projection_storage_8[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  %projection_parameter_15 = command.parameter %phase, "flow_lm.flow_net.cond_embed.bias" : view<512xbf16>
+  kernel.launch @pocket.project_bias_f64[%projection_outputs_3, %projection_times](%projection_outputs, %projection_outputs_3, %projection_times, %normalization_tensor, %projection_parameter_14, %projection_parameter_15, %projection_tensor_8) : [index, index](index, index, index, view<1024x1xf32>, view<512x1024xbf16>, view<512xbf16>, view<512x1xf32>)
+  %conditioned_storage = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %conditioned_tensor = buffer.view %conditioned_storage[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  kernel.launch @pocket.conditioning(%projection_tensor_8, %normalization_tensor_2, %normalization_tensor_3, %conditioned_tensor) : (view<512x1xf32>, view<512x1xf32>, view<512x1xf32>, view<512x1xf32>)
+  %activation_storage_3 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %activation_tensor_3 = buffer.view %activation_storage_3[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  kernel.launch @pocket.silu_512(%conditioned_tensor, %activation_tensor_3) : (view<512x1xf32>, view<512x1xf32>)
+  %head_result = template.apply<@pocket.flow_residual>(%flow_layer_0, %phase, %activation_tensor_3, %projection_tensor_7) : (index, buffer, view<512x1xf32>, view<512x1xf32>) -> (view<512x1xf32>)
+  %head_result_2 = template.apply<@pocket.flow_residual>(%projection_times, %phase, %activation_tensor_3, %head_result) : (index, buffer, view<512x1xf32>, view<512x1xf32>) -> (view<512x1xf32>)
+  %head_result_3 = template.apply<@pocket.flow_residual>(%flow_layer_2, %phase, %activation_tensor_3, %head_result_2) : (index, buffer, view<512x1xf32>, view<512x1xf32>) -> (view<512x1xf32>)
+  %head_result_4 = template.apply<@pocket.flow_residual>(%flow_layer_3, %phase, %activation_tensor_3, %head_result_3) : (index, buffer, view<512x1xf32>, view<512x1xf32>) -> (view<512x1xf32>)
+  %head_result_5 = template.apply<@pocket.flow_residual>(%flow_layer_4, %phase, %activation_tensor_3, %head_result_4) : (index, buffer, view<512x1xf32>, view<512x1xf32>) -> (view<512x1xf32>)
+  %head_result_6 = template.apply<@pocket.flow_residual>(%flow_layer_5, %phase, %activation_tensor_3, %head_result_5) : (index, buffer, view<512x1xf32>, view<512x1xf32>) -> (view<512x1xf32>)
+  %projection_parameter_16 = command.parameter %phase, "flow_lm.flow_net.final_layer.adaLN_modulation.1.weight" : view<1024x512xbf16>
+  %projection_storage_9 = buffer.alloca<global> align(16) %projection_storage_bytes : buffer
+  %projection_tensor_9 = buffer.view %projection_storage_9[%previous_latent_tensor_3_offset] : buffer -> view<1024x1xf32>
+  %projection_parameter_17 = command.parameter %phase, "flow_lm.flow_net.final_layer.adaLN_modulation.1.bias" : view<1024xbf16>
+  kernel.launch @pocket.project_bias_f64[%projection_outputs, %projection_times](%projection_outputs_3, %projection_outputs, %projection_times, %activation_tensor_3, %projection_parameter_16, %projection_parameter_17, %projection_tensor_9) : [index, index](index, index, index, view<512x1xf32>, view<1024x512xbf16>, view<1024xbf16>, view<1024x1xf32>)
+  %normalization_storage_4 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %normalization_tensor_4 = buffer.view %normalization_storage_4[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  kernel.launch @pocket.normalization_plain_512x1_e1em06(%head_result_6, %normalization_tensor_4) : (view<512x1xf32>, view<512x1xf32>)
+  %modulate_storage = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %modulate_tensor = buffer.view %modulate_storage[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  kernel.launch @pocket.modulation(%normalization_tensor_4, %projection_tensor_9, %modulate_tensor) : (view<512x1xf32>, view<1024x1xf32>, view<512x1xf32>)
+  %projection_parameter_18 = command.parameter %phase, "flow_lm.flow_net.final_layer.linear.weight" : view<32x512xbf16>
+  %projection_storage_10 = buffer.alloca<global> align(16) %previous_latent_storage_bytes : buffer
+  %projection_tensor_10 = buffer.view %projection_storage_10[%previous_latent_tensor_3_offset] : buffer -> view<32x1xf32>
+  %projection_parameter_19 = command.parameter %phase, "flow_lm.flow_net.final_layer.linear.bias" : view<32xbf16>
+  kernel.launch @pocket.project_bias_f64[%projection_inputs, %projection_times](%projection_outputs_3, %projection_inputs, %projection_times, %modulate_tensor, %projection_parameter_18, %projection_parameter_19, %projection_tensor_10) : [index, index](index, index, index, view<512x1xf32>, view<32x512xbf16>, view<32xbf16>, view<32x1xf32>)
+  %latent_output_storage = buffer.alloca<global> align(16) %previous_latent_storage_bytes : buffer
+  %latent_output_tensor = buffer.view %latent_output_storage[%previous_latent_tensor_3_offset] : buffer -> view<32x1xf32>
+  %latent_output_parameter = command.parameter %phase, "flow_lm.emb_std" : view<32xbf16>
+  %latent_output_parameter_2 = command.parameter %phase, "flow_lm.emb_mean" : view<32xbf16>
+  kernel.launch @pocket.latent_output(%tensor_3, %projection_tensor_10, %previous_latent_tensor, %latent_output_parameter, %latent_output_parameter_2, %latent_output_tensor) : (view<32x1xf32>, view<32x1xf32>, view<32x1xf32>, view<32xbf16>, view<32xbf16>, view<32x1xf32>)
+  %projection_parameter_20 = command.parameter %phase, "mimi.quantizer.output_proj.weight" : view<512x32x1xbf16>
+  %projection_storage_11 = buffer.alloca<global> align(16) %projection_storage_3_bytes : buffer
+  %projection_tensor_11 = buffer.view %projection_storage_11[%previous_latent_tensor_3_offset] : buffer -> view<512x1xf32>
+  kernel.launch @pocket.project_f32[%projection_outputs_3, %projection_times](%projection_inputs, %projection_outputs_3, %projection_times, %latent_output_tensor, %projection_parameter_20, %projection_parameter_20, %projection_tensor_11) : [index, index](index, index, index, view<32x1xf32>, view<512x32x1xbf16>, view<512x32x1xbf16>, view<512x1xf32>)
+  %transpose_convolution_parameter = command.parameter %phase, "mimi.upsample.convtr.convtr.weight" : view<512x1x32xbf16>
+  %transpose_convolution_storage_bytes = index.constant 65536 : offset
+  %transpose_convolution_storage = buffer.alloca<global> align(16) %transpose_convolution_storage_bytes : buffer
+  %transpose_convolution_tensor = buffer.view %transpose_convolution_storage[%previous_latent_tensor_3_offset] : buffer -> view<512x32xf32>
+  %transpose_convolution_storage_2_bytes = index.constant 32768 : offset
+  %transpose_convolution_storage_2 = buffer.alloca<global> align(16) %transpose_convolution_storage_2_bytes : buffer
+  %transpose_convolution_tensor_2 = buffer.view %transpose_convolution_storage_2[%previous_latent_tensor_3_offset] : buffer -> view<512x16xf32>
+  %transpose_convolution_tensor_3_offset = index.constant 12583056 : offset
+  %transpose_convolution_tensor_3 = buffer.view %state[%transpose_convolution_tensor_3_offset] : buffer -> view<512x16xf32>
+  kernel.launch @pocket.transpose_convolution_512x512_t1_g1x1_s16(%projection_tensor_11, %transpose_convolution_parameter, %transpose_convolution_tensor) : (view<512x1xf32>, view<512x1x32xbf16>, view<512x32xf32>)
+  kernel.launch @pocket.overlap_512x16_h16(%transpose_convolution_tensor, %transpose_convolution_tensor_3, %transpose_convolution_tensor_2) : (view<512x32xf32>, view<512x16xf32>, view<512x16xf32>)
+  %mimi_cache_0 = index.constant 12615824 : offset
+  %mimi_result = template.apply<@pocket.mimi_decoder_layer>(%flow_layer_0, %mimi_cache_0, %phase, %rotary, %state, %transpose_convolution_tensor_2) : (index, offset, buffer, buffer, buffer, view<512x16xf32>) -> (view<512x16xf32>)
+  %mimi_cache_1 = index.constant 13701264 : offset
+  %mimi_result_2 = template.apply<@pocket.mimi_decoder_layer>(%projection_times, %mimi_cache_1, %phase, %rotary, %state, %mimi_result) : (index, offset, buffer, buffer, buffer, view<512x16xf32>) -> (view<512x16xf32>)
+  %tensor_6 = buffer.view %state[%previous_latent_tensor_2_offset] : buffer -> view<1xi32>
+  kernel.launch @pocket.advance_16(%tensor_6) : (view<1xi32>)
+  %convolution_parameter = command.parameter %phase, "mimi.decoder.model.0.conv.weight" : view<512x512x7xbf16>
+  %convolution_parameter_2 = command.parameter %phase, "mimi.decoder.model.0.conv.bias" : view<512xbf16>
+  %convolution_tensor_offset = index.constant 14786704 : offset
+  %convolution_tensor = buffer.view %state[%convolution_tensor_offset] : buffer -> view<512x6xf32>
+  %convolution_storage_bytes = index.constant 45056 : offset
+  %convolution_storage = buffer.alloca<global> align(16) %convolution_storage_bytes : buffer
+  %convolution_tensor_2 = buffer.view %convolution_storage[%previous_latent_tensor_3_offset] : buffer -> view<512x22xf32>
+  kernel.launch @pocket.history_512x16_h6(%mimi_result_2, %convolution_tensor, %convolution_tensor_2) : (view<512x16xf32>, view<512x6xf32>, view<512x22xf32>)
+  %convolution_storage_2 = buffer.alloca<global> align(16) %transpose_convolution_storage_2_bytes : buffer
+  %convolution_tensor_3 = buffer.view %convolution_storage_2[%previous_latent_tensor_3_offset] : buffer -> view<512x16xf32>
+  kernel.launch @pocket.convolution_f32_bias_512x512_t16_k7_s1(%convolution_tensor_2, %convolution_parameter, %convolution_tensor_3, %convolution_parameter_2) : (view<512x22xf32>, view<512x512x7xbf16>, view<512x16xf32>, view<512xbf16>)
+  %activation_storage_4 = buffer.alloca<global> align(16) %transpose_convolution_storage_2_bytes : buffer
+  %activation_tensor_4 = buffer.view %activation_storage_4[%previous_latent_tensor_3_offset] : buffer -> view<512x16xf32>
+  kernel.launch @pocket.elu_8192(%convolution_tensor_3, %activation_tensor_4) : (view<512x16xf32>, view<512x16xf32>)
+  %transpose_convolution_parameter_2 = command.parameter %phase, "mimi.decoder.model.2.convtr.weight" : view<512x256x12xbf16>
+  %transpose_convolution_storage_3_bytes = index.constant 104448 : offset
+  %transpose_convolution_storage_3 = buffer.alloca<global> align(16) %transpose_convolution_storage_3_bytes : buffer
+  %transpose_convolution_tensor_4 = buffer.view %transpose_convolution_storage_3[%previous_latent_tensor_3_offset] : buffer -> view<256x102xf32>
+  %transpose_convolution_storage_4_bytes = index.constant 98304 : offset
+  %transpose_convolution_storage_4 = buffer.alloca<global> align(16) %transpose_convolution_storage_4_bytes : buffer
+  %transpose_convolution_tensor_5 = buffer.view %transpose_convolution_storage_4[%previous_latent_tensor_3_offset] : buffer -> view<256x96xf32>
+  %transpose_convolution_tensor_6_offset = index.constant 14798992 : offset
+  %transpose_convolution_tensor_6 = buffer.view %state[%transpose_convolution_tensor_6_offset] : buffer -> view<256x6xf32>
+  %transpose_convolution_parameter_3 = command.parameter %phase, "mimi.decoder.model.2.convtr.bias" : view<256xbf16>
+  kernel.launch @pocket.transpose_convolution_bias_512x256_t16_g512x256_s6(%activation_tensor_4, %transpose_convolution_parameter_2, %transpose_convolution_tensor_4, %transpose_convolution_parameter_3) : (view<512x16xf32>, view<512x256x12xbf16>, view<256x102xf32>, view<256xbf16>)
+  kernel.launch @pocket.overlap_bias_256x96_h6(%transpose_convolution_tensor_4, %transpose_convolution_tensor_6, %transpose_convolution_tensor_5, %transpose_convolution_parameter_3) : (view<256x102xf32>, view<256x6xf32>, view<256x96xf32>, view<256xbf16>)
+  %activation_storage_5 = buffer.alloca<global> align(16) %transpose_convolution_storage_4_bytes : buffer
+  %activation_tensor_5 = buffer.view %activation_storage_5[%previous_latent_tensor_3_offset] : buffer -> view<256x96xf32>
+  kernel.launch @pocket.elu_24576(%transpose_convolution_tensor_5, %activation_tensor_5) : (view<256x96xf32>, view<256x96xf32>)
+  %convolution_parameter_3 = command.parameter %phase, "mimi.decoder.model.3.block.1.conv.weight" : view<128x256x3xbf16>
+  %convolution_parameter_4 = command.parameter %phase, "mimi.decoder.model.3.block.1.conv.bias" : view<128xbf16>
+  %convolution_tensor_4_offset = index.constant 14805136 : offset
+  %convolution_tensor_4 = buffer.view %state[%convolution_tensor_4_offset] : buffer -> view<256x2xf32>
+  %convolution_storage_3_bytes = index.constant 100352 : offset
+  %convolution_storage_3 = buffer.alloca<global> align(16) %convolution_storage_3_bytes : buffer
+  %convolution_tensor_5 = buffer.view %convolution_storage_3[%previous_latent_tensor_3_offset] : buffer -> view<256x98xf32>
+  kernel.launch @pocket.history_256x96_h2(%activation_tensor_5, %convolution_tensor_4, %convolution_tensor_5) : (view<256x96xf32>, view<256x2xf32>, view<256x98xf32>)
+  %convolution_storage_4_bytes = index.constant 49152 : offset
+  %convolution_storage_4 = buffer.alloca<global> align(16) %convolution_storage_4_bytes : buffer
+  %convolution_tensor_6 = buffer.view %convolution_storage_4[%previous_latent_tensor_3_offset] : buffer -> view<128x96xf32>
+  kernel.launch @pocket.convolution_f32_bias_256x128_t96_k3_s1(%convolution_tensor_5, %convolution_parameter_3, %convolution_tensor_6, %convolution_parameter_4) : (view<256x98xf32>, view<128x256x3xbf16>, view<128x96xf32>, view<128xbf16>)
+  %activation_storage_6 = buffer.alloca<global> align(16) %convolution_storage_4_bytes : buffer
+  %activation_tensor_6 = buffer.view %activation_storage_6[%previous_latent_tensor_3_offset] : buffer -> view<128x96xf32>
+  kernel.launch @pocket.elu_12288(%convolution_tensor_6, %activation_tensor_6) : (view<128x96xf32>, view<128x96xf32>)
+  %convolution_parameter_5 = command.parameter %phase, "mimi.decoder.model.3.block.3.conv.weight" : view<256x128x1xbf16>
+  %convolution_parameter_6 = command.parameter %phase, "mimi.decoder.model.3.block.3.conv.bias" : view<256xbf16>
+  %convolution_storage_5 = buffer.alloca<global> align(16) %transpose_convolution_storage_4_bytes : buffer
+  %convolution_tensor_7 = buffer.view %convolution_storage_5[%previous_latent_tensor_3_offset] : buffer -> view<256x96xf32>
+  kernel.launch @pocket.convolution_f32_bias_128x256_t96_k1_s1(%activation_tensor_6, %convolution_parameter_5, %convolution_tensor_7, %convolution_parameter_6) : (view<128x96xf32>, view<256x128x1xbf16>, view<256x96xf32>, view<256xbf16>)
+  %residual_storage = buffer.alloca<global> align(16) %transpose_convolution_storage_4_bytes : buffer
+  %residual_tensor = buffer.view %residual_storage[%previous_latent_tensor_3_offset] : buffer -> view<256x96xf32>
+  kernel.launch @pocket.residual_256x96(%transpose_convolution_tensor_5, %convolution_tensor_7, %residual_tensor) : (view<256x96xf32>, view<256x96xf32>, view<256x96xf32>)
+  %activation_storage_7 = buffer.alloca<global> align(16) %transpose_convolution_storage_4_bytes : buffer
+  %activation_tensor_7 = buffer.view %activation_storage_7[%previous_latent_tensor_3_offset] : buffer -> view<256x96xf32>
+  kernel.launch @pocket.elu_24576(%residual_tensor, %activation_tensor_7) : (view<256x96xf32>, view<256x96xf32>)
+  %transpose_convolution_parameter_4 = command.parameter %phase, "mimi.decoder.model.5.convtr.weight" : view<256x128x10xbf16>
+  %transpose_convolution_storage_5_bytes = index.constant 248320 : offset
+  %transpose_convolution_storage_5 = buffer.alloca<global> align(16) %transpose_convolution_storage_5_bytes : buffer
+  %transpose_convolution_tensor_7 = buffer.view %transpose_convolution_storage_5[%previous_latent_tensor_3_offset] : buffer -> view<128x485xf32>
+  %transpose_convolution_storage_6_bytes = index.constant 245760 : offset
+  %transpose_convolution_storage_6 = buffer.alloca<global> align(16) %transpose_convolution_storage_6_bytes : buffer
+  %transpose_convolution_tensor_8 = buffer.view %transpose_convolution_storage_6[%previous_latent_tensor_3_offset] : buffer -> view<128x480xf32>
+  %transpose_convolution_tensor_9_offset = index.constant 14807184 : offset
+  %transpose_convolution_tensor_9 = buffer.view %state[%transpose_convolution_tensor_9_offset] : buffer -> view<128x5xf32>
+  %transpose_convolution_parameter_5 = command.parameter %phase, "mimi.decoder.model.5.convtr.bias" : view<128xbf16>
+  kernel.launch @pocket.transpose_convolution_bias_256x128_t96_g256x128_s5(%activation_tensor_7, %transpose_convolution_parameter_4, %transpose_convolution_tensor_7, %transpose_convolution_parameter_5) : (view<256x96xf32>, view<256x128x10xbf16>, view<128x485xf32>, view<128xbf16>)
+  kernel.launch @pocket.overlap_bias_128x480_h5(%transpose_convolution_tensor_7, %transpose_convolution_tensor_9, %transpose_convolution_tensor_8, %transpose_convolution_parameter_5) : (view<128x485xf32>, view<128x5xf32>, view<128x480xf32>, view<128xbf16>)
+  %activation_storage_8 = buffer.alloca<global> align(16) %transpose_convolution_storage_6_bytes : buffer
+  %activation_tensor_8 = buffer.view %activation_storage_8[%previous_latent_tensor_3_offset] : buffer -> view<128x480xf32>
+  kernel.launch @pocket.elu_61440(%transpose_convolution_tensor_8, %activation_tensor_8) : (view<128x480xf32>, view<128x480xf32>)
+  %convolution_parameter_7 = command.parameter %phase, "mimi.decoder.model.6.block.1.conv.weight" : view<64x128x3xbf16>
+  %convolution_parameter_8 = command.parameter %phase, "mimi.decoder.model.6.block.1.conv.bias" : view<64xbf16>
+  %convolution_tensor_8_offset = index.constant 14809744 : offset
+  %convolution_tensor_8 = buffer.view %state[%convolution_tensor_8_offset] : buffer -> view<128x2xf32>
+  %convolution_storage_6_bytes = index.constant 246784 : offset
+  %convolution_storage_6 = buffer.alloca<global> align(16) %convolution_storage_6_bytes : buffer
+  %convolution_tensor_9 = buffer.view %convolution_storage_6[%previous_latent_tensor_3_offset] : buffer -> view<128x482xf32>
+  kernel.launch @pocket.history_128x480_h2(%activation_tensor_8, %convolution_tensor_8, %convolution_tensor_9) : (view<128x480xf32>, view<128x2xf32>, view<128x482xf32>)
+  %convolution_storage_7_bytes = index.constant 122880 : offset
+  %convolution_storage_7 = buffer.alloca<global> align(16) %convolution_storage_7_bytes : buffer
+  %convolution_tensor_10 = buffer.view %convolution_storage_7[%previous_latent_tensor_3_offset] : buffer -> view<64x480xf32>
+  kernel.launch @pocket.convolution_f32_bias_128x64_t480_k3_s1(%convolution_tensor_9, %convolution_parameter_7, %convolution_tensor_10, %convolution_parameter_8) : (view<128x482xf32>, view<64x128x3xbf16>, view<64x480xf32>, view<64xbf16>)
+  %activation_storage_9 = buffer.alloca<global> align(16) %convolution_storage_7_bytes : buffer
+  %activation_tensor_9 = buffer.view %activation_storage_9[%previous_latent_tensor_3_offset] : buffer -> view<64x480xf32>
+  kernel.launch @pocket.elu_30720(%convolution_tensor_10, %activation_tensor_9) : (view<64x480xf32>, view<64x480xf32>)
+  %convolution_parameter_9 = command.parameter %phase, "mimi.decoder.model.6.block.3.conv.weight" : view<128x64x1xbf16>
+  %convolution_parameter_10 = command.parameter %phase, "mimi.decoder.model.6.block.3.conv.bias" : view<128xbf16>
+  %convolution_storage_8 = buffer.alloca<global> align(16) %transpose_convolution_storage_6_bytes : buffer
+  %convolution_tensor_11 = buffer.view %convolution_storage_8[%previous_latent_tensor_3_offset] : buffer -> view<128x480xf32>
+  kernel.launch @pocket.convolution_f32_bias_64x128_t480_k1_s1(%activation_tensor_9, %convolution_parameter_9, %convolution_tensor_11, %convolution_parameter_10) : (view<64x480xf32>, view<128x64x1xbf16>, view<128x480xf32>, view<128xbf16>)
+  %residual_storage_2 = buffer.alloca<global> align(16) %transpose_convolution_storage_6_bytes : buffer
+  %residual_tensor_2 = buffer.view %residual_storage_2[%previous_latent_tensor_3_offset] : buffer -> view<128x480xf32>
+  kernel.launch @pocket.residual_128x480(%transpose_convolution_tensor_8, %convolution_tensor_11, %residual_tensor_2) : (view<128x480xf32>, view<128x480xf32>, view<128x480xf32>)
+  %activation_storage_10 = buffer.alloca<global> align(16) %transpose_convolution_storage_6_bytes : buffer
+  %activation_tensor_10 = buffer.view %activation_storage_10[%previous_latent_tensor_3_offset] : buffer -> view<128x480xf32>
+  kernel.launch @pocket.elu_61440(%residual_tensor_2, %activation_tensor_10) : (view<128x480xf32>, view<128x480xf32>)
+  %transpose_convolution_parameter_6 = command.parameter %phase, "mimi.decoder.model.8.convtr.weight" : view<128x64x8xbf16>
+  %transpose_convolution_storage_7_bytes = index.constant 492544 : offset
+  %transpose_convolution_storage_7 = buffer.alloca<global> align(16) %transpose_convolution_storage_7_bytes : buffer
+  %transpose_convolution_tensor_10 = buffer.view %transpose_convolution_storage_7[%previous_latent_tensor_3_offset] : buffer -> view<64x1924xf32>
+  %transpose_convolution_storage_8_bytes = index.constant 491520 : offset
+  %transpose_convolution_storage_8 = buffer.alloca<global> align(16) %transpose_convolution_storage_8_bytes : buffer
+  %transpose_convolution_tensor_11 = buffer.view %transpose_convolution_storage_8[%previous_latent_tensor_3_offset] : buffer -> view<64x1920xf32>
+  %transpose_convolution_tensor_12_offset = index.constant 14810768 : offset
+  %transpose_convolution_tensor_12 = buffer.view %state[%transpose_convolution_tensor_12_offset] : buffer -> view<64x4xf32>
+  %transpose_convolution_parameter_7 = command.parameter %phase, "mimi.decoder.model.8.convtr.bias" : view<64xbf16>
+  kernel.launch @pocket.transpose_convolution_bias_128x64_t480_g128x64_s4(%activation_tensor_10, %transpose_convolution_parameter_6, %transpose_convolution_tensor_10, %transpose_convolution_parameter_7) : (view<128x480xf32>, view<128x64x8xbf16>, view<64x1924xf32>, view<64xbf16>)
+  kernel.launch @pocket.overlap_bias_64x1920_h4(%transpose_convolution_tensor_10, %transpose_convolution_tensor_12, %transpose_convolution_tensor_11, %transpose_convolution_parameter_7) : (view<64x1924xf32>, view<64x4xf32>, view<64x1920xf32>, view<64xbf16>)
+  %activation_storage_11 = buffer.alloca<global> align(16) %transpose_convolution_storage_8_bytes : buffer
+  %activation_tensor_11 = buffer.view %activation_storage_11[%previous_latent_tensor_3_offset] : buffer -> view<64x1920xf32>
+  kernel.launch @pocket.elu_122880(%transpose_convolution_tensor_11, %activation_tensor_11) : (view<64x1920xf32>, view<64x1920xf32>)
+  %convolution_parameter_11 = command.parameter %phase, "mimi.decoder.model.9.block.1.conv.weight" : view<32x64x3xbf16>
+  %convolution_parameter_12 = command.parameter %phase, "mimi.decoder.model.9.block.1.conv.bias" : view<32xbf16>
+  %convolution_tensor_12_offset = index.constant 14811792 : offset
+  %convolution_tensor_12 = buffer.view %state[%convolution_tensor_12_offset] : buffer -> view<64x2xf32>
+  %convolution_storage_9_bytes = index.constant 492032 : offset
+  %convolution_storage_9 = buffer.alloca<global> align(16) %convolution_storage_9_bytes : buffer
+  %convolution_tensor_13 = buffer.view %convolution_storage_9[%previous_latent_tensor_3_offset] : buffer -> view<64x1922xf32>
+  kernel.launch @pocket.history_64x1920_h2(%activation_tensor_11, %convolution_tensor_12, %convolution_tensor_13) : (view<64x1920xf32>, view<64x2xf32>, view<64x1922xf32>)
+  %convolution_storage_10 = buffer.alloca<global> align(16) %transpose_convolution_storage_6_bytes : buffer
+  %convolution_tensor_14 = buffer.view %convolution_storage_10[%previous_latent_tensor_3_offset] : buffer -> view<32x1920xf32>
+  kernel.launch @pocket.convolution_f32_bias_64x32_t1920_k3_s1(%convolution_tensor_13, %convolution_parameter_11, %convolution_tensor_14, %convolution_parameter_12) : (view<64x1922xf32>, view<32x64x3xbf16>, view<32x1920xf32>, view<32xbf16>)
+  %activation_storage_12 = buffer.alloca<global> align(16) %transpose_convolution_storage_6_bytes : buffer
+  %activation_tensor_12 = buffer.view %activation_storage_12[%previous_latent_tensor_3_offset] : buffer -> view<32x1920xf32>
+  kernel.launch @pocket.elu_61440(%convolution_tensor_14, %activation_tensor_12) : (view<32x1920xf32>, view<32x1920xf32>)
+  %convolution_parameter_13 = command.parameter %phase, "mimi.decoder.model.9.block.3.conv.weight" : view<64x32x1xbf16>
+  %convolution_parameter_14 = command.parameter %phase, "mimi.decoder.model.9.block.3.conv.bias" : view<64xbf16>
+  %convolution_storage_11 = buffer.alloca<global> align(16) %transpose_convolution_storage_8_bytes : buffer
+  %convolution_tensor_15 = buffer.view %convolution_storage_11[%previous_latent_tensor_3_offset] : buffer -> view<64x1920xf32>
+  kernel.launch @pocket.convolution_f32_bias_32x64_t1920_k1_s1(%activation_tensor_12, %convolution_parameter_13, %convolution_tensor_15, %convolution_parameter_14) : (view<32x1920xf32>, view<64x32x1xbf16>, view<64x1920xf32>, view<64xbf16>)
+  %residual_storage_3 = buffer.alloca<global> align(16) %transpose_convolution_storage_8_bytes : buffer
+  %residual_tensor_3 = buffer.view %residual_storage_3[%previous_latent_tensor_3_offset] : buffer -> view<64x1920xf32>
+  kernel.launch @pocket.residual_64x1920(%transpose_convolution_tensor_11, %convolution_tensor_15, %residual_tensor_3) : (view<64x1920xf32>, view<64x1920xf32>, view<64x1920xf32>)
+  %activation_storage_13 = buffer.alloca<global> align(16) %transpose_convolution_storage_8_bytes : buffer
+  %activation_tensor_13 = buffer.view %activation_storage_13[%previous_latent_tensor_3_offset] : buffer -> view<64x1920xf32>
+  kernel.launch @pocket.elu_122880(%residual_tensor_3, %activation_tensor_13) : (view<64x1920xf32>, view<64x1920xf32>)
+  %convolution_parameter_15 = command.parameter %phase, "mimi.decoder.model.11.conv.weight" : view<1x64x3xbf16>
+  %convolution_parameter_16 = command.parameter %phase, "mimi.decoder.model.11.conv.bias" : view<1xbf16>
+  %convolution_tensor_16_offset = index.constant 14812304 : offset
+  %convolution_tensor_16 = buffer.view %state[%convolution_tensor_16_offset] : buffer -> view<64x2xf32>
+  %convolution_storage_12 = buffer.alloca<global> align(16) %convolution_storage_9_bytes : buffer
+  %convolution_tensor_17 = buffer.view %convolution_storage_12[%previous_latent_tensor_3_offset] : buffer -> view<64x1922xf32>
+  kernel.launch @pocket.history_64x1920_h2(%activation_tensor_13, %convolution_tensor_16, %convolution_tensor_17) : (view<64x1920xf32>, view<64x2xf32>, view<64x1922xf32>)
+  %convolution_storage_13_bytes = index.constant 7680 : offset
+  %convolution_storage_13 = buffer.alloca<global> align(16) %convolution_storage_13_bytes : buffer
+  %convolution_tensor_18 = buffer.view %convolution_storage_13[%previous_latent_tensor_3_offset] : buffer -> view<1x1920xf32>
+  kernel.launch @pocket.convolution_f32_bias_64x1_t1920_k3_s1(%convolution_tensor_17, %convolution_parameter_15, %convolution_tensor_18, %convolution_parameter_16) : (view<64x1922xf32>, view<1x64x3xbf16>, view<1x1920xf32>, view<1xbf16>)
+  %fade_storage = buffer.alloca<global> align(16) %convolution_storage_13_bytes : buffer
+  %fade_tensor = buffer.view %fade_storage[%previous_latent_tensor_3_offset] : buffer -> view<1x1920xf32>
+  %fade_tensor_2 = buffer.view %state[%previous_latent_tensor_2_offset] : buffer -> view<1xi32>
+  kernel.launch @pocket.fade(%convolution_tensor_18, %fade_tensor_2, %fade_tensor) : (view<1x1920xf32>, view<1xi32>, view<1x1920xf32>)
+  %tensor_7 = buffer.view %output[%previous_latent_tensor_2_offset] : buffer -> view<1x1920xf32>
+  kernel.launch @pocket.copy_1920(%fade_tensor, %tensor_7) : (view<1x1920xf32>, view<1x1920xf32>)
+  command.return
+}
