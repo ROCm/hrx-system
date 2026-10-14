@@ -1,0 +1,34 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Each row stores hi=f32(theta^(-pair/32)/(2*pi)) and
+// lo=f32(theta^(-pair/32)/(2*pi)-hi), theta=10000000. The split preserves
+// fractional turns when multiplied by an integer position up to 262143.
+global.rodata.def @qsa_rotary_turns = align(16) bytes("83f9223e889cdc3152f8c43da0875eb0780e6e3d812a6e2f50db0f3dad95c6303addad3c949fbcaf8721523c867fdb2f79f6fd3b2f4272af0378993bde545eaf357b393bf886e6aedc2be03a4f6d17ad4777873a576d24ae1fb9233a5952d42de6dfc53920cdf0ac5a266f395f0ef52b7284103922d5852ca3a9ae382056202c94185338f37cf62b0e21ff37e4bba729712c9a372490752b47553a3737f6e3aa6b33e1360056aba98b1688369b5655299d792436d821a7a98ac8c635de4444a8853f7035686d75285b2e11357bc784a6fd76af34ba218d27c4105434ea4f03a581260034a9ae9927b5e19a33f73971a759303b33aa0361a5303ce23243634aa6")
+
+func.def public inline @qsa_rotary_coefficients(%position: index, %pair_arg: index) -> (bf16, bf16) {
+  %pair = index.assume %pair_arg [range(%pair_arg, 0, 31)] : index
+  %table = global.load @qsa_rotary_turns : buffer
+  %origin = index.constant 0 : offset
+  %coefficients = buffer.view %table[%origin] : buffer -> view<32x2xf32>
+  %packed = vector.load %coefficients[%pair, 0] : view<32x2xf32> -> vector<2xf32>
+  %high = vector.extract %packed[0] : vector<2xf32> -> f32
+  %low = vector.extract %packed[1] : vector<2xf32> -> f32
+  %position_i32 = index.cast %position : index to i32
+  %position_f32 = scalar.uitofp %position_i32 : i32 to f32
+  %product = scalar.mulf %position_f32, %high : f32
+  %negative_product = scalar.negf %product : f32
+  %product_error = scalar.fmaf %position_f32, %high, %negative_product : f32
+  %correction = scalar.fmaf %position_f32, %low, %product_error : f32
+  %whole = scalar.floorf %product : f32
+  %fraction = scalar.subf %product, %whole : f32
+  %turns = scalar.addf %fraction, %correction : f32
+  %sine = scalar.sinturnsf<afn> %turns : f32
+  %cosine = scalar.costurnsf<afn> %turns : f32
+  %sine_packed = scalar.fptrunc %sine : f32 to bf16
+  %cosine_packed = scalar.fptrunc %cosine : f32 to bf16
+  func.return %sine_packed, %cosine_packed : bf16, bf16
+}

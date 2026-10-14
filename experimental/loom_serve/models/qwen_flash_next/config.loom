@@ -1,0 +1,83 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Fixed checkpoint hash geometry. EOS here is the PLE padding boundary, not
+// the chat terminal token. Run-dependent token, span, and page capacities are
+// supplied by the cold model program.
+config.def @flash_next.ple.eos = 248044 : i32
+
+config.def @flash_next.ple.multiplier_0 = 23703573157769 : i64
+
+config.def @flash_next.ple.multiplier_1 = 20109073645365 : i64
+
+config.def @flash_next.ple.multiplier_2 = 8052911324071 : i64
+
+config.def @flash_next.ple.prime_0 = 20000003 : i64
+
+config.def @flash_next.ple.offset_0 = 0 : i32
+
+config.def @flash_next.ple.prime_1 = 20000023 : i64
+
+config.def @flash_next.ple.offset_1 = 20000003 : i32
+
+config.def @flash_next.ple.prime_2 = 20000033 : i64
+
+config.def @flash_next.ple.offset_2 = 40000026 : i32
+
+config.def @flash_next.ple.prime_3 = 20000047 : i64
+
+config.def @flash_next.ple.offset_3 = 60000059 : i32
+
+config.def @flash_next.ple.prime_4 = 20000059 : i64
+
+config.def @flash_next.ple.offset_4 = 80000106 : i32
+
+config.def @flash_next.ple.prime_5 = 20000063 : i64
+
+config.def @flash_next.ple.offset_5 = 100000165 : i32
+
+config.def @flash_next.ple.prime_6 = 20000069 : i64
+
+config.def @flash_next.ple.offset_6 = 120000228 : i32
+
+config.def @flash_next.ple.prime_7 = 20000077 : i64
+
+config.def @flash_next.ple.offset_7 = 140000297 : i32
+
+config.def @flash_next.ple.prime_8 = 20000081 : i64
+
+config.def @flash_next.ple.offset_8 = 160000374 : i32
+
+config.def @flash_next.ple.prime_9 = 20000093 : i64
+
+config.def @flash_next.ple.offset_9 = 180000455 : i32
+
+config.def @flash_next.ple.prime_10 = 20000107 : i64
+
+config.def @flash_next.ple.offset_10 = 200000548 : i32
+
+config.def @flash_next.ple.prime_11 = 20000147 : i64
+
+config.def @flash_next.ple.offset_11 = 220000655 : i32
+
+config.def @flash_next.ple.prime_12 = 20000153 : i64
+
+config.def @flash_next.ple.offset_12 = 240000802 : i32
+
+config.def @flash_next.ple.prime_13 = 20000159 : i64
+
+config.def @flash_next.ple.offset_13 = 260000955 : i32
+
+config.def @flash_next.ple.prime_14 = 20000161 : i64
+
+config.def @flash_next.ple.offset_14 = 280001114 : i32
+
+config.def @flash_next.ple.prime_15 = 20000171 : i64
+
+config.def @flash_next.ple.offset_15 = 300001275 : i32
+
+// Bound sparse score scratch independently of the packed token capacity.
+config.def @qsa.query_tile = 4 : index

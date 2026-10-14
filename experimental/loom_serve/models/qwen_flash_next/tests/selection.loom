@@ -1,0 +1,112 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qsa_select_blocks() launch(%query_begin: index, %epoch: buffer, %mapping: buffer, %scores: buffer, %selected: buffer)
+
+// The query tile starts inside the packed epoch. Only its first row is live;
+// future block scores and all other output rows must remain unobserved.
+func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %scores: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c4_i32 = scalar.constant 4 : i32
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  view.store %c4_i32, %header[0] : i32, view<3xi32>
+  %empty = index.cmp eq, %trial, %c0 : index
+  %single = index.cmp eq, %trial, %c1 : index
+  %boundary = index.cmp eq, %trial, %c2 : index
+  %crossed = index.cmp eq, %trial, %c3 : index
+  %p0 = scalar.constant 0 : i32
+  %p1 = scalar.constant 3 : i32
+  %p512 = scalar.constant 2047 : i32
+  %p513 = scalar.constant 2051 : i32
+  %p527 = scalar.constant 2108 : i32
+  %tail = scf.select %crossed, %p513, %p527 : i32
+  %mid = scf.select %boundary, %p512, %tail : i32
+  %small = scf.select %single, %p1, %mid : i32
+  %position = scf.select %empty, %p0, %small : i32
+  %map = buffer.view %mapping[%origin] : buffer -> view<8x4xi32>
+  view.store %position, %map[3, 0] : i32, view<8x4xi32>
+  view.store %p0, %map[3, 1] : i32, view<8x4xi32>
+  view.store %p0, %map[3, 2] : i32, view<8x4xi32>
+  view.store %p0, %map[3, 3] : i32, view<8x4xi32>
+  %blocks = index.constant 528 : index
+  %period = index.constant 53 : index
+  %values = buffer.view %scores[%origin] : buffer -> view<4x528xf32>
+  scf.for %block = [%c0 to %blocks step %c1] {
+    // Crossing 512 with identical scores exercises the complete tie rule.
+    %remainder = index.rem %block, %period : index
+    %value = scf.select %crossed, %c0, %remainder : index
+    %word = index.cast %value : index to i32
+    %score = scalar.uitofp %word : i32 to f32
+    view.store %score, %values[0, %block] : f32, view<4x528xf32>
+  }
+  func.return
+}
+
+// Rank every candidate by numerical score and logical ID, independently of the
+// production radix threshold and workgroup scans. Publish winners in logical
+// order because the attention consumer traverses their original positions.
+func.def @reference(%query_begin_arg: index, %epoch: buffer, %mapping: buffer, %scores: buffer, %selected: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %budget = index.constant 512 : index
+  %map = buffer.view %mapping[%origin] : buffer -> view<8x4xi32>
+  %positions = view.load %map[3, 0] : view<8x4xi32> -> i32
+  %position_value = index.cast %positions : i32 to index
+  %position = index.assume %position_value [range(%position_value, 0, 2111)] : index
+  %query_begin = index.assume %query_begin_arg [range(%query_begin_arg, 0, 7)] : index
+  %visible = index.add %position, %c1 : index
+  %complete = index.div %visible, %c4 : index
+  %values = buffer.view %scores[%origin] : buffer -> view<4x528xf32>
+  %output = buffer.view %selected[%origin] : buffer -> view<8x512xi32>
+  %unused = scf.for %block = [%c0 to %complete step %c1](%cursor = %c0 : index) -> (index) {
+    %score = view.load %values[0, %block] : view<4x528xf32> -> f32
+    %rank = scf.for %other = [%c0 to %complete step %c1](%count = %c0 : index) -> (index) {
+      %candidate = view.load %values[0, %other] : view<4x528xf32> -> f32
+      %greater = scalar.cmpf ogt, %candidate, %score : f32
+      %equal = scalar.cmpf oeq, %candidate, %score : f32
+      %earlier = index.cmp ult, %other, %block : index
+      %earlier_tie = scalar.andi %equal, %earlier : i1
+      %precedes = scalar.ori %greater, %earlier_tie : i1
+      %increment = scf.select %precedes, %c1, %c0 : index
+      %next = index.add %count, %increment : index
+      scf.yield %next : index
+    }
+    %chosen = index.cmp ult, %rank, %budget : index
+    %next = scf.if %chosen -> (index) {
+      %word = index.cast %block : index to i32
+      %selected_slot = index.assume %cursor [range(%cursor, 0, 511)] : index
+      view.store %word, %output[%query_begin, %selected_slot] : i32, view<8x512xi32>
+      %next = index.add %cursor, %c1 : index
+      scf.yield %next : index
+    } else {
+      scf.yield %cursor : index
+    }
+    scf.yield %next : index
+  }
+  func.return
+}
+
+check.scenario public @sparse_selection {
+  check.trial[5](%trial: index, %entropy: check.entropy) {
+    %query_begin = check.literal value(3) : index
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+    %scores = check.generate.fill value(1000.0) : tensor<4x528xf32>
+    check.generate<@fixture>(%trial, %epoch, %mapping, %scores) : (index, tensor<3xi32>, tensor<8x4xi32>, tensor<4x528xf32>) -> ()
+    %selected = check.generate.fill value(-99) : tensor<8x512xi32>
+    check.compare<@qsa_select_blocks, @reference>(%query_begin, %epoch, %mapping, %scores, %selected) : (index, tensor<3xi32>, tensor<8x4xi32>, tensor<4x528xf32>, tensor<8x512xi32>) -> () {
+      check.expect.bitwise actual(%selected) expected(%selected) : tensor<8x512xi32>
+    }
+  }
+  check.return
+}
