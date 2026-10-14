@@ -1,0 +1,307 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.ple.eos : %value: i32 where [range(%value, 0, 248319)]
+
+config.decl @flash_next.ple.multiplier_0 : %value: i64 where [range(%value, 1, 37143239288394)]
+
+config.decl @flash_next.ple.multiplier_1 : %value: i64 where [range(%value, 1, 37143239288394)]
+
+config.decl @flash_next.ple.multiplier_2 : %value: i64 where [range(%value, 1, 37143239288394)]
+
+config.decl @flash_next.ple.prime_0 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_0 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_1 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_1 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_2 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_2 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_3 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_3 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_4 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_4 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_5 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_5 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_6 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_6 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_7 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_7 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_8 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_8 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_9 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_9 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_10 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_10 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_11 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_11 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_12 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_12 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_13 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_13 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_14 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_14 : %value: i32 where [range(%value, 0, 320001535)]
+
+config.decl @flash_next.ple.prime_15 : %value: i64 where [range(%value, 1, 320001536)]
+
+config.decl @flash_next.ple.offset_15 : %value: i32 where [range(%value, 0, 320001535)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_token_binding(%mapping: buffer, %token: index) -> (index, index, index, index)
+
+func.decl @flash_next_row_state(%rows: buffer, %row: index, %position: index, %layer_origin: offset) -> (offset, offset)
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_span_state(%epoch: buffer, %rows: buffer, %span: index, %layer_origin: offset, %capacity: index) -> (index, index, i1, offset, offset)
+
+command.program.decl @flash_next_ple_lookup() launch(%parameters: buffer, %span: buffer, %row_ids: buffer, %output: buffer)
+
+// The cold model configuration supplies exact checkpoint multipliers, head
+// vocabulary sizes, and offsets. Each head's offset plus vocabulary size fits
+// the original table. Token IDs use the embedding's validated vocabulary.
+// Specialization retains the constant divisors through ordinary arithmetic.
+func.def inline @flash_next_ple_row(%mixed: i64, %prime: i64, %offset: i32) -> (i32) {
+  %remainder = scalar.remui %mixed, %prime : i64
+  %within_head = scalar.trunci %remainder : i64 to i32
+  %row = scalar.addi %within_head, %offset : i32
+  func.return %row : i32
+}
+
+// History contains the two actual preceding IDs in chronological order.
+// It is immutable for the entire dispatch, including inactive workgroups.
+// An EOS immediately before the current token suppresses the older context;
+// the current token's EOS does not erase its own preceding context.
+kernel.def @flash_next_ple_hash_ids() {
+  %capacity = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  %padding = index.constant 31 : index
+  %padded = index.add %capacity, %padding : index
+  %groups = index.div %padded, %threads : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%history_origin: offset, %span_arg: buffer, %mapping: buffer, %origins: buffer, %tokens_arg: buffer, %history_arg: buffer, %rows_arg: buffer) {
+  %span, %tokens, %history, %output = buffer.assume.noalias %span_arg, %tokens_arg, %history_arg, %rows_arg : buffer, buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %capacity) : (buffer, index) -> (index)
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %threads = index.constant 32 : index
+  %token = index.madd %group, %threads, %lane : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %position, %row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %reader, %writer = func.call @flash_next_row_state(%origins, %row, %first, %history_origin) : (buffer, index, index, offset) -> (offset, offset)
+    %fresh_position = index.constant 0 : index
+    %fresh = index.cmp eq, %first, %fresh_position : index
+    %eos = config.get @flash_next.ple.eos : i32
+    %origin = index.constant 0 : offset
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c2 = index.constant 2 : index
+    %input = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
+    %retained = buffer.view %history[%reader] : buffer -> view<2xi32>
+    %rows = buffer.view %output[%origin] : buffer -> view<[%capacity]x16xi32>
+    %second = index.add %begin, %c1 : index
+    %has_previous = index.cmp ugt, %token, %begin : index
+    %has_older = index.cmp ugt, %token, %second : index
+    %current_raw = view.load %input[%token] : view<[%capacity]xi32> -> i32
+    %previous_raw = scf.if %has_previous -> (i32) {
+      %position = index.sub %token, %c1 : index
+      %value = view.load %input[%position] : view<[%capacity]xi32> -> i32
+      scf.yield %value : i32
+    } else {
+      %value = scf.if %fresh -> (i32) {
+        scf.yield %eos : i32
+      } else {
+        %stored = view.load %retained[%c1] : view<2xi32> -> i32
+        scf.yield %stored : i32
+      }
+      scf.yield %value : i32
+    }
+    %older_raw = scf.if %has_older -> (i32) {
+      %position = index.sub %token, %c2 : index
+      %value = view.load %input[%position] : view<[%capacity]xi32> -> i32
+      scf.yield %value : i32
+    } else {
+      %position = scf.select %has_previous, %c1, %c0 : index
+      %value = scf.if %fresh -> (i32) {
+        scf.yield %eos : i32
+      } else {
+        %stored = view.load %retained[%position] : view<2xi32> -> i32
+        scf.yield %stored : i32
+      }
+      scf.yield %value : i32
+    }
+    %current = scalar.assume %current_raw [range(%current_raw, 0, 248319)] : i32
+    %previous = scalar.assume %previous_raw [range(%previous_raw, 0, 248319)] : i32
+    %older_input = scalar.assume %older_raw [range(%older_raw, 0, 248319)] : i32
+    %cut = scalar.cmpi eq, %previous, %eos : i32
+    %older = scf.select %cut, %eos, %older_input : i32
+    %current64 = scalar.extui %current : i32 to i64
+    %previous64 = scalar.extui %previous : i32 to i64
+    %older64 = scalar.extui %older : i32 to i64
+    %multiplier0 = config.get @flash_next.ple.multiplier_0 : i64
+    %multiplier1 = config.get @flash_next.ple.multiplier_1 : i64
+    %multiplier2 = config.get @flash_next.ple.multiplier_2 : i64
+    %product0 = scalar.muli %current64, %multiplier0 : i64
+    %product1 = scalar.muli %previous64, %multiplier1 : i64
+    %product2 = scalar.muli %older64, %multiplier2 : i64
+    %bigram = scalar.xori %product0, %product1 : i64
+    %trigram = scalar.xori %bigram, %product2 : i64
+    %prime0 = config.get @flash_next.ple.prime_0 : i64
+    %offset0 = config.get @flash_next.ple.offset_0 : i32
+    %row0 = func.call @flash_next_ple_row(%bigram, %prime0, %offset0) : (i64, i64, i32) -> (i32)
+    view.store %row0, %rows[%token, 0] : i32, view<[%capacity]x16xi32>
+    %prime1 = config.get @flash_next.ple.prime_1 : i64
+    %offset1 = config.get @flash_next.ple.offset_1 : i32
+    %row1 = func.call @flash_next_ple_row(%bigram, %prime1, %offset1) : (i64, i64, i32) -> (i32)
+    view.store %row1, %rows[%token, 1] : i32, view<[%capacity]x16xi32>
+    %prime2 = config.get @flash_next.ple.prime_2 : i64
+    %offset2 = config.get @flash_next.ple.offset_2 : i32
+    %row2 = func.call @flash_next_ple_row(%bigram, %prime2, %offset2) : (i64, i64, i32) -> (i32)
+    view.store %row2, %rows[%token, 2] : i32, view<[%capacity]x16xi32>
+    %prime3 = config.get @flash_next.ple.prime_3 : i64
+    %offset3 = config.get @flash_next.ple.offset_3 : i32
+    %row3 = func.call @flash_next_ple_row(%bigram, %prime3, %offset3) : (i64, i64, i32) -> (i32)
+    view.store %row3, %rows[%token, 3] : i32, view<[%capacity]x16xi32>
+    %prime4 = config.get @flash_next.ple.prime_4 : i64
+    %offset4 = config.get @flash_next.ple.offset_4 : i32
+    %row4 = func.call @flash_next_ple_row(%bigram, %prime4, %offset4) : (i64, i64, i32) -> (i32)
+    view.store %row4, %rows[%token, 4] : i32, view<[%capacity]x16xi32>
+    %prime5 = config.get @flash_next.ple.prime_5 : i64
+    %offset5 = config.get @flash_next.ple.offset_5 : i32
+    %row5 = func.call @flash_next_ple_row(%bigram, %prime5, %offset5) : (i64, i64, i32) -> (i32)
+    view.store %row5, %rows[%token, 5] : i32, view<[%capacity]x16xi32>
+    %prime6 = config.get @flash_next.ple.prime_6 : i64
+    %offset6 = config.get @flash_next.ple.offset_6 : i32
+    %row6 = func.call @flash_next_ple_row(%bigram, %prime6, %offset6) : (i64, i64, i32) -> (i32)
+    view.store %row6, %rows[%token, 6] : i32, view<[%capacity]x16xi32>
+    %prime7 = config.get @flash_next.ple.prime_7 : i64
+    %offset7 = config.get @flash_next.ple.offset_7 : i32
+    %row7 = func.call @flash_next_ple_row(%bigram, %prime7, %offset7) : (i64, i64, i32) -> (i32)
+    view.store %row7, %rows[%token, 7] : i32, view<[%capacity]x16xi32>
+    %prime8 = config.get @flash_next.ple.prime_8 : i64
+    %offset8 = config.get @flash_next.ple.offset_8 : i32
+    %row8 = func.call @flash_next_ple_row(%trigram, %prime8, %offset8) : (i64, i64, i32) -> (i32)
+    view.store %row8, %rows[%token, 8] : i32, view<[%capacity]x16xi32>
+    %prime9 = config.get @flash_next.ple.prime_9 : i64
+    %offset9 = config.get @flash_next.ple.offset_9 : i32
+    %row9 = func.call @flash_next_ple_row(%trigram, %prime9, %offset9) : (i64, i64, i32) -> (i32)
+    view.store %row9, %rows[%token, 9] : i32, view<[%capacity]x16xi32>
+    %prime10 = config.get @flash_next.ple.prime_10 : i64
+    %offset10 = config.get @flash_next.ple.offset_10 : i32
+    %row10 = func.call @flash_next_ple_row(%trigram, %prime10, %offset10) : (i64, i64, i32) -> (i32)
+    view.store %row10, %rows[%token, 10] : i32, view<[%capacity]x16xi32>
+    %prime11 = config.get @flash_next.ple.prime_11 : i64
+    %offset11 = config.get @flash_next.ple.offset_11 : i32
+    %row11 = func.call @flash_next_ple_row(%trigram, %prime11, %offset11) : (i64, i64, i32) -> (i32)
+    view.store %row11, %rows[%token, 11] : i32, view<[%capacity]x16xi32>
+    %prime12 = config.get @flash_next.ple.prime_12 : i64
+    %offset12 = config.get @flash_next.ple.offset_12 : i32
+    %row12 = func.call @flash_next_ple_row(%trigram, %prime12, %offset12) : (i64, i64, i32) -> (i32)
+    view.store %row12, %rows[%token, 12] : i32, view<[%capacity]x16xi32>
+    %prime13 = config.get @flash_next.ple.prime_13 : i64
+    %offset13 = config.get @flash_next.ple.offset_13 : i32
+    %row13 = func.call @flash_next_ple_row(%trigram, %prime13, %offset13) : (i64, i64, i32) -> (i32)
+    view.store %row13, %rows[%token, 13] : i32, view<[%capacity]x16xi32>
+    %prime14 = config.get @flash_next.ple.prime_14 : i64
+    %offset14 = config.get @flash_next.ple.offset_14 : i32
+    %row14 = func.call @flash_next_ple_row(%trigram, %prime14, %offset14) : (i64, i64, i32) -> (i32)
+    view.store %row14, %rows[%token, 14] : i32, view<[%capacity]x16xi32>
+    %prime15 = config.get @flash_next.ple.prime_15 : i64
+    %offset15 = config.get @flash_next.ple.offset_15 : i32
+    %row15 = func.call @flash_next_ple_row(%trigram, %prime15, %offset15) : (i64, i64, i32) -> (i32)
+    view.store %row15, %rows[%token, 15] : i32, view<[%capacity]x16xi32>
+  }
+  kernel.return
+}
+
+// One owner publishes after all hash readers complete. A one-token span shifts
+// the last actual ID, without substituting the EOS-masked hash context.
+kernel.def @flash_next_ple_publish_history() {
+  %spans = index.constant 16 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%history_origin: offset, %span: buffer, %origins: buffer, %tokens: buffer, %arena: buffer) {
+  %slot = kernel.workgroup.id<x> : index
+  %active = func.call @flash_next_span_active(%span, %slot) : (buffer, index) -> (i1)
+  scf.if %active {
+    %capacity = config.get @flash_next.token_count : index
+    %begin, %end, %fresh, %reader, %writer = func.call @flash_next_span_state(%span, %origins, %slot, %history_origin, %capacity) : (buffer, buffer, index, offset, index) -> (index, index, i1, offset, offset)
+    %origin = index.constant 0 : offset
+    %c1 = index.constant 1 : index
+    %input = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
+    %previous = buffer.view %arena[%reader] : buffer -> view<2xi32>
+    %output = buffer.view %arena[%writer] : buffer -> view<2xi32>
+    %last = index.sub %end, %c1 : index
+    %has_two = index.cmp ugt, %last, %begin : index
+    %newest = view.load %input[%last] : view<[%capacity]xi32> -> i32
+    %older = scf.if %has_two -> (i32) {
+      %position = index.sub %last, %c1 : index
+      %value = view.load %input[%position] : view<[%capacity]xi32> -> i32
+      scf.yield %value : i32
+    } else {
+      %value = scf.if %fresh -> (i32) {
+        %eos = config.get @flash_next.ple.eos : i32
+        scf.yield %eos : i32
+      } else {
+        %stored = view.load %previous[1] : view<2xi32> -> i32
+        scf.yield %stored : i32
+      }
+      scf.yield %value : i32
+    }
+    view.store %older, %output[0] : i32, view<2xi32>
+    view.store %newest, %output[1] : i32, view<2xi32>
+  }
+  kernel.return
+}
+
+command.program.def public @flash_next_ple_hash(%history_origin: offset) launch(%span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %arena: buffer, %rows: buffer) {
+  kernel.launch @flash_next_ple_hash_ids(%history_origin, %span, %mapping, %origins, %tokens, %arena, %rows) : (offset, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_ple_publish_history(%history_origin, %span, %origins, %tokens, %arena) : (offset, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @flash_next_ple_embed(%history_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %arena: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %row_bytes = index.constant 64 : offset
+  %bytes = index.scale %capacity, %row_bytes : index, offset -> offset
+  %rows = buffer.alloca<global> align(64) %bytes : buffer
+  command.program.launch @flash_next_ple_hash[%history_origin](%span, %mapping, %origins, %tokens, %arena, %rows) : [offset](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_ple_lookup(%parameters, %span, %rows, %output) : (buffer, buffer, buffer, buffer)
+  command.return
+}

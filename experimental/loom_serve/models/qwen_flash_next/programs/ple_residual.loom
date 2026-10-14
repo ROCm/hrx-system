@@ -1,0 +1,39 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+command.program.decl @flash_next_ple_embed(%history_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %arena: buffer, %output: buffer)
+
+kernel.decl @flash_next_linear_q8(%output_capacity: index) launch(%input_width: index, %output_width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+command.program.decl @flash_next_ple_consume(%layer: index, %history_origin: offset) launch(%parameters: buffer, %span: buffer, %origins: buffer, %key: buffer, %value: buffer, %residual: buffer, %history: buffer, %output: buffer)
+
+// PLE updates the four residual streams before the layer's hyperconnection.
+// The caller retains two chronological token IDs and nine chronological BF16
+// convolution vectors across spans, with fresh EOS and zero values synthesized in registers.
+// Only active rows advance either history or publish residuals. Original
+// packed weights remain immutable; transient activations stay BF16.
+command.program.def public @flash_next_ple_residual(%layer: index, %token_history_origin: offset, %convolution_history_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %residual: buffer, %arena: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %hidden = index.constant 2560 : index
+  %residual_width = index.constant 10240 : index
+  %hidden_row_bytes = index.constant 5120 : offset
+  %residual_row_bytes = index.constant 20480 : offset
+  %hidden_bytes = index.scale %capacity, %hidden_row_bytes : index, offset -> offset
+  %residual_bytes = index.scale %capacity, %residual_row_bytes : index, offset -> offset
+  %key_weight = command.parameter %parameters, "blk.{}.ple_key.weight"[%layer] : view<10240x80x34xi8>
+  %value_weight = command.parameter %parameters, "blk.{}.ple_value.weight"[%layer] : view<2560x80x34xi8>
+
+  %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @flash_next_ple_embed[%token_history_origin](%parameters, %span, %mapping, %origins, %tokens, %arena, %embedding) : [offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %key = buffer.alloca<global> align(256) %residual_bytes : buffer
+  kernel.launch @flash_next_linear_q8[%residual_width](%hidden, %residual_width, %span, %embedding, %key_weight, %key) : [index](index, index, buffer, buffer, view<10240x80x34xi8>, buffer)
+  %value = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @flash_next_linear_q8[%hidden](%hidden, %hidden, %span, %embedding, %value_weight, %value) : [index](index, index, buffer, buffer, view<2560x80x34xi8>, buffer)
+  command.program.launch @flash_next_ple_consume[%layer, %convolution_history_origin](%parameters, %span, %origins, %key, %value, %residual, %arena, %output) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

@@ -1,0 +1,126 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @flash_next_ple_lookup_iq4() launch(%epoch: buffer, %ids: buffer, %weight: buffer, %output: buffer)
+
+// Finite signed scales leave arbitrary payload bytes intact. All five blocks
+// in each 160-channel row have distinct scales, including zero and negatives.
+func.def @fixture(%trial: index, %epoch: buffer, %weight: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %blocks = index.constant 185 : index
+  %block_bytes = index.constant 18 : offset
+  %period = index.constant 17 : index
+  %center = scalar.constant 8 : i32
+  %scale_factor = scalar.constant 0.001953125 : f32
+  %full = index.cmp eq, %trial, %c1 : index
+  %empty = index.cmp eq, %trial, %c0 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c8_i32 = scalar.constant 8 : i32
+  %c3_i32 = scalar.constant 3 : i32
+  %nonempty = scf.select %full, %c8_i32, %c3_i32 : i32
+  %count = scf.select %empty, %c0_i32, %nonempty : i32
+  %header = buffer.view %epoch[%origin] : buffer -> view<1xi32>
+  view.store %count, %header[0] : i32, view<1xi32>
+  scf.for %block = [%c0 to %blocks step %c1] {
+    %base = index.scale %block, %block_bytes : index, offset -> offset
+    %header = buffer.view %weight[%base] : buffer -> view<1xf16>
+    %ordinal = index.rem %block, %period : index
+    %word = index.cast %ordinal : index to i32
+    %signed = scalar.subi %word, %center : i32
+    %value = scalar.sitofp %signed : i32 to f32
+    %scaled = scalar.mulf %value, %scale_factor : f32
+    %packed = scalar.fptrunc %scaled : f32 to f16
+    view.store %packed, %header[0] : f16, view<1xf16>
+  }
+  func.return
+}
+
+// Independent scalar nibble decoding and F64 scale application. The encoded
+// halves are sixteen channels apart, not alternating adjacent channels.
+func.def @reference(%epoch: buffer, %ids: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<1xi32>
+  %count_word = view.load %header[0] : view<1xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, 8)] : index
+  %rows = buffer.view %ids[%origin] : buffer -> view<8x16xi32>
+  %result = buffer.view %output[%origin] : buffer -> view<8x16x160xbf16>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c160 = index.constant 160 : index
+  %row_bytes = index.constant 90 : offset
+  %block_bytes = index.constant 18 : offset
+  %payload_bytes = index.constant 2 : offset
+  %mask = scalar.constant 15 : i8
+  %shift = scalar.constant 4 : i8
+  %code0 = scalar.constant -127 : i32
+  %code1 = scalar.constant -104 : i32
+  %code2 = scalar.constant -83 : i32
+  %code3 = scalar.constant -65 : i32
+  %code4 = scalar.constant -49 : i32
+  %code5 = scalar.constant -35 : i32
+  %code6 = scalar.constant -22 : i32
+  %code7 = scalar.constant -10 : i32
+  %code8 = scalar.constant 1 : i32
+  %code9 = scalar.constant 13 : i32
+  %code10 = scalar.constant 25 : i32
+  %code11 = scalar.constant 38 : i32
+  %code12 = scalar.constant 53 : i32
+  %code13 = scalar.constant 69 : i32
+  %code14 = scalar.constant 89 : i32
+  %code15 = scalar.constant 113 : i32
+  %codebook = vector.from_elements %code0, %code1, %code2, %code3, %code4, %code5, %code6, %code7, %code8, %code9, %code10, %code11, %code12, %code13, %code14, %code15 : vector<16xi32>
+  scf.for %token = [%c0 to %count step %c1] {
+    scf.for %head = [%c0 to %c16 step %c1] {
+      %row_word = view.load %rows[%token, %head] : view<8x16xi32> -> i32
+      %row = index.cast %row_word : i32 to index
+      %row_origin = index.scale %row, %row_bytes : index, offset -> offset
+      scf.for %channel = [%c0 to %c160 step %c1] {
+        %block = index.div %channel, %c32 : index
+        %relative = index.scale %block, %block_bytes : index, offset -> offset
+        %base = index.add %row_origin, %relative : offset
+        %payload = index.add %base, %payload_bytes : offset
+        %scale_view = buffer.view %weight[%base] : buffer -> view<1xf16>
+        %codes = buffer.view %weight[%payload] : buffer -> view<16xi8>
+        %byte_index = index.rem %channel, %c16 : index
+        %half_index = index.rem %channel, %c32 : index
+        %upper = index.cmp uge, %half_index, %c16 : index
+        %packed = view.load %codes[%byte_index] : view<16xi8> -> i8
+        %high = scalar.shrui %packed, %shift : i8
+        %chosen = scf.select %upper, %high, %packed : i8
+        %nibble = scalar.andi %chosen, %mask : i8
+        %lookup = index.cast %nibble : i8 to index
+        %code = vector.extract %codebook[%lookup] : vector<16xi32> -> i32
+        %value = scalar.sitofp %code : i32 to f64
+        %scale_packed = view.load %scale_view[0] : view<1xf16> -> f16
+        %scale = scalar.extf %scale_packed : f16 to f64
+        %scaled = scalar.mulf %value, %scale : f64
+        %expected = scalar.fptrunc %scaled : f64 to bf16
+        view.store %expected, %result[%token, %head, %channel] : bf16, view<8x16x160xbf16>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @iq4_nonlinear_lookup {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    %ids = check.generate.iota offset(0) step(1) period(37) : tensor<8x16xi32>
+    %weight = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<3330xi8>
+    check.generate<@fixture>(%trial, %epoch, %weight) : (index, tensor<3xi32>, tensor<3330xi8>) -> ()
+    %output = check.generate.fill value(-99.0) : tensor<8x16x160xbf16>
+    check.compare<@flash_next_ple_lookup_iq4, @reference>(%epoch, %ids, %weight, %output) : (tensor<3xi32>, tensor<8x16xi32>, tensor<3330xi8>, tensor<8x16x160xbf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<8x16x160xbf16>
+    }
+  }
+  check.return
+}
