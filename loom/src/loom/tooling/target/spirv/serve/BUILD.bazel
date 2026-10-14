@@ -10,6 +10,7 @@ load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_libra
 load("//loom/src/loom/serve/fixture/decision:sources.bzl", DECISION_SOURCES = "SOURCES")
 load("//loom/src/loom/serve/fixture/embedding:sources.bzl", EMBEDDING_SOURCES = "SOURCES", EMBEDDING_VARIANT_SOURCES = "VARIANT_SOURCES")
 load("//loom/src/loom/serve/fixture/image:sources.bzl", IMAGE_SOURCES = "SOURCES")
+load("//loom/src/loom/serve/fixture/projector:sources.bzl", PROJECTOR_SOURCES = "SOURCES")
 load("//loom/src/loom/serve/fixture/text:sources.bzl", TEXT_SOURCES = "SOURCES")
 
 package(default_visibility = ["//visibility:private"])
@@ -193,6 +194,32 @@ loom_cc_test(
         ":test_compiler",
         ":test_device",
         "//loom/src/loom/serve/service/text:source_execution_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_text_media_test",
+    data = TEXT_SOURCES + PROJECTOR_SOURCES,
+    env = {
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
+        "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=vulkan.resource.device",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:spirv_vulkan_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/text:media_projector_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )

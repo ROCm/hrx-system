@@ -343,6 +343,30 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "source_text_media_test",
+    data = TEXT_SOURCES + PROJECTOR_SOURCES,
+    env = {
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
+        "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/text:media_projector_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "source_image_service_test",
     data = IMAGE_SOURCES,
     env = {
