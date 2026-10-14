@@ -4,13 +4,18 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+load("//build_tools/bazel:cc_opts.bzl", "iree_code_link_options")
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//build_tools/bazel:select.bzl", "defaulting_select", "iree_select")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "iree_cmake_extra_content",
     "loom_cc_library",
     "loom_config_compatible_with",
 )
+load(":shared_interface.bzl", "loomc_shared_interface", "loomc_static_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -36,6 +41,7 @@ LOOMC_PUBLIC_HDRS = [
     "include/loomc/context.h",
     "include/loomc/diagnostic.h",
     "include/loomc/emit.h",
+    "include/loomc/import/cxx.h",
     "include/loomc/iree.h",
     "include/loomc/launch_config.h",
     "include/loomc/link.h",
@@ -120,11 +126,6 @@ _TARGET_EXTENSION_VISIBILITY = [
     "//loom/binding/c/target:__subpackages__",
 ]
 
-exports_files(
-    ["include/loomc/import/cxx.h"],
-    visibility = ["//loom/binding/c/import/cxx:__pkg__"],
-)
-
 _LOOMC_FULL_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:spirv_vulkan_hal",
 ])
@@ -146,8 +147,140 @@ exports_files(
     visibility = _TARGET_EXTENSION_VISIBILITY,
 )
 
-loom_cc_library(
+# Compiler implementations may name the target-independent core directly.
+package_group(
+    name = "implementation",
+    packages = [
+        "//loom/binding/c",
+        "//loom/binding/c/target/...",
+    ],
+)
+
+# The complete configured compiler. HAL adapters and execution runtimes remain
+# separate consumers of the public :loomc alias.
+_LOOMC_TARGET_DEPS = [
+    "//loom/binding/c/target/cmd:cmd_impl",
+    "//loom/binding/c/target/configured:configured_impl",
+    "//loom/src/loom/sanitizer:runtime_requirements",
+    "//loom/src/loom/target:profile",
+    "//loom/src/loom/target:provider",
+    "//loom/src/loom/target:selection",
+] + iree_select({
+    "//loom/config/target/arch:vm": ["//loom/binding/c/target/vm:vm_impl"],
+    "//conditions:default": [],
+}) + iree_select({
+    "//loom/config/target:amdgpu_artifacts": [
+        "//loom/binding/c/target/amdgpu:amdgpu_impl",
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
+        "//loom/src/loom/target/arch/amdgpu:profile",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+    ],
+    "//conditions:default": [],
+}) + iree_select({
+    "//loom/config/target:spirv_artifacts": [
+        "//loom/binding/c/target/spirv:spirv_impl",
+        "//loom/binding/c/target/spirv/vulkaninfo:vulkaninfo_impl",
+    ],
+    "//conditions:default": [],
+}) + iree_select({
+    "//loom/config/target:xdna_artifacts": [
+        "//loom/binding/c/target/amd/xdna:xdna_impl",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:target_profile",
+    ],
+    "//conditions:default": [],
+}) + iree_select({
+    "//loom/config/target:wasm_artifacts": ["//loom/binding/c/target/wasm:wasm_impl"],
+    "//conditions:default": [],
+})
+
+loomc_static_library(
+    name = "loomc_static",
+    visibility = ["//visibility:private"],
+    deps = [":loomc_core"] + _LOOMC_TARGET_DEPS,
+)
+
+# Public consumers select linkage here. Implementation targets stay private.
+alias(
     name = "loomc",
+    actual = defaulting_select({
+        "//loom/config:link_loomc_shared": ":loomc_shared",
+        "//conditions:default": ":loomc_static",
+    }),
+    tags = ["cmake-library-alias"],
+)
+
+# Preserve the implementation's header interface for target bindings without
+# propagating its static link dependencies into shared-library consumers.
+loomc_shared_interface(
+    name = "loomc_shared",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":loomc_shared_import",
+        "//runtime/src/iree/base",
+    ],
+    implementation = ":loomc_static",
+)
+
+# Link each compiler component as a root so its complete LoomC API is retained.
+cc_shared_library(
+    name = "loomc_shared_artifact",
+    additional_linker_inputs = ["//loom/binding/c:cmake/loomc_exports.lds"],
+    shared_lib_name = defaulting_select({
+        "@platforms//os:macos": "libloomc.dylib",
+        "//conditions:default": "libloomc.so",
+    }),
+    tags = ["skip-bazel_to_cmake"],
+    # Windows needs an explicit public export list before enabling this path.
+    target_compatible_with = defaulting_select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    user_link_flags = iree_code_link_options() + defaulting_select({
+        "@platforms//os:macos": [
+            "-Wl,-exported_symbol,_loomc_*",
+            "-Wl,-exported_symbol,_loom_aie2p_target_profile_select*",
+            "-Wl,-exported_symbol,_loom_aie2p_target_profile_type*",
+            "-Wl,-exported_symbol,_loom_amdgpu_artifact_key_append*",
+            "-Wl,-exported_symbol,_loom_amdgpu_target_info_find_target*",
+            "-Wl,-exported_symbol,_loom_amdgpu_target_info_is_generic*",
+            "-Wl,-exported_symbol,_loom_amdgpu_target_info_target_processor*",
+            "-Wl,-exported_symbol,_loom_amdgpu_target_profile_type*",
+            "-Wl,-exported_symbol,_loom_sanitizer_runtime_requirements_query*",
+            "-Wl,-exported_symbol,_loom_target_environment_lookup_profile_provider*",
+            "-Wl,-exported_symbol,_loom_target_environment_select_cpu_profile*",
+            "-Wl,-exported_symbol,_loom_target_profile_selection_release*",
+            "-Wl,-install_name,@rpath/libloomc.dylib",
+        ],
+        "//conditions:default": [
+            "-Wl,--version-script=$(location //loom/binding/c:cmake/loomc_exports.lds)",
+            "-Wl,-z,defs",
+            "-Wl,-soname,libloomc.so",
+        ],
+    }),
+    visibility = ["//visibility:private"],
+    deps = [":loomc_core"] + _LOOMC_TARGET_DEPS,
+)
+
+filegroup(
+    name = "loomc_shared_library",
+    srcs = [":loomc_shared_artifact"],
+    output_group = "main_shared_library_output",
+    tags = ["skip-bazel_to_cmake"],
+)
+
+# Import only the ABI. Propagating the artifact's static link graph would pull
+# compiler archives back into consumers and collide with their runtime support.
+cc_import(
+    name = "loomc_shared_import",
+    shared_library = ":loomc_shared_library",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:private"],
+)
+
+loom_cc_library(
+    name = "loomc_core",
     srcs = [
         "include/loomc/interop.h",
         "src/artifact.c",
@@ -185,7 +318,10 @@ loom_cc_library(
         "src/target.c",
         "src/task.c",
         "src/workspace.c",
-    ],
+    ] + iree_select({
+        "//loom/config/import:cxx": ["//loom/binding/c/import/cxx:cxx.c"],
+        "//conditions:default": [],
+    }),
     hdrs = LOOMC_PUBLIC_HDRS + [
         "src/config.h",
         "src/context.h",
@@ -211,6 +347,7 @@ loom_cc_library(
         "include",
         "src",
     ],
+    visibility = [":implementation"],
     deps = [
         "//loom/src/loom/analysis:kernel_launch_config",
         "//loom/src/loom/codegen:pass_environment",
@@ -282,7 +419,10 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:stream",
-    ],
+    ] + iree_select({
+        "//loom/config/import:cxx": ["//loom/src/loom/import/cxx"],
+        "//conditions:default": [],
+    }),
 )
 
 loom_cc_library(
@@ -290,7 +430,7 @@ loom_cc_library(
     hdrs = ["include/loomc/interop.h"],
     includes = ["include"],
     deps = [
-        ":loomc",
+        ":loomc_core",
         "//loom/src/loom/error:source",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:pipeline",
@@ -309,7 +449,7 @@ iree_assert_dependency_boundary(
         "//loom/src/loom/tools/...",
     ],
     message = "Base LoomC must remain target-agnostic and independent of ejectable tooling adapters",
-    target = ":loomc",
+    target = ":loomc_core",
 )
 
 loom_cc_library(

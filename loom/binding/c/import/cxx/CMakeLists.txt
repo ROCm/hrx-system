@@ -10,18 +10,11 @@
 iree_add_all_subdirs()
 
 if(LOOM_IMPORT_CXX)
-loom_cc_library(
+iree_cc_library(
   NAME
     cxx
-  HDRS
-    "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/import/cxx.h"
-  SRCS
-    "cxx.c"
   DEPS
-    iree::base
     loom::binding::c::loomc
-    loom::import::cxx
-  ALWAYSLINK
   PUBLIC
 )
 endif()

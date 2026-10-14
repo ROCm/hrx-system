@@ -22,8 +22,15 @@ _AMDGPU_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/emit:amdgpu",
 ])
 
-loom_cc_library(
+alias(
     name = "amdgpu",
+    actual = "//loom/binding/c:loomc",
+    tags = ["cmake-library-alias"],
+    target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
+)
+
+loom_cc_library(
+    name = "amdgpu_impl",
     srcs = ["amdgpu.c"],
     hdrs = [
         "//loom/binding/c:include/loomc/target/amdgpu.h",
@@ -32,8 +39,9 @@ loom_cc_library(
     ],
     linkstatic = True,
     target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
+    visibility = ["//loom/binding/c:implementation"],
     deps = [
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:loomc_core",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/kernel",
@@ -56,7 +64,7 @@ iree_assert_dependency_boundary(
     name = "amdgpu_has_no_tooling_target_dependencies",
     forbidden_subtrees = ["//loom/src/loom/tooling/target/..."],
     message = "The LoomC AMDGPU target package must compose compiler-owned target emission without tooling target adapters",
-    target = ":amdgpu",
+    target = ":amdgpu_impl",
 )
 
 loom_cc_library(
@@ -69,9 +77,6 @@ loom_cc_library(
         ":amdgpu",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/iree_hal",
-        "//loom/src/loom/target/arch/amdgpu:artifact_key",
-        "//loom/src/loom/target/arch/amdgpu:profile",
-        "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/hal",
     ],
     alwayslink = True,

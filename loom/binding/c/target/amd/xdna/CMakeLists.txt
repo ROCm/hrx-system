@@ -10,9 +10,19 @@
 iree_add_all_subdirs()
 
 if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA)
-loom_cc_library(
+iree_cc_library(
   NAME
     xdna
+  DEPS
+    loom::binding::c::loomc
+  PUBLIC
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA)
+loom_cc_library(
+  NAME
+    xdna_impl
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amd/xdna.h"
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amd/xdna/base.h"
@@ -20,7 +30,7 @@ loom_cc_library(
   SRCS
     "xdna.c"
   DEPS
-    loom::binding::c::loomc
+    loom::binding::c::loomc_core
     loom::target::arch::amd::xdna::aie2p::artifact
     loom::target::arch::amd::xdna::aie2p::target_profile
   ALWAYSLINK
@@ -41,7 +51,6 @@ loom_cc_library(
     iree::hal
     loom::binding::c::loomc
     loom::binding::c::target::iree_hal
-    loom::target::arch::amd::xdna::aie2p::target_profile
   ALWAYSLINK
   PUBLIC
 )

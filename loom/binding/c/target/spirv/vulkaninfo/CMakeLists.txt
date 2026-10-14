@@ -10,17 +10,27 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
-loom_cc_library(
+iree_cc_library(
   NAME
     vulkaninfo
+  DEPS
+    loom::binding::c::loomc
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_cc_library(
+  NAME
+    vulkaninfo_impl
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/spirv/vulkaninfo.h"
   SRCS
     "vulkaninfo.c"
   DEPS
     iree::base::internal::json
-    loom::binding::c::loomc
-    loom::binding::c::target::spirv
+    loom::binding::c::loomc_core
+    loom::binding::c::target::spirv::spirv_impl
   ALWAYSLINK
   PUBLIC
 )

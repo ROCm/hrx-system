@@ -4,4 +4,18 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
 package(default_visibility = ["//visibility:public"])
+
+# Consumers opt into the distribution library; implementation libraries always
+# retain their static dependency graph.
+bool_flag(
+    name = "link_loomc",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "link_loomc_shared",
+    flag_values = {":link_loomc": "true"},
+)

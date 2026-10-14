@@ -13,16 +13,26 @@ package(
 )
 
 loom_cc_library(
+    name = "input",
+    srcs = ["input.c"],
+    hdrs = ["input.h"],
+    deps = [
+        "//loom/src/loom/config:text_binding",
+        "//loom/src/loom/tooling/io:file",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "config",
     srcs = ["config.c"],
     hdrs = ["config.h"],
     deps = [
+        ":input",
         "//loom/src/loom/config:application",
-        "//loom/src/loom/config:text_binding",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/config",
-        "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

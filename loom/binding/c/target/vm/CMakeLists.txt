@@ -10,15 +10,25 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_VM)
-loom_cc_library(
+iree_cc_library(
   NAME
     vm
+  DEPS
+    loom::binding::c::loomc
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    vm_impl
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/vm.h"
   SRCS
     "vm.c"
   DEPS
-    loom::binding::c::loomc
+    loom::binding::c::loomc_core
     loom::target::emit::vm::module_compiler
   ALWAYSLINK
   PUBLIC

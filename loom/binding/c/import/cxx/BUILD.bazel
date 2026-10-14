@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,17 +12,17 @@ package(
     licenses = ["notice"],
 )
 
-loom_cc_library(
+# The optional importer implementation is compiled into loomc itself.
+exports_files(
+    ["cxx.c"],
+    visibility = ["//loom/binding/c:__pkg__"],
+)
+
+alias(
     name = "cxx",
-    srcs = ["cxx.c"],
-    hdrs = ["//loom/binding/c:include/loomc/import/cxx.h"],
-    linkstatic = True,
-    deps = [
-        "//loom/binding/c:loomc",
-        "//loom/src/loom/import/cxx",
-        "//runtime/src/iree/base",
-    ],
-    alwayslink = True,
+    actual = "//loom/binding/c:loomc",
+    tags = ["cmake-library-alias"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_cc_test(

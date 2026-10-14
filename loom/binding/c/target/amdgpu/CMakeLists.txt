@@ -10,9 +10,19 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_cc_library(
+iree_cc_library(
   NAME
     amdgpu
+  DEPS
+    loom::binding::c::loomc
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
+    amdgpu_impl
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amdgpu.h"
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amdgpu/base.h"
@@ -21,7 +31,7 @@ loom_cc_library(
     "amdgpu.c"
   DEPS
     iree::base
-    loom::binding::c::loomc
+    loom::binding::c::loomc_core
     loom::ir
     loom::ops::kernel
     loom::ops::op_defs
@@ -53,9 +63,6 @@ loom_cc_library(
     iree::hal
     loom::binding::c::loomc
     loom::binding::c::target::iree_hal
-    loom::target::arch::amdgpu::artifact_key
-    loom::target::arch::amdgpu::profile
-    loom::target::arch::amdgpu::target_info
   ALWAYSLINK
   PUBLIC
 )

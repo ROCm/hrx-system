@@ -61,6 +61,9 @@ That gives you the command-line tools, the benchmark/test runner used by the
 authoring corpus, and the C ABI examples that show in-memory source, compile,
 link, result, diagnostic, and artifact flow.
 
+For distributions that include both `loom-compile` and `loom-serve`, see
+[sharing the compiler with libloomc](binding/c/README.md).
+
 ## Try The Authoring Corpus
 
 The best starting point for Loom source is:

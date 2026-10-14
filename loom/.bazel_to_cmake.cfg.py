@@ -776,6 +776,16 @@ class LoomBuildFileFunctions(
             1,
         )
 
+    def loomc_static_library(self, **kwargs):
+        self.loom_cc_library(**kwargs)
+
+    def loomc_shared_interface(self, **kwargs):
+        # CMake owns its existing shared-library composition separately.
+        if not self._should_skip_target(**kwargs):
+            raise NotImplementedError(
+                "loomc_shared_interface requires skip-bazel_to_cmake"
+            )
+
     def loom_cc_library(self, deps=[], **kwargs):
         kwargs = self._apply_loom_cmake_policy(kwargs)
         self._emit_rewritten_cmake_rule(

@@ -195,6 +195,10 @@ build:fuzzer --linkopt=-fsanitize=fuzzer-no-link
 build:fuzzer --cc_output_directory_tag=asan-fuzzer
 build:fuzzer --copt=-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
 
+
+# Share the Loom compiler between distribution tools.
+common --flag_alias=loom_link_loomc=//loom/config:link_loomc
+
 # -----------------------------------------------------------------------------
 # Local/generated configuration.
 # -----------------------------------------------------------------------------

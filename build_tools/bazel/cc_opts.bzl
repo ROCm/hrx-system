@@ -265,3 +265,6 @@ cc_opts = struct(
     iree_code_link_options = _iree_code_link_options,
     iree_cxx_standard_options = _iree_cxx_standard_options,
 )
+
+# Standalone spelling for BUILD rules that compose shared-library artifacts.
+iree_code_link_options = _iree_code_link_options

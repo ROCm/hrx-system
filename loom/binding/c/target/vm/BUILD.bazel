@@ -17,16 +17,26 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_cc_library(
+alias(
     name = "vm",
+    actual = "//loom/binding/c:loomc",
+    tags = ["cmake-library-alias"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+)
+
+loom_cc_library(
+    name = "vm_impl",
     srcs = ["vm.c"],
     hdrs = ["//loom/binding/c:include/loomc/target/vm.h"],
     linkstatic = True,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
     ]),
+    visibility = ["//loom/binding/c:implementation"],
     deps = [
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:loomc_core",
         "//loom/src/loom/target/emit/vm:module_compiler",
     ],
     alwayslink = True,
@@ -36,5 +46,5 @@ iree_assert_dependency_boundary(
     name = "vm_has_no_tooling_target_dependencies",
     forbidden_subtrees = ["//loom/src/loom/tooling/target/..."],
     message = "The LoomC VM target package must compose compiler-owned target emission without tooling target adapters",
-    target = ":vm",
+    target = ":vm_impl",
 )

@@ -15,16 +15,23 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_cc_library(
+alias(
     name = "cmd",
+    actual = "//loom/binding/c:loomc",
+    tags = ["cmake-library-alias"],
+)
+
+loom_cc_library(
+    name = "cmd_impl",
     srcs = ["program.c"],
     hdrs = [
         "//loom/binding/c:include/loomc/target/cmd.h",
         "//loom/binding/c:include/loomc/target/cmd/program.h",
     ],
     linkstatic = True,
+    visibility = ["//loom/binding/c:implementation"],
     deps = [
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:loomc_core",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/pass:builtin_registry",

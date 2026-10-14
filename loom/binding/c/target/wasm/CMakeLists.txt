@@ -10,15 +10,25 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
-loom_cc_library(
+iree_cc_library(
   NAME
     wasm
+  DEPS
+    loom::binding::c::loomc
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
+loom_cc_library(
+  NAME
+    wasm_impl
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/wasm.h"
   SRCS
     "wasm.c"
   DEPS
-    loom::binding::c::loomc
+    loom::binding::c::loomc_core
     loom::target::emit::wasm::module_compiler
   ALWAYSLINK
   PUBLIC

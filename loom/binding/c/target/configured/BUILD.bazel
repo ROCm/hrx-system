@@ -17,13 +17,20 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_cc_library(
+alias(
     name = "configured",
+    actual = "//loom/binding/c:loomc",
+    tags = ["cmake-library-alias"],
+)
+
+loom_cc_library(
+    name = "configured_impl",
     srcs = ["configured.c"],
     hdrs = ["//loom/binding/c:include/loomc/target/configured.h"],
     linkstatic = True,
+    visibility = ["//loom/binding/c:implementation"],
     deps = [
-        "//loom/binding/c:loomc",
+        "//loom/binding/c:loomc_core",
         "//loom/src/loom/target/configured:compiler_provider_set",
     ],
     alwayslink = True,
@@ -40,7 +47,7 @@ iree_assert_dependency_boundary(
         "//loom/src/loom/tooling/...",
     ],
     message = "The configured LoomC target package must depend on core target composition instead of target bindings or tooling adapters",
-    target = ":configured",
+    target = ":configured_impl",
 )
 
 loom_cc_test(

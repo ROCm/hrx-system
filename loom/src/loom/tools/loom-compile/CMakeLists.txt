@@ -24,7 +24,7 @@ loom_cc_binary(
     loom::tooling::cli::help
     loom::tooling::cli::loomc_options
     loom::tooling::cli::loomc_result
-    loom::tooling::config
+    loom::tooling::config::input
     loom::tooling::io::file
     loom::tooling::io::source_path
     loom::tooling::pass::trace_cli

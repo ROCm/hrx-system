@@ -19,7 +19,6 @@ loom_cc_library(
     linkstatic = True,
     deps = [
         "//loom/binding/c:loomc",
-        "//loom/src/loom/sanitizer:runtime_requirements",
         "//runtime/src/iree/hal",
     ],
     alwayslink = True,
