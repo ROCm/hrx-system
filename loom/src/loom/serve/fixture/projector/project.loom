@@ -1,0 +1,37 @@
+target.decl @fixture_target
+
+// Exact ownership witness: row i is [first_pixel.R + i, G, B, i] as i32.
+// This consumes the published pixel offset, not source-private metadata.
+kernel.def target(@fixture_target) @project() {
+  %c64 = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c64, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %row = kernel.workgroup.id<x> : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %rows32 = view.load %header[7] : view<16xi32> -> i32
+  %bounded_rows = scalar.assume %rows32 [range(%rows32, 1, 64)] : i32
+  %rows = index.cast %bounded_rows : i32 to index
+  %live = index.cmp ult, %row, %rows : index
+  scf.if %live {
+    %offset32 = view.load %header[10] : view<16xi32> -> i32
+    %offset64 = scalar.extui %offset32 : i32 to i64
+    %offset = index.cast %offset64 : i64 to offset
+    %pixel = buffer.view %input[%offset] : buffer -> view<3xi8>
+    %red8 = view.load %pixel[0] : view<3xi8> -> i8
+    %green8 = view.load %pixel[1] : view<3xi8> -> i8
+    %blue8 = view.load %pixel[2] : view<3xi8> -> i8
+    %red = scalar.extui %red8 : i8 to i32
+    %green = scalar.extui %green8 : i8 to i32
+    %blue = scalar.extui %blue8 : i8 to i32
+    %ordinal = index.cast %row : index to i32
+    %value = scalar.addi %red, %ordinal : i32
+    %result = buffer.view %output[%origin] : buffer -> view<[%rows]x4xi32>
+    view.store %value, %result[%row, 0] : i32, view<[%rows]x4xi32>
+    view.store %green, %result[%row, 1] : i32, view<[%rows]x4xi32>
+    view.store %blue, %result[%row, 2] : i32, view<[%rows]x4xi32>
+    view.store %ordinal, %result[%row, 3] : i32, view<[%rows]x4xi32>
+  }
+  kernel.return
+}

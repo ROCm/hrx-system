@@ -9,6 +9,7 @@ load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_libra
 load("//loom/src/loom/serve/fixture/decision:sources.bzl", DECISION_SOURCES = "SOURCES")
 load("//loom/src/loom/serve/fixture/embedding:sources.bzl", EMBEDDING_SOURCES = "SOURCES", EMBEDDING_VARIANT_SOURCES = "VARIANT_SOURCES")
 load("//loom/src/loom/serve/fixture/image:sources.bzl", IMAGE_SOURCES = "SOURCES")
+load("//loom/src/loom/serve/fixture/projector:sources.bzl", PROJECTOR_SOURCES = "SOURCES")
 load("//loom/src/loom/serve/fixture/text:sources.bzl", TEXT_SOURCES = "SOURCES")
 
 package(default_visibility = ["//visibility:private"])
@@ -82,6 +83,24 @@ py_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = ["//loom/src/loom/serve/testing:http"],
+)
+
+loom_cc_test(
+    name = "projector_fixture_test",
+    args = [
+        "--projector_source=$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
+        "--test_device=task",
+    ],
+    data = PROJECTOR_SOURCES,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]),
+    deps = [
+        "//loom/src/loom/serve/fixture/projector:projector_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_test(

@@ -10,6 +10,7 @@ load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_libra
 load("//loom/src/loom/serve/fixture/decision:sources.bzl", DECISION_SOURCES = "SOURCES")
 load("//loom/src/loom/serve/fixture/embedding:sources.bzl", EMBEDDING_SOURCES = "SOURCES", EMBEDDING_VARIANT_SOURCES = "VARIANT_SOURCES")
 load("//loom/src/loom/serve/fixture/image:sources.bzl", IMAGE_SOURCES = "SOURCES")
+load("//loom/src/loom/serve/fixture/projector:sources.bzl", PROJECTOR_SOURCES = "SOURCES")
 load("//loom/src/loom/serve/fixture/text:sources.bzl", TEXT_SOURCES = "SOURCES")
 
 package(
@@ -70,6 +71,25 @@ loom_cc_library(
         "//runtime/src/iree/hal/drivers/amdgpu/registration",
     ],
     alwayslink = True,
+)
+
+loom_cc_test(
+    name = "projector_fixture_test",
+    args = [
+        "--projector_source=$(rootpath //loom/src/loom/serve/fixture/projector:prepare.loom)",
+        "--test_device=amdgpu",
+    ],
+    data = PROJECTOR_SOURCES,
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+    deps = [
+        "//loom/src/loom/serve/fixture/projector:projector_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_test(

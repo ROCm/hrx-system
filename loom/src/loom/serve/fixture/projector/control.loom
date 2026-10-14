@@ -1,0 +1,79 @@
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+global.rodata.def @invalid = bytes("70726f6a6563746f722066697874757265207265717569726573206f6e6520696d61676520616e6420312e2e363420726f7773")
+
+func.def @check(%condition: i1) {
+  %condition32 = scalar.extui %condition : i1 to i32
+  %diagnostic = global.load @invalid : buffer
+  func.call @require(%condition32, %diagnostic) : (i32, buffer)
+  func.return
+}
+
+// The native image packet owns decoded RGB8 and its published byte offset.
+// The source owns projection extent and forwards that packet without repacking.
+func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %request[%origin] : buffer -> view<16xi32>
+  %rows = view.load %header[7] : view<16xi32> -> i32
+  %c0_i32 = scalar.constant 0 : i32
+  %limit = scalar.constant 64 : i32
+  %positive = scalar.cmpi ugt, %rows, %c0_i32 : i32
+  %bounded = scalar.cmpi ule, %rows, %limit : i32
+  %valid = scalar.andi %positive, %bounded : i1
+  func.call @check(%valid) : (i1)
+  %units = scalar.extui %rows : i32 to i64
+  %tag = scalar.constant 0 : i64
+  func.return %request, %units, %tag : buffer, i64, i64
+}
+
+func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %input: buffer) -> (i32, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %c16_bytes = index.constant 16 : offset
+  %range_bytes = buffer.length %ranges
+  %single = index.cmp eq, %range_bytes, %c16_bytes : offset
+  func.call @check(%single) : (i1)
+  %header = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %rows32 = view.load %header[7] : view<16xi32> -> i32
+  %bounded_rows = scalar.assume %rows32 [range(%rows32, 1, 64)] : i32
+  %rows = index.cast %bounded_rows : i32 to index
+  %rows64 = scalar.extui %rows32 : i32 to i64
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c56_bytes = index.constant 56 : offset
+  %output_bytes = index.scale %rows, %c16_bytes : index, offset -> offset
+  %plan_bytes = index.add %c56_bytes, %output_bytes : offset
+  %plan = buffer.alloca<private> align(8) %plan_bytes : buffer
+  %values = buffer.view %plan[%origin] : buffer -> view<7xi64>
+  %c0_i64 = scalar.constant 0 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %c4_i64 = scalar.constant 4 : i64
+  %extent = index.cast %output_bytes : offset to i64
+  view.store %extent, %values[0] : i64, view<7xi64>
+  view.store %extent, %values[1] : i64, view<7xi64>
+  view.store %c1_i64, %values[2] : i64, view<7xi64>
+  view.store %rows64, %values[3] : i64, view<7xi64>
+  view.store %c0_i64, %values[4] : i64, view<7xi64>
+  view.store %rows64, %values[5] : i64, view<7xi64>
+  view.store %c0_i64, %values[6] : i64, view<7xi64>
+  %records = buffer.view %plan[%c56_bytes] : buffer -> view<[%rows]x2xi64>
+  scf.for %row = [%c0 to %rows step %c1] {
+    %offset = index.scale %row, %c16_bytes : index, offset -> offset
+    %offset64 = index.cast %offset : offset to i64
+    view.store %offset64, %records[%row, 0] : i64, view<[%rows]x2xi64>
+    view.store %c4_i64, %records[%row, 1] : i64, view<[%rows]x2xi64>
+  }
+  %stage = scalar.constant 0 : i32
+  func.return %stage, %input, %plan : i32, buffer, buffer
+}
+
+func.def public @run(%stage: i32, %feedback_bytes: i64, %input: hal.buffer, %output: hal.buffer) {
+  %work = func.call @execute_2(%stage, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+  %slot = scalar.constant 0 : i32
+  %offset = scalar.constant 0 : i64
+  %ready = func.call @feedback(%slot, %output, %offset, %feedback_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return
+}
