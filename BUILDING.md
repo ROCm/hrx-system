@@ -324,6 +324,15 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-test -R hrx
 ```
 
+Link-time optimization uses CMake's native setting:
+
+```bash
+iree-cmake-configure -DCMAKE_BUILD_TYPE=Release -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+```
+
+This enables IPO for targets throughout the build. The mimalloc allocator and
+its C++ allocation adapter retain their explicit IPO exclusions.
+
 CMake build and run commands also accept a unique executable output name, such
 as `loom-compile`. If two packages emit the same filename, use the qualified
 generated alias so the selection remains explicit.

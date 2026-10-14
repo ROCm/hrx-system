@@ -151,7 +151,6 @@ include(iree_cc_binary_benchmark)
 include(iree_genrule)
 include(iree_python)
 include(iree_setup_toolchain)
-include(hrx_optimization)
 
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/googletest/googletest.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/google_benchmark/google_benchmark.cmake")
@@ -180,7 +179,6 @@ if(IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc" AND
   set(IREE_ALLOCATOR_SYSTEM "libc")
 endif()
 
-hrx_configure_ipo()
 set(IREE_DEFAULT_EXECUTABLE_LINK_LIBRARIES "")
 if(IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc")
   iree_configure_mimalloc()
