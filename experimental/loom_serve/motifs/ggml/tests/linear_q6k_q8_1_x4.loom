@@ -1,0 +1,55 @@
+kernel.decl @ggml_quantize_q8_1_x4_f32(%tokens: index, %inputs: index) launch(%tokens: index, %inputs: index, %input: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_q8_1_x4_m4(%tokens: index, %inputs: index, %outputs: index) launch(%tokens: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+// Power-of-two activation rows preserve the quantization pattern while scaling
+// the independently calculated Q6_K result. All nine output columns must be
+// written, including the second eight-channel tile's single live column.
+kernel.def @ggml_q6k_q8_1_x4_row_fixture() {
+  %groups = index.constant 32 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %expected: buffer) {
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %threads = index.constant 256 : index
+  %channels = index.constant 2048 : index
+  %outputs = index.constant 9 : index
+  %group_base = index.mul %group, %threads : index
+  %position = index.add %group_base, %thread : index
+  %row = index.div %position, %channels : index
+  %column = index.rem %position, %channels : index
+  %row_word = index.cast %row : index to i32
+  %one = scalar.constant 1 : i32
+  %scale_word = scalar.shli %one, %row_word : i32
+  %scale = scalar.sitofp %scale_word : i32 to f32
+  %input_base = scalar.constant 0.00390625 : f32
+  %expected_base = scalar.constant 358.1715087890625 : f32
+  %input_value = scalar.mulf %input_base, %scale : f32
+  %expected_value = scalar.mulf %expected_base, %scale : f32
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<4x2048xf32>
+  %expected_view = buffer.view %expected[%origin] : buffer -> view<4x9xf32>
+  view.store %input_value, %input_view[%row, %column] : f32, view<4x2048xf32>
+  %valid_output = index.cmp ult, %column, %outputs : index
+  scf.if %valid_output {
+    view.store %expected_value, %expected_view[%row, %column] : f32, view<4x9xf32>
+  }
+  kernel.return
+}
+
+check.case public @ggml_linear_q6k_q8_1_x4_m4_distinct_rows_case {
+  %tokens = check.literal value(4) : index
+  %inputs = check.literal value(2048) : index
+  %outputs = check.literal value(9) : index
+  %input = check.generate.fill value(-99.0) : tensor<4x2048xf32>
+  %quantized = check.generate.fill value(0) : tensor<4x2304xi8>
+  %weight = check.generate.fill value(-86) : tensor<9x8x210xi8>
+  %expected = check.generate.fill value(-99.0) : tensor<4x9xf32>
+  %actual = check.generate.fill value(-99.0) : tensor<4x9xf32>
+  kernel.launch @ggml_q6k_q8_1_x4_row_fixture(%input, %expected) : (tensor<4x2048xf32>, tensor<4x9xf32>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%tokens, %inputs](%tokens, %inputs, %input, %quantized) : [index, index](index, index, tensor<4x2048xf32>, tensor<4x2304xi8>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%tokens, %inputs, %outputs](%tokens, %inputs, %outputs, %quantized, %weight, %actual) : [index, index, index](index, index, index, tensor<4x2304xi8>, tensor<9x8x210xi8>, tensor<4x9xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<4x9xf32>
+  check.return
+}

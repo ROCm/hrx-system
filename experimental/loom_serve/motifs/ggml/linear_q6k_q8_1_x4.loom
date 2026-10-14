@@ -15,9 +15,9 @@ template.decl @ggml.q8_1_x4.word(%q8_input: buffer, %row_byte_base: offset, %q8_
 //   i8 scales[16];    // signed scale for each 16-value group
 //   f16 d;            // block-wide scale
 //
-// A wave owns one output value. Each lane contracts eight values from every
-// Q6_K block as two native signed dot4 packets, and the wave reduces those
-// partials. The kernel is the raw-layout correctness and decode baseline shared
+// A 32-lane cluster owns one output value. Each lane contracts eight values
+// from every Q6_K block as two native signed dot4 packets, and the cluster
+// reduces those partials. The raw-layout correctness and decode baseline is shared
 // by dense and routed projections; prefill schedules can reuse the inline
 // packed-row primitive while staging weights across multiple activation rows.
 // The shared packer is linked beside this module.
@@ -328,6 +328,21 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane_m4_wave64_block4(%input_size: index, 
   func.return %row0, %row1, %row2, %row3 : f32, f32, f32, f32
 }
 
+// Q6_K packet ownership uses 32-lane clusters. A wider subgroup carries
+// several independent output channels without changing the packed layout.
+func.def inline @ggml_q6k_q8_1_x4_cluster_coordinates() -> (index, index) {
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %subgroup_size = target.subgroup.size : index
+  %cluster_size = index.constant 32 : index
+  %clusters_per_subgroup = index.div %subgroup_size, %cluster_size : index
+  %subgroup_base = index.mul %subgroup, %clusters_per_subgroup : index
+  %cluster_in_subgroup = index.div %lane, %cluster_size : index
+  %cluster = index.add %subgroup_base, %cluster_in_subgroup : index
+  %cluster_lane = index.rem %lane, %cluster_size : index
+  func.return %cluster, %cluster_lane : index, index
+}
+
 // Contracts one output channel for the calling Q6_K projection kernel. The
 // caller owns publication so the same canonical contraction can feed either a
 // dense logits tensor or an endpoint reduction.
@@ -336,8 +351,7 @@ template.def<@ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %channel_tile = kernel.workgroup.id<x> : index
-  %subgroup0 = kernel.subgroup.id : index
-  %lane = kernel.subgroup.lane.id : index
+  %cluster0, %cluster_lane = func.call @ggml_q6k_q8_1_x4_cluster_coordinates() : () -> (index, index)
   %c0 = index.constant 0 : index
   %c8 = index.constant 8 : index
   %c128 = index.constant 128 : index
@@ -345,9 +359,9 @@ template.def<@ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body
   %c256 = index.constant 256 : index
   %c144_bytes = index.constant 144 : offset
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
-  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
+  %cluster = index.assume %cluster0 [range(%cluster0, 0, 7)] : index
   %channel_base = index.mul %channel_tile, %c8 : index
-  %channel = index.add %channel_base, %subgroup : index
+  %channel = index.add %channel_base, %cluster : index
   %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
   %q6_block_count = index.div %bounded_input_size, %c256 : index
   %weight_row_bytes = index.scale %q6_block_count, %c210_bytes : index, offset -> offset
@@ -357,7 +371,7 @@ template.def<@ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body
   %q8_row_byte_base = index.scale %token, %q8_row_bytes : index, offset -> offset
   %lane_acc = scf.if %publish_output -> (f32) {
     %channel_acc = scf.if %valid_channel -> (f32) {
-      %value = func.call @ggml_q6k_q8_1_x4_row_lane(%bounded_input_size, %weight, %weight_row_byte_base, %q8_input, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+      %value = func.call @ggml_q6k_q8_1_x4_row_lane(%bounded_input_size, %weight, %weight_row_byte_base, %q8_input, %q8_row_byte_base, %cluster_lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
       scf.yield %value : f32
     } else {
       %c0_f32 = scalar.constant 0.0 : f32
@@ -368,12 +382,12 @@ template.def<@ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body
     %c0_f32 = scalar.constant 0.0 : f32
     scf.yield %c0_f32 : f32
   }
-  %dot = kernel.subgroup.reduce<addf> %lane_acc : f32
+  %dot = kernel.subgroup.reduce<addf> %lane_acc {cluster_size = 32} : f32
   template.return %dot, %token, %channel, %valid_channel, %launch_token_count, %bounded_output_size : f32, index, index, i1, index, index
 }
 
 // Dense raw-layout baseline. A 256-thread workgroup carries eight independent
-// wave32 output rows so decode launches enough waves without duplicating Q6_K
+// 32-lane output clusters so decode fills the workgroup without duplicating Q6_K
 // decoding within a row. Workload values size the exact launch; configured
 // capacities only constrain device-body specialization and buffer addressing.
 kernel.def export("ggml_linear_q6k_q8_1_x4") @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
@@ -399,7 +413,9 @@ kernel.def export("ggml_linear_q6k_q8_1_x4") @ggml_linear_q6k_q8_1_x4(%token_cou
   %c0_i32 = scalar.constant 0 : i32
   %c0_offset = index.constant 0 : offset
   %lane = kernel.subgroup.lane.id : index
-  %lane_i32 = index.cast %lane : index to i32
+  %cluster_size = index.constant 32 : index
+  %cluster_lane = index.rem %lane, %cluster_size : index
+  %lane_i32 = index.cast %cluster_lane : index to i32
   %is_lane_zero = scalar.cmpi eq, %lane_i32, %c0_i32 : i32
   scf.if %valid_channel {
     scf.if %is_lane_zero {
@@ -410,8 +426,8 @@ kernel.def export("ggml_linear_q6k_q8_1_x4") @ggml_linear_q6k_q8_1_x4(%token_cou
   kernel.return
 }
 
-// Four-row target-verification schedule for wave32 targets. Eight subgroups
-// each own one output channel and retain four independent row accumulators.
+// Four-row target-verification schedule. Eight 32-lane clusters each own one
+// output channel and retain four independent row accumulators.
 kernel.def export("ggml_linear_q6k_q8_1_x4_m4") @ggml_linear_q6k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
@@ -430,9 +446,8 @@ kernel.def export("ggml_linear_q6k_q8_1_x4_m4") @ggml_linear_q6k_q8_1_x4_m4(%tok
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %channel_tile = kernel.workgroup.id<x> : index
-  %subgroup0 = kernel.subgroup.id : index
-  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
-  %lane = kernel.subgroup.lane.id : index
+  %cluster0, %cluster_lane = func.call @ggml_q6k_q8_1_x4_cluster_coordinates() : () -> (index, index)
+  %cluster = index.assume %cluster0 [range(%cluster0, 0, 7)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -444,7 +459,7 @@ kernel.def export("ggml_linear_q6k_q8_1_x4_m4") @ggml_linear_q6k_q8_1_x4_m4(%tok
   %c210_bytes = index.constant 210 : offset
   %c256 = index.constant 256 : index
   %channel_base = index.mul %channel_tile, %c8 : index
-  %channel0 = index.add %channel_base, %subgroup : index
+  %channel0 = index.add %channel_base, %cluster : index
   %valid_channel = index.cmp ult, %channel0, %bounded_output_size : index
   %safe_channel0 = scf.select %valid_channel, %channel0, %c0 : index
   %safe_channel = index.assume %safe_channel0 [lt(%safe_channel0, %output_capacity)] : index
@@ -458,17 +473,17 @@ kernel.def export("ggml_linear_q6k_q8_1_x4_m4") @ggml_linear_q6k_q8_1_x4_m4(%tok
   %q8_row2_byte_base = index.scale %c2, %q8_row_bytes : index, offset -> offset
   %q8_row3_byte_base = index.scale %c3, %q8_row_bytes : index, offset -> offset
   %lane0, %lane1, %lane2, %lane3 = scf.if %valid_channel -> (f32, f32, f32, f32) {
-    %value0, %value1, %value2, %value3 = func.call @ggml_q6k_q8_1_x4_row_lane_m4(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row0_byte_base, %q8_row1_byte_base, %q8_row2_byte_base, %q8_row3_byte_base, %lane) : (index, buffer, offset, buffer, offset, offset, offset, offset, index) -> (f32, f32, f32, f32)
+    %value0, %value1, %value2, %value3 = func.call @ggml_q6k_q8_1_x4_row_lane_m4(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row0_byte_base, %q8_row1_byte_base, %q8_row2_byte_base, %q8_row3_byte_base, %cluster_lane) : (index, buffer, offset, buffer, offset, offset, offset, offset, index) -> (f32, f32, f32, f32)
     scf.yield %value0, %value1, %value2, %value3 : f32, f32, f32, f32
   } else {
     %c0_f32 = scalar.constant 0.0 : f32
     scf.yield %c0_f32, %c0_f32, %c0_f32, %c0_f32 : f32, f32, f32, f32
   }
-  %dot0 = kernel.subgroup.reduce<addf> %lane0 : f32
-  %dot1 = kernel.subgroup.reduce<addf> %lane1 : f32
-  %dot2 = kernel.subgroup.reduce<addf> %lane2 : f32
-  %dot3 = kernel.subgroup.reduce<addf> %lane3 : f32
-  %is_lane_zero = index.cmp eq, %lane, %c0 : index
+  %dot0 = kernel.subgroup.reduce<addf> %lane0 {cluster_size = 32} : f32
+  %dot1 = kernel.subgroup.reduce<addf> %lane1 {cluster_size = 32} : f32
+  %dot2 = kernel.subgroup.reduce<addf> %lane2 {cluster_size = 32} : f32
+  %dot3 = kernel.subgroup.reduce<addf> %lane3 {cluster_size = 32} : f32
+  %is_lane_zero = index.cmp eq, %cluster_lane, %c0 : index
   scf.if %valid_channel {
     scf.if %is_lane_zero {
       %c0_offset = index.constant 0 : offset
