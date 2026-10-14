@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Original Q4_K/Q5_K gate/up and Q5_1/Q8_0 down weights stay compressed. Selected
+// Original Q4_K/Q5_K/Q8_0 gate/up and Q5_1/Q8_0 down weights stay compressed. Selected
 // experts publish BF16 SwiGLU and down results; routing and shared-expert
 // weighting accumulate in F32 before the final BF16 branch publication.
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
@@ -32,7 +32,7 @@ func.def inline @expert_swiglu(%gate: f32, %up: f32) -> (bf16) {
   func.return %packed : bf16
 }
 
-func.def inline @expert_gate_up_body(%q5_encoding: i1, %span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
+func.def inline @expert_gate_up_body(%q8_encoding: i1, %q5_encoding: i1, %span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
   %span, %input, %ids, %gate_weight, %up_weight, %output = buffer.assume.noalias %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg : buffer, buffer, buffer, buffer, buffer, buffer
   %tokens = config.get @flash_next.token_count : index
   %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
@@ -55,8 +55,15 @@ func.def inline @expert_gate_up_body(%q5_encoding: i1, %span_arg: buffer, %input
     %expert_index = index.cast %expert_i32 : i32 to index
     %expert = index.assume %expert_index [range(%expert_index, 0, 511)] : index
     %row = index.madd %expert, %width, %feature : index
-    %gate_partial = func.call @flash_next_qk_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %gate_weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
-    %up_partial = func.call @flash_next_qk_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %up_weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
+    %gate_partial, %up_partial = scf.if %q8_encoding -> (f32, f32) {
+      %gate = func.call @flash_next_q8_partial(%input_width, %token, %row, %lane, %stride, %input, %gate_weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+      %up = func.call @flash_next_q8_partial(%input_width, %token, %row, %lane, %stride, %input, %up_weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+      scf.yield %gate, %up : f32, f32
+    } else {
+      %gate = func.call @flash_next_qk_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %gate_weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
+      %up = func.call @flash_next_qk_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %up_weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
+      scf.yield %gate, %up : f32, f32
+    }
     %gate = kernel.subgroup.reduce<addf> %gate_partial : f32
     %up = kernel.subgroup.reduce<addf> %up_partial : f32
     %leader = index.cmp eq, %lane, %c0 : index
@@ -78,7 +85,22 @@ kernel.def target(@flash_next_expert_wave32) @expert_gate_up_q4k() {
   kernel.launch.config workgroups(%groups, %tokens, %selected) workgroup_size(%threads, %c1, %c1) : index
 } launch(%span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
   %q5_encoding = scalar.constant false : i1
-  func.call @expert_gate_up_body(%q5_encoding, %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg) : (i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  %q8_encoding = scalar.constant false : i1
+  func.call @expert_gate_up_body(%q8_encoding, %q5_encoding, %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg) : (i1, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@flash_next_expert_wave32) @expert_gate_up_q8() {
+  %groups = index.constant 160 : index
+  %tokens = config.get @flash_next.token_count : index
+  %selected = index.constant 10 : index
+  %threads = index.constant 128 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %selected) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
+  %q5_encoding = scalar.constant false : i1
+  %q8_encoding = scalar.constant true : i1
+  func.call @expert_gate_up_body(%q8_encoding, %q5_encoding, %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg) : (i1, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -91,7 +113,8 @@ kernel.def target(@flash_next_expert_wave32) @expert_gate_up_q5k() {
   kernel.launch.config workgroups(%groups, %tokens, %selected) workgroup_size(%threads, %c1, %c1) : index
 } launch(%span_arg: buffer, %input_arg: buffer, %ids_arg: buffer, %gate_weight_arg: buffer, %up_weight_arg: buffer, %output_arg: buffer) {
   %q5_encoding = scalar.constant true : i1
-  func.call @expert_gate_up_body(%q5_encoding, %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg) : (i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  %q8_encoding = scalar.constant false : i1
+  func.call @expert_gate_up_body(%q8_encoding, %q5_encoding, %span_arg, %input_arg, %ids_arg, %gate_weight_arg, %up_weight_arg, %output_arg) : (i1, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -271,14 +294,22 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %q8_early = scalar.ori %q5_encoding, %q8_layer4 : i1
   %q8_late = scalar.ori %q8_layer30, %q8_tail : i1
   %q8_down = scalar.ori %q8_early, %q8_late : i1
-  scf.if %q5_encoding {
-    %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x10x176xi8>
-    %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x176xi8>
-    kernel.launch @expert_gate_up_q5k(%span, %input, %ids, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
+  %mtp_layer = index.constant 48 : index
+  %q8_gate_up = index.cmp eq, %layer, %mtp_layer : index
+  scf.if %q8_gate_up {
+    %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x80x34xi8>
+    %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x80x34xi8>
+    kernel.launch @expert_gate_up_q8(%span, %input, %ids, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x80x34xi8>, view<512x640x80x34xi8>, buffer)
   } else {
-    %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x10x144xi8>
-    %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x144xi8>
-    kernel.launch @expert_gate_up_q4k(%span, %input, %ids, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
+    scf.if %q5_encoding {
+      %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x10x176xi8>
+      %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x176xi8>
+      kernel.launch @expert_gate_up_q5k(%span, %input, %ids, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
+    } else {
+      %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x10x144xi8>
+      %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x144xi8>
+      kernel.launch @expert_gate_up_q4k(%span, %input, %ids, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
+    }
   }
   scf.if %q8_down {
     %down_weight = command.parameter %parameters, "blk.{}.ffn_down_exps.weight"[%layer] : view<512x2560x20x34xi8>

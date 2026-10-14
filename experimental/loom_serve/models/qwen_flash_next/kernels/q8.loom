@@ -7,17 +7,12 @@
 // Each lane consumes complete Q8_0 blocks. Integer codes are exact in BF16;
 // the shared F16 scale is applied to the block dot in F32. Neither activations
 // nor decoded weights acquire another quantization boundary.
-func.def public inline @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32) {
+func.def public inline @flash_next_q8_dot(%width: index, %input_origin: offset, %weight_origin: offset, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32) {
   %c0_index = index.constant 0 : index
   %block_size = index.constant 32 : index
   %block_bytes = index.constant 34 : offset
   %scale_bytes = index.constant 2 : offset
-  %element_bytes = index.constant 2 : offset
   %blocks = index.div %width, %block_size : index
-  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
-  %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
-  %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
-  %input_origin = index.scale %token, %input_row_bytes : index, offset -> offset
   %input_view = buffer.view %input[%input_origin] : buffer -> view<[%blocks]x32xbf16>
   %c0 = scalar.constant 0.0 : f32
   %c0_vector = vector.constant 0.0 : vector<16xf32>
@@ -39,5 +34,20 @@ func.def public inline @flash_next_q8_partial(%width: index, %token: index, %row
     %next = scalar.addf %accumulator, %scaled : f32
     scf.yield %next : f32
   }
+  func.return %result : f32
+}
+
+// Dense row-major callers derive both origins from their physical row width.
+// Sliced matrices can call the same block dot with independently chosen origins.
+func.def public inline @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32) {
+  %block_size = index.constant 32 : index
+  %block_bytes = index.constant 34 : offset
+  %element_bytes = index.constant 2 : offset
+  %blocks = index.div %width, %block_size : index
+  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+  %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
+  %input_origin = index.scale %token, %input_row_bytes : index, offset -> offset
+  %result = func.call @flash_next_q8_dot(%width, %input_origin, %weight_origin, %lane, %stride, %input, %weight) : (index, offset, offset, index, index, buffer, buffer) -> (f32)
   func.return %result : f32
 }
