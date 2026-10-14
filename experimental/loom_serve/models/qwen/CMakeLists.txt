@@ -647,6 +647,7 @@ loom_test_module(
     dflash_proposal_test_module
   SRCS
     "kernels/qwen38/dflash_proposal.loom"
+    "kernels/qwen38/spans.loom"
     "tests/dflash_proposal.loom"
 )
 
@@ -1006,10 +1007,12 @@ loom_test_module(
     mtp_control_test_module
   SRCS
     "kernels/qwen38/accept.loom"
+    "kernels/qwen38/continuation.loom"
     "kernels/qwen38/mtp_prepare.loom"
     "kernels/qwen38/mtp_proposal.loom"
     "kernels/qwen38/spans.loom"
     "tests/accept.loom"
+    "tests/continuation.loom"
     "tests/mtp_prepare.loom"
     "tests/mtp_proposal.loom"
 )

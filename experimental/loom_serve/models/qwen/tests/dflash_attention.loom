@@ -17,12 +17,16 @@ func.def @dflash_fixture(%position: index, %count: index, %epoch: buffer, %rows:
   %c8 = scalar.constant 8 : i32
   %count_word = index.cast %count : index to i32
   %position_word = index.cast %position : index to i32
+  %source_position = scalar.constant 23 : i32
+  %shift = scalar.constant 10 : i32
+  %source_output = scalar.shli %source_position, %shift : i32
   view.store %c16, %header[0] : i32, view<13xi32>
   view.store %c1, %header[1] : i32, view<13xi32>
   view.store %count_word, %header[3] : i32, view<13xi32>
   view.store %position_word, %header[4] : i32, view<13xi32>
   view.store %c8, %header[5] : i32, view<13xi32>
   view.store %c1, %header[6] : i32, view<13xi32>
+  view.store %source_output, %header[7] : i32, view<13xi32>
   %origins = buffer.view %rows[%origin] : buffer -> view<2x4xi64>
   %guard = scalar.constant 256 : i64
   view.store %guard, %origins[1, 2] : i64, view<2x4xi64>
@@ -104,7 +108,9 @@ func.def @dflash_rotary_reference(%tokens: index, %heads: index, %token0: index,
 func.def @query_reference(%capacity: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %header = buffer.view %epoch[%origin] : buffer -> view<13xi32>
-  %word = view.load %header[4] : view<13xi32> -> i32
+  %descriptor_output = view.load %header[7] : view<13xi32> -> i32
+  %shift = scalar.constant 10 : i32
+  %word = scalar.shrui %descriptor_output, %shift : i32
   %position = index.cast %word : i32 to index
   %y = buffer.view %output[%origin] : buffer -> view<16x32x128xf32>
   %c0 = index.constant 0 : index
@@ -141,11 +147,13 @@ func.def @context_reference(%capacity: index, %epoch: buffer, %rows: buffer, %la
   %c5 = index.constant 5 : index
   %c8_2 = index.constant 8 : index
   %position = index.constant 67 : index
+  %source_position = index.constant 23 : index
   %page_width = index.constant 64 : index
   %width = index.constant 128 : index
   scf.for %relative = [%c0 to %c3 step %c1_2] {
     %token = index.add %relative, %c8_2 : index
     %absolute = index.add %position, %relative : index
+    %source_absolute = index.add %source_position, %relative : index
     %page = index.div %absolute, %page_width : index
     %within = index.rem %absolute, %page_width : index
     %mixed = index.madd %page, %c3, %c5 : index
@@ -154,7 +162,7 @@ func.def @context_reference(%capacity: index, %epoch: buffer, %rows: buffer, %la
     %physical = index.madd %physical_page, %page_width, %within : index
     scf.for %head = [%c0 to %c8_2 step %c1_2] {
       scf.for %channel = [%c0 to %width step %c1_2] {
-        %key_value = func.call @dflash_rotary_reference(%capacity, %c8_2, %token, %head, %absolute, %channel, %key, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (f32)
+        %key_value = func.call @dflash_rotary_reference(%capacity, %c8_2, %token, %head, %source_absolute, %channel, %key, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (f32)
         %value_value = view.load %input_v[%token, %head, %channel] : view<16x8x128xf32> -> f32
         %k16 = scalar.fptrunc %key_value : f32 to f16
         %v16 = scalar.fptrunc %value_value : f32 to f16
