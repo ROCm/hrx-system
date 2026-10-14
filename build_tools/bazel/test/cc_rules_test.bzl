@@ -530,10 +530,14 @@ def _expect_cc_execution_dynamic_library_bindings(env, target):
         "build_tools/bazel/test/dynamic_library_root.so",
     ):
         env.fail("unexpected dynamic-library root path %r" % library_path)
-    runfiles = target[DefaultInfo].default_runfiles.files.to_list()
-    _expect_file_basename(env, runfiles, "dynamic_library_root.so")
-    _expect_file_basename(env, runfiles, "dynamic_library_dependency.so")
-    _expect_file_basename(env, runfiles, "generate_rule_fixture.data")
+    for runfiles in [
+        target[DefaultInfo].default_runfiles,
+        target[DefaultInfo].data_runfiles,
+    ]:
+        files = runfiles.files.to_list()
+        _expect_file_basename(env, files, "dynamic_library_root.so")
+        _expect_file_basename(env, files, "dynamic_library_dependency.so")
+        _expect_file_basename(env, files, "generate_rule_fixture.data")
 
 def _expect_runfiles_arguments(env, target):
     runfiles_arguments = target[IreeRunfilesArgumentsInfo]
