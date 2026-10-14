@@ -81,6 +81,35 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_release32(uint32_t* words,
   return words + 8;
 }
 
+uint32_t* iree_hal_amd_gpu_pm4_emit_wait32(
+    uint32_t* words, uint64_t address, uint32_t reference, uint32_t mask,
+    iree_hal_amd_gpu_pm4_comparison_t comparison) {
+  words[0] = UINT32_C(0xc0053c00);
+  // Ordinary MEC memory wait, default cache policy.
+  words[1] = (uint32_t)comparison | (1 << 4);
+  words[2] = (uint32_t)address;
+  words[3] = (uint32_t)(address >> 32);
+  words[4] = reference;
+  words[5] = mask;
+  words[6] = 4;
+  return words + 7;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_wait64(
+    uint32_t* words, uint64_t address, uint64_t reference, uint64_t mask,
+    iree_hal_amd_gpu_pm4_comparison_t comparison) {
+  words[0] = UINT32_C(0xc0079300);
+  words[1] = (uint32_t)comparison | (1 << 4);
+  words[2] = (uint32_t)address;
+  words[3] = (uint32_t)(address >> 32);
+  words[4] = (uint32_t)reference;
+  words[5] = (uint32_t)(reference >> 32);
+  words[6] = (uint32_t)mask;
+  words[7] = (uint32_t)(mask >> 32);
+  words[8] = 4;
+  return words + 9;
+}
+
 uint32_t* iree_hal_amd_gpu_pm4_emit_notify32(uint32_t* words,
                                              uint32_t cache_control,
                                              uint64_t target_address,

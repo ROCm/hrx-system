@@ -104,6 +104,47 @@ TEST_F(CommandsTest, AcquirePreservesTargetSpecificControls) {
                0xc0065800, 0, 0xffffffff, 0xff, 0, 0, 0x0a, 0x0001c1e1});
 }
 
+TEST_F(CommandsTest, WaitsPreserveEveryComparisonWidthAndMask) {
+  struct Comparison {
+    // Native semantic selected by admission.
+    iree_hal_amd_gpu_pm4_comparison_t value;
+    // Complete expected memory-space control word.
+    uint32_t control;
+  };
+  const Comparison comparisons[] = {
+      {IREE_HAL_AMD_GPU_PM4_COMPARISON_ALWAYS, 0x10},
+      {IREE_HAL_AMD_GPU_PM4_COMPARISON_LESS, 0x11},
+      {IREE_HAL_AMD_GPU_PM4_COMPARISON_LESS_OR_EQUAL, 0x12},
+      {IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL, 0x13},
+      {IREE_HAL_AMD_GPU_PM4_COMPARISON_NOT_EQUAL, 0x14},
+      {IREE_HAL_AMD_GPU_PM4_COMPARISON_GREATER_OR_EQUAL, 0x15},
+      {IREE_HAL_AMD_GPU_PM4_COMPARISON_GREATER, 0x16},
+  };
+  for (const auto& comparison : comparisons) {
+    for (uint64_t mask :
+         {UINT64_C(0), UINT64_MAX, UINT64_C(0xff00aa5555aa00ff)}) {
+      SCOPED_TRACE(comparison.control);
+      SCOPED_TRACE(mask);
+      storage_.fill(kGuard);
+      const uint64_t reference = UINT64_C(0xfedcba9876543210) & mask;
+      auto* end = iree_hal_amd_gpu_pm4_emit_wait32(
+          words(), UINT64_C(0x00001234fffffffc),
+          static_cast<uint32_t>(reference), static_cast<uint32_t>(mask),
+          comparison.value);
+      end = iree_hal_amd_gpu_pm4_emit_wait64(end, UINT64_C(0x0000567800000008),
+                                             reference, mask, comparison.value);
+      Expect(
+          end,
+          {0xc0053c00, comparison.control, 0xfffffffc, 0x1234,
+           static_cast<uint32_t>(reference), static_cast<uint32_t>(mask), 4,
+           0xc0079300, comparison.control, 8, 0x5678,
+           static_cast<uint32_t>(reference),
+           static_cast<uint32_t>(reference >> 32), static_cast<uint32_t>(mask),
+           static_cast<uint32_t>(mask >> 32), 4});
+    }
+  }
+}
+
 TEST_F(CommandsTest, ReleaseConfirmsGenerationWithoutInterrupt) {
   Expect(iree_hal_amd_gpu_pm4_emit_release32(
              words(), 0x30e, UINT64_C(0x00001234fffffffc), UINT32_MAX),

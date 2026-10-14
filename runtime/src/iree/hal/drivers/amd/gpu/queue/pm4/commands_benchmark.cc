@@ -143,6 +143,42 @@ static void BM_ExecutionAndAcquire(benchmark::State& state) {
 }
 BENCHMARK(BM_ExecutionAndAcquire);
 
+static void BM_DependencyWait(benchmark::State& state) {
+  alignas(64) std::array<uint32_t, 16> words;
+  uint64_t address = UINT64_C(0x1234000080);
+  benchmark::DoNotOptimize(address);
+  uint64_t value = UINT64_C(0x1234567800000000);
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(iree_hal_amd_gpu_pm4_emit_wait64(
+        words.data(), address, ++value, UINT64_MAX,
+        IREE_HAL_AMD_GPU_PM4_COMPARISON_GREATER_OR_EQUAL));
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations());
+  state.SetBytesProcessed(state.iterations() * 9 * sizeof(uint32_t));
+}
+BENCHMARK(BM_DependencyWait);
+
+static void BM_DependencyWaitAndAcquire(benchmark::State& state) {
+  alignas(64) std::array<uint32_t, 32> words;
+  uint64_t address = UINT64_C(0x1234000080);
+  uint32_t cache_control = 0xc3a1;
+  benchmark::DoNotOptimize(address);
+  benchmark::DoNotOptimize(cache_control);
+  uint64_t value = UINT64_C(0x1234567800000000);
+  for (auto _ : state) {
+    auto* end = iree_hal_amd_gpu_pm4_emit_wait64(
+        words.data(), address, ++value, UINT64_MAX,
+        IREE_HAL_AMD_GPU_PM4_COMPARISON_GREATER_OR_EQUAL);
+    end = iree_hal_amd_gpu_pm4_emit_acquire(end, cache_control);
+    benchmark::DoNotOptimize(end);
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations());
+  state.SetBytesProcessed(state.iterations() * 17 * sizeof(uint32_t));
+}
+BENCHMARK(BM_DependencyWaitAndAcquire);
+
 static void BM_CopyArgumentAndRelease(benchmark::State& state) {
   alignas(64) std::array<uint32_t, 32> words;
   uint64_t source = UINT64_C(0x1234000080);

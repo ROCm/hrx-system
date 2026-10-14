@@ -58,6 +58,35 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_compute_flush(uint32_t* words);
 uint32_t* iree_hal_amd_gpu_pm4_emit_acquire(uint32_t* words,
                                             uint32_t cache_control);
 
+// Native unsigned comparisons on (memory & mask), with the reference value
+// already restricted to that mask. These are packet function encodings, not
+// HAL atomic comparison values.
+typedef enum iree_hal_amd_gpu_pm4_comparison_e {
+  IREE_HAL_AMD_GPU_PM4_COMPARISON_ALWAYS = 0,
+  IREE_HAL_AMD_GPU_PM4_COMPARISON_LESS = 1,
+  IREE_HAL_AMD_GPU_PM4_COMPARISON_LESS_OR_EQUAL = 2,
+  IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL = 3,
+  IREE_HAL_AMD_GPU_PM4_COMPARISON_NOT_EQUAL = 4,
+  IREE_HAL_AMD_GPU_PM4_COMPARISON_GREATER_OR_EQUAL = 5,
+  IREE_HAL_AMD_GPU_PM4_COMPARISON_GREATER = 6,
+} iree_hal_amd_gpu_pm4_comparison_t;
+
+// Emits seven DWORDs of MEC WAIT_REG_MEM against a DWORD-aligned address.
+// The target's visibility and atomicity are already qualified for this queue.
+// The backing and its expected generation remain valid through the last native
+// reader, independently of producer completion. A wait establishes control
+// ordering only; payload visibility requires its separate release/acquire.
+uint32_t* iree_hal_amd_gpu_pm4_emit_wait32(
+    uint32_t* words, uint64_t address, uint32_t reference, uint32_t mask,
+    iree_hal_amd_gpu_pm4_comparison_t comparison);
+
+// Emits nine DWORDs of MEC WAIT_REG_MEM64. The eight-byte-aligned target also
+// has qualified native 64-bit read/write atomicity. Other ownership and
+// visibility requirements are the same as the DWORD form.
+uint32_t* iree_hal_amd_gpu_pm4_emit_wait64(
+    uint32_t* words, uint64_t address, uint64_t reference, uint64_t mask,
+    iree_hal_amd_gpu_pm4_comparison_t comparison);
+
 // Emits eight DWORDs of RELEASE_MEM after preceding compute execution. Applies
 // the prepared, unshifted release GCR field and writes a confirmed DWORD to the
 // aligned destination through TC/L2. Zero cache_control requests no cache
