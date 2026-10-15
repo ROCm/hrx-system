@@ -1,3 +1,9 @@
+config.decl @runner.qwen38.mixed_inputs : %value: index where [range(%value, 0, 1)]
+
+func.decl @qwen38_input_token(%mixed: index, %capacity: index, %inputs: buffer, %input: index) -> (i32)
+
+func.decl @qwen38_input_store_token(%mixed: index, %capacity: index, %inputs: buffer, %input: index, %id: i32)
+
 // Only generated spans enter the draft batch. Anchor tokens and target packed
 // offsets stay distinct from compact draft offsets and resident cache rows.
 func.decl @qwen38_descriptor_source_position(%word: i32) -> (i32)
@@ -8,6 +14,7 @@ kernel.def @qwen38_dflash_proposal_prepare() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %anchors: buffer, %draft_tokens: buffer, %selection: buffer) {
+  %mixed_inputs = config.get @runner.qwen38.mixed_inputs : index
   %origin = index.constant 0 : offset
   %descriptor_origin = index.constant 12 : offset
   %options_origin = index.constant 1804 : offset
@@ -15,7 +22,6 @@ kernel.def @qwen38_dflash_proposal_prepare() {
   %header = buffer.view %input[%origin] : buffer -> view<3xi32>
   %spans = buffer.view %input[%descriptor_origin] : buffer -> view<64x5xi32>
   %options = buffer.view %input[%options_origin] : buffer -> view<64x2xi32>
-  %tokens = buffer.view %target_tokens[%origin] : buffer -> view<512xi32>
   %draft_header = buffer.view %draft[%origin] : buffer -> view<3xi32>
   %draft_spans = buffer.view %draft[%descriptor_origin] : buffer -> view<64x5xi32>
   %mapping = buffer.view %origins[%origin] : buffer -> view<64xi32>
@@ -54,7 +60,7 @@ kernel.def @qwen38_dflash_proposal_prepare() {
       %source_position = func.call @qwen38_descriptor_source_position(%descriptor_word) : (i32) -> (i32)
       %begin_value = index.cast %begin_word : i32 to index
       %begin = index.assume %begin_value [range(%begin_value, 0, 504)] : index
-      %anchor = view.load %tokens[%begin] : view<512xi32> -> i32
+      %anchor = func.call @qwen38_input_token(%mixed_inputs, %capacity, %target_tokens, %begin) : (index, index, buffer, index) -> (i32)
       %draft_begin = index.mul %slot, %c8 : index
       %draft_begin_word = index.cast %draft_begin : index to i32
       %selection_begin = index.mul %slot, %c7 : index
@@ -136,6 +142,8 @@ kernel.def @qwen38_dflash_proposal_publish() {
   %threads = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%draft: buffer, %origins: buffer, %proposals: buffer, %target_tokens: buffer) {
+  %capacity = index.constant 512 : index
+  %mixed_inputs = config.get @runner.qwen38.mixed_inputs : index
   %origin = index.constant 0 : offset
   %header = buffer.view %draft[%origin] : buffer -> view<3xi32>
   %count_word = view.load %header[1] : view<3xi32> -> i32
@@ -146,7 +154,7 @@ kernel.def @qwen38_dflash_proposal_publish() {
   scf.if %active {
     %mapping = buffer.view %origins[%origin] : buffer -> view<64xi32>
     %predictions = buffer.view %proposals[%origin] : buffer -> view<[%count]x7xi32>
-    %tokens = buffer.view %target_tokens[%origin] : buffer -> view<512xi32>
+
     %begin_word = view.load %mapping[%slot] : view<64xi32> -> i32
     %begin_value = index.cast %begin_word : i32 to index
     %begin = index.assume %begin_value [range(%begin_value, 0, 504)] : index
@@ -157,7 +165,7 @@ kernel.def @qwen38_dflash_proposal_publish() {
     scf.for %position = [%c0 to %c7 step %c1] {
       %token = view.load %predictions[%slot, %position] : view<[%count]x7xi32> -> i32
       %destination = index.add %first, %position : index
-      view.store %token, %tokens[%destination] : i32, view<512xi32>
+      func.call @qwen38_input_store_token(%mixed_inputs, %capacity, %target_tokens, %destination, %token) : (index, index, buffer, index, i32)
     }
   }
   kernel.return

@@ -23,6 +23,7 @@ filegroup(
     srcs = [
         "control.loom",
         "epoch_control.loom",
+        "epoch_media.loom",
     ],
     visibility = ["//visibility:public"],
 )
@@ -31,6 +32,7 @@ filegroup(
 _SPECULATION_KERNEL_SOURCES = [
     "kernels/qwen38/accept.loom",
     "kernels/qwen38/continuation.loom",
+    "kernels/qwen38/inputs.loom",
     "kernels/qwen38/mtp_proposal.loom",
     "kernels/qwen38/spans.loom",
 ]
@@ -51,6 +53,7 @@ loom_test(
     name = "epoch_encoding_test",
     srcs = [
         "epoch_control.loom",
+        "epoch_media.loom",
         "tests/epoch_encoding.loom",
     ],
     benchmark_smoke = False,
@@ -73,9 +76,29 @@ filegroup(
         exclude = [
             "control.loom",
             "epoch_control.loom",
+            "epoch_media.loom",
         ],
     ),
     visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "input_embedding_test",
+    srcs = [
+        "kernels/qwen38/inputs.loom",
+        "kernels/qwen38/token_embedding.loom",
+        "tests/input_embedding.loom",
+        "//experimental/loom_serve/motifs/ggml:sources",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    variants = {
+        "mixed": {"case": "@mixed_embedding_uses_device_rows"},
+        "ordinary": {"case": "@qwen38_token_embedding_q5k_f32_differential_case"},
+    },
 )
 
 loom_test(
@@ -225,6 +248,7 @@ loom_test(
     name = "dflash_proposal_test",
     srcs = [
         "kernels/qwen38/dflash_proposal.loom",
+        "kernels/qwen38/inputs.loom",
         "kernels/qwen38/spans.loom",
         "tests/dflash_proposal.loom",
     ],
@@ -301,11 +325,13 @@ loom_test(
     srcs = [
         "kernels/qwen38/accept.loom",
         "kernels/qwen38/continuation.loom",
+        "kernels/qwen38/inputs.loom",
         "kernels/qwen38/mtp_prepare.loom",
         "kernels/qwen38/mtp_proposal.loom",
         "kernels/qwen38/spans.loom",
         "tests/accept.loom",
         "tests/continuation.loom",
+        "tests/continuation_media.loom",
         "tests/mtp_prepare.loom",
         "tests/mtp_proposal.loom",
     ],
@@ -323,7 +349,9 @@ loom_test(
         "kernels/qwen38/attention_prefill.loom",
         "kernels/qwen38/attention_prefill_wmma.loom",
         "kernels/qwen38/attention_spans.loom",
+        "kernels/qwen38/inputs.loom",
         "kernels/qwen38/spans.loom",
+        "tests/attention_media.loom",
         "tests/attention_pages.loom",
         "tests/attention_spans.loom",
     ],
@@ -335,6 +363,13 @@ loom_test(
     variants = {
         "dense": {
             "case": "@mixed_attention_spans",
+            "configs": {
+                "qwen38.attention.cache_capacity": "257",
+                "qwen38.attention.pool_capacity": "0",
+            },
+        },
+        "media": {
+            "case": "@media_query_uses_three_rotary_axes",
             "configs": {
                 "qwen38.attention.cache_capacity": "257",
                 "qwen38.attention.pool_capacity": "0",
@@ -387,6 +422,10 @@ loom_test(
     name = "epoch_control_test",
     srcs = [
         "epoch_control.loom",
+        "epoch_media.loom",
+        "kernels/qwen38/continuation.loom",
+        "kernels/qwen38/inputs.loom",
+        "kernels/qwen38/spans.loom",
         "tests/epoch_control.loom",
     ],
     benchmark_smoke = False,

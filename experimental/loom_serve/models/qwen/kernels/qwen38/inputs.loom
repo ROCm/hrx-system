@@ -1,0 +1,56 @@
+// Layout is a specialization, not a per-input discriminator. Ordinary target
+// and private draft inputs remain contiguous i32 IDs. Media-bearing target
+// inputs use the eight-word records written by epoch_media.loom.
+config.def @runner.qwen38.mixed_inputs = 0 : %value: index where [range(%value, 0, 1)]
+
+func.def @qwen38_input_token(%mixed: index, %capacity_value: index, %inputs: buffer, %input_value: index) -> (i32) {
+  %capacity = index.assume %capacity_value [range(%capacity_value, 1, 2147483647)] : index
+  %input = index.assume %input_value [ge(%input_value, 0), lt(%input_value, %capacity)] : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %is_mixed = index.cmp ne, %mixed, %c0 : index
+  %stride = scf.select %is_mixed, %c8, %c1 : index
+  %view = buffer.view %inputs[%origin] : buffer -> view<[%capacity]x[%stride]xi32>
+  %id = view.load %view[%input, 0] : view<[%capacity]x[%stride]xi32> -> i32
+  func.return %id : i32
+}
+
+func.def @qwen38_input_store_token(%mixed: index, %capacity_value: index, %inputs: buffer, %input_value: index, %id: i32) {
+  %capacity = index.assume %capacity_value [range(%capacity_value, 1, 2147483647)] : index
+  %input = index.assume %input_value [ge(%input_value, 0), lt(%input_value, %capacity)] : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %is_mixed = index.cmp ne, %mixed, %c0 : index
+  %stride = scf.select %is_mixed, %c8, %c1 : index
+  %view = buffer.view %inputs[%origin] : buffer -> view<[%capacity]x[%stride]xi32>
+  view.store %id, %view[%input, 0] : i32, view<[%capacity]x[%stride]xi32>
+  func.return
+}
+
+// Qwen's interleaved M-RoPE partitions 32 frequency pairs into temporal,
+// height, and width counts [11,11,10]. Both halves of a pair use the same
+// coordinate; the remaining 192 head elements do not undergo rotation.
+func.def @qwen38_input_position(%mixed: index, %inputs: buffer, %input: index, %lane: index, %linear_position: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %is_mixed = index.cmp ne, %mixed, %c0 : index
+  %position = scf.if %is_mixed -> (i32) {
+    %origin = index.constant 0 : offset
+    %c2 = index.constant 2 : index
+    %c3 = index.constant 3 : index
+    %c32 = index.constant 32 : index
+    %pair = index.rem %lane, %c32 : index
+    %axis = index.rem %pair, %c3 : index
+    %field = index.add %axis, %c2 : index
+    %record = index.assume %input [range(%input, 0, 511)] : index
+    %view = buffer.view %inputs[%origin] : buffer -> view<512x8xi32>
+    %position = view.load %view[%record, %field] : view<512x8xi32> -> i32
+    scf.yield %position : i32
+  } else {
+    scf.yield %linear_position : i32
+  }
+  func.return %position : i32
+}
