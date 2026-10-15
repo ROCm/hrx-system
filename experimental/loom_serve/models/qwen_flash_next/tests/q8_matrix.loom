@@ -21,14 +21,14 @@ func.decl @flash_next_q8_fixture(%count: index, %inputs: index, %outputs: index,
 func.decl @flash_next_q8_reference(%inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.def target(@q8_matrix_test_wave32) @matrix() {
-  %two = index.constant 2 : index
-  %one = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c1 = index.constant 1 : index
   %wave_size = index.constant 32 : index
   %wave_rows = config.get @q8_test.wave_rows : index
   %wave_columns = config.get @q8_test.wave_columns : index
   %waves = index.mul %wave_rows, %wave_columns : index
   %threads = index.mul %waves, %wave_size : index
-  kernel.launch.config workgroups(%two, %two, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%c2, %c2, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %tile_rows = config.get @q8_test.tile_rows : index
@@ -41,22 +41,22 @@ kernel.def target(@q8_matrix_test_wave32) @matrix() {
 }
 
 func.def @geometry(%trial: index) -> (index, index, index, index) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
   %inputs = index.constant 96 : index
   %capacity = config.get @flash_next.token_count : index
   %tile_rows = config.get @q8_test.tile_rows : index
   %tile_columns = config.get @q8_test.tile_columns : index
-  %outputs = index.add %tile_columns, %four : index
-  %ragged = index.sub %capacity, %one : index
-  %empty = index.cmp eq, %trial, %zero : index
-  %single = index.cmp eq, %trial, %one : index
-  %aligned = index.cmp eq, %trial, %two : index
+  %outputs = index.add %tile_columns, %c4 : index
+  %ragged = index.sub %capacity, %c1 : index
+  %empty = index.cmp eq, %trial, %c0 : index
+  %single = index.cmp eq, %trial, %c1 : index
+  %aligned = index.cmp eq, %trial, %c2 : index
   %full_count = scf.select %aligned, %tile_rows, %ragged : index
-  %nonempty_count = scf.select %single, %one, %full_count : index
-  %count = scf.select %empty, %zero, %nonempty_count : index
+  %nonempty_count = scf.select %single, %c1, %full_count : index
+  %count = scf.select %empty, %c0, %nonempty_count : index
   func.return %capacity, %count, %inputs, %outputs : index, index, index, index
 }
 
