@@ -147,7 +147,8 @@ synthesize empty state instead of depending on cleared recurrent storage.
 | `kernels/speculation.loom`, `kernels/mtp_state.loom` | Compact target transition capture, accepted-prefix replay, and predictor carry ownership. |
 | `kernels/qsa_*.loom`, `kernels/pages.loom` | Paged K/V, four-token compression, exact top-512 block selection, and causal attention. |
 | `kernels/ple_*.loom`, `kernels/iq4.loom` | EOS-aware bigram/trigram hashes, IQ4_NL reads, and dilated convolution history. |
-| `kernels/quantized.loom`, `kernels/experts.loom` | Q4_K, Q5_K, Q5_1, and Q8_0 expert projections in the checkpoint's actual encodings. |
+| `kernels/quantized.loom`, `kernels/q8.loom`, `kernels/experts.loom` | Q4_K, Q5_K, Q5_1, and Q8_0 expert projections in the checkpoint's actual encodings. |
+| `kernels/expert_buckets.loom` | Device-owned expert grouping and finite workers that reuse weights across routed rows. |
 
 The text model uses 36 GDN layers and 12 sparse-attention layers, with 512
 experts and ten selected experts plus a shared expert in each layer. Dense
@@ -171,12 +172,34 @@ tokens specialize to packed dot instructions without matrix shared memory.
 Live tails shorter than four rows use the same dot arithmetic. The scheduler
 continues to handle prompt and generated tokens through one epoch contract.
 
+Expert projections group routes by their selected expert. For capacities above
+four tokens, one GPU workgroup builds a histogram, scans record offsets, and
+scatters original `token * 10 + slot` identities into four-route records. Each
+record carries its expert, live row count, and original identities. A finite
+pool of workgroups visits the live records and output features, decoding each
+weight chunk once for up to four rows. Gate/up and down reuse the same records;
+the final combination still accumulates the original ten slots in order.
+
+The producer's dispatch dependency publishes the complete table to consumers.
+The count word is an extent, and the command owns record storage until both
+consumers finish. There is no CPU route readback. Scratch occupies
+`4 + 280 * token_capacity` bytes: 8,964 bytes at the default capacity of 32.
+Only valid records are consumed, so storage reuse needs no global clear.
+Capacities of one to four tokens retain direct per-route projections.
+
+Grouped consumers share the original Q4_K/Q5_K affine decoding, Q5_1 decoding,
+and Q8_0 arithmetic with their direct counterparts. Original packed weights,
+BF16 activations, lane reductions, and publication boundaries remain the same;
+grouping changes work distribution and weight reuse rather than quantization.
+
 ## Qualification
 
 The checkpoint-free kernel suite uses independent scalar arithmetic and
 ownership checks, including partitioned recurrent execution, shared-anchor
 forks, incomplete index blocks, EOS history, inactive storage guards, IQ4_NL
-decoding, and stable top-512 selection:
+decoding, stable top-512 selection, and exact route ownership through empty and
+ragged expert buckets. An independent F64 oracle covers every expert encoding
+and routed row count:
 
 ```sh
 iree-bazel-test --config=asan //experimental/loom_serve/models/qwen_flash_next/...
