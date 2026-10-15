@@ -355,6 +355,22 @@ Use positive requirements for the normal capability contract. `skip_if` is for
 exceptional conditions such as a fixture exceeding available device memory,
 not as a growing architecture allowlist.
 
+AMDGPU cases can require a target using the same processor and target-ID
+feature syntax as compiled artifacts:
+
+```loom
+check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+```
+
+The predicate accepts every device that satisfies that target, including both
+RDNA3 and RDNA3.5 for `gfx11-generic`. An exact selector such as `gfx1100`
+requires that processor; `gfx942:xnack-` also constrains its feature mode.
+A valid incompatible target reports `target_mismatch` before case compilation.
+An unknown target or malformed attribute fails the check. The
+`hal.amdgpu.descriptor_set` provider remains available when a case specifically
+requires one ISA descriptor set. Both correctness and benchmark runners honor
+these requirements.
+
 ## A benchmark names proven work
 
 [`check.benchmark`](../reference/dialects/check/ops/benchmark.md) requires an

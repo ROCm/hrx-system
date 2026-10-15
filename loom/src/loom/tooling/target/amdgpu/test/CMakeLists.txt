@@ -1152,8 +1152,28 @@ iree_execution_test_suite(
     "iree-test-loom=loom::tools::iree-test-loom"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/check_requirements.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/check_requirements_invalid.loom"
   LABELS
     "hostonly"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    check_target_requirements_test
+  MANIFESTS
+    "check-target-requirements.test.json"
+  TOOLS
+    "iree-benchmark-loom=loom::tools::iree-benchmark-loom"
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/check_target_requirements.loom"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
 )
 endif()
 

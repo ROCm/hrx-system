@@ -1,0 +1,116 @@
+// Each supported physical device belongs to exactly one of these target
+// compatibility classes. Exactly one case must execute; the others must skip.
+// The gfx11 kernel also proves admission precedes incompatible compilation.
+amdgpu.target<gfx11-generic> @gfx11_target
+
+kernel.def target(@gfx11_target) @gfx11_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  %value = scalar.constant 42 : i32
+  view.store %value, %view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def @portable_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  %value = scalar.constant 42 : i32
+  view.store %value, %view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @gfx9_4_generic {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @portable_store(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@gfx9_4_generic> @gfx9_4_generic_benchmark
+
+check.case @gfx11_generic {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @gfx11_store(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@gfx11_generic> @gfx11_generic_benchmark
+
+check.case @gfx12_generic {
+  check.requires<hal.amdgpu.target> {target = "gfx12-generic"}
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @portable_store(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@gfx12_generic> @gfx12_generic_benchmark
+
+check.case @gfx12_5_generic {
+  check.requires<hal.amdgpu.target> {target = "gfx12-5-generic"}
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @portable_store(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@gfx12_5_generic> @gfx12_5_generic_benchmark
+
+check.case @gfx90a {
+  check.requires<hal.amdgpu.target> {target = "gfx90a"}
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @portable_store(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@gfx90a> @gfx90a_benchmark
+
+check.case @gfx1170 {
+  check.requires<hal.amdgpu.target> {target = "gfx1170"}
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @portable_store(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@gfx1170> @gfx1170_benchmark
+
+check.case @gfx1171 {
+  check.requires<hal.amdgpu.target> {target = "gfx1171"}
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @portable_store(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@gfx1171> @gfx1171_benchmark
+
+check.case @gfx1172 {
+  check.requires<hal.amdgpu.target> {target = "gfx1172"}
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  kernel.launch @portable_store(%output) : (tensor<1xi32>)
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@gfx1172> @gfx1172_benchmark

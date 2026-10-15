@@ -77,11 +77,17 @@ static iree_status_t iree_benchmark_loom_populate_requirement_providers(
     iree_host_size_t* inout_provider_count) {
   (void)user_data;
 #if IREE_BENCHMARK_LOOM_HAVE_AMDGPU
-  loom_testbench_requirement_provider_t amdgpu_provider = {0};
-  loom_amdgpu_hal_testbench_requirement_provider_initialize(hal_context,
-                                                            &amdgpu_provider);
+  loom_testbench_requirement_provider_t descriptor_set_provider = {0};
+  loom_amdgpu_hal_descriptor_set_testbench_requirement_provider_initialize(
+      hal_context, &descriptor_set_provider);
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_append_requirement_provider(
-      provider_capacity, providers, inout_provider_count, amdgpu_provider));
+      provider_capacity, providers, inout_provider_count,
+      descriptor_set_provider));
+  loom_testbench_requirement_provider_t target_provider = {0};
+  loom_amdgpu_hal_target_testbench_requirement_provider_initialize(
+      hal_context, &target_provider);
+  IREE_RETURN_IF_ERROR(iree_benchmark_loom_append_requirement_provider(
+      provider_capacity, providers, inout_provider_count, target_provider));
 #endif  // IREE_BENCHMARK_LOOM_HAVE_AMDGPU
 #if IREE_BENCHMARK_LOOM_HAVE_SPIRV
   loom_testbench_requirement_provider_t vulkan_feature_provider = {0};

@@ -335,9 +335,28 @@ loom_test(
 
 iree_execution_test_suite(
     name = "check_requirements_test",
-    data = ["check_requirements.loom"],
+    data = [
+        "check_requirements.loom",
+        "check_requirements_invalid.loom",
+    ],
     manifests = ["check-requirements.test.json"],
     tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:amdgpu_hal"]),
+    tools = {
+        "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "check_target_requirements_test",
+    data = ["check_target_requirements.loom"],
+    manifests = ["check-target-requirements.test.json"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/execute:amdgpu_hal"]),
     tools = {
         "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
