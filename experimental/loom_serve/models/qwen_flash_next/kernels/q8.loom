@@ -1,3 +1,17 @@
+// Contract one complete quantization block before applying its shared scale.
+// Keeping this dot tree independent of token batching makes ordinary and
+// speculative execution publish the same BF16 values for identical inputs.
+func.def inline @flash_next_q8_block_dot(%input_origin: offset, %codes: vector<32xbf16>, %input: buffer) -> (f32) {
+  %c0_index = index.constant 0 : index
+  %view = buffer.view %input[%input_origin] : buffer -> view<32xbf16>
+  %values = vector.load %view[%c0_index] : view<32xbf16> -> vector<32xbf16>
+  %c0 = scalar.constant 0.0 : f32
+  %c0_vector = vector.constant 0.0 : vector<16xf32>
+  %pairs = vector.dot2f %codes, %values, %c0_vector : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %dot = vector.reduce<addf> %pairs, %c0 : vector<16xf32>, f32
+  func.return %dot : f32
+}
+
 // Each lane consumes complete Q8_0 blocks. Integer codes are exact in BF16;
 // the shared F16 scale is applied to the block dot in F32. Neither activations
 // nor decoded weights acquire another quantization boundary.
@@ -5,11 +19,10 @@ func.def public inline @flash_next_q8_dot(%width: index, %input_origin: offset, 
   %c0_index = index.constant 0 : index
   %block_size = index.constant 32 : index
   %block_bytes = index.constant 34 : offset
+  %input_block_bytes = index.constant 64 : offset
   %scale_bytes = index.constant 2 : offset
   %blocks = index.div %width, %block_size : index
-  %input_view = buffer.view %input[%input_origin] : buffer -> view<[%blocks]x32xbf16>
   %c0 = scalar.constant 0.0 : f32
-  %c0_vector = vector.constant 0.0 : vector<16xf32>
   %result = scf.for %block = [%lane to %blocks step %stride](%accumulator = %c0 : f32) -> (f32) {
     %block_delta = index.scale %block, %block_bytes : index, offset -> offset
     %block_origin = index.add %weight_origin, %block_delta : offset
@@ -21,9 +34,9 @@ func.def public inline @flash_next_q8_dot(%width: index, %input_origin: offset, 
     %codes = vector.load %code_view[%c0_index] : view<32xi8> -> vector<32xi8>
     %codes_f32 = vector.sitofp %codes : vector<32xi8> to vector<32xf32>
     %codes_bf16 = vector.fptrunc %codes_f32 : vector<32xf32> to vector<32xbf16>
-    %values = vector.load %input_view[%block, %c0_index] : view<[%blocks]x32xbf16> -> vector<32xbf16>
-    %pairs = vector.dot2f %codes_bf16, %values, %c0_vector : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
-    %dot = vector.reduce<addf> %pairs, %c0 : vector<16xf32>, f32
+    %input_delta = index.scale %block, %input_block_bytes : index, offset -> offset
+    %input_block_origin = index.add %input_origin, %input_delta : offset
+    %dot = func.call @flash_next_q8_block_dot(%input_block_origin, %codes_bf16, %input) : (offset, vector<32xbf16>, buffer) -> (f32)
     %scaled = scalar.mulf %dot, %scale : f32
     %next = scalar.addf %accumulator, %scaled : f32
     scf.yield %next : f32
@@ -44,4 +57,56 @@ func.def public inline @flash_next_q8_partial(%width: index, %token: index, %row
   %input_origin = index.scale %token, %input_row_bytes : index, offset -> offset
   %result = func.call @flash_next_q8_dot(%width, %input_origin, %weight_origin, %lane, %stride, %input, %weight) : (index, offset, offset, index, index, buffer, buffer) -> (f32)
   func.return %result : f32
+}
+
+// Four consecutive tokens share weight loads and code conversion. Each vector
+// element keeps its own original block-stride accumulator; neither batch size
+// nor the number of live rows changes a token's arithmetic. Inactive rows do
+// not read activations. The caller owns the subgroup reduction and publication.
+func.def public inline @flash_next_q8_batch_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %batch_size = index.constant 4 : index
+  %block_size = index.constant 32 : index
+  %block_bytes = index.constant 34 : offset
+  %input_block_bytes = index.constant 64 : offset
+  %element_bytes = index.constant 2 : offset
+  %scale_bytes = index.constant 2 : offset
+  %blocks = index.div %width, %block_size : index
+  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+  %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
+  %c0_vector = vector.constant 0.0 : vector<4xf32>
+  %result = scf.for %block = [%lane to %blocks step %stride](%sums = %c0_vector : vector<4xf32>) -> (vector<4xf32>) {
+    %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+    %block_origin = index.add %weight_origin, %block_delta : offset
+    %payload_origin = index.add %block_origin, %scale_bytes : offset
+    %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+    %code_view = buffer.view %weight[%payload_origin] : buffer -> view<32xi8>
+    %packed_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+    %scale = scalar.extf %packed_scale : f16 to f32
+    %packed_codes = vector.load %code_view[%c0] : view<32xi8> -> vector<32xi8>
+    %wide_codes = vector.sitofp %packed_codes : vector<32xi8> to vector<32xf32>
+    %codes = vector.fptrunc %wide_codes : vector<32xf32> to vector<32xbf16>
+    %input_delta = index.scale %block, %input_block_bytes : index, offset -> offset
+    %next_sums = scf.for %ordinal = [%c0 to %batch_size step %c1](%current = %sums : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+      %token = index.add %first, %ordinal : index
+      %active = index.cmp ult, %token, %end : index
+      %next = scf.if %active -> (vector<4xf32>) {
+        %input_row_origin = index.scale %token, %input_row_bytes : index, offset -> offset
+        %input_origin = index.add %input_row_origin, %input_delta : offset
+        %dot = func.call @flash_next_q8_block_dot(%input_origin, %codes, %input) : (offset, vector<32xbf16>, buffer) -> (f32)
+        %scaled = scalar.mulf %dot, %scale : f32
+        %prior = vector.extract %current[%ordinal] : vector<4xf32> -> f32
+        %sum = scalar.addf %prior, %scaled : f32
+        %updated = vector.insert %sum into %current[%ordinal] : f32, vector<4xf32>
+        scf.yield %updated : vector<4xf32>
+      } else {
+        scf.yield %current : vector<4xf32>
+      }
+      scf.yield %next : vector<4xf32>
+    }
+    scf.yield %next_sums : vector<4xf32>
+  }
+  func.return %result : vector<4xf32>
 }

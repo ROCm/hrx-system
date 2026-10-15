@@ -74,6 +74,18 @@ loom_library(
 ]
 
 loom_test(
+    name = "projection_test",
+    srcs = ["tests/projection.loom"],
+    benchmark_smoke = False,
+    configs = {"flash_next.token_count": "19"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
     name = "gdn_test",
     srcs = ["tests/gdn.loom"],
     benchmark_smoke = False,
