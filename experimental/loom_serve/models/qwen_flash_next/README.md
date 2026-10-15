@@ -127,6 +127,21 @@ attention indexes. A recurrent endpoint is 115,651,840 bytes: 36 GDN states,
 PLE token and convolution history, and incomplete sparse-index blocks. Endpoint
 capacity therefore matters independently of KV capacity.
 
+The scheduler chooses among prepared token/span capacities for each epoch;
+raising `prefill_capacity` does not force every request to use that largest
+shape. Larger prompt batches can share more expert weights and amortize
+dispatch cost, but also keep the device occupied longer before newly ready
+requests receive their next turn. Measure first-text latency alongside total
+cohort throughput when selecting the capacity for interactive workloads.
+
+MTP has a separate tradeoff: accepted proposals save target traversals, while
+drafting and verification add work. A configuration that improves one client's
+generation rate can reduce aggregate throughput when many clients already
+fill the target batch. Compare ordinary and speculative execution on the same
+arrival pattern, prompt lengths, and output budgets. Complete-cohort throughput
+includes prompt processing and queueing; it differs from individual generation
+rates measured after first text or after preparing every prompt.
+
 Pinned readers and private writers have distinct recurrent origins. At a fork,
 the first token reads its immutable anchor; subsequent tokens read the writer.
 Only that writer is updated. Main K/V and index keys use the scheduler's physical
@@ -163,7 +178,7 @@ The allocation keeps exactly the original size. The loader publishes readiness
 after preparation and repeats it after reloading the original checkpoint; all
 QKV consumers, including speculative verification, use the prepared layout.
 
-Larger epochs share each decoded Q8 block over a 64-channel by 32-token matrix
+Larger QKV epochs share each decoded Q8 block over a 64-channel by 32-token matrix
 tile. Exact integer codes and the existing BF16 activations feed WMMA, with the
 original block scales applied in F32. Padded LDS rows and a permuted producer
 assignment distribute staging traffic across banks; a two-stage loop acquires
