@@ -72,6 +72,21 @@ typedef enum iree_hal_amdgpu_aql_queue_execution_mode_e {
   IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_PM4_EMULATED = 1,
 } iree_hal_amdgpu_aql_queue_execution_mode_t;
 
+// Optional observer used by bounded queue-publication experiments. Production
+// rings leave all callbacks NULL. Callbacks execute inline on the reservation
+// and doorbell paths and therefore must not allocate, wait, format, or perform
+// I/O.
+typedef struct iree_hal_amdgpu_aql_ring_observer_t {
+  // Opaque state passed to each callback.
+  void* user_data;
+  // Called after a packet range has been reserved and backpressure satisfied.
+  void (*reserve)(void* user_data, uint64_t first_packet_id, uint32_t count);
+  // Called immediately before the packet-to-device publication operation.
+  void (*before_doorbell)(void* user_data, uint64_t packet_id);
+  // Called after the packet-to-device publication operation has completed.
+  void (*after_doorbell)(void* user_data, uint64_t packet_id);
+} iree_hal_amdgpu_aql_ring_observer_t;
+
 // Queries the AQL queue execution mode reported for |device_agent|.
 iree_status_t iree_hal_amdgpu_query_aql_queue_execution_mode(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
@@ -118,6 +133,9 @@ typedef struct iree_hal_amdgpu_aql_ring_t {
   // proof that unrelated sidecar storage associated with a dispatch has been
   // consumed by later queue work.
   const volatile int64_t* read_dispatch_id;
+
+  // Optional bounded publication observer. Disabled in production.
+  iree_hal_amdgpu_aql_ring_observer_t observer;
 } iree_hal_amdgpu_aql_ring_t;
 
 // Initializes the AQL ring from a hardware queue descriptor. Resolves the
@@ -161,6 +179,7 @@ static inline void iree_hal_amdgpu_aql_ring_initialize(
       (iree_atomic_int64_t*)&hardware_queue->write_dispatch_id;
   out_ring->read_dispatch_id =
       (const volatile int64_t*)&hardware_queue->read_dispatch_id;
+  out_ring->observer = (iree_hal_amdgpu_aql_ring_observer_t){0};
 }
 
 // Reserves |count| contiguous packet slots. Returns the first packet ID.
@@ -202,6 +221,10 @@ static inline uint64_t iree_hal_amdgpu_aql_ring_reserve(
     iree_processor_yield();
   }
 
+  if (IREE_UNLIKELY(ring->observer.reserve != NULL)) {
+    ring->observer.reserve(ring->observer.user_data, first_id, count);
+  }
+
   return first_id;
 }
 
@@ -229,6 +252,9 @@ static inline bool iree_hal_amdgpu_aql_ring_try_reserve(
             ring->write_dispatch_id, &current_write, desired_write,
             iree_memory_order_acq_rel, iree_memory_order_relaxed)) {
       *out_first_id = first_id;
+      if (IREE_UNLIKELY(ring->observer.reserve != NULL)) {
+        ring->observer.reserve(ring->observer.user_data, first_id, count);
+      }
       return true;
     }
   }
@@ -276,6 +302,9 @@ static inline void iree_hal_amdgpu_aql_ring_commit(
 // the platform runtime.
 static inline void iree_hal_amdgpu_aql_ring_doorbell(
     iree_hal_amdgpu_aql_ring_t* ring, uint64_t packet_id) {
+  if (IREE_UNLIKELY(ring->observer.before_doorbell != NULL)) {
+    ring->observer.before_doorbell(ring->observer.user_data, packet_id);
+  }
   if (ring->doorbell.ptr != NULL) {
     // Fast path: publish packet memory, then write the DOORBELL-kind signal's
     // MMIO register. This matches ROCr's native AQL queue publication boundary.
@@ -288,6 +317,9 @@ static inline void iree_hal_amdgpu_aql_ring_doorbell(
     iree_hsa_signal_store_screlease(IREE_LIBHSA(ring->libhsa),
                                     ring->doorbell.signal,
                                     (iree_hsa_signal_value_t)packet_id);
+  }
+  if (IREE_UNLIKELY(ring->observer.after_doorbell != NULL)) {
+    ring->observer.after_doorbell(ring->observer.user_data, packet_id);
   }
 }
 
