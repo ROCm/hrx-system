@@ -32,8 +32,8 @@ func.def inline @expert_affine_coefficients(%down: i1, %q8: i1, %q5: i1, %weight
     %packed_scale = view.load %scale_view[0] : view<1xf16> -> f16
     %scale = scalar.extf %packed_scale : f16 to f32
     %codes = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
-    %zero = scalar.constant 0.0 : f32
-    scf.yield %codes, %scale, %zero : vector<16xi8>, f32, f32
+    %c0_f32 = scalar.constant 0.0 : f32
+    scf.yield %codes, %scale, %c0_f32 : vector<16xi8>, f32, f32
   } else {
     %codes, %scale, %bias = scf.if %down -> (vector<16xi8>, f32, f32) {
       %block_bytes = index.constant 24 : offset
@@ -43,9 +43,9 @@ func.def inline @expert_affine_coefficients(%down: i1, %q8: i1, %q5: i1, %weight
       %codes = func.call @flash_next_q51_codes(%packed, %high, %half) : (vector<16xi8>, vector<4xi32>, index) -> (vector<16xi8>)
       scf.yield %codes, %scale, %bias : vector<16xi8>, f32, f32
     } else {
-      %eight = index.constant 8 : index
-      %block = index.div %block32, %eight : index
-      %group = index.rem %block32, %eight : index
+      %c8 = index.constant 8 : index
+      %block = index.div %block32, %c8 : index
+      %group = index.rem %block32, %c8 : index
       %codes, %scale, %minimum = scf.if %q5 -> (vector<16xi8>, f32, f32) {
         %codes, %scale, %minimum = template.apply<@ggml.q5k.chunk>(%weight, %row_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
         scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
@@ -178,14 +178,14 @@ template.def<@flash_next.expert_tile> device @flash_next_expert_tiled(%down: i1,
   %input_view = buffer.view %input[%origin] : buffer -> view<[%input_rows]x[%inputs]xbf16>
   %results = buffer.view %arena[%origin] : buffer -> view<[%tile_rows]x[%tile_columns]xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%route_capacity]x[%outputs]xbf16>
-  %zero = vector.constant 0.0 : vector<8xf32>
-  %initial = vector.fragment<init> %zero shape [%c16, %c16] : vector<8xf32>
+  %accumulator_seed = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %accumulator_seed shape [%c16, %c16] : vector<8xf32>
   %initial_tile = vector.constant 0.0 : vector<[%fragment_count]x8xf32>
   %initial_rows = vector.constant 0 : vector<[%input_rounds]xi32>
   %initial_live = vector.constant false : vector<[%input_rounds]xi1>
   %input_zero = vector.constant 0.0 : vector<4xbf16>
-  %one = vector.constant 1.0 : vector<8xf32>
-  %zero_scalar = scalar.constant 0.0 : f32
+  %unit_scale = vector.constant 1.0 : vector<8xf32>
+  %c0_f32 = scalar.constant 0.0 : f32
   %true = scalar.constant true : i1
   %has_bias = scalar.xori %q8, %true : i1
   %shuffle_one = scalar.constant 1 : i32
@@ -221,9 +221,9 @@ template.def<@flash_next.expert_tile> device @flash_next_expert_tiled(%down: i1,
         %row_live = index.cmp ult, %row, %live : index
         scf.yield %row_word, %row_live : i32, i1
       } else {
-        %zero_word = scalar.constant 0 : i32
+        %c0_i32 = scalar.constant 0 : i32
         %inactive = scalar.constant false : i1
-        scf.yield %zero_word, %inactive : i32, i1
+        scf.yield %c0_i32, %inactive : i32, i1
       }
       %next_ids = vector.insert %id into %ids[%round] : i32, vector<[%input_rounds]xi32>
       %next_masks = vector.insert %active into %masks[%round] : i1, vector<[%input_rounds]xi1>
@@ -248,7 +248,7 @@ template.def<@flash_next.expert_tile> device @flash_next_expert_tiled(%down: i1,
           scf.yield %codes, %scale, %bias : vector<16xbf16>, f32, f32
         } else {
           %zero_codes = vector.constant 0.0 : vector<16xbf16>
-          scf.yield %zero_codes, %zero_scalar, %zero_scalar : vector<16xbf16>, f32, f32
+          scf.yield %zero_codes, %c0_f32, %c0_f32 : vector<16xbf16>, f32, f32
         }
         scf.if %owns_packet {
           vector.store %stage_codes, %weight_view[%column, %k] : vector<16xbf16>, view<[%weight_columns]x40xbf16>
@@ -280,7 +280,7 @@ template.def<@flash_next.expert_tile> device @flash_next_expert_tiled(%down: i1,
           vector.store %selected, %staged_input[%row, %input_k] : vector<4xbf16>, view<[%tile_rows]x40xbf16>
           scf.if %has_bias {
             %wide = vector.extf %selected : vector<4xbf16> to vector<4xf32>
-            %partial = vector.reduce<addf> %wide, %zero_scalar : vector<4xf32>, f32
+            %partial = vector.reduce<addf> %wide, %c0_f32 : vector<4xf32>, f32
             %other_one, %valid_one = kernel.subgroup.shuffle<xor> %partial, %shuffle_one, %shuffle_width : f32, i32, i32
             %sum_one = scalar.addf %partial, %other_one : f32
             %other_two, %valid_two = kernel.subgroup.shuffle<xor> %sum_one, %shuffle_two, %shuffle_width : f32, i32, i32
@@ -316,7 +316,7 @@ template.def<@flash_next.expert_tile> device @flash_next_expert_tiled(%down: i1,
         %next = scf.if %has_bias -> (vector<8xf32>) {
           %bias_value = view.load %metadata[%metadata_column, 1] : view<[%weight_columns]x2xf32> -> f32
           %bias = vector.splat %bias_value : vector<8xf32>
-          %sums = scf.for %element = [%c0 to %c8 step %c1](%values = %zero : vector<8xf32>) -> (vector<8xf32>) unroll schedule(linear) {
+          %sums = scf.for %element = [%c0 to %c8 step %c1](%values = %accumulator_seed : vector<8xf32>) -> (vector<8xf32>) unroll schedule(linear) {
             %row_part = index.madd %element, %c2, %lane_row : index
             %sum_row = index.add %fragment_row, %row_part : index
             %value = view.load %row_sums[%sum_row] : view<[%tile_rows]xf32> -> f32
@@ -347,7 +347,7 @@ template.def<@flash_next.expert_tile> device @flash_next_expert_tiled(%down: i1,
         %up = vector.extract %result_tile[%up_ordinal] : vector<[%fragment_count]x8xf32> -> vector<8xf32>
         %negative = vector.negf %primary : vector<8xf32>
         %exponential = vector.expf<afn> %negative : vector<8xf32>
-        %denominator = vector.addf %one, %exponential : vector<8xf32>
+        %denominator = vector.addf %unit_scale, %exponential : vector<8xf32>
         %silu = vector.divf %primary, %denominator : vector<8xf32>
         %product = vector.mulf %silu, %up : vector<8xf32>
         scf.yield %product : vector<8xf32>
@@ -383,20 +383,20 @@ template.def<@flash_next.expert_tile> device @flash_next_expert_tiled(%down: i1,
 // command launch is classified; ordinary device ABI scalars remain dynamic.
 func.def inline @expert_matrix_schedule(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %three = index.constant 3 : index
-  %four = index.constant 4 : index
-  %thirty_two = index.constant 32 : index
-  %sixty_four = index.constant 64 : index
-  %down = index.cmp eq, %contraction, %one : index
-  %q8 = index.cmp eq, %format, %zero : index
-  %q5 = index.cmp eq, %format, %three : index
-  %columns = scf.select %down, %sixty_four, %thirty_two : index
-  %wave_rows = scf.select %down, %two, %four : index
-  %wave_columns = scf.select %down, %four, %two : index
-  template.apply<@flash_next.expert_tile>(%down, %q8, %q5, %capacity, %rows, %columns, %wave_rows, %wave_columns, %two, %input, %tasks, %weight, %up_weight, %output) : (i1, i1, i1, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %down = index.cmp eq, %contraction, %c1 : index
+  %q8 = index.cmp eq, %format, %c0 : index
+  %q5 = index.cmp eq, %format, %c3 : index
+  %columns = scf.select %down, %c64, %c32 : index
+  %wave_rows = scf.select %down, %c2, %c4 : index
+  %wave_columns = scf.select %down, %c4, %c2 : index
+  template.apply<@flash_next.expert_tile>(%down, %q8, %q5, %capacity, %rows, %columns, %wave_rows, %wave_columns, %c2, %input, %tasks, %weight, %up_weight, %output) : (i1, i1, i1, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
   func.return
 }
 
@@ -456,8 +456,8 @@ template.def<@flash_next.expert_schedule> device @expert_schedule_down_q8_128(%c
 kernel.def target(@flash_next_expert_matrix_wave32) @expert_matrix() {
   %workers = index.constant 1280 : index
   %threads = index.constant 256 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   template.apply<@flash_next.expert_schedule>(%contraction, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.return

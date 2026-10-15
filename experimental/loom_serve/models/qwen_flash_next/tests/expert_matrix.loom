@@ -19,11 +19,11 @@ amdgpu.target<gfx11-generic> @expert_test_wave32 {subgroup_size = 32}
 // Configurations cover Q4_K/Q5_K/Q8 gate/up and Q5_1/Q8 down. Geometry
 // determines storage only; the oracle decodes original coefficients itself.
 func.def @expert_geometry(%down: i1, %format: index) -> (index, index, index, index, index, index, index, index) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %three = index.constant 3 : index
-  %ten = index.constant 10 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c10 = index.constant 10 : index
   %block_size = index.constant 32 : index
   %q8_block_bytes = index.constant 34 : index
   %q4_row_bytes = index.constant 1440 : index
@@ -33,32 +33,32 @@ func.def @expert_geometry(%down: i1, %format: index) -> (index, index, index, in
   %model = index.constant 2560 : index
   %rows = config.get @expert_test.tile_rows : index
   %capacity = config.get @flash_next.token_count : index
-  %large = index.cmp uge, %format, %two : index
-  %q51 = index.cmp eq, %format, %one : index
-  %q5 = index.cmp eq, %format, %three : index
+  %large = index.cmp uge, %format, %c2 : index
+  %q51 = index.cmp eq, %format, %c1 : index
+  %q5 = index.cmp eq, %format, %c3 : index
   %inputs = scf.select %down, %hidden, %model : index
   %outputs = scf.select %down, %model, %hidden : index
-  %routes = index.mul %capacity, %ten : index
+  %routes = index.mul %capacity, %c10 : index
   %input_rows = scf.select %down, %routes, %capacity : index
   %blocks = index.div %inputs, %block_size : index
   %q8_row_bytes = index.mul %blocks, %q8_block_bytes : index
   %large_row_bytes = scf.select %q5, %q5_row_bytes, %q4_row_bytes : index
   %small_row_bytes = scf.select %q51, %q51_row_bytes, %q8_row_bytes : index
   %row_bytes = scf.select %large, %large_row_bytes, %small_row_bytes : index
-  %weight_rows = index.mul %outputs, %ten : index
+  %weight_rows = index.mul %outputs, %c10 : index
   %weight_bytes = index.mul %weight_rows, %row_bytes : index
-  %up_bytes = scf.select %down, %one, %weight_bytes : index
+  %up_bytes = scf.select %down, %c1, %weight_bytes : index
   %record_capacity, %fields, %task_bytes = func.call pure @expert_record_extent(%capacity, %rows) : (index, index) -> (index, index, offset)
-  %task_words = index.madd %record_capacity, %fields, %one : index
+  %task_words = index.madd %record_capacity, %fields, %c1 : index
   func.return %rows, %input_rows, %inputs, %outputs, %routes, %task_words, %weight_bytes, %up_bytes : index, index, index, index, index, index, index, index
 }
 
 // Bind the finite test geometry before compiling each GPU subject. Runtime
 // generators own only data; they do not specialize the matrix schedule.
 func.def inline @expert_matrix_subject(%down: i1, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %contraction = scf.select %down, %one, %zero : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %contraction = scf.select %down, %c1, %c0 : index
   template.apply<@flash_next.expert_schedule>(%contraction, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
   func.return
 }
@@ -66,8 +66,8 @@ func.def inline @expert_matrix_subject(%down: i1, %format: index, %rows: index, 
 kernel.def target(@expert_test_wave32) @matrix_gate_up_q4k() {
   %workers = index.constant 1280 : index
   %threads = index.constant 256 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %down = scalar.constant false : i1
   %format = index.constant 2 : index
@@ -111,8 +111,8 @@ check.scenario public @gate_up_q4k {
 kernel.def target(@expert_test_wave32) @matrix_gate_up_q5k() {
   %workers = index.constant 1280 : index
   %threads = index.constant 256 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %down = scalar.constant false : i1
   %format = index.constant 3 : index
@@ -156,8 +156,8 @@ check.scenario public @gate_up_q5k {
 kernel.def target(@expert_test_wave32) @matrix_gate_up_q8() {
   %workers = index.constant 1280 : index
   %threads = index.constant 256 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %down = scalar.constant false : i1
   %format = index.constant 0 : index
@@ -201,8 +201,8 @@ check.scenario public @gate_up_q8 {
 kernel.def target(@expert_test_wave32) @matrix_down_q51() {
   %workers = index.constant 1280 : index
   %threads = index.constant 256 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %down = scalar.constant true : i1
   %format = index.constant 1 : index
@@ -246,8 +246,8 @@ check.scenario public @down_q51 {
 kernel.def target(@expert_test_wave32) @matrix_down_q8() {
   %workers = index.constant 1280 : index
   %threads = index.constant 256 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %down = scalar.constant true : i1
   %format = index.constant 0 : index

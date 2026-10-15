@@ -83,7 +83,7 @@ template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, 
     %output_row_bytes = index.scale %outputs, %element_bytes : index, offset -> offset
     %tile_byte_offset = index.scale %first, %output_row_bytes : index, offset -> offset
     %output_view = buffer.view %output[%tile_byte_offset] : buffer -> view<[%remaining_rows]x[%outputs]xbf16>
-    %zeros = vector.constant 0.0 : vector<4xbf16>
+    %inactive_values = vector.constant 0.0 : vector<4xbf16>
     %accumulator_zero = vector.constant 0.0 : vector<8xf32>
     %initial = vector.fragment<init> %accumulator_zero shape [%c16, %c16] : vector<8xf32>
     %initial_tile = vector.constant 0.0 : vector<[%fragment_count]x8xf32>
@@ -138,7 +138,7 @@ template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, 
           %k = index.add %input_k, %local_k : index
           %loaded = vector.load %input_view[%safe_token, %k] : view<[%capacity]x[%inputs]xbf16> -> vector<4xbf16>
           %mask = vector.splat %live : vector<4xi1>
-          %values = vector.select %mask, %loaded, %zeros : vector<4xbf16>
+          %values = vector.select %mask, %loaded, %inactive_values : vector<4xbf16>
           vector.store %values, %input_stage_view[%local_token, %local_k] : vector<4xbf16>, view<[%tile_rows]x40xbf16>
         }
       }

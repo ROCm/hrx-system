@@ -63,15 +63,15 @@ func.def public pure inline @flash_next_q8_geometry(%capacity: index, %inputs: i
 // Fixed physical launch sizes keep workitem and subgroup bounds available
 // in each device entry. Both entries instantiate the same schedule family.
 kernel.def target(@flash_next_q8_wave32) @flash_next_q8_matrix_128(%capacity: index, %outputs: index, %tile_rows: index, %tile_columns: index) {
-  %one = index.constant 1 : index
-  %row_rounding = index.sub %tile_rows, %one : index
-  %column_rounding = index.sub %tile_columns, %one : index
+  %c1 = index.constant 1 : index
+  %row_rounding = index.sub %tile_rows, %c1 : index
+  %column_rounding = index.sub %tile_columns, %c1 : index
   %rounded_rows = index.add %capacity, %row_rounding : index
   %rounded_columns = index.add %outputs, %column_rounding : index
   %row_tiles = index.div %rounded_rows, %tile_rows : index
   %column_tiles = index.div %rounded_columns, %tile_columns : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%column_tiles, %row_tiles, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%column_tiles, %row_tiles, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%inputs: index, %outputs: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   template.apply<@flash_next.q8_schedule>(%capacity, %inputs, %outputs, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
@@ -79,15 +79,15 @@ kernel.def target(@flash_next_q8_wave32) @flash_next_q8_matrix_128(%capacity: in
 }
 
 kernel.def target(@flash_next_q8_wave32) @flash_next_q8_matrix_256(%capacity: index, %outputs: index, %tile_rows: index, %tile_columns: index) {
-  %one = index.constant 1 : index
-  %row_rounding = index.sub %tile_rows, %one : index
-  %column_rounding = index.sub %tile_columns, %one : index
+  %c1 = index.constant 1 : index
+  %row_rounding = index.sub %tile_rows, %c1 : index
+  %column_rounding = index.sub %tile_columns, %c1 : index
   %rounded_rows = index.add %capacity, %row_rounding : index
   %rounded_columns = index.add %outputs, %column_rounding : index
   %row_tiles = index.div %rounded_rows, %tile_rows : index
   %column_tiles = index.div %rounded_columns, %tile_columns : index
   %threads = index.constant 256 : index
-  kernel.launch.config workgroups(%column_tiles, %row_tiles, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%column_tiles, %row_tiles, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%inputs: index, %outputs: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   template.apply<@flash_next.q8_schedule>(%capacity, %inputs, %outputs, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
@@ -102,8 +102,8 @@ template.def<@flash_next.project_dense_q8> @flash_next_project_dense_q8(%inputs:
   scf.if %matrix {
     %depth = index.constant 1 : index
     %wave_count = index.mul %wave_rows, %wave_columns : index
-    %four = index.constant 4 : index
-    %four_waves = index.cmp eq, %wave_count, %four : index
+    %c4 = index.constant 4 : index
+    %four_waves = index.cmp eq, %wave_count, %c4 : index
     scf.if %four_waves {
       kernel.launch @flash_next_q8_matrix_128[%capacity, %outputs, %rows, %columns](%inputs, %outputs, %rows, %columns, %wave_rows, %wave_columns, %depth, %span, %input, %weight, %output) : [index, index, index, index](index, index, index, index, index, index, index, buffer, buffer, view<[%outputs]x[%blocks]x34xi8>, buffer)
     } else {
