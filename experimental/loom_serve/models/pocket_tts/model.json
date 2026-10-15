@@ -1,0 +1,70 @@
+{
+  "name": "pocket-tts",
+  "definition": {
+    "kind": "speech",
+    "prepare": "prepare.loom",
+    "control": "control.loom",
+    "sources": [
+      "attention.loom",
+      "batch_attention.loom",
+      "batch_conditioning.loom",
+      "batch_convolution.loom",
+      "batch_decode.loom",
+      "batch_flow_layers.loom",
+      "batch_flow_state.loom",
+      "batch_mimi_layers.loom",
+      "batch_normalization.loom",
+      "batch_pointwise.loom",
+      "batch_prefill.loom",
+      "batch_projection.loom",
+      "batch_request.loom",
+      "batch_sampling.loom",
+      "batch_voice.loom",
+      "batching.loom",
+      "convolution.loom",
+      "decode.loom",
+      "dispatch.loom",
+      "flow_layers.loom",
+      "flow_state.loom",
+      "layout.loom",
+      "mimi_layers.loom",
+      "normalization.loom",
+      "options.loom",
+      "pointwise.loom",
+      "prefill.loom",
+      "projection.loom",
+      "request_layout.loom",
+      "sampling.loom",
+      "text_chunking.loom",
+      "text_normalization.loom",
+      "voice.loom",
+      "../../motifs/tensor/random.loom",
+      "../../motifs/text/utf8.loom",
+      "../../motifs/text/unicode.loom"
+    ],
+    "assets": ".",
+    "options": {
+      "context_capacity": 512,
+      "rotary_capacity": 4096,
+      "chunk_tokens": 50,
+      "voices": [
+        {
+          "id": "alba",
+          "frames": 126
+        },
+        {
+          "id": "marius",
+          "frames": 126
+        },
+        {
+          "id": "jean",
+          "frames": 123
+        },
+        {
+          "id": "anna",
+          "frames": 154
+        }
+      ]
+    }
+  }
+}
