@@ -68,9 +68,9 @@ func.def @reference(%epoch: buffer, %input: buffer, %down: buffer, %weight: buff
   %center = scalar.constant 64.0 : f64
   %scale = scalar.constant 0.000244140625 : f64
   %initial = scalar.constant 0.0 : f64
-  %zero = scalar.constant 0.0 : bf16
-  %one = scalar.constant 1.0 : f32
-  %two = scalar.constant 2.0 : f32
+  %c0_bf16 = scalar.constant 0.0 : bf16
+  %c1_f32 = scalar.constant 1.0 : f32
+  %c2_f32 = scalar.constant 2.0 : f32
   scf.for %token = [%c0 to %c2 step %c1] {
     scf.for %row = [%c0 to %c4 step %c1] {
       %dot = scf.for %column = [%c0 to %width step %c1](%sum = %initial : f64) -> (f64) {
@@ -89,12 +89,12 @@ func.def @reference(%epoch: buffer, %input: buffer, %down: buffer, %weight: buff
       %scaled = scalar.fptrunc %dot : f64 to f32
       %negative = scalar.negf %scaled : f32
       %exponential = scalar.expf<afn> %negative : f32
-      %denominator = scalar.addf %one, %exponential : f32
-      %gate = scalar.divf %two, %denominator : f32
+      %denominator = scalar.addf %c1_f32, %exponential : f32
+      %gate = scalar.divf %c2_f32, %denominator : f32
       view.store %gate, %outputs[%token, %row] : f32, view<3x4xf32>
     }
     scf.for %column = [%c0 to %rank step %c1] {
-      view.store %zero, %ranks[%token, %column] : bf16, view<3x320xbf16>
+      view.store %c0_bf16, %ranks[%token, %column] : bf16, view<3x320xbf16>
     }
   }
   func.return
