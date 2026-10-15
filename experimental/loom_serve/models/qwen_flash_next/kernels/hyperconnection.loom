@@ -4,7 +4,7 @@ amdgpu.target<gfx11-generic> @flash_next_hc_wave32 {subgroup_size = 32}
 
 func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
-func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+func.decl @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
 
 // One wave normalizes each residual stream. GGUF already folded 1+gamma;
 // multiplication retains that F32 value until the BF16 output publication.
@@ -59,15 +59,34 @@ kernel.def target(@flash_next_hc_wave32) @hc_normalize() {
   kernel.return
 }
 
-// The final workgroup owns four injection rows. Their checkpoint storage is
-// F32 in the target and Q8_0 in the predictor. Low-rank projections and the
-// scaled SiLU/sigmoid publications share one implementation for both formats.
+// Larger epochs reuse each decoded Q8 block across four tokens. Small epochs
+// keep one token per workgroup to expose enough independent work. Capacity
+// selects this schedule during specialization, before device execution.
+func.def pure inline @hc_token_batch_size() -> (index) {
+  %tokens = config.get @flash_next.token_count : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %large = index.cmp ugt, %tokens, %c4 : index
+  %size = scf.if %large -> (index) {
+    scf.yield %c4 : index
+  } else {
+    scf.yield %c1 : index
+  }
+  func.return %size : index
+}
+
+// Each wave owns one low-rank row or one of the four final injection rows.
+// Injection weights are F32 in the target and Q8_0 in the predictor. Tokens
+// share Q8 loads while retaining independent F32 accumulators and the original
+// quarter-scaled SiLU/sigmoid publications.
 func.def inline @hc_down_inject_body(%q8_injection: i1, %span_arg: buffer, %normalized_arg: buffer, %down_weight_arg: buffer, %injection_weight_arg: buffer, %lowrank_arg: buffer, %injection_arg: buffer) {
   %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection = buffer.assume.noalias %span_arg, %normalized_arg, %down_weight_arg, %injection_weight_arg, %lowrank_arg, %injection_arg : buffer, buffer, buffer, buffer, buffer, buffer
   %tokens = config.get @flash_next.token_count : index
-  %token = kernel.workgroup.id<y> : index
+  %token_group = kernel.workgroup.id<y> : index
+  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %first = index.mul %token_group, %batch_size : index
   %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
-  %active = index.cmp ult, %token, %end : index
+  %active = index.cmp ult, %first, %end : index
   scf.if %active {
     %group = kernel.workgroup.id<x> : index
     %wave = kernel.subgroup.id : index
@@ -86,48 +105,69 @@ func.def inline @hc_down_inject_body(%q8_injection: i1, %span_arg: buffer, %norm
     %c1 = scalar.constant 1.0 : f32
     %c2 = scalar.constant 2.0 : f32
     %quarter = scalar.constant 0.25 : f32
-    %partial = scf.if %is_projection -> (f32) {
-      %value = func.call @flash_next_q8_partial(%width, %token, %row, %lane, %wave_size, %normalized, %down_weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
-      scf.yield %value : f32
+    %partial = scf.if %is_projection -> (vector<4xf32>) {
+      %value = func.call @flash_next_q8_batch_partial(%width, %batch_size, %first, %end, %row, %lane, %wave_size, %normalized, %down_weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+      scf.yield %value : vector<4xf32>
     } else {
       %injection_row = index.sub %row, %rank : index
-      %value = scf.if %q8_injection -> (f32) {
-        %part = func.call @flash_next_q8_partial(%width, %token, %injection_row, %lane, %wave_size, %normalized, %injection_weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
-        scf.yield %part : f32
+      %value = scf.if %q8_injection -> (vector<4xf32>) {
+        %part = func.call @flash_next_q8_batch_partial(%width, %batch_size, %first, %end, %injection_row, %lane, %wave_size, %normalized, %injection_weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+        scf.yield %part : vector<4xf32>
       } else {
-        %input_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x10240xbf16>
-        %weight_view = buffer.view %injection_weight[%origin] : buffer -> view<4x10240xf32>
-        %first = index.mul %lane, %c8 : index
-        %initial = vector.constant 0.0 : vector<8xf32>
-        %parts = scf.for %channel = [%first to %width step %stride](%accumulator = %initial : vector<8xf32>) -> (vector<8xf32>) {
-          %stored = vector.load %input_view[%token, %channel] : view<[%tokens]x10240xbf16> -> vector<8xbf16>
-          %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
-          %weights = vector.load %weight_view[%injection_row, %channel] : view<4x10240xf32> -> vector<8xf32>
-          %next = vector.fmaf %values, %weights, %accumulator : vector<8xf32>
-          scf.yield %next : vector<8xf32>
+        %step = index.constant 1 : index
+        %empty = vector.constant 0.0 : vector<4xf32>
+        %values = scf.for %ordinal = [%c0_index to %batch_size step %step](%current = %empty : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+          %token = index.add %first, %ordinal : index
+          %live = index.cmp ult, %token, %end : index
+          %next_value = scf.if %live -> (vector<4xf32>) {
+            %input_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x10240xbf16>
+            %weight_view = buffer.view %injection_weight[%origin] : buffer -> view<4x10240xf32>
+            %first_channel = index.mul %lane, %c8 : index
+            %initial = vector.constant 0.0 : vector<8xf32>
+            %parts = scf.for %channel = [%first_channel to %width step %stride](%accumulator = %initial : vector<8xf32>) -> (vector<8xf32>) {
+              %stored = vector.load %input_view[%token, %channel] : view<[%tokens]x10240xbf16> -> vector<8xbf16>
+              %values = vector.extf %stored : vector<8xbf16> to vector<8xf32>
+              %weights = vector.load %weight_view[%injection_row, %channel] : view<4x10240xf32> -> vector<8xf32>
+              %next = vector.fmaf %values, %weights, %accumulator : vector<8xf32>
+              scf.yield %next : vector<8xf32>
+            }
+            %sum = vector.reduce<addf> %parts, %c0 : vector<8xf32>, f32
+            %updated = vector.insert %sum into %current[%ordinal] : f32, vector<4xf32>
+            scf.yield %updated : vector<4xf32>
+          } else {
+            scf.yield %current : vector<4xf32>
+          }
+          scf.yield %next_value : vector<4xf32>
         }
-        %sum = vector.reduce<addf> %parts, %c0 : vector<8xf32>, f32
-        scf.yield %sum : f32
+        scf.yield %values : vector<4xf32>
       }
-      scf.yield %value : f32
+      scf.yield %value : vector<4xf32>
     }
-    %dot = kernel.subgroup.reduce<addf> %partial : f32
+    %dots = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
     %leader = index.cmp eq, %lane, %c0_index : index
     scf.if %leader {
-      %scaled = scalar.mulf %dot, %quarter : f32
-      %negative = scalar.negf %scaled : f32
-      %exponential = scalar.expf<afn> %negative : f32
-      %denominator = scalar.addf %c1, %exponential : f32
-      scf.if %is_projection {
-        %activated = scalar.divf %scaled, %denominator : f32
-        %packed = scalar.fptrunc %activated : f32 to bf16
-        %output = buffer.view %lowrank[%origin] : buffer -> view<[%tokens]x320xbf16>
-        view.store %packed, %output[%token, %row] : bf16, view<[%tokens]x320xbf16>
-      } else {
-        %injection_row = index.sub %row, %rank : index
-        %gate = scalar.divf %c2, %denominator : f32
-        %output = buffer.view %injection[%origin] : buffer -> view<[%tokens]x4xf32>
-        view.store %gate, %output[%token, %injection_row] : f32, view<[%tokens]x4xf32>
+      %step = index.constant 1 : index
+      scf.for %ordinal = [%c0_index to %batch_size step %step] unroll schedule(linear) {
+        %token = index.add %first, %ordinal : index
+        %live = index.cmp ult, %token, %end : index
+        scf.if %live {
+          %dot = vector.extract %dots[%ordinal] : vector<4xf32> -> f32
+          %scaled = scalar.mulf %dot, %quarter : f32
+          %negative = scalar.negf %scaled : f32
+          %exponential = scalar.expf<afn> %negative : f32
+          %denominator = scalar.addf %c1, %exponential : f32
+          scf.if %is_projection {
+            %activated = scalar.divf %scaled, %denominator : f32
+            %packed = scalar.fptrunc %activated : f32 to bf16
+            %output = buffer.view %lowrank[%origin] : buffer -> view<[%tokens]x320xbf16>
+            view.store %packed, %output[%token, %row] : bf16, view<[%tokens]x320xbf16>
+          } else {
+            %injection_row = index.sub %row, %rank : index
+            %gate = scalar.divf %c2, %denominator : f32
+            %output = buffer.view %injection[%origin] : buffer -> view<[%tokens]x4xf32>
+            view.store %gate, %output[%token, %injection_row] : f32, view<[%tokens]x4xf32>
+          }
+        }
       }
     }
   }
@@ -139,7 +179,11 @@ kernel.def target(@flash_next_hc_wave32) @hc_down_inject() {
   %groups = index.constant 81 : index
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %tail = index.sub %batch_size, %c1 : index
+  %padded = index.add %tokens, %tail : index
+  %rows = index.div %padded, %batch_size : index
+  kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%span: buffer, %normalized: buffer, %down_weight: buffer, %injection_weight: buffer, %lowrank: buffer, %injection: buffer) {
   %q8_injection = scalar.constant false : i1
   func.call @hc_down_inject_body(%q8_injection, %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (i1, buffer, buffer, buffer, buffer, buffer, buffer)
@@ -151,7 +195,11 @@ kernel.def target(@flash_next_hc_wave32) @hc_down_inject_q8() {
   %groups = index.constant 81 : index
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %tail = index.sub %batch_size, %c1 : index
+  %padded = index.add %tokens, %tail : index
+  %rows = index.div %padded, %batch_size : index
+  kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%span: buffer, %normalized: buffer, %down_weight: buffer, %injection_weight: buffer, %lowrank: buffer, %injection: buffer) {
   %q8_injection = scalar.constant true : i1
   func.call @hc_down_inject_body(%q8_injection, %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (i1, buffer, buffer, buffer, buffer, buffer, buffer)
@@ -165,13 +213,19 @@ kernel.def target(@flash_next_hc_wave32) @hc_up_mix() {
   %groups = index.constant 640 : index
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %tail = index.sub %batch_size, %c1 : index
+  %padded = index.add %tokens, %tail : index
+  %rows = index.div %padded, %batch_size : index
+  kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%span_arg: buffer, %normalized_arg: buffer, %lowrank_arg: buffer, %weight_arg: buffer, %mixed_arg: buffer) {
   %span, %normalized, %lowrank, %weight, %mixed = buffer.assume.noalias %span_arg, %normalized_arg, %lowrank_arg, %weight_arg, %mixed_arg : buffer, buffer, buffer, buffer, buffer
   %tokens = config.get @flash_next.token_count : index
-  %token = kernel.workgroup.id<y> : index
+  %token_group = kernel.workgroup.id<y> : index
+  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %first = index.mul %token_group, %batch_size : index
   %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
-  %active = index.cmp ult, %token, %end : index
+  %active = index.cmp ult, %first, %end : index
   scf.if %active {
     %group = kernel.workgroup.id<x> : index
     %wave = kernel.subgroup.id : index
@@ -186,32 +240,52 @@ kernel.def target(@flash_next_hc_wave32) @hc_up_mix() {
     %stream = index.div %lane, %cluster : index
     %cluster_lane = index.rem %lane, %cluster : index
     %row = index.madd %stream, %hidden, %feature : index
-    %partial = func.call @flash_next_q8_partial(%rank, %token, %row, %cluster_lane, %cluster, %lowrank, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
-    %dot = kernel.subgroup.reduce<addf> %partial {cluster_size = 8} : f32
-    %c0 = scalar.constant 0.0 : f32
+    %partial = func.call @flash_next_q8_batch_partial(%rank, %batch_size, %first, %end, %row, %cluster_lane, %cluster, %lowrank, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+    %dots = kernel.subgroup.reduce<addf> %partial {cluster_size = 8} : vector<4xf32>
     %c1 = scalar.constant 1.0 : f32
     %quarter = scalar.constant 0.25 : f32
     %cluster_leader = index.cmp eq, %cluster_lane, %c0_index : index
-    %contribution = scf.if %cluster_leader -> (f32) {
-      %negative = scalar.negf %dot : f32
-      %exponential = scalar.expf<afn> %negative : f32
-      %denominator = scalar.addf %c1, %exponential : f32
-      %gate = scalar.divf %c1, %denominator : f32
-      %input_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
-      %stored = view.load %input_view[%token, %stream, %feature] : view<[%tokens]x4x2560xbf16> -> bf16
-      %value = scalar.extf %stored : bf16 to f32
-      %gated = scalar.mulf %gate, %value : f32
-      scf.yield %gated : f32
+    %step = index.constant 1 : index
+    %empty = vector.constant 0.0 : vector<4xf32>
+    %contribution = scf.if %cluster_leader -> (vector<4xf32>) {
+      %contributions = scf.for %ordinal = [%c0_index to %batch_size step %step](%current = %empty : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+        %token = index.add %first, %ordinal : index
+        %live = index.cmp ult, %token, %end : index
+        %next = scf.if %live -> (vector<4xf32>) {
+          %dot = vector.extract %dots[%ordinal] : vector<4xf32> -> f32
+          %negative = scalar.negf %dot : f32
+          %exponential = scalar.expf<afn> %negative : f32
+          %denominator = scalar.addf %c1, %exponential : f32
+          %gate = scalar.divf %c1, %denominator : f32
+          %input_view = buffer.view %normalized[%origin] : buffer -> view<[%tokens]x4x2560xbf16>
+          %stored = view.load %input_view[%token, %stream, %feature] : view<[%tokens]x4x2560xbf16> -> bf16
+          %value = scalar.extf %stored : bf16 to f32
+          %gated = scalar.mulf %gate, %value : f32
+          %updated = vector.insert %gated into %current[%ordinal] : f32, vector<4xf32>
+          scf.yield %updated : vector<4xf32>
+        } else {
+          scf.yield %current : vector<4xf32>
+        }
+        scf.yield %next : vector<4xf32>
+      }
+      scf.yield %contributions : vector<4xf32>
     } else {
-      scf.yield %c0 : f32
+      scf.yield %empty : vector<4xf32>
     }
-    %sum = kernel.subgroup.reduce<addf> %contribution : f32
+    %sums = kernel.subgroup.reduce<addf> %contribution : vector<4xf32>
     %leader = index.cmp eq, %lane, %c0_index : index
     scf.if %leader {
-      %mean = scalar.mulf %sum, %quarter : f32
-      %packed = scalar.fptrunc %mean : f32 to bf16
-      %output = buffer.view %mixed[%origin] : buffer -> view<[%tokens]x2560xbf16>
-      view.store %packed, %output[%token, %feature] : bf16, view<[%tokens]x2560xbf16>
+      scf.for %ordinal = [%c0_index to %batch_size step %step] unroll schedule(linear) {
+        %token = index.add %first, %ordinal : index
+        %live = index.cmp ult, %token, %end : index
+        scf.if %live {
+          %sum = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
+          %mean = scalar.mulf %sum, %quarter : f32
+          %packed = scalar.fptrunc %mean : f32 to bf16
+          %output = buffer.view %mixed[%origin] : buffer -> view<[%tokens]x2560xbf16>
+          view.store %packed, %output[%token, %feature] : bf16, view<[%tokens]x2560xbf16>
+        }
+      }
     }
   }
   kernel.return
