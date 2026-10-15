@@ -61,6 +61,8 @@ func.def public inline @flash_next_qk_partial(%q5_encoding: i1, %width: index, %
 
 // Q5_1 stores two half scales, one high-bit word, and sixteen nibble pairs per
 // 32-element block. Each lane retains that header while visiting both halves.
+// Specializing the two halves makes nibble and high-bit shifts constant while
+// preserving their sequential accumulation and the original block ownership.
 func.def public inline @flash_next_q51_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -99,7 +101,7 @@ func.def public inline @flash_next_q51_partial(%width: index, %token: index, %ro
     %high_word = view.load %high_view[0] : view<1xi32> -> i32
     %high_words = vector.splat %high_word : vector<16xi32>
     %packed = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
-    %next = scf.for %half = [%c0 to %c2 step %c1](%partial = %accumulator : f32) -> (f32) {
+    %next = scf.for %half = [%c0 to %c2 step %c1](%partial = %accumulator : f32) -> (f32) unroll schedule(linear) {
       %half_i32 = index.cast %half : index to i32
       %nibble_shift = scalar.muli %half_i32, %c4_i32 : i32
       %nibble_shift_i8 = scalar.trunci %nibble_shift : i32 to i8
