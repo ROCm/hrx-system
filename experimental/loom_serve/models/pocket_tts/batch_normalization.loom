@@ -1,0 +1,56 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Normalization reduces each packed activation independently. Parameter
+// strides are zero for shared weights; origins also support packed archives.
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.decl pure @pocket.batch.origin(%row: index, %offset: offset, %stride: offset) -> (offset)
+
+template.decl @pocket.normalization_affine.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset, %bias_origin: offset)
+
+template.decl @pocket.batch.normalization_affine(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset)
+
+template.def<@pocket.batch.normalization_affine> device @pocket_batch_normalization_affine(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    %scale_origin = template.apply<@pocket.batch.origin>(%packed, %scale_offset, %scale_stride) pure : (index, offset, offset) -> (offset)
+    %bias_origin = template.apply<@pocket.batch.origin>(%packed, %bias_offset, %bias_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %x_origin, %y_origin, %scale_origin, %bias_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.normalization_variance.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset)
+
+template.decl @pocket.batch.normalization_variance(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset)
+
+template.def<@pocket.batch.normalization_variance> device @pocket_batch_normalization_variance(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    %scale_origin = template.apply<@pocket.batch.origin>(%packed, %scale_offset, %scale_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.normalization_variance.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %x_origin, %y_origin, %scale_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.normalization_plain.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.normalization_plain(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.normalization_plain> device @pocket_batch_normalization_plain(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.normalization_plain.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %x_origin, %y_origin) : (index, index, index, f64, f64, f32, buffer, buffer, offset, offset)
+  }
+  template.return
+}

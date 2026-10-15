@@ -1,0 +1,152 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Convolution input/output is packed; history and startup position follow
+// the resident request. Overlap tails remain owned by that request across
+// changing batch membership. Weights and biases broadcast with zero strides.
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.decl pure @pocket.batch.origin(%row: index, %offset: offset, %stride: offset) -> (offset)
+
+template.decl @pocket.transpose_convolution.body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.transpose_convolution(%membership: buffer, %elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.transpose_convolution> device @pocket_batch_transpose_convolution(%membership: buffer, %elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %w_origin = template.apply<@pocket.batch.origin>(%packed, %w_offset, %w_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.transpose_convolution.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %x_origin, %w_origin, %y_origin) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.overlap.body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %x_origin: offset, %history_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.overlap(%membership: buffer, %elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.overlap> device @pocket_batch_overlap(%membership: buffer, %elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %history_origin = template.apply<@pocket.batch.origin>(%resident, %history_offset, %history_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.overlap.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %x_origin, %history_origin, %y_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.history.body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_origin: offset, %history_origin: offset, %padded_origin: offset)
+
+template.decl @pocket.batch.history(%membership: buffer, %elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset)
+
+template.def<@pocket.batch.history> device @pocket_batch_history(%membership: buffer, %elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %history_origin = template.apply<@pocket.batch.origin>(%resident, %history_offset, %history_stride) pure : (index, offset, offset) -> (offset)
+    %padded_origin = template.apply<@pocket.batch.origin>(%packed, %padded_offset, %padded_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_origin, %history_origin, %padded_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.convolution_f32_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
+
+template.decl @pocket.batch.convolution_f32_bias(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset)
+
+template.def<@pocket.batch.convolution_f32_bias> device @pocket_batch_convolution_f32_bias(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %w_origin = template.apply<@pocket.batch.origin>(%packed, %w_offset, %w_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    %b_origin = template.apply<@pocket.batch.origin>(%packed, %b_offset, %b_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_origin, %w_origin, %y_origin, %b_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.transpose_convolution_bias.body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
+
+template.decl @pocket.batch.transpose_convolution_bias(%membership: buffer, %elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset)
+
+template.def<@pocket.batch.transpose_convolution_bias> device @pocket_batch_transpose_convolution_bias(%membership: buffer, %elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %w_origin = template.apply<@pocket.batch.origin>(%packed, %w_offset, %w_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    %b_origin = template.apply<@pocket.batch.origin>(%packed, %b_offset, %b_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.transpose_convolution_bias.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %x_origin, %w_origin, %y_origin, %b_origin) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.overlap_bias.body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %history_origin: offset, %y_origin: offset, %b_origin: offset)
+
+template.decl @pocket.batch.overlap_bias(%membership: buffer, %elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset)
+
+template.def<@pocket.batch.overlap_bias> device @pocket_batch_overlap_bias(%membership: buffer, %elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %history_origin = template.apply<@pocket.batch.origin>(%resident, %history_offset, %history_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    %b_origin = template.apply<@pocket.batch.origin>(%packed, %b_offset, %b_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.overlap_bias.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %x_origin, %history_origin, %y_origin, %b_origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.convolution_f64_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
+
+template.decl @pocket.batch.convolution_f64_bias(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset)
+
+template.def<@pocket.batch.convolution_f64_bias> device @pocket_batch_convolution_f64_bias(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %w_origin = template.apply<@pocket.batch.origin>(%packed, %w_offset, %w_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    %b_origin = template.apply<@pocket.batch.origin>(%packed, %b_offset, %b_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_origin, %w_origin, %y_origin, %b_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.history_replicate.body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer, %x_origin: offset, %history_origin: offset, %padded_origin: offset, %position_origin: offset)
+
+template.decl @pocket.batch.history_replicate(%membership: buffer, %elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset, %position_offset: offset, %position_stride: offset)
+
+template.def<@pocket.batch.history_replicate> device @pocket_batch_history_replicate(%membership: buffer, %elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset, %position_offset: offset, %position_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %history_origin = template.apply<@pocket.batch.origin>(%resident, %history_offset, %history_stride) pure : (index, offset, offset) -> (offset)
+    %padded_origin = template.apply<@pocket.batch.origin>(%packed, %padded_offset, %padded_stride) pure : (index, offset, offset) -> (offset)
+    %position_origin = template.apply<@pocket.batch.origin>(%resident, %position_offset, %position_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.history_replicate.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %position_storage, %x_origin, %history_origin, %padded_origin, %position_origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.convolution_f64.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.convolution_f64(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.convolution_f64> device @pocket_batch_convolution_f64(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %w_origin = template.apply<@pocket.batch.origin>(%packed, %w_offset, %w_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.convolution_f64.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %x_origin, %w_origin, %y_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  }
+  template.return
+}
