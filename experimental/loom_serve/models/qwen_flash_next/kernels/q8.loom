@@ -126,3 +126,29 @@ func.def public inline @flash_next_q8_batch_partial(%width: index, %first: index
   %result = func.call @flash_next_q8_batch_dot(%width, %first, %end, %lane, %stride, %scale_origin, %code_origin, %block_bytes, %block_bytes, %input, %weight) : (index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<4xf32>)
   func.return %result : vector<4xf32>
 }
+
+// Prepared groups hold four channels: all K32 scales first, then all codes.
+// Both planes order blocks before channels. Their total size equals four GGUF
+// rows, and the dot arithmetic remains shared with canonical consumers.
+func.def public inline @flash_next_q8_channel4_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
+  %channels = index.constant 4 : index
+  %block_size = index.constant 32 : index
+  %group_block_bytes = index.constant 136 : offset
+  %scale_bytes = index.constant 2 : offset
+  %code_bytes = index.constant 32 : offset
+  %scale_stride = index.constant 8 : offset
+  %code_stride = index.constant 128 : offset
+  %blocks = index.div %width, %block_size : index
+  %group = index.div %row, %channels : index
+  %channel = index.rem %row, %channels : index
+  %group_bytes = index.scale %blocks, %group_block_bytes : index, offset -> offset
+  %group_origin = index.scale %group, %group_bytes : index, offset -> offset
+  %scale_delta = index.scale %channel, %scale_bytes : index, offset -> offset
+  %scale_origin = index.add %group_origin, %scale_delta : offset
+  %scale_plane_bytes = index.scale %blocks, %scale_stride : index, offset -> offset
+  %code_plane = index.add %group_origin, %scale_plane_bytes : offset
+  %code_delta = index.scale %channel, %code_bytes : index, offset -> offset
+  %code_origin = index.add %code_plane, %code_delta : offset
+  %result = func.call @flash_next_q8_batch_dot(%width, %first, %end, %lane, %stride, %scale_origin, %code_origin, %scale_stride, %code_stride, %input, %weight) : (index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<4xf32>)
+  func.return %result : vector<4xf32>
+}
