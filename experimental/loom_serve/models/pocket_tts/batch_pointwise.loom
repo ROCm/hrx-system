@@ -1,0 +1,98 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Pointwise transforms use packed activations and outputs. Scale tensors
+// broadcast with a zero stride; no persistent request state is touched.
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.decl pure @pocket.batch.origin(%row: index, %offset: offset, %stride: offset) -> (offset)
+
+template.decl @pocket.residual.body(%elements: index, %channels: index, %times: index, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_origin: offset, %update_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.residual(%membership: buffer, %elements: index, %channels: index, %times: index, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.residual> device @pocket_batch_residual(%membership: buffer, %elements: index, %channels: index, %times: index, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %update_origin = template.apply<@pocket.batch.origin>(%packed, %update_offset, %update_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.residual.body>(%elements, %channels, %times, %x_storage, %update_storage, %y_storage, %x_origin, %update_origin, %y_origin) : (index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.gelu.body(%elements: index, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.gelu(%membership: buffer, %elements: index, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.gelu> device @pocket_batch_gelu(%membership: buffer, %elements: index, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.gelu.body>(%elements, %x_storage, %y_storage, %x_origin, %y_origin) : (index, buffer, buffer, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.copy.body(%elements: index, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.copy(%membership: buffer, %elements: index, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.copy> device @pocket_batch_copy(%membership: buffer, %elements: index, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.copy.body>(%elements, %x_storage, %y_storage, %x_origin, %y_origin) : (index, buffer, buffer, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.silu.body(%elements: index, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.silu(%membership: buffer, %elements: index, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.silu> device @pocket_batch_silu(%membership: buffer, %elements: index, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.silu.body>(%elements, %x_storage, %y_storage, %x_origin, %y_origin) : (index, buffer, buffer, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.residual_scaled.body(%elements: index, %channels: index, %times: index, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_origin: offset, %update_origin: offset, %y_origin: offset, %scale_origin: offset)
+
+template.decl @pocket.batch.residual_scaled(%membership: buffer, %elements: index, %channels: index, %times: index, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset)
+
+template.def<@pocket.batch.residual_scaled> device @pocket_batch_residual_scaled(%membership: buffer, %elements: index, %channels: index, %times: index, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %update_origin = template.apply<@pocket.batch.origin>(%packed, %update_offset, %update_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    %scale_origin = template.apply<@pocket.batch.origin>(%packed, %scale_offset, %scale_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.residual_scaled.body>(%elements, %channels, %times, %x_storage, %update_storage, %y_storage, %scale_storage, %x_origin, %update_origin, %y_origin, %scale_origin) : (index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.elu.body(%elements: index, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.elu(%membership: buffer, %elements: index, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.elu> device @pocket_batch_elu(%membership: buffer, %elements: index, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.elu.body>(%elements, %x_storage, %y_storage, %x_origin, %y_origin) : (index, buffer, buffer, offset, offset)
+  }
+  template.return
+}

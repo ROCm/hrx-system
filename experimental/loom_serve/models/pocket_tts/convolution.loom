@@ -14,19 +14,18 @@ config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
 
 template.decl @pocket.element() -> (index)
 
-template.decl @pocket.transpose_convolution.body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer)
+template.decl @pocket.transpose_convolution.body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset)
 
-template.def<@pocket.transpose_convolution.body> device @transpose_convolution_body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer) {
+template.def<@pocket.transpose_convolution.body> device @transpose_convolution_body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %f0 = scalar.constant 0.0 : f32
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%inputs]x[%times]xf32>
-    %w_view = buffer.view %w_storage[%origin] : buffer -> view<[%inputs]x[%group_outputs]x[%extent]xbf16>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%outputs]x[%raw_times]xf32>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%inputs]x[%times]xf32>
+    %w_view = buffer.view %w_storage[%w_origin] : buffer -> view<[%inputs]x[%group_outputs]x[%extent]xbf16>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%outputs]x[%raw_times]xf32>
     %row = index.div %element, %raw_times : index
     %column = index.rem %element, %raw_times : index
     %channel_group = index.div %row, %group_outputs : index
@@ -78,22 +77,22 @@ kernel.def target(@pocket) @pocket.transpose_convolution_512x512_t1_g1x1_s16() {
   %extent = index.constant 32 : index
   %stride = index.constant 16 : index
   %group_inputs = index.constant 1 : index
-  template.apply<@pocket.transpose_convolution.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer)
+  %transpose_convolution_origin = index.constant 0 : offset
+  template.apply<@pocket.transpose_convolution.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %transpose_convolution_origin, %transpose_convolution_origin, %transpose_convolution_origin) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.overlap.body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer)
+template.decl @pocket.overlap.body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %x_origin: offset, %history_origin: offset, %y_origin: offset)
 
-template.def<@pocket.overlap.body> device @overlap_body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer) {
+template.def<@pocket.overlap.body> device @overlap_body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %x_origin: offset, %history_origin: offset, %y_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%outputs]x[%raw_times]xf32>
-    %history_view = buffer.view %history_storage[%origin] : buffer -> view<[%outputs]x[%overlap]xf32>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%outputs]x[%length]xf32>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%outputs]x[%raw_times]xf32>
+    %history_view = buffer.view %history_storage[%history_origin] : buffer -> view<[%outputs]x[%overlap]xf32>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%outputs]x[%length]xf32>
     scf.for %t = [%c0 to %length step %c1] {
       %value = view.load %x_view[%element, %t] : view<[%outputs]x[%raw_times]xf32> -> f32
       %partial = index.cmp ult, %t, %overlap : index
@@ -130,22 +129,22 @@ kernel.def target(@pocket) @pocket.overlap_512x16_h16() {
   %raw_times = index.constant 32 : index
   %length = index.constant 16 : index
   %overlap = index.constant 16 : index
-  template.apply<@pocket.overlap.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %overlap_origin = index.constant 0 : offset
+  template.apply<@pocket.overlap.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %overlap_origin, %overlap_origin, %overlap_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.history.body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer)
+template.decl @pocket.history.body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_origin: offset, %history_origin: offset, %padded_origin: offset)
 
-template.def<@pocket.history.body> device @history_body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer) {
+template.def<@pocket.history.body> device @history_body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_origin: offset, %history_origin: offset, %padded_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %history_view = buffer.view %history_storage[%origin] : buffer -> view<[%channels]x[%history_length]xf32>
-    %padded_view = buffer.view %padded_storage[%origin] : buffer -> view<[%channels]x[%padded_times]xf32>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %history_view = buffer.view %history_storage[%history_origin] : buffer -> view<[%channels]x[%history_length]xf32>
+    %padded_view = buffer.view %padded_storage[%padded_origin] : buffer -> view<[%channels]x[%padded_times]xf32>
     scf.for %t = [%c0 to %history_length step %c1] {
       %old = view.load %history_view[%element, %t] : view<[%channels]x[%history_length]xf32> -> f32
       view.store %old, %padded_view[%element, %t] : f32, view<[%channels]x[%padded_times]xf32>
@@ -178,7 +177,8 @@ kernel.def target(@pocket) @pocket.history_512x16_h6() {
   %times = index.constant 16 : index
   %history_length = index.constant 6 : index
   %padded_times = index.constant 22 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
@@ -196,7 +196,8 @@ kernel.def target(@pocket) @pocket.history_256x96_h2() {
   %times = index.constant 96 : index
   %history_length = index.constant 2 : index
   %padded_times = index.constant 98 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
@@ -214,7 +215,8 @@ kernel.def target(@pocket) @pocket.history_128x480_h2() {
   %times = index.constant 480 : index
   %history_length = index.constant 2 : index
   %padded_times = index.constant 482 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
@@ -232,7 +234,8 @@ kernel.def target(@pocket) @pocket.history_64x1920_h2() {
   %times = index.constant 1920 : index
   %history_length = index.constant 2 : index
   %padded_times = index.constant 1922 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
@@ -250,7 +253,8 @@ kernel.def target(@pocket) @pocket.history_1x1920_h6() {
   %times = index.constant 1920 : index
   %history_length = index.constant 6 : index
   %padded_times = index.constant 1926 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
@@ -268,7 +272,8 @@ kernel.def target(@pocket) @pocket.history_64x1920_h4() {
   %times = index.constant 1920 : index
   %history_length = index.constant 4 : index
   %padded_times = index.constant 1924 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
@@ -286,7 +291,8 @@ kernel.def target(@pocket) @pocket.history_128x480_h5() {
   %times = index.constant 480 : index
   %history_length = index.constant 5 : index
   %padded_times = index.constant 485 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
@@ -304,7 +310,8 @@ kernel.def target(@pocket) @pocket.history_256x96_h6() {
   %times = index.constant 96 : index
   %history_length = index.constant 6 : index
   %padded_times = index.constant 102 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
@@ -322,23 +329,23 @@ kernel.def target(@pocket) @pocket.history_512x16_h2() {
   %times = index.constant 16 : index
   %history_length = index.constant 2 : index
   %padded_times = index.constant 18 : index
-  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage) : (index, index, index, index, index, buffer, buffer, buffer)
+  %history_origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %history_origin, %history_origin, %history_origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.convolution_f32_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+template.decl @pocket.convolution_f32_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
 
-template.def<@pocket.convolution_f32_bias.body> device @convolution_f32_bias_body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+template.def<@pocket.convolution_f32_bias.body> device @convolution_f32_bias_body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%inputs]x[%padded_times]xf32>
-    %w_view = buffer.view %w_storage[%origin] : buffer -> view<[%outputs]x[%inputs]x[%extent]xbf16>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%outputs]x[%times]xf32>
-    %b_view = buffer.view %b_storage[%origin] : buffer -> view<[%outputs]xbf16>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%inputs]x[%padded_times]xf32>
+    %w_view = buffer.view %w_storage[%w_origin] : buffer -> view<[%outputs]x[%inputs]x[%extent]xbf16>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%outputs]x[%times]xf32>
+    %b_view = buffer.view %b_storage[%b_origin] : buffer -> view<[%outputs]xbf16>
     %row = index.div %element, %times : index
     %column = index.rem %element, %times : index
     %start = index.mul %column, %stride : index
@@ -380,7 +387,8 @@ kernel.def target(@pocket) @pocket.convolution_f32_bias_512x512_t16_k7_s1() {
   %times = index.constant 16 : index
   %extent = index.constant 7 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -400,7 +408,8 @@ kernel.def target(@pocket) @pocket.convolution_f32_bias_256x128_t96_k3_s1() {
   %times = index.constant 96 : index
   %extent = index.constant 3 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -420,7 +429,8 @@ kernel.def target(@pocket) @pocket.convolution_f32_bias_128x256_t96_k1_s1() {
   %times = index.constant 96 : index
   %extent = index.constant 1 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -440,7 +450,8 @@ kernel.def target(@pocket) @pocket.convolution_f32_bias_128x64_t480_k3_s1() {
   %times = index.constant 480 : index
   %extent = index.constant 3 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -460,7 +471,8 @@ kernel.def target(@pocket) @pocket.convolution_f32_bias_64x128_t480_k1_s1() {
   %times = index.constant 480 : index
   %extent = index.constant 1 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -480,7 +492,8 @@ kernel.def target(@pocket) @pocket.convolution_f32_bias_64x32_t1920_k3_s1() {
   %times = index.constant 1920 : index
   %extent = index.constant 3 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -500,7 +513,8 @@ kernel.def target(@pocket) @pocket.convolution_f32_bias_32x64_t1920_k1_s1() {
   %times = index.constant 1920 : index
   %extent = index.constant 1 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -520,24 +534,24 @@ kernel.def target(@pocket) @pocket.convolution_f32_bias_64x1_t1920_k3_s1() {
   %times = index.constant 1920 : index
   %extent = index.constant 3 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.transpose_convolution_bias.body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+template.decl @pocket.transpose_convolution_bias.body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
 
-template.def<@pocket.transpose_convolution_bias.body> device @transpose_convolution_bias_body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+template.def<@pocket.transpose_convolution_bias.body> device @transpose_convolution_bias_body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %f0 = scalar.constant 0.0 : f32
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%inputs]x[%times]xf32>
-    %w_view = buffer.view %w_storage[%origin] : buffer -> view<[%inputs]x[%group_outputs]x[%extent]xbf16>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%outputs]x[%raw_times]xf32>
-    %b_view = buffer.view %b_storage[%origin] : buffer -> view<[%outputs]xbf16>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%inputs]x[%times]xf32>
+    %w_view = buffer.view %w_storage[%w_origin] : buffer -> view<[%inputs]x[%group_outputs]x[%extent]xbf16>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%outputs]x[%raw_times]xf32>
+    %b_view = buffer.view %b_storage[%b_origin] : buffer -> view<[%outputs]xbf16>
     %row = index.div %element, %raw_times : index
     %column = index.rem %element, %raw_times : index
     %channel_group = index.div %row, %group_outputs : index
@@ -591,7 +605,8 @@ kernel.def target(@pocket) @pocket.transpose_convolution_bias_512x256_t16_g512x2
   %extent = index.constant 12 : index
   %stride = index.constant 6 : index
   %group_inputs = index.constant 512 : index
-  template.apply<@pocket.transpose_convolution_bias.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %transpose_convolution_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.transpose_convolution_bias.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -613,7 +628,8 @@ kernel.def target(@pocket) @pocket.transpose_convolution_bias_256x128_t96_g256x1
   %extent = index.constant 10 : index
   %stride = index.constant 5 : index
   %group_inputs = index.constant 256 : index
-  template.apply<@pocket.transpose_convolution_bias.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %transpose_convolution_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.transpose_convolution_bias.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -635,23 +651,23 @@ kernel.def target(@pocket) @pocket.transpose_convolution_bias_128x64_t480_g128x6
   %extent = index.constant 8 : index
   %stride = index.constant 4 : index
   %group_inputs = index.constant 128 : index
-  template.apply<@pocket.transpose_convolution_bias.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %transpose_convolution_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.transpose_convolution_bias.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin, %transpose_convolution_bias_origin) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.overlap_bias.body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+template.decl @pocket.overlap_bias.body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %history_origin: offset, %y_origin: offset, %b_origin: offset)
 
-template.def<@pocket.overlap_bias.body> device @overlap_bias_body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+template.def<@pocket.overlap_bias.body> device @overlap_bias_body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %history_origin: offset, %y_origin: offset, %b_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%outputs]x[%raw_times]xf32>
-    %history_view = buffer.view %history_storage[%origin] : buffer -> view<[%outputs]x[%overlap]xf32>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%outputs]x[%length]xf32>
-    %b_view = buffer.view %b_storage[%origin] : buffer -> view<[%outputs]xbf16>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%outputs]x[%raw_times]xf32>
+    %history_view = buffer.view %history_storage[%history_origin] : buffer -> view<[%outputs]x[%overlap]xf32>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%outputs]x[%length]xf32>
+    %b_view = buffer.view %b_storage[%b_origin] : buffer -> view<[%outputs]xbf16>
     scf.for %t = [%c0 to %length step %c1] {
       %value = view.load %x_view[%element, %t] : view<[%outputs]x[%raw_times]xf32> -> f32
       %partial = index.cmp ult, %t, %overlap : index
@@ -690,7 +706,8 @@ kernel.def target(@pocket) @pocket.overlap_bias_256x96_h6() {
   %raw_times = index.constant 102 : index
   %length = index.constant 96 : index
   %overlap = index.constant 6 : index
-  template.apply<@pocket.overlap_bias.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage) : (index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %overlap_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.overlap_bias.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %overlap_bias_origin, %overlap_bias_origin, %overlap_bias_origin, %overlap_bias_origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -708,7 +725,8 @@ kernel.def target(@pocket) @pocket.overlap_bias_128x480_h5() {
   %raw_times = index.constant 485 : index
   %length = index.constant 480 : index
   %overlap = index.constant 5 : index
-  template.apply<@pocket.overlap_bias.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage) : (index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %overlap_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.overlap_bias.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %overlap_bias_origin, %overlap_bias_origin, %overlap_bias_origin, %overlap_bias_origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -726,23 +744,23 @@ kernel.def target(@pocket) @pocket.overlap_bias_64x1920_h4() {
   %raw_times = index.constant 1924 : index
   %length = index.constant 1920 : index
   %overlap = index.constant 4 : index
-  template.apply<@pocket.overlap_bias.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage) : (index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %overlap_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.overlap_bias.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %overlap_bias_origin, %overlap_bias_origin, %overlap_bias_origin, %overlap_bias_origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.convolution_f64_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+template.decl @pocket.convolution_f64_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
 
-template.def<@pocket.convolution_f64_bias.body> device @convolution_f64_bias_body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+template.def<@pocket.convolution_f64_bias.body> device @convolution_f64_bias_body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%inputs]x[%padded_times]xf32>
-    %w_view = buffer.view %w_storage[%origin] : buffer -> view<[%outputs]x[%inputs]x[%extent]xbf16>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%outputs]x[%times]xf32>
-    %b_view = buffer.view %b_storage[%origin] : buffer -> view<[%outputs]xbf16>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%inputs]x[%padded_times]xf32>
+    %w_view = buffer.view %w_storage[%w_origin] : buffer -> view<[%outputs]x[%inputs]x[%extent]xbf16>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%outputs]x[%times]xf32>
+    %b_view = buffer.view %b_storage[%b_origin] : buffer -> view<[%outputs]xbf16>
     %row = index.div %element, %times : index
     %column = index.rem %element, %times : index
     %start = index.mul %column, %stride : index
@@ -785,7 +803,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_1x64_t1920_k7_s1() {
   %times = index.constant 1920 : index
   %extent = index.constant 7 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -805,7 +824,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_64x32_t1920_k3_s1() {
   %times = index.constant 1920 : index
   %extent = index.constant 3 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -825,7 +845,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_32x64_t1920_k1_s1() {
   %times = index.constant 1920 : index
   %extent = index.constant 1 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -845,7 +866,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_64x128_t480_k8_s4() {
   %times = index.constant 480 : index
   %extent = index.constant 8 : index
   %stride = index.constant 4 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -865,7 +887,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_128x64_t480_k3_s1() {
   %times = index.constant 480 : index
   %extent = index.constant 3 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -885,7 +908,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_64x128_t480_k1_s1() {
   %times = index.constant 480 : index
   %extent = index.constant 1 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -905,7 +929,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_128x256_t96_k10_s5() {
   %times = index.constant 96 : index
   %extent = index.constant 10 : index
   %stride = index.constant 5 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -925,7 +950,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_256x128_t96_k3_s1() {
   %times = index.constant 96 : index
   %extent = index.constant 3 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -945,7 +971,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_128x256_t96_k1_s1() {
   %times = index.constant 96 : index
   %extent = index.constant 1 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -965,7 +992,8 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_256x512_t16_k12_s6() {
   %times = index.constant 16 : index
   %extent = index.constant 12 : index
   %stride = index.constant 6 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -985,23 +1013,23 @@ kernel.def target(@pocket) @pocket.convolution_f64_bias_512x512_t16_k3_s1() {
   %times = index.constant 16 : index
   %extent = index.constant 3 : index
   %stride = index.constant 1 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.history_replicate.body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer)
+template.decl @pocket.history_replicate.body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer, %x_origin: offset, %history_origin: offset, %padded_origin: offset, %position_origin: offset)
 
-template.def<@pocket.history_replicate.body> device @history_replicate_body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer) {
+template.def<@pocket.history_replicate.body> device @history_replicate_body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer, %x_origin: offset, %history_origin: offset, %padded_origin: offset, %position_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %history_view = buffer.view %history_storage[%origin] : buffer -> view<[%channels]x[%history_length]xf32>
-    %padded_view = buffer.view %padded_storage[%origin] : buffer -> view<[%channels]x[%padded_times]xf32>
-    %position_view = buffer.view %position_storage[%origin] : buffer -> view<1xi32>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %history_view = buffer.view %history_storage[%history_origin] : buffer -> view<[%channels]x[%history_length]xf32>
+    %padded_view = buffer.view %padded_storage[%padded_origin] : buffer -> view<[%channels]x[%padded_times]xf32>
+    %position_view = buffer.view %position_storage[%position_origin] : buffer -> view<1xi32>
     scf.for %t = [%c0 to %history_length step %c1] {
       %position_value = view.load %position_view[0] : view<1xi32> -> i32
       %zero = scalar.constant 0 : i32
@@ -1043,22 +1071,22 @@ kernel.def target(@pocket) @pocket.history_replicate_512x16_h16() {
   %times = index.constant 16 : index
   %history_length = index.constant 16 : index
   %padded_times = index.constant 32 : index
-  template.apply<@pocket.history_replicate.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %position_storage) : (index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %history_replicate_origin = index.constant 0 : offset
+  template.apply<@pocket.history_replicate.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %position_storage, %history_replicate_origin, %history_replicate_origin, %history_replicate_origin, %history_replicate_origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.convolution_f64.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer)
+template.decl @pocket.convolution_f64.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset)
 
-template.def<@pocket.convolution_f64.body> device @convolution_f64_body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer) {
+template.def<@pocket.convolution_f64.body> device @convolution_f64_body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%inputs]x[%padded_times]xf32>
-    %w_view = buffer.view %w_storage[%origin] : buffer -> view<[%outputs]x[%inputs]x[%extent]xbf16>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%outputs]x[%times]xf32>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%inputs]x[%padded_times]xf32>
+    %w_view = buffer.view %w_storage[%w_origin] : buffer -> view<[%outputs]x[%inputs]x[%extent]xbf16>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%outputs]x[%times]xf32>
     %row = index.div %element, %times : index
     %column = index.rem %element, %times : index
     %start = index.mul %column, %stride : index
@@ -1099,6 +1127,7 @@ kernel.def target(@pocket) @pocket.convolution_f64_512x32_t1_k32_s16() {
   %times = index.constant 1 : index
   %extent = index.constant 32 : index
   %stride = index.constant 16 : index
-  template.apply<@pocket.convolution_f64.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer)
+  %convolution_f64_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %convolution_f64_origin, %convolution_f64_origin, %convolution_f64_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }

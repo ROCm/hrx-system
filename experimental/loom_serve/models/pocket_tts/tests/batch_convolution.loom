@@ -1,0 +1,963 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Reordered active rows use independent packed scratch and resident state.
+// Every tensor has a nonzero origin and padding between rows. Comparing the
+// complete banks with isolated calls also observes all guards and inactive rows.
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.def target(@pocket) @batch_metadata() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%count: i32, %first: i32, %second: i32, %third: i32, %fourth: i32, %membership: buffer) {
+  %origin = index.constant 0 : offset
+  %map = buffer.view %membership[%origin] : buffer -> view<5xi32>
+  view.store %count, %map[0] : i32, view<5xi32>
+  view.store %first, %map[1] : i32, view<5xi32>
+  view.store %second, %map[2] : i32, view<5xi32>
+  view.store %third, %map[3] : i32, view<5xi32>
+  view.store %fourth, %map[4] : i32, view<5xi32>
+  kernel.return
+}
+
+template.decl @pocket.batch.transpose_convolution(%membership: buffer, %elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.transpose_convolution.body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_transpose_convolution() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 48 : index
+  %inputs = index.constant 4 : index
+  %times = index.constant 3 : index
+  %outputs = index.constant 6 : index
+  %raw_times = index.constant 8 : index
+  %group_outputs = index.constant 3 : index
+  %extent = index.constant 4 : index
+  %stride = index.constant 2 : index
+  %group_inputs = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.transpose_convolution.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %origin, %origin, %origin) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_transpose_convolution() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 48 : index
+  %inputs = index.constant 4 : index
+  %times = index.constant 3 : index
+  %outputs = index.constant 6 : index
+  %raw_times = index.constant 8 : index
+  %group_outputs = index.constant 3 : index
+  %extent = index.constant 4 : index
+  %stride = index.constant 2 : index
+  %group_inputs = index.constant 2 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 76 : offset
+  %w_stride = index.constant 0 : offset
+  %y_stride = index.constant 220 : offset
+  template.apply<@pocket.batch.transpose_convolution>(%membership, %elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %origin, %x_stride, %origin, %w_stride, %origin, %y_stride) : (buffer, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @transpose_convolution_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<80xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<80xf32>
+  %w_seed = check.literal value(101) : i64
+  %actual_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<70xbf16>
+  %reference_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<70xbf16>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<224xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<224xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_transpose_convolution(%membership, %actual_x, %actual_w, %actual_y) : (tensor<5xi32>, tensor<80xf32>, tensor<70xbf16>, tensor<224xf32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<80xf32> -> tensor<12xf32>
+  %w_0_0 = check.tensor.view %reference_w offset(16) : tensor<70xbf16> -> tensor<48xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<224xf32> -> tensor<48xf32>
+  kernel.launch @isolated_transpose_convolution(%x_0_0, %w_0_0, %y_0_0) : (tensor<12xf32>, tensor<48xbf16>, tensor<48xf32>)
+  %x_0_1 = check.tensor.view %reference_x offset(92) : tensor<80xf32> -> tensor<12xf32>
+  %w_0_1 = check.tensor.view %reference_w offset(16) : tensor<70xbf16> -> tensor<48xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(236) : tensor<224xf32> -> tensor<48xf32>
+  kernel.launch @isolated_transpose_convolution(%x_0_1, %w_0_1, %y_0_1) : (tensor<12xf32>, tensor<48xbf16>, tensor<48xf32>)
+  %x_0_2 = check.tensor.view %reference_x offset(168) : tensor<80xf32> -> tensor<12xf32>
+  %w_0_2 = check.tensor.view %reference_w offset(16) : tensor<70xbf16> -> tensor<48xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(456) : tensor<224xf32> -> tensor<48xf32>
+  kernel.launch @isolated_transpose_convolution(%x_0_2, %w_0_2, %y_0_2) : (tensor<12xf32>, tensor<48xbf16>, tensor<48xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<80xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<70xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<224xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_transpose_convolution(%membership, %actual_x, %actual_w, %actual_y) : (tensor<5xi32>, tensor<80xf32>, tensor<70xbf16>, tensor<224xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<80xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<70xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<224xf32>
+  check.return
+}
+
+template.decl @pocket.batch.overlap(%membership: buffer, %elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.overlap.body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %x_origin: offset, %history_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_overlap() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %history_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 3 : index
+  %outputs = index.constant 3 : index
+  %raw_times = index.constant 7 : index
+  %length = index.constant 5 : index
+  %overlap = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.overlap.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %origin, %origin, %origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_overlap() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 3 : index
+  %outputs = index.constant 3 : index
+  %raw_times = index.constant 7 : index
+  %length = index.constant 5 : index
+  %overlap = index.constant 2 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 112 : offset
+  %history_stride = index.constant 52 : offset
+  %y_stride = index.constant 88 : offset
+  template.apply<@pocket.batch.overlap>(%membership, %elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %origin, %x_stride, %origin, %history_stride, %origin, %y_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @overlap_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %history_seed = check.literal value(101) : i64
+  %actual_history = check.generate.random.uniform seed(%history_seed) range(-0.5 to 0.5) : tensor<82xf32>
+  %reference_history = check.generate.random.uniform seed(%history_seed) range(-0.5 to 0.5) : tensor<82xf32>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_overlap(%membership, %actual_x, %actual_history, %actual_y) : (tensor<5xi32>, tensor<116xf32>, tensor<82xf32>, tensor<92xf32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %history_0_0 = check.tensor.view %reference_history offset(276) : tensor<82xf32> -> tensor<6xf32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<92xf32> -> tensor<15xf32>
+  kernel.launch @isolated_overlap(%x_0_0, %history_0_0, %y_0_0) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>)
+  %x_0_1 = check.tensor.view %reference_x offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %history_0_1 = check.tensor.view %reference_history offset(16) : tensor<82xf32> -> tensor<6xf32>
+  %y_0_1 = check.tensor.view %reference_y offset(104) : tensor<92xf32> -> tensor<15xf32>
+  kernel.launch @isolated_overlap(%x_0_1, %history_0_1, %y_0_1) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>)
+  %x_0_2 = check.tensor.view %reference_x offset(240) : tensor<116xf32> -> tensor<21xf32>
+  %history_0_2 = check.tensor.view %reference_history offset(68) : tensor<82xf32> -> tensor<6xf32>
+  %y_0_2 = check.tensor.view %reference_y offset(192) : tensor<92xf32> -> tensor<15xf32>
+  kernel.launch @isolated_overlap(%x_0_2, %history_0_2, %y_0_2) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  kernel.launch @batch_metadata(%word_2, %word_1, %word_5, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_overlap(%membership, %actual_x, %actual_history, %actual_y) : (tensor<5xi32>, tensor<116xf32>, tensor<82xf32>, tensor<92xf32>)
+  %x_1_0 = check.tensor.view %reference_x offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %history_1_0 = check.tensor.view %reference_history offset(68) : tensor<82xf32> -> tensor<6xf32>
+  %y_1_0 = check.tensor.view %reference_y offset(16) : tensor<92xf32> -> tensor<15xf32>
+  kernel.launch @isolated_overlap(%x_1_0, %history_1_0, %y_1_0) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>)
+  %x_1_1 = check.tensor.view %reference_x offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %history_1_1 = check.tensor.view %reference_history offset(276) : tensor<82xf32> -> tensor<6xf32>
+  %y_1_1 = check.tensor.view %reference_y offset(104) : tensor<92xf32> -> tensor<15xf32>
+  kernel.launch @isolated_overlap(%x_1_1, %history_1_1, %y_1_1) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_overlap(%membership, %actual_x, %actual_history, %actual_y) : (tensor<5xi32>, tensor<116xf32>, tensor<82xf32>, tensor<92xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.return
+}
+
+template.decl @pocket.batch.history(%membership: buffer, %elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset)
+
+template.decl @pocket.history.body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_origin: offset, %history_origin: offset, %padded_origin: offset)
+
+kernel.def target(@pocket) @isolated_history() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %history_storage: buffer, %padded_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 3 : index
+  %times = index.constant 5 : index
+  %history_length = index.constant 2 : index
+  %padded_times = index.constant 7 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.history.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %origin, %origin, %origin) : (index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_history() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 3 : index
+  %times = index.constant 5 : index
+  %history_length = index.constant 2 : index
+  %padded_times = index.constant 7 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 88 : offset
+  %history_stride = index.constant 52 : offset
+  %padded_stride = index.constant 112 : offset
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %origin, %x_stride, %origin, %history_stride, %origin, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @history_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %history_seed = check.literal value(101) : i64
+  %actual_history = check.generate.random.uniform seed(%history_seed) range(-0.5 to 0.5) : tensor<82xf32>
+  %reference_history = check.generate.random.uniform seed(%history_seed) range(-0.5 to 0.5) : tensor<82xf32>
+  %padded_seed = check.literal value(102) : i64
+  %actual_padded = check.generate.random.uniform seed(%padded_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_padded = check.generate.random.uniform seed(%padded_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_history(%membership, %actual_x, %actual_history, %actual_padded) : (tensor<5xi32>, tensor<92xf32>, tensor<82xf32>, tensor<116xf32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %history_0_0 = check.tensor.view %reference_history offset(276) : tensor<82xf32> -> tensor<6xf32>
+  %padded_0_0 = check.tensor.view %reference_padded offset(16) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @isolated_history(%x_0_0, %history_0_0, %padded_0_0) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>)
+  %x_0_1 = check.tensor.view %reference_x offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %history_0_1 = check.tensor.view %reference_history offset(16) : tensor<82xf32> -> tensor<6xf32>
+  %padded_0_1 = check.tensor.view %reference_padded offset(128) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @isolated_history(%x_0_1, %history_0_1, %padded_0_1) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>)
+  %x_0_2 = check.tensor.view %reference_x offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %history_0_2 = check.tensor.view %reference_history offset(68) : tensor<82xf32> -> tensor<6xf32>
+  %padded_0_2 = check.tensor.view %reference_padded offset(240) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @isolated_history(%x_0_2, %history_0_2, %padded_0_2) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_padded) expected(%reference_padded) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_2, %word_1, %word_5, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_history(%membership, %actual_x, %actual_history, %actual_padded) : (tensor<5xi32>, tensor<92xf32>, tensor<82xf32>, tensor<116xf32>)
+  %x_1_0 = check.tensor.view %reference_x offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %history_1_0 = check.tensor.view %reference_history offset(68) : tensor<82xf32> -> tensor<6xf32>
+  %padded_1_0 = check.tensor.view %reference_padded offset(16) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @isolated_history(%x_1_0, %history_1_0, %padded_1_0) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>)
+  %x_1_1 = check.tensor.view %reference_x offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %history_1_1 = check.tensor.view %reference_history offset(276) : tensor<82xf32> -> tensor<6xf32>
+  %padded_1_1 = check.tensor.view %reference_padded offset(128) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @isolated_history(%x_1_1, %history_1_1, %padded_1_1) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_padded) expected(%reference_padded) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_history(%membership, %actual_x, %actual_history, %actual_padded) : (tensor<5xi32>, tensor<92xf32>, tensor<82xf32>, tensor<116xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_padded) expected(%reference_padded) : tensor<116xf32>
+  check.return
+}
+
+template.decl @pocket.batch.convolution_f32_bias(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset)
+
+template.decl @pocket.convolution_f32_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
+
+kernel.def target(@pocket) @isolated_convolution_f32_bias() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_convolution_f32_bias() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 160 : offset
+  %w_stride = index.constant 0 : offset
+  %y_stride = index.constant 88 : offset
+  %b_stride = index.constant 0 : offset
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %origin, %x_stride, %origin, %w_stride, %origin, %y_stride, %origin, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @convolution_f32_bias_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<164xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<164xf32>
+  %w_seed = check.literal value(101) : i64
+  %actual_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<50xbf16>
+  %reference_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<50xbf16>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %b_seed = check.literal value(103) : i64
+  %actual_b = check.generate.random.uniform seed(%b_seed) range(-0.5 to 0.5) : tensor<26xbf16>
+  %reference_b = check.generate.random.uniform seed(%b_seed) range(-0.5 to 0.5) : tensor<26xbf16>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_convolution_f32_bias(%membership, %actual_x, %actual_w, %actual_y, %actual_b) : (tensor<5xi32>, tensor<164xf32>, tensor<50xbf16>, tensor<92xf32>, tensor<26xbf16>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_0 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_0 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_convolution_f32_bias(%x_0_0, %w_0_0, %y_0_0, %b_0_0) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>, tensor<3xbf16>)
+  %x_0_1 = check.tensor.view %reference_x offset(176) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_1 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_1 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_convolution_f32_bias(%x_0_1, %w_0_1, %y_0_1, %b_0_1) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>, tensor<3xbf16>)
+  %x_0_2 = check.tensor.view %reference_x offset(336) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_2 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_2 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_convolution_f32_bias(%x_0_2, %w_0_2, %y_0_2, %b_0_2) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>, tensor<3xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<164xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<50xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<26xbf16>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_convolution_f32_bias(%membership, %actual_x, %actual_w, %actual_y, %actual_b) : (tensor<5xi32>, tensor<164xf32>, tensor<50xbf16>, tensor<92xf32>, tensor<26xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<164xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<50xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<26xbf16>
+  check.return
+}
+
+template.decl @pocket.batch.transpose_convolution_bias(%membership: buffer, %elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset)
+
+template.decl @pocket.transpose_convolution_bias.body(%elements: index, %inputs: index, %times: index, %outputs: index, %raw_times: index, %group_outputs: index, %extent: index, %stride: index, %group_inputs: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
+
+kernel.def target(@pocket) @isolated_transpose_convolution_bias() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+  %elements = index.constant 48 : index
+  %inputs = index.constant 4 : index
+  %times = index.constant 3 : index
+  %outputs = index.constant 6 : index
+  %raw_times = index.constant 8 : index
+  %group_outputs = index.constant 3 : index
+  %extent = index.constant 4 : index
+  %stride = index.constant 2 : index
+  %group_inputs = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.transpose_convolution_bias.body>(%elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_transpose_convolution_bias() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+  %elements = index.constant 48 : index
+  %inputs = index.constant 4 : index
+  %times = index.constant 3 : index
+  %outputs = index.constant 6 : index
+  %raw_times = index.constant 8 : index
+  %group_outputs = index.constant 3 : index
+  %extent = index.constant 4 : index
+  %stride = index.constant 2 : index
+  %group_inputs = index.constant 2 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 76 : offset
+  %w_stride = index.constant 0 : offset
+  %y_stride = index.constant 220 : offset
+  %b_stride = index.constant 0 : offset
+  template.apply<@pocket.batch.transpose_convolution_bias>(%membership, %elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %origin, %x_stride, %origin, %w_stride, %origin, %y_stride, %origin, %b_stride) : (buffer, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @transpose_convolution_bias_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<80xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<80xf32>
+  %w_seed = check.literal value(101) : i64
+  %actual_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<70xbf16>
+  %reference_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<70xbf16>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<224xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<224xf32>
+  %b_seed = check.literal value(103) : i64
+  %actual_b = check.generate.random.uniform seed(%b_seed) range(-0.5 to 0.5) : tensor<28xbf16>
+  %reference_b = check.generate.random.uniform seed(%b_seed) range(-0.5 to 0.5) : tensor<28xbf16>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_transpose_convolution_bias(%membership, %actual_x, %actual_w, %actual_y, %actual_b) : (tensor<5xi32>, tensor<80xf32>, tensor<70xbf16>, tensor<224xf32>, tensor<28xbf16>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<80xf32> -> tensor<12xf32>
+  %w_0_0 = check.tensor.view %reference_w offset(16) : tensor<70xbf16> -> tensor<48xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<224xf32> -> tensor<48xf32>
+  %b_0_0 = check.tensor.view %reference_b offset(16) : tensor<28xbf16> -> tensor<6xbf16>
+  kernel.launch @isolated_transpose_convolution_bias(%x_0_0, %w_0_0, %y_0_0, %b_0_0) : (tensor<12xf32>, tensor<48xbf16>, tensor<48xf32>, tensor<6xbf16>)
+  %x_0_1 = check.tensor.view %reference_x offset(92) : tensor<80xf32> -> tensor<12xf32>
+  %w_0_1 = check.tensor.view %reference_w offset(16) : tensor<70xbf16> -> tensor<48xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(236) : tensor<224xf32> -> tensor<48xf32>
+  %b_0_1 = check.tensor.view %reference_b offset(16) : tensor<28xbf16> -> tensor<6xbf16>
+  kernel.launch @isolated_transpose_convolution_bias(%x_0_1, %w_0_1, %y_0_1, %b_0_1) : (tensor<12xf32>, tensor<48xbf16>, tensor<48xf32>, tensor<6xbf16>)
+  %x_0_2 = check.tensor.view %reference_x offset(168) : tensor<80xf32> -> tensor<12xf32>
+  %w_0_2 = check.tensor.view %reference_w offset(16) : tensor<70xbf16> -> tensor<48xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(456) : tensor<224xf32> -> tensor<48xf32>
+  %b_0_2 = check.tensor.view %reference_b offset(16) : tensor<28xbf16> -> tensor<6xbf16>
+  kernel.launch @isolated_transpose_convolution_bias(%x_0_2, %w_0_2, %y_0_2, %b_0_2) : (tensor<12xf32>, tensor<48xbf16>, tensor<48xf32>, tensor<6xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<80xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<70xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<224xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<28xbf16>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_transpose_convolution_bias(%membership, %actual_x, %actual_w, %actual_y, %actual_b) : (tensor<5xi32>, tensor<80xf32>, tensor<70xbf16>, tensor<224xf32>, tensor<28xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<80xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<70xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<224xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<28xbf16>
+  check.return
+}
+
+template.decl @pocket.batch.overlap_bias(%membership: buffer, %elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset)
+
+template.decl @pocket.overlap_bias.body(%elements: index, %outputs: index, %raw_times: index, %length: index, %overlap: index, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %history_origin: offset, %y_origin: offset, %b_origin: offset)
+
+kernel.def target(@pocket) @isolated_overlap_bias() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+  %elements = index.constant 3 : index
+  %outputs = index.constant 3 : index
+  %raw_times = index.constant 7 : index
+  %length = index.constant 5 : index
+  %overlap = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.overlap_bias.body>(%elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_overlap_bias() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+  %elements = index.constant 3 : index
+  %outputs = index.constant 3 : index
+  %raw_times = index.constant 7 : index
+  %length = index.constant 5 : index
+  %overlap = index.constant 2 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 112 : offset
+  %history_stride = index.constant 52 : offset
+  %y_stride = index.constant 88 : offset
+  %b_stride = index.constant 0 : offset
+  template.apply<@pocket.batch.overlap_bias>(%membership, %elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %origin, %x_stride, %origin, %history_stride, %origin, %y_stride, %origin, %b_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @overlap_bias_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %history_seed = check.literal value(101) : i64
+  %actual_history = check.generate.random.uniform seed(%history_seed) range(-0.5 to 0.5) : tensor<82xf32>
+  %reference_history = check.generate.random.uniform seed(%history_seed) range(-0.5 to 0.5) : tensor<82xf32>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %b_seed = check.literal value(103) : i64
+  %actual_b = check.generate.random.uniform seed(%b_seed) range(-0.5 to 0.5) : tensor<26xbf16>
+  %reference_b = check.generate.random.uniform seed(%b_seed) range(-0.5 to 0.5) : tensor<26xbf16>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_overlap_bias(%membership, %actual_x, %actual_history, %actual_y, %actual_b) : (tensor<5xi32>, tensor<116xf32>, tensor<82xf32>, tensor<92xf32>, tensor<26xbf16>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %history_0_0 = check.tensor.view %reference_history offset(276) : tensor<82xf32> -> tensor<6xf32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_0 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_overlap_bias(%x_0_0, %history_0_0, %y_0_0, %b_0_0) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>, tensor<3xbf16>)
+  %x_0_1 = check.tensor.view %reference_x offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %history_0_1 = check.tensor.view %reference_history offset(16) : tensor<82xf32> -> tensor<6xf32>
+  %y_0_1 = check.tensor.view %reference_y offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_1 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_overlap_bias(%x_0_1, %history_0_1, %y_0_1, %b_0_1) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>, tensor<3xbf16>)
+  %x_0_2 = check.tensor.view %reference_x offset(240) : tensor<116xf32> -> tensor<21xf32>
+  %history_0_2 = check.tensor.view %reference_history offset(68) : tensor<82xf32> -> tensor<6xf32>
+  %y_0_2 = check.tensor.view %reference_y offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_2 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_overlap_bias(%x_0_2, %history_0_2, %y_0_2, %b_0_2) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>, tensor<3xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<26xbf16>
+  kernel.launch @batch_metadata(%word_2, %word_1, %word_5, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_overlap_bias(%membership, %actual_x, %actual_history, %actual_y, %actual_b) : (tensor<5xi32>, tensor<116xf32>, tensor<82xf32>, tensor<92xf32>, tensor<26xbf16>)
+  %x_1_0 = check.tensor.view %reference_x offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %history_1_0 = check.tensor.view %reference_history offset(68) : tensor<82xf32> -> tensor<6xf32>
+  %y_1_0 = check.tensor.view %reference_y offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %b_1_0 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_overlap_bias(%x_1_0, %history_1_0, %y_1_0, %b_1_0) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>, tensor<3xbf16>)
+  %x_1_1 = check.tensor.view %reference_x offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %history_1_1 = check.tensor.view %reference_history offset(276) : tensor<82xf32> -> tensor<6xf32>
+  %y_1_1 = check.tensor.view %reference_y offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %b_1_1 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_overlap_bias(%x_1_1, %history_1_1, %y_1_1, %b_1_1) : (tensor<21xf32>, tensor<6xf32>, tensor<15xf32>, tensor<3xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<26xbf16>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_overlap_bias(%membership, %actual_x, %actual_history, %actual_y, %actual_b) : (tensor<5xi32>, tensor<116xf32>, tensor<82xf32>, tensor<92xf32>, tensor<26xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<26xbf16>
+  check.return
+}
+
+template.decl @pocket.batch.convolution_f64_bias(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset)
+
+template.decl @pocket.convolution_f64_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
+
+kernel.def target(@pocket) @isolated_convolution_f64_bias() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_convolution_f64_bias() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 160 : offset
+  %w_stride = index.constant 0 : offset
+  %y_stride = index.constant 88 : offset
+  %b_stride = index.constant 0 : offset
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %origin, %x_stride, %origin, %w_stride, %origin, %y_stride, %origin, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @convolution_f64_bias_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<164xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<164xf32>
+  %w_seed = check.literal value(101) : i64
+  %actual_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<50xbf16>
+  %reference_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<50xbf16>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %b_seed = check.literal value(103) : i64
+  %actual_b = check.generate.random.uniform seed(%b_seed) range(-0.5 to 0.5) : tensor<26xbf16>
+  %reference_b = check.generate.random.uniform seed(%b_seed) range(-0.5 to 0.5) : tensor<26xbf16>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_convolution_f64_bias(%membership, %actual_x, %actual_w, %actual_y, %actual_b) : (tensor<5xi32>, tensor<164xf32>, tensor<50xbf16>, tensor<92xf32>, tensor<26xbf16>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_0 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_0 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_convolution_f64_bias(%x_0_0, %w_0_0, %y_0_0, %b_0_0) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>, tensor<3xbf16>)
+  %x_0_1 = check.tensor.view %reference_x offset(176) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_1 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_1 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_convolution_f64_bias(%x_0_1, %w_0_1, %y_0_1, %b_0_1) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>, tensor<3xbf16>)
+  %x_0_2 = check.tensor.view %reference_x offset(336) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_2 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %b_0_2 = check.tensor.view %reference_b offset(16) : tensor<26xbf16> -> tensor<3xbf16>
+  kernel.launch @isolated_convolution_f64_bias(%x_0_2, %w_0_2, %y_0_2, %b_0_2) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>, tensor<3xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<164xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<50xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<26xbf16>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_convolution_f64_bias(%membership, %actual_x, %actual_w, %actual_y, %actual_b) : (tensor<5xi32>, tensor<164xf32>, tensor<50xbf16>, tensor<92xf32>, tensor<26xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<164xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<50xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_b) expected(%reference_b) : tensor<26xbf16>
+  check.return
+}
+
+template.decl @pocket.batch.history_replicate(%membership: buffer, %elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset, %position_offset: offset, %position_stride: offset)
+
+template.decl @pocket.history_replicate.body(%elements: index, %channels: index, %times: index, %history_length: index, %padded_times: index, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer, %x_origin: offset, %history_origin: offset, %padded_origin: offset, %position_origin: offset)
+
+kernel.def target(@pocket) @isolated_history_replicate() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 3 : index
+  %times = index.constant 5 : index
+  %history_length = index.constant 2 : index
+  %padded_times = index.constant 7 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.history_replicate.body>(%elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %position_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_history_replicate() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 3 : index
+  %times = index.constant 5 : index
+  %history_length = index.constant 2 : index
+  %padded_times = index.constant 7 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 88 : offset
+  %history_stride = index.constant 52 : offset
+  %padded_stride = index.constant 112 : offset
+  %position_stride = index.constant 32 : offset
+  template.apply<@pocket.batch.history_replicate>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %position_storage, %origin, %x_stride, %origin, %history_stride, %origin, %padded_stride, %origin, %position_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @initialize_history_replicate() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %buffer[%origin] : buffer -> view<52xi32>
+  %value_0 = scalar.constant 0 : i32
+  view.store %value_0, %view[4] : i32, view<52xi32>
+  %value_1 = scalar.constant 16 : i32
+  view.store %value_1, %view[12] : i32, view<52xi32>
+  %value_2 = scalar.constant 32 : i32
+  view.store %value_2, %view[20] : i32, view<52xi32>
+  %value_3 = scalar.constant 48 : i32
+  view.store %value_3, %view[28] : i32, view<52xi32>
+  %value_4 = scalar.constant 64 : i32
+  view.store %value_4, %view[36] : i32, view<52xi32>
+  %value_5 = scalar.constant 80 : i32
+  view.store %value_5, %view[44] : i32, view<52xi32>
+  kernel.return
+}
+
+check.case public @history_replicate_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %history_seed = check.literal value(101) : i64
+  %actual_history = check.generate.random.uniform seed(%history_seed) range(-0.5 to 0.5) : tensor<82xf32>
+  %reference_history = check.generate.random.uniform seed(%history_seed) range(-0.5 to 0.5) : tensor<82xf32>
+  %padded_seed = check.literal value(102) : i64
+  %actual_padded = check.generate.random.uniform seed(%padded_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_padded = check.generate.random.uniform seed(%padded_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %position_seed = check.literal value(103) : i64
+  %actual_position = check.generate.fill value(-17) : tensor<52xi32>
+  kernel.launch @initialize_history_replicate(%actual_position) : (tensor<52xi32>)
+  %reference_position = check.generate.fill value(-17) : tensor<52xi32>
+  kernel.launch @initialize_history_replicate(%reference_position) : (tensor<52xi32>)
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_history_replicate(%membership, %actual_x, %actual_history, %actual_padded, %actual_position) : (tensor<5xi32>, tensor<92xf32>, tensor<82xf32>, tensor<116xf32>, tensor<52xi32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %history_0_0 = check.tensor.view %reference_history offset(276) : tensor<82xf32> -> tensor<6xf32>
+  %padded_0_0 = check.tensor.view %reference_padded offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %position_0_0 = check.tensor.view %reference_position offset(176) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_history_replicate(%x_0_0, %history_0_0, %padded_0_0, %position_0_0) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>, tensor<1xi32>)
+  %x_0_1 = check.tensor.view %reference_x offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %history_0_1 = check.tensor.view %reference_history offset(16) : tensor<82xf32> -> tensor<6xf32>
+  %padded_0_1 = check.tensor.view %reference_padded offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %position_0_1 = check.tensor.view %reference_position offset(16) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_history_replicate(%x_0_1, %history_0_1, %padded_0_1, %position_0_1) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>, tensor<1xi32>)
+  %x_0_2 = check.tensor.view %reference_x offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %history_0_2 = check.tensor.view %reference_history offset(68) : tensor<82xf32> -> tensor<6xf32>
+  %padded_0_2 = check.tensor.view %reference_padded offset(240) : tensor<116xf32> -> tensor<21xf32>
+  %position_0_2 = check.tensor.view %reference_position offset(48) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_history_replicate(%x_0_2, %history_0_2, %padded_0_2, %position_0_2) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>, tensor<1xi32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_padded) expected(%reference_padded) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  kernel.launch @batch_metadata(%word_2, %word_1, %word_5, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_history_replicate(%membership, %actual_x, %actual_history, %actual_padded, %actual_position) : (tensor<5xi32>, tensor<92xf32>, tensor<82xf32>, tensor<116xf32>, tensor<52xi32>)
+  %x_1_0 = check.tensor.view %reference_x offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %history_1_0 = check.tensor.view %reference_history offset(68) : tensor<82xf32> -> tensor<6xf32>
+  %padded_1_0 = check.tensor.view %reference_padded offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %position_1_0 = check.tensor.view %reference_position offset(48) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_history_replicate(%x_1_0, %history_1_0, %padded_1_0, %position_1_0) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>, tensor<1xi32>)
+  %x_1_1 = check.tensor.view %reference_x offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %history_1_1 = check.tensor.view %reference_history offset(276) : tensor<82xf32> -> tensor<6xf32>
+  %padded_1_1 = check.tensor.view %reference_padded offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %position_1_1 = check.tensor.view %reference_position offset(176) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_history_replicate(%x_1_1, %history_1_1, %padded_1_1, %position_1_1) : (tensor<15xf32>, tensor<6xf32>, tensor<21xf32>, tensor<1xi32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_padded) expected(%reference_padded) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_history_replicate(%membership, %actual_x, %actual_history, %actual_padded, %actual_position) : (tensor<5xi32>, tensor<92xf32>, tensor<82xf32>, tensor<116xf32>, tensor<52xi32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_history) expected(%reference_history) : tensor<82xf32>
+  check.expect.bitwise actual(%actual_padded) expected(%reference_padded) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  check.return
+}
+
+template.decl @pocket.batch.convolution_f64(%membership: buffer, %elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.convolution_f64.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_convolution_f64() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %w_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %origin, %origin, %origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_convolution_f64() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 15 : index
+  %inputs = index.constant 3 : index
+  %padded_times = index.constant 11 : index
+  %outputs = index.constant 3 : index
+  %times = index.constant 5 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 2 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 160 : offset
+  %w_stride = index.constant 0 : offset
+  %y_stride = index.constant 88 : offset
+  template.apply<@pocket.batch.convolution_f64>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %origin, %x_stride, %origin, %w_stride, %origin, %y_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @convolution_f64_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<164xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<164xf32>
+  %w_seed = check.literal value(101) : i64
+  %actual_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<50xbf16>
+  %reference_w = check.generate.random.uniform seed(%w_seed) range(-0.5 to 0.5) : tensor<50xbf16>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_convolution_f64(%membership, %actual_x, %actual_w, %actual_y) : (tensor<5xi32>, tensor<164xf32>, tensor<50xbf16>, tensor<92xf32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_0 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<92xf32> -> tensor<15xf32>
+  kernel.launch @isolated_convolution_f64(%x_0_0, %w_0_0, %y_0_0) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>)
+  %x_0_1 = check.tensor.view %reference_x offset(176) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_1 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(104) : tensor<92xf32> -> tensor<15xf32>
+  kernel.launch @isolated_convolution_f64(%x_0_1, %w_0_1, %y_0_1) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>)
+  %x_0_2 = check.tensor.view %reference_x offset(336) : tensor<164xf32> -> tensor<33xf32>
+  %w_0_2 = check.tensor.view %reference_w offset(16) : tensor<50xbf16> -> tensor<27xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(192) : tensor<92xf32> -> tensor<15xf32>
+  kernel.launch @isolated_convolution_f64(%x_0_2, %w_0_2, %y_0_2) : (tensor<33xf32>, tensor<27xbf16>, tensor<15xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<164xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<50xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_convolution_f64(%membership, %actual_x, %actual_w, %actual_y) : (tensor<5xi32>, tensor<164xf32>, tensor<50xbf16>, tensor<92xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<164xf32>
+  check.expect.bitwise actual(%actual_w) expected(%reference_w) : tensor<50xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<92xf32>
+  check.return
+}

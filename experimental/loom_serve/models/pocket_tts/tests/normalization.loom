@@ -6,7 +6,7 @@
 
 amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
 
-template.decl @pocket.normalization_affine.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer)
+template.decl @pocket.normalization_affine.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset, %bias_origin: offset)
 
 kernel.def target(@pocket) @test_normalization_affine() {
   %one = index.constant 1 : index
@@ -19,11 +19,12 @@ kernel.def target(@pocket) @test_normalization_affine() {
   %divisor = scalar.constant 7.0 : f64
   %variance_divisor = scalar.constant 7.0 : f64
   %epsilon = scalar.constant 1.75 : f32
-  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %input, %output, %scale, %bias) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer)
+  %normalization_affine_origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %input, %output, %scale, %bias, %normalization_affine_origin, %normalization_affine_origin, %normalization_affine_origin, %normalization_affine_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.normalization_variance.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer)
+template.decl @pocket.normalization_variance.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset)
 
 kernel.def target(@pocket) @test_normalization_variance() {
   %one = index.constant 1 : index
@@ -36,11 +37,12 @@ kernel.def target(@pocket) @test_normalization_variance() {
   %divisor = scalar.constant 7.0 : f64
   %variance_divisor = scalar.constant 6.0 : f64
   %epsilon = scalar.constant 1.375 : f32
-  template.apply<@pocket.normalization_variance.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %input, %output, %scale) : (index, index, index, f64, f64, f32, buffer, buffer, buffer)
+  %normalization_variance_origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_variance.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %input, %output, %scale, %normalization_variance_origin, %normalization_variance_origin, %normalization_variance_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.normalization_plain.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer)
+template.decl @pocket.normalization_plain.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
 
 kernel.def target(@pocket) @test_normalization_plain() {
   %one = index.constant 1 : index
@@ -53,7 +55,8 @@ kernel.def target(@pocket) @test_normalization_plain() {
   %divisor = scalar.constant 7.0 : f64
   %variance_divisor = scalar.constant 7.0 : f64
   %epsilon = scalar.constant 1.75 : f32
-  template.apply<@pocket.normalization_plain.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %input, %output) : (index, index, index, f64, f64, f32, buffer, buffer)
+  %normalization_plain_origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_plain.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %input, %output, %normalization_plain_origin, %normalization_plain_origin) : (index, index, index, f64, f64, f32, buffer, buffer, offset, offset)
   kernel.return
 }
 
