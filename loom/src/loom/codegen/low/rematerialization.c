@@ -380,6 +380,58 @@ static bool loom_low_rematerialization_use_shortens_live_range(
           user_op->prev_op != defining_op);
 }
 
+// Returns true when cloning |recipe| would keep every producer and user in the
+// same repeated execution domain. Acyclic control flow executes each block at
+// most once. Within cyclic control flow, same-block users are exact, and the
+// retained loop forest proves equivalent loop nesting for distinct blocks.
+// Missing or noncanonical loop facts cannot justify multiplying a recipe.
+static bool loom_low_rematerialization_preserves_execution_domain(
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_rematerialization_recipe_t* recipe,
+    const loom_op_t* defining_op, const loom_use_t* uses, uint32_t use_count) {
+  if (allocation == NULL || recipe->packet_count <= 1 ||
+      !allocation->cfg_graph.has_cycles) {
+    return true;
+  }
+  uint32_t first_cross_block_use = 0;
+  while (first_cross_block_use < use_count &&
+         loom_use_user_op(uses[first_cross_block_use])->parent_block ==
+             defining_op->parent_block) {
+    ++first_cross_block_use;
+  }
+  if (first_cross_block_use == use_count) {
+    return true;
+  }
+  const loom_cfg_graph_t* graph = &allocation->cfg_graph;
+  const loom_cfg_loop_forest_t* forest = &allocation->loop_forest;
+  const iree_host_size_t definition_block_index =
+      loom_cfg_graph_block_index(graph, defining_op->parent_block);
+  if (definition_block_index >= graph->block_count ||
+      forest->innermost_loop_indices == NULL) {
+    return false;
+  }
+  const uint32_t definition_loop_index =
+      forest->innermost_loop_indices[definition_block_index];
+  if (definition_loop_index != LOOM_CFG_LOOP_NONE &&
+      !forest->intervals[definition_loop_index].is_canonical) {
+    return false;
+  }
+  for (uint32_t i = first_cross_block_use; i < use_count; ++i) {
+    const loom_op_t* user_op = loom_use_user_op(uses[i]);
+    if (user_op->parent_block == defining_op->parent_block) {
+      continue;
+    }
+    const iree_host_size_t user_block_index =
+        loom_cfg_graph_block_index(graph, user_op->parent_block);
+    if (user_block_index >= graph->block_count ||
+        definition_loop_index !=
+            forest->innermost_loop_indices[user_block_index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_low_rematerialization_clone_for_use(
     loom_rewriter_t* rewriter,
     const loom_low_rematerialization_recipe_t* recipe, loom_use_t use,
@@ -434,6 +486,7 @@ static iree_status_t loom_low_rematerialization_clone_for_use(
 static iree_status_t loom_low_rematerialization_prepare_value(
     loom_module_t* module, const loom_low_resolved_target_t* target,
     loom_value_id_t value_id, const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* spill_allocation,
     loom_low_rematerialization_state_t* state, iree_arena_allocator_t* arena,
     loom_low_rematerialization_plan_t* out_plan) {
   *out_plan = (loom_low_rematerialization_plan_t){0};
@@ -484,6 +537,14 @@ static iree_status_t loom_low_rematerialization_prepare_value(
     shortens_live_range = shortens_live_range ||
                           loom_low_rematerialization_use_shortens_live_range(
                               defining_op, uses[i]);
+  }
+  // Predicted-spill rematerialization is optional. Do not replace one reload
+  // with a multi-packet recipe in a different repeated execution domain. The
+  // original spill remains available to allocation materialization, while
+  // same-domain recipes retain the pressure and storage benefit.
+  if (!loom_low_rematerialization_preserves_execution_domain(
+          spill_allocation, &recipe, defining_op, uses, use_count)) {
+    return iree_ok_status();
   }
   loom_low_rematerialization_action_t action =
       LOOM_LOW_REMATERIALIZATION_ACTION_CLONE;
@@ -686,7 +747,8 @@ iree_status_t loom_low_rematerialize_value_uses(
   *out_result = loom_low_value_rematerialization_result_empty();
   loom_low_rematerialization_plan_t plan = {0};
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_prepare_value(
-      module, target, value_id, schedule, state, arena, &plan));
+      module, target, value_id, schedule, /*spill_allocation=*/NULL, state,
+      arena, &plan));
   return loom_low_rematerialization_apply_value(module, value_id, &plan, state,
                                                 arena, out_result);
 }
@@ -907,9 +969,10 @@ static iree_status_t loom_low_rematerialization_plan_failure_batch(
 }
 
 static iree_status_t loom_low_rematerialization_apply_batch(
-    loom_module_t* module, const loom_low_resolved_target_t* target,
+    loom_module_t* module, const loom_low_allocation_table_t* table,
     const loom_low_rematerialization_candidate_t* candidates,
     iree_host_size_t candidate_count, const loom_low_schedule_table_t* schedule,
+    bool preserve_spill_execution_domain,
     loom_low_rematerialization_state_t* state, iree_arena_allocator_t* arena,
     loom_low_rematerialization_batch_result_t* out_result) {
   // Consumer-first application lets producers see uses created by earlier
@@ -917,13 +980,21 @@ static iree_status_t loom_low_rematerialization_apply_batch(
   // each individual rewrite captures its current uses immediately before apply.
   // Placement-only repairs can consult the completed schedule until the first
   // rewrite invalidates it. Later candidates still use fresh IR for cloning.
+  const loom_low_allocation_table_t* spill_allocation =
+      preserve_spill_execution_domain ? table : NULL;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < candidate_count && iree_status_is_ok(status);
        ++i) {
     const loom_low_rematerialization_candidate_t* candidate = &candidates[i];
     loom_low_value_rematerialization_result_t result = {0};
-    status = loom_low_rematerialize_value_uses(
-        module, target, candidate->value_id, schedule, state, arena, &result);
+    loom_low_rematerialization_plan_t plan = {0};
+    status = loom_low_rematerialization_prepare_value(
+        module, &table->target, candidate->value_id, schedule, spill_allocation,
+        state, arena, &plan);
+    if (iree_status_is_ok(status)) {
+      status = loom_low_rematerialization_apply_value(
+          module, candidate->value_id, &plan, state, arena, &result);
+    }
     if (iree_status_is_ok(status)) {
       loom_low_rematerialization_accumulate_result(&result, out_result);
       if (result.rewritten_operand_count != 0) {
@@ -983,14 +1054,14 @@ iree_status_t loom_low_allocation_rematerialize_failure(
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_plan_failure_batch(
       module, table, arena, &candidates, &candidate_count, &cross_block_count));
   iree_status_t status = loom_low_rematerialization_apply_batch(
-      module, &table->target, candidates, cross_block_count, schedule, state,
-      arena, out_result);
+      module, table, candidates, cross_block_count, schedule,
+      /*preserve_spill_execution_domain=*/false, state, arena, out_result);
   if (iree_status_is_ok(status) && out_result->repaired_value_count == 0 &&
       candidate_count != cross_block_count) {
     status = loom_low_rematerialization_apply_batch(
-        module, &table->target, candidates + cross_block_count,
-        candidate_count - cross_block_count, schedule, state, arena,
-        out_result);
+        module, table, candidates + cross_block_count,
+        candidate_count - cross_block_count, schedule,
+        /*preserve_spill_execution_domain=*/false, state, arena, out_result);
   }
   if (iree_status_is_ok(status)) {
     status = loom_low_allocation_rematerialization_emit_summary(
@@ -1050,8 +1121,8 @@ iree_status_t loom_low_allocation_rematerialize_spill_plans(
   }
   loom_low_rematerialization_candidate_sort(candidates, count);
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_apply_batch(
-      module, &table->target, candidates, count, /*schedule=*/NULL, state,
-      arena, out_result));
+      module, table, candidates, count, /*schedule=*/NULL,
+      /*preserve_spill_execution_domain=*/true, state, arena, out_result));
   // The first predicted spill triggers this repair; the batch can cover
   // additional classes from the same allocation snapshot.
   return loom_low_allocation_rematerialization_emit_summary(

@@ -137,6 +137,7 @@ _PTR_ALT = (RegClassAlt(_REG_PTR),)
 _PHYS_ALT = (RegClassAlt(_REG_PHYS),)
 _SPECIAL_ALT = (RegClassAlt(_REG_SPECIAL),)
 _EXPLICIT32_ALT = (RegClassAlt(_REG_EXPLICIT32),)
+_SPILLABLE_EXPLICIT32_ALT = (RegClassAlt(_REG_SPILLABLE_EXPLICIT32),)
 _FIXED_R0_ALT = (RegClassAlt(_REG_FIXED_R0),)
 _SCHEDULE_STATE_ALT = (RegClassAlt(_REG_SCHEDULE_STATE),)
 _PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
@@ -261,6 +262,10 @@ def _explicit32_result(field_name: str = "dst") -> Operand:
 
 def _explicit32_operand(field_name: str) -> Operand:
     return Operand(field_name, OperandRole.OPERAND, _EXPLICIT32_ALT)
+
+
+def _spillable_explicit32_result(field_name: str = "dst") -> Operand:
+    return Operand(field_name, OperandRole.RESULT, _SPILLABLE_EXPLICIT32_ALT)
 
 
 def _packed_narrow_result(field_name: str = "dst") -> Operand:
@@ -599,6 +604,17 @@ TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR = Descriptor(
     semantic_tag="test.rematerialize.i32",
     operands=(_i32_result(), _i32_operand("src")),
     constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_REMATERIALIZE_SPILLABLE_EXPLICIT32_DESCRIPTOR = Descriptor(
+    key="test.rematerialize.spillable.explicit32",
+    mnemonic="test.rematerialize.spillable.explicit32",
+    semantic_tag="test.rematerialize.spillable.explicit32",
+    operands=(_spillable_explicit32_result(), _i32_operand("src")),
+    constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
     asm_forms=_asm(results=("dst",), operands=("src",)),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -2704,6 +2720,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR,
         TEST_LOW_CONST_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        TEST_LOW_REMATERIALIZE_SPILLABLE_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_PAIR_EXPLICIT32_DESCRIPTOR,

@@ -643,6 +643,7 @@ static iree_status_t loom_low_allocate_function_impl(
       .target = model->context.target,
       .error_count = model->context.error_count,
       .cfg_graph = model->cfg_graph,
+      .loop_forest = model->loop_forest,
   };
   const uint8_t allocation_mode =
       loom_low_function_allocation(model->context.function_op);
@@ -956,6 +957,7 @@ static iree_status_t loom_low_allocate_function_impl(
         .reserved_ranges = state.target_constraints.reserved_ranges,
         .reserved_range_count = state.target_constraints.reserved_range_count,
         .cfg_graph = model->cfg_graph,
+        .loop_forest = model->loop_forest,
     };
   }
   if (locations_replayed && iree_status_is_ok(status)) {

@@ -21,6 +21,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/ir.h"
 #include "loom/util/cfg_graph.h"
+#include "loom/util/cfg_loop.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -448,6 +449,9 @@ typedef struct loom_low_allocation_table_t {
   // remains valid while spill materialization rewrites branch payloads without
   // changing topology; edge terminator pointers remain snapshot facts.
   loom_cfg_graph_t cfg_graph;
+  // Canonical loop intervals derived from |cfg_graph|. Spill repair preserves
+  // topology, so the execution domains remain valid across a repair batch.
+  loom_cfg_loop_forest_t loop_forest;
 } loom_low_allocation_table_t;
 
 // Active allocation-owned lease over the module value-ordinal scratch map.
