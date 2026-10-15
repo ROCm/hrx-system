@@ -221,7 +221,12 @@ static inline iree_status_code_t iree_futex_wait(void* address,
     return IREE_STATUS_OK;
   }
   if (GetLastError() == ERROR_TIMEOUT) {
-    return IREE_STATUS_DEADLINE_EXCEEDED;
+    // Windows relative waits can expire before the requested interval because
+    // their timeout clock is coarser than our monotonic clock. Treat an early
+    // expiry as a spurious wake so callers recheck their condition and
+    // deadline.
+    return iree_time_now() >= deadline_ns ? IREE_STATUS_DEADLINE_EXCEEDED
+                                          : IREE_STATUS_OK;
   }
   return IREE_STATUS_UNAVAILABLE;
 }

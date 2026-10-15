@@ -120,17 +120,20 @@ TEST(FutexTest, WakeAllWakesMultipleWaiters) {
   EXPECT_EQ(waiters_woken.load(std::memory_order_acquire), kNumWaiters);
 }
 
-// Tests that a future deadline eventually terminates an unchanged wait.
+// Tests that an unchanged wait expires only after its monotonic deadline, even
+// when the native timeout clock expires at a coarser tick boundary.
 TEST(FutexTest, WaitFutureDeadlineExpires) {
   uint32_t futex_word = 0;
-
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(1);
-  iree_status_code_t status = IREE_STATUS_OK;
-  while (status == IREE_STATUS_OK) {
-    status = iree_futex_wait(&futex_word, 0, deadline);
+  for (int iteration = 0; iteration < 16; ++iteration) {
+    SCOPED_TRACE(iteration);
+    const iree_time_t deadline = iree_time_now() + iree_make_duration_ms(1);
+    iree_status_code_t status = IREE_STATUS_OK;
+    while (status == IREE_STATUS_OK) {
+      status = iree_futex_wait(&futex_word, 0, deadline);
+    }
+    EXPECT_EQ(status, IREE_STATUS_DEADLINE_EXCEEDED);
+    EXPECT_GE(iree_time_now(), deadline);
   }
-
-  EXPECT_EQ(status, IREE_STATUS_DEADLINE_EXCEEDED);
 }
 
 // Tests that iree_futex_wait with immediate deadline returns immediately.
