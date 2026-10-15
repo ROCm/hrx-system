@@ -9,13 +9,13 @@
 
 command.program.decl @qwen38_gdn_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %gdn_ordinal: index, %verification_depth: index, %span_capacity: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %control: buffer, %transition_capture: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64)]
 
-command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %attention_ordinal: index, %verification_depth: index, %span_capacity: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 64), range(%attention_ordinal, 0, 15), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64)]
+command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %attention_ordinal: index, %verification_depth: index, %span_capacity: index, %mixed_inputs: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer, %rows: buffer, %input_tokens: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 64), range(%attention_ordinal, 0, 15), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64), range(%mixed_inputs, 0, 1)]
 
 command.program.decl @qwen38_output_head_prefill_greedy_with_hidden() launch(%parameters: buffer, %residual: buffer, %control: buffer, %normalized: buffer, %token_id: buffer)
 
 command.program.decl @qwen38_mtp_catchup(%token_count: index, %schedule_token_count: index, %verification_depth: index) launch(%embedding_parameters: buffer, %mtp_input_parameters: buffer, %mtp_layer_parameters: buffer, %residual: buffer, %control: buffer, %attention_cache: buffer, %shifted_hidden: buffer, %token_ids: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 4)]
 
-kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%token_count: index) launch(%token_ids: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_input_embedding_f32(%token_count: index) launch(%mixed_inputs: index, %token_ids: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_rmsnorm_f32_prefill(%token_count: index) launch(%token_capacity: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 
@@ -70,7 +70,7 @@ command.program.def @qwen38_capture_layer(%tokens: index, %enabled: index, %laye
 // span_capacity zero, control describes one causal span and rows is unused.
 // Otherwise control is an epoch and rows supplies stable resident origins.
 // Dense math and layer order are identical; only stateful dispatches change.
-command.program.def public @qwen38_text_prefill_body_impl(%token_count: index, %schedule_token_count: index, %verification_depth: index, %span_capacity: index, %capture_features: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %transition_capture: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64), range(%capture_features, 0, 1)] {
+command.program.def public @qwen38_text_prefill_body_impl(%token_count: index, %schedule_token_count: index, %verification_depth: index, %span_capacity: index, %capture_features: index, %mixed_inputs: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %transition_capture: buffer, %rows: buffer, %input_tokens: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 8), range(%span_capacity, 0, 64), range(%capture_features, 0, 1), range(%mixed_inputs, 0, 1)] {
   %group_begin = index.constant 0 : index
   %group_end = index.constant 16 : index
   %group_step = index.constant 1 : index
@@ -101,7 +101,7 @@ command.program.def public @qwen38_text_prefill_body_impl(%token_count: index, %
     command.program.launch @qwen38_capture_layer[%token_count, %capture_features, %layer1](%control, %residual) : [index, index, index](buffer, buffer)
     command.program.launch @qwen38_gdn_layer_prefill[%token_count, %schedule_token_count, %layer2, %gdn_ordinal2, %verification_depth, %span_capacity](%parameters, %residual, %gdn_state, %control, %transition_capture, %rows) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer)
     command.program.launch @qwen38_capture_layer[%token_count, %capture_features, %layer2](%control, %residual) : [index, index, index](buffer, buffer)
-    command.program.launch @qwen38_attention_layer_prefill[%token_count, %schedule_token_count, %attention_layer, %group, %verification_depth, %span_capacity](%parameters, %residual, %attention_cache, %control, %attention_output, %rows) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @qwen38_attention_layer_prefill[%token_count, %schedule_token_count, %attention_layer, %group, %verification_depth, %span_capacity, %mixed_inputs](%parameters, %residual, %attention_cache, %control, %attention_output, %rows, %input_tokens) : [index, index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     command.program.launch @qwen38_capture_layer[%token_count, %capture_features, %attention_layer](%control, %residual) : [index, index, index](buffer, buffer)
   }
   command.return
@@ -116,7 +116,7 @@ command.program.def public @qwen38_text_prefill_body(%token_count: index) launch
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
   %capture_features = index.constant 0 : index
   %span_capacity = index.constant 0 : index
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %token_count, %verification_depth, %span_capacity, %capture_features](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %token_count, %verification_depth, %span_capacity, %capture_features, %span_capacity](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control, %control) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -130,7 +130,7 @@ command.program.def public @qwen38_text_prefill_body_schedule_c64t32(%token_coun
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
   %capture_features = index.constant 0 : index
   %span_capacity = index.constant 0 : index
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features, %span_capacity](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control, %control) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -141,7 +141,7 @@ command.program.def public @qwen38_text_prefill_body_schedule_x64(%token_count: 
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
   %capture_features = index.constant 0 : index
   %span_capacity = index.constant 0 : index
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features, %span_capacity](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control, %control) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -152,7 +152,7 @@ command.program.def public @qwen38_text_prefill_body_schedule_x128(%token_count:
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
   %capture_features = index.constant 0 : index
   %span_capacity = index.constant 0 : index
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features, %span_capacity](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control, %control) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -163,7 +163,7 @@ command.program.def public @qwen38_text_prefill_body_schedule_c128(%token_count:
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
   %capture_features = index.constant 0 : index
   %span_capacity = index.constant 0 : index
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features, %span_capacity](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control, %control) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -174,10 +174,11 @@ command.program.def @qwen38_text_prefill_transition(%token_count: index, %schedu
   %transition_bytes = index.constant 165376 : offset
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
   %embedding_weight = command.parameter %parameters, "token_embd.weight" : view<874086400xi8>
-  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%token_count](%token_ids, %embedding_weight, %residual) : [index](buffer, view<874086400xi8>, buffer)
+  %ordinary_inputs = index.constant 0 : index
+  kernel.launch @qwen38_input_embedding_f32[%token_count](%ordinary_inputs, %token_ids, %embedding_weight, %residual) : [index](index, buffer, view<874086400xi8>, buffer)
   %capture_features = index.constant 0 : index
   %span_capacity = index.constant 0 : index
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features, %span_capacity](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control, %control) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.program.launch @qwen38_output_head_prefill_greedy_with_hidden(%parameters, %residual, %control, %normalized_hidden, %token_ids) : (buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_prefill_finish_control(%control, %token_ids, %progress) : (buffer, buffer, buffer)
   command.return
@@ -193,10 +194,11 @@ command.program.def public @qwen38_text_prefill_chunk(%token_count: index) launc
   %transition_bytes = index.constant 165376 : offset
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
   %embedding_weight = command.parameter %parameters, "token_embd.weight" : view<874086400xi8>
-  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%token_count](%token_ids, %embedding_weight, %residual) : [index](buffer, view<874086400xi8>, buffer)
+  %ordinary_inputs = index.constant 0 : index
+  kernel.launch @qwen38_input_embedding_f32[%token_count](%ordinary_inputs, %token_ids, %embedding_weight, %residual) : [index](index, buffer, view<874086400xi8>, buffer)
   %capture_features = index.constant 0 : index
   %span_capacity = index.constant 0 : index
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features, %span_capacity](%parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control, %control) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -220,11 +222,12 @@ command.program.def public @qwen38_text_prefill_mtp_chunk(%token_count: index) l
   kernel.launch @qwen38_mtp_preserve_prefill_inputs(%token_ids, %control, %normalized_hidden, %prompt_token_ids, %prefill_control, %prior_hidden) : (buffer, buffer, buffer, buffer, buffer, buffer)
 
   %embedding_weight = command.parameter %target_parameters, "token_embd.weight" : view<874086400xi8>
-  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%token_count](%token_ids, %embedding_weight, %residual) : [index](buffer, view<874086400xi8>, buffer)
+  %ordinary_inputs = index.constant 0 : index
+  kernel.launch @qwen38_input_embedding_f32[%token_count](%ordinary_inputs, %token_ids, %embedding_weight, %residual) : [index](index, buffer, view<874086400xi8>, buffer)
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
   %capture_features = index.constant 0 : index
   %span_capacity = index.constant 0 : index
-  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features](%target_parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%token_count, %schedule_token_count, %verification_depth, %span_capacity, %capture_features, %span_capacity](%target_parameters, %residual, %control, %gdn_state, %attention_cache, %transition_capture, %control, %control) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
 
   %output_norm_weight = command.parameter %target_parameters, "output_norm.weight" : view<5120xf32>
   %normalized_rows = buffer.alloca<global> align(256) %hidden_capacity_bytes : buffer
