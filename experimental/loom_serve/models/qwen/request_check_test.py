@@ -278,6 +278,37 @@ class RequestCheckTest(unittest.TestCase):
                     self.assertEqual(value["tool_calls"], [])
                     self.assertFalse(value["reusable"])
 
+    def test_retained_history_requires_unchanged_generated_text(self):
+        call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
+        cases = [
+            (False, "Ready.", True),
+            (False, "Ready.\n\n", False),
+            (False, "\tReady.", False),
+            (False, " \t", False),
+            (True, "Check.\n</think>\n\nReady.", True),
+            (True, "Check.  \n</think> \nReady.", False),
+            (True, "\n</think>\n\nReady.", True),
+            (True, "</think>\n\nReady.", False),
+            (False, call, True),
+            (False, call.replace("\n<function", "\n  <function"), False),
+        ]
+        for thinking, response, reusable in cases:
+            with self.subTest(thinking=thinking, response=response):
+                value = self.success(
+                    self.execute(
+                        PACKAGE / "control.loom",
+                        self.request(enable_thinking=thinking, tools=TOOLS),
+                        response,
+                        chunk_size=7,
+                    )
+                )
+                self.assertEqual(value["reusable"], reusable)
+                if reusable:
+                    self.assertEqual(
+                        value["checkpoint"],
+                        value["prompt"] + response + "<|im_end|>\n",
+                    )
+
     def test_empty_reasoning_and_incomplete_answer_marker(self):
         for prefix in ("", "\n"):
             for chunk_size in (0, 1, 7):

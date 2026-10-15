@@ -139,7 +139,12 @@ def run(address, model):
         # Continue before fresh replays can evict idle execution rows.
         continuation = append(branches[0], forks[0], "And then?")
         continued = chat("fork-0", continuation)
-        assert cached(continued) > receipt["position"], continued
+        if forks[0]["text"] != forks[0]["text"].strip(" \t\n\v\f\r"):
+            # Canonical history removes framing whitespace. Its token state
+            # must be replayed instead of reusing the untrimmed generation.
+            assert cached(continued) == 0, continued
+        else:
+            assert cached(continued) > receipt["position"], continued
         for i, branch in enumerate(branches):
             replay = chat(f"replay-{i}", branch)
             same_output(replay, forks[i])
