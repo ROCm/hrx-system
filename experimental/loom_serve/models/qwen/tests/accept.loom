@@ -1,9 +1,9 @@
-kernel.decl @qwen38_accept_spans() launch(%width: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
+kernel.decl @qwen38_accept_spans() launch(%width: index, %token_capacity: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
 
-// Permuted resident rows include a three-token intermediate prompt, a one-token
+// Permuted resident rows include an intermediate prompt, a one-token
 // known span, and verifiers. Trials move mismatch/EOS positions
 // and vary output credit, including truncation before a matching proposal.
-func.def @accept_fixture(%width_value: index, %span_count_value: index, %trial_value: index, %epoch: buffer, %predictions: buffer) {
+func.def @accept_fixture(%token_capacity: index, %width_value: index, %span_count_value: index, %trial_value: index, %epoch: buffer, %predictions: buffer) {
   %width = index.assume %width_value [range(%width_value, 1, 8)] : index
   %span_count = index.assume %span_count_value [range(%span_count_value, 1, 16)] : index
   %trial = index.assume %trial_value [range(%trial_value, 0, 7), lt(%trial_value, %width)] : index
@@ -22,6 +22,11 @@ func.def @accept_fixture(%width_value: index, %span_count_value: index, %trial_v
   %c5 = index.constant 5 : index
   %c6 = index.constant 6 : index
   %c7 = index.constant 7 : index
+  %small_capacity = index.constant 512 : index
+  %selected_capacity = index.constant 128 : index
+  %large = index.cmp ugt, %token_capacity, %small_capacity : index
+  %long_prompt = index.sub %token_capacity, %selected_capacity : index
+  %hidden_length = scf.select %large, %long_prompt, %c3 : index
   %last_row = index.constant 15 : index
   %source_base = index.constant 23 : index
   %c100 = index.constant 100 : index
@@ -39,7 +44,7 @@ func.def @accept_fixture(%width_value: index, %span_count_value: index, %trial_v
     %true = scalar.constant true : i1
     %speculative = scalar.xori %ordinary, %true : i1
     %visible_count = scf.select %known, %c1, %width : index
-    %count = scf.select %hidden, %c3, %visible_count : index
+    %count = scf.select %hidden, %hidden_length, %visible_count : index
     %output_count = scf.select %hidden, %c0, %visible_count : index
     %row = index.sub %last_row, %span : index
     %position = index.add %c100, %span : index
@@ -98,7 +103,7 @@ func.def @accept_fixture(%width_value: index, %span_count_value: index, %trial_v
 
 // Independent oracle takes the minimum frontier of all mismatches, EOS and
 // credit before copying any outputs. The kernel instead walks a live prefix.
-func.def @accept_oracle(%width_value: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer) {
+func.def @accept_oracle(%width_value: index, %token_capacity: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer) {
   %width = index.assume %width_value [range(%width_value, 1, 8)] : index
   %origin = index.constant 0 : offset
   %descriptor_origin = index.constant 12 : offset
@@ -106,7 +111,7 @@ func.def @accept_oracle(%width_value: index, %epoch: buffer, %inputs: buffer, %p
   %control = buffer.view %epoch[%origin] : buffer -> view<580xi32>
   %descriptors = buffer.view %epoch[%descriptor_origin] : buffer -> view<64x5xi32>
   %options = buffer.view %epoch[%options_origin] : buffer -> view<64x2xi32>
-  %tokens = buffer.view %inputs[%origin] : buffer -> view<512xi32>
+  %tokens = buffer.view %inputs[%origin] : buffer -> view<[%token_capacity]xi32>
   %selected = buffer.view %predictions[%origin] : buffer -> view<128xi32>
   %accepted_header = buffer.view %committed[%origin] : buffer -> view<3xi32>
   %accepted = buffer.view %committed[%descriptor_origin] : buffer -> view<64x5xi32>
@@ -158,8 +163,8 @@ func.def @accept_oracle(%width_value: index, %epoch: buffer, %inputs: buffer, %p
         %mismatch = scf.if %has_candidate -> (i1) {
           %relative = index.add %token, %c1 : index
           %candidate_value = index.add %begin, %relative : index
-          %candidate_index = index.assume %candidate_value [range(%candidate_value, 0, 511)] : index
-          %candidate = view.load %tokens[%candidate_index] : view<512xi32> -> i32
+          %candidate_index = index.assume %candidate_value [ge(%candidate_value, 0), lt(%candidate_value, %token_capacity)] : index
+          %candidate = view.load %tokens[%candidate_index] : view<[%token_capacity]xi32> -> i32
           %different = scalar.cmpi ne, %candidate, %prediction : i32
           scf.yield %different : i1
         } else {
@@ -231,7 +236,9 @@ func.def @accept_oracle(%width_value: index, %epoch: buffer, %inputs: buffer, %p
 
 // Four- and eight-input blocks cover every mismatch position, output credit,
 // EOS position and live span count with the VM as the independent oracle.
-func.def @accept_parameters(%trial: index) -> (index, index, index) {
+// Large epochs put later verifiers beyond a nearly full prompt, so capacity
+// coverage exercises actual token addressing rather than just larger storage.
+func.def @accept_parameters(%trial: index) -> (index, index, index, index) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -242,28 +249,34 @@ func.def @accept_parameters(%trial: index) -> (index, index, index) {
   %mode = index.rem %group, %c2 : index
   %small = index.cmp eq, %mode, %c0 : index
   %width = scf.select %small, %c4, %c8 : index
-  %span_index = index.div %trial, %c16 : index
+  %family_size = index.constant 256 : index
+  %small_capacity = index.constant 512 : index
+  %large_capacity = index.constant 16384 : index
+  %small_epoch = index.cmp ult, %trial, %family_size : index
+  %token_capacity = scf.select %small_epoch, %small_capacity, %large_capacity : index
+  %family_trial = index.rem %trial, %family_size : index
+  %span_index = index.div %family_trial, %c16 : index
   %span_count = index.add %span_index, %c1 : index
   %position = index.rem %trial, %width : index
-  func.return %width, %span_count, %position : index, index, index
+  func.return %width, %span_count, %position, %token_capacity : index, index, index, index
 }
 
 check.scenario public @accept_frontiers {
-  check.trial[256](%trial: index, %entropy: check.entropy) {
-    %width, %span_count, %position = check.generate<@accept_parameters>(%trial) : (index) -> (index, index, index)
+  check.trial[512](%trial: index, %entropy: check.entropy) {
+    %width, %span_count, %position, %token_capacity = check.generate<@accept_parameters>(%trial) : (index) -> (index, index, index, index)
     %epoch = check.generate.fill value(-99) : tensor<580xi32>
-    %inputs = check.generate.iota offset(1000) step(1) : tensor<512xi32>
+    %inputs = check.generate.iota offset(1000) step(1) : tensor<[%token_capacity]xi32>
     %predictions = check.generate.fill value(-99) : tensor<128xi32>
     %committed = check.generate.fill value(-99) : tensor<387xi32>
     %replay = check.generate.fill value(-99) : tensor<387xi32>
     %results = check.generate.fill value(-99) : tensor<16x10xi32>
-    check.generate<@accept_fixture>(%width, %span_count, %position, %epoch, %predictions) : (index, index, index, tensor<580xi32>, tensor<128xi32>) -> ()
-    check.compare<@qwen38_accept_spans, @accept_oracle>(%width, %epoch, %inputs, %predictions, %committed, %replay, %results) : (index, tensor<580xi32>, tensor<512xi32>, tensor<128xi32>, tensor<387xi32>, tensor<387xi32>, tensor<16x10xi32>) -> () {
+    check.generate<@accept_fixture>(%token_capacity, %width, %span_count, %position, %epoch, %predictions) : (index, index, index, index, tensor<580xi32>, tensor<128xi32>) -> ()
+    check.compare<@qwen38_accept_spans, @accept_oracle>(%width, %token_capacity, %epoch, %inputs, %predictions, %committed, %replay, %results) : (index, index, tensor<580xi32>, tensor<[%token_capacity]xi32>, tensor<128xi32>, tensor<387xi32>, tensor<387xi32>, tensor<16x10xi32>) -> () {
       check.expect.bitwise actual(%results) expected(%results) : tensor<16x10xi32>
       check.expect.bitwise actual(%committed) expected(%committed) : tensor<387xi32>
       check.expect.bitwise actual(%replay) expected(%replay) : tensor<387xi32>
       check.expect.bitwise actual(%epoch) expected(%epoch) : tensor<580xi32>
-      check.expect.bitwise actual(%inputs) expected(%inputs) : tensor<512xi32>
+      check.expect.bitwise actual(%inputs) expected(%inputs) : tensor<[%token_capacity]xi32>
       check.expect.bitwise actual(%predictions) expected(%predictions) : tensor<128xi32>
     }
   }

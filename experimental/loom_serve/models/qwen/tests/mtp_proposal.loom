@@ -1,14 +1,16 @@
-kernel.decl @qwen38_mtp_proposal_prepare() launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer)
+kernel.decl @qwen38_mtp_proposal_prepare() launch(%target_capacity: index, %draft_capacity: index, %epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer)
 
-kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer)
+kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: index, %target_capacity: index, %draft_capacity: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer)
 
 // Build real mixed descriptors and independently derive the final three-round
-// publication. A bit mask selects generated spans; other spans alternate known
-// 16-token input and supplied four-token candidates. Resident rows are reversed.
+// publication. A bit mask selects generated spans; other spans alternate
+// variable-length known input and supplied four-token candidates. Resident
+// rows are reversed.
 kernel.def @proposal_fixture() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%span_count_value: index, %mask: i32, %epoch: buffer, %expected_draft: buffer, %expected_origins: buffer, %expected_anchors: buffer, %expected_inputs: buffer, %expected_target: buffer) {
+} launch(%target_capacity_value: index, %span_count_value: index, %mask: i32, %epoch: buffer, %expected_draft: buffer, %expected_origins: buffer, %expected_anchors: buffer, %expected_inputs: buffer, %expected_target: buffer) {
+  %target_capacity = index.assume %target_capacity_value [range(%target_capacity_value, 512, 32768)] : index
   %span_count = index.assume %span_count_value [range(%span_count_value, 1, 16)] : index
   %origin = index.constant 0 : offset
   %descriptor_origin = index.constant 12 : offset
@@ -19,9 +21,9 @@ kernel.def @proposal_fixture() {
   %draft_header = buffer.view %expected_draft[%origin] : buffer -> view<3xi32>
   %draft = buffer.view %expected_draft[%descriptor_origin] : buffer -> view<64x5xi32>
   %origins = buffer.view %expected_origins[%origin] : buffer -> view<16xi32>
-  %anchors = buffer.view %expected_anchors[%origin] : buffer -> view<512xi32>
-  %inputs = buffer.view %expected_inputs[%origin] : buffer -> view<512xi32>
-  %target = buffer.view %expected_target[%origin] : buffer -> view<512xi32>
+  %anchors = buffer.view %expected_anchors[%origin] : buffer -> view<16xi32>
+  %inputs = buffer.view %expected_inputs[%origin] : buffer -> view<16xi32>
+  %target = buffer.view %expected_target[%origin] : buffer -> view<[%target_capacity]xi32>
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -29,7 +31,9 @@ kernel.def @proposal_fixture() {
   %c4 = index.constant 4 : index
   %c7 = index.constant 7 : index
   %last_row = index.constant 15 : index
-  %known_length = index.constant 16 : index
+  %resident_rows = index.constant 16 : index
+  %per_span = index.div %target_capacity, %resident_rows : index
+  %known_length = index.sub %per_span, %c4 : index
   %source_base = index.constant 23 : index
   %c100 = index.constant 100 : index
   %input_base = index.constant 1000 : index
@@ -40,7 +44,7 @@ kernel.def @proposal_fixture() {
   %c4_2 = scalar.constant 4 : i32
   %span_count_word = index.cast %span_count : index to i32
   %begin, %count = scf.for %span = [%c0 to %span_count step %c1](%begin_value = %c0 : index, %slot_value = %c0 : index) -> (index, index) {
-    %begin = index.assume %begin_value [range(%begin_value, 0, 508)] : index
+    %begin = index.assume %begin_value [ge(%begin_value, 0), lt(%begin_value, %target_capacity)] : index
     %slot = index.assume %slot_value [range(%slot_value, 0, 15)] : index
     %span_word = index.cast %span : index to i32
     %shifted = scalar.shrui %mask, %span_word : i32
@@ -88,11 +92,12 @@ kernel.def @proposal_fixture() {
       view.store %row_word, %draft[%slot, 3] : i32, view<64x5xi32>
       view.store %draft_output, %draft[%slot, 4] : i32, view<64x5xi32>
       view.store %begin_word, %origins[%slot] : i32, view<16xi32>
-      view.store %anchor_word, %anchors[%slot] : i32, view<512xi32>
-      view.store %prediction_word, %inputs[%slot] : i32, view<512xi32>
+      view.store %anchor_word, %anchors[%slot] : i32, view<16xi32>
+      view.store %prediction_word, %inputs[%slot] : i32, view<16xi32>
       scf.for %relative = [%c1 to %c4 step %c1] {
-        %destination = index.add %begin, %relative : index
-        view.store %prediction_word, %target[%destination] : i32, view<512xi32>
+        %destination_value = index.add %begin, %relative : index
+        %destination = index.assume %destination_value [ge(%destination_value, 0), lt(%destination_value, %target_capacity)] : index
+        view.store %prediction_word, %target[%destination] : i32, view<[%target_capacity]xi32>
       }
       %next = index.add %slot, %c1 : index
       scf.yield %next : index
@@ -113,50 +118,54 @@ kernel.def @proposal_fixture() {
 }
 
 check.case public @proposal_compaction {
+  %target_capacity = check.param.choice values([512, 16384]) name("target_capacity") : index
+  %draft_capacity = check.literal value(16) : index
   %span_count = check.param.range linear bounds(1 to 16) step(1) : index
   %mask = check.param.choice values([1, 32769, 21845, 43691, 65535]) : i32
   %epoch = check.generate.fill value(-99) : tensor<580xi32>
   %draft = check.generate.fill value(-99) : tensor<387xi32>
   %origins = check.generate.fill value(-99) : tensor<16xi32>
-  %inputs = check.generate.fill value(-99) : tensor<512xi32>
-  %target = check.generate.iota offset(1000) step(1) : tensor<512xi32>
+  %inputs = check.generate.fill value(-99) : tensor<16xi32>
+  %target = check.generate.iota offset(1000) step(1) : tensor<[%target_capacity]xi32>
   %expected_draft = check.generate.fill value(-99) : tensor<387xi32>
   %expected_origins = check.generate.fill value(-99) : tensor<16xi32>
-  %expected_anchors = check.generate.fill value(0) : tensor<512xi32>
-  %expected_inputs = check.generate.fill value(0) : tensor<512xi32>
-  %expected_target = check.generate.iota offset(1000) step(1) : tensor<512xi32>
-  kernel.launch @proposal_fixture(%span_count, %mask, %epoch, %expected_draft, %expected_origins, %expected_anchors, %expected_inputs, %expected_target) : (index, i32, tensor<580xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>, tensor<512xi32>)
-  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target, %draft, %origins, %inputs) : (tensor<580xi32>, tensor<512xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>)
-  check.expect.bitwise actual(%inputs) expected(%expected_anchors) : tensor<512xi32>
+  %expected_anchors = check.generate.fill value(0) : tensor<16xi32>
+  %expected_inputs = check.generate.fill value(0) : tensor<16xi32>
+  %expected_target = check.generate.iota offset(1000) step(1) : tensor<[%target_capacity]xi32>
+  kernel.launch @proposal_fixture(%target_capacity, %span_count, %mask, %epoch, %expected_draft, %expected_origins, %expected_anchors, %expected_inputs, %expected_target) : (index, index, i32, tensor<580xi32>, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<[%target_capacity]xi32>)
+  kernel.launch @qwen38_mtp_proposal_prepare(%target_capacity, %draft_capacity, %epoch, %target, %draft, %origins, %inputs) : (index, index, tensor<580xi32>, tensor<[%target_capacity]xi32>, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>)
+  check.expect.bitwise actual(%inputs) expected(%expected_anchors) : tensor<16xi32>
   check.expect.bitwise actual(%origins) expected(%expected_origins) : tensor<16xi32>
   check.return
 }
 
 check.case public @proposal_publication {
+  %target_capacity = check.param.choice values([512, 16384]) name("target_capacity") : index
+  %draft_capacity = check.literal value(16) : index
   %span_count = check.param.range linear bounds(1 to 16) step(1) : index
   %mask = check.param.choice values([1, 32769, 21845, 43691, 65535]) : i32
   %epoch = check.generate.fill value(-99) : tensor<580xi32>
   %draft = check.generate.fill value(-99) : tensor<387xi32>
   %origins = check.generate.fill value(-99) : tensor<16xi32>
-  %inputs = check.generate.fill value(-99) : tensor<512xi32>
-  %target = check.generate.iota offset(1000) step(1) : tensor<512xi32>
+  %inputs = check.generate.fill value(-99) : tensor<16xi32>
+  %target = check.generate.iota offset(1000) step(1) : tensor<[%target_capacity]xi32>
   %predictions = check.generate.iota offset(10000) step(7) : tensor<16xi32>
   %expected_draft = check.generate.fill value(-99) : tensor<387xi32>
   %expected_origins = check.generate.fill value(-99) : tensor<16xi32>
-  %expected_anchors = check.generate.fill value(0) : tensor<512xi32>
-  %expected_inputs = check.generate.fill value(0) : tensor<512xi32>
-  %expected_target = check.generate.iota offset(1000) step(1) : tensor<512xi32>
-  kernel.launch @proposal_fixture(%span_count, %mask, %epoch, %expected_draft, %expected_origins, %expected_anchors, %expected_inputs, %expected_target) : (index, i32, tensor<580xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>, tensor<512xi32>)
-  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target, %draft, %origins, %inputs) : (tensor<580xi32>, tensor<512xi32>, tensor<387xi32>, tensor<16xi32>, tensor<512xi32>)
+  %expected_anchors = check.generate.fill value(0) : tensor<16xi32>
+  %expected_inputs = check.generate.fill value(0) : tensor<16xi32>
+  %expected_target = check.generate.iota offset(1000) step(1) : tensor<[%target_capacity]xi32>
+  kernel.launch @proposal_fixture(%target_capacity, %span_count, %mask, %epoch, %expected_draft, %expected_origins, %expected_anchors, %expected_inputs, %expected_target) : (index, index, i32, tensor<580xi32>, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<[%target_capacity]xi32>)
+  kernel.launch @qwen38_mtp_proposal_prepare(%target_capacity, %draft_capacity, %epoch, %target, %draft, %origins, %inputs) : (index, index, tensor<580xi32>, tensor<[%target_capacity]xi32>, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>)
   %c0 = check.literal value(0) : index
   %c1 = check.literal value(1) : index
   %c2 = check.literal value(2) : index
-  kernel.launch @qwen38_mtp_proposal_advance[%c0](%c0, %draft, %origins, %predictions, %inputs, %target) : [index](index, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>)
-  kernel.launch @qwen38_mtp_proposal_advance[%c1](%c1, %draft, %origins, %predictions, %inputs, %target) : [index](index, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>)
-  kernel.launch @qwen38_mtp_proposal_advance[%c2](%c2, %draft, %origins, %predictions, %inputs, %target) : [index](index, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>, tensor<512xi32>, tensor<512xi32>)
+  kernel.launch @qwen38_mtp_proposal_advance[%c0](%c0, %target_capacity, %draft_capacity, %draft, %origins, %predictions, %inputs, %target) : [index](index, index, index, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<[%target_capacity]xi32>)
+  kernel.launch @qwen38_mtp_proposal_advance[%c1](%c1, %target_capacity, %draft_capacity, %draft, %origins, %predictions, %inputs, %target) : [index](index, index, index, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<[%target_capacity]xi32>)
+  kernel.launch @qwen38_mtp_proposal_advance[%c2](%c2, %target_capacity, %draft_capacity, %draft, %origins, %predictions, %inputs, %target) : [index](index, index, index, tensor<387xi32>, tensor<16xi32>, tensor<16xi32>, tensor<16xi32>, tensor<[%target_capacity]xi32>)
   check.expect.bitwise actual(%draft) expected(%expected_draft) : tensor<387xi32>
   check.expect.bitwise actual(%origins) expected(%expected_origins) : tensor<16xi32>
-  check.expect.bitwise actual(%inputs) expected(%expected_inputs) : tensor<512xi32>
-  check.expect.bitwise actual(%target) expected(%expected_target) : tensor<512xi32>
+  check.expect.bitwise actual(%inputs) expected(%expected_inputs) : tensor<16xi32>
+  check.expect.bitwise actual(%target) expected(%expected_target) : tensor<[%target_capacity]xi32>
   check.return
 }
