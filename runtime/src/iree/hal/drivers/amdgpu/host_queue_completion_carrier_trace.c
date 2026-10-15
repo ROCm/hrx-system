@@ -7,18 +7,42 @@
 #include "iree/hal/drivers/amdgpu/host_queue_completion_carrier_trace.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(IREE_PLATFORM_LINUX)
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <sys/ioctl.h>
+#include <time.h>
+#include <unistd.h>
+#endif  // IREE_PLATFORM_LINUX
+
+#include "iree/base/threading/thread.h"
 #include "iree/base/time.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
+#include "iree/hal/drivers/amdgpu/util/kfd.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
 
 enum {
   IREE_HAL_AMDGPU_COMPLETION_CARRIER_PACKET_CAPACITY = 131072,
   IREE_HAL_AMDGPU_COMPLETION_CARRIER_PM4_CAPACITY = 32768,
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_EVENT_CAPACITY = 512 * 1024,
 };
+
+typedef struct iree_hal_amdgpu_completion_carrier_clock_sample_t {
+  // Monotonic time sampled immediately before the boot-time clock.
+  uint64_t monotonic_before_ns;
+  // Boot time sampled between the monotonic bounds.
+  uint64_t boottime_ns;
+  // Monotonic time sampled immediately after the boot-time clock.
+  uint64_t monotonic_after_ns;
+  // Errno from sampling the boot-time clock, or zero on success.
+  int error;
+} iree_hal_amdgpu_completion_carrier_clock_sample_t;
 
 typedef struct iree_hal_amdgpu_completion_carrier_slot_t {
   // Absolute packet ID currently owning this physical slot.
@@ -90,6 +114,32 @@ typedef struct iree_hal_amdgpu_completion_carrier_trace_t {
   iree_allocator_t allocator;
   // Pre-opened trace output, never touched from an observer callback.
   FILE* output_file;
+  // KFD SMI descriptor reporting this process's queue lifecycle events.
+  int kfd_event_fd;
+  // Event descriptor used to stop the KFD observer without polling.
+  int kfd_stop_fd;
+  // Dedicated owner continuously draining the bounded kernel event FIFO.
+  iree_thread_t* kfd_event_thread;
+  // Tail buffer retaining the KFD events nearest trace export.
+  uint8_t* kfd_events;
+  // First retained byte in the circular KFD event buffer.
+  uint32_t kfd_event_begin;
+  // Number of retained bytes in the circular KFD event buffer.
+  uint32_t kfd_event_length;
+  // KFD GPU identity used to subscribe to SMI events.
+  uint32_t kfd_driver_uid;
+  // Queue lifecycle event mask written to the SMI descriptor.
+  uint64_t kfd_event_mask;
+  // Clock-domain correlation sampled immediately after SMI subscription.
+  iree_hal_amdgpu_completion_carrier_clock_sample_t kfd_begin_clocks;
+  // Clock-domain correlation sampled after the SMI observer stops.
+  iree_hal_amdgpu_completion_carrier_clock_sample_t kfd_end_clocks;
+  // First errno observed by the KFD event reader, or zero.
+  int kfd_event_error;
+  // Errno observed while stopping the KFD event reader, or zero.
+  int kfd_stop_error;
+  // True when early KFD event bytes were displaced by newer events.
+  bool kfd_event_overflow;
   // Per-physical-slot reservation and reuse identity.
   iree_hal_amdgpu_completion_carrier_slot_t* slots;
   // Bounded chronological packet ledger.
@@ -152,6 +202,276 @@ static bool iree_hal_amdgpu_completion_carrier_trace_is_enabled(void) {
          strstr(test_target,
                 "indirection_access_test_execute_amdgpu_access_test") != NULL;
 }
+
+#if defined(IREE_PLATFORM_LINUX)
+
+enum {
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_QUEUE_EVICTION_EVENT = 9,
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_QUEUE_RESTORE_EVENT = 10,
+};
+
+typedef struct iree_hal_amdgpu_completion_carrier_kfd_smi_events_args_t {
+  // KFD GPU identity to observe.
+  uint32_t gpu_id;
+  // Anonymous event descriptor returned by KFD.
+  uint32_t event_fd;
+} iree_hal_amdgpu_completion_carrier_kfd_smi_events_args_t;
+
+#define IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_SMI_EVENTS_IOCTL \
+  _IOWR('K', 0x1F, iree_hal_amdgpu_completion_carrier_kfd_smi_events_args_t)
+
+static void iree_hal_amdgpu_completion_carrier_trace_sample_clocks(
+    iree_hal_amdgpu_completion_carrier_clock_sample_t* out_sample) {
+  memset(out_sample, 0, sizeof(*out_sample));
+  out_sample->monotonic_before_ns = (uint64_t)iree_time_now();
+  struct timespec boottime = {0};
+  if (clock_gettime(CLOCK_BOOTTIME, &boottime) != 0) {
+    out_sample->error = errno;
+  } else {
+    out_sample->boottime_ns =
+        (uint64_t)boottime.tv_sec * 1000000000ull + (uint64_t)boottime.tv_nsec;
+  }
+  out_sample->monotonic_after_ns = (uint64_t)iree_time_now();
+}
+
+static void iree_hal_amdgpu_completion_carrier_trace_append_kfd_events(
+    iree_hal_amdgpu_completion_carrier_trace_t* trace, const uint8_t* data,
+    iree_host_size_t data_length) {
+  const uint32_t capacity =
+      IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_EVENT_CAPACITY;
+  if (data_length >= capacity) {
+    memcpy(trace->kfd_events, data + data_length - capacity, capacity);
+    trace->kfd_event_begin = 0;
+    trace->kfd_event_length = capacity;
+    trace->kfd_event_overflow = true;
+    return;
+  }
+
+  const uint32_t append_length = (uint32_t)data_length;
+  const uint32_t available = capacity - trace->kfd_event_length;
+  if (append_length > available) {
+    const uint32_t displaced_length = append_length - available;
+    trace->kfd_event_begin =
+        (trace->kfd_event_begin + displaced_length) % capacity;
+    trace->kfd_event_length -= displaced_length;
+    trace->kfd_event_overflow = true;
+  }
+
+  const uint32_t end =
+      (trace->kfd_event_begin + trace->kfd_event_length) % capacity;
+  const uint32_t first_length = iree_min(append_length, capacity - end);
+  memcpy(trace->kfd_events + end, data, first_length);
+  memcpy(trace->kfd_events, data + first_length, append_length - first_length);
+  trace->kfd_event_length += append_length;
+}
+
+static void iree_hal_amdgpu_completion_carrier_trace_drain_kfd_events(
+    iree_hal_amdgpu_completion_carrier_trace_t* trace) {
+  uint8_t buffer[8192];
+  while (trace->kfd_event_error == 0) {
+    const ssize_t read_length =
+        read(trace->kfd_event_fd, buffer, sizeof(buffer));
+    if (read_length > 0) {
+      iree_hal_amdgpu_completion_carrier_trace_append_kfd_events(
+          trace, buffer, (iree_host_size_t)read_length);
+    } else if (read_length == 0) {
+      trace->kfd_event_error = EPIPE;
+    } else if (errno == EINTR) {
+      continue;
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      break;
+    } else {
+      trace->kfd_event_error = errno;
+    }
+  }
+}
+
+static int iree_hal_amdgpu_completion_carrier_trace_kfd_thread_main(
+    void* user_data) {
+  iree_hal_amdgpu_completion_carrier_trace_t* trace =
+      (iree_hal_amdgpu_completion_carrier_trace_t*)user_data;
+  struct pollfd poll_fds[2] = {
+      {
+          .fd = trace->kfd_event_fd,
+          .events = POLLIN,
+      },
+      {
+          .fd = trace->kfd_stop_fd,
+          .events = POLLIN,
+      },
+  };
+  while (trace->kfd_event_error == 0) {
+    int poll_result = 0;
+    do {
+      poll_result = poll(poll_fds, IREE_ARRAYSIZE(poll_fds), -1);
+    } while (poll_result < 0 && errno == EINTR);
+    if (poll_result < 0) {
+      trace->kfd_event_error = errno;
+      break;
+    }
+
+    if (poll_fds[0].revents & POLLIN) {
+      iree_hal_amdgpu_completion_carrier_trace_drain_kfd_events(trace);
+    }
+    if (poll_fds[1].revents & POLLIN) {
+      iree_hal_amdgpu_completion_carrier_trace_drain_kfd_events(trace);
+      break;
+    }
+    if (poll_fds[0].revents & (POLLERR | POLLHUP | POLLNVAL) ||
+        poll_fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      trace->kfd_event_error = EIO;
+      break;
+    }
+  }
+  return 0;
+}
+
+static void iree_hal_amdgpu_completion_carrier_trace_stop_kfd_events(
+    iree_hal_amdgpu_completion_carrier_trace_t* trace) {
+  if (trace->kfd_event_thread) {
+    const uint64_t stop_value = 1;
+    ssize_t write_length = 0;
+    do {
+      write_length = write(trace->kfd_stop_fd, &stop_value, sizeof(stop_value));
+    } while (write_length < 0 && errno == EINTR);
+    if (write_length != (ssize_t)sizeof(stop_value)) {
+      trace->kfd_stop_error = write_length < 0 ? errno : EIO;
+    }
+    iree_thread_release(trace->kfd_event_thread);
+    trace->kfd_event_thread = NULL;
+  }
+  iree_hal_amdgpu_completion_carrier_trace_sample_clocks(
+      &trace->kfd_end_clocks);
+  if (trace->kfd_event_fd >= 0) {
+    if (close(trace->kfd_event_fd) != 0 && trace->kfd_stop_error == 0) {
+      trace->kfd_stop_error = errno;
+    }
+    trace->kfd_event_fd = -1;
+  }
+  if (trace->kfd_stop_fd >= 0) {
+    if (close(trace->kfd_stop_fd) != 0 && trace->kfd_stop_error == 0) {
+      trace->kfd_stop_error = errno;
+    }
+    trace->kfd_stop_fd = -1;
+  }
+}
+
+static iree_status_t
+iree_hal_amdgpu_completion_carrier_trace_initialize_kfd_events(
+    iree_hal_amdgpu_completion_carrier_trace_t* trace) {
+  hsa_agent_t gpu_agent = {0};
+  IREE_RETURN_IF_ERROR(iree_hsa_amd_queue_get_info(
+      IREE_LIBHSA(trace->queue->libhsa), trace->queue->hardware_queue,
+      HSA_AMD_QUEUE_INFO_AGENT, &gpu_agent));
+  IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+      IREE_LIBHSA(trace->queue->libhsa), gpu_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_UID, &trace->kfd_driver_uid));
+
+  int kfd_fd = -1;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_kfd_open(&kfd_fd));
+  iree_hal_amdgpu_completion_carrier_kfd_smi_events_args_t args = {
+      .gpu_id = trace->kfd_driver_uid,
+  };
+  iree_status_t status = iree_ok_status();
+  if (iree_hal_amdgpu_ioctl(
+          kfd_fd, IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_SMI_EVENTS_IOCTL,
+          &args) != 0) {
+    const int errsv = errno;
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "AMDKFD_IOC_SMI_EVENTS(gpu_id=%" PRIu32
+                              ") failed: errno=%d (%s)",
+                              trace->kfd_driver_uid, errsv, strerror(errsv));
+  } else if (args.event_fd > (uint32_t)INT_MAX) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "KFD returned an invalid SMI descriptor %" PRIu32,
+                              args.event_fd);
+  } else {
+    trace->kfd_event_fd = (int)args.event_fd;
+  }
+  iree_hal_amdgpu_kfd_close(kfd_fd);
+
+  if (iree_status_is_ok(status)) {
+    if (fcntl(trace->kfd_event_fd, F_SETFL, O_NONBLOCK) != 0 ||
+        fcntl(trace->kfd_event_fd, F_SETFD, FD_CLOEXEC) != 0) {
+      const int errsv = errno;
+      status = iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "failed to configure KFD SMI descriptor: errno=%d (%s)", errsv,
+          strerror(errsv));
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    trace->kfd_event_mask =
+        (1ull << (IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_QUEUE_EVICTION_EVENT -
+                  1)) |
+        (1ull << (IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_QUEUE_RESTORE_EVENT -
+                  1));
+    ssize_t write_length = 0;
+    do {
+      write_length = write(trace->kfd_event_fd, &trace->kfd_event_mask,
+                           sizeof(trace->kfd_event_mask));
+    } while (write_length < 0 && errno == EINTR);
+    if (write_length != (ssize_t)sizeof(trace->kfd_event_mask)) {
+      const int errsv = write_length < 0 ? errno : EIO;
+      status = iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "failed to subscribe KFD queue events: errno=%d (%s)", errsv,
+          strerror(errsv));
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    trace->kfd_stop_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (trace->kfd_stop_fd < 0) {
+      const int errsv = errno;
+      status = iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "failed to create KFD observer stop event: errno=%d (%s)", errsv,
+          strerror(errsv));
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_amdgpu_completion_carrier_trace_sample_clocks(
+        &trace->kfd_begin_clocks);
+    if (trace->kfd_begin_clocks.error != 0) {
+      status =
+          iree_make_status(IREE_STATUS_UNAVAILABLE,
+                           "failed to sample CLOCK_BOOTTIME: errno=%d (%s)",
+                           trace->kfd_begin_clocks.error,
+                           strerror(trace->kfd_begin_clocks.error));
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    const iree_thread_create_params_t thread_params = {
+        .name = IREE_SV("amdgpu-kfd-smi"),
+    };
+    status = iree_thread_create(
+        iree_hal_amdgpu_completion_carrier_trace_kfd_thread_main, trace,
+        thread_params, trace->allocator, &trace->kfd_event_thread);
+  }
+  return status;
+}
+
+#else
+
+static void iree_hal_amdgpu_completion_carrier_trace_stop_kfd_events(
+    iree_hal_amdgpu_completion_carrier_trace_t* trace) {
+  (void)trace;
+}
+
+static iree_status_t
+iree_hal_amdgpu_completion_carrier_trace_initialize_kfd_events(
+    iree_hal_amdgpu_completion_carrier_trace_t* trace) {
+  (void)trace;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "AMDGPU completion-carrier KFD correlation requires Linux");
+}
+
+#endif  // IREE_PLATFORM_LINUX
 
 static uint64_t iree_hal_amdgpu_completion_carrier_load_signal(
     const iree_hal_amdgpu_aql_packet_t* packet) {
@@ -340,6 +660,30 @@ static void iree_hal_amdgpu_completion_carrier_trace_write_hex(
   }
 }
 
+static void iree_hal_amdgpu_completion_carrier_trace_write_kfd_events(
+    FILE* file, const iree_hal_amdgpu_completion_carrier_trace_t* trace) {
+  const uint32_t capacity =
+      IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_EVENT_CAPACITY;
+  uint32_t remaining_length = trace->kfd_event_length;
+  uint32_t buffer_offset = trace->kfd_event_begin;
+  uint32_t stream_offset = 0;
+  uint32_t sequence = 0;
+  while (remaining_length != 0) {
+    const uint32_t chunk_length =
+        iree_min(remaining_length, iree_min(capacity - buffer_offset, 4096u));
+    fprintf(file,
+            "{\"kind\":\"kfd_event_chunk\",\"sequence\":%u,"
+            "\"stream_offset\":%u,\"payload\":\"",
+            sequence++, stream_offset);
+    iree_hal_amdgpu_completion_carrier_trace_write_hex(
+        file, trace->kfd_events + buffer_offset, chunk_length);
+    fputs("\"}\n", file);
+    remaining_length -= chunk_length;
+    stream_offset += chunk_length;
+    buffer_offset = (buffer_offset + chunk_length) % capacity;
+  }
+}
+
 static void iree_hal_amdgpu_completion_carrier_trace_export(
     iree_hal_amdgpu_completion_carrier_trace_t* trace, const char* reason,
     uint64_t completed_epoch, uint64_t published_epoch,
@@ -347,6 +691,7 @@ static void iree_hal_amdgpu_completion_carrier_trace_export(
   if (trace->has_exported) {
     return;
   }
+  iree_hal_amdgpu_completion_carrier_trace_stop_kfd_events(trace);
   trace->has_exported = true;
 
   FILE* file = trace->output_file;
@@ -376,6 +721,27 @@ static void iree_hal_amdgpu_completion_carrier_trace_export(
           trace->has_unowned_packet ? "true" : "false",
           trace->packet_overflow ? "true" : "false",
           trace->pm4_overflow ? "true" : "false");
+
+  fprintf(
+      file,
+      "{\"kind\":\"kfd_smi\",\"gpu_id\":%" PRIu32
+      ",\"event_mask\":\"0x%016" PRIx64
+      "\",\"retained_bytes\":%u,\"overflow\":%s,"
+      "\"read_errno\":%d,\"stop_errno\":%d,"
+      "\"begin_monotonic_before_ns\":%" PRIu64 ",\"begin_boottime_ns\":%" PRIu64
+      ",\"begin_monotonic_after_ns\":%" PRIu64
+      ",\"begin_clock_errno\":%d,"
+      "\"end_monotonic_before_ns\":%" PRIu64 ",\"end_boottime_ns\":%" PRIu64
+      ",\"end_monotonic_after_ns\":%" PRIu64 ",\"end_clock_errno\":%d}\n",
+      trace->kfd_driver_uid, trace->kfd_event_mask, trace->kfd_event_length,
+      trace->kfd_event_overflow ? "true" : "false", trace->kfd_event_error,
+      trace->kfd_stop_error, trace->kfd_begin_clocks.monotonic_before_ns,
+      trace->kfd_begin_clocks.boottime_ns,
+      trace->kfd_begin_clocks.monotonic_after_ns, trace->kfd_begin_clocks.error,
+      trace->kfd_end_clocks.monotonic_before_ns,
+      trace->kfd_end_clocks.boottime_ns,
+      trace->kfd_end_clocks.monotonic_after_ns, trace->kfd_end_clocks.error);
+  iree_hal_amdgpu_completion_carrier_trace_write_kfd_events(file, trace);
 
   for (uint32_t i = 0; i < trace->packet_count; ++i) {
     const iree_hal_amdgpu_completion_carrier_packet_t* record =
@@ -451,6 +817,8 @@ iree_status_t iree_hal_amdgpu_host_queue_completion_carrier_trace_initialize(
   memset(trace, 0, sizeof(*trace));
   trace->queue = queue;
   trace->allocator = queue->host_allocator;
+  trace->kfd_event_fd = -1;
+  trace->kfd_stop_fd = -1;
 
   iree_status_t status =
       iree_allocator_malloc_array(trace->allocator, queue->aql_ring.mask + 1,
@@ -466,6 +834,11 @@ iree_status_t iree_hal_amdgpu_host_queue_completion_carrier_trace_initialize(
         sizeof(*trace->pm4_records), (void**)&trace->pm4_records);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        trace->allocator, IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_EVENT_CAPACITY,
+        sizeof(*trace->kfd_events), (void**)&trace->kfd_events);
+  }
+  if (iree_status_is_ok(status)) {
     memset(trace->slots, 0, (queue->aql_ring.mask + 1) * sizeof(*trace->slots));
     for (uint32_t i = 0; i <= queue->aql_ring.mask; ++i) {
       trace->slots[i].packet_id = UINT64_MAX;
@@ -477,6 +850,9 @@ iree_status_t iree_hal_amdgpu_host_queue_completion_carrier_trace_initialize(
     memset(trace->pm4_records, 0,
            IREE_HAL_AMDGPU_COMPLETION_CARRIER_PM4_CAPACITY *
                sizeof(*trace->pm4_records));
+    memset(trace->kfd_events, 0,
+           IREE_HAL_AMDGPU_COMPLETION_CARRIER_KFD_EVENT_CAPACITY *
+               sizeof(*trace->kfd_events));
 
     char output_path[IREE_MAX_PATH + 1];
     const int output_path_length = snprintf(
@@ -500,6 +876,11 @@ iree_status_t iree_hal_amdgpu_host_queue_completion_carrier_trace_initialize(
   }
 
   if (iree_status_is_ok(status)) {
+    status =
+        iree_hal_amdgpu_completion_carrier_trace_initialize_kfd_events(trace);
+  }
+
+  if (iree_status_is_ok(status)) {
     queue->aql_ring.observer = (iree_hal_amdgpu_aql_ring_observer_t){
         .user_data = trace,
         .reserve = iree_hal_amdgpu_completion_carrier_trace_reserve,
@@ -511,9 +892,11 @@ iree_status_t iree_hal_amdgpu_host_queue_completion_carrier_trace_initialize(
     return iree_ok_status();
   }
 
+  iree_hal_amdgpu_completion_carrier_trace_stop_kfd_events(trace);
   if (trace->output_file) {
     fclose(trace->output_file);
   }
+  iree_allocator_free(trace->allocator, trace->kfd_events);
   iree_allocator_free(trace->allocator, trace->pm4_records);
   iree_allocator_free(trace->allocator, trace->packets);
   iree_allocator_free(trace->allocator, trace->slots);
@@ -559,6 +942,7 @@ void iree_hal_amdgpu_host_queue_completion_carrier_trace_deinitialize(
   }
 
   fclose(trace->output_file);
+  iree_allocator_free(trace->allocator, trace->kfd_events);
   iree_allocator_free(trace->allocator, trace->pm4_records);
   iree_allocator_free(trace->allocator, trace->packets);
   iree_allocator_free(trace->allocator, trace->slots);
