@@ -48,6 +48,18 @@ static bool loom_amdgpu_source_value_facts_are_uniform_i1(
       loom_value_fact_table_lookup(fact_table, source_value_id));
 }
 
+static bool loom_amdgpu_select_has_uniform_i1_inputs(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_op_t* op) {
+  return loom_scf_select_isa(op) &&
+         loom_amdgpu_source_value_facts_are_uniform_i1(
+             module, fact_table, loom_scf_select_condition(op)) &&
+         loom_amdgpu_source_value_facts_are_uniform_i1(
+             module, fact_table, loom_scf_select_true_value(op)) &&
+         loom_amdgpu_source_value_facts_are_uniform_i1(
+             module, fact_table, loom_scf_select_false_value(op));
+}
+
 static bool loom_amdgpu_source_value_facts_are_subgroup_lane_mask(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t source_value_id, loom_value_facts_t* out_facts) {
@@ -820,10 +832,13 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
     return false;
   }
 
-  // Boolean selects and extracted vector predicates retain native masks,
-  // including when forwarded through CFG arguments before their first use.
-  if (loom_scf_select_isa(defining_op) ||
-      loom_vector_extract_isa(defining_op)) {
+  // Unknown or lane-varying selections retain every lane's bit. Proven
+  // uniform inputs can instead select normalized scalar Boolean values.
+  if (loom_scf_select_isa(defining_op)) {
+    return !loom_amdgpu_select_has_uniform_i1_inputs(module, fact_table,
+                                                     defining_op);
+  }
+  if (loom_vector_extract_isa(defining_op)) {
     return true;
   }
 
@@ -1103,6 +1118,11 @@ static bool loom_amdgpu_source_value_is_durable_i1_bool(
     // Arguments transport independent values across entry and CFG boundaries.
     // SCC is a single ephemeral condition bit, not Boolean argument storage.
     // Native lane masks are selected before this scalar Boolean policy.
+    return true;
+  }
+  if (loom_amdgpu_select_has_uniform_i1_inputs(module, fact_table,
+                                               loom_value_def_op(value))) {
+    // Scalar selection produces a normalized word, not an ephemeral SCC bit.
     return true;
   }
   return (loom_amdgpu_source_i1_value_has_cross_block_use(module,

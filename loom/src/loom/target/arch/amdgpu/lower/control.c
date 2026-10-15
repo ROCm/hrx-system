@@ -14,6 +14,7 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -1712,26 +1713,11 @@ static iree_status_t loom_amdgpu_emit_exec_mask_cond_branch(
 // changing EXEC or introducing masked merges for the branch payloads.
 static iree_status_t loom_amdgpu_emit_uniform_mask_cond_branch(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t low_condition, loom_type_t condition_type,
-    loom_block_t* low_true_dest, loom_block_t* low_false_dest) {
-  loom_op_t* exec_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ, NULL,
-      0, loom_named_attr_slice_empty(), &condition_type, 1, &exec_op));
-  loom_type_t scc_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
-  const loom_type_t result_types[] = {condition_type, scc_type};
-  const loom_value_id_t operands[] = {
-      low_condition,
-      loom_op_const_results(exec_op)[0],
-  };
-  loom_op_t* test_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64_SCC, operands,
-      IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(), result_types,
-      IREE_ARRAYSIZE(result_types), &test_op));
-  return loom_amdgpu_emit_plain_cond_branch(context, source_op,
-                                            loom_op_const_results(test_op)[1],
+    loom_value_id_t low_condition, loom_block_t* low_true_dest,
+    loom_block_t* low_false_dest) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_i1_condition(
+      context, source_op, low_condition, &low_condition));
+  return loom_amdgpu_emit_plain_cond_branch(context, source_op, low_condition,
                                             low_true_dest, low_false_dest);
 }
 
@@ -1772,8 +1758,7 @@ iree_status_t loom_amdgpu_emit_cond_branch(void* user_data,
     }
     if (branch_plan.id == LOOM_AMDGPU_BRANCH_PLAN_UNIFORM) {
       return loom_amdgpu_emit_uniform_mask_cond_branch(
-          context, source_op, low_condition, condition_type, low_true_dest,
-          low_false_dest);
+          context, source_op, low_condition, low_true_dest, low_false_dest);
     }
     return loom_amdgpu_emit_exec_mask_cond_branch(
         context, source_op, low_condition, low_true_dest, low_false_dest,

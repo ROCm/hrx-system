@@ -1,0 +1,121 @@
+// RUN: pass source-to-low,low-dce
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+// Floating comparisons are uniform values in lane-mask carriers. Selection
+// projects all three inputs against the narrowed EXEC at the consuming use.
+kernel.def target(@target) @uniform_mask_selection() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%selector: f32, %first: f32, %second: f32, %begin: index, %end: index, %output: buffer) {
+  %threshold = scalar.constant 0.0 : f32
+  %condition = scalar.cmpf ogt, %selector, %threshold : f32
+  %true_value = scalar.cmpf ogt, %first, %threshold : f32
+  %false_value = scalar.cmpf ogt, %second, %threshold : f32
+  %lane = kernel.workitem.id<x> : index
+  %after_begin = index.cmp uge, %lane, %begin : index
+  %before_end = index.cmp ult, %lane, %end : index
+  %active = scalar.andi %after_begin, %before_end : i1
+  cfg.cond_br %active, ^write, ^exit
+^write:
+  %selected = scf.select %condition, %true_value, %false_value : i1
+  %disabled = scalar.constant 0 : i32
+  %enabled = scalar.constant 1 : i32
+  %word = scf.select %selected, %enabled, %disabled : i32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  view.store %word, %view[%lane] : i32, view<64xi32>
+  cfg.br ^exit
+^exit:
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 5, direct_arg_count = 5, direct_arg_names = {arg0 = "selector", arg1 = "first", arg2 = "second", arg3 = "begin", arg4 = "end"}, direct_arg_offsets = [0, 4, 8, 12, 16], direct_arg_parameter_indices = [0, 1, 2, 3, 4], direct_arg_sizes = [4, 4, 4, 4, 4], parameter_count = 6, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [5], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_mask_selection(%selector: reg<amdgpu.sgpr>, %first: reg<amdgpu.sgpr>, %second: reg<amdgpu.sgpr>, %begin: reg<amdgpu.sgpr>, %end: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %29 = v_mov_b32_copy %selector
+  %condition = v_cmp_gt_f32_src1_inline %29 {rhs = "f32_0_0"}
+  %31 = v_mov_b32_copy %first
+  %true_value = v_cmp_gt_f32_src1_inline %31 {rhs = "f32_0_0"}
+  %33 = v_mov_b32_copy %second
+  %false_value = v_cmp_gt_f32_src1_inline %33 {rhs = "f32_0_0"}
+  %35 = v_mov_b32_copy %begin
+  %after_begin = v_cmp_ge_u32 %lane, %35
+  %37 = v_mov_b32_copy %end
+  %before_end = v_cmp_lt_u32 %lane, %37
+  %active = s_and_b64 %after_begin, %before_end
+  %40, %41 = s_and_saveexec_b64 %active
+  low.cond_br %41, ^write, ^_bb2 : reg<amdgpu.scc>
+^write:
+  %42 = s_mov_b64_exec_read
+  %43, %44 = s_and_b64_scc %true_value, %42
+  %45 = s_mov_b32 0
+  %46 = s_mov_b32 1
+  %47 = s_cselect_b32 %46, %45, %44
+  %48 = s_mov_b64_exec_read
+  %49, %50 = s_and_b64_scc %false_value, %48
+  %51 = s_mov_b32 0
+  %52 = s_mov_b32 1
+  %53 = s_cselect_b32 %52, %51, %50
+  %54 = s_mov_b64_exec_read
+  %55, %56 = s_and_b64_scc %condition, %54
+  %selected = s_cselect_b32 %47, %53, %56
+  %disabled = s_mov_b32 0
+  %enabled = s_mov_b32 1
+  %60 = s_cmp_lg_i32_src1_inline %selected {rhs = 0}
+  %word = s_cselect_b32 %enabled, %disabled, %60
+  %62 = v_mov_b32_copy %word
+  %63 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %63, %62, %view
+  low.br ^_bb2
+^_bb2:
+  s_mov_b64_exec %40
+  low.br ^exit
+^exit:
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+// Scalar argument placement alone does not establish subgroup uniformity.
+func.def target(@target) @unknown_selection(%condition: i1, %first: i1, %second: i1) -> (i1) {
+  %selected = scf.select %condition, %first, %second : i1
+  func.return %selected : i1
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @unknown_selection(%condition: reg<amdgpu.sgpr>, %first: reg<amdgpu.sgpr>, %second: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %9 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
+  %10 = s_cmp_lg_i32_src1_inline %first {rhs = 0}
+  %11 = s_mov_b64_exec_read
+  %12 = slice %11[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = slice %11[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = s_mov_b32 0
+  %15 = s_cselect_b32 %12, %14, %10
+  %16 = s_cselect_b32 %13, %14, %10
+  %17 = concat(%15, %16) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %18 = s_cmp_lg_i32_src1_inline %second {rhs = 0}
+  %19 = s_mov_b64_exec_read
+  %20 = slice %19[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %19[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = s_mov_b32 0
+  %23 = s_cselect_b32 %20, %22, %18
+  %24 = s_cselect_b32 %21, %22, %18
+  %25 = concat(%23, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %26 = slice %17[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = slice %25[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = s_cselect_b32 %26, %27, %9
+  %29 = slice %17[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = slice %25[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = s_cselect_b32 %29, %30, %9
+  %selected = concat(%28, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %selected
+}

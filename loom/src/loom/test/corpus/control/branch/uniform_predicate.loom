@@ -149,3 +149,100 @@ check.scenario @uniform_predicate_control_values {
   }
   check.return
 }
+
+// Uniform floating comparisons can have lane-mask carriers even though their
+// truth values agree. Reusing them after a lane guard must observe the active
+// lanes at the selection, including a wave with only its upper half active.
+kernel.def @uniform_boolean_selection() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%selector: f32, %first: f32, %second: f32, %begin: index, %end: index, %output: buffer) {
+  %threshold = scalar.constant 0.0 : f32
+  %condition = scalar.cmpf ogt, %selector, %threshold : f32
+  %true_value = scalar.cmpf ogt, %first, %threshold : f32
+  %false_value = scalar.cmpf ogt, %second, %threshold : f32
+  %lane = kernel.workitem.id<x> : index
+  %after_begin = index.cmp uge, %lane, %begin : index
+  %before_end = index.cmp ult, %lane, %end : index
+  %active = scalar.andi %after_begin, %before_end : i1
+  scf.if %active {
+    %selected = scf.select %condition, %true_value, %false_value : i1
+    %word = scalar.extui %selected : i1 to i32
+    %base = index.constant 0 : offset
+    %view = buffer.view %output[%base] : buffer -> view<64xi32>
+    view.store %word, %view[%lane] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+func.def @uniform_boolean_selection_oracle(%selector: f32, %first: f32, %second: f32, %begin: index, %end: index, %output: buffer) {
+  %start = index.assume %begin [range(%begin, 0, 64)] : index
+  %limit = index.assume %end [range(%end, 0, 64)] : index
+  %threshold = scalar.constant 0.0 : f32
+  %true = scalar.constant true : i1
+  %condition = scalar.cmpf ogt, %selector, %threshold : f32
+  %true_value = scalar.cmpf ogt, %first, %threshold : f32
+  %false_value = scalar.cmpf ogt, %second, %threshold : f32
+  %inverse = scalar.xori %condition, %true : i1
+  %selected_true = scalar.andi %condition, %true_value : i1
+  %selected_false = scalar.andi %inverse, %false_value : i1
+  %selected = scalar.ori %selected_true, %selected_false : i1
+  %word = scalar.extui %selected : i1 to i32
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<64xi32>
+  scf.for %lane = [%start to %limit step %step] {
+    view.store %word, %view[%lane] : i32, view<64xi32>
+  }
+  func.return
+}
+
+func.def @uniform_boolean_selection_inputs(%trial: index) -> (f32, f32, f32, index, index) {
+  %ordinal = index.cast %trial : index to i32
+  %selector_mask = scalar.constant 1 : i32
+  %first_mask = scalar.constant 2 : i32
+  %second_mask = scalar.constant 4 : i32
+  %selector_bit = scalar.andi %ordinal, %selector_mask : i32
+  %first_bit = scalar.andi %ordinal, %first_mask : i32
+  %second_bit = scalar.andi %ordinal, %second_mask : i32
+  %selector = scalar.uitofp %selector_bit : i32 to f32
+  %first = scalar.uitofp %first_bit : i32 to f32
+  %second = scalar.uitofp %second_bit : i32 to f32
+  %combinations_per_range = index.constant 8 : index
+  %range = index.div %trial, %combinations_per_range : index
+  %begin, %end = scf.switch %range -> (index, index) {
+    case 0 {
+      %begin = index.constant 0 : index
+      %end = index.constant 64 : index
+      scf.yield %begin, %end : index, index
+    }
+    case 1 {
+      %begin = index.constant 17 : index
+      %end = index.constant 53 : index
+      scf.yield %begin, %end : index, index
+    }
+    case 2 {
+      %begin = index.constant 32 : index
+      %end = index.constant 64 : index
+      scf.yield %begin, %end : index, index
+    }
+    default {
+      %begin = index.constant 33 : index
+      scf.yield %begin, %begin : index, index
+    }
+  }
+  func.return %selector, %first, %second, %begin, %end : f32, f32, f32, index, index
+}
+
+check.scenario @uniform_boolean_selection_values {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %selector, %first, %second, %begin, %end = check.generate<@uniform_boolean_selection_inputs>(%trial) : (index) -> (f32, f32, f32, index, index)
+    %storage = check.generate.fill value(-12345) : tensor<72xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<72xi32> -> tensor<64xi32>
+    check.compare<@uniform_boolean_selection, @uniform_boolean_selection_oracle>(%selector, %first, %second, %begin, %end, %output) : (f32, f32, f32, index, index, tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<72xi32>
+    }
+  }
+  check.return
+}

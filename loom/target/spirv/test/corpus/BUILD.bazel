@@ -146,6 +146,8 @@ _SCENARIO_EXCLUDES = {
 }
 
 _ALL_PROFILE_XFAILS = {
+    # These static profiles do not promise exact floating comparison controls.
+    "control/branch/uniform_predicate.loom:@uniform_boolean_selection": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_2": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_3": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_then_depth_2": "TARGET/003",

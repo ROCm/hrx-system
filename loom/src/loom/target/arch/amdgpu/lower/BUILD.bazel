@@ -494,6 +494,11 @@ loom_cc_test(
 )
 
 loom_check_test(
+    name = "uniform_predicate_select_test",
+    src = "uniform_predicate_select.loom-test",
+)
+
+loom_check_test(
     name = "fragment_memory_transpose_loom_test",
     src = "fragment_memory/transpose.loom-test",
     compile_targets = ["//loom/target/amdgpu:gfx1200"],

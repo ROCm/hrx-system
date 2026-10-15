@@ -300,17 +300,62 @@ iree_status_t loom_amdgpu_value_can_materialize_as_native_i1_mask(
   return iree_ok_status();
 }
 
+iree_status_t loom_amdgpu_materialize_uniform_i1_condition(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_value, loom_value_id_t* out_low_condition) {
+  const loom_type_t low_type =
+      loom_module_value_type(loom_low_lower_context_module(context), low_value);
+  if (loom_low_register_type_class_id(low_type) ==
+      LOOM_AMDGPU_REG_CLASS_ID_SCC) {
+    *out_low_condition = low_value;
+    return iree_ok_status();
+  }
+  loom_type_t scc_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
+  loom_op_t* condition_op = NULL;
+  if (loom_low_register_type_unit_count(low_type) == 2) {
+    loom_op_t* exec_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ,
+        NULL, 0, loom_named_attr_slice_empty(), &low_type, 1, &exec_op));
+    const loom_type_t result_types[] = {low_type, scc_type};
+    const loom_value_id_t operands[] = {low_value,
+                                        loom_op_const_results(exec_op)[0]};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64_SCC, operands,
+        IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(), result_types,
+        IREE_ARRAYSIZE(result_types), &condition_op));
+    *out_low_condition = loom_op_const_results(condition_op)[1];
+  } else {
+    loom_named_attr_t attrs[1] = {0};
+    iree_host_size_t attr_count = 0;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_append_i64_attr(
+        context, IREE_SV("rhs"), 0, attrs, IREE_ARRAYSIZE(attrs), &attr_count));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_CMP_LG_I32_SRC1_INLINE,
+        &low_value, 1, loom_make_named_attr_slice(attrs, attr_count), &scc_type,
+        1, &condition_op));
+    *out_low_condition = loom_op_const_results(condition_op)[0];
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_lookup_or_materialize_i1_integer(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, uint32_t register_class_id,
     loom_value_id_t* out_low_value) {
   loom_value_id_t low_value =
       loom_low_lower_lookup_value(context, source_value);
-  const loom_type_t low_type =
+  loom_type_t low_type =
       loom_module_value_type(loom_low_lower_context_module(context), low_value);
-  if (loom_low_register_type_unit_count(low_type) == 2) {
+  if (loom_low_register_type_unit_count(low_type) == 2 &&
+      register_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_i1_condition(
+        context, source_op, low_value, &low_value));
+    low_type = loom_module_value_type(loom_low_lower_context_module(context),
+                                      low_value);
+  } else if (loom_low_register_type_unit_count(low_type) == 2) {
     // A native mask describes individual lanes, not a uniform 64-bit integer.
-    IREE_ASSERT_EQ(register_class_id, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
     loom_type_t lane_type = loom_type_none();
     IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
     loom_value_id_t low_false = LOOM_VALUE_ID_INVALID;

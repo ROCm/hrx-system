@@ -513,6 +513,20 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 iree_native_test(
   NAME
+    "uniform_predicate_select_test"
+  WORKING_DIRECTORY "${IREE_ROOT_DIR}"
+  ARGS
+    "{{${CMAKE_CURRENT_SOURCE_DIR}/uniform_predicate_select.loom-test}}"
+  SRC
+    loom::tools::loom-check::loom-check-test
+  LABELS
+    "loom-check"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+iree_native_test(
+  NAME
     "fragment_memory_transpose_loom_test"
   WORKING_DIRECTORY "${IREE_ROOT_DIR}"
   ARGS

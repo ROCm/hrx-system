@@ -159,9 +159,16 @@ iree_status_t loom_amdgpu_materialize_low_scalar_carrier(
     loom_value_id_t low_value, loom_type_t required_type,
     loom_value_id_t* out_low_value);
 
+// Projects a lowered subgroup-uniform predicate to SCC. The caller owns the
+// uniformity proof; storage may be SCC, a normalized SGPR word, or a native
+// lane mask. Mask projection tests only the lanes active at this use.
+iree_status_t loom_amdgpu_materialize_uniform_i1_condition(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_value, loom_value_id_t* out_low_condition);
+
 // Projects an i1 predicate to the numeric value zero or one in the requested
-// SGPR or VGPR bank. Native lane masks require a VGPR result; uniform SCC and
-// durable SGPR predicates can be represented in either bank.
+// SGPR or VGPR bank. An SGPR result requires a subgroup-uniform predicate,
+// including when its physical representation is a native lane mask.
 iree_status_t loom_amdgpu_lookup_or_materialize_i1_integer(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, uint32_t register_class_id,

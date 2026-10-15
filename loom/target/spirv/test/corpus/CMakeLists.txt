@@ -22,6 +22,10 @@ loom_corpus_build(
     loom::target::spirv::all
   XFAILS
     "loom::target::spirv::all"
+    "control/branch/uniform_predicate.loom"
+    "@uniform_boolean_selection"
+    "TARGET/003"
+    "loom::target::spirv::all"
     "control/schedule/ordered_read_ahead.loom"
     "@ordered_guarded_else_depth_2"
     "TARGET/003"

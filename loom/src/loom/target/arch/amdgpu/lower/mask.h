@@ -69,6 +69,7 @@ typedef enum loom_amdgpu_select_payload_kind_e {
   LOOM_AMDGPU_SELECT_PAYLOAD_KIND_DATA = 1,
   LOOM_AMDGPU_SELECT_PAYLOAD_KIND_I1_MASK = 2,
   LOOM_AMDGPU_SELECT_PAYLOAD_KIND_PACKED_DATA = 3,
+  LOOM_AMDGPU_SELECT_PAYLOAD_KIND_I1_BOOL = 4,
 } loom_amdgpu_select_payload_kind_t;
 
 // Boolean operands either reuse their selected carrier or materialize the
