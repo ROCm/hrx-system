@@ -1,11 +1,11 @@
-// Observe original route identity independently of nondeterministic atomic
-// ticket order. Every active route appears once with its selected expert;
-// inactive routes and stale records remain unconsumed.
+// Observe route identity independently of atomic ticket order. Exact-sized
+// tables cover complete records, partial records, non-power-of-two layouts,
+// inactive input, and retirement of previously populated storage.
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
-kernel.decl @expert_bucket_routes() launch(%epoch: buffer, %ids: buffer, %ranks: buffer, %tasks: buffer)
+func.decl pure @expert_record_extent(%capacity: index, %record_rows: index) -> (index, index, offset)
 
-kernel.decl @expert_matrix_routes() launch(%epoch: buffer, %ids: buffer, %ranks: buffer, %tasks: buffer)
+kernel.decl @expert_routes() launch(%record_rows: index, %epoch: buffer, %ids: buffer, %ranks: buffer, %tasks: buffer)
 
 amdgpu.target<gfx11-generic> @observer_wave32 {subgroup_size = 32}
 
@@ -15,153 +15,260 @@ kernel.def target(@observer_wave32) @observe_routes() {
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%record_rows_arg: index, %tasks_arg: buffer, %count_arg: buffer, %counts_arg: buffer, %experts_arg: buffer) {
   %tasks, %count_output, %counts_output, %experts_output = buffer.assume.noalias %tasks_arg, %count_arg, %counts_arg, %experts_arg : buffer, buffer, buffer, buffer
-  %record_rows = index.assume %record_rows_arg [range(%record_rows_arg, 4, 16)] : index
+  %record_rows = index.assume %record_rows_arg [range(%record_rows_arg, 4, 256)] : index
+  %capacity = config.get @flash_next.token_count : index
+  %record_capacity, %fields, %record_bytes = func.call pure @expert_record_extent(%capacity, %record_rows) : (index, index) -> (index, index, offset)
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %record_fields = index.add %record_rows, %two : index
+  %ten = index.constant 10 : index
+  %route_capacity = index.mul %capacity, %ten : index
+  %last_route = index.sub %route_capacity, %one : index
   %stride = index.constant 128 : index
   %origin = index.constant 0 : offset
   %records_origin = index.constant 4 : offset
   %routes_origin = index.constant 12 : offset
-  %routes_layout = encoding.layout.strided [%record_fields, 1] : encoding<layout>
+  %routes_layout = encoding.layout.strided [%fields, 1] : encoding<layout>
   %header = buffer.view %tasks[%origin] : buffer -> view<1xi32>
-  %records = buffer.view %tasks[%records_origin] : buffer -> view<640x[%record_fields]xi32>
-  %routes = buffer.view %tasks[%routes_origin] : buffer -> view<640x[%record_rows]xi32, %routes_layout>
-  %count_view = buffer.view %count_output[%origin] : buffer -> view<1xi32>
-  %counts = buffer.view %counts_output[%origin] : buffer -> view<640xi32>
-  %experts = buffer.view %experts_output[%origin] : buffer -> view<640xi32>
+  %records = buffer.view %tasks[%records_origin] : buffer -> view<[%record_capacity]x[%fields]xi32>
+  %routes = buffer.view %tasks[%routes_origin] : buffer -> view<[%record_capacity]x[%record_rows]xi32, %routes_layout>
+  %count_view = buffer.view %count_output[%origin] : buffer -> view<2xi32>
+  %counts = buffer.view %counts_output[%origin] : buffer -> view<[%route_capacity]xi32>
+  %experts = buffer.view %experts_output[%origin] : buffer -> view<[%route_capacity]xi32>
   %count_word = view.load %header[0] : view<1xi32> -> i32
   %count_value = index.cast %count_word : i32 to index
-  %count = index.assume %count_value [range(%count_value, 0, 640)] : index
+  %count = index.assume %count_value [range(%count_value, 0, %record_capacity)] : index
   %thread = kernel.workitem.id<x> : index
   %leader = index.cmp eq, %thread, %zero : index
   scf.if %leader {
-    view.store %count_word, %count_view[0] : i32, view<1xi32>
+    view.store %count_word, %count_view[0] : i32, view<2xi32>
   }
   %one_word = scalar.constant 1 : i32
-  scf.for %task = [%thread to %count step %stride] {
-    %expert = view.load %records[%task, 0] : view<640x[%record_fields]xi32> -> i32
+  %zero_word = scalar.constant 0 : i32
+  scf.for %task_value = [%thread to %count step %stride] {
+    %task = index.assume %task_value [ge(%task_value, 0), lt(%task_value, %record_capacity)] : index
+    %expert = view.load %records[%task, 0] : view<[%record_capacity]x[%fields]xi32> -> i32
     %expert_tag = scalar.addi %expert, %one_word : i32
-    %live_word = view.load %records[%task, 1] : view<640x[%record_fields]xi32> -> i32
+    %live_word = view.load %records[%task, 1] : view<[%record_capacity]x[%fields]xi32> -> i32
     %live_value = index.cast %live_word : i32 to index
     %live = index.assume %live_value [range(%live_value, 1, %record_rows)] : index
     scf.for %ordinal = [%zero to %record_rows step %one] {
+      %route_word = view.load %routes[%task, %ordinal] : view<[%record_capacity]x[%record_rows]xi32, %routes_layout> -> i32
       %active = index.cmp ult, %ordinal, %live : index
       scf.if %active {
-        %route_word = view.load %routes[%task, %ordinal] : view<640x[%record_rows]xi32, %routes_layout> -> i32
         %route_value = index.cast %route_word : i32 to index
-        %route = index.assume %route_value [range(%route_value, 0, 639)] : index
-        view.atomic.reduce<addi> %one_word, %counts[%route] {ordering = relaxed, scope = device} : i32, view<640xi32>
-        view.atomic.reduce<addi> %expert_tag, %experts[%route] {ordering = relaxed, scope = device} : i32, view<640xi32>
+        %route = index.assume %route_value [range(%route_value, 0, %last_route)] : index
+        view.atomic.reduce<addi> %one_word, %counts[%route] {ordering = relaxed, scope = device} : i32, view<[%route_capacity]xi32>
+        view.atomic.reduce<addi> %expert_tag, %experts[%route] {ordering = relaxed, scope = device} : i32, view<[%route_capacity]xi32>
+      } else {
+        %nonzero_padding = scalar.cmpi ne, %route_word, %zero_word : i32
+        scf.if %nonzero_padding {
+          view.atomic.reduce<addi> %one_word, %count_view[1] {ordering = relaxed, scope = device} : i32, view<2xi32>
+        }
       }
     }
   }
   kernel.return
 }
 
-// These cases cross the 512-thread producer stride. This first distribution
-// visits every expert, with 128 experts selected twice and the rest once.
-check.case public @distributed_then_empty {
-  %dot_rows = check.literal value(4) : index
-  %matrix_rows = check.literal value(16) : index
-  %epoch = check.generate.fill value(64) : tensor<3xi32>
-  %ids = check.generate.iota offset(0) step(1) period(512) : tensor<640xi32>
-  %expected_counts = check.generate.fill value(1) : tensor<640xi32>
-  %expected_experts = check.generate.iota offset(1) step(1) period(512) : tensor<640xi32>
-  %expected_count = check.generate.fill value(512) : tensor<1xi32>
-  %ranks = check.generate.fill value(1515870810) : tensor<640xi32>
-  %tasks = check.generate.fill value(1515870810) : tensor<11521xi32>
-  %count = check.generate.fill value(-1) : tensor<1xi32>
-  %counts = check.generate.fill value(0) : tensor<640xi32>
-  %experts = check.generate.fill value(0) : tensor<640xi32>
-  kernel.launch @expert_bucket_routes(%epoch, %ids, %ranks, %tasks) : (tensor<3xi32>, tensor<640xi32>, tensor<640xi32>, tensor<11521xi32>)
-  kernel.launch @observe_routes(%dot_rows, %tasks, %count, %counts, %experts) : (index, tensor<11521xi32>, tensor<1xi32>, tensor<640xi32>, tensor<640xi32>)
-  check.expect.bitwise actual(%counts) expected(%expected_counts) : tensor<640xi32>
-  check.expect.bitwise actual(%experts) expected(%expected_experts) : tensor<640xi32>
-  check.expect.bitwise actual(%count) expected(%expected_count) : tensor<1xi32>
-
-  // Reusing the same task storage with an empty epoch must hide all old
-  // records. Neither producer nor consumer requires a global buffer clear.
-  %empty = check.generate.fill value(0) : tensor<3xi32>
-  %empty_count = check.generate.fill value(-1) : tensor<1xi32>
-  %empty_counts = check.generate.fill value(0) : tensor<640xi32>
-  %empty_experts = check.generate.fill value(0) : tensor<640xi32>
-  %zero_count = check.generate.fill value(0) : tensor<1xi32>
-  %zero = check.generate.fill value(0) : tensor<640xi32>
-  kernel.launch @expert_bucket_routes(%empty, %ids, %ranks, %tasks) : (tensor<3xi32>, tensor<640xi32>, tensor<640xi32>, tensor<11521xi32>)
-  kernel.launch @observe_routes(%dot_rows, %tasks, %empty_count, %empty_counts, %empty_experts) : (index, tensor<11521xi32>, tensor<1xi32>, tensor<640xi32>, tensor<640xi32>)
-  check.expect.bitwise actual(%empty_count) expected(%zero_count) : tensor<1xi32>
-  check.expect.bitwise actual(%empty_counts) expected(%zero) : tensor<640xi32>
-  check.expect.bitwise actual(%empty_experts) expected(%zero) : tensor<640xi32>
-
-  // Repack the same storage with sixteen-route records. Empty epochs still
-  // retire the table solely by publishing a zero count.
-  %matrix_count = check.generate.fill value(-1) : tensor<1xi32>
-  %matrix_counts = check.generate.fill value(0) : tensor<640xi32>
-  %matrix_experts = check.generate.fill value(0) : tensor<640xi32>
-  kernel.launch @expert_matrix_routes(%epoch, %ids, %ranks, %tasks) : (tensor<3xi32>, tensor<640xi32>, tensor<640xi32>, tensor<11521xi32>)
-  kernel.launch @observe_routes(%matrix_rows, %tasks, %matrix_count, %matrix_counts, %matrix_experts) : (index, tensor<11521xi32>, tensor<1xi32>, tensor<640xi32>, tensor<640xi32>)
-  check.expect.bitwise actual(%matrix_counts) expected(%expected_counts) : tensor<640xi32>
-  check.expect.bitwise actual(%matrix_experts) expected(%expected_experts) : tensor<640xi32>
-  check.expect.bitwise actual(%matrix_count) expected(%expected_count) : tensor<1xi32>
-
-  %matrix_empty_count = check.generate.fill value(-1) : tensor<1xi32>
-  %matrix_empty_counts = check.generate.fill value(0) : tensor<640xi32>
-  %matrix_empty_experts = check.generate.fill value(0) : tensor<640xi32>
-  kernel.launch @expert_matrix_routes(%empty, %ids, %ranks, %tasks) : (tensor<3xi32>, tensor<640xi32>, tensor<640xi32>, tensor<11521xi32>)
-  kernel.launch @observe_routes(%matrix_rows, %tasks, %matrix_empty_count, %matrix_empty_counts, %matrix_empty_experts) : (index, tensor<11521xi32>, tensor<1xi32>, tensor<640xi32>, tensor<640xi32>)
-  check.expect.bitwise actual(%matrix_empty_count) expected(%zero_count) : tensor<1xi32>
-  check.expect.bitwise actual(%matrix_empty_counts) expected(%zero) : tensor<640xi32>
-  check.expect.bitwise actual(%matrix_empty_experts) expected(%zero) : tensor<640xi32>
+// Ten experts each receive 130 routes. Storage covers the maximum possible
+// record count at capacity 131, independently of this particular population.
+check.case public @four_route_tail {
+  %rows = check.literal value(4) : index
+  %epoch = check.generate.fill value(130) : tensor<3xi32>
+  %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
+  %ranks = check.generate.fill value(1515870810) : tensor<1310xi32>
+  %tasks = check.generate.fill value(1515870810) : tensor<5035xi32>
+  %count = check.generate.fill value(0) : tensor<2xi32>
+  %counts = check.generate.fill value(0) : tensor<1310xi32>
+  %experts = check.generate.fill value(0) : tensor<1310xi32>
+  kernel.launch @expert_routes(%rows, %epoch, %ids, %ranks, %tasks) : (index, tensor<3xi32>, tensor<1310xi32>, tensor<1310xi32>, tensor<5035xi32>)
+  kernel.launch @observe_routes(%rows, %tasks, %count, %counts, %experts) : (index, tensor<5035xi32>, tensor<2xi32>, tensor<1310xi32>, tensor<1310xi32>)
+  %actual_count = check.tensor.view %count offset(0) : tensor<2xi32> -> tensor<1xi32>
+  %padding_errors = check.tensor.view %count offset(4) : tensor<2xi32> -> tensor<1xi32>
+  %active_counts = check.tensor.view %counts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %active_experts = check.tensor.view %experts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %inactive_counts = check.tensor.view %counts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %inactive_experts = check.tensor.view %experts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %expected_count = check.generate.fill value(330) : tensor<1xi32>
+  %expected_counts = check.generate.fill value(1) : tensor<1300xi32>
+  %expected_experts = check.generate.iota offset(1) step(1) period(10) : tensor<1300xi32>
+  %zero_padding = check.generate.fill value(0) : tensor<1xi32>
+  %zero = check.generate.fill value(0) : tensor<10xi32>
+  check.expect.bitwise actual(%actual_count) expected(%expected_count) : tensor<1xi32>
+  check.expect.bitwise actual(%padding_errors) expected(%zero_padding) : tensor<1xi32>
+  check.expect.bitwise actual(%active_counts) expected(%expected_counts) : tensor<1300xi32>
+  check.expect.bitwise actual(%active_experts) expected(%expected_experts) : tensor<1300xi32>
+  check.expect.bitwise actual(%inactive_counts) expected(%zero) : tensor<10xi32>
+  check.expect.bitwise actual(%inactive_experts) expected(%zero) : tensor<10xi32>
   check.return
 }
 
-// Each of ten experts needs sixteen records: fifteen full records and one
-// three-route tail. The last ten route slots are outside the active epoch.
-check.case public @concentrated_tail {
-  %dot_rows = check.literal value(4) : index
-  %matrix_rows = check.literal value(16) : index
-  %epoch = check.generate.fill value(63) : tensor<3xi32>
-  %ids = check.generate.iota offset(0) step(1) period(10) : tensor<640xi32>
-  %expected_counts = check.generate.fill value(1) : tensor<630xi32>
-  %expected_experts = check.generate.iota offset(1) step(1) period(10) : tensor<630xi32>
-  %expected_count = check.generate.fill value(160) : tensor<1xi32>
-  %ranks = check.generate.fill value(1515870810) : tensor<640xi32>
-  %tasks = check.generate.fill value(1515870810) : tensor<11521xi32>
-  %count = check.generate.fill value(-1) : tensor<1xi32>
-  %counts = check.generate.fill value(0) : tensor<640xi32>
-  %experts = check.generate.fill value(0) : tensor<640xi32>
-  kernel.launch @expert_bucket_routes(%epoch, %ids, %ranks, %tasks) : (tensor<3xi32>, tensor<640xi32>, tensor<640xi32>, tensor<11521xi32>)
-  kernel.launch @observe_routes(%dot_rows, %tasks, %count, %counts, %experts) : (index, tensor<11521xi32>, tensor<1xi32>, tensor<640xi32>, tensor<640xi32>)
-  %active_counts = check.tensor.view %counts offset(0) : tensor<640xi32> -> tensor<630xi32>
-  %active_experts = check.tensor.view %experts offset(0) : tensor<640xi32> -> tensor<630xi32>
-  %inactive_counts = check.tensor.view %counts offset(2520) : tensor<640xi32> -> tensor<10xi32>
-  %inactive_experts = check.tensor.view %experts offset(2520) : tensor<640xi32> -> tensor<10xi32>
+// Ten experts each receive 130 routes. Storage covers the maximum possible
+// record count at capacity 131, independently of this particular population.
+check.case public @sixteen_route_tail {
+  %rows = check.literal value(16) : index
+  %epoch = check.generate.fill value(130) : tensor<3xi32>
+  %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
+  %ranks = check.generate.fill value(1515870810) : tensor<1310xi32>
+  %tasks = check.generate.fill value(1515870810) : tensor<10675xi32>
+  %count = check.generate.fill value(0) : tensor<2xi32>
+  %counts = check.generate.fill value(0) : tensor<1310xi32>
+  %experts = check.generate.fill value(0) : tensor<1310xi32>
+  kernel.launch @expert_routes(%rows, %epoch, %ids, %ranks, %tasks) : (index, tensor<3xi32>, tensor<1310xi32>, tensor<1310xi32>, tensor<10675xi32>)
+  kernel.launch @observe_routes(%rows, %tasks, %count, %counts, %experts) : (index, tensor<10675xi32>, tensor<2xi32>, tensor<1310xi32>, tensor<1310xi32>)
+  %actual_count = check.tensor.view %count offset(0) : tensor<2xi32> -> tensor<1xi32>
+  %padding_errors = check.tensor.view %count offset(4) : tensor<2xi32> -> tensor<1xi32>
+  %active_counts = check.tensor.view %counts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %active_experts = check.tensor.view %experts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %inactive_counts = check.tensor.view %counts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %inactive_experts = check.tensor.view %experts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %expected_count = check.generate.fill value(90) : tensor<1xi32>
+  %expected_counts = check.generate.fill value(1) : tensor<1300xi32>
+  %expected_experts = check.generate.iota offset(1) step(1) period(10) : tensor<1300xi32>
+  %zero_padding = check.generate.fill value(0) : tensor<1xi32>
   %zero = check.generate.fill value(0) : tensor<10xi32>
-  check.expect.bitwise actual(%active_counts) expected(%expected_counts) : tensor<630xi32>
-  check.expect.bitwise actual(%active_experts) expected(%expected_experts) : tensor<630xi32>
+  check.expect.bitwise actual(%actual_count) expected(%expected_count) : tensor<1xi32>
+  check.expect.bitwise actual(%padding_errors) expected(%zero_padding) : tensor<1xi32>
+  check.expect.bitwise actual(%active_counts) expected(%expected_counts) : tensor<1300xi32>
+  check.expect.bitwise actual(%active_experts) expected(%expected_experts) : tensor<1300xi32>
   check.expect.bitwise actual(%inactive_counts) expected(%zero) : tensor<10xi32>
   check.expect.bitwise actual(%inactive_experts) expected(%zero) : tensor<10xi32>
-  check.expect.bitwise actual(%count) expected(%expected_count) : tensor<1xi32>
+  check.return
+}
 
-  // Each expert needs four matrix records: three full records and a
-  // fifteen-route tail. The inactive epoch suffix must remain untouched.
-  %matrix_expected_count = check.generate.fill value(40) : tensor<1xi32>
-  %matrix_count = check.generate.fill value(-1) : tensor<1xi32>
-  %matrix_counts = check.generate.fill value(0) : tensor<640xi32>
-  %matrix_experts = check.generate.fill value(0) : tensor<640xi32>
-  kernel.launch @expert_matrix_routes(%epoch, %ids, %ranks, %tasks) : (tensor<3xi32>, tensor<640xi32>, tensor<640xi32>, tensor<11521xi32>)
-  kernel.launch @observe_routes(%matrix_rows, %tasks, %matrix_count, %matrix_counts, %matrix_experts) : (index, tensor<11521xi32>, tensor<1xi32>, tensor<640xi32>, tensor<640xi32>)
-  %matrix_active_counts = check.tensor.view %matrix_counts offset(0) : tensor<640xi32> -> tensor<630xi32>
-  %matrix_active_experts = check.tensor.view %matrix_experts offset(0) : tensor<640xi32> -> tensor<630xi32>
-  %matrix_inactive_counts = check.tensor.view %matrix_counts offset(2520) : tensor<640xi32> -> tensor<10xi32>
-  %matrix_inactive_experts = check.tensor.view %matrix_experts offset(2520) : tensor<640xi32> -> tensor<10xi32>
-  check.expect.bitwise actual(%matrix_active_counts) expected(%expected_counts) : tensor<630xi32>
-  check.expect.bitwise actual(%matrix_active_experts) expected(%expected_experts) : tensor<630xi32>
-  check.expect.bitwise actual(%matrix_inactive_counts) expected(%zero) : tensor<10xi32>
-  check.expect.bitwise actual(%matrix_inactive_experts) expected(%zero) : tensor<10xi32>
-  check.expect.bitwise actual(%matrix_count) expected(%matrix_expected_count) : tensor<1xi32>
+// Ten experts each receive 130 routes. Storage covers the maximum possible
+// record count at capacity 131, independently of this particular population.
+check.case public @non_power_of_two_tail {
+  %rows = check.literal value(31) : index
+  %epoch = check.generate.fill value(130) : tensor<3xi32>
+  %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
+  %ranks = check.generate.fill value(1515870810) : tensor<1310xi32>
+  %tasks = check.generate.fill value(1515870810) : tensor<18283xi32>
+  %count = check.generate.fill value(0) : tensor<2xi32>
+  %counts = check.generate.fill value(0) : tensor<1310xi32>
+  %experts = check.generate.fill value(0) : tensor<1310xi32>
+  kernel.launch @expert_routes(%rows, %epoch, %ids, %ranks, %tasks) : (index, tensor<3xi32>, tensor<1310xi32>, tensor<1310xi32>, tensor<18283xi32>)
+  kernel.launch @observe_routes(%rows, %tasks, %count, %counts, %experts) : (index, tensor<18283xi32>, tensor<2xi32>, tensor<1310xi32>, tensor<1310xi32>)
+  %actual_count = check.tensor.view %count offset(0) : tensor<2xi32> -> tensor<1xi32>
+  %padding_errors = check.tensor.view %count offset(4) : tensor<2xi32> -> tensor<1xi32>
+  %active_counts = check.tensor.view %counts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %active_experts = check.tensor.view %experts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %inactive_counts = check.tensor.view %counts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %inactive_experts = check.tensor.view %experts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %expected_count = check.generate.fill value(50) : tensor<1xi32>
+  %expected_counts = check.generate.fill value(1) : tensor<1300xi32>
+  %expected_experts = check.generate.iota offset(1) step(1) period(10) : tensor<1300xi32>
+  %zero_padding = check.generate.fill value(0) : tensor<1xi32>
+  %zero = check.generate.fill value(0) : tensor<10xi32>
+  check.expect.bitwise actual(%actual_count) expected(%expected_count) : tensor<1xi32>
+  check.expect.bitwise actual(%padding_errors) expected(%zero_padding) : tensor<1xi32>
+  check.expect.bitwise actual(%active_counts) expected(%expected_counts) : tensor<1300xi32>
+  check.expect.bitwise actual(%active_experts) expected(%expected_experts) : tensor<1300xi32>
+  check.expect.bitwise actual(%inactive_counts) expected(%zero) : tensor<10xi32>
+  check.expect.bitwise actual(%inactive_experts) expected(%zero) : tensor<10xi32>
+  check.return
+}
 
+// Ten experts each receive 130 routes. Storage covers the maximum possible
+// record count at capacity 131, independently of this particular population.
+check.case public @wide_route_tail {
+  %rows = check.literal value(128) : index
+  %epoch = check.generate.fill value(130) : tensor<3xi32>
+  %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
+  %ranks = check.generate.fill value(1515870810) : tensor<1310xi32>
+  %tasks = check.generate.fill value(1515870810) : tensor<67861xi32>
+  %count = check.generate.fill value(0) : tensor<2xi32>
+  %counts = check.generate.fill value(0) : tensor<1310xi32>
+  %experts = check.generate.fill value(0) : tensor<1310xi32>
+  kernel.launch @expert_routes(%rows, %epoch, %ids, %ranks, %tasks) : (index, tensor<3xi32>, tensor<1310xi32>, tensor<1310xi32>, tensor<67861xi32>)
+  kernel.launch @observe_routes(%rows, %tasks, %count, %counts, %experts) : (index, tensor<67861xi32>, tensor<2xi32>, tensor<1310xi32>, tensor<1310xi32>)
+  %actual_count = check.tensor.view %count offset(0) : tensor<2xi32> -> tensor<1xi32>
+  %padding_errors = check.tensor.view %count offset(4) : tensor<2xi32> -> tensor<1xi32>
+  %active_counts = check.tensor.view %counts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %active_experts = check.tensor.view %experts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %inactive_counts = check.tensor.view %counts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %inactive_experts = check.tensor.view %experts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %expected_count = check.generate.fill value(20) : tensor<1xi32>
+  %expected_counts = check.generate.fill value(1) : tensor<1300xi32>
+  %expected_experts = check.generate.iota offset(1) step(1) period(10) : tensor<1300xi32>
+  %zero_padding = check.generate.fill value(0) : tensor<1xi32>
+  %zero = check.generate.fill value(0) : tensor<10xi32>
+  check.expect.bitwise actual(%actual_count) expected(%expected_count) : tensor<1xi32>
+  check.expect.bitwise actual(%padding_errors) expected(%zero_padding) : tensor<1xi32>
+  check.expect.bitwise actual(%active_counts) expected(%expected_counts) : tensor<1300xi32>
+  check.expect.bitwise actual(%active_experts) expected(%expected_experts) : tensor<1300xi32>
+  check.expect.bitwise actual(%inactive_counts) expected(%zero) : tensor<10xi32>
+  check.expect.bitwise actual(%inactive_experts) expected(%zero) : tensor<10xi32>
+  check.return
+}
+
+// Ten experts each receive 130 routes. Storage covers the maximum possible
+// record count at capacity 131, independently of this particular population.
+check.case public @largest_route_tail {
+  %rows = check.literal value(256) : index
+  %epoch = check.generate.fill value(130) : tensor<3xi32>
+  %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
+  %ranks = check.generate.fill value(1515870810) : tensor<1310xi32>
+  %tasks = check.generate.fill value(1515870810) : tensor<133387xi32>
+  %count = check.generate.fill value(0) : tensor<2xi32>
+  %counts = check.generate.fill value(0) : tensor<1310xi32>
+  %experts = check.generate.fill value(0) : tensor<1310xi32>
+  kernel.launch @expert_routes(%rows, %epoch, %ids, %ranks, %tasks) : (index, tensor<3xi32>, tensor<1310xi32>, tensor<1310xi32>, tensor<133387xi32>)
+  kernel.launch @observe_routes(%rows, %tasks, %count, %counts, %experts) : (index, tensor<133387xi32>, tensor<2xi32>, tensor<1310xi32>, tensor<1310xi32>)
+  %actual_count = check.tensor.view %count offset(0) : tensor<2xi32> -> tensor<1xi32>
+  %padding_errors = check.tensor.view %count offset(4) : tensor<2xi32> -> tensor<1xi32>
+  %active_counts = check.tensor.view %counts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %active_experts = check.tensor.view %experts offset(0) : tensor<1310xi32> -> tensor<1300xi32>
+  %inactive_counts = check.tensor.view %counts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %inactive_experts = check.tensor.view %experts offset(5200) : tensor<1310xi32> -> tensor<10xi32>
+  %expected_count = check.generate.fill value(10) : tensor<1xi32>
+  %expected_counts = check.generate.fill value(1) : tensor<1300xi32>
+  %expected_experts = check.generate.iota offset(1) step(1) period(10) : tensor<1300xi32>
+  %zero_padding = check.generate.fill value(0) : tensor<1xi32>
+  %zero = check.generate.fill value(0) : tensor<10xi32>
+  check.expect.bitwise actual(%actual_count) expected(%expected_count) : tensor<1xi32>
+  check.expect.bitwise actual(%padding_errors) expected(%zero_padding) : tensor<1xi32>
+  check.expect.bitwise actual(%active_counts) expected(%expected_counts) : tensor<1300xi32>
+  check.expect.bitwise actual(%active_experts) expected(%expected_experts) : tensor<1300xi32>
+  check.expect.bitwise actual(%inactive_counts) expected(%zero) : tensor<10xi32>
+  check.expect.bitwise actual(%inactive_experts) expected(%zero) : tensor<10xi32>
+  check.return
+}
+
+// Every expert has a partial record. A subsequent empty epoch must hide all
+// records in the same allocation without clearing the table first.
+check.case public @distributed_then_empty {
+  %rows = check.literal value(128) : index
+  %epoch = check.generate.fill value(131) : tensor<3xi32>
+  %ids = check.generate.iota offset(0) step(1) period(512) : tensor<1310xi32>
+  %ranks = check.generate.fill value(1515870810) : tensor<1310xi32>
+  %tasks = check.generate.fill value(1515870810) : tensor<67861xi32>
+  %count = check.generate.fill value(0) : tensor<2xi32>
+  %counts = check.generate.fill value(0) : tensor<1310xi32>
+  %experts = check.generate.fill value(0) : tensor<1310xi32>
+  kernel.launch @expert_routes(%rows, %epoch, %ids, %ranks, %tasks) : (index, tensor<3xi32>, tensor<1310xi32>, tensor<1310xi32>, tensor<67861xi32>)
+  kernel.launch @observe_routes(%rows, %tasks, %count, %counts, %experts) : (index, tensor<67861xi32>, tensor<2xi32>, tensor<1310xi32>, tensor<1310xi32>)
+  %actual_count = check.tensor.view %count offset(0) : tensor<2xi32> -> tensor<1xi32>
+  %padding_errors = check.tensor.view %count offset(4) : tensor<2xi32> -> tensor<1xi32>
+  %expected_count = check.generate.fill value(512) : tensor<1xi32>
+  %expected_counts = check.generate.fill value(1) : tensor<1310xi32>
+  %expected_experts = check.generate.iota offset(1) step(1) period(512) : tensor<1310xi32>
+  %zero_padding = check.generate.fill value(0) : tensor<1xi32>
+  check.expect.bitwise actual(%actual_count) expected(%expected_count) : tensor<1xi32>
+  check.expect.bitwise actual(%padding_errors) expected(%zero_padding) : tensor<1xi32>
+  check.expect.bitwise actual(%counts) expected(%expected_counts) : tensor<1310xi32>
+  check.expect.bitwise actual(%experts) expected(%expected_experts) : tensor<1310xi32>
+
+  %empty = check.generate.fill value(0) : tensor<3xi32>
+  %empty_count = check.generate.fill value(0) : tensor<2xi32>
+  %empty_counts = check.generate.fill value(0) : tensor<1310xi32>
+  %empty_experts = check.generate.fill value(0) : tensor<1310xi32>
+  %zero_count = check.generate.fill value(0) : tensor<2xi32>
+  %zero = check.generate.fill value(0) : tensor<1310xi32>
+  kernel.launch @expert_routes(%rows, %empty, %ids, %ranks, %tasks) : (index, tensor<3xi32>, tensor<1310xi32>, tensor<1310xi32>, tensor<67861xi32>)
+  kernel.launch @observe_routes(%rows, %tasks, %empty_count, %empty_counts, %empty_experts) : (index, tensor<67861xi32>, tensor<2xi32>, tensor<1310xi32>, tensor<1310xi32>)
+  check.expect.bitwise actual(%empty_count) expected(%zero_count) : tensor<2xi32>
+  check.expect.bitwise actual(%empty_counts) expected(%zero) : tensor<1310xi32>
+  check.expect.bitwise actual(%empty_experts) expected(%zero) : tensor<1310xi32>
   check.return
 }
