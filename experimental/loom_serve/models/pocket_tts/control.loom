@@ -1,0 +1,389 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+func.decl @pocket.check(%condition: i1, %diagnostic: buffer)
+
+func.decl @pocket.voice_record(%model: buffer, %voice: i32) -> (view<4xi32>)
+
+func.decl @pocket.prepare_text(%text: buffer, %chunk_tokens: i32, %input_tokens: i32) -> (buffer, i32)
+
+template.decl pure @pocket.packet_stride(%tokens: index) -> (offset)
+
+template.decl pure @pocket.batch_work_header_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.batch_work_size(%capacity: index) -> (offset)
+
+// Pocket TTS requires speed 1 and does not accept instructions
+global.rodata.def @pocket.request_error = bytes("506f636b657420545453207265717569726573207370656564203120616e6420646f6573206e6f742061636365707420696e737472756374696f6e73")
+
+// unknown registered Pocket TTS voice
+global.rodata.def @pocket.voice_error = bytes("756e6b6e6f776e207265676973746572656420506f636b65742054545320766f696365")
+
+// Pocket TTS did not terminate within the admitted generation extent
+global.rodata.def @pocket.termination_error = bytes("506f636b65742054545320646964206e6f74207465726d696e6174652077697468696e207468652061646d69747465642067656e65726174696f6e20657874656e74")
+
+// Pocket TTS produced a nonfinite EOS score
+global.rodata.def @pocket.eos_error = bytes("506f636b6574205454532070726f64756365642061206e6f6e66696e69746520454f532073636f7265")
+
+func.def @pocket.select_voice(%model: buffer, %voice: buffer) -> (i32, i32) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %model[%origin] : buffer -> view<12xi32>
+  %count32 = view.load %header[7] : view<12xi32> -> i32
+  %count = index.cast %count32 : i32 to index
+  %length = buffer.length %voice
+  %length64 = index.cast %length : offset to i64
+  %begin = index.constant 0 : index
+  %one = index.constant 1 : index
+  %record_bytes = index.constant 80 : offset
+  %header_bytes = index.constant 48 : offset
+  %id_offset = index.constant 16 : offset
+  %zero = scalar.constant 0 : i32
+  %missing = scalar.constant -1 : i32
+  %selected, %frames = scf.for %i = [%begin to %count step %one](%selected = %missing : i32, %frames = %zero : i32) -> (i32, i32) {
+    %ordinal = index.cast %i : index to i32
+    %record = func.call @pocket.voice_record(%model, %ordinal) : (buffer, i32) -> (view<4xi32>)
+    %id_length32 = view.load %record[0] : view<4xi32> -> i32
+    %id_length = scalar.extui %id_length32 : i32 to i64
+    %same_length = scalar.cmpi eq, %id_length, %length64 : i64
+    %matches = scf.if %same_length -> (i1) {
+      %relative = index.scale %i, %record_bytes : index, offset -> offset
+      %record_begin = index.add %header_bytes, %relative : offset
+      %id_begin = index.add %record_begin, %id_offset : offset
+      %order = buffer.compare %voice[%origin], %model[%id_begin], %length
+      %equal = scalar.cmpi eq, %order, %zero : i32
+      scf.yield %equal : i1
+    } else {
+      %false = scalar.constant false : i1
+      scf.yield %false : i1
+    }
+    %entry_frames = view.load %record[1] : view<4xi32> -> i32
+    %next_selected = scf.select %matches, %ordinal, %selected : i32
+    %next_frames = scf.select %matches, %entry_frames, %frames : i32
+    scf.yield %next_selected, %next_frames : i32, i32
+  }
+  %found = scalar.cmpi ne, %selected, %missing : i32
+  %error = global.load @pocket.voice_error : buffer
+  func.call @pocket.check(%found, %error) : (i1, buffer)
+  func.return %selected, %frames : i32, i32
+}
+
+// Request header fields at byte offsets:
+//  0: next numerical phase, advanced only after retirement.
+//  4: current voice block or text token within that phase.
+//  8: immutable registered voice ordinal.
+// 12: immutable voice frame count.
+// 16: immutable whole-input chunk count.
+// 20: current chunk, also the sampling counter identity.
+// 24: generated block index within the current chunk.
+// 28: first eligible EOS block, or -1 before prediction.
+// 32: I64 cumulative published audio position in frames.
+// 40: eight reserved bytes; immutable packets begin at byte 48.
+func.def public @prepare_request(%model: buffer, %text: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %instruction_bytes = buffer.length %instructions
+  %plain = index.cmp eq, %instruction_bytes, %origin : offset
+  %normal = scalar.constant 1.0 : f32
+  %normal_speed = scalar.cmpf oeq, %speed, %normal : f32
+  %supported = scalar.andi %plain, %normal_speed : i1
+  %error = global.load @pocket.request_error : buffer
+  func.call @pocket.check(%supported, %error) : (i1, buffer)
+  %voice_id, %voice_frames = func.call @pocket.select_voice(%model, %voice) : (buffer, buffer) -> (i32, i32)
+  %model_header = buffer.view %model[%origin] : buffer -> view<12xi32>
+  %chunk_limit = view.load %model_header[2] : view<12xi32> -> i32
+  %input_limit = view.load %model_header[3] : view<12xi32> -> i32
+  %packets, %chunks = func.call @pocket.prepare_text(%text, %chunk_limit, %input_limit) : (buffer, i32, i32) -> (buffer, i32)
+  %packet_bytes = buffer.length %packets
+  %header_bytes = index.constant 48 : offset
+  %state_bytes = index.add %header_bytes, %packet_bytes : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %zero = scalar.constant 0 : i32
+  buffer.fill %zero, %state[%origin], %header_bytes : i32
+  buffer.copy %packets[%origin], %state[%header_bytes], %packet_bytes
+  %header = buffer.view %state[%origin] : buffer -> view<8xi32>
+  view.store %voice_id, %header[2] : i32, view<8xi32>
+  view.store %voice_frames, %header[3] : i32, view<8xi32>
+  view.store %chunks, %header[4] : i32, view<8xi32>
+  %missing = scalar.constant -1 : i32
+  view.store %missing, %header[7] : i32, view<8xi32>
+  %payload_bytes = index.constant 16 : offset
+  %payload = buffer.alloca<private> align(8) %payload_bytes : buffer
+  buffer.fill %zero, %payload[%origin], %payload_bytes : i32
+  %seed_view = buffer.view %payload[%origin] : buffer -> view<1xi64>
+  view.store %seed, %seed_view[0] : i64, view<1xi64>
+  func.return %state, %payload : buffer, buffer
+}
+
+func.def @pocket.current_packet(%model: buffer, %state: buffer) -> (offset) {
+  %origin = index.constant 0 : offset
+  %model_header = buffer.view %model[%origin] : buffer -> view<12xi32>
+  %header = buffer.view %state[%origin] : buffer -> view<8xi32>
+  %tokens32 = view.load %model_header[2] : view<12xi32> -> i32
+  %chunk32 = view.load %header[5] : view<8xi32> -> i32
+  %tokens = index.cast %tokens32 : i32 to index
+  %chunk = index.cast %chunk32 : i32 to index
+  %stride = template.apply<@pocket.packet_stride>(%tokens) pure : (index) -> (offset)
+  %relative = index.scale %chunk, %stride : index, offset -> offset
+  %header_bytes = index.constant 48 : offset
+  %packet = index.add %header_bytes, %relative : offset
+  func.return %packet : offset
+}
+
+// A cache hit can replace unfinished private voice preparation at a retired
+// cut. The offer changes neither the request cursor nor cache publication.
+func.def public @prepare_work(%model: buffer, %state: buffer) -> (buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<8xi32>
+  %phase = view.load %header[0] : view<8xi32> -> i32
+  %voice = view.load %header[2] : view<8xi32> -> i32
+  %record = func.call @pocket.voice_record(%model, %voice) : (buffer, i32) -> (view<4xi32>)
+  %cached = view.load %record[2] : view<4xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %restore = scalar.constant 4 : i32
+  %preparing_voice = scalar.cmpi ult, %phase, %restore : i32
+  %ready = scalar.cmpi ne, %cached, %zero : i32
+  %reuse = scalar.andi %preparing_voice, %ready : i1
+  %selected = scf.select %reuse, %restore, %phase : i32
+  %size = index.constant 32 : offset
+  %work = buffer.alloca<private> align(8) %size : buffer
+  buffer.fill %zero, %work[%origin], %size : i32
+  %offer = buffer.view %work[%origin] : buffer -> view<8xi32>
+  %cursor = view.load %header[1] : view<8xi32> -> i32
+  %frames = view.load %header[3] : view<8xi32> -> i32
+  %chunk = view.load %header[5] : view<8xi32> -> i32
+  view.store %selected, %offer[0] : i32, view<8xi32>
+  view.store %voice, %offer[1] : i32, view<8xi32>
+  view.store %cursor, %offer[2] : i32, view<8xi32>
+  view.store %chunk, %offer[3] : i32, view<8xi32>
+  view.store %frames, %offer[4] : i32, view<8xi32>
+  %text_phase = scalar.constant 5 : i32
+  %text_work = scalar.cmpi eq, %selected, %text_phase : i32
+  %token = scf.if %text_work -> (i32) {
+    %packet = func.call @pocket.current_packet(%model, %state) : (buffer, buffer) -> (offset)
+    %packet_header = index.constant 16 : offset
+    %word = index.constant 4 : offset
+    %cursor_index = index.cast %cursor : i32 to index
+    %relative = index.scale %cursor_index, %word : index, offset -> offset
+    %tokens = index.add %packet, %packet_header : offset
+    %token_origin = index.add %tokens, %relative : offset
+    %selected_token = buffer.view %state[%token_origin] : buffer -> view<1xi32>
+    %value = view.load %selected_token[0] : view<1xi32> -> i32
+    scf.yield %value : i32
+  } else {
+    %bos = scalar.constant -1 : i32
+    scf.yield %bos : i32
+  }
+  view.store %token, %offer[6] : i32, view<8xi32>
+  %tag = scalar.extui %selected : i32 to i64
+  %unit = scalar.constant 1 : i64
+  func.return %work, %unit, %tag : buffer, i64, i64
+}
+
+func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %model_header = buffer.view %model[%origin] : buffer -> view<12xi32>
+  %capacity32 = view.load %model_header[5] : view<12xi32> -> i32
+  %capacity_value = scalar.assume %capacity32 [range(%capacity32, 1, 65536)] : i32
+  %capacity = index.cast %capacity_value : i32 to index
+  %length = buffer.length %ranges
+  %bytes = index.cast %length : offset to i64
+  %record_bytes = scalar.constant 24 : i64
+  %count64 = scalar.divui %bytes, %record_bytes : i64
+  %count_value = index.cast %count64 : i64 to index
+  %count = index.assume %count_value [ge(%count_value, 1), le(%count_value, %capacity)] : index
+  %records = buffer.view %ranges[%origin] : buffer -> view<[%count]x3xi64>
+  %size = template.apply<@pocket.batch_work_size>(%capacity) pure : (index) -> (offset)
+  %payload = buffer.alloca<private> align(8) %size : buffer
+  %zero = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  buffer.fill %zero, %payload[%origin], %size : i32
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %header_words = index.add %capacity, %two : index
+  %header = buffer.view %payload[%origin] : buffer -> view<[%header_words]xi32>
+  %first = buffer.view %packed[%origin] : buffer -> view<8xi32>
+  %phase = view.load %first[0] : view<8xi32> -> i32
+  %count32 = scalar.trunci %count64 : i64 to i32
+  view.store %count32, %header[0] : i32, view<[%header_words]xi32>
+  %phase_slot = index.add %capacity, %one : index
+  view.store %phase, %header[%phase_slot] : i32, view<[%header_words]xi32>
+  %work_header = template.apply<@pocket.batch_work_header_size>(%capacity) pure : (index) -> (offset)
+  %work_stride = index.constant 32 : offset
+  // At most one writer per voice, in linear time even for large cohorts.
+  %voices32 = view.load %model_header[7] : view<12xi32> -> i32
+  %voices = index.cast %voices32 : i32 to index
+  %word_bytes = index.constant 4 : offset
+  %seen_bytes = index.scale %voices, %word_bytes : index, offset -> offset
+  %seen_buffer = buffer.alloca<private> align(4) %seen_bytes : buffer
+  buffer.fill %zero, %seen_buffer[%origin], %seen_bytes : i32
+  %seen = buffer.view %seen_buffer[%origin] : buffer -> view<[%voices]xi32>
+  %begin = index.constant 0 : index
+  scf.for %i = [%begin to %count step %one] {
+    %row64 = view.load %records[%i, 0] : view<[%count]x3xi64> -> i64
+    %offset64 = view.load %records[%i, 1] : view<[%count]x3xi64> -> i64
+    %offset_value = scalar.assume %offset64 [range(%offset64, 0, 2097120)] : i64
+    %offset = index.cast %offset_value : i64 to offset
+    %relative = index.scale %i, %work_stride : index, offset -> offset
+    %target_offset = index.add %work_header, %relative : offset
+    buffer.copy %packed[%offset], %payload[%target_offset], %work_stride
+    %work = buffer.view %payload[%target_offset] : buffer -> view<8xi32>
+    %voice32 = view.load %work[1] : view<8xi32> -> i32
+    %voice_value = index.cast %voice32 : i32 to index
+    %voice = index.assume %voice_value [ge(%voice_value, 0), lt(%voice_value, %voices)] : index
+    %previous = view.load %seen[%voice] : view<[%voices]xi32> -> i32
+    %writer = scalar.xori %previous, %one32 : i32
+    view.store %writer, %work[5] : i32, view<8xi32>
+    view.store %one32, %seen[%voice] : i32, view<[%voices]xi32>
+    %row = scalar.trunci %row64 : i64 to i32
+    %map_index_value = index.add %i, %one : index
+    %map_index = index.assume %map_index_value [ge(%map_index_value, 1), lt(%map_index_value, %header_words)] : index
+    view.store %row, %header[%map_index] : i32, view<[%header_words]xi32>
+  }
+  // The retained CPU plan carries the phase and live count directly. Generation
+  // has no model metadata and does not infer capacity from a payload's extent.
+  %plan_bytes = index.constant 8 : offset
+  %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
+  %plan_header = buffer.view %plan[%origin] : buffer -> view<2xi32>
+  view.store %phase, %plan_header[0] : i32, view<2xi32>
+  view.store %count32, %plan_header[1] : i32, view<2xi32>
+  func.return %payload, %plan : buffer, buffer
+}
+
+func.def public @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %plan[%origin] : buffer -> view<2xi32>
+  %phase = view.load %header[0] : view<2xi32> -> i32
+  %execution = func.call @execute_5(%phase, %work, %request, %conditioning, %stream, %output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %decode = scalar.constant 6 : i32
+  %audio = scalar.cmpi eq, %phase, %decode : i32
+  scf.if %audio {
+    %count32 = view.load %header[1] : view<2xi32> -> i32
+    %count = scalar.extui %count32 : i32 to i64
+    %stride = scalar.constant 7684 : i64
+    %length = scalar.muli %count, %stride : i64
+    %zero = scalar.constant 0 : i32
+    %start = scalar.constant 0 : i64
+    %feedback = func.call @feedback(%zero, %output, %start, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+  }
+  func.return
+}
+
+func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, i64, i64, i32) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<8xi32>
+  %position_origin = index.constant 32 : offset
+  %position_view = buffer.view %state[%position_origin] : buffer -> view<1xi64>
+  %position = view.load %position_view[0] : view<1xi64> -> i64
+  %batch = buffer.view %plan[%origin] : buffer -> view<2xi32>
+  %phase = view.load %batch[0] : view<2xi32> -> i32
+  %packet_origin = func.call @pocket.current_packet(%model, %state) : (buffer, buffer) -> (offset)
+  %packet = buffer.view %state[%packet_origin] : buffer -> view<4xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %four = scalar.constant 4 : i32
+  %five = scalar.constant 5 : i32
+  %six = scalar.constant 6 : i32
+  %missing = scalar.constant -1 : i32
+  %zero64 = scalar.constant 0 : i64
+  %audio = scalar.cmpi eq, %phase, %six : i32
+  %offset, %frames, %done = scf.if %audio -> (i64, i64, i32) {
+    %stride = scalar.constant 7684 : i64
+    %row_offset = scalar.muli %ordinal, %stride : i64
+    %bounded_offset = scalar.assume %row_offset [range(%row_offset, 0, 503570940)] : i64
+    %begin = index.cast %bounded_offset : i64 to offset
+    %score_view = buffer.view %feedback[%begin] : buffer -> view<1xf32>
+    %score = view.load %score_view[0] : view<1xf32> -> f32
+    %bits = scalar.bitcast %score : f32 to i32
+    %mask = scalar.constant 2139095040 : i32
+    %exponent = scalar.andi %bits, %mask : i32
+    %finite = scalar.cmpi ne, %exponent, %mask : i32
+    %error = global.load @pocket.eos_error : buffer
+    func.call @pocket.check(%finite, %error) : (i1, buffer)
+    %step = view.load %header[6] : view<8xi32> -> i32
+    %eos = view.load %header[7] : view<8xi32> -> i32
+    %unseen = scalar.cmpi eq, %eos, %missing : i32
+    %eligible = scalar.cmpi uge, %step, %six : i32
+    %threshold = scalar.constant -4.0 : f32
+    %predicted = scalar.cmpf ogt, %score, %threshold : f32
+    %eligible_prediction = scalar.andi %eligible, %predicted : i1
+    %first_prediction = scalar.andi %unseen, %eligible_prediction : i1
+    %first_eos = scf.select %first_prediction, %step, %eos : i32
+    view.store %first_eos, %header[7] : i32, view<8xi32>
+    %tail = view.load %packet[1] : view<4xi32> -> i32
+    %stop = scalar.addi %first_eos, %tail : i32
+    %seen = scalar.cmpi ne, %first_eos, %missing : i32
+    %past_tail = scalar.cmpi uge, %step, %stop : i32
+    %complete = scalar.andi %seen, %past_tail : i1
+    %next = scalar.addi %step, %one : i32
+    %maximum = view.load %packet[2] : view<4xi32> -> i32
+    %room = scalar.cmpi ult, %next, %maximum : i32
+    %valid = scalar.ori %complete, %room : i1
+    %termination_error = global.load @pocket.termination_error : buffer
+    func.call @pocket.check(%valid, %termination_error) : (i1, buffer)
+    view.store %next, %header[6] : i32, view<8xi32>
+    %terminal = scf.if %complete -> (i32) {
+      %chunk = view.load %header[5] : view<8xi32> -> i32
+      %chunks = view.load %header[4] : view<8xi32> -> i32
+      %next_chunk = scalar.addi %chunk, %one : i32
+      %last = scalar.cmpi eq, %next_chunk, %chunks : i32
+      view.store %next_chunk, %header[5] : i32, view<8xi32>
+      view.store %four, %header[0] : i32, view<8xi32>
+      %done = scalar.extui %last : i1 to i32
+      scf.yield %done : i32
+    } else {
+      scf.yield %zero : i32
+    }
+    %block_frames = scalar.constant 1920 : i64
+    %count = scf.select %complete, %zero64, %block_frames : i64
+    %next_position = scalar.addi %position, %count : i64
+    view.store %next_position, %position_view[0] : i64, view<1xi64>
+    %header_bytes = scalar.constant 4 : i64
+    %sample_offset = scalar.addi %row_offset, %header_bytes : i64
+    scf.yield %sample_offset, %count, %terminal : i64, i64, i32
+  } else {
+    %phase_index = index.cast %phase : i32 to index
+    scf.switch %phase_index {
+      case 0 {
+        view.store %one, %header[0] : i32, view<8xi32>
+      }
+      case 1 {
+        view.store %two, %header[0] : i32, view<8xi32>
+      }
+      case 3 {
+        %voice = view.load %header[2] : view<8xi32> -> i32
+        %record = func.call @pocket.voice_record(%model, %voice) : (buffer, i32) -> (view<4xi32>)
+        view.store %one, %record[2] : i32, view<4xi32>
+        view.store %four, %header[0] : i32, view<8xi32>
+      }
+      case 4 {
+        view.store %five, %header[0] : i32, view<8xi32>
+        view.store %zero, %header[1] : i32, view<8xi32>
+        view.store %zero, %header[6] : i32, view<8xi32>
+        view.store %missing, %header[7] : i32, view<8xi32>
+      }
+      default {
+        %cursor = view.load %header[1] : view<8xi32> -> i32
+        %next = scalar.addi %cursor, %one : i32
+        %voice = scalar.cmpi eq, %phase, %two : i32
+        %voice_frames = view.load %header[3] : view<8xi32> -> i32
+        %tokens = view.load %packet[0] : view<4xi32> -> i32
+        %limit = scf.select %voice, %voice_frames, %tokens : i32
+        %finished = scalar.cmpi eq, %next, %limit : i32
+        %next_cursor = scf.select %finished, %zero, %next : i32
+        %next_phase = scalar.addi %phase, %one : i32
+        %phase_after = scf.select %finished, %next_phase, %phase : i32
+        view.store %phase_after, %header[0] : i32, view<8xi32>
+        view.store %next_cursor, %header[1] : i32, view<8xi32>
+      }
+    }
+    scf.yield %zero64, %zero64, %zero : i64, i64, i32
+  }
+  func.return %position, %offset, %frames, %done : i64, i64, i64, i32
+}

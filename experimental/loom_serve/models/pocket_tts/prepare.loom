@@ -1,0 +1,130 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+func.decl @pocket.parse_options(%source: buffer) -> (buffer)
+
+template.decl pure @pocket.request_state_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.batch_work_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.conditioning_size(%voice_frames: index) -> (offset)
+
+global.rodata.def @pocket.prepare_empty = bytes("")
+
+// pocket-tts, tokenizer.json, original checkpoint, rotary and voice assets.
+global.rodata.def @pocket.name = bytes("706f636b65742d747473")
+
+global.rodata.def @pocket.tokenizer = bytes("746f6b656e697a65722e6a736f6e")
+
+global.rodata.def @pocket.checkpoint = bytes("6d6f64656c2e7361666574656e736f7273")
+
+global.rodata.def @pocket.rotary = bytes("726f746172792e7361666574656e736f7273")
+
+global.rodata.def @pocket.waveforms = bytes("766f696365732e7361666574656e736f7273")
+
+global.rodata.def @pocket.policy = bytes("776569676874732e6c6f6f6d")
+
+// Source phases are initialization, BOS, voice encoding, cache publication,
+// restoration, text prefill, and generation. BOS and text share one command.
+global.rodata.def @pocket.root_initialize = bytes("62617463685f696e697469616c697a655f72657175657374")
+
+global.rodata.def @pocket.root_prefill = bytes("62617463685f70726566696c6c5f74657874")
+
+global.rodata.def @pocket.root_voice = bytes("62617463685f656e636f64655f766f696365")
+
+global.rodata.def @pocket.root_save = bytes("62617463685f736176655f636f6e646974696f6e696e67")
+
+global.rodata.def @pocket.root_restore = bytes("62617463685f726573746f72655f636f6e646974696f6e696e67")
+
+global.rodata.def @pocket.root_generate = bytes("62617463685f67656e65726174655f617564696f")
+
+func.decl @pocket.configure(%stage: i32, %model: buffer)
+
+func.def @pocket.bind_weights(%stage: i32, %directory: buffer) {
+  %checkpoint = global.load @pocket.checkpoint : buffer
+  %rotary = global.load @pocket.rotary : buffer
+  %policy = global.load @pocket.policy : buffer
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  func.call @parameter(%stage, %zero, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %one, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %two, %directory, %rotary, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.return
+}
+
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+  %model = func.call @pocket.parse_options(%options) : (buffer) -> (buffer)
+  %initialize_root = global.load @pocket.root_initialize : buffer
+  %tag0 = scalar.constant 0 : i64
+  %initialize_stage = func.call @stage(%initialize_root, %tag0) : (buffer, i64) -> (i32)
+  func.call @pocket.configure(%initialize_stage, %model) : (i32, buffer)
+  %prefill_root = global.load @pocket.root_prefill : buffer
+  %tag1 = scalar.constant 1 : i64
+  %bos_stage = func.call @stage(%prefill_root, %tag1) : (buffer, i64) -> (i32)
+  func.call @pocket.configure(%bos_stage, %model) : (i32, buffer)
+  func.call @pocket.bind_weights(%bos_stage, %directory) : (i32, buffer)
+  %voice_root = global.load @pocket.root_voice : buffer
+  %tag2 = scalar.constant 2 : i64
+  %voice_stage = func.call @stage(%voice_root, %tag2) : (buffer, i64) -> (i32)
+  func.call @pocket.configure(%voice_stage, %model) : (i32, buffer)
+  func.call @pocket.bind_weights(%voice_stage, %directory) : (i32, buffer)
+  %voices = global.load @pocket.waveforms : buffer
+  %policy = global.load @pocket.policy : buffer
+  %three = scalar.constant 3 : i32
+  func.call @parameter(%voice_stage, %three, %directory, %voices, %policy) : (i32, i32, buffer, buffer, buffer)
+  %save_root = global.load @pocket.root_save : buffer
+  %tag3 = scalar.constant 3 : i64
+  %save_stage = func.call @stage(%save_root, %tag3) : (buffer, i64) -> (i32)
+  func.call @pocket.configure(%save_stage, %model) : (i32, buffer)
+  %restore_root = global.load @pocket.root_restore : buffer
+  %tag4 = scalar.constant 4 : i64
+  %restore_stage = func.call @stage(%restore_root, %tag4) : (buffer, i64) -> (i32)
+  func.call @pocket.configure(%restore_stage, %model) : (i32, buffer)
+  %tag5 = scalar.constant 5 : i64
+  %text_stage = func.call @stage(%prefill_root, %tag5) : (buffer, i64) -> (i32)
+  func.call @pocket.configure(%text_stage, %model) : (i32, buffer)
+  func.call @pocket.bind_weights(%text_stage, %directory) : (i32, buffer)
+  %generate_root = global.load @pocket.root_generate : buffer
+  %tag6 = scalar.constant 6 : i64
+  %generate_stage = func.call @stage(%generate_root, %tag6) : (buffer, i64) -> (i32)
+  func.call @pocket.configure(%generate_stage, %model) : (i32, buffer)
+  func.call @pocket.bind_weights(%generate_stage, %directory) : (i32, buffer)
+  %origin = index.constant 0 : offset
+  %header = buffer.view %model[%origin] : buffer -> view<12xi32>
+  %requests32 = view.load %header[4] : view<12xi32> -> i32
+  %batch32 = view.load %header[5] : view<12xi32> -> i32
+  %context32 = view.load %header[0] : view<12xi32> -> i32
+  %voice_count32 = view.load %header[7] : view<12xi32> -> i32
+  %voice_frames32 = view.load %header[8] : view<12xi32> -> i32
+  %requests = scalar.extui %requests32 : i32 to i64
+  %batch = scalar.extui %batch32 : i32 to i64
+  %context = index.cast %context32 : i32 to index
+  %voice_count = index.cast %voice_count32 : i32 to index
+  %voice_frames = index.cast %voice_frames32 : i32 to index
+  %batch_index = index.cast %batch32 : i32 to index
+  %conditioning_stride = template.apply<@pocket.conditioning_size>(%voice_frames) pure : (index) -> (offset)
+  %conditioning_bytes = index.scale %voice_count, %conditioning_stride : index, offset -> offset
+  %conditioning = index.cast %conditioning_bytes : offset to i64
+  %state_bytes = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+  %state = index.cast %state_bytes : offset to i64
+  %work_bytes = template.apply<@pocket.batch_work_size>(%batch_index) pure : (index) -> (offset)
+  %work = index.cast %work_bytes : offset to i64
+  %output_stride = scalar.constant 7684 : i64
+  %output = scalar.muli %batch, %output_stride : i64
+  %input = scalar.constant 16 : i64
+  %frames = scalar.constant 1920 : i64
+  %rate = scalar.constant 24000 : i64
+  %channels = scalar.constant 1 : i64
+  %tokenizer = global.load @pocket.tokenizer : buffer
+  %name = global.load @pocket.name : buffer
+  %empty = global.load @pocket.prepare_empty : buffer
+  func.return %requests, %batch, %input, %conditioning, %state, %work, %output, %output, %frames, %rate, %channels, %tokenizer, %name, %model, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
+}
