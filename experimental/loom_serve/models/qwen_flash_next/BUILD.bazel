@@ -199,6 +199,30 @@ loom_test(
     deps = [":residual_programs"],
 )
 
+loom_library(
+    name = "quantized_reference",
+    srcs = ["tests/quantized_reference.loom"],
+)
+
+loom_test(
+    name = "expert_matrix_test",
+    srcs = [
+        "tests/expert_matrix.loom",
+        "tests/expert_matrix_reference.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {"flash_next.token_count": "19"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_PROFILE,
+    ],
+    deps = [
+        ":quantized_reference",
+        ":residual_programs",
+    ],
+)
+
 loom_test(
     name = "quantized_test",
     srcs = ["tests/quantized.loom"],
@@ -207,7 +231,10 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
-    deps = [":residual_programs"],
+    deps = [
+        ":quantized_reference",
+        ":residual_programs",
+    ],
 )
 
 loom_test(
