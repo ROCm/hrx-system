@@ -517,6 +517,9 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
     IREE_ASSERT_OK(iree_hal_semaphore_wait(done, three, iree_infinite_timeout(),
                                            IREE_ASYNC_WAIT_FLAG_NONE));
     EXPECT_EQ(actual, (std::array<uint32_t, 8>{0, 0, 27, 0, 27, 0, 0, 0}));
+    iree_hal_pool_stats_t statistics;
+    iree_hal_pool_query_stats(pool_, &statistics);
+    EXPECT_EQ(statistics.reservation_count, 0u);
     iree_hal_semaphore_release(done);
     iree_hal_semaphore_release(gate);
   }

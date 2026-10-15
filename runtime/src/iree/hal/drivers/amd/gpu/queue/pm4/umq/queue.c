@@ -1240,6 +1240,10 @@ static bool iree_hal_amd_gpu_pm4_umq_retire(void* user_data,
       break;
     }
     iree_hal_amd_gpu_pm4_submission_t* submission = action->submission;
+    if (action->terminal &&
+        !iree_hal_amd_gpu_pm4_submission_retirement_ready(submission)) {
+      break;
+    }
     const uint64_t consumed_words = action->consumed_words;
     const uint64_t consumed_arguments = action->consumed_arguments;
     if (action->download.length) {
@@ -1285,8 +1289,10 @@ static bool iree_hal_amd_gpu_pm4_umq_retire(void* user_data,
   if (position != initial) {
     iree_hal_amd_gpu_continuation_notify(&queue->continuation);
   }
-  return position != published && iree_hal_amd_gpu_pm4_retirement_poll(
-                                      &queue->retirement, position) != NULL;
+  // A later source can retire this source's native producer. One more round
+  // after actual progress joins those causal payload lifetimes without a
+  // topological queue walk or polling merely outstanding native work.
+  return position != initial;
 }
 
 iree_hal_amd_gpu_completion_source_t

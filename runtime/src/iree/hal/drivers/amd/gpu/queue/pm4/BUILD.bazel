@@ -226,6 +226,7 @@ iree_runtime_cc_test(
         ":barrier",
         ":dispatch",
         ":semaphore",
+        ":signal",
         ":submission",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",

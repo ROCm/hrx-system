@@ -16,10 +16,10 @@ extern "C" {
 #endif  // __cplusplus
 
 // On success, consumes a bounded batch of authoritative completion records.
-// Returns true only when another batch is immediately ready; outstanding GPU
-// work alone is not ready work. Native events are hints, never completion
-// facts. The callback runs only on the completion worker, without a
-// worker-owned lock.
+// Returns true when another batch is immediately ready or this batch retired
+// resources that may unblock another source. Outstanding GPU work alone does
+// not request another round. Native events are hints, never completion facts.
+// The callback runs only on the completion worker, without a worker-owned lock.
 //
 // A native wait failure is delivered once to every source before worker exit.
 // The source records terminal queue failure; its return value is then ignored.

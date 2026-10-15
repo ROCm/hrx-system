@@ -260,6 +260,7 @@ iree_cc_test(
     ::barrier
     ::dispatch
     ::semaphore
+    ::signal
     ::submission
     iree::async
     iree::async::platform

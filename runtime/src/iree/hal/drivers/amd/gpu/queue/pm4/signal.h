@@ -25,8 +25,14 @@ typedef struct iree_hal_amd_gpu_pm4_signal_pool_t
 typedef struct iree_hal_amd_gpu_pm4_signal_t {
   // Exclusive free-list state or shared live-use state, never both.
   union {
-    // Independent live uses; new references require an existing live borrow.
-    iree_atomic_ref_count_t ref_count;
+    // Live ownership and producer retirement, sharing the free-link footprint.
+    struct {
+      // Independent uses; new references require an existing live borrow.
+      iree_atomic_ref_count_t ref_count;
+      // Producer payload uses have ended on the host, independently of the
+      // GPU-written cell. Retained readers keep this fact alive after cleanup.
+      iree_atomic_int32_t retired;
+    } live;
     // Link accessed only under the pool mutex after the last use has joined.
     struct iree_hal_amd_gpu_pm4_signal_t* next;
   } state;
@@ -103,6 +109,25 @@ iree_hal_amd_gpu_pm4_signal_t* iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
 // under the same lock that protects removal; raw pointer loads cannot retain a
 // signal racing its last release and reuse. NULL is ignored.
 void iree_hal_amd_gpu_pm4_signal_retain(iree_hal_amd_gpu_pm4_signal_t* signal);
+
+// Publishes that all producer-owned payload references and host effects have
+// retired. Native execution alone does not establish this fact. Idempotent for
+// a producer's separate retirement and final publication-bookkeeping release.
+static inline void iree_hal_amd_gpu_pm4_signal_retire(
+    iree_hal_amd_gpu_pm4_signal_t* signal) {
+  if (signal) {
+    iree_atomic_store(&signal->state.live.retired, 1,
+                      iree_memory_order_release);
+  }
+}
+
+// Queries a retained native dependency without visiting its original queue,
+// capture, semaphore, or global frontier tracker.
+static inline bool iree_hal_amd_gpu_pm4_signal_is_retired(
+    const iree_hal_amd_gpu_pm4_signal_t* signal) {
+  return iree_atomic_load(&signal->state.live.retired,
+                          iree_memory_order_acquire) != 0;
+}
 
 // Returns one use, making the cell reusable only after the last use joins.
 // A native use ends at proven execution completion or native quiescence, never

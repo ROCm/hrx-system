@@ -215,6 +215,40 @@ TEST_F(CompletionTest, CoalescedWakeBeforeWaitPreservesTheFinalWork) {
   EXPECT_EQ(calls, 2u);
 }
 
+TEST_F(CompletionTest, LaterSourceRetirementUnblocksEarlierSourceBeforeWait) {
+  bool producer_retired = false;
+  bool consumer_retired = false;
+  std::vector<uint32_t> order;
+  Callback consumer = [&](amdf_status_t status) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    order.push_back(0);
+    if (!producer_retired || consumer_retired) {
+      return false;
+    }
+    consumer_retired = true;
+    return true;
+  };
+  Callback producer = [&](amdf_status_t status) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    order.push_back(1);
+    if (producer_retired) {
+      return false;
+    }
+    producer_retired = true;
+    // No work remains here, but the earlier source can now retire its payload.
+    return true;
+  };
+  const iree_hal_amd_gpu_completion_source_t sources[] = {Source(consumer),
+                                                          Source(producer)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, {}, {},
+      iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_TRUE(consumer_retired);
+  EXPECT_EQ(order, (std::vector<uint32_t>{0, 1, 0, 1, 0, 1}));
+}
+
 TEST_F(CompletionTest, StaleWakeRechecksWithoutInventingCompletion) {
   uint32_t calls = 0;
   Callback callback = [&](amdf_status_t status) {

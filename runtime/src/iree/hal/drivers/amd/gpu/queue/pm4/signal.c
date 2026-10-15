@@ -45,7 +45,9 @@ iree_hal_amd_gpu_pm4_signal_t* iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
   if (signal) {
     pool->free_head = signal->state.next;
     ++pool->live_count;
-    iree_atomic_ref_count_init(&signal->state.ref_count);
+    iree_atomic_ref_count_init(&signal->state.live.ref_count);
+    iree_atomic_store(&signal->state.live.retired, 0,
+                      iree_memory_order_relaxed);
   }
   iree_slim_mutex_unlock(&pool->mutex);
   if (signal) {
@@ -56,13 +58,13 @@ iree_hal_amd_gpu_pm4_signal_t* iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
 
 void iree_hal_amd_gpu_pm4_signal_retain(iree_hal_amd_gpu_pm4_signal_t* signal) {
   if (signal) {
-    iree_atomic_ref_count_inc(&signal->state.ref_count);
+    iree_atomic_ref_count_inc(&signal->state.live.ref_count);
   }
 }
 
 void iree_hal_amd_gpu_pm4_signal_release(
     iree_hal_amd_gpu_pm4_signal_t* signal) {
-  if (signal && iree_atomic_ref_count_dec(&signal->state.ref_count) == 1) {
+  if (signal && iree_atomic_ref_count_dec(&signal->state.live.ref_count) == 1) {
     iree_hal_amd_gpu_pm4_signal_pool_t* pool = signal->pool;
     iree_slim_mutex_lock(&pool->mutex);
     const bool became_available = pool->free_head == NULL;

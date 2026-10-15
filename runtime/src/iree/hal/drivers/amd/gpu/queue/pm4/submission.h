@@ -148,9 +148,17 @@ iree_byte_span_t iree_hal_amd_gpu_pm4_submission_tail_storage(
 void iree_hal_amd_gpu_pm4_submission_retain(
     iree_hal_amd_gpu_pm4_submission_t* submission);
 
+// Tests the host-retirement facts of already captured native dependencies.
+// Native execution may complete before the fixed-order completion observer
+// retires a producer's payload. All signals here belong to the same device
+// completion owner; a producer's progress prompts another source round.
+bool iree_hal_amd_gpu_pm4_submission_retirement_ready(
+    const iree_hal_amd_gpu_pm4_submission_t* submission);
+
 // Releases payload resources after terminal native completion, before public
 // completion signals. Publication may still retain the capture for its signal
 // bookkeeping, but never accesses the payload after publishing the final piece.
+// Publishes the producer's host-retirement fact after its payload uses end.
 // Only terminal retirement calls this while another capture reference exists.
 void iree_hal_amd_gpu_pm4_submission_retire(
     iree_hal_amd_gpu_pm4_submission_t* submission);

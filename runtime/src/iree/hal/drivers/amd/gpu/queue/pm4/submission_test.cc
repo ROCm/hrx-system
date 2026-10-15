@@ -12,6 +12,7 @@
 
 #include "iree/async/proactor_platform.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/signal.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -89,6 +90,23 @@ TEST_F(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
       &executable.base, &function_, {}, {},
       iree_make_const_byte_span(&constant, sizeof(constant)), {1, &reference},
       &profile_, nullptr, 0, &capture));
+  uint64_t native_value = 0;
+  iree_hal_amd_gpu_pm4_signal_t native_signal;
+  iree_hal_amd_gpu_pm4_signal_pool_t signal_pool;
+  iree_hal_amd_gpu_pm4_signal_pool_initialize(
+      this, &native_value, 0x1000, &native_signal, 1, {}, &signal_pool);
+  capture->signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&signal_pool);
+  iree_hal_amd_gpu_pm4_submission_t* consumer = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
+      &pool_, {1, &semaphore, &signal_value}, {}, nullptr, nullptr, {}, {}, {},
+      {}, &profile_, nullptr, 0, &consumer));
+  // Native admission retains the producer's independent signal owner. GPU
+  // completion alone must not let this consumer publish host completion.
+  consumer->native_wait_count = 1;
+  consumer->waits[0].signal = capture->signal;
+  iree_hal_amd_gpu_pm4_signal_retain(consumer->waits[0].signal);
+  native_value = 1;
+  EXPECT_FALSE(iree_hal_amd_gpu_pm4_submission_retirement_ready(consumer));
   ASSERT_EQ(capture->allocation_size, pool_.block_size);
   const auto tail = iree_hal_amd_gpu_pm4_submission_tail_storage(capture);
   ASSERT_GT(tail.data_length, 0u);
@@ -122,6 +140,7 @@ TEST_F(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
   iree_hal_amd_gpu_pm4_submission_retire(capture);
   EXPECT_TRUE(executable.destroyed);
   EXPECT_TRUE(buffer_destroyed);
+  EXPECT_TRUE(iree_hal_amd_gpu_pm4_submission_retirement_ready(consumer));
   uint64_t completed_value = UINT64_MAX;
   IREE_ASSERT_OK(iree_hal_semaphore_query(capture->signals.semaphores[0],
                                           &completed_value));
@@ -129,6 +148,15 @@ TEST_F(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
   EXPECT_EQ(capture->signals.payload_values[0], 4u);
   EXPECT_EQ(capture->waits[0].value, 3u);
   iree_hal_amd_gpu_pm4_submission_release(capture);
+  // Producer capture destruction does not discard its retirement fact while
+  // the consumer still owns that dependency.
+  EXPECT_TRUE(iree_hal_amd_gpu_pm4_submission_retirement_ready(consumer));
+  iree_hal_amd_gpu_pm4_submission_release(consumer);
+  auto* recycled = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&signal_pool);
+  ASSERT_NE(recycled, nullptr);
+  EXPECT_FALSE(iree_hal_amd_gpu_pm4_signal_is_retired(recycled));
+  iree_hal_amd_gpu_pm4_signal_release(recycled);
+  iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&signal_pool);
   iree_async_proactor_release(proactor);
 }
 
