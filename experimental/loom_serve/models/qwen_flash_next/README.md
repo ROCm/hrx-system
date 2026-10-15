@@ -187,6 +187,17 @@ tokens specialize to packed dot instructions without matrix shared memory.
 Live tails shorter than four rows use the same dot arithmetic. The scheduler
 continues to handle prompt and generated tokens through one epoch contract.
 
+Other dense Q8 projections retain the original checkpoint layout. One matrix
+template accepts the tile dimensions, wave geometry, and pipeline depth as SSA
+values. Shape selection keeps dot products for tiny epochs, uses smaller tiles
+when a narrow output needs more independent workgroups, and increases reuse to
+128-by-128 output tiles for wide prefill projections. Six declared schedules
+instantiate the same contraction body through 128-thread and 256-thread launch
+entries. The selection specializes during command compilation; no CPU decision
+or parameter repacking is added to an epoch. The immutable epoch header bounds
+active rows, so partial tiles preserve inactive storage and cannot mix padding
+into valid results.
+
 Expert projections group routes by their selected expert. For capacities above
 four tokens, one GPU workgroup builds a histogram, scans record offsets, and
 scatters original `token * 10 + slot` identities into four-route records. Each
