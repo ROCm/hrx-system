@@ -14,6 +14,12 @@ kernel.decl @pocket.batch.restore_conditioning() launch(%work: buffer, %conditio
 
 kernel.decl @pocket.initialize_request() launch(%state: buffer)
 
+kernel.decl @pocket.batch.pack_token() launch(%work: buffer, %output: buffer)
+
+kernel.decl @pocket.batch.pack_seed() launch(%work: buffer, %requests: buffer, %output: buffer)
+
+kernel.decl @pocket.batch.pack_voice() launch(%work: buffer, %voices: buffer, %output: buffer)
+
 // Three packed rows select residents 5, 0, and 3. The last two share a
 // voice; only the earlier one publishes it. Unequal voice prefixes occupy two and
 // three positions in a four-position request context.
@@ -29,6 +35,9 @@ kernel.def target(@pocket) @conditioning_work() {
   %three = scalar.constant 3 : i32
   %four = scalar.constant 4 : i32
   %six = scalar.constant 6 : i32
+  %token0 = scalar.constant 101 : i32
+  %token1 = scalar.constant 202 : i32
+  %token2 = scalar.constant 303 : i32
   view.store %count, %words[0] : i32, view<32xi32>
   view.store %first, %words[1] : i32, view<32xi32>
   view.store %zero, %words[2] : i32, view<32xi32>
@@ -40,18 +49,21 @@ kernel.def target(@pocket) @conditioning_work() {
   view.store %chunk, %words[11] : i32, view<32xi32>
   view.store %one, %words[12] : i32, view<32xi32>
   view.store %one, %words[13] : i32, view<32xi32>
+  view.store %token0, %words[14] : i32, view<32xi32>
   view.store %three, %words[16] : i32, view<32xi32>
   view.store %zero, %words[17] : i32, view<32xi32>
-  view.store %zero, %words[18] : i32, view<32xi32>
+  view.store %one, %words[18] : i32, view<32xi32>
   view.store %four, %words[19] : i32, view<32xi32>
   view.store %two, %words[20] : i32, view<32xi32>
   view.store %one, %words[21] : i32, view<32xi32>
+  view.store %token1, %words[22] : i32, view<32xi32>
   view.store %three, %words[24] : i32, view<32xi32>
   view.store %zero, %words[25] : i32, view<32xi32>
   view.store %zero, %words[26] : i32, view<32xi32>
   view.store %six, %words[27] : i32, view<32xi32>
   view.store %two, %words[28] : i32, view<32xi32>
   view.store %zero, %words[29] : i32, view<32xi32>
+  view.store %token2, %words[30] : i32, view<32xi32>
   kernel.return
 }
 
@@ -190,5 +202,57 @@ check.case public @initialization_clears_only_selected_residents {
   %original4 = check.tensor.view %source_expected offset(18590400) : tensor<6971400xi32> -> tensor<1161900xi32>
   check.expect.bitwise actual(%untouched12) expected(%original12) : tensor<2323800xi32>
   check.expect.bitwise actual(%untouched4) expected(%original4) : tensor<1161900xi32>
+  check.return
+}
+
+check.case public @packed_tokens_seeds_and_waveform_blocks {
+  %work = check.generate.fill value(-1) : tensor<32xi32>
+  %count = check.literal value(3) : i32
+  %first = check.literal value(5) : i32
+  %chunk = check.literal value(2) : i32
+  %zero = check.literal value(0) : i32
+  kernel.launch @conditioning_work(%work, %count, %first, %chunk) : (tensor<32xi32>, i32, i32, i32)
+  %tokens = check.generate.fill value(-17) : tensor<5xi32>
+  %requests = check.generate.iota offset(1311768467750121217) step(1) : tensor<12xi64>
+  %seeds = check.generate.fill value(-17) : tensor<4xi64>
+  %voices = check.generate.iota offset(0.0) step(0.125) : tensor<3x2x1920xf32>
+  %blocks = check.generate.fill value(-17.0) : tensor<5764xf32>
+  kernel.launch @pocket.batch.pack_token(%work, %tokens) : (tensor<32xi32>, tensor<5xi32>)
+  kernel.launch @pocket.batch.pack_seed(%work, %requests, %seeds) : (tensor<32xi32>, tensor<12xi64>, tensor<4xi64>)
+  kernel.launch @pocket.batch.pack_voice(%work, %voices, %blocks) : (tensor<32xi32>, tensor<3x2x1920xf32>, tensor<5764xf32>)
+  kernel.launch @conditioning_work(%work, %zero, %first, %chunk) : (tensor<32xi32>, i32, i32, i32)
+  kernel.launch @pocket.batch.pack_token(%work, %tokens) : (tensor<32xi32>, tensor<5xi32>)
+  kernel.launch @pocket.batch.pack_seed(%work, %requests, %seeds) : (tensor<32xi32>, tensor<12xi64>, tensor<4xi64>)
+  kernel.launch @pocket.batch.pack_voice(%work, %voices, %blocks) : (tensor<32xi32>, tensor<3x2x1920xf32>, tensor<5764xf32>)
+  %token_values = check.tensor.view %tokens offset(0) : tensor<5xi32> -> tensor<3xi32>
+  %expected_tokens = check.generate.iota offset(101) step(101) : tensor<3xi32>
+  check.expect.bitwise actual(%token_values) expected(%expected_tokens) : tensor<3xi32>
+  %token_guard = check.tensor.view %tokens offset(12) : tensor<5xi32> -> tensor<2xi32>
+  %expected_token_guard = check.generate.fill value(-17) : tensor<2xi32>
+  check.expect.bitwise actual(%token_guard) expected(%expected_token_guard) : tensor<2xi32>
+  %seed0 = check.tensor.view %seeds offset(0) : tensor<4xi64> -> tensor<1xi64>
+  %seed1 = check.tensor.view %seeds offset(8) : tensor<4xi64> -> tensor<1xi64>
+  %seed2 = check.tensor.view %seeds offset(16) : tensor<4xi64> -> tensor<1xi64>
+  %expected_seed0 = check.tensor.view %requests offset(80) : tensor<12xi64> -> tensor<1xi64>
+  %expected_seed1 = check.tensor.view %requests offset(0) : tensor<12xi64> -> tensor<1xi64>
+  %expected_seed2 = check.tensor.view %requests offset(48) : tensor<12xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%seed0) expected(%expected_seed0) : tensor<1xi64>
+  check.expect.bitwise actual(%seed1) expected(%expected_seed1) : tensor<1xi64>
+  check.expect.bitwise actual(%seed2) expected(%expected_seed2) : tensor<1xi64>
+  %seed_guard = check.tensor.view %seeds offset(24) : tensor<4xi64> -> tensor<1xi64>
+  %expected_seed_guard = check.generate.fill value(-17) : tensor<1xi64>
+  check.expect.bitwise actual(%seed_guard) expected(%expected_seed_guard) : tensor<1xi64>
+  %block0 = check.tensor.view %blocks offset(0) : tensor<5764xf32> -> tensor<1920xf32>
+  %block1 = check.tensor.view %blocks offset(7680) : tensor<5764xf32> -> tensor<1920xf32>
+  %block2 = check.tensor.view %blocks offset(15360) : tensor<5764xf32> -> tensor<1920xf32>
+  %expected_block0 = check.tensor.view %voices offset(15360) : tensor<3x2x1920xf32> -> tensor<1920xf32>
+  %expected_block1 = check.tensor.view %voices offset(7680) : tensor<3x2x1920xf32> -> tensor<1920xf32>
+  %expected_block2 = check.tensor.view %voices offset(0) : tensor<3x2x1920xf32> -> tensor<1920xf32>
+  check.expect.bitwise actual(%block0) expected(%expected_block0) : tensor<1920xf32>
+  check.expect.bitwise actual(%block1) expected(%expected_block1) : tensor<1920xf32>
+  check.expect.bitwise actual(%block2) expected(%expected_block2) : tensor<1920xf32>
+  %block_guard = check.tensor.view %blocks offset(23040) : tensor<5764xf32> -> tensor<4xf32>
+  %expected_block_guard = check.generate.fill value(-17.0) : tensor<4xf32>
+  check.expect.bitwise actual(%block_guard) expected(%expected_block_guard) : tensor<4xf32>
   check.return
 }
