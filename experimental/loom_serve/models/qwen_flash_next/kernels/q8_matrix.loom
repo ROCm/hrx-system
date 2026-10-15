@@ -76,7 +76,13 @@ template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, 
     %weight_fragment = buffer.view %weight_stage[%origin] : buffer -> view<32x[%tile_columns]xbf16, %weight_layout>
     %metadata_view = buffer.view %metadata[%origin] : buffer -> view<[%tile_columns]xf32>
     %input_view = buffer.view %input[%origin] : buffer -> view<[%capacity]x[%inputs]xbf16>
-    %output_view = buffer.view %output[%origin] : buffer -> view<[%end]x[%outputs]xbf16>
+    // Keep the workgroup origin in a full-width byte offset. Wave-local row
+    // coordinates then remain small even when the complete output exceeds 4 GiB.
+    %remaining_rows = index.sub %end, %first : index
+    %element_bytes = index.constant 2 : offset
+    %output_row_bytes = index.scale %outputs, %element_bytes : index, offset -> offset
+    %tile_byte_offset = index.scale %first, %output_row_bytes : index, offset -> offset
+    %output_view = buffer.view %output[%tile_byte_offset] : buffer -> view<[%remaining_rows]x[%outputs]xbf16>
     %zeros = vector.constant 0.0 : vector<4xbf16>
     %accumulator_zero = vector.constant 0.0 : vector<8xf32>
     %initial = vector.fragment<init> %accumulator_zero shape [%c16, %c16] : vector<8xf32>
@@ -167,33 +173,32 @@ template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, 
       %column_fragment = index.rem %ordinal, %column_fragments : index
       %fragment_row = index.madd %row_fragment, %c16, %wave_token : index
       %fragment_column = index.madd %column_fragment, %c16, %wave_channel : index
-      %result_row = index.add %first, %fragment_row : index
       %result_column = index.add %channel_base, %fragment_column : index
       %result = vector.extract %result_tile[%ordinal] : vector<[%fragment_count]x8xf32> -> vector<8xf32>
-      %row_limit = index.add %result_row, %c16 : index
+      %row_limit = index.add %fragment_row, %c16 : index
       %column_limit = index.add %result_column, %c16 : index
-      %full_rows = index.cmp ule, %row_limit, %end : index
+      %full_rows = index.cmp ule, %row_limit, %remaining_rows : index
       %full_columns = index.cmp ule, %column_limit, %outputs : index
       %full_fragment = scalar.andi %full_rows, %full_columns : i1
       scf.if %full_fragment {
-        %maximum_row = index.sub %end, %c16 : index
+        %maximum_row = index.sub %remaining_rows, %c16 : index
         %maximum_column = index.sub %outputs, %c16 : index
-        %checked_row = index.assume %result_row [ge(%result_row, 0), le(%result_row, %maximum_row)] : index
+        %checked_row = index.assume %fragment_row [ge(%fragment_row, 0), le(%fragment_row, %maximum_row)] : index
         %checked_column = index.assume %result_column [ge(%result_column, 0), le(%result_column, %maximum_column)] : index
         %fragment = vector.fragment<result> %result shape [%c16, %c16] : vector<8xf32>
-        vector.fragment.store<result> %fragment, %output_view[%checked_row, %checked_column] shape [%c16, %c16] : vector<8xf32>, view<[%end]x[%outputs]xbf16>
+        vector.fragment.store<result> %fragment, %output_view[%checked_row, %checked_column] shape [%c16, %c16] : vector<8xf32>, view<[%remaining_rows]x[%outputs]xbf16>
       } else {
         %column = index.add %result_column, %lane_column : index
         %live_column = index.cmp ult, %column, %outputs : index
         %packed = vector.fptrunc %result : vector<8xf32> to vector<8xbf16>
         scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
           %within_row = index.madd %element, %c2, %lane_row : index
-          %token = index.add %result_row, %within_row : index
-          %live_row = index.cmp ult, %token, %end : index
+          %token = index.add %fragment_row, %within_row : index
+          %live_row = index.cmp ult, %token, %remaining_rows : index
           %live = scalar.andi %live_row, %live_column : i1
           scf.if %live {
             %value = vector.extract %packed[%element] : vector<8xbf16> -> bf16
-            view.store %value, %output_view[%token, %column] : bf16, view<[%end]x[%outputs]xbf16>
+            view.store %value, %output_view[%token, %column] : bf16, view<[%remaining_rows]x[%outputs]xbf16>
           }
         }
       }
