@@ -64,8 +64,9 @@ loom_test_module(
     epoch_encoding_test_module
   SRCS
     "epoch_control.loom"
-    "epoch_media.loom"
     "tests/epoch_encoding.loom"
+  LIBRARIES
+    "::epoch_media"
 )
 
 if(LOOM_TARGET_ARCH_VM)
@@ -120,14 +121,35 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
     "${CMAKE_CURRENT_BINARY_DIR}/sources.stamp"
 )
 
+loom_module(
+  NAME
+    input_records
+  SRCS
+    "kernels/qwen38/inputs.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
+loom_module(
+  NAME
+    epoch_media
+  SRCS
+    "epoch_media.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
 loom_test_module(
   NAME
     input_embedding_test_module
   SRCS
-    "kernels/qwen38/inputs.loom"
     "kernels/qwen38/token_embedding.loom"
     "tests/input_embedding.loom"
     "iree::experimental::loom_serve::motifs::ggml::sources"
+  LIBRARIES
+    "::input_records"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -853,9 +875,10 @@ loom_test_module(
     dflash_proposal_test_module
   SRCS
     "kernels/qwen38/dflash_proposal.loom"
-    "kernels/qwen38/inputs.loom"
     "kernels/qwen38/spans.loom"
     "tests/dflash_proposal.loom"
+  LIBRARIES
+    "::input_records"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -1215,7 +1238,6 @@ loom_test_module(
   SRCS
     "kernels/qwen38/accept.loom"
     "kernels/qwen38/continuation.loom"
-    "kernels/qwen38/inputs.loom"
     "kernels/qwen38/mtp_prepare.loom"
     "kernels/qwen38/mtp_proposal.loom"
     "kernels/qwen38/spans.loom"
@@ -1224,6 +1246,8 @@ loom_test_module(
     "tests/continuation_media.loom"
     "tests/mtp_prepare.loom"
     "tests/mtp_proposal.loom"
+  LIBRARIES
+    "::input_records"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -1286,11 +1310,12 @@ loom_test_module(
     "kernels/qwen38/attention_prefill.loom"
     "kernels/qwen38/attention_prefill_wmma.loom"
     "kernels/qwen38/attention_spans.loom"
-    "kernels/qwen38/inputs.loom"
     "kernels/qwen38/spans.loom"
     "tests/attention_media.loom"
     "tests/attention_pages.loom"
     "tests/attention_spans.loom"
+  LIBRARIES
+    "::input_records"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -1472,11 +1497,12 @@ loom_test_module(
     epoch_control_test_module
   SRCS
     "epoch_control.loom"
-    "epoch_media.loom"
     "kernels/qwen38/continuation.loom"
-    "kernels/qwen38/inputs.loom"
     "kernels/qwen38/spans.loom"
     "tests/epoch_control.loom"
+  LIBRARIES
+    "::epoch_media"
+    "::input_records"
 )
 
 if(LOOM_TARGET_ARCH_VM)
