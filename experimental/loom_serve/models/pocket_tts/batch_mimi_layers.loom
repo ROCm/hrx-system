@@ -1,0 +1,161 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Packed activations use source tensor extents; persistent histories retain
+// their independently supplied resident stride across every compatible cohort.
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.rotary_capacity : %value: index where [range(%value, 16, 1048576)]
+
+kernel.decl @pocket.batch.attention_scores_512x16_c265_p249_kernel() launch(%membership: buffer, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer, %q_offset: offset, %q_stride: offset, %keys_offset: offset, %keys_stride: offset, %position_offset: offset, %position_stride: offset, %scores_offset: offset, %scores_stride: offset)
+
+kernel.decl @pocket.batch.attention_values_512x16_c265_p249_kernel() launch(%membership: buffer, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer, %values_offset: offset, %values_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset, %position_offset: offset, %position_stride: offset, %y_offset: offset, %y_stride: offset)
+
+kernel.decl @pocket.batch.gelu_32768_kernel() launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+kernel.decl @pocket.batch.normalization_affine_512x16_e1em05_kernel() launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset)
+
+kernel.decl @pocket.batch.project_f32_kernel(%dispatch_outputs: index, %dispatch_times: index) launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset)
+
+kernel.decl @pocket.batch.project_f64_kernel(%dispatch_outputs: index, %dispatch_times: index) launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset)
+
+kernel.decl @pocket.batch.residual_scaled_512x16_kernel() launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset)
+
+kernel.decl @pocket.batch.rotary_cache_512x16_c265_p249_kernel() launch(%membership: buffer, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer, %x_offset: offset, %x_stride: offset, %q_offset: offset, %q_stride: offset, %keys_offset: offset, %keys_stride: offset, %values_offset: offset, %values_stride: offset, %position_offset: offset, %position_stride: offset, %cosine_offset: offset, %cosine_stride: offset, %sine_offset: offset, %sine_stride: offset)
+
+kernel.decl @pocket.batch.softmax_128x265_kernel() launch(%membership: buffer, %scores_storage: buffer, %probabilities_storage: buffer, %scores_offset: offset, %scores_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset)
+
+template.decl @pocket.batch.mimi_decoder_layer(%membership: buffer, %state_stride: offset, %layer: index, %cache_origin: offset, %phase: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer)
+
+template.decl @pocket.batch.mimi_encoder_layer(%membership: buffer, %state_stride: offset, %layer: index, %cache_origin: offset, %phase: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer)
+
+template.def<@pocket.batch.mimi_encoder_layer> @pocket_batch_mimi_encoder_layer(%membership: buffer, %state_stride: offset, %layer: index, %cache_origin: offset, %phase: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer) {
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  %batch_zero = index.constant 0 : offset
+  %batch_stride_1 = index.constant 32768 : offset
+  %rotary_capacity = config.get @pocket.rotary_capacity : index
+  %tensor_offset = index.constant 8 : offset
+  %normalization_storage_bytes = index.constant 32768 : offset
+  %batch_bytes_2 = index.scale %batch_capacity, %normalization_storage_bytes : index, offset -> offset
+  %normalization_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %normalization_tensor_offset = index.constant 0 : offset
+  %normalization_parameter = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.norm1.weight"[%layer] : view<512xbf16>
+  %normalization_parameter_2 = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.norm1.bias"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.normalization_affine_512x16_e1em05_kernel(%membership, %input, %normalization_storage, %normalization_parameter, %normalization_parameter_2, %batch_zero, %batch_stride_1, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, view<512xbf16>, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_tensor_offset_relative = index.constant 0 : offset
+  %attention_tensor_offset = index.add %cache_origin, %attention_tensor_offset_relative : offset
+  %attention_tensor_2_offset_relative = index.constant 542720 : offset
+  %attention_tensor_2_offset = index.add %cache_origin, %attention_tensor_2_offset_relative : offset
+  %attention_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %projection_parameter = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.self_attn.in_proj.weight"[%layer] : view<1536x512xbf16>
+  %projection_storage_bytes = index.constant 98304 : offset
+  %batch_bytes_3 = index.scale %batch_capacity, %projection_storage_bytes : index, offset -> offset
+  %projection_storage = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  %projection_inputs = index.constant 512 : index
+  %projection_outputs = index.constant 1536 : index
+  %projection_times = index.constant 16 : index
+  kernel.launch @pocket.batch.project_f64_kernel[%projection_outputs, %projection_times](%membership, %projection_inputs, %projection_outputs, %projection_times, %normalization_storage, %projection_parameter, %projection_parameter, %projection_storage, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %normalization_tensor_offset, %projection_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<1536x512xbf16>, view<1536x512xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<[%rotary_capacity]x32xf32>
+  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<[%rotary_capacity]x32xf32>
+  kernel.launch @pocket.batch.rotary_cache_512x16_c265_p249_kernel(%membership, %projection_storage, %attention_storage, %state, %state, %state, %attention_parameter, %attention_parameter_2, %normalization_tensor_offset, %projection_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %attention_tensor_offset, %state_stride, %attention_tensor_2_offset, %state_stride, %tensor_offset, %state_stride, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, buffer, buffer, buffer, view<[%rotary_capacity]x32xf32>, view<[%rotary_capacity]x32xf32>, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_storage_2_bytes = index.constant 135680 : offset
+  %batch_bytes_4 = index.scale %batch_capacity, %attention_storage_2_bytes : index, offset -> offset
+  %attention_storage_2 = buffer.alloca<global> align(16) %batch_bytes_4 : buffer
+  kernel.launch @pocket.batch.attention_scores_512x16_c265_p249_kernel(%membership, %attention_storage, %state, %state, %attention_storage_2, %normalization_tensor_offset, %normalization_storage_bytes, %attention_tensor_offset, %state_stride, %tensor_offset, %state_stride, %normalization_tensor_offset, %attention_storage_2_bytes) : (buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_storage_3 = buffer.alloca<global> align(16) %batch_bytes_4 : buffer
+  kernel.launch @pocket.batch.softmax_128x265_kernel(%membership, %attention_storage_2, %attention_storage_3, %normalization_tensor_offset, %attention_storage_2_bytes, %normalization_tensor_offset, %attention_storage_2_bytes) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  %attention_storage_4 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.attention_values_512x16_c265_p249_kernel(%membership, %state, %attention_storage_3, %state, %attention_storage_4, %attention_tensor_2_offset, %state_stride, %normalization_tensor_offset, %attention_storage_2_bytes, %tensor_offset, %state_stride, %normalization_tensor_offset, %normalization_storage_bytes) : (buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %projection_parameter_2 = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.self_attn.out_proj.weight"[%layer] : view<512x512xbf16>
+  %projection_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.project_f64_kernel[%projection_inputs, %projection_times](%membership, %projection_inputs, %projection_inputs, %projection_times, %attention_storage_4, %projection_parameter_2, %projection_parameter_2, %projection_storage_2, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %normalization_tensor_offset, %normalization_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<512x512xbf16>, view<512x512xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %residual_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %residual_parameter = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.layer_scale_1.scale"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.residual_scaled_512x16_kernel(%membership, %input, %projection_storage_2, %residual_storage, %residual_parameter, %batch_zero, %batch_stride_1, %normalization_tensor_offset, %normalization_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero) : (buffer, buffer, buffer, buffer, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %normalization_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %normalization_parameter_3 = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.norm2.weight"[%layer] : view<512xbf16>
+  %normalization_parameter_4 = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.norm2.bias"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.normalization_affine_512x16_e1em05_kernel(%membership, %residual_storage, %normalization_storage_2, %normalization_parameter_3, %normalization_parameter_4, %normalization_tensor_offset, %normalization_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, view<512xbf16>, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %projection_parameter_3 = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.linear1.weight"[%layer] : view<2048x512xbf16>
+  %projection_storage_3_bytes = index.constant 131072 : offset
+  %batch_bytes_5 = index.scale %batch_capacity, %projection_storage_3_bytes : index, offset -> offset
+  %projection_storage_3 = buffer.alloca<global> align(16) %batch_bytes_5 : buffer
+  %projection_outputs_3 = index.constant 2048 : index
+  kernel.launch @pocket.batch.project_f64_kernel[%projection_outputs_3, %projection_times](%membership, %projection_inputs, %projection_outputs_3, %projection_times, %normalization_storage_2, %projection_parameter_3, %projection_parameter_3, %projection_storage_3, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %normalization_tensor_offset, %projection_storage_3_bytes) : [index, index](buffer, index, index, index, buffer, view<2048x512xbf16>, view<2048x512xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %activation_storage = buffer.alloca<global> align(16) %batch_bytes_5 : buffer
+  kernel.launch @pocket.batch.gelu_32768_kernel(%membership, %projection_storage_3, %activation_storage, %normalization_tensor_offset, %projection_storage_3_bytes, %normalization_tensor_offset, %projection_storage_3_bytes) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  %projection_parameter_4 = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.linear2.weight"[%layer] : view<512x2048xbf16>
+  %projection_storage_4 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.project_f64_kernel[%projection_inputs, %projection_times](%membership, %projection_outputs_3, %projection_inputs, %projection_times, %activation_storage, %projection_parameter_4, %projection_parameter_4, %projection_storage_4, %normalization_tensor_offset, %projection_storage_3_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %normalization_tensor_offset, %normalization_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<512x2048xbf16>, view<512x2048xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %residual_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %residual_parameter_2 = command.parameter %phase, "mimi.encoder_transformer.transformer.layers.{}.layer_scale_2.scale"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.residual_scaled_512x16_kernel(%membership, %residual_storage, %projection_storage_4, %residual_storage_2, %residual_parameter_2, %normalization_tensor_offset, %normalization_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero) : (buffer, buffer, buffer, buffer, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  template.return %residual_storage_2 : buffer
+}
+
+template.def<@pocket.batch.mimi_decoder_layer> @pocket_batch_mimi_decoder_layer(%membership: buffer, %state_stride: offset, %layer: index, %cache_origin: offset, %phase: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer) {
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  %batch_zero = index.constant 0 : offset
+  %batch_stride_1 = index.constant 32768 : offset
+  %rotary_capacity = config.get @pocket.rotary_capacity : index
+  %tensor_offset = index.constant 4 : offset
+  %normalization_storage_bytes = index.constant 32768 : offset
+  %batch_bytes_2 = index.scale %batch_capacity, %normalization_storage_bytes : index, offset -> offset
+  %normalization_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %normalization_tensor_offset = index.constant 0 : offset
+  %normalization_parameter = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.norm1.weight"[%layer] : view<512xbf16>
+  %normalization_parameter_2 = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.norm1.bias"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.normalization_affine_512x16_e1em05_kernel(%membership, %input, %normalization_storage, %normalization_parameter, %normalization_parameter_2, %batch_zero, %batch_stride_1, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, view<512xbf16>, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_tensor_offset_relative = index.constant 0 : offset
+  %attention_tensor_offset = index.add %cache_origin, %attention_tensor_offset_relative : offset
+  %attention_tensor_2_offset_relative = index.constant 542720 : offset
+  %attention_tensor_2_offset = index.add %cache_origin, %attention_tensor_2_offset_relative : offset
+  %attention_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %projection_parameter = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.self_attn.in_proj.weight"[%layer] : view<1536x512xbf16>
+  %projection_storage_bytes = index.constant 98304 : offset
+  %batch_bytes_3 = index.scale %batch_capacity, %projection_storage_bytes : index, offset -> offset
+  %projection_storage = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  %projection_inputs = index.constant 512 : index
+  %projection_outputs = index.constant 1536 : index
+  %projection_times = index.constant 16 : index
+  kernel.launch @pocket.batch.project_f32_kernel[%projection_outputs, %projection_times](%membership, %projection_inputs, %projection_outputs, %projection_times, %normalization_storage, %projection_parameter, %projection_parameter, %projection_storage, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %normalization_tensor_offset, %projection_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<1536x512xbf16>, view<1536x512xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<[%rotary_capacity]x32xf32>
+  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<[%rotary_capacity]x32xf32>
+  kernel.launch @pocket.batch.rotary_cache_512x16_c265_p249_kernel(%membership, %projection_storage, %attention_storage, %state, %state, %state, %attention_parameter, %attention_parameter_2, %normalization_tensor_offset, %projection_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %attention_tensor_offset, %state_stride, %attention_tensor_2_offset, %state_stride, %tensor_offset, %state_stride, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, buffer, buffer, buffer, view<[%rotary_capacity]x32xf32>, view<[%rotary_capacity]x32xf32>, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_storage_2_bytes = index.constant 135680 : offset
+  %batch_bytes_4 = index.scale %batch_capacity, %attention_storage_2_bytes : index, offset -> offset
+  %attention_storage_2 = buffer.alloca<global> align(16) %batch_bytes_4 : buffer
+  kernel.launch @pocket.batch.attention_scores_512x16_c265_p249_kernel(%membership, %attention_storage, %state, %state, %attention_storage_2, %normalization_tensor_offset, %normalization_storage_bytes, %attention_tensor_offset, %state_stride, %tensor_offset, %state_stride, %normalization_tensor_offset, %attention_storage_2_bytes) : (buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_storage_3 = buffer.alloca<global> align(16) %batch_bytes_4 : buffer
+  kernel.launch @pocket.batch.softmax_128x265_kernel(%membership, %attention_storage_2, %attention_storage_3, %normalization_tensor_offset, %attention_storage_2_bytes, %normalization_tensor_offset, %attention_storage_2_bytes) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  %attention_storage_4 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.attention_values_512x16_c265_p249_kernel(%membership, %state, %attention_storage_3, %state, %attention_storage_4, %attention_tensor_2_offset, %state_stride, %normalization_tensor_offset, %attention_storage_2_bytes, %tensor_offset, %state_stride, %normalization_tensor_offset, %normalization_storage_bytes) : (buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %projection_parameter_2 = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.self_attn.out_proj.weight"[%layer] : view<512x512xbf16>
+  %projection_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.project_f32_kernel[%projection_inputs, %projection_times](%membership, %projection_inputs, %projection_inputs, %projection_times, %attention_storage_4, %projection_parameter_2, %projection_parameter_2, %projection_storage_2, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %normalization_tensor_offset, %normalization_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<512x512xbf16>, view<512x512xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %residual_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %residual_parameter = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.layer_scale_1.scale"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.residual_scaled_512x16_kernel(%membership, %input, %projection_storage_2, %residual_storage, %residual_parameter, %batch_zero, %batch_stride_1, %normalization_tensor_offset, %normalization_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero) : (buffer, buffer, buffer, buffer, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %normalization_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %normalization_parameter_3 = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.norm2.weight"[%layer] : view<512xbf16>
+  %normalization_parameter_4 = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.norm2.bias"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.normalization_affine_512x16_e1em05_kernel(%membership, %residual_storage, %normalization_storage_2, %normalization_parameter_3, %normalization_parameter_4, %normalization_tensor_offset, %normalization_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, view<512xbf16>, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %projection_parameter_3 = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.linear1.weight"[%layer] : view<2048x512xbf16>
+  %projection_storage_3_bytes = index.constant 131072 : offset
+  %batch_bytes_5 = index.scale %batch_capacity, %projection_storage_3_bytes : index, offset -> offset
+  %projection_storage_3 = buffer.alloca<global> align(16) %batch_bytes_5 : buffer
+  %projection_outputs_3 = index.constant 2048 : index
+  kernel.launch @pocket.batch.project_f32_kernel[%projection_outputs_3, %projection_times](%membership, %projection_inputs, %projection_outputs_3, %projection_times, %normalization_storage_2, %projection_parameter_3, %projection_parameter_3, %projection_storage_3, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %normalization_tensor_offset, %projection_storage_3_bytes) : [index, index](buffer, index, index, index, buffer, view<2048x512xbf16>, view<2048x512xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %activation_storage = buffer.alloca<global> align(16) %batch_bytes_5 : buffer
+  kernel.launch @pocket.batch.gelu_32768_kernel(%membership, %projection_storage_3, %activation_storage, %normalization_tensor_offset, %projection_storage_3_bytes, %normalization_tensor_offset, %projection_storage_3_bytes) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  %projection_parameter_4 = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.linear2.weight"[%layer] : view<512x2048xbf16>
+  %projection_storage_4 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.project_f32_kernel[%projection_inputs, %projection_times](%membership, %projection_outputs_3, %projection_inputs, %projection_times, %activation_storage, %projection_parameter_4, %projection_parameter_4, %projection_storage_4, %normalization_tensor_offset, %projection_storage_3_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %normalization_tensor_offset, %normalization_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<512x2048xbf16>, view<512x2048xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %residual_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %residual_parameter_2 = command.parameter %phase, "mimi.decoder_transformer.transformer.layers.{}.layer_scale_2.scale"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.residual_scaled_512x16_kernel(%membership, %residual_storage, %projection_storage_4, %residual_storage_2, %residual_parameter_2, %normalization_tensor_offset, %normalization_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %normalization_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero) : (buffer, buffer, buffer, buffer, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  template.return %residual_storage_2 : buffer
+}
