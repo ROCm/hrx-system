@@ -55,6 +55,7 @@ static_assert(LOOM_TYPE_COUNT_ <= 16,
 //===----------------------------------------------------------------------===//
 
 typedef struct loom_value_fact_region_entry_t loom_value_fact_region_entry_t;
+typedef struct loom_value_fact_region_frame_t loom_value_fact_region_frame_t;
 typedef struct loom_value_fact_condition_scratch_t
     loom_value_fact_condition_scratch_t;
 typedef struct loom_value_fact_exact_lane_origin_entry_t
@@ -399,7 +400,7 @@ struct loom_value_fact_table_t {
   } exact_relations;
 
   // Reusable scratch buffers for fact inference calls. Allocated on first use,
-  // grown only when an op needs more slots. Never shrinks. Old buffers are
+  // grown only when an evaluation needs more slots. Old buffers are
   // abandoned in the arena and freed in bulk with the arena.
   struct {
     // Fact scratch buffer state.
@@ -409,6 +410,16 @@ struct loom_value_fact_table_t {
       // Allocated fact scratch entry count.
       iree_host_size_t capacity;
     } facts;
+    // Continuations shared by lexical traversals and reentrant loop solvers.
+    struct {
+      // Active nested frames; each traversal keeps its root on the native
+      // stack.
+      loom_value_fact_region_frame_t* values;
+      // Live prefix reserved across all suspended and current traversals.
+      iree_host_size_t count;
+      // Allocated frame count, reused until the scope is cleared.
+      iree_host_size_t capacity;
+    } regions;
     // Value ID scratch buffer state.
     struct {
       // Scratch value IDs used by transforms that materialize replacements.

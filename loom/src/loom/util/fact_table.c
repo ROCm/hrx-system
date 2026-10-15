@@ -452,15 +452,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->exact_relations.ops = NULL;
   table->exact_relations.count = 0;
   table->exact_relations.capacity = 0;
-  table->scratch.facts.values = NULL;
-  table->scratch.facts.capacity = 0;
-  table->scratch.value_ids.values = NULL;
-  table->scratch.value_ids.capacity = 0;
-  table->scratch.vector_partition_components.values = NULL;
-  table->scratch.vector_partition_components.capacity = 0;
-  table->scratch.alias_ordinals.values = NULL;
-  table->scratch.alias_ordinals.capacity = 0;
-  table->scratch.condition = NULL;
+  memset(&table->scratch, 0, sizeof(table->scratch));
   table->context.table = table;
   table->context.function = (loom_func_like_t){0};
   table->context.reference_origin = (loom_value_fact_reference_origin_t){0};

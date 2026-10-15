@@ -659,3 +659,127 @@ func.def @same_tile_coordinate(%raw: index) -> (index, i1) {
   %equal = scalar.constant true : i1
   func.return %difference, %equal : index, i1
 }
+
+// ====
+
+// RUN: pass canonicalize,dce
+
+// A loop solver reenters fact traversal while both enclosing branches are
+// suspended. Its nested switch joins two independent result facts; completing
+// that solve must resume the enclosing branch and its following operations.
+func.def @nested_region_continuations(%outer: i1, %inner: i1, %repeat: i1, %selector: index) -> (i64, i64) {
+  %low = index.constant 2 : offset
+  %high = index.constant 8 : offset
+  %result = scf.if %outer -> (offset) {
+    %nested = scf.if %inner -> (offset) {
+      scf.while {
+        scf.condition %repeat : i1
+      } do {
+        %left, %right = scf.switch %selector -> (offset, offset) {
+          case 0 {
+            scf.yield %low, %high : offset, offset
+          }
+          default {
+            %deeper = scf.if %inner -> (offset) {
+              test.use %low : offset
+              scf.yield %low : offset
+            } else {
+              test.use %high : offset
+              scf.yield %high : offset
+            }
+            scf.yield %deeper, %low : offset, offset
+          }
+        }
+        %left_low = test.fact_range_lo %left : offset -> i64
+        %right_high = test.fact_range_hi %right : offset -> i64
+        test.use %left_low, %right_high : i64, i64
+        scf.yield
+      }
+      %resumed = index.add %low, %high : offset
+      test.use %resumed : offset
+      scf.yield %resumed : offset
+    } else {
+      test.use %high : offset
+      scf.yield %high : offset
+    }
+    scf.yield %nested : offset
+  } else {
+    test.use %low : offset
+    scf.yield %low : offset
+  }
+  %range_low = test.fact_range_lo %result : offset -> i64
+  %range_high = test.fact_range_hi %result : offset -> i64
+  func.return %range_low, %range_high : i64, i64
+}
+
+// ----
+func.def @nested_region_continuations(%outer: i1, %inner: i1, %repeat: i1, %selector: index) -> (i64, i64) {
+  %low = index.constant 2 : offset
+  %high = index.constant 8 : offset
+  scf.if %outer {
+    scf.if %inner {
+      scf.while {
+        scf.condition %repeat : i1
+      } do {
+        %left, %right = scf.switch %selector -> (offset, offset) {
+          case 0 {
+            scf.yield %low, %high : offset, offset
+          }
+          default {
+            test.use %low : offset
+            scf.yield %low, %low : offset, offset
+          }
+        }
+        %left_low = scalar.constant 2 : i64
+        %right_high = scalar.constant 8 : i64
+        test.use %left_low, %right_high : i64, i64
+        scf.yield
+      }
+      %resumed = index.constant 10 : offset
+      test.use %resumed : offset
+    } else {
+      test.use %high : offset
+    }
+  } else {
+    test.use %low : offset
+  }
+  %range_low = scalar.constant 2 : i64
+  %range_high = scalar.constant 10 : i64
+  func.return %range_low, %range_high : i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// A joined view constrains its sibling extent even when the view precedes the
+// extent in the result tuple. Publish the complete joined tuple together.
+func.def @branch_result_tuple(%condition: i1, %input: buffer, %left_size: i32, %right_size: i32) -> (i1) {
+  %base = index.constant 0 : offset
+  %view, %size = scf.if %condition -> (view<[%size]xi32>, i32) {
+    %left = buffer.view %input[%base] : buffer -> view<[%left_size]xi32>
+    scf.yield %left, %left_size : view<[%left_size]xi32>, i32
+  } else {
+    %right = buffer.view %input[%base] : buffer -> view<[%right_size]xi32>
+    scf.yield %right, %right_size : view<[%right_size]xi32>, i32
+  }
+  test.use %view : view<[%size]xi32>
+  %c0 = scalar.constant 0 : i32
+  %nonnegative = scalar.cmpi sge, %size, %c0 : i32
+  func.return %nonnegative : i1
+}
+
+// ----
+func.def @branch_result_tuple(%condition: i1, %input: buffer, %left_size: i32, %right_size: i32) -> (i1) {
+  %base = index.constant 0 : offset
+  %view, %size = scf.if %condition -> (view<[%size]xi32>, i32) {
+    %left = buffer.view %input[%base] : buffer -> view<[%left_size]xi32>
+    scf.yield %left, %left_size : view<[%left_size]xi32>, i32
+  } else {
+    %right = buffer.view %input[%base] : buffer -> view<[%right_size]xi32>
+    scf.yield %right, %right_size : view<[%right_size]xi32>, i32
+  }
+  test.use %view : view<[%size]xi32>
+  %nonnegative = scalar.constant true : i1
+  func.return %nonnegative : i1
+}

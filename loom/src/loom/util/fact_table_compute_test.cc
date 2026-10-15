@@ -128,6 +128,200 @@ class FactTableComputeTest : public ::testing::Test {
   loom_value_id_t inputs_[2];
 };
 
+class FactTableScratchTest : public FactTableComputeTest {
+ protected:
+  static iree_status_t Allocate(void* self, iree_allocator_command_t command,
+                                const void* parameters, void** pointer) {
+    auto* test = static_cast<FactTableScratchTest*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+        test->allocation_count_++ == test->failure_index_) {
+      test->failure_active_count_ = test->table_.scratch.regions.count;
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "injected fact scratch allocation failure");
+    }
+    const auto allocator = iree_allocator_system();
+    return allocator.ctl(allocator.self, command, parameters, pointer);
+  }
+
+  void SetUp() override {
+    FactTableComputeTest::SetUp();
+    // Small blocks expose individual scratch and region-table allocations.
+    iree_arena_block_pool_initialize(64, {this, Allocate}, &transient_pool_);
+    iree_arena_initialize(&transient_pool_, &transient_arena_);
+    IREE_ASSERT_OK(loom_value_fact_table_initialize_with_arenas(
+        &table_, &arena_, &transient_arena_, 4));
+    SeedInputs();
+    condition_ = DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+  }
+
+  void TearDown() override {
+    iree_arena_deinitialize(&transient_arena_);
+    iree_arena_block_pool_deinitialize(&transient_pool_);
+    FactTableComputeTest::TearDown();
+  }
+
+  void SeedInputs() {
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &table_, inputs_[0], loom_value_facts_make(2, 4, 2)));
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &table_, inputs_[1], loom_value_facts_make(8, 16, 4)));
+  }
+
+  // Each level forwards two different facts through both branches. A nested
+  // branch on the true edge requires a continuation and a complete result join.
+  loom_op_t* BuildBranches(unsigned depth, loom_op_t** out_leaf = nullptr) {
+    const loom_type_t types[] = {type_, type_};
+    loom_op_t* branch = nullptr;
+    IREE_CHECK_OK(loom_test_branch_build(&builder_, condition_, types,
+                                         IREE_ARRAYSIZE(types), nullptr, 0,
+                                         LOOM_LOCATION_UNKNOWN, &branch));
+    if (depth == 1 && out_leaf) {
+      *out_leaf = branch;
+    }
+    for (uint8_t i = 0; i < branch->region_count; ++i) {
+      const auto saved = loom_builder_enter_region(&builder_, branch,
+                                                   loom_op_regions(branch)[i]);
+      const loom_value_id_t* yielded = inputs_;
+      if (i == 0 && depth > 1) {
+        yielded = loom_op_const_results(BuildBranches(depth - 1, out_leaf));
+      }
+      loom_op_t* terminator = nullptr;
+      IREE_CHECK_OK(loom_test_yield_build(&builder_, yielded, 2,
+                                          LOOM_LOCATION_UNKNOWN, &terminator));
+      loom_builder_restore(&builder_, saved);
+    }
+    return branch;
+  }
+
+  void ExpectResults(loom_op_t* branch) {
+    for (uint16_t i = 0; i < branch->result_count; ++i) {
+      const auto expected = loom_value_fact_table_lookup(&table_, inputs_[i]);
+      const auto actual = loom_value_fact_table_lookup(
+          &table_, loom_op_const_results(branch)[i]);
+      EXPECT_EQ(actual.range_lo, expected.range_lo);
+      EXPECT_EQ(actual.range_hi, expected.range_hi);
+      EXPECT_EQ(actual.known_divisor, expected.known_divisor);
+    }
+    EXPECT_EQ(table_.scratch.regions.count, 0u);
+  }
+
+  // Scope-lived extension and scratch backing, separate from retained entries.
+  iree_arena_block_pool_t transient_pool_ = {};
+  // Reset after clearing the table, matching pass-owned fact scopes.
+  iree_arena_allocator_t transient_arena_ = {};
+  // Number of attempted transient backing allocations.
+  iree_host_size_t allocation_count_ = 0;
+  // Backing allocation to fail, or SIZE_MAX for unrestricted allocation.
+  iree_host_size_t failure_index_ = SIZE_MAX;
+  // Live continuations when the selected allocation failed.
+  iree_host_size_t failure_active_count_ = 0;
+  // Unknown selector keeps both branch contributions observable.
+  loom_value_id_t condition_ = LOOM_VALUE_ID_INVALID;
+};
+
+TEST_F(FactTableScratchTest, FlatRegionNeedsNoContinuationStorage) {
+  loom_op_t* identity = nullptr;
+  IREE_ASSERT_OK(BuildIdentity(inputs_[0], &identity));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_region_tree(
+      &table_, module_, module_->body, nullptr));
+  EXPECT_EQ(table_.scratch.regions.values, nullptr);
+  EXPECT_EQ(table_.scratch.regions.capacity, 0u);
+  EXPECT_EQ(
+      loom_value_fact_table_lookup(&table_, loom_op_const_results(identity)[0])
+          .range_lo,
+      2);
+}
+
+TEST_F(FactTableScratchTest, RepeatedBranchQueriesReuseScopeStorage) {
+  loom_op_t* branch = BuildBranches(4);
+  for (unsigned scope = 0; scope < 2; ++scope) {
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, branch));
+    ASSERT_GT(table_.scratch.regions.capacity, 0u);
+    const auto* frames = table_.scratch.regions.values;
+    const auto used_bytes = transient_arena_.used_allocation_size;
+    for (unsigned query = 0; query < 16; ++query) {
+      IREE_ASSERT_OK(
+          loom_value_fact_table_compute_op(&table_, module_, branch));
+      ExpectResults(branch);
+      EXPECT_EQ(table_.scratch.regions.values, frames);
+      EXPECT_EQ(transient_arena_.used_allocation_size, used_bytes);
+    }
+    loom_value_fact_table_clear_scope(&table_);
+    EXPECT_EQ(table_.scratch.regions.values, nullptr);
+    EXPECT_EQ(table_.scratch.regions.capacity, 0u);
+    iree_arena_reset(&transient_arena_);
+    SeedInputs();
+  }
+}
+
+TEST_F(FactTableScratchTest, LoopReentryGrowsPastSuspendedContinuations) {
+  loom_op_t* leaf = nullptr;
+  loom_op_t* branch = BuildBranches(4, &leaf);
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, branch));
+  const auto* frames = table_.scratch.regions.values;
+  const auto capacity = table_.scratch.regions.capacity;
+
+  loom_builder_set_before(
+      &builder_,
+      loom_region_entry_block(loom_test_branch_then_region(leaf))->last_op);
+  loom_op_t* loop = nullptr;
+  IREE_ASSERT_OK(loom_scf_while_build(&builder_, nullptr, 0, nullptr, nullptr,
+                                      0, nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                      &loop));
+  const auto saved =
+      loom_builder_enter_region(&builder_, loop, loom_scf_while_before(loop));
+  loom_op_t* condition = nullptr;
+  IREE_ASSERT_OK(loom_scf_condition_build(&builder_, condition_, nullptr, 0,
+                                          LOOM_LOCATION_UNKNOWN, &condition));
+  loom_builder_restore(&builder_, saved);
+  const auto body_saved =
+      loom_builder_enter_region(&builder_, loop, loom_scf_while_after(loop));
+  loom_op_t* inner = BuildBranches(4);
+  loom_op_t* yield = nullptr;
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, body_saved);
+  loom_op_t* after_loop = nullptr;
+  IREE_ASSERT_OK(BuildIdentity(inputs_[0], &after_loop));
+
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, branch));
+  EXPECT_NE(table_.scratch.regions.values, frames);
+  EXPECT_GT(table_.scratch.regions.capacity, capacity);
+  ExpectResults(branch);
+  ExpectResults(inner);
+  const auto resumed = loom_value_fact_table_lookup(
+      &table_, loom_op_const_results(after_loop)[0]);
+  EXPECT_EQ(resumed.range_lo, 2);
+  EXPECT_EQ(resumed.range_hi, 4);
+}
+
+TEST_F(FactTableScratchTest, FailedTraversalReleasesActiveReservations) {
+  loom_op_t* branch = BuildBranches(4);
+  // Visit every failing allocation, including failures after descent has
+  // reserved frames. Each failed query is retried on the same table.
+  bool failed_during_descent = false;
+  for (iree_host_size_t failure = 0;; ++failure) {
+    loom_value_fact_table_clear_scope(&table_);
+    iree_arena_reset(&transient_arena_);
+    SeedInputs();
+    allocation_count_ = 0;
+    failure_index_ = failure;
+    iree_status_t status =
+        loom_value_fact_table_compute_op(&table_, module_, branch);
+    if (iree_status_is_ok(status)) {
+      ExpectResults(branch);
+      break;
+    }
+    IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    failed_during_descent |= failure_active_count_ > 0;
+    EXPECT_EQ(table_.scratch.regions.count, 0u);
+    failure_index_ = SIZE_MAX;
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, branch));
+    ExpectResults(branch);
+  }
+  EXPECT_TRUE(failed_during_descent);
+}
+
 TEST_F(FactTableComputeTest, InductionStepReadsCurrentFactsAndLiteralBits) {
   loom_value_fact_induction_t induction = {};
   induction.step.value = inputs_[0];
