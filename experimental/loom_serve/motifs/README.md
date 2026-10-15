@@ -12,6 +12,14 @@ targets and launch geometry. This keeps a reusable projection independent of a
 particular model's configuration namespace while allowing the JIT to specialize
 the entire call chain.
 
+Each family publishes a `:library` target containing its relocatable Loom
+module. Compiled consumers name that target in `srcs` when the shared programs
+and their check cases belong to the consumer's root module, or in `deps` when
+they supply separately resolved dependencies. The `:sources` filegroup retains
+the original files for runtime deployment bundles and their JSON paths. The
+complete GGML library includes AMDGPU schedules; portable test modules select
+their target-independent provider files explicitly.
+
 The tests beside each family use actual production helpers. They include scalar
 oracles, exact integer contractions, and comparisons with smaller cooperative
 or single-wave implementations. Hardware and access-sanitizer profiles are
