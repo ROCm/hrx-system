@@ -307,7 +307,7 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@wrap_field_maximum_array$worker$0 tile=(0,2) code-bytes=128 resources=0 fixups=1
+resident worker=0 entry=@wrap_field_maximum_array$worker$0 tile=(0,2) code-bytes=122 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @wrap_field_maximum_array$worker$0() asm {
   %acquire_delta = mov.short -1
