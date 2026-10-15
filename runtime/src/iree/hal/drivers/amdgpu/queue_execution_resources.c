@@ -90,7 +90,10 @@ iree_status_t iree_hal_amdgpu_queue_execution_resource_topology_initialize(
             "AMDGPU queue resource topology is not defined for gfx%u.%u.%u",
             gfxip_version.major, gfxip_version.minor, gfxip_version.stepping);
       }
-      execution_units_per_resource = 2;
+      // gfx1250 accepts individual CU mask bits; gfx1200 requires CU pairs.
+      // ROCr exempts gfx1250 from the WGP pair check in AqlQueue::SetCUMasking:
+      // https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_aql_queue.cpp
+      execution_units_per_resource = gfxip_version.minor == 5 ? 1 : 2;
       break;
     default:
       return iree_make_status(
