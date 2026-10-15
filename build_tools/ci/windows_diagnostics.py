@@ -150,14 +150,7 @@ def cmake_cache(build_dir: Path) -> dict[str, str]:
 
 
 def capture_cmake(capture: Capture, build_dir: Path, output: str) -> dict[str, str]:
-    for relative_path in (
-        "CMakeCache.txt",
-        "build.ninja",
-        "CMakeFiles/rules.ninja",
-        ".ninja_log",
-        ".ninja_deps",
-    ):
-        capture.file(build_dir / relative_path, copy=True)
+    capture.file(build_dir / "CMakeCache.txt", copy=True)
     # Ninja retains response files for failed actions until the next invocation.
     for path in sorted(build_dir.rglob("*.rsp")):
         capture.file(path, copy=True)
@@ -188,6 +181,15 @@ def capture_cmake(capture: Capture, build_dir: Path, output: str) -> dict[str, s
                 # Snapshot products owned by this build, not installed SDK libs.
                 if path.resolve().is_relative_to(build_dir.resolve()):
                     capture.file(path, copy=True)
+    # The full graph can be larger than the failed link's inputs. Preserve those
+    # inputs before auxiliary build metadata consumes the bounded snapshot budget.
+    for relative_path in (
+        "build.ninja",
+        "CMakeFiles/rules.ninja",
+        ".ninja_log",
+        ".ninja_deps",
+    ):
+        capture.file(build_dir / relative_path, copy=True)
     return cache
 
 
