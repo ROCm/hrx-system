@@ -101,9 +101,11 @@ void iree_async_proactor_posix_drain_pending_fence_imports(
     }
 
     if (!iree_status_is_ok(status)) {
-      // Registration failed. Clean up: close fd, release semaphore, free.
-      iree_status_ignore(status);
+      // Import already accepted ownership. A failed registration cannot produce
+      // the requested signal, so fail its target before releasing that
+      // ownership.
       close(tracker->fence_fd);
+      iree_async_semaphore_fail(tracker->semaphore, status);
       iree_async_semaphore_release(tracker->semaphore);
       iree_allocator_free(tracker->allocator, tracker);
     }
