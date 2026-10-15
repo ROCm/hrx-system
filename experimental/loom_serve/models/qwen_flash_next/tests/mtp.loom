@@ -11,11 +11,11 @@ func.def @scale_streams(%hidden: buffer) {
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
   %width = index.constant 2560 : index
-  %one = scalar.constant 1 : i32
+  %c1_i32 = scalar.constant 1 : i32
   scf.for %token = [%c0 to %c2 step %c1] {
     scf.for %stream = [%c0 to %c4 step %c1] {
       %shift = index.cast %stream : index to i32
-      %power = scalar.shli %one, %shift : i32
+      %power = scalar.shli %c1_i32, %shift : i32
       %factor = scalar.uitofp %power : i32 to f32
       scf.for %channel = [%c0 to %width step %c1] {
         %packed = view.load %values[%token, %stream, %channel] : view<2x4x2560xbf16> -> bf16
@@ -43,11 +43,11 @@ func.def @normalize_reference(%width: index, %epoch: buffer, %input: buffer, %ga
   %c1 = index.constant 1 : index
   %width_word = index.cast %width : index to i64
   %divisor = scalar.uitofp %width_word : i64 to f64
-  %zero = scalar.constant 0.0 : f64
+  %c0_f64 = scalar.constant 0.0 : f64
   %epsilon = scalar.constant 9.9999999999999995e-07 : f64
-  %one = scalar.constant 1.0 : f64
+  %c1_f64 = scalar.constant 1.0 : f64
   scf.for %token = [%c0 to %count step %c1] {
-    %sum = scf.for %channel = [%c0 to %width step %c1](%prior = %zero : f64) -> (f64) {
+    %sum = scf.for %channel = [%c0 to %width step %c1](%prior = %c0_f64 : f64) -> (f64) {
       %packed = view.load %inputs[%token, %channel] : view<2x[%width]xbf16> -> bf16
       %value = scalar.extf %packed : bf16 to f64
       %square = scalar.mulf %value, %value : f64
@@ -59,7 +59,7 @@ func.def @normalize_reference(%width: index, %epoch: buffer, %input: buffer, %ga
     %biased32 = scalar.fptrunc %biased : f64 to f32
     %root32 = scalar.sqrtf %biased32 : f32
     %root = scalar.extf %root32 : f32 to f64
-    %inverse = scalar.divf %one, %root : f64
+    %inverse = scalar.divf %c1_f64, %root : f64
     scf.for %channel = [%c0 to %width step %c1] {
       %packed = view.load %inputs[%token, %channel] : view<2x[%width]xbf16> -> bf16
       %value = scalar.extf %packed : bf16 to f64
