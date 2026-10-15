@@ -43,9 +43,9 @@ loom_library(
         "programs/*.loom",
     ]) + [
         "config.loom",
-        "//experimental/loom_serve/models/qwen:speculation_kernels",
-        "//experimental/loom_serve/motifs/ggml:sources",
-        "//experimental/loom_serve/motifs/tensor:sources",
+        "//experimental/loom_serve/models/qwen:speculation_library",
+        "//experimental/loom_serve/motifs/ggml:library",
+        "//experimental/loom_serve/motifs/tensor:library",
     ],
 )
 
