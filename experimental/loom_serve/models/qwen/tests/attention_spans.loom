@@ -1,12 +1,12 @@
-kernel.decl @qwen38_attention_query_prepare_spans(%token_capacity: index, %span_capacity: index) launch(%epoch: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer)
+kernel.decl @qwen38_attention_query_prepare_spans(%token_capacity: index, %span_capacity: index) launch(%mixed_inputs: index, %epoch: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer, %input_tokens: buffer)
 
-kernel.decl @qwen38_attention_kv_prepare_spans(%token_capacity: index, %span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %weight: buffer, %state: buffer)
+kernel.decl @qwen38_attention_kv_prepare_spans(%token_capacity: index, %span_capacity: index) launch(%mixed_inputs: index, %epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %weight: buffer, %state: buffer, %input_tokens: buffer)
 
 kernel.decl @qwen38_attention_spans_f16_wmma(%token_capacity: index, %span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer)
 
-template.decl @qwen38.attention.query_prepare(%head: index, %token: index, %lane: index, %control: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer, %source_position: i32, %control_origin: offset, %token_begin: index)
+template.decl @qwen38.attention.query_prepare(%head: index, %token: index, %lane: index, %control: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer, %source_position: i32, %control_origin: offset, %token_begin: index, %mixed_inputs: index, %input_tokens: buffer)
 
-template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer, %source_position: i32, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer, %source_position: i32, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index, %mixed_inputs: index, %input_tokens: buffer)
 
 kernel.decl @qwen38_attention_prefill_f16_wmma(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
 
@@ -28,7 +28,7 @@ kernel.def @attention_query_prepare_reference(%token_count: index) {
   %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
-  template.apply<@qwen38.attention.query_prepare>(%head, %token, %lane, %control, %epsilon, %projection, %weight, %query, %gate, %source_position, %origin, %token_begin) : (index, index, index, buffer, f32, buffer, buffer, buffer, buffer, i32, offset, index)
+  template.apply<@qwen38.attention.query_prepare>(%head, %token, %lane, %control, %epsilon, %projection, %weight, %query, %gate, %source_position, %origin, %token_begin, %token_begin, %control) : (index, index, index, buffer, f32, buffer, buffer, buffer, buffer, i32, offset, index, index, buffer)
   kernel.return
 }
 
@@ -47,7 +47,7 @@ kernel.def @attention_kv_prepare_reference(%token_count: index) {
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
   %logical_capacity = config.get @qwen38.attention.cache_capacity : index
-  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key, %value, %weight, %key_cache, %value_cache, %source_position, %origin, %token_begin, %origin, %origin, %control, %origin, %token_begin) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, i32, offset, index, offset, offset, buffer, offset, index)
+  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key, %value, %weight, %key_cache, %value_cache, %source_position, %origin, %token_begin, %origin, %origin, %control, %origin, %token_begin, %token_begin, %control) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, i32, offset, index, offset, offset, buffer, offset, index, index, buffer)
   kernel.return
 }
 
@@ -162,6 +162,7 @@ kernel.def @mixed_attention_metadata() {
 // positions and packed placement without recompiling the span kernels.
 check.case public @mixed_attention_spans {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %ordinary_inputs = check.literal value(0) : index
   %token_capacity = check.literal value(32) : index
   %span_capacity = check.literal value(8) : index
   %initial = check.literal value(false) : i1
@@ -246,8 +247,8 @@ check.case public @mixed_attention_spans {
   %continuation1_output = check.tensor.view %isolated_output offset(49152) : tensor<32x6144xf32> -> tensor<1x6144xf32>
 
   kernel.launch @mixed_attention_metadata(%initial, %epoch, %rows) : (i1, tensor<43xi32>, tensor<6x4xi64>)
-  kernel.launch @qwen38_attention_query_prepare_spans[%token_capacity, %span_capacity](%epoch, %epsilon, %projection, %weight, %packed_query, %packed_gate) : [index, index](tensor<43xi32>, f32, tensor<32x12288xf32>, tensor<256xf32>, tensor<32x6144xf32>, tensor<32x6144xf32>)
-  kernel.launch @qwen38_attention_kv_prepare_spans[%token_capacity, %span_capacity](%epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %packed_state) : [index, index](tensor<43xi32>, tensor<6x4xi64>, offset, f32, tensor<32x1024xf32>, tensor<32x1024xf32>, tensor<256xf32>, tensor<6317568xf16>)
+  kernel.launch @qwen38_attention_query_prepare_spans[%token_capacity, %span_capacity](%ordinary_inputs, %epoch, %epsilon, %projection, %weight, %packed_query, %packed_gate, %epoch) : [index, index](index, tensor<43xi32>, f32, tensor<32x12288xf32>, tensor<256xf32>, tensor<32x6144xf32>, tensor<32x6144xf32>, tensor<43xi32>)
+  kernel.launch @qwen38_attention_kv_prepare_spans[%token_capacity, %span_capacity](%ordinary_inputs, %epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %packed_state, %epoch) : [index, index](index, tensor<43xi32>, tensor<6x4xi64>, offset, f32, tensor<32x1024xf32>, tensor<32x1024xf32>, tensor<256xf32>, tensor<6317568xf16>, tensor<43xi32>)
   kernel.launch @qwen38_attention_spans_f16_wmma[%token_capacity, %span_capacity](%epoch, %rows, %layer_origin, %packed_query, %packed_gate, %packed_state, %packed_output) : [index, index](tensor<43xi32>, tensor<6x4xi64>, offset, tensor<32x6144xf32>, tensor<32x6144xf32>, tensor<6317568xf16>, tensor<32x6144xf32>)
   kernel.launch @attention_query_prepare_reference[%initial0_count](%initial0_control, %initial0_source, %epsilon, %initial0_projection, %weight, %initial0_query, %initial0_gate) : [index](tensor<2xi32>, i32, f32, tensor<17x12288xf32>, tensor<256xf32>, tensor<17x6144xf32>, tensor<17x6144xf32>)
   kernel.launch @attention_kv_prepare_reference[%initial0_count](%initial0_control, %initial0_source, %epsilon, %initial0_key, %initial0_value, %weight, %key_cache0, %value_cache0) : [index](tensor<2xi32>, i32, f32, tensor<17x1024xf32>, tensor<17x1024xf32>, tensor<256xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>)
@@ -263,8 +264,8 @@ check.case public @mixed_attention_spans {
   kernel.launch @qwen38_attention_prefill_f16_wmma[%initial3_count](%initial3_control, %initial3_query, %initial3_gate, %key_cache3, %value_cache3, %initial3_output) : [index](tensor<2xi32>, tensor<1x6144xf32>, tensor<1x6144xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>, tensor<1x6144xf32>)
 
   kernel.launch @mixed_attention_metadata(%continuation, %epoch, %rows) : (i1, tensor<43xi32>, tensor<6x4xi64>)
-  kernel.launch @qwen38_attention_query_prepare_spans[%token_capacity, %span_capacity](%epoch, %epsilon, %projection, %weight, %packed_query, %packed_gate) : [index, index](tensor<43xi32>, f32, tensor<32x12288xf32>, tensor<256xf32>, tensor<32x6144xf32>, tensor<32x6144xf32>)
-  kernel.launch @qwen38_attention_kv_prepare_spans[%token_capacity, %span_capacity](%epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %packed_state) : [index, index](tensor<43xi32>, tensor<6x4xi64>, offset, f32, tensor<32x1024xf32>, tensor<32x1024xf32>, tensor<256xf32>, tensor<6317568xf16>)
+  kernel.launch @qwen38_attention_query_prepare_spans[%token_capacity, %span_capacity](%ordinary_inputs, %epoch, %epsilon, %projection, %weight, %packed_query, %packed_gate, %epoch) : [index, index](index, tensor<43xi32>, f32, tensor<32x12288xf32>, tensor<256xf32>, tensor<32x6144xf32>, tensor<32x6144xf32>, tensor<43xi32>)
+  kernel.launch @qwen38_attention_kv_prepare_spans[%token_capacity, %span_capacity](%ordinary_inputs, %epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %packed_state, %epoch) : [index, index](index, tensor<43xi32>, tensor<6x4xi64>, offset, f32, tensor<32x1024xf32>, tensor<32x1024xf32>, tensor<256xf32>, tensor<6317568xf16>, tensor<43xi32>)
   kernel.launch @qwen38_attention_spans_f16_wmma[%token_capacity, %span_capacity](%epoch, %rows, %layer_origin, %packed_query, %packed_gate, %packed_state, %packed_output) : [index, index](tensor<43xi32>, tensor<6x4xi64>, offset, tensor<32x6144xf32>, tensor<32x6144xf32>, tensor<6317568xf16>, tensor<32x6144xf32>)
   kernel.launch @attention_query_prepare_reference[%continuation0_count](%continuation0_control, %continuation0_source, %epsilon, %continuation0_projection, %weight, %continuation0_query, %continuation0_gate) : [index](tensor<2xi32>, i32, f32, tensor<2x12288xf32>, tensor<256xf32>, tensor<2x6144xf32>, tensor<2x6144xf32>)
   kernel.launch @attention_kv_prepare_reference[%continuation0_count](%continuation0_control, %continuation0_source, %epsilon, %continuation0_key, %continuation0_value, %weight, %key_cache0, %value_cache0) : [index](tensor<2xi32>, i32, f32, tensor<2x1024xf32>, tensor<2x1024xf32>, tensor<256xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>)

@@ -6,6 +6,7 @@
     "control": "../qwen/control.loom",
     "sources": [
       "../qwen/epoch_control.loom",
+      "../qwen/epoch_media.loom",
       "config.loom",
       "epoch.loom",
       "kernels/embedding.loom",
@@ -51,6 +52,7 @@
       "verify.loom",
       "programs/speculation.loom",
       "../qwen/kernels/qwen38/accept.loom",
+      "../qwen/kernels/qwen38/inputs.loom",
       "kernels/mtp.loom",
       "kernels/mtp_state.loom",
       "programs/mtp.loom",
