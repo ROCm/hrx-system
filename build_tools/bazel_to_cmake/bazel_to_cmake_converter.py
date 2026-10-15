@@ -1355,6 +1355,7 @@ class BuildFileFunctions(object):
         imports=None,
         main=None,
         package_dirs=None,
+        resource_group=None,
         tags=None,
         target_compatible_with=None,
         testonly=None,
@@ -1415,6 +1416,9 @@ class BuildFileFunctions(object):
             package_dirs or self._python_package_dirs(),
             sort=False,
         )
+        resource_group_block = self._convert_string_arg_block(
+            "RESOURCE_GROUP", resource_group, quote=False
+        )
         timeout_block = self._convert_test_timeout_arg_block("TIMEOUT", timeout, size)
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += args_var_block + data_var_block
@@ -1431,6 +1435,7 @@ class BuildFileFunctions(object):
             f"{imports_block}"
             f"{labels_block}"
             f"{package_dirs_block}"
+            f"{resource_group_block}"
             f"{timeout_block}"
             ")\n\n"
         )

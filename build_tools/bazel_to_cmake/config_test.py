@@ -824,6 +824,25 @@ cc_library(
         self.assertIn("TIMEOUT\n    60", converter.body)
         self.assertNotIn("TIMEOUT\n    3600", converter.body)
 
+    def test_py_test_preserves_resource_group(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = _PythonBuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+            build_dir="build_tools/bazel_to_cmake",
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_py_test(
+            name="serialized_test",
+            srcs=["config_test.py"],
+            deps=[],
+            resource_group="shared-device",
+        )
+
+        self.assertIn("RESOURCE_GROUP\n    shared-device", converter.body)
+
     def test_py_library_resolves_cross_package_sources(self):
         repo_root = Path(__file__).resolve().parents[2]
         converter = SimpleNamespace(body="")

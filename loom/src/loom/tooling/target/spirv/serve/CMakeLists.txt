@@ -192,11 +192,12 @@ iree_py_test(
     loom::serve::testing::logs
   LABELS
     "iree-run-requirement=vulkan.resource.device"
-    "resource_group:gpu-device"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  RESOURCE_GROUP
+    gpu-device
   TIMEOUT
     300
 )

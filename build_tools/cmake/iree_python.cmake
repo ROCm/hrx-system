@@ -452,6 +452,8 @@ endfunction()
 # DATA: Additional files or targets required by the test.
 # LABELS: Additional labels to apply to the test. The package path is added
 #     automatically.
+# RESOURCE_GROUP: If set, tests sharing the same RESOURCE_GROUP name will not
+#     run concurrently under CTest. Maps to CTest's RESOURCE_LOCK property.
 # GENERATED_IN_BINARY_DIR: If present, indicates that the srcs have been
 #   generated in CMAKE_CURRENT_BINARY_DIR.
 # PACKAGE_DIRS: Python package paths to be added to PYTHONPATH.
@@ -463,7 +465,7 @@ function(iree_local_py_test)
   cmake_parse_arguments(
     _RULE
     "GENERATED_IN_BINARY_DIR"
-    "NAME;SRC"
+    "NAME;RESOURCE_GROUP;SRC"
     "ARGS;DATA;DEPS;LABELS;PACKAGE_DIRS;SOURCES;TIMEOUT"
     ${ARGN}
   )
@@ -506,6 +508,9 @@ function(iree_local_py_test)
 
   set_property(TEST ${_NAME_PATH} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST ${_NAME_PATH} PROPERTY TIMEOUT ${_RULE_TIMEOUT})
+  if(_RULE_RESOURCE_GROUP)
+    set_property(TEST ${_NAME_PATH} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")
+  endif()
 
   set(_IREE_INSTALL_PACKAGE_DIRS ${_RULE_PACKAGE_DIRS})
 
@@ -553,6 +558,10 @@ function(iree_local_py_test)
 
   if(IREE_PYTHON_TEST_REGISTRATION_FUNCTION AND
      NOT IREE_SKIP_TEST_REGISTRATION)
+    set(_IREE_REGISTERED_RESOURCE_GROUP)
+    if(_RULE_RESOURCE_GROUP)
+      set(_IREE_REGISTERED_RESOURCE_GROUP RESOURCE_GROUP "${_RULE_RESOURCE_GROUP}")
+    endif()
     if(COMMAND ${IREE_PYTHON_TEST_REGISTRATION_FUNCTION})
       cmake_language(CALL ${IREE_PYTHON_TEST_REGISTRATION_FUNCTION}
         NAME
@@ -573,6 +582,7 @@ function(iree_local_py_test)
           ${_IREE_INSTALL_PACKAGE_DIRS}
         TIMEOUT
           ${_RULE_TIMEOUT}
+        ${_IREE_REGISTERED_RESOURCE_GROUP}
       )
     endif()
   endif()
@@ -593,13 +603,15 @@ endfunction()
 #     automatically.
 # IMPORTS: List of package import directories relative to the current package.
 # DEPS: List of iree_py_library targets needed by the test.
+# RESOURCE_GROUP: If set, tests sharing the same RESOURCE_GROUP name will not
+#     run concurrently under CTest. Maps to CTest's RESOURCE_LOCK property.
 # GENERATED_IN_BINARY_DIR: If present, indicates that the srcs have been
 #   generated in CMAKE_CURRENT_BINARY_DIR.
 function(iree_py_test)
   cmake_parse_arguments(
     _RULE
     "GENERATED_IN_BINARY_DIR"
-    "MAIN;NAME"
+    "MAIN;NAME;RESOURCE_GROUP"
     "ARGS;DATA;LABELS;PACKAGE_DIRS;IMPORTS;DEPS;SRCS;TIMEOUT"
     ${ARGN}
   )
@@ -657,6 +669,8 @@ function(iree_py_test)
       ${_RULE_LABELS}
     PACKAGE_DIRS
       ${_RULE_PACKAGE_DIRS}
+    RESOURCE_GROUP
+      ${_RULE_RESOURCE_GROUP}
     ${_GENERATED_OPTION}
     TIMEOUT
       ${_RULE_TIMEOUT}

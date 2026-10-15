@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("@rules_python//python:defs.bzl", "py_test")
+load("//build_tools/bazel:python.bzl", "iree_py_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 load("//loom/src/loom/serve/fixture/decision:sources.bzl", DECISION_SOURCES = "SOURCES")
@@ -137,7 +137,7 @@ loom_cc_test(
     ],
 )
 
-py_test(
+iree_py_test(
     name = "catalog_test",
     size = "medium",
     srcs = ["//loom/src/loom/serve/server:catalog_test.py"],
@@ -155,9 +155,9 @@ py_test(
         ":loom-serve-test-tool",
     ],
     main = "catalog_test.py",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
         "iree-run-requirement=vulkan.resource.device",
-        "resource_group:" + GPU_DEVICE_RESOURCE_GROUP,
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",

@@ -114,6 +114,7 @@ class CMakeTestArgumentsTest(unittest.TestCase):
                 args=["$(location //tools:runner)", "$(locations :inputs)"],
                 data=[":inputs", "//:first input.txt", "//tools:runner"],
                 package_dirs=["${PROJECT_SOURCE_DIR}"],
+                resource_group="shared-device",
             )
             suppression = {"lsan": "//:lsan_suppressions_fixture.txt"}
             functions.cc_test(
@@ -145,6 +146,14 @@ class CMakeTestArgumentsTest(unittest.TestCase):
                 [Path(argument) for argument in converted["command"][-2:]],
                 [source / "fixture.txt", source / "fixture.txt.more"],
             )
+            self.assertEqual(
+                next(
+                    prop["value"]
+                    for prop in converted["properties"]
+                    if prop["name"] == "RESOURCE_LOCK"
+                ),
+                ["shared-device"],
+            )
 
             generated = [build / "generated.py", build / "generated.txt"]
             timestamps = [path.stat().st_mtime_ns for path in generated]
@@ -171,7 +180,24 @@ class CMakeTestArgumentsTest(unittest.TestCase):
             prefix.rename(relocated)
             source.rename(root / "retired source")
             build.rename(root / "retired build")
-            test_project(relocated / "share/tests")
+            installed_test_root = relocated / "share/tests"
+            installed_tests = json.loads(
+                test_project(installed_test_root, "--show-only=json-v1")
+            )["tests"]
+            installed_converted = next(
+                test
+                for test in installed_tests
+                if test["name"] == "fixture/converted/converted_python"
+            )
+            self.assertEqual(
+                next(
+                    prop["value"]
+                    for prop in installed_converted["properties"]
+                    if prop["name"] == "RESOURCE_LOCK"
+                ),
+                ["shared-device"],
+            )
+            test_project(installed_test_root)
 
     def test_malformed_locators_fail_at_registration(self):
         with tempfile.TemporaryDirectory() as temporary:

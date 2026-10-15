@@ -11,6 +11,11 @@ macro files that define concrete target kinds, such as `cc.bzl`,
 `cc_test.bzl`, `cc_benchmark.bzl`, and `cc_fuzz.bzl`.
 """
 
+load(
+    "//build_tools/bazel:test_resources.bzl",
+    _with_resource_group_tags = "with_resource_group_tags",
+)
+
 def _merge_string_lists(first, second):
     if first == None:
         first = []
@@ -97,16 +102,6 @@ def _merge_dicts(*dicts):
     for source in dicts:
         result.update(source)
     return result
-
-def _with_resource_group_tags(tags, resource_group):
-    if tags == None:
-        tags = []
-    if resource_group == None or resource_group == "":
-        return tags
-    return tags + [
-        "exclusive-if-local",
-        "resource_group:" + resource_group,
-    ]
 
 def _collect(
         srcs,

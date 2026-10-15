@@ -177,11 +177,12 @@ iree_py_test(
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
-    "resource_group:gpu-device"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  RESOURCE_GROUP
+    gpu-device
   TIMEOUT
     300
 )
@@ -240,11 +241,12 @@ iree_py_test(
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
-    "resource_group:gpu-device"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  RESOURCE_GROUP
+    gpu-device
   TIMEOUT
     300
 )
@@ -305,12 +307,13 @@ iree_py_test(
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
     "manual"
-    "resource_group:gpu-device"
     "stress"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  RESOURCE_GROUP
+    gpu-device
   TIMEOUT
     300
 )
@@ -340,11 +343,12 @@ iree_py_test(
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
-    "resource_group:gpu-device"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  RESOURCE_GROUP
+    gpu-device
   TIMEOUT
     300
 )
@@ -376,12 +380,13 @@ iree_py_test(
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
     "manual"
-    "resource_group:gpu-device"
     "stress"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  RESOURCE_GROUP
+    gpu-device
   TIMEOUT
     300
 )

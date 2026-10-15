@@ -598,7 +598,7 @@ function(hrx_register_installed_python_test)
   cmake_parse_arguments(
     _RULE
     ""
-    "NAME;SRC;TIMEOUT"
+    "NAME;RESOURCE_GROUP;SRC;TIMEOUT"
     "ARGS;DATA;DEPS;LABELS;PACKAGE_DIRS;SOURCES"
     ${ARGN}
   )
@@ -683,6 +683,7 @@ function(hrx_register_installed_python_test)
     ARGS "${_INSTALLED_SRC}" ${_RULE_ARGS}
     DATA ${_RULE_DATA}
     LABELS ${_RULE_LABELS}
+    RESOURCE_GROUP "${_RULE_RESOURCE_GROUP}"
     TIMEOUT "${_RULE_TIMEOUT}"
     ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1"
     ENVIRONMENT_MODIFICATION ${_PYTHONPATH_MODS}
