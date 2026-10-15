@@ -75,6 +75,12 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             (build / "link.rsp").write_bytes(
                 '"common source.obj" common.lib'.encode("utf-16")
             )
+            # The graph fits alone but competes with the actual failed-link
+            # inputs for the capture budget, as in large generated CMake builds.
+            (build / "build.ninja").write_bytes(b"graph" * 20)
+            capture_budget = sum(len(contents) for contents in objects.values())
+            capture_budget += (build / "CMakeCache.txt").stat().st_size
+            capture_budget += (build / "link.rsp").stat().st_size
             (artifacts / "output.log").write_text(
                 "FAILED: [code=4294967295] test with spaces.exe test.pdb\n"
             )
@@ -98,7 +104,10 @@ class WindowsDiagnosticsTest(unittest.TestCase):
 
             # The native graph query and symbol reader are dependencies. The
             # collector, filesystem snapshots, and manifest writer all run.
-            with mock.patch.object(subprocess, "run", side_effect=native_tool):
+            with (
+                mock.patch.object(subprocess, "run", side_effect=native_tool),
+                mock.patch.object(diagnostics, "MAX_CAPTURE_BYTES", capture_budget),
+            ):
                 diagnostics.capture_failure(artifacts, root, {}, build)
             manifest = json.loads((artifacts / "manifest.json").read_text())
             records = {
@@ -106,6 +115,7 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             }
             for name, contents in objects.items():
                 (build / name).write_bytes(b"rebuild replaced the original")
+                self.assertIn("copy", records[name], records[name])
                 self.assertEqual(
                     (artifacts / records[name]["copy"]).read_bytes(), contents
                 )
@@ -117,6 +127,9 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 (build / "link.rsp").read_bytes(),
             )
             self.assertNotIn("sdk.lib", records)
+            self.assertEqual(
+                records["build.ninja"]["error"], "capture byte limit exceeded"
+            )
             self.assertEqual(
                 sum("--print-armap" in tool["argv"] for tool in manifest["tools"]), 3
             )
