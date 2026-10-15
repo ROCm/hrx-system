@@ -155,6 +155,22 @@ projections and embeddings use Q8_0; index projections use BF16. Accumulation is
 F32, with explicit BF16 activation publication boundaries. The output head
 projects only rows that require token selection.
 
+The 36 GDN QKV tensors use an in-place preparation pass. Each workgroup owns
+four complete output channels, captures their original bytes into 10,880 bytes
+of shared memory, and separates their scales and codes into contiguous planes.
+The allocation keeps exactly the original size. The loader publishes readiness
+after preparation and repeats it after reloading the original checkpoint; all
+QKV consumers, including speculative verification, use the prepared layout.
+
+Larger epochs share each decoded Q8 block over a 64-channel by 32-token matrix
+tile. Exact integer codes and the existing BF16 activations feed WMMA, with the
+original block scales applied in F32. Padded LDS rows and a permuted producer
+assignment distribute staging traffic across banks; a two-stage loop acquires
+the next block while contracting the current one. Capacities of one to four
+tokens specialize to packed dot instructions without matrix shared memory.
+Live tails shorter than four rows use the same dot arithmetic. The scheduler
+continues to handle prompt and generated tokens through one epoch contract.
+
 ## Qualification
 
 The checkpoint-free kernel suite uses independent scalar arithmetic and

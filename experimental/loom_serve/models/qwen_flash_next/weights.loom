@@ -1,8 +1,47 @@
+// UTF-8 bytes for "blk.", ".attn_qkv.weight", "flash_next_prepare_qkv", and
+// the empty root that preserves a tensor's original file representation.
+global.rodata.def @block = bytes("626c6b2e")
+
+global.rodata.def @qkv = bytes("2e6174746e5f716b762e776569676874")
+
+global.rodata.def @prepare = bytes("666c6173685f6e6578745f707265706172655f716b76")
+
 global.rodata.def @unchanged = bytes("")
 
-// Numerical commands consume the original GGUF tensor representations.
+// All 36 GDN QKV tensors are K2560/N10240 Q8_0. Preparation permutes their
+// existing allocation into four-channel code/scale planes; ordinary, mixed,
+// and speculative consumers all read that layout. Other tensors stay in GGUF
+// order. Reactivation reloads original bytes before running the same command.
 func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
-  %root = global.load @unchanged : buffer
-  %bytes = scalar.constant 0 : i64
+  %length = buffer.length %key
+  %prefix = global.load @block : buffer
+  %suffix = global.load @qkv : buffer
+  %prefix_length = buffer.length %prefix
+  %suffix_length = buffer.length %suffix
+  %minimum_length = index.add %prefix_length, %suffix_length : offset
+  %fits = index.cmp uge, %length, %minimum_length : offset
+  %matches = scf.if %fits -> (i1) {
+    %origin = index.constant 0 : offset
+    %prefix_comparison = buffer.compare %key[%origin], %prefix[%origin], %prefix_length
+    %suffix_origin = index.sub %length, %suffix_length : offset
+    %suffix_comparison = buffer.compare %key[%suffix_origin], %suffix[%origin], %suffix_length
+    %c0 = scalar.constant 0 : i32
+    %prefix_equal = scalar.cmpi eq, %prefix_comparison, %c0 : i32
+    %suffix_equal = scalar.cmpi eq, %suffix_comparison, %c0 : i32
+    %equal = scalar.andi %prefix_equal, %suffix_equal : i1
+    scf.yield %equal : i1
+  } else {
+    %false = scalar.constant false : i1
+    scf.yield %false : i1
+  }
+  %root, %bytes = scf.if %matches -> (buffer, i64) {
+    %prepare = global.load @prepare : buffer
+    %size = scalar.constant 27852800 : i64
+    scf.yield %prepare, %size : buffer, i64
+  } else {
+    %unchanged = global.load @unchanged : buffer
+    %size = scalar.constant 0 : i64
+    scf.yield %unchanged, %size : buffer, i64
+  }
   func.return %root, %bytes : buffer, i64
 }
