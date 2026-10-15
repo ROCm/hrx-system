@@ -430,13 +430,6 @@ static iree_status_t loom_opt_append_reproducer_run_line(
     iree_string_builder_t* builder, bool use_synthetic_pipeline) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder, "// RUN: loom-opt --verify=%s", FLAG_verify ? "true" : "false"));
-  iree_flag_string_list_t config_assignments = FLAG_config_list();
-  for (iree_host_size_t i = 0; i < config_assignments.count; ++i) {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(builder, " --config="));
-    IREE_RETURN_IF_ERROR(
-        loom_opt_append_shell_quoted(builder, config_assignments.values[i]));
-  }
   iree_string_view_t pass_report =
       iree_string_view_trim(iree_make_cstring_view(FLAG_pass_report));
   if (!iree_string_view_is_empty(pass_report)) {
@@ -718,12 +711,15 @@ static iree_status_t loom_opt_append_reproducer_metadata(
 
 static iree_status_t loom_opt_write_pass_reproducer(
     iree_string_view_t path, iree_string_view_t filename,
-    iree_string_view_t source, const loom_pass_registry_t* registry,
+    const loomc_source_t* input_snapshot, const loom_pass_registry_t* registry,
     iree_status_code_t failure_status_code, iree_allocator_t allocator) {
   path = iree_string_view_trim(path);
   if (iree_string_view_is_empty(path)) {
     return iree_ok_status();
   }
+  const loomc_byte_span_t contents = loomc_source_contents(input_snapshot);
+  const iree_string_view_t source =
+      iree_make_string_view((const char*)contents.data, contents.data_length);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator, &builder);
@@ -1327,6 +1323,7 @@ int main(int argc, char** argv) {
   loomc_context_t* public_context = NULL;
   loomc_workspace_t* public_workspace = NULL;
   loomc_source_t* public_source = NULL;
+  loomc_source_t* reproducer_input = NULL;
   loomc_module_t* public_module = NULL;
   loomc_result_t* public_result = NULL;
   loom_module_t* module = NULL;
@@ -1526,6 +1523,14 @@ int main(int argc, char** argv) {
         loom_opt_verify_module(&low_descriptor_registry, module,
                                source_resolver, diagnostic_sink, &module_ready);
   }
+  if (iree_status_is_ok(status) && !metadata_only && module_ready &&
+      !iree_string_view_is_empty(iree_string_view_trim(
+          iree_make_cstring_view(FLAG_pass_reproducer)))) {
+    // Capture the exact pass input before execution can mutate it. Applied
+    // configuration is already in the IR, and bytecode becomes rerunnable text.
+    status = iree_status_from_loomc(loomc_module_serialize_text_to_source(
+        public_module, /*options=*/NULL, loom_allocator, &reproducer_input));
+  }
   if (iree_status_is_ok(status) && !metadata_only && module_ready) {
     status = loom_tooling_pass_trace_open_from_flags(
         &(loom_tooling_pass_trace_open_options_t){
@@ -1563,7 +1568,7 @@ int main(int argc, char** argv) {
     status = iree_status_join(
         status, loom_opt_write_pass_reproducer(
                     iree_make_cstring_view(FLAG_pass_reproducer), filename,
-                    source, pass_registry,
+                    reproducer_input, pass_registry,
                     !iree_status_is_ok(pass_pipeline_status)
                         ? iree_status_code(pass_pipeline_status)
                         : IREE_STATUS_FAILED_PRECONDITION,
@@ -1582,10 +1587,10 @@ int main(int argc, char** argv) {
     if (iree_status_is_ok(status) && !module_ready && pass_execution_started &&
         iree_status_is_ok(pass_pipeline_status)) {
       status = iree_status_join(
-          status,
-          loom_opt_write_pass_reproducer(
-              iree_make_cstring_view(FLAG_pass_reproducer), filename, source,
-              pass_registry, IREE_STATUS_FAILED_PRECONDITION, allocator));
+          status, loom_opt_write_pass_reproducer(
+                      iree_make_cstring_view(FLAG_pass_reproducer), filename,
+                      reproducer_input, pass_registry,
+                      IREE_STATUS_FAILED_PRECONDITION, allocator));
     }
   }
   if (iree_status_is_ok(status) && pass_run_result.error_count == 0 &&
@@ -1617,6 +1622,7 @@ int main(int argc, char** argv) {
   }
   loom_config_text_binding_set_deinitialize(&config_set);
   loomc_result_release(public_result);
+  loomc_source_release(reproducer_input);
   loom_module_free(projected_module);
   loomc_module_release(public_module);
   loomc_source_release(public_source);

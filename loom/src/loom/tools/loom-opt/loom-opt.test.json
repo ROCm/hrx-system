@@ -325,6 +325,138 @@
       }
     },
     {
+      "name": "replays a bytecode input failure from text",
+      "steps": [
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": ["--to=bc"]
+          },
+          "stdin": {
+            "text": "pass.pipeline<module> @boom pipeline {\n  for func {\n    dce\n  }\n  fail \"bytecode failure\"\n}\n\nfunc.def @identity(%value: i32) -> (i32) {\n  %unused = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+          },
+          "stderr": {"empty": true}
+        },
+        {
+          "name": "capture",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pipeline=@boom",
+              "--pass-reproducer={tmp}/bytecode.repro.loom"
+            ]
+          },
+          "stdin": {"step_stdout": "encode"},
+          "exit": 1,
+          "stdout": {"empty": true},
+          "stderr": {
+            "contains": ["pass pipeline reproducer written to", "bytecode failure"]
+          },
+          "files": [
+            {
+              "path": "{tmp}/bytecode.repro.loom",
+              "contains": [
+                "// RUN: loom-opt --verify=true --pipeline='@boom' %s",
+                "func.def @identity(%value: i32) -> (i32) {",
+                "%unused = scalar.constant 42 : i32"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "replay",
+          "run": {
+            "tool": "loom-opt",
+            "args": ["--verify=true", "--pipeline=@boom", "{tmp}/bytecode.repro.loom"]
+          },
+          "exit": 1,
+          "stdout": {"empty": true},
+          "stderr": {
+            "contains": ["FAILED_PRECONDITION; bytecode failure"],
+            "not_contains": ["PARSE/"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "replays file and flag configuration without external inputs",
+      "steps": [
+        {
+          "write": {
+            "path": "{tmp}/config.jsonc",
+            "text": "{\n  // Nested configuration is flattened at admission.\n  \"model\": {\"answer\": 42}\n}\n"
+          }
+        },
+        {
+          "name": "capture",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--pipeline=@boom",
+              "--config-file={tmp}/config.jsonc",
+              "--config=limit=7",
+              "--pass-reproducer={tmp}/configured.repro.loom"
+            ]
+          },
+          "stdin": {
+            "text": "config.decl @model.answer : index\nconfig.decl @limit : index\n\npass.pipeline<module> @boom pipeline {\n  for func {\n    dce\n  }\n  fail \"configured failure\"\n}\n\nfunc.def @identity(%value: i32) -> (i32) {\n  %unused = scalar.constant 42 : i32\n  func.return %value : i32\n}\n"
+          },
+          "exit": 1,
+          "stdout": {"empty": true},
+          "stderr": {
+            "contains": ["pass pipeline reproducer written to", "configured failure"]
+          },
+          "files": [
+            {
+              "path": "{tmp}/configured.repro.loom",
+              "contains": [
+                "// RUN: loom-opt --verify=true --pipeline='@boom' %s",
+                "config.def @model.answer = 42 : index",
+                "config.def @limit = 7 : index",
+                "%unused = scalar.constant 42 : i32"
+              ],
+              "not_contains": ["--config", "config.decl"]
+            }
+          ]
+        },
+        {
+          "write": {
+            "path": "{tmp}/config.jsonc",
+            "text": "{\"model\": {\"answer\": 99}}\n"
+          }
+        },
+        {
+          "name": "replay",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "--verify=true",
+              "--pipeline=@boom",
+              "{tmp}/configured.repro.loom",
+              "--dump-ir-before=dce",
+              "--dump-ir-format=jsonl",
+              "--dump-ir-output={tmp}/replay.jsonl"
+            ]
+          },
+          "exit": 1,
+          "stdout": {"empty": true},
+          "stderr": {
+            "contains": ["FAILED_PRECONDITION; configured failure"]
+          },
+          "files": [
+            {
+              "path": "{tmp}/replay.jsonl",
+              "contains": [
+                "config.def @model.answer = 42 : index",
+                "config.def @limit = 7 : index"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "writes pass pipeline reproducer",
       "run": {
         "tool": "loom-opt",
