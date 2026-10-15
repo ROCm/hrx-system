@@ -20,8 +20,8 @@ loom_test(
     name = "batch_conditioning_test",
     srcs = glob(["*.loom"]) + [
         "tests/batch_conditioning.loom",
-        "//experimental/loom_serve/motifs/tensor:sources",
-        "//experimental/loom_serve/motifs/text:sources",
+        "//experimental/loom_serve/motifs/tensor:library",
+        "//experimental/loom_serve/motifs/text:library",
     ],
     benchmark_smoke = False,
     configs = {
@@ -42,8 +42,8 @@ loom_test(
     name = "request_test",
     srcs = glob(["*.loom"]) + [
         "tests/request.loom",
-        "//experimental/loom_serve/motifs/tensor:sources",
-        "//experimental/loom_serve/motifs/text:sources",
+        "//experimental/loom_serve/motifs/tensor:library",
+        "//experimental/loom_serve/motifs/text:library",
     ],
     benchmark_smoke = False,
     configs = {
@@ -67,7 +67,7 @@ loom_test(
     srcs = [
         "tests/text_normalization.loom",
         "text_normalization.loom",
-        "//experimental/loom_serve/motifs/text:sources",
+        "//experimental/loom_serve/motifs/text:library",
     ],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
