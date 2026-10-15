@@ -380,6 +380,72 @@ loom_execution_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    narrow_projection_test_q6_q8_single_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::narrow_projection_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=ggml.linear_q5k_q8_1_x4.output_capacity=65"
+    "--config=ggml.linear_q5k_q8_1_x4.token_capacity=4"
+    "--config=ggml.linear_q6k_f32_decode.output_capacity=9"
+    "--config=ggml.linear_q6k_q8_1_x4.output_capacity=9"
+    "--config=ggml.linear_q6k_q8_1_x4.token_capacity=4"
+    "--config=ggml.quantize_q8_1_x4.group_capacity=2176"
+    "--case=@ggml_linear_q6k_q8_1_x4_wave64_block4_nonzero_tail_case"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    narrow_projection_test_q6_q8_single_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::narrow_projection_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=ggml.linear_q5k_q8_1_x4.output_capacity=65"
+    "--config=ggml.linear_q5k_q8_1_x4.token_capacity=4"
+    "--config=ggml.linear_q6k_f32_decode.output_capacity=9"
+    "--config=ggml.linear_q6k_q8_1_x4.output_capacity=9"
+    "--config=ggml.linear_q6k_q8_1_x4.token_capacity=4"
+    "--config=ggml.quantize_q8_1_x4.group_capacity=2176"
+    "--case=@ggml_linear_q6k_q8_1_x4_wave64_block4_nonzero_tail_case"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
 loom_test_module(
   NAME
     q6_projection_test_module

@@ -16,6 +16,7 @@
       "../../motifs/ggml/linear_q5k_q8_1_x4.loom",
       "../../motifs/ggml/linear_q6k_f32_decode.loom",
       "../../motifs/ggml/linear_q6k_q8_1_x4.loom",
+      "../../motifs/ggml/linear_q6k_q8_1_x4_amdgpu.loom",
       "../../motifs/ggml/linear_q8_0_q8_1_x4.loom",
       "../../motifs/ggml/linear_qk_common.loom",
       "../../motifs/ggml/q4k.loom",
