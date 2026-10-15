@@ -266,7 +266,7 @@ typedef struct loom_liveness_analysis_t {
   const loom_liveness_block_info_t* blocks;
   // Number of records in |blocks|.
   iree_host_size_t block_count;
-  // Live intervals for values touched by the region.
+  // Live intervals for participating values touched by the region.
   const loom_liveness_interval_t* intervals;
   // Number of records in |intervals|.
   iree_host_size_t interval_count;
@@ -288,7 +288,7 @@ typedef struct loom_liveness_analysis_t {
   // Segment ranges indexed by local value ordinal. The table has
   // |value_count| entries.
   const loom_liveness_segment_range_t* value_segment_ranges;
-  // Operations in accepted program-point order and their semantic-use values.
+  // Operations in accepted program-point order and participating semantic uses.
   // Rows retain stable addresses for the complete analysis lifetime.
   const loom_liveness_operation_table_t* operations;
   // Number of operation records in |operations|.
@@ -331,7 +331,9 @@ iree_status_t loom_liveness_analyze_local_value_domain(
 // the result: block live-in/live-out lists are borrowed. |order| may reorder
 // operations within each block without changing SSA or CFG semantics. This
 // entry point consumes the retained flow instead of collecting and solving it
-// again for every source or scheduled operation order.
+// again for every source or scheduled operation order. Intervals, segments,
+// operation uses, and pressure follow the dataflow's value selection; excluded
+// values keep their local ordinals but have no interval or segments.
 iree_status_t loom_liveness_analyze_local_value_domain_with_dataflow(
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_dataflow_t* dataflow, loom_liveness_order_t order,

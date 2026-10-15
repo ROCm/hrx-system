@@ -19,6 +19,14 @@
 extern "C" {
 #endif
 
+// Values whose lifetimes are modeled, without changing the shared SSA ordinal
+// domain. Low planning needs register lifetimes, including state registers;
+// static storage handles retain their separate function-owned layout.
+typedef enum loom_liveness_value_selection_e {
+  LOOM_LIVENESS_VALUES_ALL = 0,
+  LOOM_LIVENESS_VALUES_REGISTERS = 1,
+} loom_liveness_value_selection_t;
+
 // Block-local transfer facts over region-local value ordinals.
 typedef struct loom_liveness_block_transfer_t {
   // Unique upward-exposed uses in this block.
@@ -50,6 +58,8 @@ typedef struct loom_liveness_block_relation_t {
 // owned by the result arena; they do not borrow the acquired ordinal scratch
 // map.
 typedef struct loom_liveness_dataflow_t {
+  // Participation shared by boundary relations and ordered interval consumers.
+  loom_liveness_value_selection_t value_selection;
   // Exact live-in/live-out relations in region block order.
   const loom_liveness_block_relation_t* blocks;
   // Number of block relations in |blocks|.
@@ -59,11 +69,14 @@ typedef struct loom_liveness_dataflow_t {
 // Collects canonical block transfers and solves their boundary relations once.
 // The acquired |value_domain| and |cfg_graph| must describe the same immutable
 // region. Non-CFG regions use local block relations and an identity-only graph.
+// Only |value_selection| participates in the relations; the value domain keeps
+// every SSA value so adjacent analyses can share its ordinal map.
 // |arena| must outlive every consumer of |out_dataflow|.
 iree_status_t loom_liveness_dataflow_analyze(
     const loom_local_value_domain_t* value_domain,
-    const loom_cfg_graph_t* cfg_graph, iree_arena_allocator_t* arena,
-    loom_liveness_dataflow_t* out_dataflow);
+    const loom_cfg_graph_t* cfg_graph,
+    loom_liveness_value_selection_t value_selection,
+    iree_arena_allocator_t* arena, loom_liveness_dataflow_t* out_dataflow);
 
 // Solves the least live-in/live-out fixed point for |block_transfers|.
 //

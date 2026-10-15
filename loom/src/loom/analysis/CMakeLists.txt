@@ -1276,6 +1276,23 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
+    liveness_selection_test
+  SRCS
+    "liveness_selection_test.cc"
+  DEPS
+    ::liveness
+    ::liveness_dataflow
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::low
+    loom::target::registers
+    loom::util::cfg_graph
+)
+
+loom_cc_test(
+  NAME
     liveness_test
   SRCS
     "liveness_test.cc"

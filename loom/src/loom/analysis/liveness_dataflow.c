@@ -374,6 +374,8 @@ typedef struct loom_liveness_dataflow_build_state_t {
   const loom_module_t* module;
   // Acquired value-ordinal map shared with snapshot consumers.
   const loom_local_value_domain_t* value_domain;
+  // Values participating in boundary propagation.
+  loom_liveness_value_selection_t value_selection;
   // Number of entries in the local value domain.
   loom_value_ordinal_t value_count;
   // Temporary storage for block transfers and membership generations.
@@ -418,6 +420,11 @@ static iree_status_t loom_liveness_add_block_use(void* user_data,
                                                  loom_value_id_t value_id) {
   loom_liveness_dataflow_build_state_t* build_state =
       (loom_liveness_dataflow_build_state_t*)user_data;
+  if (build_state->value_selection == LOOM_LIVENESS_VALUES_REGISTERS &&
+      !loom_type_is_register(
+          loom_module_value_type(build_state->module, value_id))) {
+    return iree_ok_status();
+  }
   const loom_value_ordinal_t value_ordinal =
       loom_local_value_domain_ordinal(build_state->value_domain, value_id);
   if (build_state->definitions.generations[value_ordinal] ==
@@ -496,7 +503,9 @@ static iree_status_t loom_liveness_allocate_block_states(
 
 iree_status_t loom_liveness_dataflow_analyze(
     const loom_local_value_domain_t* value_domain,
-    const loom_cfg_graph_t* cfg_graph, iree_arena_allocator_t* result_arena,
+    const loom_cfg_graph_t* cfg_graph,
+    loom_liveness_value_selection_t value_selection,
+    iree_arena_allocator_t* result_arena,
     loom_liveness_dataflow_t* out_dataflow) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
   *out_dataflow = (loom_liveness_dataflow_t){0};
@@ -508,6 +517,7 @@ iree_status_t loom_liveness_dataflow_analyze(
   loom_liveness_dataflow_build_state_t state = {
       .module = module,
       .value_domain = value_domain,
+      .value_selection = value_selection,
       .value_count = value_domain->value_count,
       .scratch_arena = scratch_arena,
   };
@@ -570,6 +580,7 @@ iree_status_t loom_liveness_dataflow_analyze(
 
   if (iree_status_is_ok(status)) {
     *out_dataflow = (loom_liveness_dataflow_t){
+        .value_selection = value_selection,
         .blocks = block_relations,
         .block_count = region->block_count,
     };

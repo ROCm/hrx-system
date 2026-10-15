@@ -136,6 +136,8 @@ typedef struct loom_liveness_build_state_t {
   iree_arena_allocator_t* scratch_arena;
   // Active local value domain shared with adjacent compiler phases.
   const loom_local_value_domain_t* value_domain;
+  // Participation retained by the canonical boundary analysis.
+  loom_liveness_value_selection_t value_selection;
   // Value IDs indexed by region-local value ordinal. Borrowed from
   // value_domain.
   const loom_value_id_t* value_ids;
@@ -267,6 +269,12 @@ static loom_value_ordinal_t loom_liveness_value_ordinal(
   return loom_local_value_domain_ordinal(state->value_domain, value_id);
 }
 
+static bool loom_liveness_includes_value(
+    const loom_liveness_build_state_t* state, loom_value_id_t value_id) {
+  return state->value_selection == LOOM_LIVENESS_VALUES_ALL ||
+         loom_type_is_register(loom_module_value_type(state->module, value_id));
+}
+
 static loom_liveness_interval_bounds_t* loom_liveness_ensure_interval_bounds(
     loom_liveness_build_state_t* state, loom_value_id_t value_id,
     uint32_t point) {
@@ -315,6 +323,9 @@ static void loom_liveness_note_segment_bounds(
 static void loom_liveness_note_definition(loom_liveness_build_state_t* state,
                                           loom_value_id_t value_id,
                                           uint32_t point) {
+  if (!loom_liveness_includes_value(state, value_id)) {
+    return;
+  }
   loom_liveness_interval_bounds_t* bounds =
       loom_liveness_ensure_interval_bounds(state, value_id, point);
   bounds->definition_point = point;
@@ -325,6 +336,9 @@ static void loom_liveness_note_definition(loom_liveness_build_state_t* state,
 static iree_status_t loom_liveness_note_live_point(
     loom_liveness_build_state_t* state, loom_value_id_t value_id,
     uint32_t point) {
+  if (!loom_liveness_includes_value(state, value_id)) {
+    return iree_ok_status();
+  }
   if (point == UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "liveness live point exceeds uint32_t range");
@@ -652,6 +666,9 @@ static iree_status_t loom_liveness_note_use_at_point(void* user_data,
                                                      loom_value_id_t value_id) {
   loom_liveness_point_use_state_t* state =
       (loom_liveness_point_use_state_t*)user_data;
+  if (!loom_liveness_includes_value(state->build_state, value_id)) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_liveness_note_live_point(state->build_state,
                                                      value_id, state->point));
   if (state->operation_point != NULL) {
@@ -1095,6 +1112,9 @@ static iree_status_t loom_liveness_add_use_to_pressure(
     void* user_data, loom_value_id_t value_id) {
   loom_liveness_add_use_to_pressure_state_t* state =
       (loom_liveness_add_use_to_pressure_state_t*)user_data;
+  if (!loom_liveness_includes_value(state->build_state, value_id)) {
+    return iree_ok_status();
+  }
   const loom_value_ordinal_t value_ordinal =
       loom_liveness_value_ordinal(state->build_state, value_id);
   if (!loom_liveness_bitset_set(*state->live_values, value_ordinal)) {
@@ -1535,6 +1555,7 @@ loom_liveness_analyze_local_value_domain_with_dataflow_impl(
       .result_arena = result_arena,
       .scratch_arena = scratch_arena,
       .value_domain = value_domain,
+      .value_selection = dataflow->value_selection,
       .value_ids = value_domain->value_ids,
       .value_count = value_domain->value_count,
   };
@@ -1683,8 +1704,8 @@ iree_status_t loom_liveness_analyze_local_value_domain(
   }
   loom_liveness_dataflow_t dataflow = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_liveness_dataflow_analyze(value_domain, &cfg_graph, arena,
-                                            &dataflow);
+    status = loom_liveness_dataflow_analyze(
+        value_domain, &cfg_graph, LOOM_LIVENESS_VALUES_ALL, arena, &dataflow);
   }
   if (iree_status_is_ok(status)) {
     status = loom_liveness_analyze_local_value_domain_with_dataflow_impl(

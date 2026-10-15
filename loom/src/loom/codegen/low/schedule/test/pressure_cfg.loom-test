@@ -111,3 +111,30 @@ low.func.def target<test.low.core>(@target) @loop_residency(%held: reg<test.i32>
   test.event.memory.write.i32 %second
   low.br ^loop
 }
+
+// ====
+
+// A frame-owned handle survives the backedge without occupying a register.
+// Its view/address SSA dependencies still order the local materialization.
+// RUN: emit low-schedule-query @storage_handle_loop strategy=resource-stall kind=ssa consumer=3,4,5 order=* scheduled-pressure=test.i32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @storage_handle_loop(%seed: reg<test.i32>) asm {
+  %slot = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
+  low.br ^loop
+^loop:
+  %view = storage_view %slot {byte_length = 8, offset = 8} : low.storage<private> -> low.storage<private>
+  %address = storage_address %view : low.storage<private> -> reg<test.i32>
+  %value = test.add.i32 %seed, %address
+  test.event.memory.write.i32 %value
+  low.br ^loop
+}
+
+// ----
+block 0 order: 0, 1
+block 1 order: 2, 3, 4, 5, 6
+scheduled pressure test.i32: peak-live-units=2 peak-live-values=2
+node 3 <- 2
+node 4 <- 3
+node 5 <- 4

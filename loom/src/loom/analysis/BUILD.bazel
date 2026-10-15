@@ -1130,6 +1130,22 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "liveness_selection_test",
+    srcs = ["liveness_selection_test.cc"],
+    deps = [
+        ":liveness",
+        ":liveness_dataflow",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:cfg_graph",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "liveness_test",
     srcs = ["liveness_test.cc"],
     deps = [

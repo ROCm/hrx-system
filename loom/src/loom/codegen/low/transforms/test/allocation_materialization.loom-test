@@ -191,7 +191,7 @@ low.func.def target<test.low.core>(@test_target) @reports_released_allocation_at
 }
 
 // ----
-{"invocations":[{"pass":"low-materialize-allocation","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"reports_released_allocation_attempt_storage","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"storage":2,"spills":2,"reloads":2,"rematerializations":0,"live_range_splits":0,"attempts":3,"attempt_arena_used_bytes_high_water":9664,"attempt_arena_owned_bytes_high_water":32768},"details":[]}]}
+{"invocations":[{"pass":"low-materialize-allocation","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"reports_released_allocation_attempt_storage","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"storage":2,"spills":2,"reloads":2,"rematerializations":0,"live_range_splits":0,"attempts":3,"attempt_arena_used_bytes_high_water":9440,"attempt_arena_owned_bytes_high_water":32768},"details":[]}]}
 
 // ====
 
@@ -1080,11 +1080,12 @@ low.func.def allocation(fixed) target<test.low.core>(@target) @fixed_input() asm
 
 // Register-required spill sources can still be rematerialized. Recreating a
 // constant near its store repairs pressure without another spill slot.
+// The storage handle and unused argument have ordinals but no live interval.
 // RUN: pass low-materialize-allocation{budgets=test.i32=2}
 
 test.target<low_core> @target
 
-low.func.def target<test.low.core>(@target) @spill_constants() asm {
+low.func.def target<test.low.core>(@target) @spill_constants(%unused: reg<test.i32>) asm {
   %storage = storage {byte_alignment = 4, byte_length = 12} : low.storage<private>
   %first = test.const.i32 1
   %second = test.const.i32 2
@@ -1097,7 +1098,7 @@ low.func.def target<test.low.core>(@target) @spill_constants() asm {
 // ----
 test.target<low_core> @target
 
-low.func.def target<test.low.core>(@target) @spill_constants() asm {
+low.func.def target<test.low.core>(@target) @spill_constants(%unused: reg<test.i32>) asm {
   %storage = storage {byte_alignment = 4, byte_length = 12} : low.storage<private>
   %first = test.const.i32 1
   low.spill %first, %storage : reg<test.i32>, low.storage<private>

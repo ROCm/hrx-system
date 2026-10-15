@@ -64,7 +64,8 @@ typedef struct loom_low_function_model_t {
   loom_low_function_context_t context;
   // Read-only control-flow graph for the function body.
   loom_cfg_graph_t cfg_graph;
-  // Canonical block liveness shared by source and scheduled-order consumers.
+  // Canonical register liveness shared by source and scheduled-order consumers.
+  // Static storage handles retain their function-owned layout, not registers.
   loom_liveness_dataflow_t liveness_dataflow;
   // Canonical loop intervals preserved from |cfg_graph|.
   loom_cfg_loop_forest_t loop_forest;

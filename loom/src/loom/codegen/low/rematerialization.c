@@ -715,11 +715,14 @@ static iree_status_t loom_low_rematerialization_plan_failure_batch(
   iree_host_size_t capacity = 0;
   for (loom_value_ordinal_t ordinal = 0; ordinal < liveness->value_count;
        ++ordinal) {
-    const loom_liveness_interval_t* interval =
-        &liveness->intervals[liveness->value_interval_indices[ordinal]];
-    if (interval->value_class.type_kind != LOOM_TYPE_REGISTER) {
+    // Storage handles and unused block arguments retain their ordinals without
+    // contributing a register interval to the failure frontier.
+    const uint32_t interval_index = liveness->value_interval_indices[ordinal];
+    if (interval_index == UINT32_MAX) {
       continue;
     }
+    const loom_liveness_interval_t* interval =
+        &liveness->intervals[interval_index];
     const uint32_t assignment_index =
         table->assignment_indices_by_value_ordinal[ordinal];
     const bool in_failure_frontier =

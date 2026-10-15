@@ -88,9 +88,9 @@ iree_status_t loom_low_function_model_build(
                                         &out_model->loop_forest);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_liveness_dataflow_analyze(&prepared->value_domain,
-                                            &out_model->cfg_graph, arena,
-                                            &out_model->liveness_dataflow);
+    status = loom_liveness_dataflow_analyze(
+        &prepared->value_domain, &out_model->cfg_graph,
+        LOOM_LIVENESS_VALUES_REGISTERS, arena, &out_model->liveness_dataflow);
   }
   return status;
 }
