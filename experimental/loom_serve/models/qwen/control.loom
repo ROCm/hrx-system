@@ -157,7 +157,12 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
     %next_bounded = scalar.assume %next_count [range(%next_count, 1, 16)] : i32
     %next = index.cast %next_bounded : i32 to index
     %metadata_base = index.constant 2320 : offset
-    %token_base = index.constant 2048 : offset
+    // The allocation contains two equal planes sized by the largest prepared
+    // shape. The queued epoch may use a different shape than the active one.
+    %token_byte_count = index.cast %token_bytes : offset to index
+    %plane_count = index.constant 2 : index
+    %plane_bytes = index.div %token_byte_count, %plane_count : index
+    %token_base = index.cast %plane_bytes : index to offset
     %next_outputs = func.call @encode_plan(%plan, %inputs, %next, %c16, %metadata, %metadata_base, %tokens, %token_base) : (buffer, buffer, index, index, buffer, offset, buffer, offset) -> (i32)
     %next_eos_offset = index.constant 4636 : offset
     %next_terminal = buffer.view %metadata[%next_eos_offset] : buffer -> view<1xi32>

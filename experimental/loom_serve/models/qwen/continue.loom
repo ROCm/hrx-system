@@ -1,9 +1,10 @@
 config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
 
-kernel.decl @qwen38_continue_dispatch() launch(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer)
+kernel.decl @qwen38_continue_dispatch() launch(%context: index, %capacity: index, %epoch: buffer, %tokens: buffer, %results: buffer)
 
 command.program.def public @qwen38_continue() launch(%epoch: buffer, %tokens: buffer, %results: buffer) {
   %context = config.get @qwen38.attention.cache_capacity : index
-  kernel.launch @qwen38_continue_dispatch(%context, %epoch, %tokens, %results) : (index, buffer, buffer, buffer)
+  %capacity = index.constant 512 : index
+  kernel.launch @qwen38_continue_dispatch(%context, %capacity, %epoch, %tokens, %results) : (index, index, buffer, buffer, buffer)
   command.return
 }

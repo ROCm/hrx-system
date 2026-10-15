@@ -12,8 +12,9 @@ func.decl @qwen38_descriptor_without_selection(%word: i32) -> (i32)
 kernel.def export("qwen38_accept_spans") @qwen38_accept_spans() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%width_value: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer) {
+} launch(%width_value: index, %token_capacity_value: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer) {
   %width = index.assume %width_value [range(%width_value, 1, 8)] : index
+  %token_capacity = index.assume %token_capacity_value [range(%token_capacity_value, 1, 2147483647)] : index
   %origin = index.constant 0 : offset
   %descriptor_origin = index.constant 12 : offset
   %options_origin = index.constant 1804 : offset
@@ -24,7 +25,7 @@ kernel.def export("qwen38_accept_spans") @qwen38_accept_spans() {
   %options = buffer.view %metadata[%options_origin] : buffer -> view<64x2xi32>
   %eos_view = buffer.view %metadata[%eos_origin] : buffer -> view<1xi32>
   %eos = view.load %eos_view[0] : view<1xi32> -> i32
-  %tokens = buffer.view %inputs[%origin] : buffer -> view<512xi32>
+  %tokens = buffer.view %inputs[%origin] : buffer -> view<[%token_capacity]xi32>
   %selected = buffer.view %predictions[%origin] : buffer -> view<128xi32>
   %outputs = buffer.view %results[%origin] : buffer -> view<16x10xi32>
   %accepted_header = buffer.view %committed[%origin] : buffer -> view<3xi32>
@@ -79,8 +80,8 @@ kernel.def export("qwen38_accept_spans") @qwen38_accept_spans() {
           %matches = scf.if %has_draft -> (i1) {
             %relative = index.add %token, %c1 : index
             %candidate_value = index.add %begin, %relative : index
-            %candidate_index = index.assume %candidate_value [range(%candidate_value, 0, 511)] : index
-            %candidate = view.load %tokens[%candidate_index] : view<512xi32> -> i32
+            %candidate_index = index.assume %candidate_value [ge(%candidate_value, 0), lt(%candidate_value, %token_capacity)] : index
+            %candidate = view.load %tokens[%candidate_index] : view<[%token_capacity]xi32> -> i32
             %same = scalar.cmpi eq, %prediction, %candidate : i32
             scf.yield %same : i1
           } else {
