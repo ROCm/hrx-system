@@ -10,6 +10,7 @@
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/publisher.h"
@@ -28,18 +29,6 @@ typedef struct iree_hal_amd_gpu_pm4_submission_wait_t {
   // Owned eligible native reader, or NULL for a completed/host dependency.
   iree_hal_amd_gpu_pm4_signal_t* signal;
 } iree_hal_amd_gpu_pm4_submission_wait_t;
-
-// Admitted direct-dispatch geometry, independent of packet publication mode.
-typedef struct iree_hal_amd_gpu_pm4_dispatch_t {
-  // Work-items in each complete workgroup.
-  uint32_t workgroup_size[3];
-  // Number of dispatched workgroups, including a possible partial group.
-  uint32_t workgroup_count[3];
-  // Final group dimensions, all zero when every group is complete.
-  uint32_t partial_size[3];
-  // Fixed and dynamic LDS allocation in bytes.
-  uint32_t group_segment_byte_length;
-} iree_hal_amd_gpu_pm4_dispatch_t;
 
 typedef enum iree_hal_amd_gpu_pm4_submission_kind_e {
   IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER,
@@ -98,16 +87,6 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
     iree_hal_amd_gpu_pm4_transfer_t transfer;
   };
 } iree_hal_amd_gpu_pm4_submission_t;
-
-// Admits direct geometry and argument representation at the backend's public
-// dispatch boundary. The public HAL wrapper has validated list storage, flags,
-// and exact-family identity. No caller bytes or native addresses are captured.
-iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
-    const iree_hal_amd_gpu_pm4_function_t* function,
-    uint32_t maximum_group_segment_byte_length,
-    iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
-    iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags,
-    iree_hal_amd_gpu_pm4_dispatch_t* out_dispatch);
 
 // Creates a refcounted capture of an admitted operation before the public API
 // returns. The pool is borrowed and outlives every retained reference.
@@ -171,13 +150,6 @@ void iree_hal_amd_gpu_pm4_submission_release(
 iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
     const iree_hal_queue_family_t* family, iree_hal_buffer_ref_t reference,
     iree_hal_memory_access_t access, uint64_t* out_address);
-
-// Writes the admitted native kernarg segment after native addresses have been
-// resolved. binding_addresses contains one address for each dense HAL binding;
-// native direct constants do not consume it. Indirect arguments bypass this.
-void iree_hal_amd_gpu_pm4_submission_emplace_arguments(
-    const iree_hal_amd_gpu_pm4_submission_t* submission,
-    const uint64_t* binding_addresses, void* target);
 
 #ifdef __cplusplus
 }  // extern "C"

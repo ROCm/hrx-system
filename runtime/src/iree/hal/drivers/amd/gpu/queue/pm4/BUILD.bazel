@@ -86,12 +86,42 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "dispatch",
+    srcs = ["dispatch.c"],
+    hdrs = ["dispatch.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu:executable",
+        "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "dispatch_test",
+    srcs = ["dispatch_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":dispatch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu:executable",
+        "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:metadata",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "submission",
     srcs = ["submission.c"],
     hdrs = ["submission.h"],
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":barrier",
+        ":dispatch",
         ":semaphore",
         ":signal",
         ":transfer",
@@ -126,6 +156,7 @@ iree_runtime_cc_test(
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":barrier",
+        ":dispatch",
         ":semaphore",
         ":submission",
         "//runtime/src/iree/async",

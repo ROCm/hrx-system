@@ -96,6 +96,41 @@ iree_cc_library(
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    dispatch
+  HDRS
+    "dispatch.h"
+  SRCS
+    "dispatch.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::kernarg
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    dispatch_test
+  SRCS
+    "dispatch_test.cc"
+  DEPS
+    ::dispatch
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::image::metadata
+    iree::hal::drivers::amd::gpu::kernarg
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     submission
   HDRS
     "submission.h"
@@ -103,6 +138,7 @@ iree_cc_library(
     "submission.c"
   DEPS
     ::barrier
+    ::dispatch
     ::semaphore
     ::signal
     ::transfer
@@ -143,6 +179,7 @@ iree_cc_test(
     "submission_test.cc"
   DEPS
     ::barrier
+    ::dispatch
     ::semaphore
     ::submission
     iree::async

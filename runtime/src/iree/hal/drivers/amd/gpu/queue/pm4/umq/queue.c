@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/continuation.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/retirement.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/submission.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/umq/ring.h"
@@ -661,8 +662,9 @@ iree_hal_amd_gpu_pm4_umq_publish(
   // Reservation commits only the advancing position; ring geometry is fixed.
   queue->producer.ring.reserved_words = candidate.reserved_words;
   if (argument_length) {
-    iree_hal_amd_gpu_pm4_submission_emplace_arguments(
-        submission, addresses,
+    iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
+        function, &submission->dispatch.geometry,
+        submission->dispatch.constants, addresses, submission->dispatch.flags,
         arguments->memory.contents.data + argument_offset);
   }
   uint32_t* words = reservation.words;
@@ -1207,7 +1209,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_dispatch(
       function,
       (uint32_t)
           queue->context->target_info.compute.local_data_share_byte_length,
-      config, constants, bindings, flags, &dispatch));
+      config, constants, bindings.count, flags, &dispatch));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
+      function->kernarg, bindings, flags));
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create(
       &queue->captures, waits, signals, executable, function, dispatch,

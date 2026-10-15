@@ -55,6 +55,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::host_wait
     iree::hal::drivers::amd::gpu::queue::pm4::barrier
     iree::hal::drivers::amd::gpu::queue::pm4::commands
+    iree::hal::drivers::amd::gpu::queue::pm4::dispatch
     iree::hal::drivers::amd::gpu::queue::pm4::launch
     iree::hal::drivers::amd::gpu::queue::pm4::retirement
     iree::hal::drivers::amd::gpu::queue::pm4::semaphore
