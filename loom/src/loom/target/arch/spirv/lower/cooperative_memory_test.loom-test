@@ -1,0 +1,183 @@
+// A cooperative store and load share the allocation selected by an integer
+// alias. Floating-point column-major and unsigned row-major components retain
+// their own interpretation without changing the pointer type.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT16,COOPERATIVE_MATRIX_KHR
+
+kernel.def @float_integer_storage() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %bytes = index.constant 2048 : offset
+  %tile_bytes = index.constant 1024 : offset
+  %allocation = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 1)] : index
+  %tile_offset = index.scale %subgroup, %tile_bytes : index, offset -> offset
+  %layout = encoding.layout.strided [1, %m] : encoding<layout>
+  %view = buffer.view %allocation[%tile_offset] : buffer -> view<16x16xf32, %layout>
+  %output_view = buffer.view %aligned[%base] : buffer -> view<64xf32>
+  %a_values = vector.constant -2.0 : vector<1xf16>
+  %b_values = vector.constant 3.0 : vector<1xf16>
+  %c_values = vector.constant 7.0 : vector<1xf32>
+  %lhs = vector.fragment<lhs> %a_values shape [%m, %k] : vector<1xf16>
+  %rhs = vector.fragment<rhs> %b_values shape [%k, %m] : vector<1xf16>
+  %init = vector.fragment<init> %c_values shape [%m, %m] : vector<1xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<1xf16>, vector<1xf16>, vector<1xf32>
+  vector.fragment.store<result> %result, %view[0, 0] shape [%m, %m] : vector<1xf32>, view<16x16xf32, %layout>
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+  %loaded = vector.fragment.load<init> %view[0, 0] shape [%m, %m] : view<16x16xf32, %layout> -> vector<1xf32>
+  %accumulated = vector.mma %lhs, %rhs, %loaded : vector<1xf16>, vector<1xf16>, vector<1xf32>
+  vector.fragment.store<result> %accumulated, %view[0, 0] shape [%m, %m] : vector<1xf32>, view<16x16xf32, %layout>
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+  %integer_view = buffer.view %allocation[%tile_offset] : buffer -> view<16x16xi32>
+  %bits = view.load %integer_view[0, 0] : view<16x16xi32> -> i32
+  %value = scalar.bitcast %bits : i32 to f32
+  %thread = kernel.workitem.id<x> : index
+  view.store %value, %output_view[%thread] : f32, view<64xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer) -> ()}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @float_integer_storage() asm {
+  %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %allocation = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
+  %tile_bytes = OpConstant.offset64 1024
+  %subgroup = OpLoadBuiltin.subgroup_id
+  %35 = OpBitcast.i32.u32 %subgroup
+  %36 = OpUConvert.u32.offset64 %35
+  %tile_offset = OpIMul.offset64 %36, %tile_bytes
+  %view = storage_address %allocation : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %39 = OpConstant.f16 49152 : reg<spirv.id>
+  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %39 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
+  %41 = OpConstant.f16 16896 : reg<spirv.id>
+  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %41 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
+  %43 = OpConstant.f32 1088421888 : reg<spirv.id>
+  %init = OpCompositeConstruct.cooperative.f32.16x16.accumulator %43 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f32.subgroup %lhs, %rhs, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %46 = OpConstant.offset64 16
+  %47 = OpUConvert.offset64.u32 %46
+  %48 = OpAccessChain.workgroup.i32.byte_offset %view, %tile_offset
+  OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.workgroup.i32 %48, %result, %47, 1
+  OpControlBarrier.subgroup.workgroup.acq_rel
+  %49 = OpConstant.offset64 16
+  %50 = OpUConvert.offset64.u32 %49
+  %51 = OpAccessChain.workgroup.i32.byte_offset %view, %tile_offset
+  %loaded = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.workgroup.i32 %51, %50, 1 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %accumulated = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f32.subgroup %lhs, %rhs, %loaded : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %54 = OpConstant.offset64 16
+  %55 = OpUConvert.offset64.u32 %54
+  %56 = OpAccessChain.workgroup.i32.byte_offset %view, %tile_offset
+  OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.workgroup.i32 %56, %accumulated, %55, 1
+  OpControlBarrier.subgroup.workgroup.acq_rel
+  %integer_view = storage_address %allocation : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %58 = OpConstant.i32 8 : reg<spirv.id : index>
+  %59 = OpShiftLeftLogical %subgroup, %58 : reg<spirv.id : index>
+  %60 = OpAccessChain.workgroup.i32.element_index %integer_view, %59
+  %bits = OpLoad.workgroup.i32 %60
+  %value = OpBitcast.i32.f32 %bits
+  %thread = OpLoadBuiltin.local_invocation_id.x
+  %64 = OpSConvert.i32.offset64 %thread
+  %65 = OpConstant.offset64 4
+  %66 = OpIMul.offset64 %64, %65
+  %67 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned, %66
+  OpStore.storage_buffer.f32 %67, %value
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,COOPERATIVE_MATRIX_KHR
+
+kernel.def @unsigned_integer_storage() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 32 : index
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %bytes = index.constant 2048 : offset
+  %tile_bytes = index.constant 1024 : offset
+  %allocation = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 1)] : index
+  %tile_offset = index.scale %subgroup, %tile_bytes : index, offset -> offset
+  %input_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=32, payload_registers=8> : encoding<schema>
+  %acc_schema = encoding.define #encoding.operand<element_format=u32, payload_elements=8, payload_registers=8> : encoding<schema>
+  %layout = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u32, payload_elements=8, payload_registers=8>> : encoding<storage>
+  %view = buffer.view %allocation[%tile_offset] : buffer -> view<16x16xi32, %layout>
+  %output_view = buffer.view %aligned[%base] : buffer -> view<64xi32>
+  %a_values = vector.constant -3 : vector<1xi8>
+  %b_values = vector.constant 3 : vector<1xi8>
+  %c_values = vector.constant 7 : vector<1xi32>
+  %lhs = vector.fragment<lhs> %a_values shape [%m, %k] using {schema = %input_schema : encoding<schema>} : vector<1xi8>
+  %rhs = vector.fragment<rhs> %b_values shape [%k, %m] using {schema = %input_schema : encoding<schema>} : vector<1xi8>
+  %init = vector.fragment<init> %c_values shape [%m, %m] using {schema = %acc_schema : encoding<schema>} : vector<1xi32>
+  %result = vector.mma %lhs, %rhs, %init : vector<1xi8>, vector<1xi8>, vector<1xi32>
+  vector.fragment.store<result> %result, %view[0, 0] shape [%m, %m] : vector<1xi32>, view<16x16xi32, %layout>
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+  %loaded = vector.fragment.load<init> %view[0, 0] shape [%m, %m] : view<16x16xi32, %layout> -> vector<1xi32>
+  %accumulated = vector.mma %lhs, %rhs, %loaded : vector<1xi8>, vector<1xi8>, vector<1xi32>
+  vector.fragment.store<result> %accumulated, %view[0, 0] shape [%m, %m] : vector<1xi32>, view<16x16xi32, %layout>
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+  %integer_view = buffer.view %allocation[%tile_offset] : buffer -> view<16x16xi32>
+  %bits = view.load %integer_view[0, 0] : view<16x16xi32> -> i32
+  %thread = kernel.workitem.id<x> : index
+  view.store %bits, %output_view[%thread] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer) -> ()}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @unsigned_integer_storage() asm {
+  %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %allocation = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
+  %tile_bytes = OpConstant.offset64 1024
+  %subgroup = OpLoadBuiltin.subgroup_id
+  %36 = OpBitcast.i32.u32 %subgroup
+  %37 = OpUConvert.u32.offset64 %36
+  %tile_offset = OpIMul.offset64 %37, %tile_bytes
+  %view = storage_address %allocation : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %40 = OpConstant.i8 -3 : reg<spirv.id>
+  %41 = OpBitcast.i8.u8 %40
+  %lhs = OpCompositeConstruct.cooperative.u8.16x32.lhs %41 : reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>
+  %43 = OpConstant.i8 3 : reg<spirv.id>
+  %44 = OpBitcast.i8.u8 %43
+  %rhs = OpCompositeConstruct.cooperative.u8.32x16.rhs %44 : reg<spirv.id : spirv.cooperative_matrix<32x16xu8, subgroup, matrix_b>>
+  %46 = OpConstant.i32 7 : reg<spirv.id>
+  %47 = OpBitcast.i32.u32 %46
+  %init = OpCompositeConstruct.cooperative.u32.16x16.accumulator %47 : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %result = OpCooperativeMatrixMulAddKHR.u8.16x16x32.u32.subgroup %lhs, %rhs, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %50 = OpConstant.offset64 16
+  %51 = OpUConvert.offset64.u32 %50
+  %52 = OpAccessChain.workgroup.i32.byte_offset %view, %tile_offset
+  OpCooperativeMatrixStoreKHR.result.u8.16x16x32.u32.subgroup.workgroup.i32 %52, %result, %51, 0
+  OpControlBarrier.subgroup.workgroup.acq_rel
+  %53 = OpConstant.offset64 16
+  %54 = OpUConvert.offset64.u32 %53
+  %55 = OpAccessChain.workgroup.i32.byte_offset %view, %tile_offset
+  %loaded = OpCooperativeMatrixLoadKHR.init.u8.16x16x32.u32.subgroup.workgroup.i32 %55, %54, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %accumulated = OpCooperativeMatrixMulAddKHR.u8.16x16x32.u32.subgroup %lhs, %rhs, %loaded : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %58 = OpConstant.offset64 16
+  %59 = OpUConvert.offset64.u32 %58
+  %60 = OpAccessChain.workgroup.i32.byte_offset %view, %tile_offset
+  OpCooperativeMatrixStoreKHR.result.u8.16x16x32.u32.subgroup.workgroup.i32 %60, %accumulated, %59, 0
+  OpControlBarrier.subgroup.workgroup.acq_rel
+  %integer_view = storage_address %allocation : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %62 = OpConstant.i32 8 : reg<spirv.id : index>
+  %63 = OpShiftLeftLogical %subgroup, %62 : reg<spirv.id : index>
+  %64 = OpAccessChain.workgroup.i32.element_index %integer_view, %63
+  %bits = OpLoad.workgroup.i32 %64
+  %thread = OpLoadBuiltin.local_invocation_id.x
+  %67 = OpSConvert.i32.offset64 %thread
+  %68 = OpConstant.offset64 4
+  %69 = OpIMul.offset64 %67, %68
+  %70 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned, %69
+  OpStore.storage_buffer.i32 %70, %bits
+  return
+}

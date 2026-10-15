@@ -1,7 +1,8 @@
 // Both subgroup widths execute the same padded and transposed memory flow.
 // Runtime stride and subgroup origins must survive source planning, including
 // axes whose coordinate is an SSA zero. Each workgroup publishes two tiles.
-// Four-element source carriers stay opaque at both subgroup widths.
+// Four-element source carriers stay opaque at both subgroup widths. Integer
+// copies select shared integer allocations for the floating matrix fragments.
 spirv.target<vulkan1_3> @wave32 {abi = hal_kernel, subgroup_size = 32}
 
 spirv.target<vulkan1_3> @wave64 {abi = hal_kernel, subgroup_size = 64}
@@ -29,28 +30,25 @@ template.def<@staged_matrix> @staged_matrix_impl(%lhs_buffer: buffer, %rhs_buffe
   %lhs_stage = buffer.alloca<workgroup> align(16) %half_bytes : buffer
   %rhs_stage = buffer.alloca<workgroup> align(16) %half_bytes : buffer
   %result_stage = buffer.alloca<workgroup> align(16) %float_bytes : buffer
+  %lhs_bits = buffer.view %lhs_stage[%base] : buffer -> view<32x16xi16, %row_layout>
+  %rhs_bits = buffer.view %rhs_stage[%base] : buffer -> view<32x16xi16, %column_layout>
+  %result_bits = buffer.view %result_stage[%base] : buffer -> view<32x16xi32, %row_layout>
   %lhs_staged = buffer.view %lhs_stage[%base] : buffer -> view<32x16xf16, %row_layout>
   %rhs_staged = buffer.view %rhs_stage[%base] : buffer -> view<32x16xf16, %column_layout>
   %result_staged = buffer.view %result_stage[%base] : buffer -> view<32x16xf32, %row_layout>
   %lhs_group_bytes = index.constant 1024 : index
   %out_group_bytes = index.constant 2048 : index
-  %acc_tile_bytes = index.constant 1024 : index
   %lhs_byte_index = index.mul %workgroup, %lhs_group_bytes : index
   %out_byte_index = index.mul %workgroup, %out_group_bytes : index
-  %group_tile = index.mul %workgroup, %c2 : index
-  %global_tile = index.add %group_tile, %subgroup : index
-  %acc_byte_index = index.mul %global_tile, %acc_tile_bytes : index
   %lhs_offset = index.cast %lhs_byte_index : index to offset
   %out_offset = index.cast %out_byte_index : index to offset
-  %acc_offset = index.cast %acc_byte_index : index to offset
-  %acc_aligned_offset = index.assume %acc_offset [multiple_of(%acc_offset, 16)] : offset
   %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 16} : buffer
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
   %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
   %lhs_view = buffer.view %lhs_aligned[%lhs_offset] : buffer -> view<32x16xf16>
   %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<16x16xf16>
-  %init_view = buffer.view %init_aligned[%acc_aligned_offset] : buffer -> view<16x16xf32>
+  %init_view = buffer.view %init_aligned[%out_offset] : buffer -> view<32x16xf32>
   %out_view = buffer.view %out_aligned[%out_offset] : buffer -> view<32x16xf32>
   %stage_elements = index.constant 512 : index
   scf.for %chunk = [%c0 to %stage_elements step %copy_width] unroll {
@@ -64,15 +62,20 @@ template.def<@staged_matrix> @staged_matrix_impl(%lhs_buffer: buffer, %rhs_buffe
     %rhs_row = index.assume %rhs_row_id [range(%rhs_row_id, 0, 15)] : index
     %lhs_element = view.load %lhs_view[%row, %column] : view<32x16xf16> -> f16
     %rhs_element = view.load %rhs_view[%rhs_row, %column] : view<16x16xf16> -> f16
-    view.store %lhs_element, %lhs_staged[%row, %column] : f16, view<32x16xf16, %row_layout>
-    view.store %rhs_element, %rhs_staged[%row, %column] : f16, view<32x16xf16, %column_layout>
+    %init_element = view.load %init_view[%row, %column] : view<32x16xf32> -> f32
+    %lhs_integer = scalar.bitcast %lhs_element : f16 to i16
+    %rhs_integer = scalar.bitcast %rhs_element : f16 to i16
+    %init_integer = scalar.bitcast %init_element : f32 to i32
+    view.store %lhs_integer, %lhs_bits[%row, %column] : i16, view<32x16xi16, %row_layout>
+    view.store %rhs_integer, %rhs_bits[%row, %column] : i16, view<32x16xi16, %column_layout>
+    view.store %init_integer, %result_bits[%row, %column] : i32, view<32x16xi32, %row_layout>
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %origin_id = index.mul %subgroup, %tile_size : index
   %origin = index.assume %origin_id [range(%origin_id, 0, 16), multiple_of(%origin_id, 16)] : index
   %lhs = vector.fragment.load<lhs> %lhs_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf16, %row_layout> -> vector<4xf16>
   %rhs = vector.fragment.load<rhs> %rhs_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf16, %column_layout> -> vector<4xf16>
-  %init = vector.fragment.load<init> %init_view[%c0, %c0] shape [%tile_size, %tile_size] : view<16x16xf32> -> vector<4xf32>
+  %init = vector.fragment.load<init> %result_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf32, %row_layout> -> vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %result, %result_staged[%origin, %c0] shape [%tile_size, %tile_size] : vector<4xf32>, view<32x16xf32, %row_layout>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
@@ -83,7 +86,8 @@ template.def<@staged_matrix> @staged_matrix_impl(%lhs_buffer: buffer, %rhs_buffe
     %column_id = index.rem %element, %tile_size : index
     %row = index.assume %row_id [range(%row_id, 0, 31)] : index
     %column = index.assume %column_id [range(%column_id, 0, 15)] : index
-    %value = view.load %result_staged[%row, %column] : view<32x16xf32, %row_layout> -> f32
+    %bits = view.load %result_bits[%row, %column] : view<32x16xi32, %row_layout> -> i32
+    %value = scalar.bitcast %bits : i32 to f32
     view.store %value, %out_view[%row, %column] : f32, view<32x16xf32>
   }
   template.return
@@ -114,6 +118,7 @@ kernel.def target(@wave64) @staged_matrix64() {
 check.case @staged_matrix32_case {
   check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
   check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "shader_int16"}
   check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<64x16xf16>
@@ -130,6 +135,7 @@ check.case @staged_matrix32_case {
 check.case @staged_matrix64_case {
   check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
   check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "shader_int16"}
   check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
   check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
   %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<64x16xf16>

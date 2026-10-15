@@ -47,7 +47,9 @@ from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
     COOPERATIVE_MATRIX_TYPES,
     CooperativeMatrixCase,
+    CooperativeMatrixMemory,
     cooperative_matrix_descriptor_key,
+    cooperative_matrix_memory_variants,
 )
 from loom.target.arch.spirv.extended_math import (
     EXTENDED_MATH_INSTRUCTIONS,
@@ -1374,20 +1376,17 @@ def _cooperative_matrix_load_descriptor(
     *,
     role: str,
     case: CooperativeMatrixCase,
-    scalar: StorageBufferScalar,
-    memory_space: str,
+    memory: CooperativeMatrixMemory,
 ) -> Descriptor:
     key = case.descriptor_key(
-        "op_cooperative_matrix_load_khr", role=role, memory_space=memory_space
+        "op_cooperative_matrix_load_khr",
+        role=role,
+        memory_space=memory.descriptor_suffix,
     )
-    feature_bits = case.feature_bits | (
-        scalar.register_feature_bits
-        if memory_space == "workgroup"
-        else scalar.feature_bits
-    )
+    feature_bits = case.feature_bits | memory.feature_bits
     pointer = (
-        _ptr_workgroup_scalar_operand(scalar, "ptr")
-        if memory_space == "workgroup"
+        _ptr_workgroup_scalar_operand(memory.carrier, "ptr")
+        if memory.space == "workgroup"
         else _ptr_storage_buffer_operand("ptr")
     )
     return Descriptor(
@@ -1395,13 +1394,13 @@ def _cooperative_matrix_load_descriptor(
         mnemonic=(
             f"OpCooperativeMatrixLoadKHR.{role}.{case.element}."
             f"{case.m_size}x{case.n_size}x{case.k_size}."
-            f"{case.accumulator}.subgroup.{memory_space}"
+            f"{case.accumulator}.subgroup.{memory.descriptor_suffix}"
         ),
         semantic_tag=key,
         operands=(_id_result(), pointer, _id_operand("stride")),
         immediates=(_COOPERATIVE_MATRIX_LAYOUT_IMMEDIATE,),
         effects=(
-            _cooperative_matrix_effect(EffectKind.READ, memory_space),
+            _cooperative_matrix_effect(EffectKind.READ, memory.space),
             Effect(EffectKind.CONVERGENT, flags=(EffectFlag.ORDERED,)),
         ),
         feature_mask_words=(feature_bits,),
@@ -1416,20 +1415,17 @@ def _cooperative_matrix_load_descriptor(
 def _cooperative_matrix_store_descriptor(
     *,
     case: CooperativeMatrixCase,
-    scalar: StorageBufferScalar,
-    memory_space: str,
+    memory: CooperativeMatrixMemory,
 ) -> Descriptor:
     key = case.descriptor_key(
-        "op_cooperative_matrix_store_khr", role="result", memory_space=memory_space
+        "op_cooperative_matrix_store_khr",
+        role="result",
+        memory_space=memory.descriptor_suffix,
     )
-    feature_bits = case.feature_bits | (
-        scalar.register_feature_bits
-        if memory_space == "workgroup"
-        else scalar.feature_bits
-    )
+    feature_bits = case.feature_bits | memory.feature_bits
     pointer = (
-        _ptr_workgroup_scalar_operand(scalar, "ptr")
-        if memory_space == "workgroup"
+        _ptr_workgroup_scalar_operand(memory.carrier, "ptr")
+        if memory.space == "workgroup"
         else _ptr_storage_buffer_operand("ptr")
     )
     return Descriptor(
@@ -1437,13 +1433,13 @@ def _cooperative_matrix_store_descriptor(
         mnemonic=(
             f"OpCooperativeMatrixStoreKHR.result.{case.element}."
             f"{case.m_size}x{case.n_size}x{case.k_size}."
-            f"{case.accumulator}.subgroup.{memory_space}"
+            f"{case.accumulator}.subgroup.{memory.descriptor_suffix}"
         ),
         semantic_tag=key,
         operands=(pointer, _id_operand("value"), _id_operand("stride")),
         immediates=(_COOPERATIVE_MATRIX_LAYOUT_IMMEDIATE,),
         effects=(
-            _cooperative_matrix_effect(EffectKind.WRITE, memory_space),
+            _cooperative_matrix_effect(EffectKind.WRITE, memory.space),
             Effect(EffectKind.CONVERGENT, flags=(EffectFlag.ORDERED,)),
         ),
         feature_mask_words=(feature_bits,),
@@ -1495,26 +1491,20 @@ def _cooperative_matrix_mul_add_descriptor(
 def _cooperative_matrix_descriptors_for_case(
     case: CooperativeMatrixCase,
 ) -> tuple[Descriptor, ...]:
-    memory = tuple(
-        descriptor
-        for memory_space in ("storage_buffer", "workgroup")
-        for descriptor in (
-            *(
-                _cooperative_matrix_load_descriptor(
-                    role=role, case=case, scalar=scalar, memory_space=memory_space
-                )
-                for role, scalar in (
-                    ("lhs", case.lhs_scalar),
-                    ("rhs", case.rhs_scalar),
-                    ("init", case.accumulator_scalar),
-                )
-            ),
-            _cooperative_matrix_store_descriptor(
-                case=case, scalar=case.result_scalar, memory_space=memory_space
-            ),
+    loads = tuple(
+        _cooperative_matrix_load_descriptor(role=role, case=case, memory=memory)
+        for role, scalar in (
+            ("lhs", case.lhs_scalar),
+            ("rhs", case.rhs_scalar),
+            ("init", case.accumulator_scalar),
         )
+        for memory in cooperative_matrix_memory_variants(scalar)
     )
-    return (*memory, _cooperative_matrix_mul_add_descriptor(case=case))
+    stores = tuple(
+        _cooperative_matrix_store_descriptor(case=case, memory=memory)
+        for memory in cooperative_matrix_memory_variants(case.result_scalar)
+    )
+    return (*loads, *stores, _cooperative_matrix_mul_add_descriptor(case=case))
 
 
 def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:

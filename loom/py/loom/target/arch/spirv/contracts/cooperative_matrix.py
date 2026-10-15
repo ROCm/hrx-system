@@ -28,9 +28,10 @@ from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
     COOPERATIVE_MATRIX_TYPES,
     CooperativeMatrixCase,
+    CooperativeMatrixMemory,
     CooperativeMatrixType,
+    cooperative_matrix_memory_variants,
 )
-from loom.target.arch.spirv.scalar_memory import StorageBufferScalar
 from loom.target.contracts import (
     DescriptorEmitForm,
     DescriptorResultType,
@@ -185,13 +186,13 @@ COOPERATIVE_MATRIX_INITIALIZER_RULES = (
 def _memory_rule(
     case: CooperativeMatrixCase,
     role: str,
-    scalar: StorageBufferScalar,
+    memory: CooperativeMatrixMemory,
     element: str,
     rows: int,
     columns: int,
-    memory_space: str,
     leading_axis: int,
 ) -> DescriptorRule:
+    scalar = memory.component
     is_load = role != "result"
     operation = SourceMemoryOperation.LOAD if is_load else SourceMemoryOperation.STORE
     descriptor = logical_core_descriptor(
@@ -200,12 +201,14 @@ def _memory_rule(
             if is_load
             else "op_cooperative_matrix_store_khr",
             role=role,
-            memory_space=memory_space,
+            memory_space=memory.descriptor_suffix,
         )
     )
-    is_workgroup = memory_space == "workgroup"
+    is_workgroup = memory.space == "workgroup"
     address_materializer = (
-        workgroup_address_materializer(scalar, SourceMemoryAddressCoordinateType.OFFSET)
+        workgroup_address_materializer(
+            memory.carrier, SourceMemoryAddressCoordinateType.OFFSET
+        )
         if is_workgroup
         else storage_buffer_address_materializer(scalar)
     )
@@ -264,7 +267,11 @@ def _memory_rule(
             ),
             Guard.value_i64_range("rows", rows, rows),
             Guard.value_i64_range("columns", columns, columns),
-            *((workgroup_carrier_guard(scalar.suffix),) if is_workgroup else ()),
+            *(
+                (workgroup_carrier_guard(memory.carrier.suffix),)
+                if is_workgroup
+                else ()
+            ),
             *source_memory_address_feature_guards(address_materializer),
             *descriptor_feature_guards(descriptor, stride_descriptor),
         ),
@@ -292,7 +299,7 @@ def _memory_rule(
 
 
 COOPERATIVE_MATRIX_MEMORY_RULES = tuple(
-    _memory_rule(case, role, scalar, element, rows, columns, memory_space, leading_axis)
+    _memory_rule(case, role, memory, element, rows, columns, leading_axis)
     for case in COOPERATIVE_MATRIX_CASES
     if case.source_rule_enabled
     for role, scalar, element, rows, columns in (
@@ -325,6 +332,6 @@ COOPERATIVE_MATRIX_MEMORY_RULES = tuple(
             case.accumulator_columns,
         ),
     )
-    for memory_space in ("storage_buffer", "workgroup")
+    for memory in cooperative_matrix_memory_variants(scalar)
     for leading_axis in (0, 1)
 )

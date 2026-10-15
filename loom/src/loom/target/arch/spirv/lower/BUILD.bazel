@@ -93,3 +93,10 @@ loom_check_test_suite(
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/target:spirv_artifacts"]),
 )
+
+loom_check_test_suite(
+    name = "cooperative_memory_tests",
+    srcs = ["cooperative_memory_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/target:spirv_artifacts"]),
+)

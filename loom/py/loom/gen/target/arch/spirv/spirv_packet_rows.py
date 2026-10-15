@@ -52,6 +52,7 @@ from loom.target.arch.spirv.cooperative_matrix import (  # noqa: E402
     COOPERATIVE_MATRIX_CASES,
     COOPERATIVE_MATRIX_TYPES,
     CooperativeMatrixCase,
+    cooperative_matrix_memory_variants,
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET  # noqa: E402
 from loom.target.arch.spirv.extended_math import (  # noqa: E402
@@ -740,30 +741,32 @@ def _cooperative_matrix_rows_for_case(case: CooperativeMatrixCase) -> list[_Pack
         matrix_use="LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_ACCUMULATOR_KHR",
     )
     rows = []
-    for memory_space in ("storage_buffer", "workgroup"):
-        pointer_type = _workgroup_pointer_value if memory_space == "workgroup" else _physical_storage_buffer_pointer_value
-        for role, scalar, value in (
-            ("lhs", lhs_scalar, lhs_value),
-            ("rhs", rhs_scalar, rhs_value),
-            ("init", accumulator_scalar, accumulator_value),
-        ):
+    for role, scalar, value in (
+        ("lhs", lhs_scalar, lhs_value),
+        ("rhs", rhs_scalar, rhs_value),
+        ("init", accumulator_scalar, accumulator_value),
+    ):
+        for memory in cooperative_matrix_memory_variants(scalar):
+            pointer_type = _workgroup_pointer_value if memory.space == "workgroup" else _physical_storage_buffer_pointer_value
             rows.append(
                 _PacketRow(
-                    case.descriptor_key("op_cooperative_matrix_load_khr", role=role, memory_space=memory_space),
+                    case.descriptor_key("op_cooperative_matrix_load_khr", role=role, memory_space=memory.descriptor_suffix),
                     opcode="LOOM_SPIRV_OP_COOPERATIVE_MATRIX_LOAD_KHR",
                     form="LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_LOAD",
                     result_type=value,
-                    operand_types=(pointer_type(scalar), stride_type),
+                    operand_types=(pointer_type(memory.carrier), stride_type),
                     memory_alignment=16,
                     has_immediate=True,
                 )
             )
+    for memory in cooperative_matrix_memory_variants(result_scalar):
+        pointer_type = _workgroup_pointer_value if memory.space == "workgroup" else _physical_storage_buffer_pointer_value
         rows.append(
             _PacketRow(
-                case.descriptor_key("op_cooperative_matrix_store_khr", role="result", memory_space=memory_space),
+                case.descriptor_key("op_cooperative_matrix_store_khr", role="result", memory_space=memory.descriptor_suffix),
                 opcode="LOOM_SPIRV_OP_COOPERATIVE_MATRIX_STORE_KHR",
                 form="LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_STORE",
-                operand_types=(pointer_type(result_scalar), result_value, stride_type),
+                operand_types=(pointer_type(memory.carrier), result_value, stride_type),
                 memory_alignment=16,
                 has_immediate=True,
             )

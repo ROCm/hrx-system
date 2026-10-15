@@ -4,6 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+from loom.target.arch.spirv.contracts.cooperative_matrix import (
+    COOPERATIVE_MATRIX_MEMORY_RULES,
+)
 from loom.target.arch.spirv.contracts.logical_core import (
     SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT,
 )
@@ -100,6 +103,62 @@ def test_cooperative_memory_uses_logical_shapes_without_carrier_widths() -> None
             ("result", accumulator_element, 16, 16),
         )
         for workgroup in (False, True)
+        for layout in (0, 1)
+    }
+    assert signatures == expected
+
+
+def test_cooperative_memory_uses_the_retained_allocation_carrier() -> None:
+    signatures = set()
+    for rule in COOPERATIVE_MATRIX_MEMORY_RULES:
+        memory = rule.emit[-1].source_memory
+        if "workgroup" not in memory.memory_spaces:
+            continue
+        role = next(
+            guard.enum_keyword
+            for guard in rule.guards
+            if guard.kind == GuardKind.ENUM_ATTR_EQUALS
+        )
+        carrier_guard = next(
+            guard
+            for guard in rule.guards
+            if guard.kind == GuardKind.LOW_VALUE_REGISTER_CLASS
+        )
+        carrier = carrier_guard.register_class.removeprefix(
+            "spirv.ptr.workgroup.array."
+        )
+        layout = rule.emit[-1].immediates["memory_layout"]
+        signature = (rule.descriptor.key.split(".")[3], role, carrier, layout)
+        assert signature not in signatures
+        signatures.add(signature)
+        for step in rule.emit:
+            assert step.source_memory is memory
+            assert step.source_memory_address_materializer.address.key == (
+                f"spirv.op_access_chain.workgroup.{carrier}.byte_offset"
+            )
+        assert (
+            memory.element_byte_count
+            == {
+                "f16": 2,
+                "bf16": 2,
+                "i16": 2,
+                "f32": 4,
+                "i8": 1,
+                "u8": 1,
+                "i32": 4,
+                "u32": 4,
+            }[carrier]
+        )
+    expected = {
+        (family, role, carrier, layout)
+        for family, inputs, accumulators in (
+            ("f16", ("f16", "i16"), ("f32", "i32")),
+            ("bf16", ("bf16", "i16"), ("f32", "i32")),
+            ("s8", ("i8",), ("i32",)),
+            ("u8", ("u8", "i8"), ("u32", "i32")),
+        )
+        for role in ("lhs", "rhs", "init", "result")
+        for carrier in (inputs if role in ("lhs", "rhs") else accumulators)
         for layout in (0, 1)
     }
     assert signatures == expected

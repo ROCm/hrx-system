@@ -148,6 +148,49 @@ def _require_storage_buffer_scalar(suffix: str) -> StorageBufferScalar:
     return scalar
 
 
+@dataclass(frozen=True, slots=True)
+class CooperativeMatrixMemory:
+    """A matrix component and its independently typed memory pointer."""
+
+    # Scalar interpreted by the cooperative matrix instruction.
+    component: StorageBufferScalar
+    # Pointee scalar selected by the allocation's storage layout.
+    carrier: StorageBufferScalar
+    # SPIR-V memory family used by the address materializer and effects.
+    space: str
+
+    @property
+    def descriptor_suffix(self) -> str:
+        if self.carrier == self.component:
+            return self.space
+        return f"{self.space}.{self.carrier.suffix}"
+
+    @property
+    def feature_bits(self) -> int:
+        if self.space == "workgroup":
+            return (
+                self.component.register_feature_bits
+                | self.carrier.register_feature_bits
+            )
+        return self.component.feature_bits
+
+
+def cooperative_matrix_memory_variants(
+    component: StorageBufferScalar,
+) -> tuple[CooperativeMatrixMemory, ...]:
+    memory = (
+        CooperativeMatrixMemory(component, component, "storage_buffer"),
+        CooperativeMatrixMemory(component, component, "workgroup"),
+    )
+    # Workgroup layout retains a signed integer carrier when same-width views
+    # alias. KHR cooperative memory interprets those bits as matrix components;
+    # equal widths preserve the stride's units without a conversion or copy.
+    carrier = _require_storage_buffer_scalar(f"i{component.byte_width * 8}")
+    if carrier != component:
+        memory += (CooperativeMatrixMemory(component, carrier, "workgroup"),)
+    return memory
+
+
 _SIGNED_SATURATING_PROPERTY_OPERANDS = " | ".join(
     (
         "LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_A_SIGNED_COMPONENTS",
