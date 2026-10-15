@@ -372,8 +372,18 @@ LOOMC_API_EXPORT void loomc_target_profile_release(
 /// its contexts and compilers. Composition does not change the compatibility
 /// domain of profiles previously created against an input environment.
 ///
-/// On success the caller owns one reference to out_target_environment. On
-/// failure it is NULL and no input ownership transfers.
+/// @param environment_count Number of input target environments.
+/// @param environments Input environments to compose. May be NULL when
+/// environment_count is zero.
+/// @param allocator Host allocator used for target-environment storage.
+/// @param out_target_environment Receives one retained environment on success,
+/// or NULL on failure.
+/// @return OK when the target environment was created.
+///
+/// @ownership
+/// The caller releases the returned reference with
+/// `loomc_target_environment_release`. The result retains the input
+/// environments without transferring the caller's references.
 LOOMC_API_EXPORT loomc_status_t loomc_target_environment_create(
     loomc_host_size_t environment_count,
     loomc_target_environment_t* const* environments,
