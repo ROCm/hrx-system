@@ -19,10 +19,17 @@ from loom.reporting.compile_report import (
 )
 
 SUGGEST_KIND = "loom.compile_report.suggest"
+SUGGEST_GUIDANCE = (
+    "Static compiler findings; order and confidence do not rank performance benefit. "
+    "Optimization requires a known-good oracle's native instruction mix, controlled "
+    "measurement on the intended machine, and data reuse policy, plus an end-to-end "
+    "opportunity bound. An unexplained large oracle gap stops local tuning; small "
+    "gains over our own baseline do not qualify the execution shape."
+)
 
 
 class CompileReportSuggestionConfidence(StrEnum):
-    """Evidence tier for one proposed experiment."""
+    """Confidence in the static finding, not its runtime cost or tuning value."""
 
     HIGH = "high"
     EXPERIMENTAL = "experimental"
@@ -103,6 +110,7 @@ def build_compile_report_suggestions(
         "status": (
             "unavailable" if result.unavailable_reason is not None else "available"
         ),
+        "guidance": SUGGEST_GUIDANCE,
         "finding_count": len(result.suggestions),
         "findings": [
             {
@@ -145,6 +153,19 @@ def format_compile_report_suggestions_text(view: dict[str, object]) -> str:
         lines.append(f"  reason: {view['reason']}")
     if "target_unavailable_reason" in view:
         lines.append(f"  target interpretation: {view['target_unavailable_reason']}")
+    lines.extend(
+        (
+            "",
+            fill(
+                str(view["guidance"]),
+                width=100,
+                initial_indent="  ",
+                subsequent_indent="  ",
+                break_long_words=False,
+                break_on_hyphens=False,
+            ),
+        )
+    )
     findings = _expect_list(view["findings"])
     if not findings:
         lines.append("  findings: none")

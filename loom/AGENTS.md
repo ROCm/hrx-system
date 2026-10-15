@@ -12,6 +12,26 @@ numerical oracles establish accuracy. HIP, Triton, ggml and other implementation
 provide performance baselines and algorithmic evidence; their output bits,
 rounding choices and numerical weaknesses are not accuracy requirements.
 
+**Data reuse is the starting point, not the result of hill climbing.** Every
+performance workstream establishes a known-good oracle's emitted instruction
+mix, controlled performance on the intended machine, and data reuse policy
+before optimization begins. The evidence includes paneling, tile and batch
+sizes, prefill chunks, resident operands, buffering, broadcast or cache reuse,
+and complete-request traffic. A scalar reference or single-tile correctness
+example cannot qualify the execution shape. Missing oracle evidence keeps the
+work in investigation and baseline reproduction.
+
+Each tuning task has an absolute end-to-end target, a measured oracle gap,
+an upper bound on the benefit recoverable from its target cost, and a stop or
+rejection condition. The task proceeds only when that benefit can materially
+close the gap or remove a measured resource constraint preventing a competitive
+design. An unexplained large gap reopens the algorithm, execution shape, and
+reuse policy. Repeated 1% or 2% wins over our own slow baseline do not qualify
+that design or justify further tuning. Static compiler findings and passing
+tests cannot supply the missing performance evidence. The
+[agent authoring workflow](docs/src/workflows/agent-driven-kernel-development.md#establish-the-oracle-and-data-reuse-policy)
+owns the evidence record and admission gate.
+
 Optimization explores the performance/accuracy frontier against those oracles.
 The objective is the fastest implementation within the workload's acceptable
 error envelope, with the highest accuracy attainable at that performance.

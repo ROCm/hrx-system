@@ -64,6 +64,9 @@ def test_builds_compact_suggestion_view_with_cited_evidence() -> None:
     assert "[test.reduce_pressure] kernel" in text
     assert "confidence: high" in text
     assert "entries.rows[0].pressure: 128" in text
+    assert "data reuse policy" in view["guidance"]
+    assert view["guidance"] in " ".join(text.split())
+    assert text.index("Static compiler findings") < text.index("[test.reduce_pressure]")
 
 
 def test_builds_explicit_unavailable_view() -> None:

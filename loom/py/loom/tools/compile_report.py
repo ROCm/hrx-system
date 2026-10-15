@@ -32,6 +32,26 @@ _AGENTS_MARKDOWN = """## loom-compile-report
 `loom-compile-report` turns version-zero compile report JSON into bounded views
 for one compiler checkout. Start here before querying the complete report tree.
 
+### Establish that the execution shape is worth optimizing
+
+Data reuse comes first. Before tuning, establish a known-good oracle's native
+instruction mix, controlled performance on the intended machine, and data reuse
+policy: paneling, tile and batch sizes, prefill chunks, operand residency,
+buffering, sharing, and complete-request traffic. A numerical reference or a
+single-tile correctness example cannot qualify the performance architecture.
+
+Each optimization needs an absolute end-to-end target, the measured oracle gap,
+an upper bound on recoverable cost, and a rejection condition. An unexplained
+large gap stops local tuning and reopens the algorithm and reuse policy. Small
+percentage wins against our own slow baseline do not satisfy this gate.
+
+`suggest` consumes compiler evidence, not oracle measurements or reuse policy.
+Its `guidance` appears in text and JSON even with no findings. Finding order
+and confidence do not rank performance benefit; `status: available` means an
+interpreter is available, not that the program is worth optimizing. The
+[agent authoring workflow](https://rocm.github.io/hrx-system/loom/workflows/agent-driven-kernel-development/#establish-the-oracle-and-data-reuse-policy)
+owns the oracle record and admission gate.
+
 ### Read, compare, and choose an experiment
 
 ```shell
@@ -115,7 +135,7 @@ loom-compile-report diff baseline.report.json candidate.report.json \\
   --format=json | \\
   jq '{identity_mismatches, changed_entry_count, entries}'
 loom-compile-report suggest kernel.report.json --format=json | \\
-  jq '{status, provider, findings}'
+  jq '{status, guidance, provider, findings}'
 ```
 
 The JSON views are smaller and more stable than the complete compiler report.
@@ -238,7 +258,14 @@ def _create_argument_parser() -> argparse.ArgumentParser:
 
     suggest_parser = subparsers.add_parser(
         "suggest",
-        help="Suggests experiments from source policies and target evidence.",
+        help="Proposes experiments from static evidence, without runtime ranking.",
+        description=(
+            "Interprets source policies and target evidence. Optimization requires "
+            "a known-good oracle's native instruction mix, controlled measurement "
+            "on the intended machine, data reuse policy, and an end-to-end "
+            "opportunity bound. Finding order and confidence do not rank "
+            "performance benefit."
+        ),
     )
     suggest_parser.add_argument("report", type=Path, help="Compile report JSON path.")
     suggest_parser.add_argument(

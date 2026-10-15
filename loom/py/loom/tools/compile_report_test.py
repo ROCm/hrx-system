@@ -471,6 +471,36 @@ def test_suggest_json_uses_registered_target_provider(
     assert view["findings"] == []
 
 
+@pytest.mark.parametrize(
+    ("target_key", "expected_status"),
+    [("gfx1151", "available"), ("gfx9999", "unavailable")],
+)
+def test_suggest_keeps_static_scope_visible_without_findings(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    target_key: str,
+    expected_status: str,
+) -> None:
+    report_path = tmp_path / "report.json"
+    _write_report(report_path, target_key=target_key, target_record=target_key)
+
+    assert main(["suggest", str(report_path), "--format=json"]) == 0
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)
+    assert captured.err == ""
+    assert view["status"] == expected_status
+    assert view["findings"] == []
+    assert "order and confidence do not rank performance benefit" in view["guidance"]
+    assert "data reuse policy" in view["guidance"]
+    assert "unexplained large oracle gap stops local tuning" in view["guidance"]
+
+    assert main(["suggest", str(report_path)]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert view["guidance"] in " ".join(captured.out.split())
+    assert "findings: none" in captured.out
+
+
 def test_suggest_experimental_bank_model_requires_explicit_opt_in(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

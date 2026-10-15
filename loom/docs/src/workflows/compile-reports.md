@@ -468,9 +468,27 @@ loom-compile-report suggest kernel.report.json
 ```
 
 Each finding names an action and cites the exact evidence paths and values that
-motivated it. The output is a prioritized experiment queue, not an assertion
-that a transformation will improve performance. Recompile, retest, and measure
-each accepted experiment.
+motivated it. Finding order and confidence describe static compiler evidence;
+they do not rank runtime cost or optimization value. `status: available` means
+the relevant interpreter is available. An empty finding list cannot establish
+that the current execution shape is competitive.
+
+Optimization requires a known-good oracle's native instruction mix, controlled
+performance on the intended machine, and data reuse policy before acting on
+these findings. Paneling, tile and batch sizes, prefill chunks, resident
+operands, buffering, sharing, and complete-request traffic determine whether
+the schedule is worth tuning. Each experiment also needs an absolute target,
+the measured end-to-end gap, a bound on recoverable cost, and a rejection
+condition. An unexplained large oracle gap stops local tuning; repeated small
+wins over an inefficient baseline cannot qualify that architecture. The
+[agent authoring workflow](agent-driven-kernel-development.md#establish-the-oracle-and-data-reuse-policy)
+owns this evidence and admission gate.
+
+The tool receives no external oracle measurement or reuse policy, so it cannot
+admit an optimization on the author's behalf. Its `guidance` field makes this
+interpretation explicit in JSON and before findings in text, including results
+with no findings or an unavailable provider. Once the experiment passes the
+opportunity gate, recompile, retest, and measure it.
 
 For an explicitly pipelined loop, `scf.compare_pipeline_depth` suggests comparing
 a smaller depth while holding the unroll factor and workload fixed. It cites
@@ -559,7 +577,8 @@ loom-compile-report suggest kernel.report.json \
 ```
 
 The output preserves the confidence class and evidence for every finding, so
-automation can keep high-confidence and exploratory searches distinct.
+automation can distinguish established static findings from exploratory ones.
+High confidence does not imply a large or even positive runtime benefit.
 
 ## Follow one finding into details
 
