@@ -1,0 +1,144 @@
+func.decl @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer)
+
+// Exercise each native cohort size with complete source packets. The plan's
+// logical request rows and physical feature ranges must agree independently.
+func.def @vision_cohort_observation(%count: index) -> (i32) where [range(%count, 1, 4)] {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %header_bytes = index.constant 64 : offset
+  %pixel_bytes = index.constant 196608 : offset
+  %packet_bytes = index.constant 196672 : offset
+  %range_stride = index.constant 16 : offset
+  %tag_stride = index.constant 8 : offset
+  %state_bytes = index.constant 1 : offset
+  %range_bytes = index.scale %count, %range_stride : index, offset -> offset
+  %tag_bytes = index.scale %count, %tag_stride : index, offset -> offset
+  %input_bytes = index.scale %count, %packet_bytes : index, offset -> offset
+  %state = buffer.alloca<private> align(1) %state_bytes : buffer
+  %tags = buffer.alloca<private> align(8) %tag_bytes : buffer
+  %ranges = buffer.alloca<private> align(8) %range_bytes : buffer
+  %packed = buffer.alloca<private> align(16) %input_bytes : buffer
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %rgb8 = scalar.constant 3 : i32
+  %geometry = scalar.constant 256 : i32
+  %rows32 = scalar.constant 64 : i32
+  %header32 = scalar.constant 64 : i32
+  %pixels32 = scalar.constant 196608 : i32
+  %packet64 = scalar.constant 196672 : i64
+  buffer.store.i8 %zero32, %state[%origin]
+  buffer.fill %zero32, %tags[%origin], %tag_bytes : i32
+  buffer.fill %zero32, %packed[%origin], %input_bytes : i32
+  %range_view = buffer.view %ranges[%origin] : buffer -> view<[%count]x2xi64>
+  scf.for %i = [%c0 to %count step %c1] {
+    %offset = index.scale %i, %packet_bytes : index, offset -> offset
+    %offset64 = index.cast %offset : offset to i64
+    view.store %offset64, %range_view[%i, 0] : i64, view<[%count]x2xi64>
+    view.store %packet64, %range_view[%i, 1] : i64, view<[%count]x2xi64>
+    %header = buffer.view %packed[%offset] : buffer -> view<16xi32>
+    view.store %one32, %header[0] : i32, view<16xi32>
+    view.store %one32, %header[1] : i32, view<16xi32>
+    view.store %geometry, %header[2] : i32, view<16xi32>
+    view.store %geometry, %header[3] : i32, view<16xi32>
+    view.store %geometry, %header[4] : i32, view<16xi32>
+    view.store %geometry, %header[5] : i32, view<16xi32>
+    view.store %one32, %header[6] : i32, view<16xi32>
+    view.store %rows32, %header[7] : i32, view<16xi32>
+    view.store %header32, %header[8] : i32, view<16xi32>
+    view.store %header32, %header[10] : i32, view<16xi32>
+    view.store %pixels32, %header[11] : i32, view<16xi32>
+    view.store %rgb8, %header[12] : i32, view<16xi32>
+    %pixels = index.add %offset, %header_bytes : offset
+    %color32 = index.cast %i : index to i32
+    %color = scalar.trunci %color32 : i32 to i8
+    buffer.fill %color, %packed[%pixels], %pixel_bytes : i8
+  }
+  %stage, %payload, %plan = func.call @prepare_batch(%state, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (i32, buffer, buffer)
+  %payload_length = buffer.length %payload
+  %length_valid = index.cmp eq, %payload_length, %input_bytes : offset
+  %order = buffer.compare %payload[%origin], %packed[%origin], %input_bytes
+  %payload_valid = scalar.cmpi eq, %order, %zero32 : i32
+  %count32 = index.cast %count : index to i32
+  %expected_stage = scalar.subi %count32, %one32 : i32
+  %stage_valid = scalar.cmpi eq, %stage, %expected_stage : i32
+  %valid0 = scalar.andi %length_valid, %payload_valid : i1
+  %valid1 = scalar.andi %valid0, %stage_valid : i1
+  %count64 = index.cast %count : index to i64
+  %image_output_bytes = scalar.constant 1310720 : i64
+  %expected_bytes = scalar.muli %count64, %image_output_bytes : i64
+  %image_rows = scalar.constant 64 : i64
+  %expected_rows = scalar.muli %count64, %image_rows : i64
+  %header = buffer.view %plan[%origin] : buffer -> view<4xi64>
+  %physical_bytes = view.load %header[0] : view<4xi64> -> i64
+  %live_bytes = view.load %header[1] : view<4xi64> -> i64
+  %requests = view.load %header[2] : view<4xi64> -> i64
+  %rows = view.load %header[3] : view<4xi64> -> i64
+  %physical_valid = scalar.cmpi eq, %physical_bytes, %expected_bytes : i64
+  %live_valid = scalar.cmpi eq, %live_bytes, %expected_bytes : i64
+  %count_valid = scalar.cmpi eq, %requests, %count64 : i64
+  %rows_valid = scalar.cmpi eq, %rows, %expected_rows : i64
+  %valid2 = scalar.andi %physical_valid, %live_valid : i1
+  %valid3 = scalar.andi %count_valid, %rows_valid : i1
+  %valid4 = scalar.andi %valid1, %valid2 : i1
+  %header_valid = scalar.andi %valid4, %valid3 : i1
+  %request_base = index.constant 32 : offset
+  %request_stride = index.constant 24 : offset
+  %request_view = buffer.view %plan[%request_base] : buffer -> view<[%count]x3xi64>
+  %requests_valid = scf.for %i = [%c0 to %count step %c1](%valid = %header_valid : i1) -> (i1) {
+    %i64 = index.cast %i : index to i64
+    %expected_first = scalar.muli %i64, %image_rows : i64
+    %first = view.load %request_view[%i, 0] : view<[%count]x3xi64> -> i64
+    %length = view.load %request_view[%i, 1] : view<[%count]x3xi64> -> i64
+    %usage = view.load %request_view[%i, 2] : view<[%count]x3xi64> -> i64
+    %first_valid = scalar.cmpi eq, %first, %expected_first : i64
+    %length_valid = scalar.cmpi eq, %length, %image_rows : i64
+    %usage_valid = scalar.cmpi eq, %usage, %image_rows : i64
+    %next0 = scalar.andi %valid, %first_valid : i1
+    %next1 = scalar.andi %length_valid, %usage_valid : i1
+    %next = scalar.andi %next0, %next1 : i1
+    scf.yield %next : i1
+  }
+  %request_bytes = index.scale %count, %request_stride : index, offset -> offset
+  %row_base = index.add %request_base, %request_bytes : offset
+  %row_count = index.mul %count, %c64 : index
+  %row_bytes = index.scale %row_count, %range_stride : index, offset -> offset
+  %expected_plan_bytes = index.add %row_base, %row_bytes : offset
+  %plan_bytes = buffer.length %plan
+  %plan_length_valid = index.cmp eq, %plan_bytes, %expected_plan_bytes : offset
+  %plan_valid = scalar.andi %requests_valid, %plan_length_valid : i1
+  %row_view = buffer.view %plan[%row_base] : buffer -> view<[%row_count]x2xi64>
+  %feature_bytes = scalar.constant 20480 : i64
+  %features = scalar.constant 5120 : i64
+  %valid = scf.for %i = [%c0 to %row_count step %c1](%previous = %plan_valid : i1) -> (i1) {
+    %i64 = index.cast %i : index to i64
+    %expected_offset = scalar.muli %i64, %feature_bytes : i64
+    %offset = view.load %row_view[%i, 0] : view<[%row_count]x2xi64> -> i64
+    %length = view.load %row_view[%i, 1] : view<[%row_count]x2xi64> -> i64
+    %offset_valid = scalar.cmpi eq, %offset, %expected_offset : i64
+    %length_valid = scalar.cmpi eq, %length, %features : i64
+    %next0 = scalar.andi %previous, %offset_valid : i1
+    %next = scalar.andi %next0, %length_valid : i1
+    scf.yield %next : i1
+  }
+  %result = scalar.extui %valid : i1 to i32
+  func.return %result : i32
+}
+
+check.case public @vision_cohort_plans {
+  %one = check.literal value(1) : index
+  %two = check.literal value(2) : index
+  %three = check.literal value(3) : index
+  %four = check.literal value(4) : index
+  %expected = check.literal value(1) : i32
+  %single = func.call @vision_cohort_observation(%one) : (index) -> (i32)
+  %pair = func.call @vision_cohort_observation(%two) : (index) -> (i32)
+  %triple = func.call @vision_cohort_observation(%three) : (index) -> (i32)
+  %full = func.call @vision_cohort_observation(%four) : (index) -> (i32)
+  check.expect.equal actual(%single) expected(%expected) : i32
+  check.expect.equal actual(%pair) expected(%expected) : i32
+  check.expect.equal actual(%triple) expected(%expected) : i32
+  check.expect.equal actual(%full) expected(%expected) : i32
+  check.return
+}
