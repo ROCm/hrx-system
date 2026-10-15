@@ -9,7 +9,7 @@
 // source frontier is one past the maximum coordinate of the consumed prefix:
 // the first eight rows advance it, and the remaining rows leave it unchanged.
 // The complete-image row index recovers the same base across epoch boundaries.
-func.def @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: buffer, %media_begin: index, %media_end: index, %count: index, %first: index, %metadata: buffer, %tokens: buffer, %packet_begin: index) {
+func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: buffer, %media_begin: index, %media_end: index, %count: index, %first: index, %metadata: buffer, %tokens: buffer, %packet_begin: index) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -117,7 +117,7 @@ func.def @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: buffer,
 // publication pass already advanced by consumed inputs; subtract only image
 // rows whose rotary frontier does not advance. Continuation records retain
 // first-plan ownership even when device compaction changes result slots.
-func.def @publish_media_positions(%plan: buffer, %media_plan: buffer, %count: index, %progress: buffer) {
+func.def public @publish_media_positions(%plan: buffer, %media_plan: buffer, %count: index, %progress: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
