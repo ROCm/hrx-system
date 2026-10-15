@@ -35,7 +35,6 @@ if(${IREE_TRACING_PROVIDER} STREQUAL "console")
         ::provider
         iree::base::core_headers
         iree::testing::gtest
-        iree::testing::gtest_main
     )
   endif()
 elseif(${IREE_TRACING_PROVIDER} STREQUAL "tracy")

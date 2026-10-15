@@ -52,4 +52,27 @@ TEST(ConsoleTracingTest, NestedNames) {
 #endif  // IREE_TRACING_CONSOLE_TIMING
 }
 
+TEST(ConsoleTracingTest, MessagesAndAllocations) {
+  std::string allocation(128, 'x');
+  ::testing::internal::CaptureStderr();
+  IREE_TRACE_MESSAGE(INFO, "embedded message");
+  IREE_TRACE_MESSAGE_DYNAMIC(INFO, allocation.data(), 8);
+  IREE_TRACE_ALLOC(allocation.data(), allocation.size());
+  IREE_TRACE_FREE(allocation.data());
+  IREE_TRACE_APP_EXIT(0);
+  std::string output = ::testing::internal::GetCapturedStderr();
+  EXPECT_THAT(output, ::testing::HasSubstr("i embedded message\n"));
+  EXPECT_THAT(output, ::testing::HasSubstr("i xxxxxxxx\n"));
+#if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_ALLOCATION_TRACKING
+  EXPECT_THAT(output, ::testing::HasSubstr("heap alloc "));
+  EXPECT_THAT(output, ::testing::HasSubstr("heap free "));
+#endif  // IREE_TRACING_FEATURE_ALLOCATION_TRACKING
+}
+
 }  // namespace
+
+int main(int argc, char** argv) {
+  // Model an embedding application that does not initialize runtime tracing.
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

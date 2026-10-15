@@ -27,8 +27,9 @@
     IREE_TRACING_FEATURE_ALLOCATION_TRACKING))
 #endif  // !IREE_TRACING_FEATURES
 
-// File handle that tracing information will be dumped to.
-// We could make this an extern variable to allow for programmatic overriding.
+// Borrowed stream used directly by every tracing operation. The stream must be
+// valid whenever instrumented code runs, including from embedded libraries that
+// do not receive application tracing hooks.
 #if !defined(IREE_TRACING_CONSOLE_FILE)
 #define IREE_TRACING_CONSOLE_FILE stderr
 #endif  // !IREE_TRACING_CONSOLE_FILE
@@ -77,8 +78,7 @@ typedef struct iree_tracing_location_t {
 
 #define iree_tracing_make_zone_ctx(zone_id) (zone_id)
 
-void iree_tracing_console_initialize();
-void iree_tracing_console_deinitialize();
+void iree_tracing_console_flush(void);
 
 void iree_tracing_set_thread_name(const char* name);
 
@@ -120,8 +120,8 @@ void iree_tracing_memory_free(const char* name, size_t name_length, void* ptr);
 
 #define IREE_TRACE(expr) expr
 
-#define IREE_TRACE_APP_ENTER() iree_tracing_console_initialize()
-#define IREE_TRACE_APP_EXIT(exit_code) iree_tracing_console_deinitialize()
+#define IREE_TRACE_APP_ENTER()
+#define IREE_TRACE_APP_EXIT(exit_code) iree_tracing_console_flush()
 #define IREE_TRACE_SET_APP_INFO(value, value_length)
 #define IREE_TRACE_SET_THREAD_NAME(name) iree_tracing_set_thread_name(name)
 

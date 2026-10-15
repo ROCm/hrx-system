@@ -39,34 +39,7 @@
 
 #if IREE_TRACING_FEATURES
 
-typedef struct iree_tracing_console_t {
-  // The file that all tracing output is routed to.
-  FILE* file;
-
-  // TODO(benvanik): storage for a fixed number of plots.
-  // TODO(benvanik): storage for memory statistics (global and named pools).
-} iree_tracing_console_t;
-
-// Global shared console tracing context.
-// We could potentially allow for multiple to exist but that will require apps
-// to manage the lifetime. Most command line apps would have an easy time but
-// garbage collection and long-lived processes make it really tricky without
-// also capturing the tracing context and ref counting it everywhere.
-static iree_tracing_console_t _console = {0};
-
-void iree_tracing_console_initialize() {
-  if (_console.file) {
-    return;
-  }
-  _console.file = IREE_TRACING_CONSOLE_FILE;
-}
-
-void iree_tracing_console_deinitialize() {
-  if (!_console.file) {
-    return;
-  }
-  fflush(_console.file);
-}
+void iree_tracing_console_flush(void) { fflush(IREE_TRACING_CONSOLE_FILE); }
 
 #define IREE_TRACING_MAX_THREAD_LENGTH 16
 
@@ -136,13 +109,14 @@ static iree_zone_id_t iree_tracing_zone_begin(
   }
 
   // Log the line immediately.
-  fprintf(_console.file, "[%08" PRIX64 "][%.*s%*s] %*s► %.*s (%.*s:%u)\n",
+  FILE* file = IREE_TRACING_CONSOLE_FILE;
+  fprintf(file, "[%08" PRIX64 "][%.*s%*s] %*s► %.*s (%.*s:%u)\n",
           iree_thread_id(), (int)_thread.name_length, _thread.name,
           (int)(IREE_TRACING_MAX_THREAD_LENGTH - _thread.name_length), "",
           (zone_id - 1), "", (int)name_length, name, file_name.length,
           file_name.value, line);
 #if IREE_TRACING_CONSOLE_FLUSH
-  fflush(_console.file);
+  fflush(file);
 #endif  // IREE_TRACING_CONSOLE_FLUSH
 
 #if IREE_TRACING_CONSOLE_TIMING
@@ -189,7 +163,8 @@ void iree_tracing_zone_end(iree_zone_id_t zone_id) {
   uint64_t end_timestamp_ns = iree_platform_time_now();
   iree_trace_zone_t* zone = &_thread.stack[zone_id];
   uint64_t duration_ns = end_timestamp_ns - zone->start_timestamp_ns;
-  fprintf(_console.file,
+  FILE* file = IREE_TRACING_CONSOLE_FILE;
+  fprintf(file,
           "[%08" PRIX64 "][%.*s%*s] %*s◄ %.*s t = %" PRIu64 "ns / %" PRIu64
           "us / %gms\n",
           iree_thread_id(), (int)_thread.name_length, _thread.name,
@@ -197,7 +172,7 @@ void iree_tracing_zone_end(iree_zone_id_t zone_id) {
           (zone_id - 1), "", (int)zone->name_length, zone->name, duration_ns,
           duration_ns / 1000, duration_ns / 1000000.0f);
 #if IREE_TRACING_CONSOLE_FLUSH
-  fflush(_console.file);
+  fflush(file);
 #endif  // IREE_TRACING_CONSOLE_FLUSH
 #endif  // IREE_TRACING_CONSOLE_TIMING
 
@@ -211,33 +186,36 @@ void iree_tracing_message_cstring(const char* value, const char* symbol,
 
 void iree_tracing_message_string_view(const char* value, size_t value_length,
                                       const char* symbol, uint32_t color) {
-  fprintf(_console.file, "[%08" PRIX64 "][%.*s%*s] %*s %s %.*s\n",
-          iree_thread_id(), (int)_thread.name_length, _thread.name,
+  FILE* file = IREE_TRACING_CONSOLE_FILE;
+  fprintf(file, "[%08" PRIX64 "][%.*s%*s] %*s %s %.*s\n", iree_thread_id(),
+          (int)_thread.name_length, _thread.name,
           (int)(IREE_TRACING_MAX_THREAD_LENGTH - _thread.name_length), "",
           _thread.depth, "", symbol, (int)value_length, value);
 #if IREE_TRACING_CONSOLE_FLUSH
-  fflush(_console.file);
+  fflush(file);
 #endif  // IREE_TRACING_CONSOLE_FLUSH
 }
 
 void iree_tracing_memory_alloc(const char* name, size_t name_length, void* ptr,
                                size_t size) {
-  fprintf(_console.file, "[%08" PRIX64 "][%.*s%*s] %*s● %.*s alloc %p (%zu)\n",
+  FILE* file = IREE_TRACING_CONSOLE_FILE;
+  fprintf(file, "[%08" PRIX64 "][%.*s%*s] %*s● %.*s alloc %p (%zu)\n",
           iree_thread_id(), (int)_thread.name_length, _thread.name,
           (int)(IREE_TRACING_MAX_THREAD_LENGTH - _thread.name_length), "",
           _thread.depth, "", (int)name_length, name, ptr, size);
 #if IREE_TRACING_CONSOLE_FLUSH
-  fflush(_console.file);
+  fflush(file);
 #endif  // IREE_TRACING_CONSOLE_FLUSH
 }
 
 void iree_tracing_memory_free(const char* name, size_t name_length, void* ptr) {
-  fprintf(_console.file, "[%08" PRIX64 "][%.*s%*s] %*s◌ %.*s free %p\n",
+  FILE* file = IREE_TRACING_CONSOLE_FILE;
+  fprintf(file, "[%08" PRIX64 "][%.*s%*s] %*s◌ %.*s free %p\n",
           iree_thread_id(), (int)_thread.name_length, _thread.name,
           (int)(IREE_TRACING_MAX_THREAD_LENGTH - _thread.name_length), "",
           _thread.depth, "", (int)name_length, name, ptr);
 #if IREE_TRACING_CONSOLE_FLUSH
-  fflush(_console.file);
+  fflush(file);
 #endif  // IREE_TRACING_CONSOLE_FLUSH
 }
 
