@@ -33,9 +33,9 @@ kernel.decl @qwen38_mtp_save_carry(%span_capacity: index) launch(%epoch: buffer,
 
 kernel.decl @qwen38_mtp_gather_carry(%span_capacity: index) launch(%epoch: buffer, %carry: buffer, %hidden: buffer)
 
-kernel.decl @qwen38_mtp_proposal_prepare() launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer)
+kernel.decl @qwen38_mtp_proposal_prepare() launch(%target_capacity: index, %draft_capacity: index, %epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer)
 
-kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer)
+kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: index, %target_capacity: index, %draft_capacity: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer)
 
 // Materializes the pairing token[P], target_hidden[P-1] and rewrites private
 // MTP KV from committed inputs. Only the K/V path is needed: query, attention
@@ -165,7 +165,9 @@ command.program.def @qwen38_mtp_draft() launch(%embedding_parameters: buffer, %i
 command.program.def public @qwen38_mtp_propose() launch(%embedding_parameters: buffer, %input_parameters: buffer, %layer_parameters: buffer, %head_parameters: buffer, %output_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer, %carry: buffer) {
   %spans = config.get @runner.qwen38.span_capacity : index
   %control_bytes = index.constant 1548 : offset
-  %token_bytes = index.constant 2048 : offset
+  %token_capacity = index.constant 512 : index
+  %word_bytes = index.constant 4 : offset
+  %token_bytes = index.scale %token_capacity, %word_bytes : index, offset -> offset
   %three_outputs = index.constant 3 : index
   %four_outputs = index.constant 4 : index
   %padded_spans = index.add %spans, %three_outputs : index
@@ -179,14 +181,14 @@ command.program.def public @qwen38_mtp_propose() launch(%embedding_parameters: b
   %output_tokens = buffer.alloca<global> align(256) %output_bytes : buffer
   %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target_tokens, %draft, %origins, %input_tokens) : (buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_mtp_proposal_prepare(%token_capacity, %token_capacity, %epoch, %target_tokens, %draft, %origins, %input_tokens) : (index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_mtp_gather_carry[%spans](%draft, %carry, %hidden) : [index](buffer, buffer, buffer)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c3 = index.constant 3 : index
   scf.for %round = [%c0 to %c3 step %c1] unroll {
     command.program.launch @qwen38_mtp_draft(%embedding_parameters, %input_parameters, %layer_parameters, %head_parameters, %output_parameters, %residual, %draft, %rows, %cache, %hidden, %input_tokens, %output_tokens) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @qwen38_mtp_proposal_advance[%round](%round, %draft, %origins, %output_tokens, %input_tokens, %target_tokens) : [index](index, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @qwen38_mtp_proposal_advance[%round](%round, %token_capacity, %token_capacity, %draft, %origins, %output_tokens, %input_tokens, %target_tokens) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer)
   }
   command.return
 }
