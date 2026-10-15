@@ -143,7 +143,7 @@ void DeviceGeneratedSdmaSerialTest<DispatchTest>::RunDependentCopies() {
   std::array<uint32_t, kAllocationWordCount> expected_control;
   expected_control.fill(kControlGuard);
   if constexpr (std::is_same_v<DispatchTest, AqlDispatchTest>) {
-    const aql::Signal final_signal = {.kind = 1};
+    const aql::Signal final_signal = aql::UserSignal();
     std::memcpy(expected_control.data(), &final_signal, sizeof(final_signal));
   } else {
     expected_control[0] = 1;

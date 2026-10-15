@@ -70,7 +70,7 @@ TEST_F(AqlLdsTest, StaticStorageExchangesBetweenWaves) {
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion));
   std::memset(completion->host.pointer, 0, completion->info.byte_length);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
 
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));

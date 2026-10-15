@@ -73,7 +73,7 @@ TEST_P(AqlOrPayloadTest, ReadsReadyPayloadWhileOtherProducersRemainPending) {
   auto* signals = static_cast<aql::Signal*>(control->host.pointer);
   std::array<uint64_t, kSignalCount> signal_addresses;
   for (uint32_t i = 0; i < kSignalCount; ++i) {
-    signals[i].kind = 1;
+    signals[i] = aql::UserSignal();
     signal_addresses[i] = control->device_address + i * sizeof(aql::Signal);
   }
   auto* control_guard_address =

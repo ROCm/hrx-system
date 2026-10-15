@@ -24,7 +24,7 @@ TEST_F(AqlQueueTest, BarrierAndJoinsFiveQueueDependencies) {
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
   for (uint32_t i = 0; i < 7; ++i) {
-    signals[i].kind = 1;
+    signals[i] = aql::UserSignal();
   }
   std::array<uint64_t, 5> dependencies = {};
   for (uint32_t i = 0; i < dependencies.size(); ++i) {
@@ -84,7 +84,7 @@ TEST_F(AqlQueueTest, BarrierOrAcceptsEachSatisfiedSlot) {
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
   for (uint32_t i = 0; i < 7; ++i) {
-    signals[i].kind = 1;
+    signals[i] = aql::UserSignal();
   }
   std::array<uint64_t, 5> dependencies = {};
   for (uint32_t i = 0; i < dependencies.size(); ++i) {
@@ -137,7 +137,7 @@ TEST_F(AqlQueueTest, BarrierOrCompletesWithPublishedDependencyAndNullSlots) {
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
   for (uint32_t i = 0; i < 6; ++i) {
-    signals[i].kind = 1;
+    signals[i] = aql::UserSignal();
   }
   const auto marker =
       aql::Barrier(aql::BarrierType::kAnd, aql::HeaderBarrier::kDisabled,

@@ -353,9 +353,7 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
                 control_.host.byte_length);
     auto* signals = static_cast<aql::Signal*>(control_.host.pointer);
     for (size_t i = 0; i < kSignalCount; ++i) {
-      signals[i] = {};
-      signals[i].kind = 1;
-      signals[i].value = 1;
+      signals[i] = aql::UserSignal(1);
     }
   }
 

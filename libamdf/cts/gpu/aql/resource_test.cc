@@ -79,7 +79,7 @@ TEST_F(AqlDispatchTest, SwitchesBetweenPrivateAndLdsKernels) {
   std::memset(arguments->host.pointer, 0, arguments->info.byte_length);
   std::memset(completion->host.pointer, 0, completion->info.byte_length);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
   auto* completion_guard_address =
       static_cast<uint8_t*>(completion->host.pointer) + sizeof(aql::Signal);
   std::array<uint32_t, kCompletionGuardWordCount> completion_guards;

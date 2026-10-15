@@ -320,10 +320,12 @@ void GpuFileStagedTest::Run(const StagedCase& test_case) {
                                          kControlGuard);
   auto* job_signals = static_cast<JobSignals*>(signals->host.pointer);
   for (uint32_t job = 0; job <= test_case.job_count; ++job) {
-    JobSignals state = {};
-    state.file.kind = state.upload.kind = 1;
+    JobSignals state = {
+        .file = aql::UserSignal(),
+        .upload = aql::UserSignal(),
+    };
     for (auto& reader : state.readers) {
-      reader.kind = 1;
+      reader = aql::UserSignal();
     }
     std::memcpy(expected_signals.data() + job * sizeof(JobSignals) / 4, &state,
                 sizeof(state));
@@ -338,9 +340,7 @@ void GpuFileStagedTest::Run(const StagedCase& test_case) {
   }
   std::vector<uint32_t> expected_control(control->info.byte_length / 4,
                                          kControlGuard);
-  aql::Signal terminal = {
-      .kind = 1,
-  };
+  const aql::Signal terminal = aql::UserSignal();
   std::memcpy(expected_control.data(), &terminal, sizeof(terminal));
   expected_control[kCompletionOffset / 4] = 0;
   expected_control[kFileStateOffset / 4] = 0;

@@ -72,11 +72,10 @@ TEST_F(AqlEpochTest, BarrierValueOrdersEpochPayloadAcrossQueues) {
   auto* signals = static_cast<aql::Signal*>(control->host.pointer);
   auto& epoch_signal = signals[0];
   auto& completion_signal = signals[1];
-  epoch_signal.kind = 1;
-  completion_signal.kind = 1;
   // The host initializes this epoch only once. Its first decrement borrows
   // across bit 32, and each satisfied predicate stays satisfied through use.
-  epoch_signal.value = kInitialEpoch;
+  epoch_signal = aql::UserSignal(kInitialEpoch);
+  completion_signal = aql::UserSignal();
   const uint64_t epoch_address = control->device_address;
   const uint64_t completion_address =
       control->device_address + sizeof(aql::Signal);

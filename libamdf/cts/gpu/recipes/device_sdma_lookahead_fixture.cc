@@ -230,10 +230,11 @@ void DeviceSdmaLookaheadTest::Run(const LookaheadCase& test_case) {
                                          kControlGuard);
   auto* job_signals = static_cast<JobSignals*>(signals->host.pointer);
   for (uint32_t job = 0; job <= test_case.job_count; ++job) {
-    JobSignals state = {};
-    state.upload.kind = 1;
+    JobSignals state = {
+        .upload = aql::UserSignal(),
+    };
     for (auto& signal : state.readers) {
-      signal.kind = 1;
+      signal = aql::UserSignal();
     }
     for (uint32_t reader = 0; reader < 2; ++reader) {
       state.started[reader].value =
@@ -254,7 +255,7 @@ void DeviceSdmaLookaheadTest::Run(const LookaheadCase& test_case) {
   }
   std::array<uint32_t, 1024> expected_control;
   expected_control.fill(kControlGuard);
-  aql::Signal joined = {.kind = 1};
+  const aql::Signal joined = aql::UserSignal();
   std::memcpy(expected_control.data(), &joined, sizeof(joined));
   expected_control[kCompletionOffset / 4] = 0;
   std::memcpy(expected_control.data() + kLengthsOffset / 4,

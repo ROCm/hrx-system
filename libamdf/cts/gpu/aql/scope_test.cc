@@ -70,7 +70,7 @@ TEST_F(AqlDispatchTest, AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
   // native-owned; subsequent guard writes start outside the 64-byte ABI.
   std::memset(completion->host.pointer, 0, kPageByteLength);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
 
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));

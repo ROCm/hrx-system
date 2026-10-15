@@ -119,7 +119,7 @@ TEST_P(DeviceGeneratedSdmaBatchTest, SeparateCommandAndPayloadCredits) {
       destination_byte_length / sizeof(uint32_t), kDestinationGuard);
   std::array<uint32_t, kAllocationWordCount> expected_control;
   expected_control.fill(kControlGuard);
-  aql::Signal final_signal = {.kind = 1};
+  const aql::Signal final_signal = aql::UserSignal();
   std::memcpy(expected_control.data(), &final_signal, sizeof(final_signal));
   expected_control[kCompletionByteOffset / sizeof(uint32_t)] =
       test_case.round_count;

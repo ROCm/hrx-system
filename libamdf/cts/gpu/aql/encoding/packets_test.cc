@@ -6,11 +6,33 @@
 
 #include "libamdf/cts/gpu/aql/encoding/packets.h"
 
+#include <array>
 #include <cstddef>
+#include <cstring>
 
 #include "gtest/gtest.h"
 
 namespace {
+
+TEST(AqlEncodingTest, UserSignalInitializesCompleteNativeBlock) {
+  // The native AMD signal object layout reserves the USER queue pointer and
+  // requires both padding regions to remain zero.
+  EXPECT_EQ(offsetof(aql::Signal, kind), 0u);
+  EXPECT_EQ(offsetof(aql::Signal, value), 8u);
+  EXPECT_EQ(offsetof(aql::Signal, event), 16u);
+  EXPECT_EQ(offsetof(aql::Signal, timestamps.start), 32u);
+  EXPECT_EQ(offsetof(aql::Signal, timestamps.end), 40u);
+  EXPECT_EQ(offsetof(aql::Signal, queue_address), 48u);
+  EXPECT_EQ(offsetof(aql::Signal, reserved), 56u);
+  EXPECT_EQ(sizeof(aql::Signal), 64u);
+  EXPECT_EQ(alignof(aql::Signal), 64u);
+
+  const auto signal = aql::UserSignal(7);
+  std::array<uint64_t, 8> actual_words;
+  std::memcpy(actual_words.data(), &signal, sizeof(signal));
+  const std::array<uint64_t, 8> expected_words = {1, 7, 0, 0, 0, 0, 0, 0};
+  EXPECT_EQ(actual_words, expected_words);
+}
 
 TEST(AqlEncodingTest, BarrierSignalAddressesAndSystemScopes) {
   const auto packet = aql::Barrier(
@@ -23,16 +45,6 @@ TEST(AqlEncodingTest, BarrierSignalAddressesAndSystemScopes) {
                                 0,      0, 0,          0,          0, 0,
                                 0,      0, 0x87654300, 0x12345678};
   EXPECT_EQ(packet, expected);
-  // ROCm 8d57824901ff, amd_hsa_signal.h, amd_signal_t.
-  EXPECT_EQ(offsetof(aql::Signal, kind), 0u);
-  EXPECT_EQ(offsetof(aql::Signal, value), 8u);
-  EXPECT_EQ(offsetof(aql::Signal, event), 16u);
-  EXPECT_EQ(offsetof(aql::Signal, timestamps.start), 32u);
-  EXPECT_EQ(offsetof(aql::Signal, timestamps.end), 40u);
-  EXPECT_EQ(offsetof(aql::Signal, queue_address), 48u);
-  EXPECT_EQ(offsetof(aql::Signal, reserved), 56u);
-  EXPECT_EQ(sizeof(aql::Signal), 64u);
-  EXPECT_EQ(alignof(aql::Signal), 64u);
 }
 
 TEST(AqlEncodingTest, BarrierAndEncodesAllFiveDependencies) {

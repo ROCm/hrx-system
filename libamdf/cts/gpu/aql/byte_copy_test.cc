@@ -73,7 +73,7 @@ TEST_F(AqlDispatchTest, CoherentSystemByteCopyPreservesBoundsAcrossEpochs) {
   std::array<uint8_t, kPageByteLength> observed_completion;
   std::memset(completion->host.pointer, 0, kPageByteLength);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
   // Native reserved fields start zero and remain native-owned. Arbitrary
   // guards begin after the complete USER signal, never inside its ABI block.
   std::memset(

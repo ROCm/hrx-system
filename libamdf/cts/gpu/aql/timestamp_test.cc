@@ -191,7 +191,7 @@ TEST_P(AqlTimestampTest, ConfirmedClockSamplesAreVisibleBeforeReuse) {
     initial_output[kTimestampIndices[1]] = 0;
     std::memcpy(output->host.pointer, initial_output.data(),
                 sizeof(initial_output));
-    aql::Signal initial_signal = {.kind = 1, .value = 1};
+    const aql::Signal initial_signal = aql::UserSignal(1);
     std::memcpy(completion->host.pointer, &initial_signal,
                 sizeof(initial_signal));
     initial_completion_guards.fill(0x68d329b7u + static_cast<uint32_t>(epoch));

@@ -89,8 +89,7 @@ void Executable::Initialize(const amdf_api_t* api,
               publication.size() * sizeof(uint32_t));
   std::memset(completion_.host.pointer, 0, completion_.info.byte_length);
   auto& signal = *static_cast<Signal*>(completion_.host.pointer);
-  signal.kind = 1;
-  signal.value = 1;
+  signal = aql::UserSignal(1);
   const std::string prefix = property_prefix;
   ::testing::Test::RecordProperty(prefix + "_image_sha256", image.sha256);
   ::testing::Test::RecordProperty(prefix + "_image_byte_length",

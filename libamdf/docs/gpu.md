@@ -369,9 +369,14 @@ registration without stealing a wake.
 
 AQL completion and barrier dependencies reference complete native 64-byte AMD
 signal blocks. A signal is caller-owned device-visible memory with USER kind,
-a signed 64-bit value at byte offset eight, and initialized unused fields. A
-packet carries the block's GPU address. These are native packet operands;
-libamdf does not create or retain a signal object for each dispatch.
+a signed 64-bit value at byte offset eight, and initialized unused fields. The
+event padding at byte 28, doorbell-only queue pointer at byte 48, and tail
+padding at byte 56 are required zero for USER signals; they are not spare
+caller storage. Timestamp fields begin at zero. A packet carries the block's
+GPU address. These are native packet operands; libamdf does not create or retain
+a signal object for each dispatch. The
+[native signal reference](../../docs/reference/amd/gpu/notifications.md#amd-user-signal-layout)
+traces the representation and its distinct notification state.
 
 A kernel dispatch decrements its completion signal once after all workgroups
 finish. The runtime chooses fence scopes and observes completion with the

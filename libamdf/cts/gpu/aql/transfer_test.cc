@@ -276,7 +276,7 @@ TEST_P(AqlTransferTest, ConfirmedWriteFeedsCopyAcrossEpochs) {
               sizeof(expected_commands));
   std::memset(completion->host.pointer, 0, kByteLength);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
   auto* completion_guard_address =
       static_cast<uint8_t*>(completion->host.pointer) + sizeof(aql::Signal);
   std::array<uint32_t, kCompletionGuardWordCount> completion_words;
@@ -387,7 +387,7 @@ TEST_P(AqlTransferTest, CpuPublishedSourceFeedsCopyAcrossEpochs) {
               sizeof(expected_commands));
   std::memset(completion->host.pointer, 0, kByteLength);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
   auto* completion_guard_address =
       static_cast<uint8_t*>(completion->host.pointer) + sizeof(aql::Signal);
   std::array<uint32_t, kCompletionGuardWordCount> completion_words;
@@ -495,7 +495,7 @@ TEST_P(AqlTransferTest, CompletedCarrierAllowsCopyAddressRebinding) {
       completion->device_address, scopes);
   std::memset(completion->host.pointer, 0, kByteLength);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
   auto* completion_guard_address =
       static_cast<uint8_t*>(completion->host.pointer) + sizeof(aql::Signal);
   std::array<uint32_t, kCompletionGuardWordCount> completion_words;

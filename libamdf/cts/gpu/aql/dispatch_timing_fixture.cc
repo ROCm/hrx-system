@@ -121,7 +121,7 @@ void AqlDispatchTimingTest::Exercise(bool enabled, uint32_t dispatch_count) {
   auto submit = [&](uint32_t sequence) {
     const uint32_t slot = sequence % kSlotCount;
     std::fill_n(output_words + slot * kWords, kWords, kGuard);
-    slots[slot].signal = {.kind = 1, .value = 1};
+    slots[slot].signal = aql::UserSignal(1);
     const kernels::transform::Arguments payload = {
         input->device_address + kPayload * sizeof(uint32_t),
         output->device_address + (slot * kWords + kPayload) * sizeof(uint32_t),

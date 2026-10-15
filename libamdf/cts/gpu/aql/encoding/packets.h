@@ -44,6 +44,15 @@ struct alignas(64) Signal {
 };
 static_assert(sizeof(Signal) == 64);
 
+// Constructs a host-polled USER signal with every unused native ABI field
+// zero. The initial value is atomically decremented by packet completion.
+inline Signal UserSignal(int64_t initial_value = 0) {
+  return Signal{
+      .kind = 1,
+      .value = initial_value,
+  };
+}
+
 using Packet = std::array<uint32_t, 16>;
 
 enum class BarrierType : uint32_t {

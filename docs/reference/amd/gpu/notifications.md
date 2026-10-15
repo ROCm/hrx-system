@@ -42,10 +42,10 @@ objects or make the handle valid for arbitrary ROCr APIs.
 | 8 | 8 | `value` for USER; the union instead contains `hardware_doorbell_ptr` for its doorbell use. |
 | 16 | 8 | `event_mailbox_ptr`; zero when this signal has no mailbox. |
 | 24 | 4 | `event_id`. |
-| 28 | 4 | `reserved1`. |
+| 28 | 4 | ABI padding; must be zero. |
 | 32, 40 | 8 each | `start_ts`, `end_ts`; [dispatch profiling](aql/profiling.md#dispatch-timestamps) owns their meaning and lifetime. |
-| 48 | 8 | `queue_ptr` / `reserved2` union. |
-| 56 | 8 | `reserved3[2]`. |
+| 48 | 8 | `queue_ptr` for doorbell kinds; reserved and zero for USER signals. |
+| 56 | 8 | ABI tail padding; must be zero. |
 
 ROCr zeroes the native block when constructing `SharedSignal`, then sets its
 initial value and kind. `InterruptSignal` copies the event ID and `HWData2`
@@ -53,6 +53,13 @@ mailbox address from its native event. This is initialization, not a protocol
 for rewriting the whole block while a device or host waiter uses it.
 [Shared initialization][signal-storage] · [Initial value][signal-initial-value]
 · [Event binding][interrupt-binding]
+
+The archived AMD Compute ABI names the byte-28 and byte-56 padding as
+must-zero and restricts `queue_ptr` to doorbell signals. Those fields are not
+available for application metadata, including on a host-polled USER signal.
+That document is obsolete as a general compiler and code-object reference;
+the signal rule is used here only because the current ROCr representation and
+whole-block initialization corroborate it. [Archived signal object][legacy-signal-object]
 
 ## Creating the native event
 
@@ -282,6 +289,7 @@ Return to [GPU programming](README.md), [AQL](aql/README.md), or the
 [primary source map](../sources.md).
 
 [signal-abi]: https://github.com/ROCm/rocm-systems/blob/f9ba16bbe70e365b2f59b268e847bef19ad9db6e/projects/rocr-runtime/runtime/hsa-runtime/inc/amd_hsa_signal.h#L49-L77
+[legacy-signal-object]: https://github.com/ROCm/ROCm-ComputeABI-Doc/blob/572ac3831ac5d30ac82f743d489a90bffba14a59/AMDGPU-ABI.md#signal-object-amd_signal_t
 [signal-convert]: https://github.com/ROCm/rocm-systems/blob/f9ba16bbe70e365b2f59b268e847bef19ad9db6e/projects/rocr-runtime/runtime/hsa-runtime/core/inc/signal.h#L295-L326
 [signal-storage]: https://github.com/ROCm/rocm-systems/blob/f9ba16bbe70e365b2f59b268e847bef19ad9db6e/projects/rocr-runtime/runtime/hsa-runtime/core/inc/signal.h#L146-L164
 [signal-initial-value]: https://github.com/ROCm/rocm-systems/blob/f9ba16bbe70e365b2f59b268e847bef19ad9db6e/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/signal.cpp#L129-L134

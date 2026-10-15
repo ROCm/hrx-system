@@ -120,7 +120,7 @@ TEST_F(AqlDispatchTest, IndependentWorksetReusePreservesPendingConsumer) {
     std::memset(workset.control->host.pointer, 0, kPageByteLength);
     auto* signals = static_cast<aql::Signal*>(workset.control->host.pointer);
     for (uint32_t signal = 0; signal < kSignalCount; ++signal) {
-      signals[signal].kind = 1;
+      signals[signal] = aql::UserSignal();
     }
     signals[2].value = i;
     auto* control_words = static_cast<uint32_t*>(workset.control->host.pointer);

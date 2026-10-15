@@ -57,7 +57,7 @@ TEST_F(AqlDispatchTest, CoherentSystemPayloadChangesAcrossEpochs) {
   ASSERT_EQ(arguments->device_address % kernel.arguments.alignment, 0u);
   std::memset(completion->host.pointer, 0, completion->info.byte_length);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
 
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));
@@ -267,7 +267,7 @@ TEST_F(AqlDispatchTest, HostPublishesDeviceLocalKernargsAcrossEpochs) {
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion));
   std::memset(completion->host.pointer, 0, completion->info.byte_length);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
 
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));
@@ -386,7 +386,7 @@ TEST_F(AqlDispatchTest,
   ASSERT_EQ(arguments->device_address % kernel.arguments.alignment, 0u);
   std::memset(completion->host.pointer, 0, completion->info.byte_length);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
   // Native signal fields retain their ABI meaning. Guards begin after the
   // complete 64-byte block, leaving its unused fields zero-initialized.
   auto* completion_guard_address =

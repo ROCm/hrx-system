@@ -101,7 +101,7 @@ TEST_P(AqlFanInTest, BarrierAndJoinsIndependentShaderPayloads) {
   auto* signals = static_cast<aql::Signal*>(control->host.pointer);
   std::vector<uint64_t> signal_addresses(signal_count);
   for (uint32_t i = 0; i < signal_count; ++i) {
-    signals[i].kind = 1;
+    signals[i] = aql::UserSignal();
     signal_addresses[i] = control->device_address + i * sizeof(aql::Signal);
   }
   auto* control_guard_address =

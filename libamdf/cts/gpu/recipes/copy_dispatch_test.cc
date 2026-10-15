@@ -512,7 +512,8 @@ void CopyDispatchRecipeTest::RunCoherentHandoff(
   ASSERT_EQ(control->device_address % alignof(CompletionState), 0u);
   std::memset(control->host.pointer, 0, control->info.byte_length);
   auto& completion = *static_cast<CompletionState*>(control->host.pointer);
-  completion.upload.kind = completion.compute.kind = 1;
+  completion.upload = aql::UserSignal();
+  completion.compute = aql::UserSignal();
   const uint64_t upload_signal_address =
       control->device_address + offsetof(CompletionState, upload);
   const uint64_t compute_signal_address =
@@ -969,7 +970,8 @@ void CopyDispatchRecipeTest::RunStagedHandoff(PairQuery query_kind) {
   ASSERT_EQ(control->device_address % alignof(CompletionState), 0u);
   std::memset(control->host.pointer, 0, control->info.byte_length);
   auto& completion = *static_cast<CompletionState*>(control->host.pointer);
-  completion.upload.kind = completion.compute.kind = 1;
+  completion.upload = aql::UserSignal();
+  completion.compute = aql::UserSignal();
   const uint64_t upload_signal_address =
       control->device_address + offsetof(CompletionState, upload);
   const uint64_t compute_signal_address =

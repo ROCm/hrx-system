@@ -16,7 +16,8 @@ TEST_F(AqlQueueTest, CompletesBarriersAndReusesRetiredSlots) {
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
-  signals[0].kind = signals[1].kind = 1;
+  signals[0] = aql::UserSignal();
+  signals[1] = aql::UserSignal();
   const uint64_t packet_count =
       queue->host.ring_byte_length / sizeof(aql::Packet) + 1;
   uint64_t index = 0;
@@ -48,8 +49,7 @@ TEST_F(AqlQueueTest, MultipleProducersReserveAndPublishIndependently) {
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, AMDF_QUEUE_PRODUCER_MODE_MULTI));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* completion = static_cast<aql::Signal*>(storage->host.pointer);
-  completion->kind = 1;
-  completion->value = 64;
+  *completion = aql::UserSignal(64);
   const auto packet =
       aql::Barrier(aql::BarrierType::kAnd, aql::HeaderBarrier::kEnabled,
                    storage->device_address);
@@ -81,8 +81,8 @@ TEST_F(AqlQueueTest, PublishesReservedPacketsOutOfOrder) {
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, AMDF_QUEUE_PRODUCER_MODE_MULTI));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
-  signals[0].kind = signals[1].kind = 1;
-  signals[0].value = signals[1].value = 1;
+  signals[0] = aql::UserSignal(1);
+  signals[1] = aql::UserSignal(1);
   const auto first =
       aql::Barrier(aql::BarrierType::kAnd, aql::HeaderBarrier::kDisabled,
                    storage->device_address);

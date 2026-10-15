@@ -358,11 +358,14 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// Dispatches use AMD kernel descriptors and caller-owned kernargs. Completion
 /// and barrier dependencies use native 64-byte AMD signal blocks, not bare
 /// counters or handles created by libamdf. Callers initialize USER kind (1), a
-/// signed 64-bit value at byte offset 8, and zero unused fields; the packet
-/// carries the block's GPU address. Firmware decrements dispatch completion
-/// once after all workgroups complete. System acquire/release fence scopes
-/// provide the advertised global cache transitions. This contract does not
-/// enable HSA runtime services, dynamic scratch growth, or device enqueue.
+/// signed 64-bit value at byte offset 8, and zero unused fields. The event
+/// padding at byte 28, doorbell-only queue pointer at byte 48, and tail padding
+/// at byte 56 are always zero for USER signals and are not caller storage.
+/// Start/end timestamp fields begin at zero. The packet carries the block's GPU
+/// address. Firmware decrements dispatch completion once after all workgroups
+/// complete. System acquire/release fence scopes provide the advertised global
+/// cache transitions. This contract does not enable HSA runtime services,
+/// dynamic scratch growth, or device enqueue.
 ///
 /// AMD vendor format 1 carries a four-dword INDIRECT_BUFFER at packet byte 4,
 /// remaining-dword count 10 at byte 20, zero reserved words, and the native

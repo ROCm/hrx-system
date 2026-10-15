@@ -184,7 +184,7 @@ void DeviceGeneratedSdmaStagedTest::Run(const DeviceSdmaStagedCase& test_case) {
               selections->info.byte_length);
   std::array<uint32_t, 1024> expected_control;
   expected_control.fill(kControlGuard);
-  aql::Signal final_signal = {.kind = 1, .value = 1};
+  const aql::Signal final_signal = aql::UserSignal(1);
   std::memcpy(expected_control.data(), &final_signal, sizeof(final_signal));
   expected_control[kCompletionByteOffset / 4] = 0;
   expected_control[kStateByteOffset / 4 + 2] = kSeed;

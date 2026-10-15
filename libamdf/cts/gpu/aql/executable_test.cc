@@ -143,8 +143,8 @@ TEST_F(AqlDispatchTest, ReplacesCompletedExecutableAtSameAddress) {
   std::memset(control->host.pointer, kControlGuard, kPageByteLength);
   std::memset(control->host.pointer, 0, kSignalGuardByteOffset);
   auto* signals = static_cast<aql::Signal*>(control->host.pointer);
-  signals[0].kind = 1;
-  signals[1].kind = 1;
+  signals[0] = aql::UserSignal();
+  signals[1] = aql::UserSignal();
   const auto cache_packet = aql::IndirectBuffer(
       aql::HeaderBarrier::kDisabled, commands->device_address,
       cache_commands.size(), control->device_address,
@@ -443,8 +443,8 @@ TEST_F(AqlDispatchTest, ReplacesCompletedImmutableDataAtSameAddress) {
   std::memset(control->host.pointer, kControlGuard, kPageByteLength);
   std::memset(control->host.pointer, 0, kSignalGuardByteOffset);
   auto* signals = static_cast<aql::Signal*>(control->host.pointer);
-  signals[0].kind = 1;
-  signals[1].kind = 1;
+  signals[0] = aql::UserSignal();
+  signals[1] = aql::UserSignal();
   const auto cache_packet = aql::IndirectBuffer(
       aql::HeaderBarrier::kDisabled, commands->device_address,
       cache_commands.size(), control->device_address,

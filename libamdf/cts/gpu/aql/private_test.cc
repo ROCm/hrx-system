@@ -52,7 +52,7 @@ TEST_F(AqlDispatchTest, CallerOwnedFixedScratchChangesAcrossEpochs) {
   ASSERT_EQ(arguments->device_address % kernel.arguments.alignment, 0u);
   std::memset(completion->host.pointer, 0, completion->info.byte_length);
   auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
+  signal = aql::UserSignal();
 
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(
