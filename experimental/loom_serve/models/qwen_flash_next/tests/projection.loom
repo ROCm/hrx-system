@@ -1,0 +1,194 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @flash_next_linear_q8(%output_width: index) launch(%input_width: index, %output_width: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+// Random codes receive distinct finite block scales. Inactive rows contain
+// NaNs so accidental participation contaminates the output instead of hiding.
+func.def @fixture(%count_value: index, %inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer) {
+  %count = index.assume %count_value [range(%count_value, 0, 19)] : index
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %scale_period = index.constant 13 : index
+  %tokens = index.constant 19 : index
+  %block_size = index.constant 32 : index
+  %block_bytes = index.constant 34 : offset
+  %blocks = index.div %inputs, %block_size : index
+  %block_count = index.mul %outputs, %blocks : index
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = index.cast %count : index to i32
+  view.store %count_word, %header[0] : i32, view<3xi32>
+  %unit = scalar.constant 0.00125 : f64
+  scf.for %block = [%c0 to %block_count step %c1] {
+    %position = index.scale %block, %block_bytes : index, offset -> offset
+    %scale_view = buffer.view %weight[%position] : buffer -> view<1xf16>
+    %remainder = index.rem %block, %scale_period : index
+    %word = index.cast %remainder : index to i32
+    %value = scalar.uitofp %word : i32 to f64
+    %scaled = scalar.mulf %value, %unit : f64
+    %packed = scalar.fptrunc %scaled : f64 to f16
+    view.store %packed, %scale_view[0] : f16, view<1xf16>
+  }
+  %input_view = buffer.view %input[%origin] : buffer -> view<19x[%inputs]xbf16>
+  %nan_word = scalar.constant 32705 : i16
+  %nan = scalar.bitcast %nan_word : i16 to bf16
+  scf.for %row = [%count to %tokens step %c1] {
+    scf.for %column = [%c0 to %inputs step %c1] {
+      view.store %nan, %input_view[%row, %column] : bf16, view<19x[%inputs]xbf16>
+    }
+  }
+  func.return
+}
+
+// Decode each original Q8 value independently and accumulate in F64. The
+// reference has no matrix fragments, lane partitioning, or subgroup reduction.
+func.def @reference(%inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %block_size = index.constant 32 : index
+  %block_bytes = index.constant 34 : offset
+  %scale_bytes = index.constant 2 : offset
+  %blocks = index.div %inputs, %block_size : index
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, 19)] : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<19x[%inputs]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<19x[%outputs]xbf16>
+  %initial = scalar.constant 0.0 : f64
+  scf.for %token = [%c0 to %count step %c1] {
+    scf.for %row = [%c0 to %outputs step %c1] {
+      %result = scf.for %column = [%c0 to %inputs step %c1](%sum = %initial : f64) -> (f64) {
+        %block = index.div %column, %block_size : index
+        %element = index.rem %column, %block_size : index
+        %block_index = index.madd %row, %blocks, %block : index
+        %position = index.scale %block_index, %block_bytes : index, offset -> offset
+        %code_origin = index.add %position, %scale_bytes : offset
+        %scales = buffer.view %weight[%position] : buffer -> view<1xf16>
+        %codes = buffer.view %weight[%code_origin] : buffer -> view<32xi8>
+        %scale_packed = view.load %scales[0] : view<1xf16> -> f16
+        %code = view.load %codes[%element] : view<32xi8> -> i8
+        %input_packed = view.load %input_view[%token, %column] : view<19x[%inputs]xbf16> -> bf16
+        %scale = scalar.extf %scale_packed : f16 to f64
+        %value = scalar.sitofp %code : i8 to f64
+        %x = scalar.extf %input_packed : bf16 to f64
+        %w = scalar.mulf %value, %scale : f64
+        %product = scalar.mulf %w, %x : f64
+        %next = scalar.addf %sum, %product : f64
+        scf.yield %next : f64
+      }
+      %packed = scalar.fptrunc %result : f64 to bf16
+      view.store %packed, %output_view[%token, %row] : bf16, view<19x[%outputs]xbf16>
+    }
+  }
+  func.return
+}
+
+func.def @projection_geometry(%configuration: index, %trial: index) -> (index, index, index, index) {
+  %c3 = index.constant 3 : index
+  %block_size = index.constant 32 : index
+  %small = index.constant 4 : index
+  %large = index.constant 68 : index
+  %width32 = scalar.constant 32 : i32
+  %width96 = scalar.constant 96 : i32
+  %width1280 = scalar.constant 1280 : i32
+  %input_sizes = vector.from_elements %width32, %width96, %width1280 : vector<3xi32>
+  %count0 = scalar.constant 0 : i32
+  %count1 = scalar.constant 1 : i32
+  %count3 = scalar.constant 3 : i32
+  %count4 = scalar.constant 4 : i32
+  %count17 = scalar.constant 17 : i32
+  %count19 = scalar.constant 19 : i32
+  %counts = vector.from_elements %count0, %count1, %count3, %count4, %count17, %count19 : vector<6xi32>
+  %size_index = index.rem %configuration, %c3 : index
+  %size_word = vector.extract %input_sizes[%size_index] : vector<3xi32> -> i32
+  %trial_index = index.assume %trial [range(%trial, 0, 5)] : index
+  %count_word = vector.extract %counts[%trial_index] : vector<6xi32> -> i32
+  %inputs = index.cast %size_word : i32 to index
+  %count = index.cast %count_word : i32 to index
+  %small_output = index.cmp ult, %configuration, %c3 : index
+  %outputs = scf.select %small_output, %small, %large : index
+  %blocks = index.div %inputs, %block_size : index
+  func.return %count, %inputs, %outputs, %blocks : index, index, index, index
+}
+
+check.scenario public @packed_q8_projection configure[6](%configuration: index, %configuration_entropy: check.entropy) {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %count, %inputs, %outputs, %blocks = check.generate<@projection_geometry>(%configuration, %trial) : (index, index) -> (index, index, index, index)
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<19x[%inputs]xbf16>
+    %weight = check.generate.random.uniform seed(%seed) range(-127 to 127) : tensor<[%outputs]x[%blocks]x34xi8>
+    check.generate<@fixture>(%count, %inputs, %outputs, %epoch, %input, %weight) : (index, index, index, tensor<3xi32>, tensor<19x[%inputs]xbf16>, tensor<[%outputs]x[%blocks]x34xi8>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<19x[%outputs]xbf16>
+    check.compare<@flash_next_linear_q8, @reference>[%outputs](%inputs, %outputs, %epoch, %input, %weight, %output) : [index](index, index, tensor<3xi32>, tensor<19x[%inputs]xbf16>, tensor<[%outputs]x[%blocks]x34xi8>, tensor<19x[%outputs]xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.00006103515625) rtol(0.0078125) nan(different) : tensor<19x[%outputs]xbf16>
+    }
+  }
+  check.return
+}
+
+// Large opposing terms surround two small contributions. Floating-point
+// reassociation can change their residual; joining a batch must not change it.
+// The independent numerical oracle above separately establishes accuracy.
+kernel.def @cancellation_fixture() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%count: index, %epoch: buffer, %input: buffer, %weight: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %tokens = index.constant 19 : index
+  %blocks = index.constant 52 : index
+  %block_bytes = index.constant 34 : offset
+  %scale_bytes = index.constant 2 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = index.cast %count : index to i32
+  view.store %count_word, %header[0] : i32, view<3xi32>
+  %unit_scale = scalar.constant 1.0 : f16
+  %unit_code = scalar.constant 1 : i8
+  scf.for %block = [%c0 to %blocks step %c1] {
+    %position = index.scale %block, %block_bytes : index, offset -> offset
+    %code_position = index.add %position, %scale_bytes : offset
+    %scale = buffer.view %weight[%position] : buffer -> view<1xf16>
+    %code = buffer.view %weight[%code_position] : buffer -> view<32xi8>
+    view.store %unit_scale, %scale[0] : f16, view<1xf16>
+    view.store %unit_code, %code[0] : i8, view<32xi8>
+  }
+  %values = buffer.view %input[%origin] : buffer -> view<19x416xbf16>
+  %large = scalar.constant 33554432.0 : bf16
+  %small = scalar.constant 1.0 : bf16
+  %negative = scalar.constant -33554432.0 : bf16
+  scf.for %token = [%c0 to %tokens step %c1] {
+    view.store %large, %values[%token, 0] : bf16, view<19x416xbf16>
+    view.store %small, %values[%token, 128] : bf16, view<19x416xbf16>
+    view.store %negative, %values[%token, 256] : bf16, view<19x416xbf16>
+    view.store %small, %values[%token, 384] : bf16, view<19x416xbf16>
+  }
+  kernel.return
+}
+
+check.case public @batch_independent_reduction {
+  %count = check.param.choice values([1, 3, 4, 17, 19]) name("active") : index
+  %c1 = check.literal value(1) : index
+  %inputs = check.literal value(416) : index
+  %outputs = check.literal value(4) : index
+  %epoch = check.generate.fill value(0) : tensor<3xi32>
+  %input = check.generate.fill value(0.0) : tensor<19x416xbf16>
+  %weight = check.generate.fill value(0) : tensor<4x13x34xi8>
+  %single = check.generate.fill value(-17.0) : tensor<19x4xbf16>
+  %batched = check.generate.fill value(-17.0) : tensor<19x4xbf16>
+  kernel.launch @cancellation_fixture(%c1, %epoch, %input, %weight) : (index, tensor<3xi32>, tensor<19x416xbf16>, tensor<4x13x34xi8>)
+  kernel.launch @flash_next_linear_q8[%outputs](%inputs, %outputs, %epoch, %input, %weight, %single) : [index](index, index, tensor<3xi32>, tensor<19x416xbf16>, tensor<4x13x34xi8>, tensor<19x4xbf16>)
+  kernel.launch @cancellation_fixture(%count, %epoch, %input, %weight) : (index, tensor<3xi32>, tensor<19x416xbf16>, tensor<4x13x34xi8>)
+  kernel.launch @flash_next_linear_q8[%outputs](%inputs, %outputs, %epoch, %input, %weight, %batched) : [index](index, index, tensor<3xi32>, tensor<19x416xbf16>, tensor<4x13x34xi8>, tensor<19x4xbf16>)
+  %single_first = check.tensor.view %single offset(0) : tensor<19x4xbf16> -> tensor<1x4xbf16>
+  %batched_first = check.tensor.view %batched offset(0) : tensor<19x4xbf16> -> tensor<1x4xbf16>
+  check.expect.bitwise actual(%batched_first) expected(%single_first) : tensor<1x4xbf16>
+  check.return
+}
