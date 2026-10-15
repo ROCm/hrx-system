@@ -10,19 +10,19 @@ kernel.decl @expert_routes() launch(%record_rows: index, %epoch: buffer, %ids: b
 amdgpu.target<gfx11-generic> @observer_wave32 {subgroup_size = 32}
 
 kernel.def target(@observer_wave32) @observe_routes() {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%record_rows_arg: index, %tasks_arg: buffer, %count_arg: buffer, %counts_arg: buffer, %experts_arg: buffer) {
   %tasks, %count_output, %counts_output, %experts_output = buffer.assume.noalias %tasks_arg, %count_arg, %counts_arg, %experts_arg : buffer, buffer, buffer, buffer
   %record_rows = index.assume %record_rows_arg [range(%record_rows_arg, 4, 256)] : index
   %capacity = config.get @flash_next.token_count : index
   %record_capacity, %fields, %record_bytes = func.call pure @expert_record_extent(%capacity, %record_rows) : (index, index) -> (index, index, offset)
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %ten = index.constant 10 : index
-  %route_capacity = index.mul %capacity, %ten : index
-  %last_route = index.sub %route_capacity, %one : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c10 = index.constant 10 : index
+  %route_capacity = index.mul %capacity, %c10 : index
+  %last_route = index.sub %route_capacity, %c1 : index
   %stride = index.constant 128 : index
   %origin = index.constant 0 : offset
   %records_origin = index.constant 4 : offset
@@ -38,31 +38,31 @@ kernel.def target(@observer_wave32) @observe_routes() {
   %count_value = index.cast %count_word : i32 to index
   %count = index.assume %count_value [range(%count_value, 0, %record_capacity)] : index
   %thread = kernel.workitem.id<x> : index
-  %leader = index.cmp eq, %thread, %zero : index
+  %leader = index.cmp eq, %thread, %c0 : index
   scf.if %leader {
     view.store %count_word, %count_view[0] : i32, view<2xi32>
   }
-  %one_word = scalar.constant 1 : i32
-  %zero_word = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c0_i32 = scalar.constant 0 : i32
   scf.for %task_value = [%thread to %count step %stride] {
     %task = index.assume %task_value [ge(%task_value, 0), lt(%task_value, %record_capacity)] : index
     %expert = view.load %records[%task, 0] : view<[%record_capacity]x[%fields]xi32> -> i32
-    %expert_tag = scalar.addi %expert, %one_word : i32
+    %expert_tag = scalar.addi %expert, %c1_i32 : i32
     %live_word = view.load %records[%task, 1] : view<[%record_capacity]x[%fields]xi32> -> i32
     %live_value = index.cast %live_word : i32 to index
     %live = index.assume %live_value [range(%live_value, 1, %record_rows)] : index
-    scf.for %ordinal = [%zero to %record_rows step %one] {
+    scf.for %ordinal = [%c0 to %record_rows step %c1] {
       %route_word = view.load %routes[%task, %ordinal] : view<[%record_capacity]x[%record_rows]xi32, %routes_layout> -> i32
       %active = index.cmp ult, %ordinal, %live : index
       scf.if %active {
         %route_value = index.cast %route_word : i32 to index
         %route = index.assume %route_value [range(%route_value, 0, %last_route)] : index
-        view.atomic.reduce<addi> %one_word, %counts[%route] {ordering = relaxed, scope = device} : i32, view<[%route_capacity]xi32>
+        view.atomic.reduce<addi> %c1_i32, %counts[%route] {ordering = relaxed, scope = device} : i32, view<[%route_capacity]xi32>
         view.atomic.reduce<addi> %expert_tag, %experts[%route] {ordering = relaxed, scope = device} : i32, view<[%route_capacity]xi32>
       } else {
-        %nonzero_padding = scalar.cmpi ne, %route_word, %zero_word : i32
+        %nonzero_padding = scalar.cmpi ne, %route_word, %c0_i32 : i32
         scf.if %nonzero_padding {
-          view.atomic.reduce<addi> %one_word, %count_view[1] {ordering = relaxed, scope = device} : i32, view<2xi32>
+          view.atomic.reduce<addi> %c1_i32, %count_view[1] {ordering = relaxed, scope = device} : i32, view<2xi32>
         }
       }
     }
