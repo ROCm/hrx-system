@@ -22,8 +22,6 @@ typedef struct iree_hal_amd_gpu_pm4_semaphore_t {
   } submitted;
   // Optional owned host semaphore, installed once under async.mutex.
   iree_hal_semaphore_t* submission_semaphore;
-  // Allocator for this semaphore and its cold submission wait state.
-  iree_allocator_t host_allocator;
 } iree_hal_amd_gpu_pm4_semaphore_t;
 
 static const iree_hal_semaphore_vtable_t iree_hal_amd_gpu_pm4_semaphore_vtable;
@@ -47,10 +45,9 @@ iree_status_t iree_hal_amd_gpu_pm4_semaphore_create(
   iree_hal_amd_gpu_pm4_semaphore_t* semaphore = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, total_size, (void**)&semaphore));
-  iree_async_semaphore_initialize(&iree_hal_amd_gpu_pm4_semaphore_vtable.async,
-                                  proactor, initial_value, frontier_offset,
-                                  frontier_capacity, &semaphore->async);
-  semaphore->host_allocator = host_allocator;
+  iree_async_semaphore_initialize(
+      &iree_hal_amd_gpu_pm4_semaphore_vtable.async, proactor, initial_value,
+      frontier_offset, frontier_capacity, host_allocator, &semaphore->async);
   *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   return iree_ok_status();
 }
@@ -59,7 +56,7 @@ static void iree_hal_amd_gpu_pm4_semaphore_destroy(
     iree_async_semaphore_t* base_semaphore) {
   iree_hal_amd_gpu_pm4_semaphore_t* semaphore =
       (iree_hal_amd_gpu_pm4_semaphore_t*)base_semaphore;
-  iree_allocator_t host_allocator = semaphore->host_allocator;
+  iree_allocator_t host_allocator = semaphore->async.allocator;
   iree_hal_amd_gpu_pm4_signal_release(semaphore->submitted.signal);
   iree_hal_semaphore_release(semaphore->submission_semaphore);
   iree_async_semaphore_deinitialize(&semaphore->async);
@@ -198,7 +195,7 @@ iree_status_t iree_hal_amd_gpu_pm4_semaphore_acquire_submission_semaphore(
   if (!submission_semaphore) {
     iree_hal_semaphore_t* candidate = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_host_semaphore_create(
-        semaphore->async.proactor, 0, semaphore->host_allocator, &candidate));
+        semaphore->async.proactor, 0, semaphore->async.allocator, &candidate));
     iree_slim_mutex_lock(&semaphore->async.mutex);
     if (!semaphore->submission_semaphore) {
       semaphore->submission_semaphore = candidate;

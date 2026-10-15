@@ -6,7 +6,9 @@
 
 #include "iree/async/semaphore.h"
 
+#include <array>
 #include <atomic>
+#include <barrier>
 #include <thread>
 #include <vector>
 
@@ -401,8 +403,8 @@ TEST(SemaphoreTest, FailDispatchesPendingTimepoints) {
   iree_async_semaphore_release(sem);
 }
 
-// Verifies that timepoints are fully unlinked before their failure callback
-// fires. A callback seeing non-NULL next/prev would have stale list pointers.
+// Cancellation from a callback observes that ownership has already transferred
+// from the pending index, including on the failure path.
 TEST(SemaphoreTest, FailUnlinksTimepointsBeforeCallback) {
   iree_async_semaphore_t* sem = nullptr;
   IREE_ASSERT_OK(iree_async_semaphore_create(
@@ -417,7 +419,8 @@ TEST(SemaphoreTest, FailUnlinksTimepointsBeforeCallback) {
                        iree_async_semaphore_timepoint_t* timepoint,
                        iree_status_t status) {
       auto* self = static_cast<UnlinkChecker*>(user_data);
-      if (timepoint->next != nullptr || timepoint->prev != nullptr) {
+      if (iree_async_semaphore_cancel_timepoint(timepoint->semaphore,
+                                                timepoint)) {
         self->was_unlinked = false;
       }
       self->call_count++;
@@ -432,7 +435,7 @@ TEST(SemaphoreTest, FailUnlinksTimepointsBeforeCallback) {
   tp2.callback = UnlinkChecker::Invoke;
   tp2.user_data = &checker2;
 
-  // Register two timepoints so the list has actual linkage.
+  // Register two timepoints to exercise a detached callback batch.
   IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(sem, 10, &tp1));
   IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(sem, 20, &tp2));
 
@@ -1309,7 +1312,7 @@ TEST(SemaphoreTest, ConditionalChainSignals) {
 }
 
 //===----------------------------------------------------------------------===//
-// Semaphore linking (zero-allocation relay)
+// Semaphore linking (caller-owned relay)
 //===----------------------------------------------------------------------===//
 
 TEST(LinkTest, BasicRelay) {
@@ -1521,6 +1524,209 @@ TEST(LinkTest, AlreadyFailedSourcePropagatesImmediately) {
 }
 
 //===----------------------------------------------------------------------===//
+// Indexed timepoint ownership
+//===----------------------------------------------------------------------===//
+
+TEST(SemaphoreTest, PendingOrderCancellationAndDuplicateValues) {
+  constexpr size_t kCount = 512;
+  for (uint64_t base :
+       {uint64_t{0}, uint64_t{1} << 32, uint64_t{1} << 63, UINT64_MAX - 1024}) {
+    for (size_t stride : {size_t{1}, size_t{511}, size_t{73}}) {
+      for (uint64_t signal_step : {uint64_t{1}, uint64_t{19}}) {
+        SCOPED_TRACE(::testing::Message()
+                     << base << ":" << stride << ":" << signal_step);
+        iree_async_semaphore_t* semaphore = nullptr;
+        IREE_ASSERT_OK(iree_async_semaphore_create(
+            test_proactor(), base, 0, iree_allocator_system(), &semaphore));
+        std::vector<TimepointCallback> callbacks(kCount);
+        std::vector<iree_async_semaphore_timepoint_t> points(kCount);
+        for (size_t i = 0; i < kCount; ++i) {
+          const size_t index = i * stride % kCount;
+          points[index].callback = TimepointCallback::Invoke;
+          points[index].user_data = &callbacks[index];
+          IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+              semaphore, base + index / 3 + 1, &points[index]));
+        }
+        // Mixed removals exercise both directions of heap repair. Repeated
+        // cancellation must not accidentally remove a slot's new occupant.
+        for (size_t i = 0; i < kCount; i += 5) {
+          EXPECT_TRUE(
+              iree_async_semaphore_cancel_timepoint(semaphore, &points[i]));
+          EXPECT_FALSE(
+              iree_async_semaphore_cancel_timepoint(semaphore, &points[i]));
+        }
+        for (uint64_t value = 1; value <= kCount; value += signal_step) {
+          IREE_ASSERT_OK(
+              iree_async_semaphore_signal(semaphore, base + value, nullptr));
+          for (size_t i = 0; i < kCount; ++i) {
+            const int expected = i % 5 != 0 && i / 3 + 1 <= value ? 1 : 0;
+            EXPECT_EQ(callbacks[i].call_count.load(), expected);
+            if (expected) {
+              EXPECT_FALSE(
+                  iree_async_semaphore_cancel_timepoint(semaphore, &points[i]));
+            }
+          }
+        }
+        iree_async_semaphore_release(semaphore);
+      }
+    }
+  }
+}
+
+TEST(SemaphoreTest, WholeCallbackBatchIsDetachedBeforeAnyCallback) {
+  enum class Completion { kSignal, kFailure, kDestroy };
+  for (auto completion :
+       {Completion::kSignal, Completion::kFailure, Completion::kDestroy}) {
+    struct Batch {
+      // Storage remains live through every callback and reentrant cancellation.
+      std::array<iree_async_semaphore_timepoint_t, 64> points{};
+      // Number of callbacks already invoked in this dispatch batch.
+      size_t callbacks = 0;
+      // Terminal status expected from the selected completion path.
+      iree_status_code_t expected = IREE_STATUS_OK;
+    } batch;
+    batch.expected = completion == Completion::kSignal ? IREE_STATUS_OK
+                     : completion == Completion::kFailure
+                         ? IREE_STATUS_ABORTED
+                         : IREE_STATUS_CANCELLED;
+    iree_async_semaphore_t* semaphore = nullptr;
+    IREE_ASSERT_OK(iree_async_semaphore_create(
+        test_proactor(), 0, 0, iree_allocator_system(), &semaphore));
+    for (auto& point : batch.points) {
+      point.user_data = &batch;
+      point.callback = [](void* user_data,
+                          iree_async_semaphore_timepoint_t* current,
+                          iree_status_t status) {
+        auto& batch = *static_cast<Batch*>(user_data);
+        EXPECT_EQ(iree_status_code(status), batch.expected);
+        iree_status_free(status);
+        if (batch.callbacks++ == 0) {
+          // The rest of the batch has not been invoked yet, but its ownership
+          // must already belong to dispatch. No callback blocks a signaler.
+          for (auto& other : batch.points) {
+            EXPECT_FALSE(iree_async_semaphore_cancel_timepoint(
+                current->semaphore, &other));
+          }
+        }
+      };
+      IREE_ASSERT_OK(
+          iree_async_semaphore_acquire_timepoint(semaphore, 1, &point));
+    }
+    if (completion == Completion::kSignal) {
+      IREE_ASSERT_OK(iree_async_semaphore_signal(semaphore, 1, nullptr));
+    } else if (completion == Completion::kFailure) {
+      iree_async_semaphore_fail(semaphore,
+                                iree_status_from_code(IREE_STATUS_ABORTED));
+    }
+    iree_async_semaphore_release(semaphore);
+    EXPECT_EQ(batch.callbacks, batch.points.size());
+  }
+}
+
+TEST(SemaphoreTest, CallbackReusesThenReleasesItsTimepoint) {
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      test_proactor(), 0, 0, iree_allocator_system(), &semaphore));
+  size_t callbacks = 0;
+  auto* point = new iree_async_semaphore_timepoint_t{};
+  point->user_data = &callbacks;
+  point->callback = [](void* user_data, iree_async_semaphore_timepoint_t* point,
+                       iree_status_t status) {
+    IREE_CHECK_OK(status);
+    auto& callbacks = *static_cast<size_t*>(user_data);
+    if (++callbacks < 128) {
+      IREE_CHECK_OK(iree_async_semaphore_acquire_timepoint(
+          point->semaphore, point->minimum_value + 1, point));
+    } else {
+      delete point;
+    }
+  };
+  // The initial callback runs inside registration; later callbacks reuse the
+  // same storage from deferred dispatch. The final callback frees it
+  // immediately.
+  IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(semaphore, 0, point));
+  for (uint64_t value = 1; value < 128; ++value) {
+    IREE_ASSERT_OK(iree_async_semaphore_signal(semaphore, value, nullptr));
+  }
+  EXPECT_EQ(callbacks, 128u);
+  iree_async_semaphore_release(semaphore);
+}
+
+TEST(SemaphoreTest, IndexGrowthFailurePreservesPendingAndCallerOwnership) {
+  struct Allocator {
+    // Controlled failure at the real allocator boundary.
+    bool fail = false;
+    // Live allocations, including the semaphore and its shared index.
+    size_t live = 0;
+    static iree_status_t Control(void* self, iree_allocator_command_t command,
+                                 const void* parameters, void** pointer) {
+      auto& state = *static_cast<Allocator*>(self);
+      if (command != IREE_ALLOCATOR_COMMAND_FREE && state.fail) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      }
+      const bool was_allocated = *pointer != nullptr;
+      auto system = iree_allocator_system();
+      iree_status_t status =
+          system.ctl(system.self, command, parameters, pointer);
+      if (iree_status_is_ok(status)) {
+        if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+          state.live -= was_allocated;
+        } else if (!was_allocated) {
+          ++state.live;
+        }
+      }
+      return status;
+    }
+  } allocator;
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      test_proactor(), 0, 0, {&allocator, Allocator::Control}, &semaphore));
+  std::array<iree_async_semaphore_timepoint_t, 17> points{};
+  TimepointCallback callback;
+  for (auto& point : points) {
+    point.callback = TimepointCallback::Invoke;
+    point.user_data = &callback;
+  }
+  // Both inline-to-owned growth and realloc failure preserve the old index.
+  for (size_t capacity : {size_t{4}, size_t{8}, size_t{16}}) {
+    const size_t begin = capacity == 4 ? 0 : capacity / 2;
+    for (size_t i = begin; i < capacity; ++i) {
+      IREE_ASSERT_OK(
+          iree_async_semaphore_acquire_timepoint(semaphore, i + 1, &points[i]));
+    }
+    allocator.fail = true;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          iree_async_semaphore_acquire_timepoint(
+                              semaphore, capacity + 1, &points[capacity]));
+    EXPECT_EQ(callback.call_count.load(), 0);
+    allocator.fail = false;
+  }
+  allocator.fail = true;
+  size_t resolve_callbacks = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_async_semaphore_resolve(
+                            semaphore, 17, iree_infinite_timeout(),
+                            [](void* user_data, iree_status_t status) {
+                              ++*static_cast<size_t*>(user_data);
+                              iree_status_free(status);
+                            },
+                            &resolve_callbacks));
+  iree_async_semaphore_link_t link;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_async_semaphore_link(semaphore, 17, semaphore, 18, &link));
+  EXPECT_EQ(resolve_callbacks, 0u);
+  IREE_ASSERT_OK(iree_async_semaphore_signal(semaphore, 16, nullptr));
+  EXPECT_EQ(callback.call_count.load(), 16);
+  // Reusing retained index capacity still works while allocations are denied.
+  IREE_ASSERT_OK(
+      iree_async_semaphore_acquire_timepoint(semaphore, 17, &points[16]));
+  IREE_ASSERT_OK(iree_async_semaphore_signal(semaphore, 17, nullptr));
+  iree_async_semaphore_release(semaphore);
+  EXPECT_EQ(allocator.live, 0u);
+}
+
+//===----------------------------------------------------------------------===//
 // Concurrency
 //===----------------------------------------------------------------------===//
 
@@ -1556,56 +1762,55 @@ TEST(SemaphoreTest, ConcurrentSignals) {
   iree_async_semaphore_release(sem);
 }
 
-TEST(SemaphoreTest, ConcurrentTimepointAcquisitionAndSignal) {
-  iree_async_semaphore_t* sem = nullptr;
+TEST(SemaphoreTest, ConcurrentRegistrationCancellationAndSignal) {
+  iree_async_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_async_semaphore_create(
-      test_proactor(), 0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
-      iree_allocator_system(), &sem));
-
-  constexpr int kNumTimepoints = 100;
-
-  struct ThreadData {
+      test_proactor(), 0, 0, iree_allocator_system(), &semaphore));
+  constexpr size_t kCount = 1024;
+  constexpr size_t kThreadCount = 4;
+  struct Entry {
+    // Callback result, read after all signal and registration threads join.
     TimepointCallback callback;
-    iree_async_semaphore_timepoint_t timepoint;
+    // Stable registration storage kept live through cancellation and dispatch.
+    iree_async_semaphore_timepoint_t timepoint{};
+    // True if the registering thread recovered ownership before dispatch.
+    bool cancelled = false;
   };
-  std::vector<ThreadData> data(kNumTimepoints);
-
-  // Start threads that acquire timepoints.
-  std::vector<std::thread> acquire_threads;
-  for (int i = 0; i < kNumTimepoints; ++i) {
-    data[i].timepoint.callback = TimepointCallback::Invoke;
-    data[i].timepoint.user_data = &data[i].callback;
-    acquire_threads.emplace_back([sem, &data, i]() {
-      IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
-          sem, i + 1, &data[i].timepoint));
+  std::vector<Entry> entries(kCount);
+  std::barrier<> start(kThreadCount + 1);
+  std::vector<std::thread> threads;
+  for (size_t thread = 0; thread < kThreadCount; ++thread) {
+    threads.emplace_back([&, thread] {
+      start.arrive_and_wait();
+      for (size_t i = thread; i < kCount; i += kThreadCount) {
+        auto& entry = entries[i];
+        entry.timepoint.callback = TimepointCallback::Invoke;
+        entry.timepoint.user_data = &entry.callback;
+        IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+            semaphore, (i * 73 % kCount) + 1, &entry.timepoint));
+        if (i % 3 == 0) {
+          entry.cancelled = iree_async_semaphore_cancel_timepoint(
+              semaphore, &entry.timepoint);
+        }
+      }
     });
   }
-
-  // Signal thread.
-  std::thread signal_thread([sem, kNumTimepoints]() {
-    for (int i = 1; i <= kNumTimepoints; ++i) {
-      iree_status_t status = iree_async_semaphore_signal(sem, i, nullptr);
-      // May fail if we signal out of order, that's OK.
-      iree_status_free(status);
+  std::thread signaler([&] {
+    start.arrive_and_wait();
+    for (uint64_t value = 1; value <= kCount; ++value) {
+      IREE_ASSERT_OK(iree_async_semaphore_signal(semaphore, value, nullptr));
     }
   });
-
-  for (auto& t : acquire_threads) {
-    t.join();
+  for (auto& thread : threads) {
+    thread.join();
   }
-  signal_thread.join();
-
-  // Ensure signal is past all timepoints.
-  iree_status_t status =
-      iree_async_semaphore_signal(sem, kNumTimepoints + 1, nullptr);
-  iree_status_free(status);
-
-  // All timepoints should have fired.
-  for (int i = 0; i < kNumTimepoints; ++i) {
-    EXPECT_EQ(data[i].callback.call_count, 1);
+  signaler.join();
+  for (auto& entry : entries) {
+    EXPECT_EQ(entry.callback.call_count.load(), entry.cancelled ? 0 : 1);
+    EXPECT_FALSE(
+        iree_async_semaphore_cancel_timepoint(semaphore, &entry.timepoint));
   }
-
-  iree_async_semaphore_release(sem);
+  iree_async_semaphore_release(semaphore);
 }
 
 }  // namespace

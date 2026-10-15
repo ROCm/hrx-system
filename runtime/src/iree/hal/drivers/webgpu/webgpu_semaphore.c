@@ -14,7 +14,6 @@
 
 typedef struct iree_hal_webgpu_semaphore_t {
   iree_async_semaphore_t async;
-  iree_allocator_t host_allocator;
   // Submitted signal provenance for FIFO wait elision. Records the axis and
   // value of the most recent signal that has been submitted to the GPU queue
   // but may not have completed yet. Same-queue fast paths check these fields
@@ -56,8 +55,7 @@ iree_status_t iree_hal_webgpu_semaphore_create(
   iree_async_semaphore_initialize(
       (const iree_async_semaphore_vtable_t*)&iree_hal_webgpu_semaphore_vtable,
       proactor, initial_value, frontier_offset, /*frontier_capacity=*/1,
-      &semaphore->async);
-  semaphore->host_allocator = host_allocator;
+      host_allocator, &semaphore->async);
   semaphore->submitted_signal_axis = 0;
   iree_atomic_store(&semaphore->submitted_signal_value, 0,
                     iree_memory_order_relaxed);
@@ -93,7 +91,7 @@ static void iree_hal_webgpu_semaphore_destroy(
     iree_async_semaphore_t* base_semaphore) {
   iree_hal_webgpu_semaphore_t* semaphore =
       iree_hal_webgpu_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
-  iree_allocator_t host_allocator = semaphore->host_allocator;
+  iree_allocator_t host_allocator = semaphore->async.allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_async_semaphore_deinitialize(&semaphore->async);

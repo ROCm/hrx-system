@@ -1760,7 +1760,8 @@ static iree_status_t iree_async_proactor_io_uring_export_fence(
   // Register the timepoint. If the semaphore has already reached wait_value,
   // the callback fires synchronously (writing to eventfd before we return).
   // If the semaphore is already failed, the callback fires with the failure
-  // status (eventfd stays unreadable). acquire_timepoint always returns OK.
+  // status (eventfd stays unreadable). Index growth may fail before
+  // registration.
   status = iree_async_semaphore_acquire_timepoint(semaphore, wait_value,
                                                   &tracker->timepoint);
 
@@ -1768,8 +1769,7 @@ static iree_status_t iree_async_proactor_io_uring_export_fence(
     // Return the eventfd as the exported fence. Caller owns the fd.
     *out_fence = iree_async_primitive_from_fd(efd);
   } else {
-    // Should not happen (acquire_timepoint only fails on NULL semaphore), but
-    // handle defensively.
+    // Registration failed before any callback took ownership.
     close(efd);
     iree_async_semaphore_release(semaphore);
     iree_allocator_free(proactor->base.allocator, tracker);

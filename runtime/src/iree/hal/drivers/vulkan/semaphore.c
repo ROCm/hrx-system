@@ -16,9 +16,6 @@ typedef struct iree_hal_vulkan_semaphore_t {
   // Embedded async semaphore at offset 0 for HAL/async toll-free bridging.
   iree_async_semaphore_t async;
 
-  // Host allocator used to free this semaphore.
-  iree_allocator_t host_allocator;
-
   // Device-level Vulkan dispatch table copied from the creating device.
   iree_hal_vulkan_device_syms_t syms;
 
@@ -109,8 +106,8 @@ iree_status_t iree_hal_vulkan_semaphore_create(
     memset(semaphore, 0, total_size);
     iree_async_semaphore_initialize(
         (const iree_async_semaphore_vtable_t*)&iree_hal_vulkan_semaphore_vtable,
-        proactor, initial_value, frontier_offset, 0, &semaphore->async);
-    semaphore->host_allocator = host_allocator;
+        proactor, initial_value, frontier_offset, 0, host_allocator,
+        &semaphore->async);
     semaphore->syms = *syms;
     semaphore->device = device;
     semaphore->logical_device = logical_device;
@@ -132,7 +129,7 @@ static void iree_hal_vulkan_semaphore_destroy(
     iree_async_semaphore_t* base_semaphore) {
   iree_hal_vulkan_semaphore_t* semaphore =
       iree_hal_vulkan_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
-  iree_allocator_t host_allocator = semaphore->host_allocator;
+  iree_allocator_t host_allocator = semaphore->async.allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_vkDestroySemaphore(IREE_VULKAN_DEVICE(&semaphore->syms),

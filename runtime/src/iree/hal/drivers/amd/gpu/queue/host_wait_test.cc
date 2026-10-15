@@ -233,9 +233,9 @@ TEST_F(HostWaitTest, FailureCancelsPeerThatWillNeverSignal) {
   iree_hal_semaphore_fail(semaphores[1],
                           iree_make_status(IREE_STATUS_DATA_LOSS, "producer"));
   Check(completion, IREE_STATUS_DATA_LOSS);
-  EXPECT_EQ(
-      reinterpret_cast<iree_async_semaphore_t*>(semaphores[0])->timepoints_head,
-      nullptr);
+  EXPECT_EQ(reinterpret_cast<iree_async_semaphore_t*>(semaphores[0])
+                ->timepoints.count,
+            0u);
 }
 
 TEST_F(HostWaitTest, FailureDuringRegistrationJoinsEarlierTimepoint) {
@@ -251,9 +251,46 @@ TEST_F(HostWaitTest, FailureDuringRegistrationJoinsEarlierTimepoint) {
   Check(completion, IREE_STATUS_ABORTED);
   for (auto* semaphore : semaphores) {
     EXPECT_EQ(
-        reinterpret_cast<iree_async_semaphore_t*>(semaphore)->timepoints_head,
-        nullptr);
+        reinterpret_cast<iree_async_semaphore_t*>(semaphore)->timepoints.count,
+        0u);
   }
+}
+
+TEST_F(HostWaitTest, IndexGrowthFailureCancelsOnlyRegisteredWaits) {
+  Allocator allocator;
+  iree_hal_semaphore_t* full_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_host_semaphore_create(proactor_, 0, allocator.get(),
+                                                &full_semaphore));
+  auto* full_async = reinterpret_cast<iree_async_semaphore_t*>(full_semaphore);
+  std::array<iree_async_semaphore_timepoint_t, 4> pending{};
+  uint32_t callbacks = 0;
+  for (auto& point : pending) {
+    point.user_data = &callbacks;
+    point.callback = [](void* data, iree_async_semaphore_timepoint_t*,
+                        iree_status_t status) {
+      IREE_CHECK_OK(status);
+      ++*static_cast<uint32_t*>(data);
+    };
+    IREE_ASSERT_OK(
+        iree_async_semaphore_acquire_timepoint(full_async, 10, &point));
+  }
+  allocator.fail_allocations = true;
+  std::array<iree_hal_semaphore_t*, 2> semaphores = {Semaphore(),
+                                                     full_semaphore};
+  std::array<uint64_t, 2> values = {1, 1};
+  Completion completion;
+  Wait wait;
+  IREE_ASSERT_OK(Begin({semaphores.size(), semaphores.data(), values.data()},
+                       completion, wait));
+  Check(completion, IREE_STATUS_RESOURCE_EXHAUSTED);
+  EXPECT_EQ(reinterpret_cast<iree_async_semaphore_t*>(semaphores[0])
+                ->timepoints.count,
+            0u);
+  EXPECT_EQ(full_async->timepoints.count, pending.size());
+  EXPECT_EQ(callbacks, 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(full_semaphore, 10, nullptr));
+  EXPECT_EQ(callbacks, pending.size());
+  iree_hal_semaphore_release(full_semaphore);
 }
 
 TEST_F(HostWaitTest, CancellationDoesNotWaitForProducer) {

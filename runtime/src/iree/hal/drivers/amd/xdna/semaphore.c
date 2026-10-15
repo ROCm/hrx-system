@@ -12,9 +12,6 @@ typedef struct iree_hal_amd_xdna_semaphore_t {
   // Timeline, failure, frontier, and asynchronous wait state.
   iree_async_semaphore_t async;
 
-  // Allocator owning the semaphore and its inline frontier storage.
-  iree_allocator_t host_allocator;
-
   // Exact creating device identity, borrowed for type discrimination.
   iree_hal_device_t* device;
 
@@ -65,8 +62,7 @@ iree_status_t iree_hal_amd_xdna_semaphore_create(
     iree_async_semaphore_initialize(
         (const iree_async_semaphore_vtable_t*)&iree_hal_amd_xdna_semaphore_vtable,
         proactor, initial_value, frontier_offset,
-        IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY, &semaphore->async);
-    semaphore->host_allocator = host_allocator;
+        IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY, host_allocator, &semaphore->async);
     semaphore->device = device;
     semaphore->epoch_wait = epoch_wait;
     semaphore->flags = flags;
@@ -84,7 +80,7 @@ static void iree_hal_amd_xdna_semaphore_destroy(
     iree_async_semaphore_t* base_semaphore) {
   iree_hal_amd_xdna_semaphore_t* semaphore =
       iree_hal_amd_xdna_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
-  iree_allocator_t host_allocator = semaphore->host_allocator;
+  iree_allocator_t host_allocator = semaphore->async.allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_async_semaphore_deinitialize(&semaphore->async);

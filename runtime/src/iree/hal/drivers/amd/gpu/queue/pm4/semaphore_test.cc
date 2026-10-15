@@ -410,8 +410,8 @@ TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinOnService) {
     EXPECT_EQ(iree_status_code(completion.status), expected);
     EXPECT_EQ(completion.calls.load(), 1u);
     EXPECT_EQ(
-        reinterpret_cast<iree_async_semaphore_t*>(submission)->timepoints_head,
-        nullptr);
+        reinterpret_cast<iree_async_semaphore_t*>(submission)->timepoints.count,
+        0u);
     if (expected == IREE_STATUS_CANCELLED) {
       auto* signal = AcquireSignal();
       Publish(semaphore, value, signal);

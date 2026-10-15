@@ -252,6 +252,20 @@ iree_cc_test(
 
 iree_cc_binary_benchmark(
   NAME
+    semaphore_benchmark
+  SRCS
+    "semaphore_benchmark.cc"
+  DEPS
+    ::async
+    ::platform
+    iree::base
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+iree_cc_binary_benchmark(
+  NAME
     frontier_benchmark
   SRCS
     "frontier_benchmark.cc"

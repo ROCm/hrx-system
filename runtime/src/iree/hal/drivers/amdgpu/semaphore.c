@@ -19,9 +19,6 @@ typedef struct iree_hal_amdgpu_semaphore_t {
   // Embedded async semaphore at offset 0 for toll-free bridging.
   iree_async_semaphore_t async;
 
-  // Allocator used to free this semaphore.
-  iree_allocator_t host_allocator;
-
   // Back-pointer to the logical device that created this semaphore.
   // Used for type discrimination (is_local check). Not retained.
   iree_hal_amdgpu_logical_device_t* device;
@@ -75,8 +72,8 @@ iree_status_t iree_hal_amdgpu_semaphore_create(
     iree_async_semaphore_initialize(
         (const iree_async_semaphore_vtable_t*)&iree_hal_amdgpu_semaphore_vtable,
         proactor, initial_value, frontier_offset,
-        IREE_HAL_AMDGPU_MAX_FRONTIER_SNAPSHOT_ENTRY_COUNT, &semaphore->async);
-    semaphore->host_allocator = host_allocator;
+        IREE_HAL_AMDGPU_MAX_FRONTIER_SNAPSHOT_ENTRY_COUNT, host_allocator,
+        &semaphore->async);
     semaphore->device = device;
     semaphore->flags = flags;
     semaphore->queue_family_affinity = queue_family_affinity;
@@ -93,7 +90,7 @@ static void iree_hal_amdgpu_semaphore_destroy(
     iree_async_semaphore_t* base_semaphore) {
   iree_hal_amdgpu_semaphore_t* semaphore =
       iree_hal_amdgpu_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
-  iree_allocator_t host_allocator = semaphore->host_allocator;
+  iree_allocator_t host_allocator = semaphore->async.allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_async_semaphore_deinitialize(&semaphore->async);

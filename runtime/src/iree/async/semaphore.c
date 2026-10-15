@@ -19,16 +19,29 @@
 // Tentative definition; full definition at end of section.
 static const iree_async_semaphore_vtable_t iree_async_semaphore_default_vtable;
 
+// The checked allocation layout places the initial index immediately after the
+// frontier. Keeping it out of the header preserves embedded native hot fields.
+static iree_async_semaphore_timepoint_entry_t*
+iree_async_semaphore_inline_timepoints(iree_async_semaphore_t* semaphore) {
+  static_assert(iree_alignof(iree_async_frontier_entry_t) >=
+                    iree_alignof(iree_async_semaphore_timepoint_entry_t),
+                "frontier entries must align the trailing timepoint index");
+  return (
+      iree_async_semaphore_timepoint_entry_t*)(semaphore->frontier->entries +
+                                               semaphore->frontier_capacity);
+}
+
 IREE_API_EXPORT void iree_async_semaphore_initialize(
     const iree_async_semaphore_vtable_t* vtable,
     iree_async_proactor_t* proactor, uint64_t initial_value,
     iree_host_size_t frontier_offset, uint8_t frontier_capacity,
-    iree_async_semaphore_t* out_semaphore) {
+    iree_allocator_t allocator, iree_async_semaphore_t* out_semaphore) {
   IREE_ASSERT_ARGUMENT(vtable);
   IREE_ASSERT_ARGUMENT(proactor);
   IREE_ASSERT_ARGUMENT(out_semaphore);
   iree_atomic_ref_count_init(&out_semaphore->ref_count);
   out_semaphore->vtable = vtable;
+  out_semaphore->allocator = allocator;
   out_semaphore->proactor = proactor;
   iree_atomic_store(&out_semaphore->timeline_value, (int64_t)initial_value,
                     iree_memory_order_release);
@@ -37,11 +50,15 @@ IREE_API_EXPORT void iree_async_semaphore_initialize(
   iree_slim_mutex_initialize(&out_semaphore->mutex);
   iree_atomic_store(&out_semaphore->failure_status, 0,
                     iree_memory_order_release);
-  out_semaphore->timepoints_head = NULL;
   out_semaphore->frontier_capacity = frontier_capacity;
   out_semaphore->frontier =
       (iree_async_frontier_t*)((uint8_t*)out_semaphore + frontier_offset);
   iree_async_frontier_initialize(out_semaphore->frontier, 0);
+  out_semaphore->timepoints.entries =
+      iree_async_semaphore_inline_timepoints(out_semaphore);
+  out_semaphore->timepoints.count = 0;
+  out_semaphore->timepoints.capacity =
+      IREE_ASYNC_SEMAPHORE_INLINE_TIMEPOINT_CAPACITY;
 }
 
 IREE_API_EXPORT void iree_async_semaphore_retain(
@@ -58,13 +75,19 @@ IREE_API_EXPORT void iree_async_semaphore_release(
   }
 }
 
-// Detaches all timepoints from the semaphore's pending list, returning them
-// as a singly-linked list (via ->next). The semaphore's list is left empty.
-// Must be called with semaphore->mutex held.
+// Detaches all pending timepoints in one pass without heap repair. Every member
+// is marked detached under the mutex before callbacks or cancellation can run.
 static iree_async_semaphore_timepoint_t* iree_async_semaphore_detach_all_locked(
     iree_async_semaphore_t* semaphore) {
-  iree_async_semaphore_timepoint_t* head = semaphore->timepoints_head;
-  semaphore->timepoints_head = NULL;
+  iree_async_semaphore_timepoint_t* head = NULL;
+  for (iree_host_size_t i = 0; i < semaphore->timepoints.count; ++i) {
+    iree_async_semaphore_timepoint_t* timepoint =
+        semaphore->timepoints.entries[i].timepoint;
+    timepoint->heap_index = IREE_HOST_SIZE_MAX;
+    timepoint->next = head;
+    head = timepoint;
+  }
+  semaphore->timepoints.count = 0;
   return head;
 }
 
@@ -77,7 +100,6 @@ static void iree_async_semaphore_dispatch_detached(
   while (head != NULL) {
     iree_async_semaphore_timepoint_t* next = head->next;
     head->next = NULL;
-    head->prev = NULL;
     head->callback(head->user_data, head, iree_status_clone(status));
     head = next;
   }
@@ -107,6 +129,10 @@ IREE_API_EXPORT void iree_async_semaphore_deinitialize(
     iree_status_free(failure_status);
   }
 
+  if (semaphore->timepoints.entries !=
+      iree_async_semaphore_inline_timepoints(semaphore)) {
+    iree_allocator_free(semaphore->allocator, semaphore->timepoints.entries);
+  }
   iree_slim_mutex_deinitialize(&semaphore->mutex);
 }
 
@@ -129,8 +155,7 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_create(
       z0, iree_allocator_malloc(allocator, total_size, (void**)&semaphore));
   iree_async_semaphore_initialize(&iree_async_semaphore_default_vtable,
                                   proactor, initial_value, frontier_offset,
-                                  frontier_capacity, semaphore);
-  semaphore->allocator = allocator;
+                                  frontier_capacity, allocator, semaphore);
 
   *out_semaphore = semaphore;
   IREE_TRACE_ZONE_END(z0);
@@ -204,16 +229,110 @@ IREE_API_EXPORT void iree_async_semaphore_fail(
   }
 }
 
+// Grows only when all slots are occupied. The heap owns one contiguous index;
+// caller-owned timepoints never move and no per-timepoint nodes are allocated.
+static iree_status_t iree_async_semaphore_grow_timepoints_locked(
+    iree_async_semaphore_t* semaphore) {
+  const iree_host_size_t maximum_capacity =
+      iree_min(UINT32_MAX, IREE_HOST_SIZE_MAX /
+                               sizeof(iree_async_semaphore_timepoint_entry_t));
+  if (semaphore->timepoints.capacity > maximum_capacity / 2) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "semaphore pending index capacity exhausted");
+  }
+  const uint32_t capacity = semaphore->timepoints.capacity * 2;
+  const iree_host_size_t allocation_size =
+      capacity * sizeof(iree_async_semaphore_timepoint_entry_t);
+  iree_async_semaphore_timepoint_entry_t* entries = NULL;
+  if (semaphore->timepoints.entries ==
+      iree_async_semaphore_inline_timepoints(semaphore)) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
+        semaphore->allocator, allocation_size, (void**)&entries));
+    memcpy(entries, semaphore->timepoints.entries,
+           IREE_ASYNC_SEMAPHORE_INLINE_TIMEPOINT_CAPACITY * sizeof(entries[0]));
+  } else {
+    entries = semaphore->timepoints.entries;
+    IREE_RETURN_IF_ERROR(iree_allocator_realloc(
+        semaphore->allocator, allocation_size, (void**)&entries));
+  }
+  semaphore->timepoints.entries = entries;
+  semaphore->timepoints.capacity = capacity;
+  return iree_ok_status();
+}
+
+// Fills a vacant slot by moving only indexed ancestors. Every moved callback's
+// slot is updated here, so cancellation never has to rediscover membership.
+static void iree_async_semaphore_timepoint_sift_up(
+    iree_async_semaphore_timepoint_entry_t* entries, iree_host_size_t index,
+    iree_async_semaphore_timepoint_entry_t entry) {
+  while (index > 0) {
+    const iree_host_size_t parent = (index - 1) / 4;
+    if (entries[parent].minimum_value <= entry.minimum_value) {
+      break;
+    }
+    entries[index] = entries[parent];
+    entries[index].timepoint->heap_index = index;
+    index = parent;
+  }
+  entries[index] = entry;
+  entry.timepoint->heap_index = index;
+}
+
+// Compares adjacent keys instead of following pointers into callback storage.
+// Capacity is bounded by sizeof(entry), so computing four child slots cannot
+// overflow even for the largest representable allocation.
+static void iree_async_semaphore_timepoint_sift_down(
+    iree_async_semaphore_timepoint_entry_t* entries, iree_host_size_t count,
+    iree_host_size_t index, iree_async_semaphore_timepoint_entry_t entry) {
+  for (iree_host_size_t child = index * 4 + 1; child < count;
+       child = index * 4 + 1) {
+    const iree_host_size_t child_end = iree_min(child + 4, count);
+    for (iree_host_size_t sibling = child + 1; sibling < child_end; ++sibling) {
+      if (entries[sibling].minimum_value < entries[child].minimum_value) {
+        child = sibling;
+      }
+    }
+    if (entry.minimum_value <= entries[child].minimum_value) {
+      break;
+    }
+    entries[index] = entries[child];
+    entries[index].timepoint->heap_index = index;
+    index = child;
+  }
+  entries[index] = entry;
+  entry.timepoint->heap_index = index;
+}
+
+// Removes a known member and repairs one heap path. The detached marker is
+// stable through callback dispatch and observed only under the owning mutex.
+static void iree_async_semaphore_remove_timepoint_locked(
+    iree_async_semaphore_t* semaphore,
+    iree_async_semaphore_timepoint_t* timepoint) {
+  const iree_host_size_t index = timepoint->heap_index;
+  const iree_host_size_t count = --semaphore->timepoints.count;
+  iree_async_semaphore_timepoint_entry_t* entries =
+      semaphore->timepoints.entries;
+  if (index != count) {
+    const iree_async_semaphore_timepoint_entry_t entry = entries[count];
+    if (index > 0 &&
+        entry.minimum_value < entries[(index - 1) / 4].minimum_value) {
+      iree_async_semaphore_timepoint_sift_up(entries, index, entry);
+    } else {
+      iree_async_semaphore_timepoint_sift_down(entries, count, index, entry);
+    }
+  }
+  timepoint->heap_index = IREE_HOST_SIZE_MAX;
+}
+
 IREE_API_EXPORT iree_status_t iree_async_semaphore_acquire_timepoint(
     iree_async_semaphore_t* semaphore, uint64_t minimum_value,
     iree_async_semaphore_timepoint_t* timepoint) {
-  // Initialize timepoint fields.
   timepoint->semaphore = semaphore;
   timepoint->minimum_value = minimum_value;
   timepoint->next = NULL;
-  timepoint->prev = NULL;
+  timepoint->heap_index = IREE_HOST_SIZE_MAX;
 
-  // Fast path: check for immediate failure or satisfaction without the lock.
+  // Immediate completion needs neither index storage nor the mutex.
   iree_status_t failure = (iree_status_t)iree_atomic_load(
       &semaphore->failure_status, iree_memory_order_acquire);
   if (!iree_status_is_ok(failure)) {
@@ -228,87 +347,53 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_acquire_timepoint(
     return iree_ok_status();
   }
 
-  // Acquire the lock for list mutation and re-check under lock.
   iree_slim_mutex_lock(&semaphore->mutex);
 
-  // Insert into the doubly-linked list (prepend for O(1)).
-  timepoint->next = semaphore->timepoints_head;
-  if (semaphore->timepoints_head != NULL) {
-    semaphore->timepoints_head->prev = timepoint;
-  }
-  semaphore->timepoints_head = timepoint;
-
-  // Re-check after insertion (handles signal-during-insertion race).
-  // This matches the pattern used in frontier_tracker.c.
+  // A publisher updates the value before taking this mutex to dispatch, so it
+  // either precedes this check or observes the entry inserted below.
   current_value = (uint64_t)iree_atomic_load(&semaphore->timeline_value,
                                              iree_memory_order_acquire);
   if (current_value >= minimum_value) {
-    // Unlink and dispatch immediately.
-    if (timepoint->next != NULL) {
-      timepoint->next->prev = timepoint->prev;
-    }
-    if (timepoint->prev != NULL) {
-      timepoint->prev->next = timepoint->next;
-    } else {
-      semaphore->timepoints_head = timepoint->next;
-    }
     iree_slim_mutex_unlock(&semaphore->mutex);
     timepoint->callback(timepoint->user_data, timepoint, iree_ok_status());
     return iree_ok_status();
   }
-
-  // Also re-check failure status (set via CAS outside the mutex).
   failure = (iree_status_t)iree_atomic_load(&semaphore->failure_status,
                                             iree_memory_order_acquire);
   if (!iree_status_is_ok(failure)) {
-    // Unlink and dispatch with failure.
-    if (timepoint->next != NULL) {
-      timepoint->next->prev = timepoint->prev;
-    }
-    if (timepoint->prev != NULL) {
-      timepoint->prev->next = timepoint->next;
-    } else {
-      semaphore->timepoints_head = timepoint->next;
-    }
     iree_slim_mutex_unlock(&semaphore->mutex);
     timepoint->callback(timepoint->user_data, timepoint,
                         iree_status_clone(failure));
     return iree_ok_status();
   }
 
+  iree_status_t status = iree_ok_status();
+  if (semaphore->timepoints.count == semaphore->timepoints.capacity) {
+    status = iree_async_semaphore_grow_timepoints_locked(semaphore);
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_async_semaphore_timepoint_entry_t entry = {
+        .minimum_value = minimum_value,
+        .timepoint = timepoint,
+    };
+    iree_async_semaphore_timepoint_sift_up(
+        semaphore->timepoints.entries, semaphore->timepoints.count++, entry);
+  }
   iree_slim_mutex_unlock(&semaphore->mutex);
-  return iree_ok_status();
+  return status;
 }
 
 IREE_API_EXPORT bool iree_async_semaphore_cancel_timepoint(
     iree_async_semaphore_t* semaphore,
     iree_async_semaphore_timepoint_t* timepoint) {
   iree_slim_mutex_lock(&semaphore->mutex);
-
-  // Search for the timepoint in the list.
-  iree_async_semaphore_timepoint_t* current = semaphore->timepoints_head;
-  while (current != NULL) {
-    if (current == timepoint) {
-      // Found — unlink it.
-      if (current->next != NULL) {
-        current->next->prev = current->prev;
-      }
-      if (current->prev != NULL) {
-        current->prev->next = current->next;
-      } else {
-        semaphore->timepoints_head = current->next;
-      }
-      iree_slim_mutex_unlock(&semaphore->mutex);
-      return true;  // Cancelled — callback will not fire.
-    }
-    current = current->next;
+  const bool pending = timepoint->semaphore == semaphore &&
+                       timepoint->heap_index != IREE_HOST_SIZE_MAX;
+  if (pending) {
+    iree_async_semaphore_remove_timepoint_locked(semaphore, timepoint);
   }
-
-  // Not found — already dispatched (or dispatching). The callback has been
-  // collected for dispatch and may be executing or may have completed.
-  // Callers that need to wait for completion must use their own mechanism.
   iree_slim_mutex_unlock(&semaphore->mutex);
-  return false;
+  return pending;
 }
 
 //===----------------------------------------------------------------------===//
@@ -365,8 +450,12 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_resolve(
   state->user_data = user_data;
   state->timepoint.callback = iree_async_semaphore_resolve_timepoint_callback;
   state->timepoint.user_data = state;
-  return iree_async_semaphore_acquire_timepoint(semaphore, minimum_value,
-                                                &state->timepoint);
+  iree_status_t status = iree_async_semaphore_acquire_timepoint(
+      semaphore, minimum_value, &state->timepoint);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(iree_allocator_system(), state);
+  }
+  return status;
 }
 
 static const iree_async_semaphore_vtable_t iree_async_semaphore_default_vtable =
@@ -378,7 +467,7 @@ static const iree_async_semaphore_vtable_t iree_async_semaphore_default_vtable =
 };
 
 //===----------------------------------------------------------------------===//
-// Semaphore linking (zero-allocation relay)
+// Semaphore linking (caller-owned relay)
 //===----------------------------------------------------------------------===//
 
 // Built-in timepoint callback for semaphore links. Signals the target on
@@ -627,28 +716,13 @@ IREE_API_EXPORT void iree_async_semaphore_dispatch_timepoints(
 
   iree_slim_mutex_lock(&semaphore->mutex);
 
-  iree_async_semaphore_timepoint_t** prev_ptr = &semaphore->timepoints_head;
-  iree_async_semaphore_timepoint_t* timepoint = semaphore->timepoints_head;
-
-  while (timepoint != NULL) {
-    iree_async_semaphore_timepoint_t* next = timepoint->next;
-
-    if (timepoint->minimum_value <= value) {
-      // Unlink from semaphore list.
-      *prev_ptr = next;
-      if (next != NULL) {
-        next->prev = timepoint->prev;
-      }
-      // Append to satisfied list (preserves dispatch order).
-      timepoint->next = NULL;
-      timepoint->prev = NULL;
-      *satisfied_tail = timepoint;
-      satisfied_tail = &timepoint->next;
-    } else {
-      prev_ptr = &timepoint->next;
-    }
-
-    timepoint = next;
+  while (semaphore->timepoints.count > 0 &&
+         semaphore->timepoints.entries[0].minimum_value <= value) {
+    iree_async_semaphore_timepoint_t* timepoint =
+        semaphore->timepoints.entries[0].timepoint;
+    iree_async_semaphore_remove_timepoint_locked(semaphore, timepoint);
+    *satisfied_tail = timepoint;
+    satisfied_tail = &timepoint->next;
   }
 
   iree_slim_mutex_unlock(&semaphore->mutex);

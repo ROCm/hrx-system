@@ -509,6 +509,12 @@ static_assert(offsetof(iree_hal_semaphore_vtable_t, async) == 0,
               "async vtable must be at offset 0 for toll-free bridging");
 static_assert(offsetof(iree_async_semaphore_vtable_t, destroy) == 0,
               "destroy must be at offset 0 of async vtable");
+static_assert(offsetof(iree_async_semaphore_t, ref_count) ==
+                  offsetof(iree_hal_resource_t, ref_count),
+              "async semaphore must preserve the HAL resource reference count");
+static_assert(offsetof(iree_async_semaphore_t, vtable) ==
+                  offsetof(iree_hal_resource_t, vtable),
+              "async semaphore must preserve the HAL resource vtable offset");
 
 IREE_API_EXPORT void iree_hal_semaphore_destroy(
     iree_hal_semaphore_t* semaphore);
@@ -516,7 +522,7 @@ IREE_API_EXPORT void iree_hal_semaphore_destroy(
 // Casts an async semaphore to the containing HAL semaphore.
 // Valid because HAL semaphores embed async-compatible layout at offset 0
 // (toll-free bridge: iree_hal_resource_t and iree_async_semaphore_t have
-// identical {ref_count, vtable} layout at offsets 0 and 8).
+// identical {ref_count, vtable} prefixes on every supported pointer width).
 // Driver vtable methods receive iree_async_semaphore_t* and use this to
 // recover the iree_hal_semaphore_t* before narrowing to the driver type:
 //   iree_hal_foo_semaphore_cast(iree_hal_semaphore_cast(base_semaphore))

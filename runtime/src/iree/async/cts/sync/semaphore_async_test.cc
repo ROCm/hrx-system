@@ -97,7 +97,7 @@ class SemaphoreAsyncTest : public CtsTestBase<> {
       for (int iteration = 1; iteration <= kIterationCount; ++iteration) {
         for (;;) {
           iree_slim_mutex_lock(&semaphores[0]->mutex);
-          const bool registered = semaphores[0]->timepoints_head != nullptr;
+          const bool registered = semaphores[0]->timepoints.count != 0;
           iree_slim_mutex_unlock(&semaphores[0]->mutex);
           if (registered) {
             break;

@@ -19,8 +19,6 @@
 typedef struct iree_hal_host_semaphore_t {
   // Timeline, failure, frontier, and asynchronous wait state.
   iree_async_semaphore_t async;
-  // Allocator owning the semaphore and its inline frontier storage.
-  iree_allocator_t host_allocator;
 } iree_hal_host_semaphore_t;
 
 static const iree_hal_semaphore_vtable_t iree_hal_host_semaphore_vtable;
@@ -50,8 +48,8 @@ iree_status_t iree_hal_host_semaphore_create(
   if (iree_status_is_ok(status)) {
     iree_async_semaphore_initialize(
         (const iree_async_semaphore_vtable_t*)&iree_hal_host_semaphore_vtable,
-        proactor, initial_value, frontier_offset, 0, &semaphore->async);
-    semaphore->host_allocator = host_allocator;
+        proactor, initial_value, frontier_offset, 0, host_allocator,
+        &semaphore->async);
 
     *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   }
@@ -64,7 +62,7 @@ static void iree_hal_host_semaphore_destroy(
     iree_async_semaphore_t* base_semaphore) {
   iree_hal_host_semaphore_t* semaphore =
       iree_hal_host_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
-  iree_allocator_t host_allocator = semaphore->host_allocator;
+  iree_allocator_t host_allocator = semaphore->async.allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_async_semaphore_deinitialize(&semaphore->async);
