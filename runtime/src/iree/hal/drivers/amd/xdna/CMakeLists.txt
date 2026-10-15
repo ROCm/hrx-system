@@ -350,6 +350,7 @@ iree_cc_library(
     iree::base::threading
     iree::hal
     iree::hal::drivers::amd::fabric::buffer
+    iree::hal::drivers::amd::fabric::event
     iree::hal::drivers::amd::fabric::file_transfer
     iree::hal::drivers::amd::fabric::transient_buffer
     iree::hal::drivers::amd::status

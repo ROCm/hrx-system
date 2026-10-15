@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/gpu/context.h"
 
+#include "iree/hal/drivers/amd/fabric/event.h"
 #include "iree/hal/drivers/amd/status.h"
 
 void iree_hal_amd_gpu_context_report_status(
@@ -49,6 +50,7 @@ void iree_hal_amd_gpu_context_free(iree_hal_amd_gpu_context_t* context) {
     }
     context->event = NULL;
   }
+  iree_async_event_native_deinitialize(&context->kernel_event);
   if (context->device) {
     amdf_status_t status = context->api->device_destroy(context->device);
     if (!amdf_status_is_ok(status)) {
@@ -145,6 +147,19 @@ static iree_status_t iree_hal_amd_gpu_context_open(
         "device_enumerate_memory_scopes"));
   }
 
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_context_prepare_completion(
+    iree_hal_amd_gpu_context_t* context,
+    amdf_queue_publication_modes_t publication_mode) {
+  if (publication_mode == AMDF_QUEUE_PUBLICATION_MODE_KERNEL) {
+    IREE_RETURN_IF_ERROR(
+        iree_async_event_native_initialize(&context->kernel_event));
+    context->kernel_notification =
+        iree_hal_amd_fabric_event_native_handle(&context->kernel_event);
+    return iree_ok_status();
+  }
   const amdf_gpu_event_create_info_t event_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO,
       .structure_size = sizeof(event_info),
@@ -159,6 +174,15 @@ static iree_status_t iree_hal_amd_gpu_context_open(
   return IREE_HAL_AMD_STATUS_FROM_AMDF(
       context->gpu->event_query_info(context->event, &context->event_info),
       "gpu.event_query_info");
+}
+
+amdf_status_t iree_hal_amd_gpu_context_signal(
+    const iree_hal_amd_gpu_context_t* context) {
+  if (context->event) {
+    return context->gpu->event_signal(context->event);
+  }
+  iree_async_event_native_set(&context->kernel_event);
+  return AMDF_STATUS_OK;
 }
 
 iree_status_t iree_hal_amd_gpu_context_allocate(

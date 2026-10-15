@@ -280,8 +280,17 @@ class ContextTest : public ::testing::Test {
             },
         .user_data = &native_,
     };
-    return iree_hal_amd_gpu_context_allocate(
+    iree_status_t status = iree_hal_amd_gpu_context_allocate(
         &fabric_, &id, sink, iree_allocator_system(), out_context);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amd_gpu_context_prepare_completion(
+          *out_context, AMDF_QUEUE_PUBLICATION_MODE_USER);
+    }
+    if (!iree_status_is_ok(status)) {
+      iree_hal_amd_gpu_context_free(*out_context);
+      *out_context = nullptr;
+    }
+    return status;
   }
 
   // Dependency-owned identities and construction failure schedule.
@@ -291,6 +300,22 @@ class ContextTest : public ::testing::Test {
   // Existing fabric reference retained independently of the context.
   iree_hal_amd_fabric_t fabric_ = {};
 };
+
+TEST_F(ContextTest, EndpointOpeningDoesNotRequireUserPublication) {
+  const amdf_endpoint_id_t id = {{37, 0}};
+  iree_hal_amd_gpu_context_t* context = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_allocate(
+      &fabric_, &id, {}, iree_allocator_system(), &context));
+  ASSERT_NE(context, nullptr);
+  EXPECT_EQ(context->event, nullptr);
+  EXPECT_FALSE(native_.event_live);
+  const auto native_call_count = native_.call_count;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+      context, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
+  EXPECT_EQ(native_.call_count, native_call_count);
+  EXPECT_FALSE(native_.event_live);
+  iree_hal_amd_gpu_context_free(context);
+}
 
 TEST_F(ContextTest, CapturesFamiliesIndependentlyOfIsa) {
   for (uint32_t gfx_major : {9u, 11u, 12u}) {

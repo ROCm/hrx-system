@@ -189,7 +189,7 @@ static void iree_hal_amd_gpu_pm4_umq_wake_shutdown(
   if (IREE_UNLIKELY(
           iree_atomic_load(&queue->closed, iree_memory_order_acquire))) {
     const amdf_status_t status =
-        queue->context->gpu->event_signal(queue->context->event);
+        iree_hal_amd_gpu_context_signal(queue->context);
     if (!amdf_status_is_ok(status)) {
       iree_hal_amd_gpu_context_report(queue->context, status,
                                       "GPU shutdown event_signal");

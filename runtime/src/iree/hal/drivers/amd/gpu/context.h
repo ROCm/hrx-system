@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_CONTEXT_H_
 
 #include "amdf/gpu.h"
+#include "iree/async/event.h"
 #include "iree/hal/device_event.h"
 #include "iree/hal/drivers/amd/fabric/fabric.h"
 
@@ -38,8 +39,12 @@ typedef struct iree_hal_amd_gpu_context_t {
   amdf_endpoint_t* endpoint;
   // Owned execution/address domain, released after every queue and backing.
   amdf_device_t* device;
-  // One owned wake resource shared by GPU producers and host control signals.
+  // USER publication's owned GPU/host wake, or NULL for KERNEL publication.
   amdf_gpu_event_t* event;
+  // KERNEL publication's owned native event, empty for USER publication.
+  iree_async_event_native_t kernel_event;
+  // Borrowed native destination dominated by kernel_event.
+  amdf_native_event_t kernel_notification;
   // Physical identity and native family count captured at opening.
   amdf_endpoint_info_t endpoint_info;
   // Compiler identity and compute geometry, independent of queue protocol.
@@ -62,7 +67,7 @@ typedef struct iree_hal_amd_gpu_context_t {
   bool cleanup_blocked;
 } iree_hal_amd_gpu_context_t;
 
-// Opens one exact GPU endpoint, creates its address domain and native event,
+// Opens one exact GPU endpoint, creates its address domain,
 // and captures family/storage facts. The caller transfers this unique owner
 // to the HAL device only after complete device construction. Failure leaves
 // out_context NULL and releases acquired resources; native cleanup failures
@@ -71,6 +76,18 @@ iree_status_t iree_hal_amd_gpu_context_allocate(
     iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* endpoint_id,
     iree_hal_device_event_sink_t event_sink, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_context_t** out_context);
+
+// Prepares the device's shared completion wake after selecting publication.
+// Called once under device construction ownership, before any queue or worker.
+// Partial acquisition remains owned by context on failure.
+iree_status_t iree_hal_amd_gpu_context_prepare_completion(
+    iree_hal_amd_gpu_context_t* context,
+    amdf_queue_publication_modes_t publication_mode);
+
+// Signals the shared completion observer without allocating or advancing any
+// completion frontier. The caller retains context through the final access.
+amdf_status_t iree_hal_amd_gpu_context_signal(
+    const iree_hal_amd_gpu_context_t* context);
 
 // Releases an idle owner after all queue removals, notification tails, host
 // event calls/waits, backing and worker uses have joined. This performs no

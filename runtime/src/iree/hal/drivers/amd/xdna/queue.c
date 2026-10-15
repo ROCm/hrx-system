@@ -10,6 +10,7 @@
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/semaphore.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/hal/drivers/amd/fabric/event.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/drivers/amd/xdna/barrier.h"
 #include "iree/hal/drivers/amd/xdna/executable.h"
@@ -1505,15 +1506,8 @@ iree_status_t iree_hal_amd_xdna_queue_create(
     status = iree_async_event_create(proactor, &queue->event);
   }
   if (iree_status_is_ok(status)) {
-#if defined(IREE_ASYNC_HAVE_EVENTFD)
-    queue->native_event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
-    queue->native_event.payload.file_descriptor =
-        queue->event->native.signal_primitive.value.fd;
-#elif defined(IREE_ASYNC_HAVE_WIN32_HANDLE)
-    queue->native_event.type = AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT;
-    queue->native_event.payload.native_handle =
-        (void*)queue->event->native.signal_primitive.value.win32_handle;
-#endif
+    queue->native_event =
+        iree_hal_amd_fabric_event_native_handle(&queue->event->native);
     if (!iree_any_bit_set(info.notification_types,
                           UINT64_C(1) << queue->native_event.type)) {
       status = iree_make_status(

@@ -440,4 +440,39 @@ TEST_F(CompletionTest, ExitCallbackCanReleaseTheWorkerAndItsAllocation) {
   finalized.acquire();
 }
 
+TEST(CompletionNativeEventTest, KernelWakeSharesOneWorkerAndJoinsShutdown) {
+  iree_hal_amd_gpu_context_t context = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+      &context, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
+  ASSERT_NE(context.kernel_notification.type, AMDF_NATIVE_EVENT_TYPE_NONE);
+  struct State {
+    // Producer-owned work predicate, independent of event coalescing.
+    std::atomic<bool> ready{false};
+    // Joins each source observation before the next publication.
+    std::binary_semaphore observed{0};
+  } state;
+  const iree_hal_amd_gpu_completion_source_t source = {
+      .fn =
+          [](void* user_data, amdf_status_t status) {
+            auto* state = static_cast<State*>(user_data);
+            EXPECT_TRUE(amdf_status_is_ok(status));
+            if (state->ready.exchange(false)) {
+              state->observed.release();
+            }
+            return false;
+          },
+      .user_data = &state,
+  };
+  iree_hal_amd_gpu_completion_t completion = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context, 1, &source, {}, {}, iree_allocator_system(), &completion));
+  for (int i = 0; i < 128; ++i) {
+    state.ready.store(true);
+    EXPECT_TRUE(amdf_status_is_ok(iree_hal_amd_gpu_context_signal(&context)));
+    state.observed.acquire();
+  }
+  IREE_EXPECT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion));
+  iree_async_event_native_deinitialize(&context.kernel_event);
+}
+
 }  // namespace

@@ -307,3 +307,20 @@ iree_runtime_cc_fuzz(
         "//runtime/src/iree/base",
     ],
 )
+
+iree_runtime_cc_test(
+    name = "event_test",
+    srcs = ["event_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

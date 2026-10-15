@@ -420,8 +420,7 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
   }
   iree_atomic_store(&device->shutdown.closing, 1, iree_memory_order_release);
   iree_notification_post(&device->shutdown.notification, IREE_ALL_WAITERS);
-  amdf_status_t status =
-      device->context->gpu->event_signal(device->context->event);
+  amdf_status_t status = iree_hal_amd_gpu_context_signal(device->context);
   if (!amdf_status_is_ok(status)) {
     iree_hal_amd_gpu_context_report(device->context, status,
                                     "GPU shutdown event_signal");
@@ -485,6 +484,10 @@ iree_status_t iree_hal_amd_gpu_device_create(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_device_build_spec(device, display_name,
                                                 options->queue_count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_context_prepare_completion(
+        context, AMDF_QUEUE_PUBLICATION_MODE_USER);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_device_prepare_control(device);

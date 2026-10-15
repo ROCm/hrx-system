@@ -44,4 +44,30 @@ iree_async_event_native_consume(const iree_async_event_native_t* event) {
   return iree_ok_status();
 }
 
+IREE_API_EXPORT iree_status_t iree_async_event_native_wait(
+    const iree_async_event_native_t* event, iree_timeout_t timeout) {
+  const iree_time_t deadline = iree_timeout_as_deadline_ns(timeout);
+  for (;;) {
+    const iree_duration_t remaining =
+        iree_absolute_deadline_to_timeout_ns(deadline);
+    const DWORD milliseconds =
+        remaining == IREE_DURATION_INFINITE
+            ? INFINITE
+            : (DWORD)iree_min(remaining / 1000000 + (remaining % 1000000 != 0),
+                              INFINITE - 1);
+    const DWORD result = WaitForSingleObject(
+        (HANDLE)event->wait_primitive.value.win32_handle, milliseconds);
+    if (result == WAIT_OBJECT_0) {
+      return iree_ok_status();
+    }
+    if (result != WAIT_TIMEOUT) {
+      return iree_make_status(iree_status_code_from_win32_error(GetLastError()),
+                              "native event wait failed");
+    }
+    if (iree_absolute_deadline_to_timeout_ns(deadline) == 0) {
+      return iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
+    }
+  }
+}
+
 #endif  // IREE_PLATFORM_WINDOWS

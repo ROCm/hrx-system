@@ -163,9 +163,11 @@ iree_cc_library(
     "context.c"
   DEPS
     amdf::headers
+    iree::async
     iree::base
     iree::hal
     iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::fabric::event
     iree::hal::drivers::amd::status
   PUBLIC
 )
@@ -199,6 +201,7 @@ iree_cc_library(
   DEPS
     ::context
     amdf::headers
+    iree::async
     iree::base
     iree::base::internal
     iree::base::threading::thread
@@ -217,6 +220,7 @@ iree_cc_test(
     ::completion
     ::context
     amdf::headers
+    iree::async
     iree::base
     iree::base::threading::thread
     iree::hal

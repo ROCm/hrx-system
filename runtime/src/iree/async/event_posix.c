@@ -9,6 +9,9 @@
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID) || \
     defined(IREE_PLATFORM_APPLE) || defined(IREE_PLATFORM_BSD)
 
+#include <limits.h>
+#include <poll.h>
+
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID)
 
 #include <errno.h>
@@ -120,6 +123,40 @@ iree_async_event_native_consume(const iree_async_event_native_t* event) {
                             "event signaling endpoint closed");
   }
   return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_async_event_native_wait(
+    const iree_async_event_native_t* event, iree_timeout_t timeout) {
+  const iree_time_t deadline = iree_timeout_as_deadline_ns(timeout);
+  struct pollfd descriptor = {
+      .fd = event->wait_primitive.value.fd,
+      .events = POLLIN,
+  };
+  for (;;) {
+    const iree_duration_t remaining =
+        iree_absolute_deadline_to_timeout_ns(deadline);
+    const int milliseconds =
+        remaining == IREE_DURATION_INFINITE
+            ? -1
+            : (int)iree_min(remaining / 1000000 + (remaining % 1000000 != 0),
+                            INT_MAX);
+    const int result = poll(&descriptor, 1, milliseconds);
+    if (result > 0) {
+      if (descriptor.revents & POLLIN) {
+        return iree_async_event_native_consume(event);
+      }
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "native event wait returned events 0x%x",
+                              descriptor.revents);
+    }
+    if (result < 0 && errno != EINTR) {
+      return iree_make_status(iree_status_code_from_errno(errno),
+                              "native event wait failed");
+    }
+    if (iree_absolute_deadline_to_timeout_ns(deadline) == 0) {
+      return iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
+    }
+  }
 }
 
 #endif  // POSIX platforms

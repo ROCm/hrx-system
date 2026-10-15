@@ -251,3 +251,13 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+iree_runtime_cc_library(
+    name = "event",
+    srcs = ["event.c"],
+    hdrs = ["event.h"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+    ],
+)

@@ -311,4 +311,19 @@ iree_cc_test(
 )
 endif()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    event
+  HDRS
+    "event.h"
+  SRCS
+    "event.c"
+  DEPS
+    amdf::headers
+    iree::async
+  PUBLIC
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

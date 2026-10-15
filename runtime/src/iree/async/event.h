@@ -106,6 +106,15 @@ IREE_API_EXPORT void iree_async_event_native_set(
 IREE_API_EXPORT iree_status_t
 iree_async_event_native_consume(const iree_async_event_native_t* event);
 
+// Waits on the calling thread and consumes one native readiness hint. This is
+// for dedicated external completion workers; proactor consumers use EVENT_WAIT
+// or event sources instead. The caller is the sole consumer and keeps the event
+// alive through return. A signal before entry remains pending. Signals may
+// coalesce, so success requires rechecking the producer's authoritative state.
+// Returns DEADLINE_EXCEEDED if the timeout expires without a signal.
+IREE_API_EXPORT iree_status_t iree_async_event_native_wait(
+    const iree_async_event_native_t* event, iree_timeout_t timeout);
+
 //===----------------------------------------------------------------------===//
 // Managed event
 //===----------------------------------------------------------------------===//

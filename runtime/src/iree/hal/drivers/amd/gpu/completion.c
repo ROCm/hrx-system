@@ -40,11 +40,25 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
     // Signals before entry remain pending, closing the predicate-to-wait gap.
     // A stale or coalesced wake simply causes another authoritative scan.
     IREE_TRACE_ZONE_BEGIN_NAMED(z_wait, "iree_hal_amd_gpu_completion_wait");
-    amdf_status_t status =
-        context->gpu->event_wait(context->event, AMDF_TIMEOUT_INFINITE);
+    amdf_status_t status = AMDF_STATUS_OK;
+    if (context->event) {
+      status = context->gpu->event_wait(context->event, AMDF_TIMEOUT_INFINITE);
+    } else {
+      iree_status_t wait_status = iree_async_event_native_wait(
+          &context->kernel_event, iree_infinite_timeout());
+      if (!iree_status_is_ok(wait_status)) {
+        // The sink consumes the host failure's detailed diagnostic. Sources
+        // receive a terminal observer failure, never successful GPU progress.
+        iree_hal_amd_gpu_context_report_status(context, NULL, wait_status);
+        iree_status_free(wait_status);
+        status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+      }
+    }
     IREE_TRACE_ZONE_END(z_wait);
     if (!amdf_status_is_ok(status)) {
-      iree_hal_amd_gpu_context_report(context, status, "gpu.event_wait");
+      if (context->event) {
+        iree_hal_amd_gpu_context_report(context, status, "gpu.event_wait");
+      }
       for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
         const iree_hal_amd_gpu_completion_source_t* source =
             &completion->sources[i];
@@ -101,7 +115,7 @@ amdf_status_t iree_hal_amd_gpu_completion_request_stop(
     // A failed wake preserves the join obligation. Retrying must signal again
     // even when a previous call has already published STOP_REQUESTED.
     const iree_hal_amd_gpu_context_t* context = completion->context;
-    return context->gpu->event_signal(context->event);
+    return iree_hal_amd_gpu_context_signal(context);
   }
   return AMDF_STATUS_OK;
 }

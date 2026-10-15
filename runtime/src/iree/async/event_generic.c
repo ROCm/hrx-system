@@ -30,4 +30,12 @@ iree_async_event_native_consume(const iree_async_event_native_t* event) {
                           "events not supported on this platform");
 }
 
+IREE_API_EXPORT iree_status_t iree_async_event_native_wait(
+    const iree_async_event_native_t* event, iree_timeout_t timeout) {
+  (void)event;
+  (void)timeout;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "native events not supported on this platform");
+}
+
 #endif  // Unsupported platforms
