@@ -23,16 +23,16 @@ func.decl @flash_next_q8_rows_partial(%width: index, %rows: vector<4xi32>, %live
 // keeps large tiles compact even when expert populations are highly skewed.
 // Allocation, production, and consumption share the same logical extent.
 func.def public pure inline @expert_record_extent(%capacity: index, %record_rows: index) -> (index, index, offset) {
-  %ten = index.constant 10 : index
-  %two = index.constant 2 : index
+  %routes_per_token = index.constant 10 : index
+  %header_fields = index.constant 2 : index
   %experts = index.constant 512 : index
   %word_bytes = index.constant 4 : offset
-  %routes = index.mul %capacity, %ten : index
+  %routes = index.mul %capacity, %routes_per_token : index
   %full_records = index.div %routes, %record_rows : index
   %population_bound = index.add %full_records, %experts : index
   %route_bound_is_smaller = index.cmp ult, %routes, %population_bound : index
   %records = scf.select %route_bound_is_smaller, %routes, %population_bound : index
-  %fields = index.add %record_rows, %two : index
+  %fields = index.add %record_rows, %header_fields : index
   %record_bytes = index.scale %fields, %word_bytes : index, offset -> offset
   %table_bytes = index.scale %records, %record_bytes : index, offset -> offset
   %bytes = index.add %table_bytes, %word_bytes : offset
@@ -40,9 +40,9 @@ func.def public pure inline @expert_record_extent(%capacity: index, %record_rows
 }
 
 kernel.def target(@flash_next_expert_bucket_wave32) @expert_routes() {
-  %one = index.constant 1 : index
+  %c1_index = index.constant 1 : index
   %threads = index.constant 512 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%c1_index, %c1_index, %c1_index) workgroup_size(%threads, %c1_index, %c1_index) : index
 } launch(%record_rows_arg: index, %epoch_arg: buffer, %ids_arg: buffer, %ranks_arg: buffer, %tasks_arg: buffer) {
   %record_rows = index.assume %record_rows_arg [range(%record_rows_arg, 4, 256)] : index
   %epoch, %ids, %ranks, %tasks = buffer.assume.noalias %epoch_arg, %ids_arg, %ranks_arg, %tasks_arg : buffer, buffer, buffer, buffer

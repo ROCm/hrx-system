@@ -155,9 +155,9 @@ kernel.def target(@wave32) @quantized_rows(%format: index) {
   %width = index.constant 768 : index
   %stride = index.constant 32 : index
   %origin = index.constant 0 : offset
-  %zero_word = scalar.constant 0 : i32
-  %one_word = scalar.constant 1 : i32
-  %ordinals = vector.iota %zero_word step %one_word : vector<4xi32>
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %ordinals = vector.iota %c0_i32 step %c1_i32 : vector<4xi32>
   %reverse = vector.constant 3 : vector<4xi32>
   %permutation = vector.xori %ordinals, %reverse : vector<4xi32>
   %live_word = index.cast %live : index to i32
@@ -189,8 +189,8 @@ kernel.def target(@wave32) @quantized_rows(%format: index) {
   %leader = index.cmp eq, %lane, %c0 : index
   scf.if %leader {
     %view = buffer.view %output[%origin] : buffer -> view<4x4x2xf32>
-    %one = index.constant 1 : index
-    scf.for %ordinal = [%c0 to %live step %one] {
+    %c1_index = index.constant 1 : index
+    scf.for %ordinal = [%c0 to %live step %c1_index] {
       %token = index.sub %c3, %ordinal : index
       %gate_value = vector.extract %gate[%ordinal] : vector<4xf32> -> f32
       %up_value = vector.extract %up[%ordinal] : vector<4xf32> -> f32

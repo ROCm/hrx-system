@@ -196,9 +196,9 @@ kernel.def @initialize_arena() {
   scf.if %active {
     %row_word = index.cast %row : index to i32
     %row_float = scalar.sitofp %row_word : i32 to f32
-    %one = scalar.constant 1.0 : f32
+    %c1_f32 = scalar.constant 1.0 : f32
     %quarter = scalar.constant 0.25 : f32
-    %base = scalar.addf %row_float, %one : f32
+    %base = scalar.addf %row_float, %c1_f32 : f32
     %value = scalar.mulf %base, %quarter : f32
     %origin = index.constant 0 : offset
     %view = buffer.view %arena[%origin] : buffer -> view<6x848128xf32>
@@ -221,8 +221,8 @@ kernel.def @untouched_speculation() {
   %before = buffer.view %initial[%origin] : buffer -> view<6x848128xi32>
   %after = buffer.view %actual[%origin] : buffer -> view<6x848128xi32>
   %outputs = buffer.view %results[%origin] : buffer -> view<5xi32>
-  %one = scalar.constant 1 : i32
-  %same = scf.for %element = [%thread to %length step %threads](%prior = %one : i32) -> (i32) {
+  %c1_i32 = scalar.constant 1 : i32
+  %same = scf.for %element = [%thread to %length step %threads](%prior = %c1_i32 : i32) -> (i32) {
     %a = view.load %before[%row, %element] : view<6x848128xi32> -> i32
     %b = view.load %after[%row, %element] : view<6x848128xi32> -> i32
     %equal = scalar.cmpi eq, %a, %b : i32
