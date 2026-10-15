@@ -22,9 +22,10 @@ kernel.def @ordinary_vector_structure_i32() {
   %singleton_value = vector.extract %singleton_inserted[0] : vector<1xi32> -> i32
   %singleton_constant_value = vector.extract %singleton_constant[0] : vector<1xi32> -> i32
   %from = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  %shuffled = vector.shuffle<[3, 1, 1, 0]> %from : vector<4xi32>
   %constant = vector.constant 10 : vector<4xi32>
   %splat = vector.splat %singleton_value : vector<4xi32>
-  %candidate = scf.select %condition, %from, %constant : vector<4xi32>
+  %candidate = scf.select %condition, %shuffled, %constant : vector<4xi32>
   %selected = scf.if %condition -> (vector<4xi32>) {
     view.store %a, %output_view[0] : i32, view<4xi32>
     scf.yield %candidate : vector<4xi32>
@@ -49,47 +50,48 @@ kernel.def @ordinary_vector_structure_i32() {
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @ordinary_vector_structure_i32() asm {
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %36 = OpConstant.offset64 0
-  %37 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %36
-  %a = OpLoad.storage_buffer.i32 %37
-  %39 = OpConstant.offset64 4
-  %40 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %39
-  %b = OpLoad.storage_buffer.i32 %40
-  %42 = OpConstant.offset64 8
-  %43 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %42
-  %c = OpLoad.storage_buffer.i32 %43
-  %45 = OpConstant.offset64 12
-  %46 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %45
-  %d = OpLoad.storage_buffer.i32 %46
+  %37 = OpConstant.offset64 0
+  %38 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %37
+  %a = OpLoad.storage_buffer.i32 %38
+  %40 = OpConstant.offset64 4
+  %41 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %40
+  %b = OpLoad.storage_buffer.i32 %41
+  %43 = OpConstant.offset64 8
+  %44 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %43
+  %c = OpLoad.storage_buffer.i32 %44
+  %46 = OpConstant.offset64 12
+  %47 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %46
+  %d = OpLoad.storage_buffer.i32 %47
   %condition = OpSGreaterThan %a, %b
   %singleton_constant_value = OpConstant.i32 10
   %from = OpCompositeConstruct.v4i32 %a, %b, %c, %d
+  %shuffled = OpVectorShuffle.v4i32.v4i32 %from, %from, 3, 1, 1, 0
   %constant = OpCompositeConstruct.v4i32 %singleton_constant_value, %singleton_constant_value, %singleton_constant_value, %singleton_constant_value
   %splat = OpCompositeConstruct.v4i32 %a, %a, %a, %a
-  %54 = OpCompositeConstruct.v4bool %condition, %condition, %condition, %condition
-  %candidate = OpSelect.v4i32 %54, %from, %constant
+  %56 = OpCompositeConstruct.v4bool %condition, %condition, %condition, %condition
+  %candidate = OpSelect.v4i32 %56, %shuffled, %constant
   %selected = low.scf.if %condition -> (reg<spirv.id : vector<4xi32>>) {
-    %58 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %36
-    OpStore.storage_buffer.i32 %58, %a
+    %60 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %37
+    OpStore.storage_buffer.i32 %60, %a
     low.scf.yield %candidate : reg<spirv.id : vector<4xi32>>
   } else {
-    %60 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %36
-    OpStore.storage_buffer.i32 %60, %b
+    %62 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %37
+    OpStore.storage_buffer.i32 %62, %b
     low.scf.yield %splat : reg<spirv.id : vector<4xi32>>
   }
   %inserted = OpCompositeInsert.i32.v4i32 %singleton_constant_value, %selected, 2
-  %final = OpSelect.v4i32 %54, %selected, %inserted
+  %final = OpSelect.v4i32 %56, %selected, %inserted
   %result0 = OpCompositeExtract.v4i32.i32 %final, 0
   %result1 = OpCompositeExtract.v4i32.i32 %final, 1
   %result2 = OpCompositeExtract.v4i32.i32 %final, 2
   %result3 = OpCompositeExtract.v4i32.i32 %final, 3
-  %69 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %36
-  OpStore.storage_buffer.i32 %69, %result0
-  %71 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %39
-  OpStore.storage_buffer.i32 %71, %result1
-  %73 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %42
-  OpStore.storage_buffer.i32 %73, %result2
-  %75 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %45
-  OpStore.storage_buffer.i32 %75, %result3
+  %71 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %37
+  OpStore.storage_buffer.i32 %71, %result0
+  %73 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %40
+  OpStore.storage_buffer.i32 %73, %result1
+  %75 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %43
+  OpStore.storage_buffer.i32 %75, %result2
+  %77 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %46
+  OpStore.storage_buffer.i32 %77, %result3
   return
 }

@@ -59,10 +59,12 @@ from loom.target.arch.spirv.extended_math import (
 from loom.target.arch.spirv.features import feature_bit_value
 from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_INSTRUCTIONS,
+    ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
     OrdinaryVectorComponentKind,
     OrdinaryVectorComponentType,
     OrdinaryVectorInstruction,
     OrdinaryVectorInstructionType,
+    OrdinaryVectorShuffleInstruction,
     OrdinaryVectorType,
 )
 from loom.target.arch.spirv.ordinary_vector_bit_layout import (
@@ -670,6 +672,39 @@ def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
             result_value_types=(
                 (result_value_type,) if result_value_type is not None else ()
             ),
+        ),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _ordinary_vector_shuffle_descriptor(
+    row: OrdinaryVectorShuffleInstruction,
+) -> Descriptor:
+    return Descriptor(
+        key=row.key,
+        mnemonic=row.mnemonic,
+        semantic_tag=row.key,
+        operands=(
+            _ordinary_vector_result(row.result_type),
+            _ordinary_vector_operand("source0", row.source_type),
+            _ordinary_vector_operand("source1", row.source_type),
+        ),
+        immediates=tuple(
+            Immediate(
+                name,
+                ImmediateKind.UNSIGNED,
+                bit_width=32,
+                unsigned_max=row.selector_maximum,
+            )
+            for name in row.selector_names
+        ),
+        feature_mask_words=(row.feature_bits,) if row.feature_bits else (),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("source0", "source1"),
+            immediates=row.selector_names,
+            result_value_types=(_ordinary_vector_result_value_type(row.result_type),),
         ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -1908,6 +1943,10 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         *_scalar_binary_descriptors(),
         *_conversion_descriptors(),
         *(_ordinary_vector_descriptor(row) for row in ORDINARY_VECTOR_INSTRUCTIONS),
+        *(
+            _ordinary_vector_shuffle_descriptor(row)
+            for row in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS
+        ),
         *(
             _ordinary_vector_descriptor(row)
             for row in (

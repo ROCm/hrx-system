@@ -213,13 +213,16 @@ static iree_status_t loom_spirv_emit_builtin_variable(
   return iree_ok_status();
 }
 
+static loom_named_attr_slice_t loom_spirv_emit_packet_attrs(
+    const loom_low_descriptor_packet_t* packet) {
+  return packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_CONST
+             ? loom_low_const_attrs(packet->op)
+             : loom_low_op_attrs(packet->op);
+}
+
 int64_t loom_spirv_emit_packet_immediate(
     const loom_low_descriptor_packet_t* packet) {
-  const loom_named_attr_slice_t attrs =
-      packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_CONST
-          ? loom_low_const_attrs(packet->op)
-          : loom_low_op_attrs(packet->op);
-  return attrs.entries[0].value.i64;
+  return loom_spirv_emit_packet_attrs(packet).entries[0].value.i64;
 }
 
 static void loom_spirv_emit_validate_packet_shape(
@@ -450,6 +453,42 @@ static iree_status_t loom_spirv_emit_composite_insert_packet(
   return loom_spirv_emit_define_packet_result(
       state, packet, result_id, result_type_id,
       loom_spirv_packet_row_result_type(row));
+}
+
+static iree_status_t loom_spirv_emit_vector_shuffle_packet(
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
+    const loom_spirv_packet_row_t* row) {
+  loom_spirv_module_value_ref_t operands[2] = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_emit_load_packet_operands(state, packet, row, operands));
+  const loom_spirv_value_type_t result_type =
+      loom_spirv_packet_row_result_type(row);
+  uint32_t result_type_id = 0;
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_type_id_for_value_type(
+      state->type_context, result_type, &result_type_id));
+  uint32_t result_id = 0;
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_prepare_packet_result(
+      state, packet, result_type_id, result_type, &result_id));
+
+  uint32_t instruction_operands
+      [4 + LOOM_SPIRV_PACKET_VECTOR_SHUFFLE_MAX_RESULT_LANES] = {
+          result_type_id,
+          result_id,
+          operands[0].id,
+          operands[1].id,
+      };
+  const loom_named_attr_slice_t selectors =
+      loom_spirv_emit_packet_attrs(packet);
+  // Descriptor fields are selector0 through selector3, so canonical
+  // dictionary spelling order is also SPIR-V result-lane order.
+  for (uint16_t i = 0; i < result_type.vector.lane_count; ++i) {
+    instruction_operands[4 + i] = (uint32_t)selectors.entries[i].value.i64;
+  }
+  IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
+      row->opcode, instruction_operands, 4 + result_type.vector.lane_count));
+  return loom_spirv_emit_define_packet_result(state, packet, result_id,
+                                              result_type_id, result_type);
 }
 
 static iree_status_t loom_spirv_emit_load_builtin_packet(
@@ -983,6 +1022,8 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
       return loom_spirv_emit_composite_extract_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_COMPOSITE_INSERT:
       return loom_spirv_emit_composite_insert_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_VECTOR_SHUFFLE:
+      return loom_spirv_emit_vector_shuffle_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_LOAD_BUILTIN:
       return loom_spirv_emit_load_builtin_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_INTEGER_MUL_ADD:

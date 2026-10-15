@@ -14,11 +14,12 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordina
   %eight = OpConstant.i32 8
   %replacement = OpConstant.i32 9
   %values = OpCompositeConstruct.v4i32 %one, %two, %three, %four
+  %shuffled = OpVectorShuffle.v4i32.v4i32 %values, %values, 3, 1, 1, 0
   %alternates = OpCompositeConstruct.v4i32 %five, %six, %seven, %eight
   %true = OpConstantTrue.bool
   %false = OpConstantFalse.bool
   %mask = OpCompositeConstruct.v4bool %true, %false, %true, %false
-  %selected = OpSelect.v4i32 %mask, %values, %alternates
+  %selected = OpSelect.v4i32 %mask, %shuffled, %alternates
   %inserted = OpCompositeInsert.i32.v4i32 %replacement, %selected, 2
   %extracted = OpCompositeExtract.v4i32.i32 %inserted, 2
   %condition = OpIEqual %extracted, %replacement
@@ -49,6 +50,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordina
                OpName %eight "eight"
                OpName %replacement "replacement"
                OpName %values "values"
+               OpName %shuffled "shuffled"
                OpName %alternates "alternates"
                OpName %true "true"
                OpName %false "false"
@@ -80,17 +82,18 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordina
 %ordinary_vector_structure = OpFunction %void None %3
           %4 = OpLabel
      %values = OpCompositeConstruct %v4int %one %two %three %four
+   %shuffled = OpVectorShuffle %v4int %values %values 3 1 1 0
  %alternates = OpCompositeConstruct %v4int %five %six %seven %eight
        %mask = OpCompositeConstruct %v4bool %true %false %true %false
-   %selected = OpSelect %v4int %mask %values %alternates
+   %selected = OpSelect %v4int %mask %shuffled %alternates
    %inserted = OpCompositeInsert %v4int %replacement %selected 2
   %extracted = OpCompositeExtract %int %inserted 2
   %condition = OpIEqual %bool %extracted %replacement
-               OpSelectionMerge %28 None
-               OpBranchConditional %condition %27 %28
-         %27 = OpLabel
-               OpControlBarrier %uint_2 %uint_2 %uint_264
-               OpBranch %28
+               OpSelectionMerge %29 None
+               OpBranchConditional %condition %28 %29
          %28 = OpLabel
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+               OpBranch %29
+         %29 = OpLabel
                OpReturn
                OpFunctionEnd

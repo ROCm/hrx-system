@@ -59,7 +59,9 @@ from loom.target.arch.spirv.extended_math import (  # noqa: E402
     EXTENDED_MATH_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.ordinary_vector import (  # noqa: E402
+    NATIVE_ORDINARY_VECTOR_LANE_COUNTS,
     ORDINARY_VECTOR_INSTRUCTIONS,
+    ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
     OrdinaryVectorComponentType,
     OrdinaryVectorInstructionType,
     OrdinaryVectorType,
@@ -241,7 +243,7 @@ class _PacketRow:
     form: str
     result_type: str | None = None
     operand_types: tuple[str, ...] = ()
-    has_immediate: bool = False
+    immediate_count: int = 0
     literal_word_count: int = 0
     memory_alignment: int = 0
     no_contraction: bool = False
@@ -406,7 +408,7 @@ def _atomic_rows_for_scope(
                     opcode=operation.opcode,
                     form="LOOM_SPIRV_PACKET_FORM_ATOMIC",
                     operand_types=(pointer_value, scalar_value),
-                    has_immediate=True,
+                    immediate_count=1,
                     **common,
                 )
             )
@@ -423,7 +425,7 @@ def _atomic_rows_for_scope(
                 form="LOOM_SPIRV_PACKET_FORM_ATOMIC",
                 result_type=scalar_value,
                 operand_types=(pointer_value, scalar_value),
-                has_immediate=True,
+                immediate_count=1,
                 **common,
             )
         )
@@ -440,7 +442,7 @@ def _atomic_rows_for_scope(
             form="LOOM_SPIRV_PACKET_FORM_ATOMIC_COMPARE_EXCHANGE",
             result_type=scalar_value,
             operand_types=(pointer_value, scalar_value, scalar_value),
-            has_immediate=True,
+            immediate_count=1,
             atomic_success_ordering=success_ordering.ordinal,
             **common,
         )
@@ -481,7 +483,7 @@ def _float_atomic_rows_for_scope(
                         opcode=operation.native_opcode,
                         form="LOOM_SPIRV_PACKET_FORM_ATOMIC",
                         operand_types=(pointer_value, scalar_value),
-                        has_immediate=True,
+                        immediate_count=1,
                         **common,
                     )
                 )
@@ -499,7 +501,7 @@ def _float_atomic_rows_for_scope(
                     form="LOOM_SPIRV_PACKET_FORM_ATOMIC",
                     result_type=scalar_value,
                     operand_types=(pointer_value, scalar_value),
-                    has_immediate=True,
+                    immediate_count=1,
                     **common,
                 )
             )
@@ -528,7 +530,7 @@ def _float_atomic_rows_for_scope(
                     form="LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_BITCAST",
                     result_type=scalar_value,
                     operand_types=(integer_pointer_value, scalar_value),
-                    has_immediate=True,
+                    immediate_count=1,
                     **integer_common,
                 )
             )
@@ -547,7 +549,7 @@ def _float_atomic_rows_for_scope(
                 form="LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_CAS",
                 result_type=scalar_value if form == "rmw" else None,
                 operand_types=(integer_pointer_value, scalar_value),
-                has_immediate=True,
+                immediate_count=1,
                 atomic_float_operation=operation.cas_operation,
                 **integer_common,
             )
@@ -573,7 +575,7 @@ def _float_atomic_rows_for_scope(
                     scalar_value,
                     scalar_value,
                 ),
-                has_immediate=True,
+                immediate_count=1,
                 atomic_success_ordering=success_ordering.ordinal,
                 atomic_integer_scalar=scalar.integer_scalar_enum,
                 **common,
@@ -781,7 +783,7 @@ def _cooperative_matrix_rows() -> list[_PacketRow]:
                         result_type=value if is_load else None,
                         operand_types=(pointer, stride_type) if is_load else (pointer, value, stride_type),
                         memory_alignment=16,
-                        has_immediate=True,
+                        immediate_count=1,
                     )
                 )
     rows.extend(_cooperative_matrix_mul_add_row(case) for case in COOPERATIVE_MATRIX_CASES)
@@ -807,7 +809,7 @@ def _integer_constant_row(scalar_pair: IntegerAluTypePair) -> _PacketRow:
         opcode="LOOM_SPIRV_OP_CONSTANT",
         form="LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT",
         result_type=_alu_scalar_value(scalar),
-        has_immediate=True,
+        immediate_count=1,
         literal_word_count=scalar_pair.literal_word_count,
     )
 
@@ -821,7 +823,7 @@ def _float_constant_row(scalar: FloatConstantType) -> _PacketRow:
             "LOOM_SPIRV_VALUE_CLASS_SCALAR",
             scalar.scalar_enum,
         ),
-        has_immediate=True,
+        immediate_count=1,
         literal_word_count=scalar.literal_word_count,
     )
 
@@ -924,7 +926,7 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
             form=row.packet_form,
             result_type=_ordinary_vector_instruction_value(row.result_type),
             operand_types=tuple(_ordinary_vector_instruction_value(operand_type) for operand_type in row.operand_types),
-            has_immediate=row.component_index_maximum is not None,
+            immediate_count=int(row.component_index_maximum is not None),
             no_contraction=row.opcode in _FLOAT_BINARY_OPCODES or row.opcode in _FLOAT_CONVERSION_OPCODES,
         )
         for row in (
@@ -941,6 +943,23 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
     ]
 
 
+def _ordinary_vector_shuffle_rows() -> list[_PacketRow]:
+    return [
+        _PacketRow(
+            row.key,
+            opcode=row.opcode,
+            form=row.packet_form,
+            result_type=_ordinary_vector_instruction_value(row.result_type),
+            operand_types=(
+                _ordinary_vector_instruction_value(row.source_type),
+                _ordinary_vector_instruction_value(row.source_type),
+            ),
+            immediate_count=len(row.selector_names),
+        )
+        for row in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS
+    ]
+
+
 def _subgroup_rows() -> list[_PacketRow]:
     return [
         _PacketRow(
@@ -951,7 +970,7 @@ def _subgroup_rows() -> list[_PacketRow]:
             operand_types=tuple(_ordinary_vector_instruction_value(operand_type) for operand_type in row.operand_types),
             group_operation_scope="LOOM_SPIRV_SCOPE_SUBGROUP",
             group_operation=row.group_operation,
-            has_immediate=row.clustered,
+            immediate_count=int(row.clustered),
         )
         for row in SPIRV_SUBGROUP_INSTRUCTIONS
     ]
@@ -1203,12 +1222,13 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
             opcode="LOOM_SPIRV_OP_CONSTANT",
             form="LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT",
             result_type=_offset64_value(),
-            has_immediate=True,
+            immediate_count=1,
             literal_word_count=2,
         ),
         *_scalar_binary_rows(),
         *_conversion_rows(),
         *_ordinary_vector_rows(),
+        *_ordinary_vector_shuffle_rows(),
         *_subgroup_rows(),
         *_extended_math_rows(),
         *_builtin_index_rows(),
@@ -1260,10 +1280,10 @@ def _validate_rows(rows: tuple[_PacketRow, ...], descriptors: tuple[Descriptor, 
         if row.result_type == _unknown_value() or row.result_count != result_count:
             raise ValueError(f"{row.descriptor_key}: packet result type must match descriptor result count")
         immediates = descriptor.immediates
-        if len(immediates) != int(row.has_immediate) or any(
+        if len(immediates) != row.immediate_count or any(
             immediate.kind not in (ImmediateKind.SIGNED, ImmediateKind.UNSIGNED, ImmediateKind.ENUM) or ImmediateFlag.DEFAULT_VALUE in immediate.flags for immediate in immediates
         ):
-            expected = "one required integer immediate" if row.has_immediate else "no immediates"
+            expected = "no immediates" if row.immediate_count == 0 else ("one required integer immediate" if row.immediate_count == 1 else f"{row.immediate_count} required integer immediates")
             raise ValueError(f"{row.descriptor_key}: emission requires {expected}")
 
     over_capacity_rows = sorted(row.descriptor_key for row in rows if len(row.operand_types) > _PACKET_MAX_OPERAND_COUNT)
@@ -1329,6 +1349,7 @@ def generate_tables() -> str:
         "",
         f'static_assert(LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT == {_PACKET_MAX_OPERAND_COUNT}, "generated packet operand maximum");',
         f'static_assert(LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY == {_PACKET_OPERAND_TYPE_CAPACITY}, "generated packet operand-type capacity");',
+        f'static_assert(LOOM_SPIRV_PACKET_VECTOR_SHUFFLE_MAX_RESULT_LANES == {max(NATIVE_ORDINARY_VECTOR_LANE_COUNTS)}, "generated vector shuffle result-lane maximum");',
         f'static_assert(LOOM_SPIRV_BUILTIN_VARIABLE_COUNT == {len(builtin_queries)}, "generated builtin variable count");',
         "",
         "const loom_spirv_builtin_variable_info_t loom_spirv_builtin_variables[] = {",

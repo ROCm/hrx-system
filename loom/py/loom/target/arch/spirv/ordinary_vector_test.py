@@ -12,9 +12,11 @@ from loom.target.arch.spirv.ordinary_vector import (
     NATIVE_ORDINARY_VECTOR_LANE_COUNTS,
     ORDINARY_VECTOR_COMPONENT_TYPES,
     ORDINARY_VECTOR_INSTRUCTIONS,
+    ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
     ORDINARY_VECTOR_TYPES,
     OrdinaryVectorComponentKind,
     OrdinaryVectorComponentType,
+    OrdinaryVectorShuffleInstruction,
     OrdinaryVectorType,
 )
 
@@ -85,6 +87,26 @@ def test_structural_instruction_matrix_is_closed_per_native_type() -> None:
         "LOOM_SPIRV_PACKET_FORM_COMPOSITE_INSERT",
         "LOOM_SPIRV_PACKET_FORM_SELECT",
     }
+
+
+def test_shuffle_instruction_matrix_covers_every_native_type() -> None:
+    assert len(ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS) == len(ORDINARY_VECTOR_TYPES)
+    assert {
+        (instruction.source_type, instruction.result_type)
+        for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS
+    } == {(vector_type, vector_type) for vector_type in ORDINARY_VECTOR_TYPES}
+    assert len(
+        {instruction.key for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS}
+    ) == len(ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS)
+
+    for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS:
+        lane_count = instruction.result_type.lane_count
+        assert instruction.selector_names == tuple(
+            f"selector{lane_index}" for lane_index in range(lane_count)
+        )
+        assert instruction.selector_maximum == 2 * lane_count - 1
+        assert instruction.opcode == "LOOM_SPIRV_OP_VECTOR_SHUFFLE"
+        assert instruction.packet_form == "LOOM_SPIRV_PACKET_FORM_VECTOR_SHUFFLE"
 
 
 def test_component_invariants_reject_invalid_records() -> None:
@@ -180,3 +202,21 @@ def test_lane_invariants_reject_non_native_counts() -> None:
     for lane_count in (0, 1, 5, 8, 16):
         with pytest.raises(ValueError, match="require 2-4 lanes"):
             OrdinaryVectorType(f32_component, lane_count)
+
+
+def test_shuffle_invariants_reject_mixed_component_types() -> None:
+    i32_component = next(
+        component
+        for component in ORDINARY_VECTOR_COMPONENT_TYPES
+        if component.suffix == "i32"
+    )
+    f32_component = next(
+        component
+        for component in ORDINARY_VECTOR_COMPONENT_TYPES
+        if component.suffix == "f32"
+    )
+    with pytest.raises(ValueError, match="component types must match"):
+        OrdinaryVectorShuffleInstruction(
+            source_type=OrdinaryVectorType(i32_component, 4),
+            result_type=OrdinaryVectorType(f32_component, 4),
+        )

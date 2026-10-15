@@ -17,6 +17,7 @@ from loom.target.arch.spirv.contracts.ordinary_vector import (
 from loom.target.arch.spirv.ordinary_vector import (
     NATIVE_ORDINARY_VECTOR_LANE_COUNTS,
     ORDINARY_VECTOR_COMPONENT_TYPES,
+    ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
     ORDINARY_VECTOR_TYPES,
     OrdinaryVectorComponentKind,
 )
@@ -47,9 +48,10 @@ def test_every_owned_source_operation_has_a_closed_shape_matrix() -> None:
         vector.vector_from_elements.name: 31,
         vector.vector_extract.name: 31,
         vector.vector_insert.name: 31,
+        vector.vector_shuffle.name: 30,
         scf.scf_select.name: 40,
     }
-    assert len(SPIRV_ORDINARY_VECTOR_CONTRACT_CASES) == 360
+    assert len(SPIRV_ORDINARY_VECTOR_CONTRACT_CASES) == 390
 
 
 def test_aliases_cover_singletons_uniform_carriers_and_identity_bit_layouts() -> None:
@@ -142,6 +144,9 @@ def test_each_native_type_drives_all_descriptor_backed_structural_rules() -> Non
             f"{vector_type.suffix}"
         )
         select_key = f"spirv.op_select.{vector_type.suffix}"
+        shuffle_key = (
+            f"spirv.op_vector_shuffle.{vector_type.suffix}.{vector_type.suffix}"
+        )
         constant_count = (
             2
             if vector_type.component_type.kind == OrdinaryVectorComponentKind.BOOLEAN
@@ -158,7 +163,32 @@ def test_each_native_type_drives_all_descriptor_backed_structural_rules() -> Non
         )
         assert descriptor_rule_counts[(vector.vector_extract.name, extract_key)] == 1
         assert descriptor_rule_counts[(vector.vector_insert.name, insert_key)] == 1
+        assert descriptor_rule_counts[(vector.vector_shuffle.name, shuffle_key)] == 1
         assert descriptor_rule_counts[(scf.scf_select.name, select_key)] == 1
+
+
+def test_native_shuffle_rules_bind_each_selector_and_duplicate_the_source() -> None:
+    rules = {
+        contract_case.descriptor.key: contract_case
+        for contract_case in SPIRV_ORDINARY_VECTOR_CONTRACT_CASES
+        if isinstance(contract_case, DescriptorRule)
+        and contract_case.source_op is vector.vector_shuffle
+    }
+    assert rules.keys() == {
+        instruction.key for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS
+    }
+
+    for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS:
+        rule = rules[instruction.key]
+        emit = rule.emit[0]
+        assert emit.operands == {
+            "source0": ValueRef.operand("source"),
+            "source1": ValueRef.operand("source"),
+        }
+        assert tuple(emit.immediates) == instruction.selector_names
+        assert tuple(
+            projection.element for projection in emit.immediates.values()
+        ) == tuple(range(instruction.result_type.lane_count))
 
 
 def test_vector_contract_is_bound_into_the_shipping_fragment() -> None:
@@ -275,6 +305,7 @@ def test_vector_contract_contains_only_structural_and_bit_layout_rows() -> None:
         "spirv.op_composite_construct",
         "spirv.op_composite_extract",
         "spirv.op_composite_insert",
+        "spirv.op_vector_shuffle",
         "spirv.op_select",
         "spirv.op_bitcast",
     )

@@ -205,6 +205,56 @@ class OrdinaryVectorInstruction:
         return feature_bits
 
 
+@dataclass(frozen=True, slots=True)
+class OrdinaryVectorShuffleInstruction:
+    """One native SPIR-V vector-shuffle shape.
+
+    SPIR-V accepts two vectors with the same component type and permits the
+    result to have a different native lane count. Source ``vector.shuffle``
+    uses the equal-shape subset and binds the same value to both inputs.
+    """
+
+    source_type: OrdinaryVectorType
+    result_type: OrdinaryVectorType
+
+    def __post_init__(self) -> None:
+        if self.source_type.component_type != self.result_type.component_type:
+            raise ValueError("vector shuffle component types must match")
+
+    @property
+    def key(self) -> str:
+        return (
+            f"spirv.op_vector_shuffle.{self.source_type.suffix}."
+            f"{self.result_type.suffix}"
+        )
+
+    @property
+    def mnemonic(self) -> str:
+        return f"OpVectorShuffle.{self.source_type.suffix}.{self.result_type.suffix}"
+
+    @property
+    def opcode(self) -> str:
+        return "LOOM_SPIRV_OP_VECTOR_SHUFFLE"
+
+    @property
+    def packet_form(self) -> str:
+        return "LOOM_SPIRV_PACKET_FORM_VECTOR_SHUFFLE"
+
+    @property
+    def selector_names(self) -> tuple[str, ...]:
+        return tuple(
+            f"selector{lane_index}" for lane_index in range(self.result_type.lane_count)
+        )
+
+    @property
+    def selector_maximum(self) -> int:
+        return 2 * self.source_type.lane_count - 1
+
+    @property
+    def feature_bits(self) -> int:
+        return self.source_type.feature_bits | self.result_type.feature_bits
+
+
 def _structural_instructions(
     vector_type: OrdinaryVectorType,
 ) -> tuple[OrdinaryVectorInstruction, ...]:
@@ -275,4 +325,12 @@ ORDINARY_VECTOR_INSTRUCTIONS = tuple(
     instruction
     for vector_type in ORDINARY_VECTOR_TYPES
     for instruction in _structural_instructions(vector_type)
+)
+
+ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS = tuple(
+    OrdinaryVectorShuffleInstruction(
+        source_type=vector_type,
+        result_type=vector_type,
+    )
+    for vector_type in ORDINARY_VECTOR_TYPES
 )

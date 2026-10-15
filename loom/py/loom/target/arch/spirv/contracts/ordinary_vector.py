@@ -15,8 +15,11 @@ from loom.target.arch.spirv.ordinary_vector import (
     BOOLEAN_ORDINARY_VECTOR_COMPONENT_TYPE,
     NATIVE_ORDINARY_VECTOR_LANE_COUNTS,
     ORDINARY_VECTOR_COMPONENT_TYPES,
+    ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
+    ORDINARY_VECTOR_TYPES,
     OrdinaryVectorComponentKind,
     OrdinaryVectorComponentType,
+    OrdinaryVectorShuffleInstruction,
     OrdinaryVectorType,
 )
 from loom.target.arch.spirv.ordinary_vector_bit_layout import (
@@ -237,6 +240,15 @@ def _insert_descriptor(vector_type: OrdinaryVectorType) -> Descriptor:
     )
 
 
+_SOURCE_SHUFFLE_BY_TYPE = {
+    instruction.source_type: instruction
+    for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS
+    if instruction.source_type == instruction.result_type
+}
+if _SOURCE_SHUFFLE_BY_TYPE.keys() != set(ORDINARY_VECTOR_TYPES):
+    raise ValueError("source vector shuffle instructions must cover native types")
+
+
 def _splat_rule(vector_type: OrdinaryVectorType) -> DescriptorRule:
     descriptor = _construct_descriptor(vector_type)
     scalar = ValueRef.operand("scalar")
@@ -354,6 +366,43 @@ def _insert_rule(vector_type: OrdinaryVectorType) -> DescriptorRule:
                     "component_index": AttrProject.i64_array_element(
                         "static_indices", element=0
                     )
+                },
+            ),
+        ),
+    )
+
+
+def _shuffle_rule(
+    instruction: OrdinaryVectorShuffleInstruction,
+) -> DescriptorRule:
+    descriptor = _descriptor(instruction.key)
+    source_pattern = _vector_pattern(instruction.source_type)
+    result_pattern = _vector_pattern(instruction.result_type)
+    return DescriptorRule(
+        source_op=vector.vector_shuffle,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("source", source_pattern),
+            Guard.value_type("result", result_pattern),
+            Guard.i64_array_count("source_lanes", instruction.result_type.lane_count),
+            Guard.i64_array_elements_range(
+                "source_lanes", 0, instruction.source_type.lane_count - 1
+            ),
+            *_feature_guards(descriptor),
+        ),
+        emit=(
+            _emit(
+                descriptor,
+                operands={
+                    "source0": ValueRef.operand("source"),
+                    "source1": ValueRef.operand("source"),
+                },
+                results={"dst": ValueRef.result("result")},
+                immediates={
+                    name: AttrProject.i64_array_element(
+                        "source_lanes", element=lane_index
+                    )
+                    for lane_index, name in enumerate(instruction.selector_names)
                 },
             ),
         ),
@@ -570,6 +619,7 @@ def _native_rules() -> tuple[DescriptorRule, ...]:
                     _from_elements_rule(vector_type),
                     _extract_rule(vector_type),
                     _insert_rule(vector_type),
+                    _shuffle_rule(_SOURCE_SHUFFLE_BY_TYPE[vector_type]),
                     _select_rule(vector_type),
                 )
             )

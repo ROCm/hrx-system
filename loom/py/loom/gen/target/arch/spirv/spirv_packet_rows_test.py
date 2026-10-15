@@ -46,6 +46,7 @@ from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
 from loom.target.arch.spirv.extended_math import EXTENDED_MATH_INSTRUCTIONS
 from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_INSTRUCTIONS,
+    ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
     ORDINARY_VECTOR_TYPES,
     OrdinaryVectorComponentKind,
     OrdinaryVectorInstruction,
@@ -132,7 +133,7 @@ def test_subgroup_reductions_retain_group_mode_and_cluster_operand() -> None:
         assert row.form == "LOOM_SPIRV_PACKET_FORM_GROUP_NON_UNIFORM_ARITHMETIC"
         assert row.group_operation == instruction.group_operation
         assert row.group_operation_scope == "LOOM_SPIRV_SCOPE_SUBGROUP"
-        assert row.has_immediate == instruction.clustered
+        assert row.immediate_count == int(instruction.clustered)
         assert row.result_count == 1
         assert row.operand_types == (row.result_type,)
 
@@ -342,7 +343,7 @@ def test_cooperative_matrix_memory_packets_preserve_runtime_stride() -> None:
                 assert "LOOM_SPIRV_VALUE_CLASS_SCALAR" in row.operand_types[-1]
                 assert "LOOM_SPIRV_SCALAR_TYPE_U32" in row.operand_types[-1]
                 assert row.memory_alignment == 16
-                assert row.has_immediate
+                assert row.immediate_count == 1
 
 
 def test_cooperative_constructors_use_one_exact_scalar_component() -> None:
@@ -601,6 +602,7 @@ def test_generation_emits_complete_ordinary_vector_structural_matrix() -> None:
     assert len(packet_rows_by_key) == len(ORDINARY_VECTOR_INSTRUCTIONS)
     assert ('static_assert(LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT == 4, "generated packet operand maximum");') in tables
     assert ('static_assert(LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY == 3, "generated packet operand-type capacity");') in tables
+    assert ('static_assert(LOOM_SPIRV_PACKET_VECTOR_SHUFFLE_MAX_RESULT_LANES == 4, "generated vector shuffle result-lane maximum");') in tables
     assert "operand_type_count" not in tables
 
     for vector_type in ORDINARY_VECTOR_TYPES:
@@ -660,6 +662,20 @@ def test_generation_emits_complete_ordinary_vector_structural_matrix() -> None:
             )
 
 
+def test_generation_emits_complete_ordinary_vector_shuffle_matrix() -> None:
+    rows = {row.descriptor_key: row for row in _packet_rows() if row.descriptor_key in {instruction.key for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS}}
+    assert len(rows) == len(ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS) == 30
+
+    for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS:
+        row = rows[instruction.key]
+        source_value = _expected_ordinary_vector_value(instruction.source_type)
+        assert row.opcode == instruction.opcode
+        assert row.form == instruction.packet_form
+        assert row.result_type == _expected_ordinary_vector_value(instruction.result_type)
+        assert row.operand_types == (source_value, source_value)
+        assert row.immediate_count == instruction.result_type.lane_count
+
+
 def _expected_ordinary_vector_value(
     value_type: OrdinaryVectorInstructionType,
 ) -> str:
@@ -686,7 +702,7 @@ def _assert_generated_ordinary_vector_instructions(
         assert row.result_type == _expected_ordinary_vector_value(instruction.result_type)
         assert row.operand_types == tuple(_expected_ordinary_vector_value(operand_type) for operand_type in instruction.operand_types)
         assert row.result_count == 1
-        assert not row.has_immediate
+        assert row.immediate_count == 0
 
         descriptor = descriptors_by_key[instruction.key]
         assert descriptor.mnemonic == instruction.mnemonic
@@ -922,7 +938,7 @@ def test_generation_emits_atomic_packet_forms_and_immediates() -> None:
     assert integer_rmw.opcode == "LOOM_SPIRV_OP_ATOMIC_I_SUB"
     assert integer_rmw.form == "LOOM_SPIRV_PACKET_FORM_ATOMIC"
     assert integer_rmw.result_count == 1
-    assert integer_rmw.has_immediate
+    assert integer_rmw.immediate_count == 1
     assert integer_rmw.atomic_scope == "LOOM_SPIRV_SCOPE_SUBGROUP"
     assert integer_rmw.atomic_storage_semantics == "LOOM_SPIRV_MEMORY_SEMANTICS_WORKGROUP_MEMORY_MASK"
     assert "LOOM_SPIRV_SCALAR_TYPE_S64" in integer_rmw.result_type

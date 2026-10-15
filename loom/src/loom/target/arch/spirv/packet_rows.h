@@ -24,6 +24,8 @@ extern "C" {
 
 #define LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT 4
 #define LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY 3
+// Maximum result width carried by a native OpVectorShuffle packet.
+#define LOOM_SPIRV_PACKET_VECTOR_SHUFFLE_MAX_RESULT_LANES 4
 
 enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_UNSUPPORTED = 0,
@@ -58,6 +60,8 @@ enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_GROUP_NON_UNIFORM_UNARY = 26,
   // Typed subgroup arithmetic with a GroupOperation literal before its value.
   LOOM_SPIRV_PACKET_FORM_GROUP_NON_UNIFORM_ARITHMETIC = 27,
+  // Typed two-input vector shuffle with one selector per result lane.
+  LOOM_SPIRV_PACKET_FORM_VECTOR_SHUFFLE = 28,
 };
 typedef uint8_t loom_spirv_packet_form_t;
 

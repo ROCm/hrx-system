@@ -33,6 +33,7 @@ from loom.target.arch.spirv.extended_math import EXTENDED_MATH_INSTRUCTIONS
 from loom.target.arch.spirv.features import feature_bits_value
 from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_INSTRUCTIONS,
+    ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
     OrdinaryVectorComponentKind,
     OrdinaryVectorComponentType,
     OrdinaryVectorType,
@@ -94,6 +95,35 @@ from loom.target.low_descriptors import (
     InstructionClass,
     MemorySpace,
 )
+
+
+def test_vector_shuffle_descriptors_retain_every_native_selector() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for instruction in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS:
+        descriptor = descriptors[instruction.key]
+        assert descriptor.mnemonic == instruction.mnemonic
+        assert descriptor.semantic_tag == instruction.key
+        assert tuple(operand.field_name for operand in descriptor.operands) == (
+            "dst",
+            "source0",
+            "source1",
+        )
+        assert tuple(immediate.field_name for immediate in descriptor.immediates) == (
+            instruction.selector_names
+        )
+        assert all(
+            immediate.unsigned_max == instruction.selector_maximum
+            for immediate in descriptor.immediates
+        )
+        assert (
+            tuple(
+                immediate.field_name for immediate in descriptor.asm_forms[0].immediates
+            )
+            == instruction.selector_names
+        )
 
 
 def test_bfloat16_float32_conversions_are_bidirectional() -> None:
@@ -401,6 +431,7 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
 
     for row in (
         *ORDINARY_VECTOR_INSTRUCTIONS,
+        *ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
         *ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
