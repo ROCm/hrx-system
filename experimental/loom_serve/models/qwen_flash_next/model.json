@@ -9,6 +9,7 @@
       "epoch.loom",
       "kernels/embedding.loom",
       "kernels/experts.loom",
+      "kernels/expert_buckets.loom",
       "kernels/gdn.loom",
       "kernels/hyperconnection.loom",
       "kernels/iq4.loom",
