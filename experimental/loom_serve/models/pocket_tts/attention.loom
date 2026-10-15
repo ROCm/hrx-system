@@ -18,23 +18,22 @@ config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
 
 template.decl @pocket.element() -> (index)
 
-template.decl @pocket.rotary_cache.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %packed_channels: index, %value_origin: index, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer)
+template.decl @pocket.rotary_cache.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %packed_channels: index, %value_origin: index, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer, %x_origin: offset, %q_origin: offset, %keys_origin: offset, %values_origin: offset, %position_origin: offset, %cosine_origin: offset, %sine_origin: offset)
 
-template.def<@pocket.rotary_cache.body> device @rotary_cache_body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %packed_channels: index, %value_origin: index, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer) {
+template.def<@pocket.rotary_cache.body> device @rotary_cache_body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %packed_channels: index, %value_origin: index, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer, %x_origin: offset, %q_origin: offset, %keys_origin: offset, %values_origin: offset, %position_origin: offset, %cosine_origin: offset, %sine_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%packed_channels]x[%times]xf32>
-    %q_view = buffer.view %q_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %keys_view = buffer.view %keys_storage[%origin] : buffer -> view<[%capacity]x[%channels]xf32>
-    %values_view = buffer.view %values_storage[%origin] : buffer -> view<[%capacity]x[%channels]xf32>
-    %position_view = buffer.view %position_storage[%origin] : buffer -> view<1xi32>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%packed_channels]x[%times]xf32>
+    %q_view = buffer.view %q_storage[%q_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %keys_view = buffer.view %keys_storage[%keys_origin] : buffer -> view<[%capacity]x[%channels]xf32>
+    %values_view = buffer.view %values_storage[%values_origin] : buffer -> view<[%capacity]x[%channels]xf32>
+    %position_view = buffer.view %position_storage[%position_origin] : buffer -> view<1xi32>
     %rotary_capacity = config.get @pocket.rotary_capacity : index
-    %cosine_view = buffer.view %cosine_storage[%origin] : buffer -> view<[%rotary_capacity]x32xf32>
-    %sine_view = buffer.view %sine_storage[%origin] : buffer -> view<[%rotary_capacity]x32xf32>
+    %cosine_view = buffer.view %cosine_storage[%cosine_origin] : buffer -> view<[%rotary_capacity]x32xf32>
+    %sine_view = buffer.view %sine_storage[%sine_origin] : buffer -> view<[%rotary_capacity]x32xf32>
     %row = index.div %element, %times : index
     %column = index.rem %element, %times : index
     %position32 = view.load %position_view[0] : view<1xi32> -> i32
@@ -104,7 +103,8 @@ kernel.def target(@pocket) @pocket.rotary_cache_flow() {
   %past = index.sub %past_capacity, %past_one : index
   %packed_channels = index.constant 3072 : index
   %value_origin = index.constant 2048 : index
-  template.apply<@pocket.rotary_cache.body>(%elements, %channels, %times, %capacity, %past, %packed_channels, %value_origin, %x_storage, %q_storage, %keys_storage, %values_storage, %position_storage, %cosine_storage, %sine_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.rotary_cache.body>(%elements, %channels, %times, %capacity, %past, %packed_channels, %value_origin, %x_storage, %q_storage, %keys_storage, %values_storage, %position_storage, %cosine_storage, %sine_storage, %origin, %origin, %origin, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -124,23 +124,23 @@ kernel.def target(@pocket) @pocket.rotary_cache_512x16_c265_p249() {
   %past = index.constant 249 : index
   %packed_channels = index.constant 1536 : index
   %value_origin = index.constant 1024 : index
-  template.apply<@pocket.rotary_cache.body>(%elements, %channels, %times, %capacity, %past, %packed_channels, %value_origin, %x_storage, %q_storage, %keys_storage, %values_storage, %position_storage, %cosine_storage, %sine_storage) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.rotary_cache.body>(%elements, %channels, %times, %capacity, %past, %packed_channels, %value_origin, %x_storage, %q_storage, %keys_storage, %values_storage, %position_storage, %cosine_storage, %sine_storage, %origin, %origin, %origin, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.attention_scores.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer)
+template.decl @pocket.attention_scores.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer, %q_origin: offset, %keys_origin: offset, %position_origin: offset, %scores_origin: offset)
 
-template.def<@pocket.attention_scores.body> device @attention_scores_body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer) {
+template.def<@pocket.attention_scores.body> device @attention_scores_body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer, %q_origin: offset, %keys_origin: offset, %position_origin: offset, %scores_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %q_view = buffer.view %q_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %keys_view = buffer.view %keys_storage[%origin] : buffer -> view<[%capacity]x[%channels]xf32>
-    %position_view = buffer.view %position_storage[%origin] : buffer -> view<1xi32>
-    %scores_view = buffer.view %scores_storage[%origin] : buffer -> view<[%score_rows]x[%capacity]xf32>
+    %q_view = buffer.view %q_storage[%q_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %keys_view = buffer.view %keys_storage[%keys_origin] : buffer -> view<[%capacity]x[%channels]xf32>
+    %position_view = buffer.view %position_storage[%position_origin] : buffer -> view<1xi32>
+    %scores_view = buffer.view %scores_storage[%scores_origin] : buffer -> view<[%score_rows]x[%capacity]xf32>
     %row = index.div %element, %capacity : index
     %column = index.rem %element, %capacity : index
     %position32 = view.load %position_view[0] : view<1xi32> -> i32
@@ -204,7 +204,8 @@ kernel.def target(@pocket) @pocket.attention_scores_flow() {
   %past_one = index.constant 1 : index
   %past = index.sub %past_capacity, %past_one : index
   %score_rows = index.constant 16 : index
-  template.apply<@pocket.attention_scores.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %q_storage, %keys_storage, %position_storage, %scores_storage) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.attention_scores.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %q_storage, %keys_storage, %position_storage, %scores_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -223,23 +224,23 @@ kernel.def target(@pocket) @pocket.attention_scores_512x16_c265_p249() {
   %capacity = index.constant 265 : index
   %past = index.constant 249 : index
   %score_rows = index.constant 128 : index
-  template.apply<@pocket.attention_scores.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %q_storage, %keys_storage, %position_storage, %scores_storage) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.attention_scores.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %q_storage, %keys_storage, %position_storage, %scores_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.attention_values.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer)
+template.decl @pocket.attention_values.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer, %values_origin: offset, %probabilities_origin: offset, %position_origin: offset, %y_origin: offset)
 
-template.def<@pocket.attention_values.body> device @attention_values_body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer) {
+template.def<@pocket.attention_values.body> device @attention_values_body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer, %values_origin: offset, %probabilities_origin: offset, %position_origin: offset, %y_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %values_view = buffer.view %values_storage[%origin] : buffer -> view<[%capacity]x[%channels]xf32>
-    %probabilities_view = buffer.view %probabilities_storage[%origin] : buffer -> view<[%score_rows]x[%capacity]xf32>
-    %position_view = buffer.view %position_storage[%origin] : buffer -> view<1xi32>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
+    %values_view = buffer.view %values_storage[%values_origin] : buffer -> view<[%capacity]x[%channels]xf32>
+    %probabilities_view = buffer.view %probabilities_storage[%probabilities_origin] : buffer -> view<[%score_rows]x[%capacity]xf32>
+    %position_view = buffer.view %position_storage[%position_origin] : buffer -> view<1xi32>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%channels]x[%times]xf32>
     %row = index.div %element, %times : index
     %column = index.rem %element, %times : index
     %position32 = view.load %position_view[0] : view<1xi32> -> i32
@@ -285,7 +286,8 @@ kernel.def target(@pocket) @pocket.attention_values_flow() {
   %past_one = index.constant 1 : index
   %past = index.sub %past_capacity, %past_one : index
   %score_rows = index.constant 16 : index
-  template.apply<@pocket.attention_values.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %values_storage, %probabilities_storage, %position_storage, %y_storage) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.attention_values.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %values_storage, %probabilities_storage, %position_storage, %y_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -304,6 +306,7 @@ kernel.def target(@pocket) @pocket.attention_values_512x16_c265_p249() {
   %capacity = index.constant 265 : index
   %past = index.constant 249 : index
   %score_rows = index.constant 128 : index
-  template.apply<@pocket.attention_values.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %values_storage, %probabilities_storage, %position_storage, %y_storage) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.attention_values.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %values_storage, %probabilities_storage, %position_storage, %y_storage, %origin, %origin, %origin, %origin) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }

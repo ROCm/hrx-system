@@ -121,17 +121,16 @@ kernel.def target(@pocket) @pocket.normalization_affine_512x16_e1em05() {
   kernel.return
 }
 
-template.decl @pocket.softmax.body(%elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer)
+template.decl @pocket.softmax.body(%elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer, %scores_origin: offset, %probabilities_origin: offset)
 
-template.def<@pocket.softmax.body> device @softmax_body(%elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer) {
+template.def<@pocket.softmax.body> device @softmax_body(%elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer, %scores_origin: offset, %probabilities_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %scores_view = buffer.view %scores_storage[%origin] : buffer -> view<[%rows]x[%capacity]xf32>
-    %probabilities_view = buffer.view %probabilities_storage[%origin] : buffer -> view<[%rows]x[%capacity]xf32>
+    %scores_view = buffer.view %scores_storage[%scores_origin] : buffer -> view<[%rows]x[%capacity]xf32>
+    %probabilities_view = buffer.view %probabilities_storage[%probabilities_origin] : buffer -> view<[%rows]x[%capacity]xf32>
     %negative = scalar.constant -1e+30 : f32
     %maximum = scf.for %i = [%c0 to %capacity step %c1](%acc = %negative : f32) -> (f32) {
       %value = view.load %scores_view[%element, %i] : view<[%rows]x[%capacity]xf32> -> f32
@@ -171,7 +170,8 @@ kernel.def target(@pocket) @pocket.softmax_flow() {
   %elements = index.constant 16 : index
   %rows = index.constant 16 : index
   %capacity = config.get @pocket.context_capacity : index
-  template.apply<@pocket.softmax.body>(%elements, %rows, %capacity, %scores_storage, %probabilities_storage) : (index, index, index, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.softmax.body>(%elements, %rows, %capacity, %scores_storage, %probabilities_storage, %origin, %origin) : (index, index, index, buffer, buffer, offset, offset)
   kernel.return
 }
 
@@ -187,7 +187,8 @@ kernel.def target(@pocket) @pocket.softmax_128x265() {
   %elements = index.constant 128 : index
   %rows = index.constant 128 : index
   %capacity = index.constant 265 : index
-  template.apply<@pocket.softmax.body>(%elements, %rows, %capacity, %scores_storage, %probabilities_storage) : (index, index, index, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.softmax.body>(%elements, %rows, %capacity, %scores_storage, %probabilities_storage, %origin, %origin) : (index, index, index, buffer, buffer, offset, offset)
   kernel.return
 }
 

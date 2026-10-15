@@ -124,12 +124,30 @@ pointwise maps, and recurrent state. Concrete model shapes wrap shared template
 bodies, keeping shape-dependent indexing constant in device code. `dispatch.loom`
 owns element assignment independently of any arithmetic family.
 
+`batching.loom` separates packed numerical work from resident request identity.
+Its immutable membership packet contains an I32 active count followed by resident
+row IDs. `pocket.batch_capacity` bounds the dispatch shape and packet;
+`pocket.request_capacity` bounds persistent row storage. Inactive dispatch rows
+do not read a resident ID or access request state. Changing membership changes
+the packet without moving histories.
+
+`batch_attention.loom` applies that mapping to the same arithmetic used by direct
+commands. Cache and position origins follow resident rows; queries, scores,
+probabilities, and outputs follow packed positions. Each argument carries its
+source-owned byte offset and row stride; zero strides broadcast rotary tables.
+FlowLM retains its full configured context, while Mimi wraps cache slots and
+keeps absolute rotary positions. These templates provide numerical batching;
+the controller owns phase selection and request eligibility.
+
 The checkpoint-free tests use closed-form projection, strided-convolution,
 normalization, and attention oracles. Attention checks retain positions beyond
 256, mask future slots, and reach the last configured absolute rotary row.
 Streaming checks observe consecutive outputs and retained history, including
 startup replication, overlap bias, latent recurrence, and
-fade behavior. Both hardware and memory-access-checking profiles run with:
+fade behavior. Batched attention checks compare complete cache banks and outputs
+across staggered, reordered, removed, and resumed rows. An empty cohort leaves
+every cache and output unchanged. Both hardware and memory-access-checking
+profiles run with:
 
 ```sh
 iree-bazel-test --config=asan \

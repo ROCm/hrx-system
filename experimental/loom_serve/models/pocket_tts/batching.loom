@@ -1,0 +1,48 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Numerical dispatches index packed activations independently from persistent
+// request rows. The source producer writes an active count followed by distinct
+// resident row IDs; it bounds both by these configured allocation capacities.
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.request_capacity : %value: index where [range(%value, 1, 65536)]
+
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.def<@pocket.batch.member> device @pocket_batch_member(%membership: buffer) -> (i1, index, index) {
+  %capacity = config.get @pocket.batch_capacity : index
+  %resident_capacity = config.get @pocket.request_capacity : index
+  %one = index.constant 1 : index
+  %zero = index.constant 0 : index
+  %map_length = index.add %capacity, %one : index
+  %packed_value = kernel.workgroup.id<z> : index
+  %packed = index.assume %packed_value [ge(%packed_value, 0), lt(%packed_value, %capacity)] : index
+  %origin = index.constant 0 : offset
+  %map = buffer.view %membership[%origin] : buffer -> view<[%map_length]xi32>
+  %count_word = view.load %map[0] : view<[%map_length]xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [ge(%count_value, 0), le(%count_value, %capacity)] : index
+  %active = index.cmp ult, %packed, %count : index
+  %resident = scf.if %active -> (index) {
+    %entry = index.add %packed, %one : index
+    %row_word = view.load %map[%entry] : view<[%map_length]xi32> -> i32
+    %row_value = index.cast %row_word : i32 to index
+    %row = index.assume %row_value [ge(%row_value, 0), lt(%row_value, %resident_capacity)] : index
+    scf.yield %row : index
+  } else {
+    scf.yield %zero : index
+  }
+  template.return %active, %packed, %resident : i1, index, index
+}
+
+template.decl pure @pocket.batch.origin(%row: index, %offset: offset, %stride: offset) -> (offset)
+
+template.def<@pocket.batch.origin> pure @pocket_batch_origin(%row: index, %offset: offset, %stride: offset) -> (offset) {
+  %relative = index.scale %row, %stride : index, offset -> offset
+  %origin = index.add %offset, %relative : offset
+  template.return %origin : offset
+}
