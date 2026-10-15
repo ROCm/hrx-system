@@ -10,6 +10,7 @@
 #include "iree/base/cpu_data.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/continuation.h"
+#include "iree/hal/drivers/amd/gpu/queue/host_call.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
@@ -1703,11 +1704,36 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_execute(
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_host_call(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_host_call_t call,
     const uint64_t arguments[4], iree_hal_host_call_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 host-call retirement is not admitted");
+  iree_hal_amd_gpu_pm4_umq_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_umq_check_acceptance(queue));
+  const iree_hal_amd_gpu_host_call_executor_t executor = {
+      .queue = base,
+      .context = queue->context,
+      .service = queue->options.service,
+      .captures = &queue->captures,
+  };
+  return iree_hal_amd_gpu_host_call_submit(&executor, waits, signals, call,
+                                           arguments, flags);
+}
+
+static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_map(
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t mapping_count,
+    const iree_hal_memory_mapping_t* mappings,
+    iree_hal_queue_map_flags_t flags) {
+  iree_hal_amd_gpu_pm4_umq_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_umq_check_acceptance(queue));
+  const iree_hal_amd_gpu_host_call_executor_t executor = {
+      .queue = base,
+      .context = queue->context,
+      .service = queue->options.service,
+      .captures = &queue->captures,
+  };
+  return iree_hal_amd_gpu_memory_mapping_submit(&executor, waits, signals,
+                                                mapping_count, mappings, flags);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_query_dispatch_concurrency(
@@ -1888,6 +1914,7 @@ static const iree_hal_queue_vtable_t iree_hal_amd_gpu_pm4_umq_queue_vtable = {
     .flush = iree_hal_amd_gpu_pm4_umq_queue_flush,
     .alloca = iree_hal_amd_gpu_pm4_umq_queue_alloca,
     .dealloca = iree_hal_amd_gpu_pm4_umq_queue_dealloca,
+    .map = iree_hal_amd_gpu_pm4_umq_queue_map,
     .transfer = iree_hal_amd_gpu_pm4_umq_queue_transfer,
     .read = iree_hal_amd_gpu_pm4_umq_queue_read,
     .write = iree_hal_amd_gpu_pm4_umq_queue_write,

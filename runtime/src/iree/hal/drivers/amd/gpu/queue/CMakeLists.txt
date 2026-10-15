@@ -33,6 +33,23 @@ endif()
 
 iree_cc_library(
   NAME
+    host_call
+  HDRS
+    "host_call.h"
+  SRCS
+    "host_call.c"
+  DEPS
+    ::capture_pool
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     host_wait
   HDRS
     "host_wait.h"

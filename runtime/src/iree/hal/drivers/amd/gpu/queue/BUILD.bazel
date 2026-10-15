@@ -36,6 +36,20 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "host_call",
+    srcs = ["host_call.c"],
+    hdrs = ["host_call.h"],
+    deps = [
+        ":capture_pool",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu:context",
+        "//runtime/src/iree/hal/memory:maintenance",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "host_wait",
     srcs = ["host_wait.c"],
     hdrs = ["host_wait.h"],

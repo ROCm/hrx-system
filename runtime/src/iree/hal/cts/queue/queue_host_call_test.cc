@@ -531,6 +531,78 @@ TEST_P(AsyncQueueHostCallLifetimeTest, ReleasesStateAfterFailedPrerequisite) {
   EXPECT_EQ(call_count, 0);
 }
 
+TEST_P(QueueHostCallTest, DeferredCompletionBeforeCallbackReturn) {
+  std::atomic<int> call_count{0};
+  const auto call = iree_hal_make_host_call(
+      +[](void* user_data, const uint64_t args[4],
+          iree_hal_host_call_context_t* context) {
+        ++*static_cast<std::atomic<int>*>(user_data);
+        IREE_RETURN_IF_ERROR(iree_hal_semaphore_list_signal(
+            context->signal_semaphore_list, nullptr));
+        return iree_status_from_code(IREE_STATUS_DEFERRED);
+      },
+      &call_count);
+  SemaphoreList done(device_, {0, 0}, {1, 3});
+  const uint64_t arguments[4] = {0};
+  IREE_ASSERT_OK(
+      iree_hal_queue_host_call(transfer_queue_, {}, done, call, arguments, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_list_wait(done, iree_infinite_timeout(), 0));
+  EXPECT_EQ(call_count, 1);
+}
+
+TEST_P(AsyncQueueHostCallLifetimeTest,
+       DeferredFailureReleasesInvocationResourceBeforeCompletion) {
+  struct State {
+    // Refcounted invocation state, released after the callback returns.
+    iree_hal_resource_t resource;
+    // External copied completion list, retained independently of this state.
+    SemaphoreList* completion;
+    // External destruction join proving no further invocation-state accesses.
+    std::promise<void>* destroyed;
+  };
+  static const iree_hal_resource_vtable_t vtable = {
+      .destroy =
+          +[](iree_hal_resource_t* resource) {
+            auto* state = reinterpret_cast<State*>(resource);
+            state->destroyed->set_value();
+            delete state;
+          },
+  };
+  SemaphoreList completion;
+  std::promise<void> destroyed;
+  auto destroyed_future = destroyed.get_future();
+  auto* state = new State{{}, &completion, &destroyed};
+  iree_hal_resource_initialize(&vtable, &state->resource);
+  const auto call = iree_hal_make_host_call_with_resource(
+      +[](void* user_data, const uint64_t args[4],
+          iree_hal_host_call_context_t* context) {
+        auto* state = static_cast<State*>(user_data);
+        *state->completion = SemaphoreList(context->signal_semaphore_list);
+        return iree_status_from_code(IREE_STATUS_DEFERRED);
+      },
+      state, &state->resource);
+  SemaphoreList gate(device_, {0}, {1});
+  SemaphoreList done(device_, {0, 0}, {1, 2});
+  const uint64_t arguments[4] = {0};
+  iree_status_t status =
+      iree_hal_queue_host_call(transfer_queue_, gate, done, call, arguments, 0);
+  iree_hal_resource_release(&state->resource);
+  IREE_ASSERT_OK(status);
+  IREE_ASSERT_OK(iree_hal_semaphore_list_signal(gate, nullptr));
+  destroyed_future.wait();
+  ASSERT_FALSE(completion.semaphores.empty());
+  iree_hal_semaphore_list_fail(
+      completion,
+      iree_make_status(IREE_STATUS_DATA_LOSS, "deferred host work failed"));
+  for (size_t i = 0; i < done.semaphores.size(); ++i) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_DATA_LOSS,
+        iree_hal_semaphore_wait(done.semaphores[i], done.payload_values[i],
+                                iree_infinite_timeout(), 0));
+  }
+}
+
 CTS_REGISTER_TEST_SUITE(QueueHostCallTest);
 CTS_REGISTER_TEST_SUITE_WITH_TAGS(AsyncQueueHostCallLifetimeTest,
                                   {"async_queue"}, {});

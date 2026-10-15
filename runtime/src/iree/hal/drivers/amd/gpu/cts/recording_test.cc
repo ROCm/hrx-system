@@ -175,6 +175,91 @@ TEST_F(GpuNativeRecordingTest,
   iree_hal_semaphore_release(gate);
 }
 
+TEST_F(GpuNativeRecordingTest, HostCallPublishesShaderAndHostWrites) {
+  const iree_hal_pool_family_access_t access = {
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &access,
+      .host =
+          {
+              .access =
+                  IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+              .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+          },
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &options,
+                                           iree_allocator_system(), &pool));
+  iree_hal_buffer_t* output = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), &output));
+  iree_hal_semaphore_t* progress = nullptr;
+  CreateSemaphore(&progress);
+  uint64_t initialized = 1, produced = 2, called = 3, consumed = 4;
+  uint32_t initial = 31, first_addend = 7, last_addend = 11;
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {},
+                                     {1, &progress, &initialized}, output, 0, 4,
+                                     &initial, 4, nullptr, 0));
+  const iree_hal_barrier_list_t empty = {};
+  const iree_hal_queue_barriers_t producer_barriers = {
+      .before = nullptr,
+      .after = &empty,
+  };
+  const iree_hal_queue_barriers_t consumer_barriers = {
+      .before = &empty,
+      .after = nullptr,
+  };
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  const auto binding = iree_hal_make_buffer_ref(output, 0, 4);
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queues_[0], {1, &progress, &initialized}, {1, &progress, &produced},
+      executable_, function_, config,
+      iree_make_const_byte_span(&first_addend, 4), {1, &binding},
+      &producer_barriers, 0));
+  const auto call = iree_hal_make_host_call(
+      +[](void* user_data, const uint64_t arguments[4],
+          iree_hal_host_call_context_t* context) {
+        auto* output = static_cast<iree_hal_buffer_t*>(user_data);
+        uint32_t value = 0;
+        IREE_RETURN_IF_ERROR(
+            iree_hal_buffer_map_read(output, 0, &value, sizeof(value)));
+        if (value != arguments[0]) {
+          return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "shader writes were not visible to host");
+        }
+        value *= 2;
+        return iree_hal_buffer_map_write(output, 0, &value, sizeof(value));
+      },
+      output);
+  const uint64_t arguments[4] = {initial + first_addend};
+  IREE_ASSERT_OK(iree_hal_queue_host_call(
+      queues_[0], {1, &progress, &produced}, {1, &progress, &called}, call,
+      arguments, IREE_HAL_HOST_CALL_FLAG_WAIT_ACTIVE));
+  // Neither neighboring dispatch supplies the host-call cache boundary.
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queues_[0], {1, &progress, &called}, {1, &progress, &consumed},
+      executable_, function_, config,
+      iree_make_const_byte_span(&last_addend, 4), {1, &binding},
+      &consumer_barriers, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(progress, consumed, iree_infinite_timeout(), 0));
+  uint32_t observed = 0;
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, &observed, 4));
+  EXPECT_EQ(observed, (initial + first_addend) * 2 + last_addend);
+  iree_hal_semaphore_release(progress);
+  iree_hal_buffer_release(output);
+  iree_hal_pool_release(pool);
+}
+
 TEST_F(GpuNativeRecordingTest,
        NativeArgumentsRequireOnlyIndirectParameterUsage) {
   const auto* family = iree_hal_queue_family(queues_[0]);

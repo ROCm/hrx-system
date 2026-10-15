@@ -44,6 +44,24 @@ iree_cc_test(
 endif()
 
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    host_call_test
+  DEPS
+    ::backends
+    iree::hal::cts::queue::queue_host_call_test
+    iree::hal::cts::util::test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_binary_benchmark(
   NAME
     queue_benchmark
@@ -90,6 +108,7 @@ iree_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::hal
+    iree::hal::cts::util::test_base
     iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::fabric::memory_backend
     iree::hal::drivers::amd::gpu::context

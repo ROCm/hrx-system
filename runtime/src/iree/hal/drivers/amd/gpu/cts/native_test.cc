@@ -14,6 +14,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/device.h"
@@ -1056,6 +1057,280 @@ TEST_F(GpuNativeTest, LastReleaseFromSharedService) {
       },
       device);
   allocator_.reclaimed.acquire();
+}
+
+TEST_F(GpuNativeTest, HostCallbacksProgressWhileColdServiceIsOccupied) {
+  using iree::hal::cts::Ref;
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  const iree_hal_pool_family_access_t family = {
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, {1, &family, {}}, &options, iree_allocator_system(), pool.out()));
+  ASSERT_NE(pool.get()->maintenance, nullptr);
+  for (auto flags :
+       {IREE_HAL_HOST_CALL_FLAG_NONE, IREE_HAL_HOST_CALL_FLAG_RELAXED}) {
+    SCOPED_TRACE(flags);
+    Ref<iree_hal_semaphore_t> done;
+    CreateSemaphore(done.out());
+    {
+      struct ServiceCall {
+        // First-field maintenance entry, borrowed until finished.
+        iree_hal_memory_maintenance_entry_t entry;
+        // Signals that the existing service is occupied.
+        std::binary_semaphore started{0};
+        // Explicit release of the simulated slow native operation.
+        std::binary_semaphore proceed{0};
+        // Joins the last service access, including assertion-exit cleanup.
+        std::binary_semaphore finished{0};
+        // Identity of the actual cold-memory worker.
+        std::thread::id thread;
+        ~ServiceCall() {
+          proceed.release();
+          finished.acquire();
+        }
+      } service;
+      service.entry = {
+          .fn =
+              +[](iree_hal_memory_maintenance_entry_t* entry) {
+                auto* service = reinterpret_cast<ServiceCall*>(entry);
+                service->thread = std::this_thread::get_id();
+                service->started.release();
+                service->proceed.acquire();
+                service->finished.release();
+              },
+      };
+      struct Callback {
+        // Exact other native queue used for a reentrant asynchronous callback.
+        iree_hal_queue_t* next_queue;
+        // Actual callback executor identity, published through called.
+        std::thread::id thread;
+        // Joins callback entry without depending on the return cache boundary.
+        std::binary_semaphore called{0};
+      } callback = {.next_queue = queues_[1]};
+      const auto call = iree_hal_make_host_call(
+          +[](void* user_data, const uint64_t arguments[4],
+              iree_hal_host_call_context_t* context) {
+            auto* callback = static_cast<Callback*>(user_data);
+            callback->thread = std::this_thread::get_id();
+            iree_status_t status = iree_hal_queue_barrier(
+                callback->next_queue, {}, context->signal_semaphore_list,
+                nullptr, 0);
+            callback->called.release();
+            return iree_status_is_ok(status)
+                       ? iree_status_from_code(IREE_STATUS_DEFERRED)
+                       : status;
+          },
+          &callback);
+      iree_hal_memory_maintenance_enqueue(pool.get()->maintenance,
+                                          &service.entry);
+      service.started.acquire();
+      uint64_t value = 1;
+      iree_hal_semaphore_t* done_handle = done;
+      const uint64_t arguments[4] = {0};
+      IREE_ASSERT_OK(iree_hal_queue_host_call(
+          queues_[0], {}, {1, &done_handle, &value}, call, arguments, flags));
+      callback.called.acquire();
+      EXPECT_NE(callback.thread, service.thread);
+      EXPECT_NE(callback.thread, std::this_thread::get_id());
+      if (flags == IREE_HAL_HOST_CALL_FLAG_RELAXED) {
+        IREE_ASSERT_OK(
+            iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(), 0));
+      }
+      // Join service before the ordinary return boundary can retire. The scoped
+      // blocker releases service on assertion exits as well.
+    }
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(), 0));
+  }
+}
+
+TEST_F(GpuNativeTest, BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
+  using iree::hal::cts::Ref;
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  const iree_hal_pool_family_access_t access = {
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .interfaces = (UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS) |
+                    (UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE),
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, {1, &access, {}}, &options, iree_allocator_system(), pool.out()));
+  const auto source = iree_hal_pool_query_mapping_requirements(pool);
+  auto target_access = access;
+  target_access.interfaces = UINT64_C(1)
+                             << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+  const iree_hal_pool_scope_t scope = {1, &target_access, {}};
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, iree_allocator_system(), &capabilities));
+  ASSERT_NE(capabilities.max_byte_length, 0u);
+  EXPECT_EQ(capabilities.operations, IREE_HAL_MEMORY_MAPPING_OPERATIONS_ALL);
+  const uint64_t unit =
+      iree_max(source.minimum_granularity,
+               iree_max(capabilities.mapping_granularity,
+                        capabilities.reservation_granularity));
+  const iree_hal_virtual_buffer_options_t reservation_options = {
+      .byte_length = 3 * unit,
+      .mapping_granularity = unit,
+  };
+  Ref<iree_hal_buffer_t> reservation;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      group_, scope, &reservation_options, iree_allocator_system(),
+      reservation.out()));
+  iree_hal_memory_scope_t program_scope;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_PROGRAM, access.family}, &program_scope));
+  std::array<Ref<iree_hal_buffer_t>, 2> backing;
+  for (auto& buffer : backing) {
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool, iree_hal_make_pool_reservation_request(5 * unit, unit),
+        iree_infinite_timeout(), buffer.out()));
+  }
+  Ref<iree_hal_semaphore_t> progress;
+  CreateSemaphore(progress.out());
+  iree_hal_semaphore_t* timeline = progress;
+  uint64_t value = 0;
+  std::array<std::vector<uint32_t>, 2> expected;
+  for (size_t i = 0; i < backing.size(); ++i) {
+    const uint32_t poison = 0xEFEF0000u + i;
+    expected[i].assign(5 * unit / sizeof(uint32_t), poison);
+    uint64_t before = value++;
+    IREE_ASSERT_OK(
+        iree_hal_queue_fill(queues_[0], {before ? 1u : 0u, &timeline, &before},
+                            {1, &timeline, &value}, backing[i], 0, 5 * unit,
+                            &poison, sizeof(poison), nullptr, 0));
+  }
+  std::array<iree_hal_memory_mapping_t, 3> mappings;
+  for (uint32_t epoch = 0; epoch < 3; ++epoch) {
+    SCOPED_TRACE(epoch);
+    std::vector<uint32_t> expected_mapped(3 * unit / sizeof(uint32_t));
+    std::array<Ref<iree_hal_buffer_t>, 3> source_views;
+    for (uint32_t i = 0; i < mappings.size(); ++i) {
+      const uint32_t index = (epoch + i) % 2;
+      IREE_ASSERT_OK(iree_hal_buffer_subspan(backing[index], (1 + i) * unit,
+                                             unit, iree_allocator_system(),
+                                             source_views[i].out()));
+      mappings[i] = {
+          .target = reservation,
+          .scope = program_scope,
+          .target_range = {i * unit, unit},
+          .source = source_views[i],
+          .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+          .operation = epoch ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
+                             : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+      };
+    }
+    uint64_t before = value++;
+    IREE_ASSERT_OK(iree_hal_queue_map(
+        queues_[0], {1, &timeline, &before}, {1, &timeline, &value},
+        mappings.size(), mappings.data(),
+        epoch == 1 ? IREE_HAL_QUEUE_MAP_FLAG_BORROW_BUFFERS
+                   : IREE_HAL_QUEUE_MAP_FLAG_NONE));
+    for (uint32_t i = 0; i < mappings.size(); ++i) {
+      if (epoch != 1) {
+        source_views[i].reset();
+      }
+      // Later protection supplies the original source coordinates itself.
+      mappings[i].source = backing[(epoch + i) % 2];
+      mappings[i].source_offset = (1 + i) * unit;
+      const uint32_t pattern = 0x01010000u + epoch * 16 + i;
+      uint64_t filled = value++;
+      IREE_ASSERT_OK(iree_hal_queue_fill(
+          queues_[1], {1, &timeline, &filled}, {1, &timeline, &value},
+          reservation, i * unit, unit, &pattern, sizeof(pattern), nullptr, 0));
+      auto& words = expected[(epoch + i) % 2];
+      std::fill(words.begin() + (1 + i) * unit / sizeof(uint32_t),
+                words.begin() + (2 + i) * unit / sizeof(uint32_t), pattern);
+      std::fill(expected_mapped.begin() + i * unit / sizeof(uint32_t),
+                expected_mapped.begin() + (i + 1) * unit / sizeof(uint32_t),
+                pattern);
+    }
+    if (!epoch) {
+      Ref<iree_hal_semaphore_t> gate, rejected;
+      CreateSemaphore(gate.out());
+      CreateSemaphore(rejected.out());
+      iree_hal_semaphore_t* gate_handle = gate;
+      iree_hal_semaphore_t* rejected_handle = rejected;
+      uint64_t one = 1;
+      auto removals = mappings;
+      for (auto& removal : removals) {
+        removal.source = nullptr;
+        removal.source_offset = 0;
+        removal.access = 0;
+        removal.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+      }
+      IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {1, &gate_handle, &one},
+                                        {1, &rejected_handle, &one},
+                                        removals.size(), removals.data(), 0));
+      iree_hal_semaphore_fail(gate,
+                              iree_status_from_code(IREE_STATUS_CANCELLED));
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_CANCELLED,
+          iree_hal_semaphore_wait(rejected, one, iree_infinite_timeout(), 0));
+    }
+    for (auto& mapping : mappings) {
+      mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT;
+      mapping.access = IREE_HAL_MEMORY_ACCESS_READ;
+    }
+    uint64_t protected_before = value++;
+    IREE_ASSERT_OK(iree_hal_queue_map(
+        queues_[0], {1, &timeline, &protected_before}, {1, &timeline, &value},
+        mappings.size(), mappings.data(), 0));
+    std::vector<uint32_t> observed_mapped(expected_mapped.size());
+    uint64_t read = value++;
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[1], {1, &timeline, &read}, {1, &timeline, &value}, reservation,
+        0, observed_mapped.data(), 3 * unit, nullptr));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(progress, value, iree_infinite_timeout(), 0));
+    EXPECT_EQ(observed_mapped, expected_mapped);
+    std::vector<uint32_t> observed(5 * unit / sizeof(uint32_t));
+    for (size_t i = 0; i < backing.size(); ++i) {
+      uint64_t copied = value++;
+      IREE_ASSERT_OK(iree_hal_queue_download(
+          queues_[1], {1, &timeline, &copied}, {1, &timeline, &value},
+          backing[i], 0, observed.data(), 5 * unit, nullptr));
+      IREE_ASSERT_OK(
+          iree_hal_semaphore_wait(progress, value, iree_infinite_timeout(), 0));
+      EXPECT_EQ(observed, expected[i]);
+    }
+  }
+  for (auto& mapping : mappings) {
+    mapping.source = nullptr;
+    mapping.source_offset = 0;
+    mapping.access = 0;
+    mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+  }
+  uint64_t before = value++;
+  IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {1, &timeline, &before},
+                                    {1, &timeline, &value}, mappings.size(),
+                                    mappings.data(), 0));
+  // The captured target owns its addresses through native removal. Physical
+  // backing remains explicitly owned until that checked removal completes.
+  reservation.reset();
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(progress, value, iree_infinite_timeout(), 0));
+  for (auto& buffer : backing) {
+    buffer.reset();
+  }
+  iree_hal_pool_stats_t statistics;
+  iree_hal_pool_query_stats(pool, &statistics);
+  EXPECT_EQ(statistics.reservation_count, 0u);
 }
 
 class DriverTest : public ::testing::Test {
