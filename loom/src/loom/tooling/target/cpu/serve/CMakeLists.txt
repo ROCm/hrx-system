@@ -606,4 +606,120 @@ loom_cc_test(
 )
 endif()
 
+if(IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    device_group_test
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/device/device_group_test.cc"
+  DEPS
+    ::test_device
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::host
+    loom::serve::runtime::storage::memory
+    loom::serve::testing::device
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    retirement_test
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/execution/retirement_test.cc"
+  DEPS
+    ::test_device
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::runtime::device
+    loom::serve::runtime::execution::retirement
+    loom::serve::runtime::storage::memory
+    loom::serve::testing::device
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    memory_test
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/storage/memory_test.cc"
+  DEPS
+    ::test_device
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::storage::memory
+    loom::serve::testing::device
+    loom::serve::testing::native_allocator
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    relocation_test
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/storage/relocation_test.cc"
+  DEPS
+    ::test_device
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::execution::retirement
+    loom::serve::runtime::storage::memory
+    loom::serve::runtime::storage::relocation
+    loom::serve::testing::device
+    loom::serve::testing::native_allocator
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    snapshot_test
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/storage/snapshot_test.cc"
+  DEPS
+    ::test_device
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::task
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::execution::retirement
+    loom::serve::runtime::storage::memory
+    loom::serve::runtime::storage::snapshot
+    loom::serve::testing::device
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

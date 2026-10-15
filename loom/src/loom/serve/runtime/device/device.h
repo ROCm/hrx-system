@@ -41,7 +41,7 @@ typedef struct loom_serve_device_options_t {
   iree_string_view_t uri;
   // Physical backing strategy for all models sharing this owner.
   loom_serve_device_backing_t backing;
-  // Physical slab bytes; zero selects the allocator recommendation.
+  // Physical slab bytes; zero selects the backing source's recommendation.
   iree_device_size_t slab_size;
   // Maximum committed virtual-pool bytes; zero imposes no serving limit.
   uint64_t memory_limit;

@@ -15,11 +15,18 @@ namespace {
 
 class DeviceGroupTest : public ::testing::Test {
  protected:
-  void SetUp() override {
+  static void SetUpTestSuite() {
     IREE_ASSERT_OK(
         loom_serve_host_create(1, nullptr, iree_allocator_system(), &host_));
     IREE_ASSERT_OK(loom_serve_test_driver_create(host_, iree_allocator_system(),
                                                  &driver_));
+  }
+
+  static void TearDownTestSuite() {
+    iree_hal_driver_release(driver_);
+    loom_serve_host_release(host_);
+    driver_ = nullptr;
+    host_ = nullptr;
   }
 
   void TearDown() override {
@@ -33,16 +40,14 @@ class DeviceGroupTest : public ::testing::Test {
       IREE_EXPECT_OK(loom_serve_virtual_buffer_free(reservation));
     }
     IREE_EXPECT_OK(loom_serve_device_group_free(group_));
-    iree_hal_driver_release(driver_);
-    loom_serve_host_release(host_);
   }
 
   // Physical granularity, independent of each device's admission budget.
   static constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
   // Shared workers and asynchronous I/O outliving all device resources.
-  loom_serve_host_t* host_ = nullptr;
+  inline static loom_serve_host_t* host_ = nullptr;
   // Exact physical driver supplied by the target-specific test leaf.
-  iree_hal_driver_t* driver_ = nullptr;
+  inline static iree_hal_driver_t* driver_ = nullptr;
   // One application group, including nullable partial construction.
   loom_serve_device_group_t* group_ = nullptr;
   // Independent model-like timelines, one per device record.

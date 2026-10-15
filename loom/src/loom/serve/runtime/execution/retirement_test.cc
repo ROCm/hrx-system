@@ -26,14 +26,22 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
     self->wake_condition.notify_one();
   }
 
-  void SetUp() override {
-    loom_serve_retirement_initialize(&retirement);
-    loom_serve_host_t* host = nullptr;
+  static void SetUpTestSuite() {
     IREE_ASSERT_OK(
         loom_serve_host_create(1, nullptr, iree_allocator_system(), &host));
-    iree_hal_driver_t* driver = nullptr;
     IREE_ASSERT_OK(
         loom_serve_test_driver_create(host, iree_allocator_system(), &driver));
+  }
+
+  static void TearDownTestSuite() {
+    iree_hal_driver_release(driver);
+    loom_serve_host_release(host);
+    driver = nullptr;
+    host = nullptr;
+  }
+
+  void SetUp() override {
+    loom_serve_retirement_initialize(&retirement);
     const loom_serve_device_options_t options = {
         .driver = driver,
         .uri = loom_serve_test_device()->device_uri,
@@ -43,8 +51,6 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
     };
     auto status = loom_serve_device_group_allocate(
         host, 1, &options, iree_allocator_system(), &group);
-    iree_hal_driver_release(driver);
-    loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
     device = loom_serve_device_group_at(group, 0);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
@@ -80,6 +86,10 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
 
   // One mapped slab remains owned until all transfer views retire.
   static constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
+  // Application infrastructure retained across independent device lifetimes.
+  inline static loom_serve_host_t* host = nullptr;
+  // One native connection shared across the suite.
+  inline static iree_hal_driver_t* driver = nullptr;
   // Application group enclosing all device resources.
   loom_serve_device_group_t* group = nullptr;
   // Borrowed device record within the application group.
