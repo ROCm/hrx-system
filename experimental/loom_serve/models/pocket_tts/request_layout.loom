@@ -34,7 +34,8 @@ template.def<@pocket.request_state_size> pure @pocket_request_state_size(%capaci
 // Membership is count plus capacity resident IDs. A stage ordinal follows;
 // eight-word work records begin at the next 16-byte boundary. Each record is
 // phase, voice ordinal, phase cursor, chunk, voice frames, unique-writer bit,
-// and two reserved words. Membership owns identity; records own next work.
+// selected prefill token, and a reserved word. Membership owns identity;
+// records own next work.
 template.def<@pocket.batch_work_header_size> pure @pocket_batch_work_header_size(%capacity: index) -> (offset) {
   %two = index.constant 2 : index
   %words = index.add %capacity, %two : index
