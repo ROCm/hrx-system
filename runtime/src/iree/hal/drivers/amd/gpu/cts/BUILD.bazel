@@ -38,6 +38,8 @@ iree_runtime_cc_test(
 iree_runtime_cc_benchmark(
     name = "queue_benchmark",
     srcs = ["queue_benchmark.cc"],
+    # Explicit measurement iteration counts override the smoke's minimum time.
+    args = ["--benchmark_dry_run"],
     deps = [
         "//libamdf:amdf_static",
         "//libamdf:headers",

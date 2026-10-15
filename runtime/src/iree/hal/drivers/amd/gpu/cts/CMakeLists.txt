@@ -63,6 +63,8 @@ iree_cc_binary_benchmark(
     iree::hal::drivers::amd::status
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
+  ARGS
+    "--benchmark_dry_run"
   TESTONLY
   LABELS
     "iree-build-requirement=libamdf"
