@@ -432,8 +432,10 @@ static void CheckMemoryExtraction(const char* temp_directory,
                                   const char* mode) {
   ASSERT_TRUE(SetEnvironmentVariableA("TMP", temp_directory));
   const auto* file = dynamic_library_test_library_create();
+  const bool explicit_delete = !strcmp(mode, "native-posix-explicit");
   const bool close_while_mapped = !strcmp(mode, "native-posix-live-close") ||
-                                  !strcmp(mode, "native-posix-unlink");
+                                  !strcmp(mode, "native-posix-unlink") ||
+                                  explicit_delete;
   if (!strcmp(mode, "native-posix-close") || close_while_mapped) {
     auto path = std::filesystem::path(temp_directory) / "native_image.dll";
     HANDLE writer =
@@ -448,7 +450,7 @@ static void CheckMemoryExtraction(const char* temp_directory,
     HANDLE image =
         ReOpenFile(writer, GENERIC_READ | DELETE,
                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                   FILE_FLAG_DELETE_ON_CLOSE);
+                   explicit_delete ? 0 : FILE_FLAG_DELETE_ON_CLOSE);
     DWORD reopen_error =
         image != INVALID_HANDLE_VALUE ? ERROR_SUCCESS : GetLastError();
     CloseHandle(writer);
@@ -466,7 +468,7 @@ static void CheckMemoryExtraction(const char* temp_directory,
     FILE_DISPOSITION_INFO_EX disposition = {};
     disposition.Flags =
         FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS;
-    if (strcmp(mode, "native-posix-unlink")) {
+    if (strcmp(mode, "native-posix-unlink") && !explicit_delete) {
       disposition.Flags |= FILE_DISPOSITION_FLAG_ON_CLOSE;
     }
     BOOL marked = SetFileInformationByHandle(image, FileDispositionInfoEx,
@@ -697,7 +699,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values("create-failure", "load-failure", "allocation-failure",
                       "empty-image", "release", "nodelete", "nodelete-os-temp",
                       "native-posix-close", "native-posix-live-close",
-                      "native-posix-unlink"));
+                      "native-posix-unlink", "native-posix-explicit"));
 #else
 INSTANTIATE_TEST_SUITE_P(Policies, DynamicLibraryMemoryTest,
                          ::testing::Values("discard", "empty", "preserve",
