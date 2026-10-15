@@ -157,9 +157,9 @@ func.def public inline @flash_next_q8_channel4_partial(%width: index, %first: in
 // fields never read an activation row, and original block arithmetic is shared
 // with the dense and consecutive-token consumers above.
 func.def public inline @flash_next_q8_rows_partial(%width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
   %block_width = index.constant 32 : index
   %block_bytes = index.constant 34 : offset
   %scale_bytes = index.constant 2 : offset
@@ -176,7 +176,7 @@ func.def public inline @flash_next_q8_rows_partial(%width: index, %rows: vector<
     %code_origin = index.add %scale_origin, %scale_bytes : offset
     %codes, %scale = func.call @flash_next_q8_load_block(%scale_origin, %code_origin, %weight) : (offset, offset, buffer) -> (vector<32xbf16>, f32)
     %input_delta = index.scale %block, %input_block_bytes : index, offset -> offset
-    %next_sums = scf.for %ordinal = [%zero to %four step %one](%current = %sums : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+    %next_sums = scf.for %ordinal = [%c0 to %c4 step %c1](%current = %sums : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
       %active = index.cmp ult, %ordinal, %live : index
       %next = scf.if %active -> (vector<4xf32>) {
         %row_word = vector.extract %rows[%ordinal] : vector<4xi32> -> i32
