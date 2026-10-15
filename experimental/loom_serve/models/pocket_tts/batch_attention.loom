@@ -1,0 +1,78 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Source-owned offsets select the tensor within a row; strides select its
+// stable resident or transient packed row. Shared weights use a zero stride.
+// Arithmetic is shared with direct single-stream commands, including absolute
+// rotary positions and the distinct FlowLM/full-context and Mimi/ring policies.
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.decl pure @pocket.batch.origin(%row: index, %offset: offset, %stride: offset) -> (offset)
+
+template.decl @pocket.rotary_cache.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %packed_channels: index, %value_origin: index, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer, %x_origin: offset, %q_origin: offset, %keys_origin: offset, %values_origin: offset, %position_origin: offset, %cosine_origin: offset, %sine_origin: offset)
+
+template.decl @pocket.batch.rotary_cache(%membership: buffer, %elements: index, %channels: index, %times: index, %capacity: index, %past: index, %packed_channels: index, %value_origin: index, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer, %x_offset: offset, %x_stride: offset, %q_offset: offset, %q_stride: offset, %keys_offset: offset, %keys_stride: offset, %values_offset: offset, %values_stride: offset, %position_offset: offset, %position_stride: offset, %cosine_offset: offset, %cosine_stride: offset, %sine_offset: offset, %sine_stride: offset)
+
+template.def<@pocket.batch.rotary_cache> device @pocket_batch_rotary_cache(%membership: buffer, %elements: index, %channels: index, %times: index, %capacity: index, %past: index, %packed_channels: index, %value_origin: index, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer, %x_offset: offset, %x_stride: offset, %q_offset: offset, %q_stride: offset, %keys_offset: offset, %keys_stride: offset, %values_offset: offset, %values_stride: offset, %position_offset: offset, %position_stride: offset, %cosine_offset: offset, %cosine_stride: offset, %sine_offset: offset, %sine_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %x_origin = template.apply<@pocket.batch.origin>(%packed, %x_offset, %x_stride) pure : (index, offset, offset) -> (offset)
+    %q_origin = template.apply<@pocket.batch.origin>(%packed, %q_offset, %q_stride) pure : (index, offset, offset) -> (offset)
+    %keys_origin = template.apply<@pocket.batch.origin>(%resident, %keys_offset, %keys_stride) pure : (index, offset, offset) -> (offset)
+    %values_origin = template.apply<@pocket.batch.origin>(%resident, %values_offset, %values_stride) pure : (index, offset, offset) -> (offset)
+    %position_origin = template.apply<@pocket.batch.origin>(%resident, %position_offset, %position_stride) pure : (index, offset, offset) -> (offset)
+    %cosine_origin = template.apply<@pocket.batch.origin>(%packed, %cosine_offset, %cosine_stride) pure : (index, offset, offset) -> (offset)
+    %sine_origin = template.apply<@pocket.batch.origin>(%packed, %sine_offset, %sine_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.rotary_cache.body>(%elements, %channels, %times, %capacity, %past, %packed_channels, %value_origin, %x_storage, %q_storage, %keys_storage, %values_storage, %position_storage, %cosine_storage, %sine_storage, %x_origin, %q_origin, %keys_origin, %values_origin, %position_origin, %cosine_origin, %sine_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.attention_scores.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer, %q_origin: offset, %keys_origin: offset, %position_origin: offset, %scores_origin: offset)
+
+template.decl @pocket.batch.attention_scores(%membership: buffer, %elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer, %q_offset: offset, %q_stride: offset, %keys_offset: offset, %keys_stride: offset, %position_offset: offset, %position_stride: offset, %scores_offset: offset, %scores_stride: offset)
+
+template.def<@pocket.batch.attention_scores> device @pocket_batch_attention_scores(%membership: buffer, %elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer, %q_offset: offset, %q_stride: offset, %keys_offset: offset, %keys_stride: offset, %position_offset: offset, %position_stride: offset, %scores_offset: offset, %scores_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %q_origin = template.apply<@pocket.batch.origin>(%packed, %q_offset, %q_stride) pure : (index, offset, offset) -> (offset)
+    %keys_origin = template.apply<@pocket.batch.origin>(%resident, %keys_offset, %keys_stride) pure : (index, offset, offset) -> (offset)
+    %position_origin = template.apply<@pocket.batch.origin>(%resident, %position_offset, %position_stride) pure : (index, offset, offset) -> (offset)
+    %scores_origin = template.apply<@pocket.batch.origin>(%packed, %scores_offset, %scores_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.attention_scores.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %q_storage, %keys_storage, %position_storage, %scores_storage, %q_origin, %keys_origin, %position_origin, %scores_origin) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.softmax.body(%elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer, %scores_origin: offset, %probabilities_origin: offset)
+
+template.decl @pocket.batch.softmax(%membership: buffer, %elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer, %scores_offset: offset, %scores_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset)
+
+template.def<@pocket.batch.softmax> device @pocket_batch_softmax(%membership: buffer, %elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer, %scores_offset: offset, %scores_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %scores_origin = template.apply<@pocket.batch.origin>(%packed, %scores_offset, %scores_stride) pure : (index, offset, offset) -> (offset)
+    %probabilities_origin = template.apply<@pocket.batch.origin>(%packed, %probabilities_offset, %probabilities_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.softmax.body>(%elements, %rows, %capacity, %scores_storage, %probabilities_storage, %scores_origin, %probabilities_origin) : (index, index, index, buffer, buffer, offset, offset)
+  }
+  template.return
+}
+
+template.decl @pocket.attention_values.body(%elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer, %values_origin: offset, %probabilities_origin: offset, %position_origin: offset, %y_origin: offset)
+
+template.decl @pocket.batch.attention_values(%membership: buffer, %elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer, %values_offset: offset, %values_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset, %position_offset: offset, %position_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.def<@pocket.batch.attention_values> device @pocket_batch_attention_values(%membership: buffer, %elements: index, %channels: index, %times: index, %capacity: index, %past: index, %score_rows: index, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer, %values_offset: offset, %values_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset, %position_offset: offset, %position_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %values_origin = template.apply<@pocket.batch.origin>(%resident, %values_offset, %values_stride) pure : (index, offset, offset) -> (offset)
+    %probabilities_origin = template.apply<@pocket.batch.origin>(%packed, %probabilities_offset, %probabilities_stride) pure : (index, offset, offset) -> (offset)
+    %position_origin = template.apply<@pocket.batch.origin>(%resident, %position_offset, %position_stride) pure : (index, offset, offset) -> (offset)
+    %y_origin = template.apply<@pocket.batch.origin>(%packed, %y_offset, %y_stride) pure : (index, offset, offset) -> (offset)
+    template.apply<@pocket.attention_values.body>(%elements, %channels, %times, %capacity, %past, %score_rows, %values_storage, %probabilities_storage, %position_storage, %y_storage, %values_origin, %probabilities_origin, %position_origin, %y_origin) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  template.return
+}
