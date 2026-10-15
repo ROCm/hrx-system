@@ -106,8 +106,10 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%logical_capa
   %activation_origin = index.scale %token_begin, %activation_row_bytes : index, offset -> offset
   %query_view = buffer.view %query[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
   %gate_view = buffer.view %gate[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
-  %key_view = buffer.view %key_cache[%key_cache_origin] : buffer -> view<[%physical_capacity]x1024xf16>
-  %value_view = buffer.view %value_cache[%value_cache_origin] : buffer -> view<[%physical_capacity]x1024xf16>
+  // Cache allocations and their layer subviews preserve 256-byte alignment.
+  %key_aligned, %value_aligned = buffer.assume.alignment %key_cache, %value_cache {minimum_alignment = 16} : buffer, buffer
+  %key_view = buffer.view %key_aligned[%key_cache_origin] : buffer -> view<[%physical_capacity]x1024xf16>
+  %value_view = buffer.view %value_aligned[%value_cache_origin] : buffer -> view<[%physical_capacity]x1024xf16>
   %output_view = buffer.view %output[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
   %query_stage = buffer.alloca<workgroup> align(16) %query_stage_bytes : buffer
   %score_stage = buffer.alloca<workgroup> align(16) %score_stage_bytes : buffer
