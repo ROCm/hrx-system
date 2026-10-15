@@ -1,9 +1,3 @@
-// Copyright 2026 The IREE Authors
-//
-// Licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
 func.def public inline @flash_next_iq4_codes(%weight: buffer, %block_origin: offset) -> (vector<32xbf16>, f32) {
   %c0_index = index.constant 0 : index
   %payload_delta = index.constant 2 : offset
