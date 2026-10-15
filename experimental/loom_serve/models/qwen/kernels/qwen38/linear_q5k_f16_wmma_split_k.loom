@@ -1,4 +1,4 @@
-template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
 
 // Exact-Q5_K split-K schedule for narrow prefill projections.
 //
@@ -105,7 +105,7 @@ kernel.def target(@qwen38_dense_gfx11_wave64_split_k) export("qwen38_linear_q5k_
         %metadata_row_byte_base = index.cast %metadata_channel_byte_index : index to offset
         %metadata_block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
         %metadata_block_byte_base = index.add %metadata_row_byte_base, %metadata_block_byte_add : offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%weight_noalias, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%weight_noalias, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
