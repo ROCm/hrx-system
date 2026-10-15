@@ -174,6 +174,8 @@ loom_cc_binary(
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::vm
+    loom::binding::c::loomc
+    loom::binding::c::target::vm
     loom::serve::runtime::program
     loom::serve::runtime::program::compilation
     loom::serve::runtime::program::input

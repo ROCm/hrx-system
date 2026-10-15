@@ -20,6 +20,7 @@ loom_cc_library(
         "//loom/binding/c:loomc",
         "//loom/binding/c:task_pool",
         "//loom/binding/c:task_queue",
+        "//loom/binding/c/target/vm",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/async/util:proactor_thread",
         "//runtime/src/iree/base",

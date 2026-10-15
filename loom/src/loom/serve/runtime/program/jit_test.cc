@@ -309,6 +309,8 @@ class JitTest : public ::testing::TestWithParam<int> {
         .count = IREE_ARRAYSIZE(providers),
         .values = providers};
     IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
+        loom_serve_host_target_environment(
+            loom_serve_device_host(device_owner_)),
         &sources, iree_make_cstring_view(path.c_str()), IREE_ARRAYSIZE(roots),
         roots, &compilation_, host_allocator_, &image));
     auto status = iree_vm_bytecode_module_create_trusted(
@@ -490,8 +492,10 @@ TEST_P(JitTest, VmLibrariesPreserveMissingPrivateAndDuplicateDiagnostics) {
         .values = providers};
     loom_serve_compilation_report_t report = {};
     iree_const_byte_span_t image = {};
-    auto status = loom_serve_jit_compile_vm(&sources, test.entry, 1, &root,
-                                            &report, host_allocator_, &image);
+    auto status = loom_serve_jit_compile_vm(
+        loom_serve_host_target_environment(
+            loom_serve_device_host(device_owner_)),
+        &sources, test.entry, 1, &root, &report, host_allocator_, &image);
     EXPECT_FALSE(iree_status_is_ok(status));
     EXPECT_EQ(image.data, nullptr);
     EXPECT_GT(report.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 0u);
@@ -534,8 +538,11 @@ TEST_P(JitTest, SourceFailureOutlivesUnconstructedCatalogAndVm) {
   // More failures than retained slots leave complete severity counters.
   for (size_t i = 0; i < 10; ++i) {
     iree_const_byte_span_t image = iree_const_byte_span_empty();
-    status = loom_serve_jit_compile_vm(&sources, IREE_SV("invalid.loom"), 1,
-                                       &root, &report, host_allocator_, &image);
+    status =
+        loom_serve_jit_compile_vm(loom_serve_host_target_environment(
+                                      loom_serve_device_host(device_owner_)),
+                                  &sources, IREE_SV("invalid.loom"), 1, &root,
+                                  &report, host_allocator_, &image);
     IREE_EXPECT_NOT_OK(status);
     EXPECT_EQ(image.data, nullptr);
   }

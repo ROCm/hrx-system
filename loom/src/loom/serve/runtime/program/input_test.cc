@@ -16,6 +16,8 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/program/program.h"
+#include "loomc/iree.h"
+#include "loomc/target/vm.h"
 
 IREE_FLAG(string, input_source, "", "Source input capability callers.");
 
@@ -27,6 +29,8 @@ class InputTest : public ::testing::TestWithParam<bool> {
   loom_serve_compilation_report_t compilation = {};
 
   void SetUp() override {
+    IREE_ASSERT_OK(iree_status_from_loomc(loomc_target_environment_create_vm(
+        loomc_allocator_from_iree(host_allocator), &target_environment)));
     IREE_ASSERT_OK(iree_vm_environment_allocate(host_allocator, &environment));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
@@ -77,15 +81,17 @@ class InputTest : public ::testing::TestWithParam<bool> {
                                         IREE_SVL("check"), IREE_SVL("text")};
     const loom_serve_sources_t sources = {.base_directory = IREE_SV(".")};
     IREE_ASSERT_OK(loom_serve_program_allocate(
-        environment, &sources, iree_make_cstring_view(FLAG_input_source),
-        IREE_ARRAYSIZE(roots), roots, (iree_vm_module_span_t){&module, 1},
-        &compilation, host_allocator, &program));
+        target_environment, environment, &sources,
+        iree_make_cstring_view(FLAG_input_source), IREE_ARRAYSIZE(roots), roots,
+        (iree_vm_module_span_t){&module, 1}, &compilation, host_allocator,
+        &program));
   }
   void TearDown() override {
     loom_serve_program_free(program);
     iree_vm_module_release(module);
     iree_tokenizer_free(tokenizer);
     iree_vm_environment_free(environment);
+    loomc_target_environment_release(target_environment);
   }
   iree_vm_variant_t Text(iree_string_view_t text) {
     iree_vm_buffer_t* buffer = nullptr;
@@ -116,6 +122,8 @@ class InputTest : public ::testing::TestWithParam<bool> {
   const iree_allocator_t host_allocator = iree_allocator_system();
   // Environment outliving every returned reference.
   iree_vm_environment_t* environment = nullptr;
+  // VM-only grammar for the authored capability fixtures.
+  loomc_target_environment_t* target_environment = nullptr;
   // Canonical VM buffer reference type.
   iree_vm_ref_types_t types = {};
   // Actual BPE tokenizer, borrowed by the input module.

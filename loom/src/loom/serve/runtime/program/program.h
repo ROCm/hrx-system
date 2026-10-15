@@ -12,6 +12,7 @@
 #include "iree/vm/program.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/runtime/program/sources.h"
+#include "loomc/target.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,8 +28,11 @@ typedef struct loom_serve_program_t loom_serve_program_t;
 // its provider scopes outlive the module and escaped references. This finite
 // CPU operation may run on a private preparation task. sources supplies the
 // namespace for source_path. No compiler storage or source mapping survives;
-// report accumulates copied diagnostics on failure.
+// report accumulates copied diagnostics on failure. target_environment supplies
+// VM support and the complete source catalog grammar and is borrowed for the
+// call.
 iree_status_t loom_serve_program_compile(
+    loomc_target_environment_t* target_environment,
     iree_vm_environment_t* environment, const loom_serve_sources_t* sources,
     iree_string_view_t source_path, iree_host_size_t root_count,
     const iree_string_view_t* roots, loom_serve_compilation_report_t* report,
@@ -47,9 +51,11 @@ iree_status_t loom_serve_program_link(iree_vm_module_t* module,
 // links it with libraries, and creates one process. The environment's provider
 // scopes must outlive the program and any returned references. Libraries are
 // retained by the program. sources supplies the namespace for source_path.
+// target_environment supplies VM support and the complete source grammar.
 // No compiler storage or source-file mapping survives this call.
 // report accumulates copied source diagnostics, including on failure.
 iree_status_t loom_serve_program_allocate(
+    loomc_target_environment_t* target_environment,
     iree_vm_environment_t* environment, const loom_serve_sources_t* sources,
     iree_string_view_t source_path, iree_host_size_t root_count,
     const iree_string_view_t* roots, iree_vm_module_span_t libraries,

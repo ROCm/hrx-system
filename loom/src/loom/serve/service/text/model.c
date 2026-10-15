@@ -400,6 +400,8 @@ static iree_status_t loom_serve_text_load_prepare(
         (void**)&model->shapes));
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_source_initialize(
+      loom_serve_host_target_environment(
+          loom_serve_device_host(model->device_owner)),
       options, model->host_allocator, &model->source, &model->state.storage));
   const iree_host_size_t stage_count =
       loom_serve_preparation_stage_count(model->source.preparation);

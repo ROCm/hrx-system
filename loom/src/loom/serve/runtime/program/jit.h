@@ -53,6 +53,11 @@ void loom_serve_jit_free(loom_serve_jit_t* jit);
 // this catalog. Native tasks merge into it before publishing completion.
 loom_serve_compilation_report_t* loom_serve_jit_report(loom_serve_jit_t* jit);
 
+// Borrows the catalog's shared native and VM source grammar through jit
+// lifetime.
+loomc_target_environment_t* loom_serve_jit_target_environment(
+    const loom_serve_jit_t* jit);
+
 // Receives the owned stage on success (NULL on failure) and owns status. Runs
 // on a shared task worker after every native request and compiler access has
 // retired. May schedule more work or destroy its completed catalog, but never
@@ -118,15 +123,16 @@ iree_status_t loom_serve_jit_stage_record(
 // Links the model's portable VM source against the declared library providers
 // and compiles named roots into one image. The entry source is primary input;
 // library-private symbols remain private. The entry may also occur in sources.
+// target_environment supplies VM compilation and the complete catalog grammar;
+// it is borrowed only for this call. Only the named roots target the VM.
 // root_count is nonzero. On success, the caller owns
 // the image with host_allocator and can transfer it to the VM bytecode module.
-iree_status_t loom_serve_jit_compile_vm(const loom_serve_sources_t* sources,
-                                        iree_string_view_t source_path,
-                                        iree_host_size_t root_count,
-                                        const iree_string_view_t* roots,
-                                        loom_serve_compilation_report_t* report,
-                                        iree_allocator_t host_allocator,
-                                        iree_const_byte_span_t* out_image);
+iree_status_t loom_serve_jit_compile_vm(
+    loomc_target_environment_t* target_environment,
+    const loom_serve_sources_t* sources, iree_string_view_t source_path,
+    iree_host_size_t root_count, const iree_string_view_t* roots,
+    loom_serve_compilation_report_t* report, iree_allocator_t host_allocator,
+    iree_const_byte_span_t* out_image);
 
 #ifdef __cplusplus
 }  // extern "C"

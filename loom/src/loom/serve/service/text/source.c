@@ -41,6 +41,7 @@ static iree_status_t loom_serve_text_load_tokenizer(
 // Bootstrap returns ordinary source-owned references. Its temporary program
 // is gone before device setup; the shared environment outlives warm control.
 static iree_status_t loom_serve_text_prepare(
+    loomc_target_environment_t* target_environment,
     loom_serve_text_source_t* source, const loom_serve_text_options_t* options,
     loom_serve_text_storage_t* storage) {
   const iree_allocator_t host_allocator = source->host_allocator;
@@ -109,8 +110,9 @@ static iree_status_t loom_serve_text_prepare(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_allocate(
-        source->environment, &options->sources, options->sources.prepare,
-        IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
+        target_environment, source->environment, &options->sources,
+        options->sources.prepare, IREE_SV("prepare"),
+        iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
         iree_vm_module_span_from_array(modules), &source->compilation,
         host_allocator, &source->preparation);
@@ -193,13 +195,14 @@ static iree_status_t loom_serve_text_prepare(
 }
 
 iree_status_t loom_serve_text_source_initialize(
+    loomc_target_environment_t* target_environment,
     const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
     loom_serve_text_source_t* out_source,
     loom_serve_text_storage_t* out_storage) {
   memset(out_source, 0, sizeof(*out_source));
   out_source->host_allocator = host_allocator;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_prepare(out_source, options, out_storage));
+  IREE_RETURN_IF_ERROR(loom_serve_text_prepare(target_environment, out_source,
+                                               options, out_storage));
   const iree_vm_ref_type_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_module_register_types(out_source->environment, &table));
@@ -223,9 +226,9 @@ iree_status_t loom_serve_text_source_initialize(
                                       IREE_SVL("request_options"),
                                       IREE_SVL("bind_request")};
   return loom_serve_program_compile(
-      out_source->environment, &options->sources, options->sources.control,
-      IREE_ARRAYSIZE(roots), roots, &out_source->compilation, host_allocator,
-      &out_source->module);
+      target_environment, out_source->environment, &options->sources,
+      options->sources.control, IREE_ARRAYSIZE(roots), roots,
+      &out_source->compilation, host_allocator, &out_source->module);
 }
 
 void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {

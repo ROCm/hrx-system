@@ -15,6 +15,7 @@
 #include "loom/serve/runtime/program/preparation.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/storage.h"
+#include "loomc/target.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,7 +58,9 @@ typedef struct loom_serve_text_source_t {
 // failure and must be deinitialized by their owners. No device memory, queue
 // submission or shared pool mutation occurs. Option views are borrowed only
 // through this call; source-returned state may retain its own copied inputs.
+// target_environment supplies the native source grammar and VM compilation.
 iree_status_t loom_serve_text_source_initialize(
+    loomc_target_environment_t* target_environment,
     const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
     loom_serve_text_source_t* out_source,
     loom_serve_text_storage_t* out_storage);

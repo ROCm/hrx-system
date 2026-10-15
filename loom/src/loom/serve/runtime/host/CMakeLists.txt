@@ -27,6 +27,7 @@ loom_cc_library(
     iree::hal::drivers::task::executable::loaders::registration
     iree::task
     loom::binding::c::loomc
+    loom::binding::c::target::vm
     loom::binding::c::task_pool
     loom::binding::c::task_queue
   PUBLIC

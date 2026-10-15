@@ -14,6 +14,7 @@
 #include "loom/serve/runtime/program/sources.h"
 #include "loom/target/arch/cmd/program.h"
 #include "loomc/config.h"
+#include "loomc/target.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,7 +92,10 @@ typedef struct loom_serve_preparation_t loom_serve_preparation_t;
 // On failure all partial declarations are released and *out_preparation is
 // NULL.
 // report receives copied compiler diagnostics independently of this outcome.
+// target_environment supplies VM support and the complete source catalog
+// grammar and is borrowed only through this call.
 iree_status_t loom_serve_preparation_allocate(
+    loomc_target_environment_t* target_environment,
     iree_vm_environment_t* environment, const loom_serve_sources_t* sources,
     iree_string_view_t source_path, iree_string_view_t entry,
     iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,

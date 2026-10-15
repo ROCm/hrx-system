@@ -28,6 +28,16 @@ struct loomc_target_environment_t {
 
   // Prepared immutable pass capability tables over environment.
   loomc_target_pass_environment_t pass_environment;
+
+  // Composition storage; leaf environments instead borrow a static set.
+  struct {
+    // Owned provider union backing the prepared environment.
+    loom_target_provider_set_storage_t providers;
+    // Owned array of retained input environments.
+    loomc_target_environment_t** environments;
+    // Initialized references in environments, including partial construction.
+    loomc_host_size_t environment_count;
+  } composition;
 };
 
 struct loomc_target_profile_t {
@@ -273,6 +283,81 @@ loomc_status_t loomc_target_environment_create_from_provider_set_internal(
   return status;
 }
 
+loomc_status_t loomc_target_environment_create(
+    loomc_host_size_t environment_count,
+    loomc_target_environment_t* const* environments,
+    loomc_allocator_t allocator,
+    loomc_target_environment_t** out_target_environment) {
+  if (out_target_environment == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_target_environment must not be NULL");
+  }
+  *out_target_environment = NULL;
+  if (environment_count != 0 && environments == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "nonempty environment list requires storage");
+  }
+  for (loomc_host_size_t i = 0; i < environment_count; ++i) {
+    if (environments[i] == NULL) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "environment list contains NULL");
+    }
+  }
+
+  loomc_target_environment_t* target_environment = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc(
+      allocator, sizeof(*target_environment), (void**)&target_environment));
+  memset(target_environment, 0, sizeof(*target_environment));
+  iree_atomic_ref_count_init(&target_environment->ref_count);
+  target_environment->allocator = allocator;
+  loom_target_provider_set_storage_t* storage =
+      &target_environment->composition.providers;
+  loom_target_provider_set_storage_initialize(storage);
+  iree_status_t status = iree_ok_status();
+  if (environment_count != 0) {
+    status = iree_allocator_malloc_array(
+        iree_allocator_from_loomc(allocator), environment_count,
+        sizeof(*target_environment->composition.environments),
+        (void**)&target_environment->composition.environments);
+  }
+  for (loomc_host_size_t i = 0;
+       i < environment_count && iree_status_is_ok(status); ++i) {
+    loomc_target_environment_retain(environments[i]);
+    target_environment->composition
+        .environments[target_environment->composition.environment_count++] =
+        environments[i];
+    const loom_target_provider_set_t* source =
+        environments[i]->environment.provider_set;
+    for (iree_host_size_t j = 0;
+         j < source->provider_count && iree_status_is_ok(status); ++j) {
+      const loom_target_provider_t* provider = source->providers[j];
+      iree_host_size_t index = 0;
+      while (index < storage->provider_set.provider_count &&
+             storage->providers[index] != provider) {
+        ++index;
+      }
+      if (index == storage->provider_set.provider_count) {
+        status = loom_target_provider_set_storage_append(storage, provider);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_environment_initialize(
+        &storage->provider_set, &target_environment->environment);
+  }
+  loomc_status_t result = loomc_status_from_iree(status);
+  if (loomc_status_is_ok(result)) {
+    result = loomc_target_pass_environment_initialize(
+        target_environment, &target_environment->pass_environment);
+  }
+  if (loomc_status_is_ok(result)) {
+    *out_target_environment = target_environment;
+  } else {
+    loomc_target_environment_release(target_environment);
+  }
+  return result;
+}
+
 const loom_target_environment_t*
 loomc_target_environment_loom_target_environment(
     const loomc_target_environment_t* target_environment) {
@@ -507,6 +592,12 @@ void loomc_target_environment_release(
   loomc_target_pass_environment_deinitialize(
       &target_environment->pass_environment);
   loom_target_environment_deinitialize(&target_environment->environment);
+  for (loomc_host_size_t i = 0;
+       i < target_environment->composition.environment_count; ++i) {
+    loomc_target_environment_release(
+        target_environment->composition.environments[i]);
+  }
+  loomc_allocator_free(allocator, target_environment->composition.environments);
   loomc_allocator_free(allocator, target_environment);
 }
 

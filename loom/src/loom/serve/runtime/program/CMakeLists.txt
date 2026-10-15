@@ -242,6 +242,7 @@ loom_cc_library(
     iree::base
     iree::vm
     iree::vm::bytecode::module
+    loom::binding::c::loomc
   PUBLIC
 )
 
@@ -327,6 +328,8 @@ loom_cc_test(
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::vm
+    loom::binding::c::loomc
+    loom::binding::c::target::vm
   ARGS
     "--input_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/input/control.loom}}"
 )
@@ -348,6 +351,7 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::vm
     loom::binding::c::loomc
+    loom::binding::c::target::vm
   ARGS
     "--boundary_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/preparation/boundaries.loom}}"
 )

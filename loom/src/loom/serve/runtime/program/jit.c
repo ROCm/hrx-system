@@ -324,6 +324,11 @@ loom_serve_compilation_report_t* loom_serve_jit_report(loom_serve_jit_t* jit) {
   return jit->report;
 }
 
+loomc_target_environment_t* loom_serve_jit_target_environment(
+    const loom_serve_jit_t* jit) {
+  return jit->kernel.environment;
+}
+
 // Keeps prepared-low function facts in the same module through native emission.
 static iree_status_t loom_serve_jit_emit_module(
     const jit_compiler_t* compiler, loomc_workspace_t* workspace,
@@ -1222,27 +1227,23 @@ iree_status_t loom_serve_jit_stage_record(
       stage->entry_count, stage->entries, stage->host_allocator, out_command);
 }
 
-iree_status_t loom_serve_jit_compile_vm(const loom_serve_sources_t* sources,
-                                        iree_string_view_t source_path,
-                                        iree_host_size_t root_count,
-                                        const iree_string_view_t* roots,
-                                        loom_serve_compilation_report_t* report,
-                                        iree_allocator_t host_allocator,
-                                        iree_const_byte_span_t* out_image) {
+iree_status_t loom_serve_jit_compile_vm(
+    loomc_target_environment_t* target_environment,
+    const loom_serve_sources_t* sources, iree_string_view_t source_path,
+    iree_host_size_t root_count, const iree_string_view_t* roots,
+    loom_serve_compilation_report_t* report, iree_allocator_t host_allocator,
+    iree_const_byte_span_t* out_image) {
   *out_image = iree_const_byte_span_empty();
   if (!root_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VM program requires at least one source root");
   }
-  jit_compiler_t compiler = {0};
+  jit_compiler_t compiler = {.environment = target_environment};
+  loomc_target_environment_retain(compiler.environment);
   const loomc_allocator_t ca = loomc_allocator_from_iree(host_allocator);
-  iree_status_t status = iree_status_from_loomc(
-      loomc_target_environment_create_vm(ca, &compiler.environment));
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_jit_compiler_initialize(
-        NULL, LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG, report, &compiler,
-        host_allocator);
-  }
+  iree_status_t status = loom_serve_jit_compiler_initialize(
+      NULL, LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG, report, &compiler,
+      host_allocator);
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(loomc_target_profile_select(
         compiler.environment, loomc_make_cstring_view("vm:core"), ca,

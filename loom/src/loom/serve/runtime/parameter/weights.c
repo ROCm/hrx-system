@@ -301,8 +301,9 @@ static iree_status_t loom_serve_weight_prepare_policy(
   loom_serve_program_t* program = NULL;
   const iree_string_view_t roots[] = {IREE_SVL("prepare_weight")};
   iree_status_t status = loom_serve_program_allocate(
-      environment, &job->sources, job->policy_path, IREE_ARRAYSIZE(roots),
-      roots, iree_vm_module_span_empty(), loom_serve_jit_report(job->jit),
+      loom_serve_jit_target_environment(job->jit), environment, &job->sources,
+      job->policy_path, IREE_ARRAYSIZE(roots), roots,
+      iree_vm_module_span_empty(), loom_serve_jit_report(job->jit),
       host_allocator, &program);
   iree_vm_ref_types_t types = {0};
   if (iree_status_is_ok(status)) {

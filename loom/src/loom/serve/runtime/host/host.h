@@ -33,10 +33,11 @@ typedef loomc_status_t(
 
 // Application-global compiler target composition. The environment factory and
 // provider descriptors are process-lifetime functions/data from linked LoomC
-// target leaves. The host creates and owns one environment and copies the
-// provider pointer list. Device-only hosts may omit this configuration.
+// target leaves. The host composes the supplied packages with VM preparation
+// support, owns the resulting environment, and copies the provider pointer
+// list. Device-only hosts may omit this configuration.
 typedef struct loom_serve_compiler_options_t {
-  // Factory for the exact linked compiler target environment.
+  // Factory for the linked native compiler packages; VM support is added once.
   loom_serve_target_environment_create_fn_t target_environment_create;
   // Ordered HAL target routes borrowed for host creation.
   const struct loomc_iree_hal_target_provider_t* const* target_providers;
@@ -48,7 +49,7 @@ typedef struct loom_serve_compiler_options_t {
 // Worker count must be positive. Proactors are created lazily per NUMA node.
 // The host always owns a task driver backed by this exact executor; that
 // runtime capability is independent of optional native x86 compiler support.
-// compiler_options may be NULL when the host will never JIT kernels.
+// compiler_options may be NULL when the host will never compile model sources.
 iree_status_t loom_serve_host_create(
     iree_host_size_t worker_count,
     const loom_serve_compiler_options_t* compiler_options,
@@ -74,8 +75,8 @@ iree_hal_driver_t* loom_serve_host_task_driver(const loom_serve_host_t* host);
 // Worker ordinals match the shared task pool and executor.
 loomc_task_sink_t loom_serve_host_compiler_sink(const loom_serve_host_t* host);
 
-// Exact compiler target environment, or NULL for a device-only host. Borrowed
-// through host release.
+// Shared native and VM compiler environment, or NULL for a device-only host.
+// Borrowed through host release. All model source catalogs use this grammar.
 loomc_target_environment_t* loom_serve_host_target_environment(
     const loom_serve_host_t* host);
 

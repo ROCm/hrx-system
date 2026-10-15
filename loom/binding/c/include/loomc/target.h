@@ -360,6 +360,26 @@ LOOMC_API_EXPORT void loomc_target_profile_retain(
 LOOMC_API_EXPORT void loomc_target_profile_release(
     loomc_target_profile_t* profile);
 
+/// Creates one immutable environment from explicitly selected target packages.
+///
+/// The result retains every input environment and includes each identical
+/// provider contribution once, in first-occurrence order. Distinct providers
+/// claiming the same target family or artifact format are rejected. An empty
+/// list creates an environment with no target providers. The input array is
+/// borrowed only for this call; no element may be NULL.
+///
+/// Create profiles against the resulting environment before using them with
+/// its contexts and compilers. Composition does not change the compatibility
+/// domain of profiles previously created against an input environment.
+///
+/// On success the caller owns one reference to out_target_environment. On
+/// failure it is NULL and no input ownership transfers.
+LOOMC_API_EXPORT loomc_status_t loomc_target_environment_create(
+    loomc_host_size_t environment_count,
+    loomc_target_environment_t* const* environments,
+    loomc_allocator_t allocator,
+    loomc_target_environment_t** out_target_environment);
+
 /// Retains a target environment for another owner.
 ///
 /// @param target_environment Target environment to retain.

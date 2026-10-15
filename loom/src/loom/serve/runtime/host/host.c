@@ -14,6 +14,7 @@
 #include "iree/task/topology.h"
 #include "loomc/iree.h"
 #include "loomc/iree/task_pool.h"
+#include "loomc/target/vm.h"
 #include "loomc/task_queue.h"
 
 struct loom_serve_host_t {
@@ -91,6 +92,26 @@ static iree_status_t loom_serve_host_create_task_driver(
   return status;
 }
 
+static iree_status_t loom_serve_host_create_compiler_environment(
+    loom_serve_target_environment_create_fn_t create,
+    iree_allocator_t host_allocator,
+    loomc_target_environment_t** out_environment) {
+  const loomc_allocator_t allocator = loomc_allocator_from_iree(host_allocator);
+  loomc_target_environment_t* environments[2] = {NULL, NULL};
+  loomc_status_t status = create(allocator, &environments[0]);
+  if (loomc_status_is_ok(status)) {
+    status = loomc_target_environment_create_vm(allocator, &environments[1]);
+  }
+  if (loomc_status_is_ok(status)) {
+    status = loomc_target_environment_create(
+        IREE_ARRAYSIZE(environments), environments, allocator, out_environment);
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(environments); ++i) {
+    loomc_target_environment_release(environments[i]);
+  }
+  return iree_status_from_loomc(status);
+}
+
 iree_status_t loom_serve_host_create(
     iree_host_size_t worker_count,
     const loom_serve_compiler_options_t* compiler_options,
@@ -114,10 +135,9 @@ iree_status_t loom_serve_host_create(
     if (iree_status_is_ok(status)) {
       memcpy(host->target_providers, compiler_options->target_providers,
              host->target_provider_count * sizeof(*host->target_providers));
-      status =
-          iree_status_from_loomc(compiler_options->target_environment_create(
-              loomc_allocator_from_iree(host_allocator),
-              &host->target_environment));
+      status = loom_serve_host_create_compiler_environment(
+          compiler_options->target_environment_create, host_allocator,
+          &host->target_environment);
     }
   }
   iree_task_topology_t topology;

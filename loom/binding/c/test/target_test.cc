@@ -145,6 +145,15 @@ iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
   return iree_ok_status();
 }
 
+iree_status_t EmitFakeWasmArtifact(const loom_target_emit_request_t* request,
+                                   bool* out_emitted,
+                                   loom_target_emit_artifact_t* out_artifact) {
+  IREE_RETURN_IF_ERROR(EmitFakeArtifact(request, out_emitted, out_artifact));
+  out_artifact->target_artifact_format =
+      LOOM_TARGET_ARTIFACT_FORMAT_WASM_BINARY;
+  return iree_ok_status();
+}
+
 iree_status_t EmitFakeArtifactWithDiagnostic(
     const loom_target_emit_request_t* request, bool* out_emitted,
     loom_target_emit_artifact_t* out_artifact) {
@@ -218,7 +227,7 @@ static const loom_target_emitter_t kFakeWasmEmitter = {
     .default_identifier = {"fake.wasm", 9},
     .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_WASM_BINARY,
     .default_pipeline_options = {},
-    .emit = EmitFakeArtifact,
+    .emit = EmitFakeWasmArtifact,
 };
 
 static const loom_target_emitter_t kFakeDiagnosticEmitter = {
@@ -652,6 +661,85 @@ void ExpectFailedEmitTargetResult(const loomc_result_t* result) {
   const loomc_diagnostic_t* diagnostic = loomc_result_diagnostic_at(result, 0);
   ASSERT_NE(diagnostic, nullptr);
   EXPECT_EQ(ToString(diagnostic->code), "EMIT/TARGET");
+}
+
+TEST(TargetTest, ComposedEnvironmentRetainsAndDeduplicatesPackages) {
+  const loom_target_provider_t* providers[] = {
+      &kFakeElfProvider,
+      &kFakeWasmProvider,
+  };
+  const auto first_set = loom_target_provider_set_make(providers, 1);
+  const auto both_set = loom_target_provider_set_make(providers, 2);
+  auto first = CreateTargetEnvironmentFromProviderSet(&first_set);
+  auto both = CreateTargetEnvironmentFromProviderSet(&both_set);
+  loomc_target_environment_t* inputs[] = {
+      first.get(),
+      both.get(),
+      first.get(),
+  };
+  loomc_target_environment_t* composed = nullptr;
+  LOOMC_ASSERT_OK(loomc_target_environment_create(
+      IREE_ARRAYSIZE(inputs), inputs, loomc_allocator_system(), &composed));
+  TargetEnvironmentPtr environment(composed);
+  first.reset();
+  both.reset();
+
+  const auto* native =
+      loomc_target_environment_loom_target_environment(environment.get());
+  ASSERT_EQ(native->provider_set->provider_count, 2u);
+  EXPECT_EQ(native->provider_set->providers[0], &kFakeElfProvider);
+  EXPECT_EQ(native->provider_set->providers[1], &kFakeWasmProvider);
+  auto context = CreateContext();
+  auto workspace = CreateWorkspace();
+  auto module = CreateIdentityModule(context.get(), workspace.get(), "entry");
+  for (const char* format : {"fake-elf", "fake-wasm"}) {
+    const loomc_emit_options_t options = {
+        .artifact_format = loomc_make_cstring_view(format),
+    };
+    auto result =
+        EmitModule(environment.get(), workspace.get(), module.get(), &options);
+    ExpectSucceededResult(result.get());
+    ASSERT_EQ(loomc_result_artifact_count(result.get()), 1u);
+    EXPECT_EQ(ToString(loomc_result_artifact_at(result.get(), 0)->format),
+              format);
+  }
+}
+
+TEST(TargetTest, ComposedEnvironmentRejectsDistinctFamilyOwners) {
+  const auto first_set = loom_target_provider_set_make(kTestTargetProviders, 1);
+  const auto duplicate_provider = kTestTargetProvider;
+  const loom_target_provider_t* duplicate_providers[] = {&duplicate_provider};
+  const auto second_set = loom_target_provider_set_make(duplicate_providers, 1);
+  auto first = CreateTargetEnvironmentFromProviderSet(&first_set);
+  auto second = CreateTargetEnvironmentFromProviderSet(&second_set);
+  loomc_target_environment_t* inputs[] = {first.get(), second.get()};
+  loomc_target_environment_t* composed = nullptr;
+  auto status = loomc_target_environment_create(
+      IREE_ARRAYSIZE(inputs), inputs, loomc_allocator_system(), &composed);
+  EXPECT_EQ(loomc_status_code(status), LOOMC_STATUS_INVALID_ARGUMENT);
+  loomc_status_free(status);
+  EXPECT_EQ(composed, nullptr);
+}
+
+TEST(TargetTest, ComposedEnvironmentValidatesInputStorage) {
+  loomc_target_environment_t* composed = nullptr;
+  auto status = loomc_target_environment_create(
+      1, nullptr, loomc_allocator_system(), &composed);
+  EXPECT_EQ(loomc_status_code(status), LOOMC_STATUS_INVALID_ARGUMENT);
+  loomc_status_free(status);
+  EXPECT_EQ(composed, nullptr);
+  loomc_target_environment_t* inputs[] = {nullptr};
+  status = loomc_target_environment_create(1, inputs, loomc_allocator_system(),
+                                           &composed);
+  EXPECT_EQ(loomc_status_code(status), LOOMC_STATUS_INVALID_ARGUMENT);
+  loomc_status_free(status);
+  EXPECT_EQ(composed, nullptr);
+  LOOMC_ASSERT_OK(loomc_target_environment_create(
+      0, nullptr, loomc_allocator_system(), &composed));
+  TargetEnvironmentPtr environment(composed);
+  EXPECT_EQ(loomc_target_environment_loom_target_environment(environment.get())
+                ->provider_set->provider_count,
+            0u);
 }
 
 TEST(TargetTest, EmitSelectsOnlyLinkedEmitterWhenFormatOmitted) {

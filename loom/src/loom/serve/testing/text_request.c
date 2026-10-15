@@ -17,6 +17,8 @@
 #include "loom/serve/service/text/chat.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
+#include "loomc/iree.h"
+#include "loomc/target/vm.h"
 
 IREE_FLAG(string, control, "", "Chat control VM program (.loom or .loombc).");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
@@ -167,12 +169,19 @@ static iree_status_t loom_serve_text_request_check_run(
       IREE_SVL("request_options")};
   loom_serve_program_t* program = NULL;
   const loom_serve_sources_t sources = {.base_directory = IREE_SV(".")};
+  loomc_target_environment_t* target_environment = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_target_environment_create_vm(
+        loomc_allocator_from_iree(host_allocator), &target_environment));
+  }
   if (iree_status_is_ok(status)) {
     status = loom_serve_program_allocate(
-        environment, &sources, iree_make_cstring_view(FLAG_control),
-        IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_from_array(libraries),
-        &compilation, host_allocator, &program);
+        target_environment, environment, &sources,
+        iree_make_cstring_view(FLAG_control), IREE_ARRAYSIZE(roots), roots,
+        iree_vm_module_span_from_array(libraries), &compilation, host_allocator,
+        &program);
   }
+  loomc_target_environment_release(target_environment);
   loom_serve_text_chat_policy_t policy = {0};
   iree_vm_buffer_t* options = NULL;
   if (iree_status_is_ok(status)) {

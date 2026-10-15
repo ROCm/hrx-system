@@ -221,6 +221,7 @@ loom_cc_library(
         ":compilation",
         ":jit",
         ":sources",
+        "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode:module",
@@ -292,6 +293,8 @@ loom_cc_test(
     deps = [
         ":input",
         ":program",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",
@@ -313,6 +316,7 @@ loom_cc_test(
     deps = [
         ":preparation",
         "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",

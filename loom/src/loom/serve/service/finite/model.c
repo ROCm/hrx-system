@@ -293,6 +293,8 @@ static iree_status_t loom_serve_finite_prepare(
   iree_vm_variant_t results[7] = {0};
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_allocate(
+        loom_serve_host_target_environment(
+            loom_serve_device_host(model->owner)),
         model->control.environment, &options->sources, options->sources.prepare,
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
@@ -757,6 +759,7 @@ static iree_status_t loom_serve_finite_load_prepare(
   const iree_string_view_t roots[] = {
       IREE_SVL("prepare_request"), IREE_SVL("prepare_batch"), IREE_SVL("run")};
   iree_status_t status = loom_serve_program_compile(
+      loom_serve_host_target_environment(loom_serve_device_host(model->owner)),
       model->control.environment, &load->options.sources,
       load->options.sources.control, IREE_ARRAYSIZE(roots), roots,
       &model->compilation, host_allocator, &load->module);
