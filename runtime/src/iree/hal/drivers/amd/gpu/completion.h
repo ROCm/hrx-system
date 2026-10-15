@@ -22,17 +22,18 @@ extern "C" {
 // The callback runs only on the completion worker, without a worker-owned lock.
 //
 // A native wait failure is delivered once to every source before worker exit.
-// The source records terminal queue failure; its return value is then ignored.
+// Queue sources record terminal failure; the return value is then ignored.
 // Failure does not establish native quiescence or permit releasing GPU storage.
 typedef bool (*iree_hal_amd_gpu_completion_fn_t)(void* user_data,
                                                  amdf_status_t wait_status);
 
-// One queue's protocol-specific completion observation and host retirement.
-// Sources are immutable and borrowed until completion deinitialization joins.
+// One provisioned completion source, such as queue retirement or shader
+// reports. Sources are immutable and borrowed until completion deinitialization
+// joins.
 typedef struct iree_hal_amd_gpu_completion_source_t {
-  // Bounded retirement or terminal native-failure delivery.
+  // Bounded observation or terminal native-failure delivery.
   iree_hal_amd_gpu_completion_fn_t fn;
-  // Borrowed queue state, live through the callback's final access.
+  // Borrowed source state, live through the callback's final access.
   void* user_data;
 } iree_hal_amd_gpu_completion_source_t;
 
@@ -55,7 +56,7 @@ typedef struct iree_hal_amd_gpu_completion_exit_callback_t {
 typedef struct iree_hal_amd_gpu_completion_t {
   // Borrowed context whose event and API table outlive the worker join.
   const iree_hal_amd_gpu_context_t* context;
-  // Number of immutable provisioned queue sources.
+  // Number of immutable provisioned sources.
   iree_host_size_t source_count;
   // Borrowed contiguous source array, live through the worker join.
   const iree_hal_amd_gpu_completion_source_t* sources;

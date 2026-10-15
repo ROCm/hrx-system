@@ -1300,6 +1300,11 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
                                 submission, &completion_code)) {
       break;
     }
+    if (queue->options.feedback) {
+      // Native retirement makes this dispatch's reports observable. Drain the
+      // ready shared prefix before waking host completion consumers.
+      iree_hal_amd_gpu_feedback_drain(queue->options.feedback);
+    }
     const uint64_t consumed_words = action->consumed_words;
     const uint64_t consumed_arguments = action->consumed_arguments;
     if (action->download.length) {

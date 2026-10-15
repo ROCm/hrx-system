@@ -9,6 +9,7 @@
 
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
+#include "iree/hal/drivers/amd/gpu/feedback.h"
 #include "iree/hal/drivers/amd/gpu/kernarg.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 
@@ -32,6 +33,8 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   // Borrowed device service for native allocation and deferred final cleanup.
   // The parent joins this service before releasing its native context.
   iree_hal_memory_maintenance_t* maintenance;
+  // Device-owned shared report channel, or NULL when feedback is disabled.
+  iree_hal_amd_gpu_feedback_t* feedback;
 } iree_hal_amd_gpu_executable_options_t;
 
 // Copies the public artifact, admits its image, and loads native backing for

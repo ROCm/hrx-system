@@ -9,6 +9,101 @@
 
 iree_add_all_subdirs()
 
+loom_target_profile(
+  NAME
+    "feedback_profile_gfx11-generic"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx11-generic"
+  REQUIRES
+    LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE
+)
+
+loom_target_profile(
+  NAME
+    "feedback_profile_gfx12-generic"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx12-generic"
+  REQUIRES
+    LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE
+)
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "feedback_gfx11-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/cts:feedback_gfx11-generic"
+  TARGET
+    "::feedback_profile_gfx11-generic"
+  OUTPUT
+    "feedback_gfx11-generic.hsaco"
+  SRCS
+    "feedback.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "feedback_gfx12-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/cts:feedback_gfx12-generic"
+  TARGET
+    "::feedback_profile_gfx12-generic"
+  OUTPUT
+    "feedback_gfx12-generic.hsaco"
+  SRCS
+    "feedback.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE)
+iree_c_embed_data(
+  NAME
+    feedback_images
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/feedback_gfx11-generic.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/feedback_gfx12-generic.hsaco"
+  C_FILE_OUTPUT
+    "feedback_images.c"
+  H_FILE_OUTPUT
+    "feedback_images.h"
+  IDENTIFIER
+    "iree_hal_amd_gpu_feedback_images"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    feedback_test
+  SRCS
+    "feedback_test.cc"
+  DEPS
+    ::feedback_images
+    ::test_device
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME

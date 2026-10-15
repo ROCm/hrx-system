@@ -7,6 +7,7 @@
 load("//build_tools/amdgpu:selectors.bzl", "iree_amdgpu_target_selectors_flag")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -36,6 +37,7 @@ iree_runtime_cc_library(
         ":completion",
         ":context",
         ":executable",
+        ":feedback",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -68,7 +70,9 @@ iree_runtime_cc_library(
     visibility = ["//runtime/src/iree/hal/drivers/amd/gpu:__subpackages__"],
     deps = [
         ":context",
+        ":feedback",
         ":kernarg",
+        ":source_context",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
@@ -89,6 +93,73 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "source_context",
+    srcs = ["source_context.c"],
+    hdrs = ["source_context.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "source_context_test",
+    srcs = ["source_context_test.cc"],
+    deps = [
+        ":source_context",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "source_context_fuzz",
+    srcs = ["source_context_fuzz.cc"],
+    deps = [
+        ":source_context",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "feedback",
+    srcs = ["feedback.c"],
+    hdrs = ["feedback.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":completion",
+        ":context",
+        ":source_context",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "feedback_test",
+    srcs = ["feedback_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":context",
+        ":feedback",
+        ":source_context",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "executable_test",
     srcs = ["executable_test.cc"],
@@ -96,7 +167,9 @@ iree_runtime_cc_test(
     deps = [
         ":context",
         ":executable",
+        ":feedback",
         ":kernarg",
+        ":source_context",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",

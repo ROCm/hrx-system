@@ -41,7 +41,7 @@ class GpuNativeTest : public ::testing::Test {
 
   void TearDown() override;
 
-  void Create();
+  void Create(iree_hal_device_runtime_feature_flags_t runtime_features = 0);
 
   void CreateSemaphore(iree_hal_semaphore_t** out_semaphore);
 

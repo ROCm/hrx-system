@@ -4,6 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -12,6 +15,63 @@ package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+_FEEDBACK_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
+])
+
+_FEEDBACK_TARGETS = [
+    "gfx11-generic",
+    "gfx12-generic",
+]
+
+[
+    loom_target_profile(
+        name = "feedback_profile_" + target,
+        family = "amdgpu",
+        selector = target,
+        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    )
+    for target in _FEEDBACK_TARGETS
+]
+
+[
+    loom_kernel_binary(
+        name = "feedback_" + target,
+        testonly = True,
+        srcs = ["feedback.loom"],
+        out = "feedback_" + target + ".hsaco",
+        target = ":feedback_profile_" + target,
+        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    )
+    for target in _FEEDBACK_TARGETS
+]
+
+iree_c_embed_data(
+    name = "feedback_images",
+    testonly = True,
+    srcs = [":feedback_" + target for target in _FEEDBACK_TARGETS],
+    c_file_output = "feedback_images.c",
+    h_file_output = "feedback_images.h",
+    identifier = "iree_hal_amd_gpu_feedback_images",
+    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_test(
+    name = "feedback_test",
+    srcs = ["feedback_test.cc"],
+    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    deps = [
+        ":feedback_images",
+        ":test_device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 iree_runtime_cc_library(

@@ -42,10 +42,12 @@ typedef struct iree_hal_amd_gpu_device_t {
   uint32_t queue_count;
   // Owned queue references. Every queue joins before any signal backing frees.
   iree_hal_queue_t** queues;
-  // Immutable inline sources, one per queue and one final shutdown observer.
+  // Immutable queue sources, optional feedback, and a final shutdown observer.
   iree_hal_amd_gpu_completion_source_t* sources;
   // Sole native-event completion/retirement worker.
   iree_hal_amd_gpu_completion_t completion;
+  // Optional shared shader reports, drained by the same completion worker.
+  iree_hal_amd_gpu_feedback_t feedback;
   // Retained placement-local process infrastructure, independent of the pool.
   iree_async_proactor_pool_entry_t* proactor_entry;
   // Cold lifetime handoff; submission never accesses its mutex/notification.
@@ -349,6 +351,9 @@ static bool iree_hal_amd_gpu_device_release_children(
     iree_hal_queue_release(device->queues[i]);
     device->queues[i] = NULL;
   }
+  if (!iree_hal_amd_gpu_feedback_deinitialize(&device->feedback)) {
+    return false;
+  }
   amdf_status_t completion_status =
       iree_hal_amd_gpu_context_deinitialize_completion(device->context);
   if (!amdf_status_is_ok(completion_status)) {
@@ -402,6 +407,11 @@ static bool iree_hal_amd_gpu_device_poll_shutdown(void* user_data,
   if (amdf_status_is_ok(wait_status) &&
       iree_hal_amd_gpu_device_is_closing(device) &&
       iree_hal_amd_gpu_device_is_idle(device)) {
+    if (device->feedback.context) {
+      // All producers have retired. An interrupted reservation cannot become
+      // ready now; consume the final prefix without waiting for it.
+      iree_hal_amd_gpu_feedback_drain(&device->feedback);
+    }
     amdf_status_t status =
         iree_hal_amd_gpu_completion_request_stop(&device->completion);
     if (!amdf_status_is_ok(status)) {
@@ -450,6 +460,22 @@ iree_hal_amd_gpu_device_family_publication(
              : modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
 }
 
+typedef struct iree_hal_amd_gpu_device_feedback_prepare_t {
+  // Unpublished device borrowed until the service call joins.
+  iree_hal_amd_gpu_device_t* device;
+  // Construction result transferred back to the creating thread.
+  iree_status_t status;
+} iree_hal_amd_gpu_device_feedback_prepare_t;
+
+static void iree_hal_amd_gpu_device_prepare_feedback(void* user_data) {
+  iree_hal_amd_gpu_device_feedback_prepare_t* prepare = user_data;
+  iree_hal_amd_gpu_device_t* device = prepare->device;
+  prepare->status = iree_hal_amd_gpu_feedback_initialize(
+      device->context, (iree_hal_device_t*)device, &device->memory.control,
+      device->memory.capabilities.address_domain_ordinal,
+      device->host_allocator, &device->feedback);
+}
+
 iree_status_t iree_hal_amd_gpu_device_create(
     iree_hal_amd_gpu_context_t* context, iree_string_view_t display_name,
     const iree_hal_amd_gpu_device_options_t* options,
@@ -457,7 +483,10 @@ iree_status_t iree_hal_amd_gpu_device_create(
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
   *out_device = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_device_create_params_verify_runtime_features(
-      create_params, IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_NONE));
+      create_params, IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK));
+  const bool feedback_enabled =
+      iree_any_bit_set(create_params->runtime_features,
+                       IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK);
   uint32_t family_ordinal = options->queue_family_ordinal;
   if (family_ordinal == UINT32_MAX) {
     for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
@@ -485,10 +514,11 @@ iree_status_t iree_hal_amd_gpu_device_create(
                             "GPU family has no supported PM4 publication");
   }
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_device_t);
+  const uint32_t source_count = options->queue_count + 1 + feedback_enabled;
   if (!iree_host_size_checked_mul_add(total_size, options->queue_count,
                                       sizeof(iree_hal_queue_t*), &total_size) ||
       !iree_host_size_checked_mul_add(
-          total_size, options->queue_count + 1,
+          total_size, source_count,
           sizeof(iree_hal_amd_gpu_completion_source_t), &total_size) ||
       !iree_host_size_checked_mul_add(
           total_size, (iree_host_size_t)context->memory_scope_count + 1,
@@ -508,8 +538,7 @@ iree_status_t iree_hal_amd_gpu_device_create(
       (iree_hal_amd_gpu_completion_source_t*)(device->queues +
                                               options->queue_count);
   device->memory.storage =
-      (iree_hal_amd_fabric_memory_storage_t*)(device->sources +
-                                              options->queue_count + 1);
+      (iree_hal_amd_fabric_memory_storage_t*)(device->sources + source_count);
   iree_slim_mutex_initialize(&device->shutdown.mutex);
   iree_notification_initialize(&device->shutdown.notification);
   snprintf(device->processor_name, sizeof(device->processor_name), "gfx%u%u%x",
@@ -555,6 +584,13 @@ iree_status_t iree_hal_amd_gpu_device_create(
           host_allocator, &device->memory.allocations);
     }
   }
+  if (iree_status_is_ok(status) && feedback_enabled) {
+    iree_hal_amd_gpu_device_feedback_prepare_t prepare = {.device = device};
+    iree_hal_memory_maintenance_call(device->memory.service,
+                                     iree_hal_amd_gpu_device_prepare_feedback,
+                                     &prepare);
+    status = prepare.status;
+  }
   iree_hal_amd_gpu_pm4_queue_options_t queue_options = {
       .family_ordinal = family_ordinal,
       .publication_mode = publication_mode,
@@ -562,6 +598,7 @@ iree_status_t iree_hal_amd_gpu_device_create(
       .memory = &device->memory.control,
       .service = device->memory.service,
       .allocations = &device->memory.allocations,
+      .feedback = feedback_enabled ? &device->feedback : NULL,
       .retirement_capacity = options->pm4.retirement_capacity,
       .argument_capacity = options->pm4.argument_capacity,
       .capture_block_size = options->pm4.capture_block_size,
@@ -592,13 +629,19 @@ iree_status_t iree_hal_amd_gpu_device_create(
   }
   if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_device_initialize_memory(device, family_ordinal);
-    device->sources[device->queue_count] =
-        (iree_hal_amd_gpu_completion_source_t){
-            iree_hal_amd_gpu_device_poll_shutdown, device};
+    // Queue retirement is observed before the final feedback drain so shutdown
+    // cannot pass a report published between a drain and native completion.
+    if (feedback_enabled) {
+      device->sources[device->queue_count] =
+          (iree_hal_amd_gpu_completion_source_t){iree_hal_amd_gpu_feedback_poll,
+                                                 &device->feedback};
+    }
+    device->sources[source_count - 1] = (iree_hal_amd_gpu_completion_source_t){
+        iree_hal_amd_gpu_device_poll_shutdown, device};
     // Startup is the final fallible step. Its exit callback cannot consume the
     // device until the caller's eventual last release completes the handoff.
     status = iree_hal_amd_gpu_completion_initialize(
-        context, device->queue_count + 1, device->sources,
+        context, source_count, device->sources,
         (iree_hal_amd_gpu_completion_exit_callback_t){
             iree_hal_amd_gpu_device_completion_exit, device},
         affinity, host_allocator, &device->completion);
@@ -711,6 +754,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .native_family_ordinal = device->memory.family.queue_family_ordinal,
       .memory = &device->memory.control,
       .maintenance = device->memory.service,
+      .feedback = device->feedback.context ? &device->feedback : NULL,
   };
   return iree_hal_amd_gpu_executable_create(family, device->context, &options,
                                             params, device->host_allocator,

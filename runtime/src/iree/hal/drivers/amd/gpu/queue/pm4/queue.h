@@ -9,6 +9,7 @@
 
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/completion.h"
+#include "iree/hal/drivers/amd/gpu/feedback.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 
@@ -34,6 +35,8 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   iree_hal_memory_maintenance_t* service;
   // Borrowed device-shared allocation executor, independent of publication.
   iree_hal_amd_gpu_allocation_context_t* allocations;
+  // Optional shared channel drained before host completion on the sole worker.
+  iree_hal_amd_gpu_feedback_t* feedback;
   // Prepared physical cache-control encoding.
   iree_hal_amd_gpu_pm4_barrier_profile_t barriers;
   // Power-of-two number of simultaneously published native completion records.

@@ -279,7 +279,10 @@ loom_test(
     name = "ubsan_test",
     srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_ubsan_actual.loom"],
     # Authored assertions must provision feedback without insertion options.
-    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        RDNA_HARDWARE_PROFILE,
+    ],
 )
 
 loom_test(

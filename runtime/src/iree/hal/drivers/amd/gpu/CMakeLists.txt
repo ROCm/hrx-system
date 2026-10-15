@@ -21,6 +21,7 @@ iree_cc_library(
     ::completion
     ::context
     ::executable
+    ::feedback
     amdf::headers
     iree::async
     iree::async::util::proactor_pool
@@ -56,7 +57,9 @@ iree_cc_library(
     "executable.c"
   DEPS
     ::context
+    ::feedback
     ::kernarg
+    ::source_context
     amdf::headers
     iree::base
     iree::base::core_headers
@@ -78,6 +81,84 @@ iree_cc_library(
 )
 endif()
 
+iree_cc_library(
+  NAME
+    source_context
+  HDRS
+    "source_context.h"
+  SRCS
+    "source_context.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    source_context_test
+  SRCS
+    "source_context_test.cc"
+  DEPS
+    ::source_context
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_fuzz(
+  NAME
+    source_context_fuzz
+  SRCS
+    "source_context_fuzz.cc"
+  DEPS
+    ::source_context
+    iree::base
+    iree::hal
+)
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    feedback
+  HDRS
+    "feedback.h"
+  SRCS
+    "feedback.c"
+  DEPS
+    ::completion
+    ::context
+    ::source_context
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    feedback_test
+  SRCS
+    "feedback_test.cc"
+  DEPS
+    ::context
+    ::feedback
+    ::source_context
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
 if(AMDF_BUILD)
 iree_cc_test(
   NAME
@@ -87,7 +168,9 @@ iree_cc_test(
   DEPS
     ::context
     ::executable
+    ::feedback
     ::kernarg
+    ::source_context
     amdf::headers
     iree::base
     iree::base::core_headers

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/alignment.h"
+#include "iree/base/internal/debugging.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amd/fabric/buffer.h"
@@ -116,7 +117,8 @@ static iree_status_t iree_hal_amd_gpu_executable_parse(
 // services belonging to an individual dispatch remain recorded on its function.
 static iree_status_t iree_hal_amd_gpu_executable_admit(
     const iree_hal_amd_gpu_image_t* image,
-    const iree_hal_amd_gpu_target_identity_t* target) {
+    const iree_hal_amd_gpu_executable_options_t* options) {
+  const iree_hal_amd_gpu_target_identity_t* target = options->target;
   if (image->metadata.kernel_count > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "GPU function count exceeds HAL token indices");
@@ -144,7 +146,21 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
       IREE_SV("iree_feedback_config"),
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(service_globals); ++i) {
-    if (iree_hal_amd_gpu_image_find_symbol(image, service_globals[i])) {
+    const iree_hal_amd_gpu_image_symbol_t* symbol =
+        iree_hal_amd_gpu_image_find_symbol(image, service_globals[i]);
+    if (!symbol) {
+      continue;
+    }
+    if (i == 2 && options->feedback) {
+      if (symbol->kind != IREE_HAL_AMD_GPU_IMAGE_SYMBOL_DATA ||
+          symbol->address.kind != IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMAGE ||
+          !(symbol->access & IREE_HAL_AMD_GPU_IMAGE_ACCESS_WRITE) ||
+          symbol->length < sizeof(iree_hal_amd_gpu_feedback_config_t)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "GPU feedback configuration global has an invalid layout");
+      }
+    } else {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
           "GPU image requires runtime service global `%.*s`, which the native "
@@ -200,6 +216,45 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
         (int)artifact.target.size, artifact.target.data,
         (int)target->target.size, target->target.data, compatibility);
   }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amd_gpu_executable_publish_feedback(
+    iree_hal_amd_gpu_executable_t* executable,
+    iree_hal_amd_gpu_feedback_t* feedback) {
+  const iree_hal_amd_gpu_image_symbol_t* config_symbol =
+      iree_hal_amd_gpu_image_find_symbol(&executable->image,
+                                         IREE_SV("iree_feedback_config"));
+  if (!config_symbol) {
+    return iree_ok_status();
+  }
+  iree_const_byte_span_t site_table = iree_const_byte_span_empty();
+  const iree_hal_amd_gpu_image_symbol_t* sites =
+      iree_hal_amd_gpu_image_find_symbol(&executable->image,
+                                         IREE_SV("loom_sanitizer_sites"));
+  if (sites) {
+    if (sites->kind != IREE_HAL_AMD_GPU_IMAGE_SYMBOL_DATA ||
+        sites->address.kind != IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMAGE ||
+        !sites->length ||
+        sites->address.offset > executable->memory.contents.data_length ||
+        sites->length >
+            executable->memory.contents.data_length - sites->address.offset) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "GPU sanitizer site table is outside the loaded image");
+    }
+    site_table = iree_make_const_byte_span(
+        executable->memory.contents.data + sites->address.offset,
+        sites->length);
+  }
+  const iree_hal_amd_gpu_source_context_t* source = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_source_context_registry_register(
+      &feedback->sources, site_table, &source));
+  iree_hal_amd_gpu_feedback_config_t config = feedback->config;
+  config.source_context = (uint64_t)(uintptr_t)source;
+  IREE_TSAN_RELEASE((void*)source);
+  memcpy(executable->memory.contents.data + config_symbol->address.offset,
+         &config, sizeof(config));
   return iree_ok_status();
 }
 
@@ -520,6 +575,10 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
       }
     }
   }
+  if (iree_status_is_ok(status) && options->feedback) {
+    status = iree_hal_amd_gpu_executable_publish_feedback(executable,
+                                                          options->feedback);
+  }
   if (iree_status_is_ok(status)) {
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
         executable->context->api->host_mapping_cache_control(
@@ -569,8 +628,7 @@ iree_status_t iree_hal_amd_gpu_executable_create(
   iree_hal_amd_gpu_image_t image = {0};
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_executable_parse(
       params->executable_data, host_allocator, &image));
-  iree_status_t status =
-      iree_hal_amd_gpu_executable_admit(&image, options->target);
+  iree_status_t status = iree_hal_amd_gpu_executable_admit(&image, options);
   iree_host_size_t byte_length = 0, functions_offset = 0, globals_offset = 0;
   iree_host_size_t exports_offset = 0;
   iree_host_size_t packet_count = 0, packets_offset = 0, program_offset = 0;

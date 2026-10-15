@@ -14,8 +14,10 @@
 #include <vector>
 
 #include "iree/base/alignment.h"
+#include "iree/hal/drivers/amd/gpu/feedback.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco_test_util.h"
+#include "iree/hal/drivers/amd/gpu/source_context.h"
 #include "iree/hal/memory/maintenance_thread.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -249,6 +251,8 @@ struct FailingAllocator {
 class ExecutableTest : public ::testing::TestWithParam<size_t> {
  protected:
   void SetUp() override {
+    iree_hal_amd_gpu_source_context_registry_initialize(iree_allocator_system(),
+                                                        &feedback_.sources);
     const auto& file = iree_hal_amd_gpu_hip_images_create()[GetParam()];
     bytes_.assign(file.data, file.data + file.size);
     RecordProperty("target", file.name);
@@ -301,6 +305,7 @@ class ExecutableTest : public ::testing::TestWithParam<size_t> {
   void TearDown() override {
     iree_hal_executable_release(executable_);
     iree_hal_memory_maintenance_release(options_.maintenance);
+    iree_hal_amd_gpu_source_context_registry_deinitialize(&feedback_.sources);
     EXPECT_EQ(native_.mappings, 0u);
     EXPECT_EQ(native_.allocations, 0u);
     iree_hal_amd_gpu_image_deinitialize(&image_);
@@ -327,6 +332,19 @@ class ExecutableTest : public ::testing::TestWithParam<size_t> {
     EXPECT_TRUE(found);
     return global;
   }
+  void RenameConfiguration(const char* name) {
+    constexpr char source[] = "image_runtime_config";
+    size_t replacements = 0;
+    auto cursor = bytes_.begin();
+    while ((cursor = std::search(cursor, bytes_.end(), std::begin(source),
+                                 std::end(source))) != bytes_.end()) {
+      std::fill_n(cursor, sizeof(source), uint8_t{0});
+      std::memcpy(&*cursor, name, std::strlen(name));
+      cursor += sizeof(source);
+      ++replacements;
+    }
+    ASSERT_GT(replacements, 0u);
+  }
   // Real compiler-produced artifact borrowed only for each load call.
   std::vector<uint8_t> bytes_;
   // Independent parse supplies fixture expectations and physical target.
@@ -347,6 +365,8 @@ class ExecutableTest : public ::testing::TestWithParam<size_t> {
   iree_hal_amd_fabric_memory_options_t memory_ = {};
   // Call-only construction arguments.
   iree_hal_amd_gpu_executable_options_t options_ = {};
+  // Device-owned feedback metadata surviving individual image releases.
+  iree_hal_amd_gpu_feedback_t feedback_ = {};
   // Owning HAL resource reference.
   iree_hal_executable_t* executable_ = nullptr;
 };
@@ -613,24 +633,47 @@ TEST_P(ExecutableTest, RejectsWrongTargetBeforeAllocatingNativeStorage) {
 
 TEST_P(ExecutableTest, RuntimeConfigurationRequiresProvisionedServices) {
   const auto original = bytes_;
-  constexpr char source[] = "image_runtime_config";
   for (const char* name :
        {"iree_asan_config", "iree_tsan_config", "iree_feedback_config"}) {
     SCOPED_TRACE(name);
     bytes_ = original;
-    size_t replacements = 0;
-    auto cursor = bytes_.begin();
-    while ((cursor = std::search(cursor, bytes_.end(), std::begin(source),
-                                 std::end(source))) != bytes_.end()) {
-      std::fill_n(cursor, sizeof(source), uint8_t{0});
-      std::memcpy(&*cursor, name, std::strlen(name));
-      cursor += sizeof(source);
-      ++replacements;
-    }
-    ASSERT_GT(replacements, 0u);
+    RenameConfiguration(name);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Load());
     EXPECT_EQ(executable_, nullptr);
     EXPECT_EQ(native_.calls, 0u);
+  }
+}
+
+TEST_P(ExecutableTest, PublishesSharedFeedbackWithRetainedSourceIdentity) {
+  RenameConfiguration("iree_feedback_config");
+  feedback_.config.record_length = sizeof(feedback_.config);
+  feedback_.config.flags = 1;
+  feedback_.config.channel_base = 0x1201000000;
+  feedback_.config.notify_signal = 0x1201000040;
+  options_.feedback = &feedback_;
+  for (uint64_t identity = 1; identity <= 2; ++identity) {
+    IREE_ASSERT_OK(Load());
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(iree_hal_executable_global_buffer(
+        executable_, Global("iree_feedback_config"), &buffer));
+    iree_hal_buffer_mapping_t mapping;
+    IREE_ASSERT_OK(iree_hal_buffer_map_range(
+        buffer, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_READ, 0, 0,
+        sizeof(feedback_.config), &mapping));
+    iree_hal_amd_gpu_feedback_config_t config;
+    std::memcpy(&config, mapping.contents.data, sizeof(config));
+    IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+    EXPECT_EQ(config.record_length, sizeof(config));
+    EXPECT_EQ(config.flags, 1u);
+    EXPECT_EQ(config.channel_base, feedback_.config.channel_base);
+    EXPECT_EQ(config.notify_signal, feedback_.config.notify_signal);
+    ASSERT_NE(config.source_context, 0u);
+    Release();
+    EXPECT_EQ(native_.allocations, 0u);
+    const auto* source =
+        reinterpret_cast<const iree_hal_amd_gpu_source_context_t*>(
+            config.source_context);
+    EXPECT_EQ(iree_hal_amd_gpu_source_context_executable_id(source), identity);
   }
 }
 

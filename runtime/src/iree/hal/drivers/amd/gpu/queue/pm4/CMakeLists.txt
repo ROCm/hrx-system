@@ -670,6 +670,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::feedback
     iree::hal::drivers::amd::gpu::queue::allocation
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::continuation

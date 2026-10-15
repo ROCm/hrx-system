@@ -83,9 +83,11 @@ void GpuNativeTest::TearDown() {
   iree_hal_amd_fabric_release(fabric_);
 }
 
-void GpuNativeTest::Create() {
+void GpuNativeTest::Create(
+    iree_hal_device_runtime_feature_flags_t runtime_features) {
   auto params = iree_hal_device_create_params_default();
   params.proactor_pool = proactors_;
+  params.runtime_features = runtime_features;
   IREE_ASSERT_OK(iree_hal_amd_gpu_device_create(
       context_, IREE_SV("PM4 native CTS"), &options_, &params,
       allocator_.allocator(), &device_));

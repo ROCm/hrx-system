@@ -1,0 +1,15 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.def export("report_assertion") @report_assertion() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%value: i32) {
+  %zero = scalar.constant 0 : i32
+  %condition = scalar.cmpi ne, %value, %zero : i32
+  kernel.assert %condition "feedback survives replay and executable release" : i1
+  kernel.return
+}
