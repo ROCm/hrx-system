@@ -47,7 +47,10 @@ typedef struct iree_hal_amd_gpu_pm4_dispatch_t {
 typedef struct iree_hal_amd_gpu_pm4_submission_t {
   // Host publication and native retirement may finish in either order.
   iree_atomic_ref_count_t ref_count;
-  // Ready-list link; unresolved operations remain outside the publisher.
+  // Number of retained native readers after admission, or UINT32_MAX before
+  // admission. The publisher preserves this fact across capacity deferral.
+  uint32_t native_wait_count;
+  // Captured-work link; the publisher parks unresolved operations separately.
   iree_hal_amd_gpu_publication_entry_t publication;
   // Borrowed allocation owner, live through the capture's final release.
   iree_arena_block_pool_t* pool;

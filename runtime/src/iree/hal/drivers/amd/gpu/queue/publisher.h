@@ -14,16 +14,18 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Link embedded in a captured, causally ready operation. Unresolved dependency
-// waits do not enter this list. Storage remains owned by the operation through
-// publication and its separate retirement contract. The publisher never
-// allocates or retains an operation, nor interprets its native command format.
+// Link embedded in a captured operation. The owner admits dependencies before
+// native publication and parks unresolved waits separately. Storage stays owned
+// by the operation through publication and its separate retirement contract.
+// The publisher never allocates or retains an operation, nor interprets its
+// native command format.
 typedef struct iree_hal_amd_gpu_publication_entry_t {
-  // Next ready entry while linked; otherwise exclusively owned by the caller.
+  // Next captured entry while linked; otherwise exclusively owned by the
+  // caller.
   struct iree_hal_amd_gpu_publication_entry_t* next;
 } iree_hal_amd_gpu_publication_entry_t;
 
-// Exclusively owned ready prefix. An empty head makes the tail irrelevant.
+// Exclusively owned captured prefix. An empty head makes the tail irrelevant.
 typedef struct iree_hal_amd_gpu_publication_list_t {
   // First remaining operation, or NULL after the prefix is consumed.
   iree_hal_amd_gpu_publication_entry_t* head;
@@ -31,7 +33,7 @@ typedef struct iree_hal_amd_gpu_publication_list_t {
   iree_hal_amd_gpu_publication_entry_t* tail;
 } iree_hal_amd_gpu_publication_list_t;
 
-// Transfers one exact queue's native producer between ready API callers and
+// Transfers one exact queue's admission/native producer between API callers and
 // its device's single service executor. Only the current owner accesses the
 // native producer. This object contains no native state or per-queue worker.
 //
@@ -45,7 +47,7 @@ typedef struct iree_hal_amd_gpu_publisher_t {
   iree_slim_mutex_t mutex;
   // Implementation-owned idle/caller/service discriminator.
   uint32_t owner;
-  // Ready work appended while another publisher owns the native producer.
+  // Captured work appended while another publisher owns admission/publication.
   iree_hal_amd_gpu_publication_list_t pending;
 } iree_hal_amd_gpu_publisher_t;
 
@@ -56,8 +58,8 @@ void iree_hal_amd_gpu_publisher_initialize(
 void iree_hal_amd_gpu_publisher_deinitialize(
     iree_hal_amd_gpu_publisher_t* publisher);
 
-// Enqueues a completely captured, ready operation. True grants the caller
-// exclusive native publication ownership for this entry immediately. False
+// Enqueues a completely captured operation. True grants the caller exclusive
+// admission and native publication ownership for this entry immediately. False
 // transfers the entry to the pending list; the caller must not access it again.
 // The current owner guarantees service progress, so this caller needs no wake.
 // Concurrent entries are ordered by this metadata lock, not HAL causality.
@@ -72,7 +74,7 @@ bool iree_hal_amd_gpu_publisher_enqueue(
 // True transfers responsibility to the device service executor. A calling
 // producer must arrange that service turn before returning; a service owner
 // may continue or park on its already-enrolled capacity notification. False
-// leaves the queue idle so the next ready caller can publish immediately.
+// leaves the queue idle so the next caller can admit/publish immediately.
 // Neither result permits further access to native producer state.
 bool iree_hal_amd_gpu_publisher_handoff(
     iree_hal_amd_gpu_publisher_t* publisher,
@@ -91,7 +93,7 @@ iree_hal_amd_gpu_publication_list_t iree_hal_amd_gpu_publisher_take(
     iree_hal_amd_gpu_publisher_t* publisher);
 
 // Cold shutdown query after external producers have joined. Serializes with
-// the final caller/service handoff; no ready entry or native owner remains.
+// the final caller/service handoff; no captured entry or native owner remains.
 bool iree_hal_amd_gpu_publisher_is_idle(
     iree_hal_amd_gpu_publisher_t* publisher);
 

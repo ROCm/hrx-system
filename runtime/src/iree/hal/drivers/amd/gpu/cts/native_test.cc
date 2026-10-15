@@ -185,9 +185,13 @@ TEST_F(GpuNativeTest, TrimReleasesUnusedCaptureCache) {
   iree_hal_semaphore_release(done);
 }
 
-TEST_F(GpuNativeTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
+class GpuNativeDispatchTest : public GpuNativeTest,
+                              public ::testing::WithParamInterface<uint32_t> {};
+
+TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
   constexpr uint32_t kThreads = 4;
   constexpr uint32_t kSteps = 256;
+  const uint32_t queue_count = GetParam();
   const uint32_t gfx_major = context_->target_info.gfx_ip.major;
   options_.pm4.argument_capacity = 8;
   options_.pm4.retirement_capacity = 8;
@@ -270,7 +274,7 @@ TEST_F(GpuNativeTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
         auto binding =
             iree_hal_make_buffer_ref(output, (t * kSteps + i) * 4, 4);
         IREE_ASSERT_OK(iree_hal_queue_dispatch(
-            queues_[i & 1], {i ? 1u : 0u, &timelines[t], &before},
+            queues_[i % queue_count], {i ? 1u : 0u, &timelines[t], &before},
             {1, &timelines[t], &after}, executables[t], functions[t], config,
             t & 1 ? iree_make_const_byte_span(&arguments, 12)
                   : iree_make_const_byte_span(&arguments.value, 4),
@@ -280,6 +284,8 @@ TEST_F(GpuNativeTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
             t & 1 ? IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS : 0));
         std::memset(&arguments, 0xCD, sizeof(arguments));
       };
+      // A consumer cannot occupy the native FIFO until its producer has been
+      // published, including when both operations target the same queue.
       for (uint32_t i = 0; i < kSteps; i += 2) {
         submit(i + 1);
         submit(i);
@@ -300,7 +306,7 @@ TEST_F(GpuNativeTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
     const uint8_t count = iree_async_semaphore_query_frontier(
         reinterpret_cast<iree_async_semaphore_t*>(timeline),
         iree_async_fixed_frontier_as_frontier(&frontier), 2);
-    ASSERT_EQ(count, 2);
+    ASSERT_EQ(count, queue_count);
     for (uint8_t i = 0; i < count; ++i) {
       EXPECT_TRUE(iree_async_frontier_tracker_query_epoch(
           tracker_, frontier.entries[i].axis, frontier.entries[i].epoch));
@@ -317,6 +323,51 @@ TEST_F(GpuNativeTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
   }
   iree_hal_buffer_release(output);
   iree_hal_pool_release(pool);
+}
+
+INSTANTIATE_TEST_SUITE_P(QueuePlacement, GpuNativeDispatchTest,
+                         ::testing::Values(1u, 2u),
+                         [](const ::testing::TestParamInfo<uint32_t>& info) {
+                           return info.param == 1 ? "SameQueue" : "CrossQueue";
+                         });
+
+TEST_F(GpuNativeTest, AdmissionFailureReachesSignalsAndPreservesQueueProgress) {
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  for (bool fail_before_capture : {false, true}) {
+    SCOPED_TRACE(fail_before_capture);
+    iree_hal_semaphore_t* gate = nullptr;
+    iree_hal_semaphore_t* failed = nullptr;
+    iree_hal_semaphore_t* done = nullptr;
+    CreateSemaphore(&gate);
+    CreateSemaphore(&failed);
+    CreateSemaphore(&done);
+    if (fail_before_capture) {
+      iree_hal_semaphore_fail(
+          gate, iree_make_status(IREE_STATUS_ABORTED, "producer failure"));
+    }
+    uint64_t value = 1;
+    IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {1, &gate, &value},
+                                          {1, &failed, &value}, nullptr, 0));
+    IREE_ASSERT_OK(
+        iree_hal_queue_barrier(queues_[0], {}, {1, &done, &value}, nullptr, 0));
+    // Unresolved or failed work leaves later independent operations runnable.
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(done, value, iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+    if (!fail_before_capture) {
+      iree_hal_semaphore_fail(
+          gate, iree_make_status(IREE_STATUS_ABORTED, "producer failure"));
+    }
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_ABORTED,
+        iree_hal_semaphore_wait(failed, value, iree_infinite_timeout(),
+                                IREE_ASYNC_WAIT_FLAG_NONE));
+    iree_hal_semaphore_release(gate);
+    iree_hal_semaphore_release(failed);
+    iree_hal_semaphore_release(done);
+  }
 }
 
 TEST_F(GpuNativeTest, ManyFutureDependenciesUseOwnedWaitStorage) {

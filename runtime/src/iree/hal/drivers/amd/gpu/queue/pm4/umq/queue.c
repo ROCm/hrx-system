@@ -46,6 +46,12 @@ typedef struct iree_hal_amd_gpu_pm4_signal_storage_t {
 typedef struct iree_hal_amd_gpu_pm4_umq_queue_t
     iree_hal_amd_gpu_pm4_umq_queue_t;
 
+typedef enum iree_hal_amd_gpu_pm4_wait_kind_e {
+  IREE_HAL_AMD_GPU_PM4_WAIT_READY,
+  IREE_HAL_AMD_GPU_PM4_WAIT_COMPLETION,
+  IREE_HAL_AMD_GPU_PM4_WAIT_SUBMISSION,
+} iree_hal_amd_gpu_pm4_wait_kind_t;
+
 // Reusable admission sidecar. Its list links and tracker acceptance are owned
 // by service, while tracker callbacks only enqueue finalization there.
 typedef struct iree_hal_amd_gpu_pm4_pending_t {
@@ -67,7 +73,10 @@ typedef struct iree_hal_amd_gpu_pm4_pending_t {
   struct iree_hal_amd_gpu_pm4_pending_t* previous;
   // Existing asynchronous wait lifecycle; no additional thread is created.
   iree_hal_amd_gpu_host_wait_t wait;
-  // Owned timeline selected for this registration, including availability.
+  // Kind selected by admission; never READY while a sidecar exists.
+  iree_hal_amd_gpu_pm4_wait_kind_t kind;
+  // Before begin, borrows the source from submission. After begin, owns the
+  // registered completion or submission-availability timeline.
   iree_hal_semaphore_t* semaphore;
   // Captured value paired with semaphore.
   uint64_t value;
@@ -400,10 +409,6 @@ iree_hal_amd_gpu_pm4_umq_publish(
     }
     argument_address = arguments->address + argument_offset;
   }
-  uint32_t native_wait_count = 0;
-  for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
-    native_wait_count += submission->waits[i].signal != NULL;
-  }
   iree_hal_amd_gpu_pm4_barrier_t before = submission->before;
   if (dispatch) {
     // Instruction upload and host argument publication remain mandatory even
@@ -425,7 +430,7 @@ iree_hal_amd_gpu_pm4_umq_publish(
     native_signal |=
         iree_hal_amd_gpu_pm4_semaphore_isa(submission->signals.semaphores[i]);
   }
-  const uint32_t body_words = native_wait_count * 7 + launch_words +
+  const uint32_t body_words = submission->native_wait_count * 7 + launch_words +
                               iree_hal_amd_gpu_pm4_barrier_word_count(before) +
                               tail_words + (native_signal ? 8 : 0) + 14 + 8;
   iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
@@ -466,8 +471,7 @@ iree_hal_amd_gpu_pm4_umq_publish(
     }
   }
   arguments->end = argument_end;
-  // Admission concurrently reads immutable ring geometry. Commit only the
-  // publisher-owned position, preserving those read-only fields in place.
+  // Reservation commits only the advancing position; ring geometry is fixed.
   queue->producer.ring.reserved_words = candidate.reserved_words;
   submission->consumed_arguments = argument_end;
   if (argument_length) {
@@ -547,33 +551,6 @@ iree_hal_amd_gpu_pm4_umq_publish(
   return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
 }
 
-// Publication mode and whether dependencies are ready determine ownership;
-// enqueue order does not supply a HAL execution dependency.
-static void iree_hal_amd_gpu_pm4_umq_enqueue_ready(
-    iree_hal_amd_gpu_pm4_umq_queue_t* queue,
-    iree_hal_amd_gpu_pm4_submission_t* submission) {
-  if (!iree_hal_amd_gpu_publisher_enqueue(&queue->publisher,
-                                          &submission->publication)) {
-    return;
-  }
-  iree_hal_amd_gpu_publication_list_t remainder = {0};
-  if (iree_hal_amd_gpu_pm4_umq_publish(queue, submission) !=
-      IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED) {
-    remainder.head = remainder.tail = &submission->publication;
-  }
-  if (iree_hal_amd_gpu_publisher_handoff(&queue->publisher, remainder) ||
-      iree_atomic_load(&queue->native_failure, iree_memory_order_acquire)) {
-    iree_hal_amd_gpu_continuation_notify(&queue->continuation);
-  }
-  iree_hal_amd_gpu_pm4_umq_wake_shutdown(queue);
-}
-
-typedef enum iree_hal_amd_gpu_pm4_wait_kind_e {
-  IREE_HAL_AMD_GPU_PM4_WAIT_READY,
-  IREE_HAL_AMD_GPU_PM4_WAIT_COMPLETION,
-  IREE_HAL_AMD_GPU_PM4_WAIT_SUBMISSION,
-} iree_hal_amd_gpu_pm4_wait_kind_t;
-
 // An unresolved edge leaves no native reader pinned. In particular, a consumer
 // awaiting a future producer cannot exhaust that producer's signal backing.
 static iree_status_t iree_hal_amd_gpu_pm4_umq_admit(
@@ -589,6 +566,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_admit(
       iree_min(queue->producer.ring.capacity / 2, 16384u);
   const bool native_eligible =
       submission->wait_count <= (word_budget - 128) / 7;
+  uint32_t native_wait_count = 0;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < submission->wait_count &&
                                *out_kind == IREE_HAL_AMD_GPU_PM4_WAIT_READY &&
@@ -607,6 +585,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_admit(
                    IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_NATIVE) {
           if (acquired.signal->pool->domain == queue->context) {
             wait->signal = acquired.signal;
+            ++native_wait_count;
           } else {
             iree_hal_amd_gpu_pm4_signal_release(acquired.signal);
             *out_kind = IREE_HAL_AMD_GPU_PM4_WAIT_COMPLETION;
@@ -630,6 +609,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_admit(
       iree_hal_amd_gpu_pm4_signal_release(submission->waits[i].signal);
       submission->waits[i].signal = NULL;
     }
+  } else {
+    submission->native_wait_count = native_wait_count;
   }
   return status;
 }
@@ -642,72 +623,18 @@ static void iree_hal_amd_gpu_pm4_umq_pending_release(
   }
 }
 
-// The sidecar registration continuation is recursive through the service
-// queue: immediate semaphore completion never recursively admits more work.
-static void iree_hal_amd_gpu_pm4_umq_pending_resume(void* user_data,
-                                                    iree_status_t status);
-
-static void iree_hal_amd_gpu_pm4_umq_pending_begin(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  iree_hal_amd_gpu_pm4_pending_t* pending = (void*)entry;
-  iree_hal_amd_gpu_pm4_umq_queue_t* queue = pending->queue;
-  iree_hal_amd_gpu_pm4_submission_t* submission = pending->submission;
-  const amdf_status_t failure = (amdf_status_t)iree_atomic_load(
-      &queue->native_failure, iree_memory_order_acquire);
-  iree_status_t status =
-      IREE_HAL_AMD_STATUS_FROM_AMDF(failure, "PM4 native completion");
-  iree_host_size_t wait_index = 0;
-  iree_hal_amd_gpu_pm4_wait_kind_t kind = IREE_HAL_AMD_GPU_PM4_WAIT_READY;
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_amd_gpu_pm4_umq_admit(queue, submission, &wait_index, &kind);
-  }
-  if (iree_status_is_ok(status) && kind != IREE_HAL_AMD_GPU_PM4_WAIT_READY) {
-    const iree_hal_amd_gpu_pm4_submission_wait_t* wait =
-        &submission->waits[wait_index];
-    pending->value = wait->value;
-    if (kind == IREE_HAL_AMD_GPU_PM4_WAIT_SUBMISSION) {
-      status = iree_hal_amd_gpu_pm4_semaphore_acquire_submission_semaphore(
-          wait->semaphore, &pending->semaphore);
-    } else {
-      pending->semaphore = wait->semaphore;
-      iree_hal_semaphore_retain(pending->semaphore);
-    }
-    if (iree_status_is_ok(status)) {
-      pending->previous = NULL;
-      pending->next = queue->pending;
-      if (pending->next) {
-        pending->next->previous = pending;
-      }
-      queue->pending = pending;
-      status = iree_hal_amd_gpu_host_wait_begin(
-          &queue->wait_context, queue->options.service,
-          (iree_hal_semaphore_list_t){1, &pending->semaphore, &pending->value},
-          iree_hal_amd_gpu_pm4_umq_pending_resume, pending,
-          iree_allocator_inline_arena(&pending->tracker_storage),
-          &pending->wait);
-      if (iree_status_is_ok(status)) {
-        return;
-      }
-      queue->pending = pending->next;
-      if (pending->next) {
-        pending->next->previous = NULL;
-      }
-    }
-    iree_hal_semaphore_release(pending->semaphore);
-  }
-  iree_hal_amd_gpu_pm4_umq_pending_release(pending);
-  if (iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_pm4_umq_enqueue_ready(queue, submission);
-  } else {
-    iree_hal_amd_gpu_pm4_umq_abandon(queue, submission, status);
-  }
-}
+// Wait completion reenters the same publication owner after tracker
+// finalization has joined every callback. Registration itself always runs on
+// service.
+static void iree_hal_amd_gpu_pm4_umq_enqueue(
+    iree_hal_amd_gpu_pm4_umq_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission);
 
 static void iree_hal_amd_gpu_pm4_umq_pending_resume(void* user_data,
                                                     iree_status_t status) {
   iree_hal_amd_gpu_pm4_pending_t* pending = user_data;
   iree_hal_amd_gpu_pm4_umq_queue_t* queue = pending->queue;
+  iree_hal_amd_gpu_pm4_submission_t* submission = pending->submission;
   if (pending->previous) {
     pending->previous->next = pending->next;
   } else {
@@ -717,19 +644,63 @@ static void iree_hal_amd_gpu_pm4_umq_pending_resume(void* user_data,
     pending->next->previous = pending->previous;
   }
   iree_hal_semaphore_release(pending->semaphore);
-  pending->semaphore = NULL;
+  iree_hal_amd_gpu_pm4_umq_pending_release(pending);
   if (iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_pm4_umq_pending_begin(&pending->entry);
+    iree_hal_amd_gpu_pm4_umq_enqueue(queue, submission);
   } else {
-    iree_hal_amd_gpu_pm4_submission_t* submission = pending->submission;
-    iree_hal_amd_gpu_pm4_umq_pending_release(pending);
     iree_hal_amd_gpu_pm4_umq_abandon(queue, submission, status);
   }
 }
 
+static void iree_hal_amd_gpu_pm4_umq_pending_begin(
+    iree_hal_memory_maintenance_entry_t* entry) {
+  iree_hal_amd_gpu_pm4_pending_t* pending = (void*)entry;
+  iree_hal_amd_gpu_pm4_umq_queue_t* queue = pending->queue;
+  iree_hal_amd_gpu_pm4_submission_t* submission = pending->submission;
+  iree_hal_semaphore_t* source = pending->semaphore;
+  pending->semaphore = NULL;
+  const amdf_status_t failure = (amdf_status_t)iree_atomic_load(
+      &queue->native_failure, iree_memory_order_acquire);
+  iree_status_t status =
+      IREE_HAL_AMD_STATUS_FROM_AMDF(failure, "PM4 native completion");
+  if (iree_status_is_ok(status)) {
+    if (pending->kind == IREE_HAL_AMD_GPU_PM4_WAIT_SUBMISSION) {
+      status = iree_hal_amd_gpu_pm4_semaphore_acquire_submission_semaphore(
+          source, &pending->semaphore);
+    } else {
+      pending->semaphore = source;
+      iree_hal_semaphore_retain(source);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    pending->previous = NULL;
+    pending->next = queue->pending;
+    if (pending->next) {
+      pending->next->previous = pending;
+    }
+    queue->pending = pending;
+    status = iree_hal_amd_gpu_host_wait_begin(
+        &queue->wait_context, queue->options.service,
+        (iree_hal_semaphore_list_t){1, &pending->semaphore, &pending->value},
+        iree_hal_amd_gpu_pm4_umq_pending_resume, pending,
+        iree_allocator_inline_arena(&pending->tracker_storage), &pending->wait);
+    if (iree_status_is_ok(status)) {
+      return;
+    }
+    queue->pending = pending->next;
+    if (pending->next) {
+      pending->next->previous = NULL;
+    }
+  }
+  iree_hal_semaphore_release(pending->semaphore);
+  iree_hal_amd_gpu_pm4_umq_pending_release(pending);
+  iree_hal_amd_gpu_pm4_umq_abandon(queue, submission, status);
+}
+
 static iree_status_t iree_hal_amd_gpu_pm4_umq_pending_allocate(
     iree_hal_amd_gpu_pm4_umq_queue_t* queue,
-    iree_hal_amd_gpu_pm4_submission_t* submission,
+    iree_hal_amd_gpu_pm4_submission_t* submission, iree_host_size_t wait_index,
+    iree_hal_amd_gpu_pm4_wait_kind_t kind,
     iree_hal_amd_gpu_pm4_pending_t** out_pending) {
   iree_byte_span_t storage =
       iree_hal_amd_gpu_pm4_submission_tail_storage(submission);
@@ -747,6 +718,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_pending_allocate(
       .queue = queue,
       .submission = submission,
       .block = block,
+      .kind = kind,
+      .semaphore = submission->waits[wait_index].semaphore,
+      .value = submission->waits[wait_index].value,
       .tracker_storage =
           {
               .capacity = storage.data_length - prefix_size,
@@ -757,32 +731,65 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_pending_allocate(
   return iree_ok_status();
 }
 
-// Returns synchronous capture/admission failures before acceptance. Once linked
-// or registered, terminal completion belongs to signals and the event sink.
-static iree_status_t iree_hal_amd_gpu_pm4_umq_submit(
+// The current publisher admits captured work immediately before publication.
+// An unresolved edge leaves this list, allowing later producers to make
+// progress. The admitted count and native readers survive capacity deferral
+// unchanged.
+static iree_hal_amd_gpu_pm4_publication_result_t
+iree_hal_amd_gpu_pm4_umq_process(
     iree_hal_amd_gpu_pm4_umq_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission) {
-  iree_host_size_t wait_index = 0;
-  iree_hal_amd_gpu_pm4_wait_kind_t kind;
-  iree_status_t status =
-      iree_hal_amd_gpu_pm4_umq_admit(queue, submission, &wait_index, &kind);
-  iree_hal_amd_gpu_pm4_pending_t* pending = NULL;
-  if (iree_status_is_ok(status) && kind != IREE_HAL_AMD_GPU_PM4_WAIT_READY) {
-    status =
-        iree_hal_amd_gpu_pm4_umq_pending_allocate(queue, submission, &pending);
+  if (submission->native_wait_count == UINT32_MAX) {
+    iree_host_size_t wait_index = 0;
+    iree_hal_amd_gpu_pm4_wait_kind_t kind;
+    iree_status_t status =
+        iree_hal_amd_gpu_pm4_umq_admit(queue, submission, &wait_index, &kind);
+    if (!iree_status_is_ok(status) || kind != IREE_HAL_AMD_GPU_PM4_WAIT_READY) {
+      iree_hal_amd_gpu_pm4_pending_t* pending = NULL;
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_amd_gpu_pm4_umq_pending_allocate(
+            queue, submission, wait_index, kind, &pending);
+      }
+      if (iree_status_is_ok(status)) {
+        iree_hal_memory_maintenance_enqueue(queue->options.service,
+                                            &pending->entry);
+      } else {
+        iree_hal_amd_gpu_pm4_umq_abandon(queue, submission, status);
+      }
+      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
+    }
   }
-  if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_pm4_submission_release(submission);
-    return status;
+  return iree_hal_amd_gpu_pm4_umq_publish(queue, submission);
+}
+
+// Publication mode and whether dependencies are ready determine ownership;
+// enqueue order does not supply a HAL execution dependency.
+static void iree_hal_amd_gpu_pm4_umq_enqueue(
+    iree_hal_amd_gpu_pm4_umq_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission) {
+  if (!iree_hal_amd_gpu_publisher_enqueue(&queue->publisher,
+                                          &submission->publication)) {
+    return;
   }
+  iree_hal_amd_gpu_publication_list_t remainder = {0};
+  if (iree_hal_amd_gpu_pm4_umq_process(queue, submission) !=
+      IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED) {
+    remainder.head = remainder.tail = &submission->publication;
+  }
+  if (iree_hal_amd_gpu_publisher_handoff(&queue->publisher, remainder) ||
+      iree_atomic_load(&queue->native_failure, iree_memory_order_acquire)) {
+    iree_hal_amd_gpu_continuation_notify(&queue->continuation);
+  }
+  iree_hal_amd_gpu_pm4_umq_wake_shutdown(queue);
+}
+
+// Capture/validation have already succeeded. Admission errors after acceptance
+// belong to signal timelines and the event sink, including on an inline turn.
+static void iree_hal_amd_gpu_pm4_umq_submit(
+    iree_hal_amd_gpu_pm4_umq_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission) {
   iree_atomic_fetch_add(&queue->outstanding, 1, iree_memory_order_relaxed);
-  if (pending) {
-    iree_hal_memory_maintenance_enqueue(queue->options.service,
-                                        &pending->entry);
-  } else {
-    iree_hal_amd_gpu_pm4_umq_enqueue_ready(queue, submission);
-  }
-  return iree_ok_status();
+  iree_hal_amd_gpu_pm4_umq_enqueue(queue, submission);
 }
 
 static bool iree_hal_amd_gpu_pm4_umq_progress(void* user_data) {
@@ -800,7 +807,7 @@ static bool iree_hal_amd_gpu_pm4_umq_progress(void* user_data) {
       iree_hal_amd_gpu_pm4_submission_t* submission = iree_containerof(
           work.head, iree_hal_amd_gpu_pm4_submission_t, publication);
       const iree_hal_amd_gpu_pm4_publication_result_t result =
-          iree_hal_amd_gpu_pm4_umq_publish(queue, submission);
+          iree_hal_amd_gpu_pm4_umq_process(queue, submission);
       iree_status_t status = iree_ok_status();
       switch (result) {
         case IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED:
@@ -1012,7 +1019,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_barrier(
       (iree_hal_amd_gpu_pm4_dispatch_t){0}, iree_const_byte_span_empty(),
       iree_hal_buffer_ref_list_empty(), &queue->options.barriers, barriers, 0,
       &submission));
-  return iree_hal_amd_gpu_pm4_umq_submit(queue, submission);
+  iree_hal_amd_gpu_pm4_umq_submit(queue, submission);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_dispatch(
@@ -1038,7 +1046,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_dispatch(
       &queue->captures, waits, signals, executable, function, dispatch,
       constants, bindings, &queue->options.barriers, barriers, flags,
       &submission));
-  return iree_hal_amd_gpu_pm4_umq_submit(queue, submission);
+  iree_hal_amd_gpu_pm4_umq_submit(queue, submission);
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//

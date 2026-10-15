@@ -183,6 +183,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
         pool->block_allocator, total_size, (void**)&submission));
   }
   *submission = (iree_hal_amd_gpu_pm4_submission_t){
+      .native_wait_count = waits.count ? UINT32_MAX : 0,
       .pool = pool,
       .block = block,
       .executable = executable,
