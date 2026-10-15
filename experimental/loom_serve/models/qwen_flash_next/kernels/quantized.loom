@@ -90,7 +90,7 @@ func.def public inline @flash_next_qk_pair_partial(%q5_encoding: i1, %width: ind
 }
 
 // Decode the shared Q5_1 block header once before visiting its two halves.
-func.def inline @flash_next_q51_load_block(%weight: buffer, %block_origin: offset) -> (vector<16xi8>, vector<4xi32>, f32, f32) {
+func.def public inline @flash_next_q51_load_block(%weight: buffer, %block_origin: offset) -> (vector<16xi8>, vector<4xi32>, f32, f32) {
   %high_add = index.constant 4 : offset
   %code_add = index.constant 8 : offset
   %high_origin = index.add %block_origin, %high_add : offset
@@ -110,7 +110,7 @@ func.def inline @flash_next_q51_load_block(%weight: buffer, %block_origin: offse
 
 // Expand either nibble/high-bit half to unsigned integer codes. The half
 // argument is constant at each unrolled callsite, so all shifts specialize.
-func.def inline @flash_next_q51_codes(%packed: vector<16xi8>, %high_words: vector<4xi32>, %half: index) -> (vector<16xi8>) {
+func.def public inline @flash_next_q51_codes(%packed: vector<16xi8>, %high_words: vector<4xi32>, %half: index) -> (vector<16xi8>) {
   %c4_i32 = scalar.constant 4 : i32
   %c16_i32 = scalar.constant 16 : i32
   %mask15 = vector.constant 15 : vector<16xi8>
