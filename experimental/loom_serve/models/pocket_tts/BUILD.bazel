@@ -17,6 +17,28 @@ filegroup(
 )
 
 loom_test(
+    name = "batch_conditioning_test",
+    srcs = glob(["*.loom"]) + [
+        "tests/batch_conditioning.loom",
+        "//experimental/loom_serve/motifs/tensor:sources",
+        "//experimental/loom_serve/motifs/text:sources",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.batch_capacity": "3",
+        "pocket.context_capacity": "4",
+        "pocket.request_capacity": "6",
+        "pocket.threads": "128",
+        "pocket.voice_count": "3",
+        "pocket.voice_frame_capacity": "2",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "request_test",
     srcs = glob(["*.loom"]) + [
         "tests/request.loom",
