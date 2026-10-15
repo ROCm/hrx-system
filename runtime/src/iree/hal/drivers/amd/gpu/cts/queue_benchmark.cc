@@ -375,6 +375,7 @@ DISPATCH_CASE(BindingsDefaultLatency, kBindings, kDefault, kSampledSubmit);
 // Persistent callers share one actual queue without a caller-side mutex.
 // Barrier rendezvous coordinate only benchmark epochs and stay outside each
 // caller's submission interval. Overall wall time includes start/join overhead.
+// Process CPU time covers callers and both device workers through final drain.
 static void BM_ConcurrentDispatch(benchmark::State& state) {
   const size_t producer_count = state.range(0);
   const size_t count = state.range(1);
@@ -389,6 +390,8 @@ static void BM_ConcurrentDispatch(benchmark::State& state) {
     iree_time_t begin = 0;
     // Host time immediately after its last dispatch returned.
     iree_time_t end = 0;
+    // Host time after the final visibility barrier and completion wait return.
+    iree_time_t completed = 0;
     // First native retirement observed on the existing completion worker.
     std::atomic<iree_time_t> first_retirement = 0;
     // Registration lives until every operation in this burst has completed.
@@ -438,6 +441,7 @@ static void BM_ConcurrentDispatch(benchmark::State& state) {
         phase.arrive_and_wait();
         phase.arrive_and_wait();
         IREE_CHECK_OK(dispatch.Complete(p));
+        producer.completed = iree_time_now();
         IREE_CHECK_OK(dispatch.CheckOutput(p));
         phase.arrive_and_wait();
       }
@@ -448,6 +452,8 @@ static void BM_ConcurrentDispatch(benchmark::State& state) {
   iree_duration_t caller_duration = 0;
   iree_duration_t first_retirement_duration = 0;
   iree_duration_t last_acceptance_duration = 0;
+  iree_duration_t completion_duration = 0;
+  iree_duration_t drain_duration = 0;
   uint64_t pipelined_bursts = 0;
   for (auto _ : state) {
     phase.arrive_and_wait();
@@ -461,14 +467,18 @@ static void BM_ConcurrentDispatch(benchmark::State& state) {
     phase.arrive_and_wait();
     iree_time_t first_retirement = INT64_MAX;
     iree_time_t last_acceptance = 0;
+    iree_time_t completed = 0;
     for (auto& producer : producers) {
       caller_duration += producer.end - producer.begin;
       first_retirement =
           std::min(first_retirement, producer.first_retirement.load());
       last_acceptance = std::max(last_acceptance, producer.end);
+      completed = std::max(completed, producer.completed);
     }
     first_retirement_duration += first_retirement - begin;
     last_acceptance_duration += last_acceptance - begin;
+    completion_duration += completed - begin;
+    drain_duration += completed - last_acceptance;
     pipelined_bursts += first_retirement < last_acceptance;
   }
   stop = true;
@@ -483,6 +493,12 @@ static void BM_ConcurrentDispatch(benchmark::State& state) {
       static_cast<double>(first_retirement_duration) / state.iterations();
   state.counters["last_acceptance_ns"] =
       static_cast<double>(last_acceptance_duration) / state.iterations();
+  // End-to-end counters include native completion and CPU visibility. They are
+  // separate from the benchmark's submit-only interval and caller_mean_ns.
+  state.counters["completion_ns"] =
+      static_cast<double>(completion_duration) / state.iterations();
+  state.counters["drain_ns"] =
+      static_cast<double>(drain_duration) / state.iterations();
   state.counters["pipelined_percent"] =
       100.0 * pipelined_bursts / state.iterations();
   state.counters["host_allocations"] =
@@ -496,6 +512,7 @@ BENCHMARK(BM_ConcurrentDispatch)
     ->Args({2, 1000})
     ->Args({4, 1000})
     ->Iterations(50)
+    ->MeasureProcessCPUTime()
     ->UseManualTime();
 
 }  // namespace
