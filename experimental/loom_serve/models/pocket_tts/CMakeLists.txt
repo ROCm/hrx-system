@@ -32,8 +32,8 @@ loom_test_module(
   SRCS
     "${_GLOB_X_LOOM}"
     "tests/batch_conditioning.loom"
-    "iree::experimental::loom_serve::motifs::tensor::sources"
-    "iree::experimental::loom_serve::motifs::text::sources"
+    "iree::experimental::loom_serve::motifs::tensor::library"
+    "iree::experimental::loom_serve::motifs::text::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -107,8 +107,8 @@ loom_test_module(
   SRCS
     "${_GLOB_X_LOOM}"
     "tests/request.loom"
-    "iree::experimental::loom_serve::motifs::tensor::sources"
-    "iree::experimental::loom_serve::motifs::text::sources"
+    "iree::experimental::loom_serve::motifs::tensor::library"
+    "iree::experimental::loom_serve::motifs::text::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -185,7 +185,7 @@ loom_test_module(
   SRCS
     "tests/text_normalization.loom"
     "text_normalization.loom"
-    "iree::experimental::loom_serve::motifs::text::sources"
+    "iree::experimental::loom_serve::motifs::text::library"
 )
 
 if(LOOM_TARGET_ARCH_VM)
