@@ -111,6 +111,30 @@ loom_test(
 )
 
 loom_test(
+    name = "batch_attention_test",
+    srcs = [
+        "attention.loom",
+        "batch_attention.loom",
+        "batching.loom",
+        "dispatch.loom",
+        "normalization.loom",
+        "tests/batch_attention.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.batch_capacity": "4",
+        "pocket.context_capacity": "320",
+        "pocket.request_capacity": "4",
+        "pocket.rotary_capacity": "4096",
+        "pocket.threads": "128",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "attention_test",
     srcs = [
         "attention.loom",
