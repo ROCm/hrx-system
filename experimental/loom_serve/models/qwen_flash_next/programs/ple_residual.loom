@@ -2,7 +2,7 @@ config.decl @flash_next.token_count : %value: index where [range(%value, 1, 3276
 
 command.program.decl @flash_next_ple_embed(%history_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %arena: buffer, %output: buffer)
 
-kernel.decl @flash_next_linear_q8(%output_capacity: index) launch(%input_width: index, %output_width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @flash_next.project_dense_q8(%inputs: index, %outputs: index, %blocks: index, %span: buffer, %input: buffer, %weight: view<[%outputs]x[%blocks]x34xi8>, %output: buffer)
 
 command.program.decl @flash_next_ple_consume(%layer: index, %history_origin: offset) launch(%parameters: buffer, %span: buffer, %origins: buffer, %key: buffer, %value: buffer, %residual: buffer, %history: buffer, %output: buffer, %capture: buffer)
 
@@ -25,9 +25,15 @@ command.program.def public @flash_next_ple_residual(%layer: index, %token_histor
   %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
   command.program.launch @flash_next_ple_embed[%token_history_origin](%parameters, %span, %mapping, %origins, %tokens, %arena, %embedding) : [offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   %key = buffer.alloca<global> align(256) %residual_bytes : buffer
-  kernel.launch @flash_next_linear_q8[%residual_width](%hidden, %residual_width, %span, %embedding, %key_weight, %key) : [index](index, index, buffer, buffer, view<10240x80x34xi8>, buffer)
+  %key_weight_block_size = index.constant 32 : index
+  %key_weight_blocks = index.div %hidden, %key_weight_block_size : index
+  %key_weight_shaped = view.refine %key_weight : view<10240x80x34xi8> -> view<[%residual_width]x[%key_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%hidden, %residual_width, %key_weight_blocks, %span, %embedding, %key_weight_shaped, %key) : (index, index, index, buffer, buffer, view<[%residual_width]x[%key_weight_blocks]x34xi8>, buffer)
   %value = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  kernel.launch @flash_next_linear_q8[%hidden](%hidden, %hidden, %span, %embedding, %value_weight, %value) : [index](index, index, buffer, buffer, view<2560x80x34xi8>, buffer)
+  %value_weight_block_size = index.constant 32 : index
+  %value_weight_blocks = index.div %hidden, %value_weight_block_size : index
+  %value_weight_shaped = view.refine %value_weight : view<2560x80x34xi8> -> view<[%hidden]x[%value_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%hidden, %hidden, %value_weight_blocks, %span, %embedding, %value_weight_shaped, %value) : (index, index, index, buffer, buffer, view<[%hidden]x[%value_weight_blocks]x34xi8>, buffer)
   command.program.launch @flash_next_ple_consume[%layer, %convolution_history_origin](%parameters, %span, %origins, %key, %value, %residual, %arena, %output, %capture) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
