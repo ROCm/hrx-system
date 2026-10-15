@@ -166,8 +166,22 @@ does not advance a surviving request's random stream.
 `request_layout.loom` defines resident state and compact batch work geometry.
 The work header retains the membership map and selected stage. Each packed
 record carries phase, registered voice ordinal, phase cursor, chunk identity,
-voice length, and a unique-writer bit. Progress belongs to the record rather
-than the executable shape.
+voice length, a unique-writer bit, and the selected prefill token. Progress
+belongs to the record rather than the executable shape.
+
+`batch_request.loom` connects those work records to complete numerical phases.
+`batch_prefill_text` packs the selected tokens, including `-1` for BOS;
+`batch_encode_voice` packs each selected 1,920-sample block from the registered
+`waveforms` tensor; `batch_generate_audio` packs seeds, samples independent
+noise, and decodes one block per ready request. The waveform tensor is shaped
+`[pocket.voice_count,pocket.voice_frame_capacity,1920]`, with each voice's actual
+length retained in its work record. Padding is never encoded.
+
+Immutable device request rows contain only the full 64-bit seed, padded to 16
+bytes. Complete text packets remain in request-owned CPU storage. Preparing a
+work offer selects its next token without advancing the request; retirement
+advances the cursor. Text length therefore does not enlarge the device request
+bank, and a changed batch membership never changes token or seed identity.
 
 `batch_conditioning.loom` retains a separate FlowLM prefix for each registered
 voice. The bank stores twelve key/value planes with room for BOS and the longest
@@ -205,7 +219,8 @@ shrinking cohorts with isolated calls, preserves state and padding, and retains
 the independent Philox/Box-Muller oracle. Conditioning checks compare entire
 banks with an independent rectangle-copy oracle across unequal prefix lengths,
 duplicate voices, reused request rows, and empty cohorts. Both hardware and
-memory-access-checking profiles run with:
+memory-access-checking profiles also verify packed tokens, full-width seeds,
+and different voice blocks with inactive output guards. Run them with:
 
 ```sh
 iree-bazel-test --config=asan \
