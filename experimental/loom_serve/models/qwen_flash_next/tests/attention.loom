@@ -12,12 +12,12 @@ kernel.decl @qsa_selected_attention() launch(%key_origin: offset, %value_origin:
 // Page permutations and nonzero plane origins make logical/physical addressing
 // observable without making the oracle repeat the production address helpers.
 func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
-  %seven = index.constant 7 : index
-  %nine = index.constant 9 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c7 = index.constant 7 : index
+  %c9 = index.constant 9 : index
   %heads = index.constant 24 : index
   %pages = index.constant 33 : index
   %channels = index.constant 256 : index
@@ -28,8 +28,8 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
   %value_base = index.constant 2163072 : offset
   %map_base = index.constant 2048 : offset
   %counts = buffer.view %epoch[%origin] : buffer -> view<3xi32>
-  %three = scalar.constant 3 : i32
-  view.store %three, %counts[0] : i32, view<3xi32>
+  %c3_i32 = scalar.constant 3 : i32
+  view.store %c3_i32, %counts[0] : i32, view<3xi32>
   %positions = buffer.view %mapping[%origin] : buffer -> view<8x4xi32>
   %entries = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
   %maps = buffer.view %rows[%map_base] : buffer -> view<16x33xi32>
@@ -43,41 +43,41 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
   %eighth = scalar.constant 0.125 : f64
   %sixteenth = scalar.constant 0.0625 : f64
   %sixty_fourth = scalar.constant 0.015625 : f64
-  %fifteen = scalar.constant 15.0 : f64
-  %six = scalar.constant 6.0 : f64
-  %eight = scalar.constant 8.0 : f64
-  %five = index.constant 5 : index
-  %thirteen = index.constant 13 : index
-  %seventeen = index.constant 17 : index
-  %thirty_one = index.constant 31 : index
-  scf.for %physical = [%zero to %pool step %one] {
-    %key_index = index.madd %physical, %seven, %one : index
-    %key_remainder = index.rem %key_index, %thirty_one : index
+  %c15_f64 = scalar.constant 15.0 : f64
+  %c6_f64 = scalar.constant 6.0 : f64
+  %c8_f64 = scalar.constant 8.0 : f64
+  %c5 = index.constant 5 : index
+  %c13 = index.constant 13 : index
+  %c17 = index.constant 17 : index
+  %c31 = index.constant 31 : index
+  scf.for %physical = [%c0 to %pool step %c1] {
+    %key_index = index.madd %physical, %c7, %c1 : index
+    %key_remainder = index.rem %key_index, %c31 : index
     %key_word = index.cast %key_remainder : index to i32
     %key_unsigned = scalar.uitofp %key_word : i32 to f64
-    %key_centered = scalar.subf %key_unsigned, %fifteen : f64
+    %key_centered = scalar.subf %key_unsigned, %c15_f64 : f64
     %key_scaled = scalar.mulf %key_centered, %eighth : f64
     %key0 = scalar.fptrunc %key_scaled : f64 to bf16
-    %other_remainder = index.rem %physical, %thirteen : index
+    %other_remainder = index.rem %physical, %c13 : index
     %other_word = index.cast %other_remainder : index to i32
     %other_unsigned = scalar.uitofp %other_word : i32 to f64
-    %other_centered = scalar.subf %other_unsigned, %six : f64
+    %other_centered = scalar.subf %other_unsigned, %c6_f64 : f64
     %other_scaled = scalar.mulf %other_centered, %quarter : f64
     %key1 = scalar.fptrunc %other_scaled : f64 to bf16
-    %value_remainder = index.rem %physical, %seventeen : index
+    %value_remainder = index.rem %physical, %c17 : index
     %value_word = index.cast %value_remainder : index to i32
     %value_unsigned = scalar.uitofp %value_word : i32 to f64
-    %value_centered = scalar.subf %value_unsigned, %eight : f64
+    %value_centered = scalar.subf %value_unsigned, %c8_f64 : f64
     %value_scaled = scalar.mulf %value_centered, %sixteenth : f64
-    scf.for %head = [%zero to %two step %one] {
+    scf.for %head = [%c0 to %c2 step %c1] {
       view.store %key0, %key[%physical, %head, 0] : bf16, view<2112x2x256xbf16>
       view.store %key1, %key[%physical, %head, 1] : bf16, view<2112x2x256xbf16>
       %head_word = index.cast %head : index to i32
       %head_float = scalar.uitofp %head_word : i32 to f64
       %head_offset = scalar.mulf %head_float, %eighth : f64
       %value_base = scalar.addf %value_scaled, %head_offset : f64
-      scf.for %channel = [%zero to %channels step %one] {
-        %channel_remainder = index.rem %channel, %nine : index
+      scf.for %channel = [%c0 to %channels step %c1] {
+        %channel_remainder = index.rem %channel, %c9 : index
         %channel_word = index.cast %channel_remainder : index to i32
         %channel_float = scalar.uitofp %channel_word : i32 to f64
         %channel_offset = scalar.mulf %channel_float, %sixty_fourth : f64
@@ -89,9 +89,9 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
   }
   %base_word = scalar.constant 256 : i64
   %rows_count = index.constant 3 : index
-  %first_trial = index.cmp eq, %trial, %zero : index
-  %second_trial = index.cmp eq, %trial, %one : index
-  %third_trial = index.cmp eq, %trial, %two : index
+  %first_trial = index.cmp eq, %trial, %c0 : index
+  %second_trial = index.cmp eq, %trial, %c1 : index
+  %third_trial = index.cmp eq, %trial, %c2 : index
   %short = index.constant 3 : index
   %boundary = index.constant 65 : index
   %dense_end = index.constant 2048 : index
@@ -99,40 +99,40 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
   %long = scf.select %third_trial, %dense_end, %sparse_end : index
   %middle = scf.select %second_trial, %boundary, %long : index
   %visible = scf.select %first_trial, %short, %middle : index
-  scf.for %token = [%zero to %rows_count step %one] {
-    %resident_row = index.madd %token, %four, %one : index
+  scf.for %token = [%c0 to %rows_count step %c1] {
+    %resident_row = index.madd %token, %c4, %c1 : index
     view.store %base_word, %entries[%resident_row, 2] : i64, view<16x4xi64>
-    scf.for %page = [%zero to %pages step %one] {
-      %biased = index.madd %page, %seven, %resident_row : index
+    scf.for %page = [%c0 to %pages step %c1] {
+      %biased = index.madd %page, %c7, %resident_row : index
       %physical = index.rem %biased, %pages : index
       %word = index.cast %physical : index to i32
       view.store %word, %maps[%resident_row, %page] : i32, view<16x33xi32>
     }
     %length = index.sub %visible, %token : index
-    %position = index.sub %length, %one : index
+    %position = index.sub %length, %c1 : index
     %position_word = index.cast %position : index to i32
     %row_word = index.cast %resident_row : index to i32
-    %zero_word = scalar.constant 0 : i32
+    %c0_i32 = scalar.constant 0 : i32
     view.store %position_word, %positions[%token, 0] : i32, view<8x4xi32>
     view.store %row_word, %positions[%token, 1] : i32, view<8x4xi32>
-    view.store %zero_word, %positions[%token, 2] : i32, view<8x4xi32>
-    view.store %zero_word, %positions[%token, 3] : i32, view<8x4xi32>
-    %complete = index.div %length, %four : index
+    view.store %c0_i32, %positions[%token, 2] : i32, view<8x4xi32>
+    view.store %c0_i32, %positions[%token, 3] : i32, view<8x4xi32>
+    %complete = index.div %length, %c4 : index
     %sparse = index.cmp ugt, %complete, %budget : index
     %count = scf.select %sparse, %budget, %complete : index
-    scf.for %slot = [%zero to %count step %one] {
+    scf.for %slot = [%c0 to %count step %c1] {
       %numerator = index.mul %slot, %complete : index
       %id = index.div %numerator, %count : index
       %word = index.cast %id : index to i32
       view.store %word, %ids[%token, %slot] : i32, view<8x512xi32>
     }
-    scf.for %head = [%zero to %heads step %one] {
-      %head_remainder = index.rem %head, %five : index
+    scf.for %head = [%c0 to %heads step %c1] {
+      %head_remainder = index.rem %head, %c5 : index
       %head_word = index.cast %head_remainder : index to i32
       %head_float = scalar.uitofp %head_word : i32 to f64
       %query_scaled = scalar.mulf %head_float, %quarter : f64
       %query_centered = scalar.subf %query_scaled, %half : f64
-      %sharp = index.cmp eq, %head, %zero : index
+      %sharp = index.cmp eq, %head, %c0 : index
       %large = scalar.constant 64.0 : f64
       %query0 = scf.select %sharp, %large, %query_centered : f64
       %query1 = scalar.negf %query0 : f64
@@ -140,12 +140,12 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
       %packed1 = scalar.fptrunc %query1 : f64 to bf16
       view.store %packed0, %query[%token, %head, 0] : bf16, view<8x24x256xbf16>
       view.store %packed1, %query[%token, %head, 1] : bf16, view<8x24x256xbf16>
-      scf.for %channel = [%zero to %channels step %one] {
+      scf.for %channel = [%c0 to %channels step %c1] {
         %biased = index.add %head, %channel : index
-        %remainder = index.rem %biased, %seventeen : index
+        %remainder = index.rem %biased, %c17 : index
         %word = index.cast %remainder : index to i32
         %unsigned = scalar.uitofp %word : i32 to f64
-        %centered = scalar.subf %unsigned, %eight : f64
+        %centered = scalar.subf %unsigned, %c8_f64 : f64
         %scaled = scalar.mulf %centered, %half : f64
         %packed = scalar.fptrunc %scaled : f64 to bf16
         %column = index.add %channels, %channel : index
@@ -170,12 +170,12 @@ func.def @reference_exp(%value: f64) -> (f64) {
 // with the production kernel. Accumulation, normalization, and output gating
 // use F64, with explicit BF16 attention and output rounding boundaries.
 func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %three = index.constant 3 : index
-  %four = index.constant 4 : index
-  %nine = index.constant 9 : index
-  %twelve = index.constant 12 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c9 = index.constant 9 : index
+  %c12 = index.constant 12 : index
   %heads = index.constant 24 : index
   %page_tokens = index.constant 64 : index
   %channels = index.constant 256 : index
@@ -197,39 +197,39 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
   %lowest = scalar.constant -1e30 : f64
   %scale = scalar.constant 0.0625 : f64
   %channel_scale = scalar.constant 0.015625 : f64
-  scf.for %token = [%zero to %three step %one] {
+  scf.for %token = [%c0 to %c3 step %c1] {
     %position_word = view.load %positions[%token, 0] : view<8x4xi32> -> i32
     %row_word = view.load %positions[%token, 1] : view<8x4xi32> -> i32
     %position_value = index.cast %position_word : i32 to index
     %position = index.assume %position_value [range(%position_value, 0, 2111)] : index
     %row_value = index.cast %row_word : i32 to index
     %row = index.assume %row_value [range(%row_value, 0, 15)] : index
-    %visible = index.add %position, %one : index
-    %complete = index.div %visible, %four : index
+    %visible = index.add %position, %c1 : index
+    %complete = index.div %visible, %c4 : index
     %sparse = index.cmp ugt, %complete, %budget : index
     %count = scf.select %sparse, %budget, %complete : index
-    %selected_tokens = index.mul %count, %four : index
-    %tail = index.rem %visible, %four : index
+    %selected_tokens = index.mul %count, %c4 : index
+    %tail = index.rem %visible, %c4 : index
     %length = index.add %selected_tokens, %tail : index
-    scf.for %head = [%zero to %heads step %one] {
-      %kv_head = index.div %head, %twelve : index
+    scf.for %head = [%c0 to %heads step %c1] {
+      %kv_head = index.div %head, %c12 : index
       %q0_packed = view.load %query[%token, %head, 0] : view<8x24x256xbf16> -> bf16
       %q1_packed = view.load %query[%token, %head, 1] : view<8x24x256xbf16> -> bf16
       %q0 = scalar.extf %q0_packed : bf16 to f64
       %q1 = scalar.extf %q1_packed : bf16 to f64
-      %maximum, %denominator, %accumulator = scf.for %slot = [%zero to %length step %one](%old_maximum = %lowest : f64, %old_denominator = %fzero : f64, %old_accumulator = %fzero : f64) -> (f64, f64, f64) {
+      %maximum, %denominator, %accumulator = scf.for %slot = [%c0 to %length step %c1](%old_maximum = %lowest : f64, %old_denominator = %fzero : f64, %old_accumulator = %fzero : f64) -> (f64, f64, f64) {
         %in_block = index.cmp ult, %slot, %selected_tokens : index
         %logical_value = scf.if %in_block -> (index) {
-          %block_slot = index.div %slot, %four : index
+          %block_slot = index.div %slot, %c4 : index
           %word = view.load %ids[%token, %block_slot] : view<8x512xi32> -> i32
           %block_value = index.cast %word : i32 to index
           %block = index.assume %block_value [range(%block_value, 0, 527)] : index
-          %member = index.rem %slot, %four : index
-          %logical = index.madd %block, %four, %member : index
+          %member = index.rem %slot, %c4 : index
+          %logical = index.madd %block, %c4, %member : index
           scf.yield %logical : index
         } else {
           %relative = index.sub %slot, %selected_tokens : index
-          %logical = index.madd %complete, %four, %relative : index
+          %logical = index.madd %complete, %c4, %relative : index
           scf.yield %logical : index
         }
         %logical = index.assume %logical_value [range(%logical_value, 0, 2111)] : index
@@ -262,8 +262,8 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
         scf.yield %next_maximum, %next_sum, %next_value : f64, f64, f64
       }
       %base = scalar.divf %accumulator, %denominator : f64
-      scf.for %channel = [%zero to %channels step %one] {
-        %remainder = index.rem %channel, %nine : index
+      scf.for %channel = [%c0 to %channels step %c1] {
+        %remainder = index.rem %channel, %c9 : index
         %word = index.cast %remainder : index to i32
         %number = scalar.uitofp %word : i32 to f64
         %offset = scalar.mulf %number, %channel_scale : f64
