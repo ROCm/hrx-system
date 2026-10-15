@@ -54,3 +54,149 @@ template.def<@pocket.batch.normalization_plain> device @pocket_batch_normalizati
   }
   template.return
 }
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+template.decl @pocket.batch.softmax(%membership: buffer, %elements: index, %rows: index, %capacity: index, %scores_storage: buffer, %probabilities_storage: buffer, %scores_offset: offset, %scores_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset)
+
+// Dispatch entry points specialize source geometry. Membership remains a
+// runtime packet; changing request progress never changes the compiled shape.
+target.decl @pocket
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.def target(@pocket) @pocket.batch.normalization_affine_1024x1_e1em05_kernel() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 1024 : index
+  %times = index.constant 1 : index
+  %divisor = scalar.constant 1024.0 : f64
+  %variance_divisor = scalar.constant 1024.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  template.apply<@pocket.batch.normalization_affine>(%membership, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %x_offset, %x_stride, %y_offset, %y_stride, %scale_offset, %scale_stride, %bias_offset, %bias_stride) : (buffer, index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.normalization_affine_512x1_e1em06_kernel() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 1 : index
+  %divisor = scalar.constant 512.0 : f64
+  %variance_divisor = scalar.constant 512.0 : f64
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  template.apply<@pocket.batch.normalization_affine>(%membership, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %x_offset, %x_stride, %y_offset, %y_stride, %scale_offset, %scale_stride, %bias_offset, %bias_stride) : (buffer, index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.normalization_affine_512x16_e1em05_kernel() {
+  %elements = index.constant 16 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset) {
+  %elements = index.constant 16 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 16 : index
+  %divisor = scalar.constant 512.0 : f64
+  %variance_divisor = scalar.constant 512.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  template.apply<@pocket.batch.normalization_affine>(%membership, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %x_offset, %x_stride, %y_offset, %y_stride, %scale_offset, %scale_stride, %bias_offset, %bias_stride) : (buffer, index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.softmax_flow_kernel() {
+  %elements = index.constant 16 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %scores_storage: buffer, %probabilities_storage: buffer, %scores_offset: offset, %scores_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset) {
+  %elements = index.constant 16 : index
+  %rows = index.constant 16 : index
+  %capacity = config.get @pocket.context_capacity : index
+  template.apply<@pocket.batch.softmax>(%membership, %elements, %rows, %capacity, %scores_storage, %probabilities_storage, %scores_offset, %scores_stride, %probabilities_offset, %probabilities_stride) : (buffer, index, index, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.softmax_128x265_kernel() {
+  %elements = index.constant 128 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %scores_storage: buffer, %probabilities_storage: buffer, %scores_offset: offset, %scores_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset) {
+  %elements = index.constant 128 : index
+  %rows = index.constant 128 : index
+  %capacity = index.constant 265 : index
+  template.apply<@pocket.batch.softmax>(%membership, %elements, %rows, %capacity, %scores_storage, %probabilities_storage, %scores_offset, %scores_stride, %probabilities_offset, %probabilities_stride) : (buffer, index, index, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.normalization_variance_512x1_e1em05_kernel() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 1 : index
+  %divisor = scalar.constant 512.0 : f64
+  %variance_divisor = scalar.constant 511.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  template.apply<@pocket.batch.normalization_variance>(%membership, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %x_offset, %x_stride, %y_offset, %y_stride, %scale_offset, %scale_stride) : (buffer, index, index, index, f64, f64, f32, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.normalization_plain_512x1_e1em06_kernel() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 1 : index
+  %divisor = scalar.constant 512.0 : f64
+  %variance_divisor = scalar.constant 512.0 : f64
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  template.apply<@pocket.batch.normalization_plain>(%membership, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, index, index, f64, f64, f32, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
