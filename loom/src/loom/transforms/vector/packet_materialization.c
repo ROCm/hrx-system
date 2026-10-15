@@ -709,7 +709,7 @@ static iree_status_t loom_vector_packet_materialize_from_elements(
           selected_packet, packet_type, op->location, &select_op));
       selected_packet = loom_scf_select_result(select_op);
     }
-    packetized_value->packet = selected_packet;
+    packetized_value->packet.vector = selected_packet;
     return iree_ok_status();
   }
 
