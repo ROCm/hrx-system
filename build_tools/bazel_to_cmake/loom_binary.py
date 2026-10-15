@@ -8,6 +8,16 @@
 
 
 class LoomBinaryBuildFileFunctions:
+    def _convert_select_condition(self, label):
+        if isinstance(label, str) and label.startswith(
+            "//loom/config/target/amdgpu:descriptor_set_"
+        ):
+            return "LOOM_TARGET_AMDGPU_" + label.split(":", 1)[1].upper()
+        return super()._convert_select_condition(label)
+
+    def loom_config_compatible_with(self, config_labels):
+        return list(config_labels)
+
     def _register_loom_module_target(self, name):
         if not hasattr(self, "_loom_module_targets"):
             self._loom_module_targets = set()

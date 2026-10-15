@@ -250,9 +250,6 @@ class LoomBuildFileFunctions(
             return text
         return f"\nif({condition})\n{text}endif()\n\n"
 
-    def loom_config_compatible_with(self, config_labels):
-        return list(config_labels)
-
     def loom_target_profile(
         self, name, family, selector, target_compatible_with=None, **kwargs
     ):

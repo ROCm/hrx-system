@@ -67,6 +67,35 @@ cc_library(
         self.assertIn('"disabled.c"', output)
         self.assertIn("if(REPO_ENABLED)", output)
 
+    def test_amdgpu_descriptor_requirements_reach_consumer_profiles(self):
+        converter = SimpleNamespace(body="")
+        functions = _LoomBinaryBuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={}),
+            build_dir="/repo/programs",
+            repo_root="/repo",
+        )
+        compatibility = functions.loom_config_compatible_with(
+            [
+                "//loom/config/target:amdgpu_artifacts",
+                "//loom/config/target/amdgpu:descriptor_set_rdna3_5_core",
+            ]
+        )
+        functions.loom_target_profile(
+            name="gfx1151",
+            family="amdgpu",
+            selector="gfx1151",
+            target_compatible_with=compatibility,
+        )
+        self.assertIn("REQUIRES", converter.body)
+        self.assertIn(
+            "LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU",
+            converter.body,
+        )
+        self.assertIn(
+            "AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE", converter.body
+        )
+
     def test_gpu_image_targets_use_their_own_driver_selection(self):
         cases = (
             ("amdgpu", "IREE_HAL_AMDGPU_TARGETS", "IREE_HAL_AMD_GPU_TARGETS"),

@@ -211,7 +211,7 @@ TEST_P(HsacoTest, LoadsRealHipGlobalsAndDescriptors) {
     SCOPED_TRACE(segment_length);
     Image image;
     IREE_ASSERT_OK(Initialize(bytes_, &image, segment_length));
-    EXPECT_EQ(image.value.metadata.kernel_count, 5u);
+    EXPECT_EQ(image.value.metadata.kernel_count, 6u);
     EXPECT_EQ(image.value.import_count, 0u);
     EXPECT_GT(image.value.relocation_count, 0u);
     EXPECT_GE(image.value.segment_count, 3u);
@@ -283,7 +283,7 @@ TEST_P(HsacoTest, SourceOutlivesCallerAndCallbackSpans) {
   EXPECT_NE(
       iree_hal_amd_gpu_image_find_symbol(&image.value, IREE_SV("image_value")),
       nullptr);
-  EXPECT_EQ(image.value.metadata.kernel_count, 5u);
+  EXPECT_EQ(image.value.metadata.kernel_count, 6u);
   for (size_t i = 0; i < image.value.metadata.kernel_count; ++i) {
     EXPECT_TRUE(iree_string_view_starts_with(
         image.value.metadata.kernels[i].name, IREE_SV("image_")));
@@ -299,7 +299,7 @@ TEST_P(HsacoTest, DoesNotRequireSectionHeaders) {
   Write16(bytes_, 62, 0);
   Image image;
   IREE_ASSERT_OK(Initialize(bytes_, &image, 11));
-  EXPECT_EQ(image.value.metadata.kernel_count, 5u);
+  EXPECT_EQ(image.value.metadata.kernel_count, 6u);
   EXPECT_GT(image.value.relocation_count, 0u);
 }
 
@@ -315,7 +315,7 @@ TEST_P(HsacoTest, SupportsGnuHashWithoutSystemVHash) {
   EXPECT_NE(iree_hal_amd_gpu_image_find_symbol(&image.value,
                                                IREE_SV("image_pointer")),
             nullptr);
-  EXPECT_EQ(image.value.metadata.kernel_count, 5u);
+  EXPECT_EQ(image.value.metadata.kernel_count, 6u);
 }
 
 TEST_P(HsacoTest, ValidatesMappingsBeforeWriting) {

@@ -10,7 +10,7 @@
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/kernarg.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/launch.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,17 +33,6 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   // The parent joins this service before releasing its native context.
   iree_hal_memory_maintenance_t* maintenance;
 } iree_hal_amd_gpu_executable_options_t;
-
-// One placed PM4 function. The executable dominates every borrowed pointer;
-// captured dispatches keep that executable alive through native completion.
-typedef struct iree_hal_amd_gpu_pm4_function_t {
-  // Complete cold reflection and resource constraints owned by the image.
-  const iree_hal_amd_gpu_metadata_kernel_t* metadata;
-  // Immutable argument packing and public parameter reflection.
-  iree_hal_amd_gpu_kernarg_layout_t* kernarg;
-  // Placed register/SGPR state prepared once for this exact family.
-  iree_hal_amd_gpu_pm4_launch_t launch;
-} iree_hal_amd_gpu_pm4_function_t;
 
 // Copies the public artifact, admits its image, and loads native backing for
 // one PM4 family. The family belongs to a sealed device group; context and

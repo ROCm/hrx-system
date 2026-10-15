@@ -322,9 +322,16 @@ TEST_F(LaunchTest, PreparesActualHipCompilerArtifacts) {
         iree_hal_amd_gpu_pm4_launch_t launch = {};
         IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
             image.target.version, &image.kernels[j], kImageAddress, &launch));
-        EXPECT_EQ(launch.requirements, 0);
-        EXPECT_EQ(launch.user_data.kernarg_pointer, 0);
-        EXPECT_GE(launch.user_data_count, 2);
+        const bool packet = iree_string_view_equal(
+            image.metadata.kernels[j].name, IREE_SV("image_dispatch_packet"));
+        EXPECT_EQ(launch.requirements,
+                  packet
+                      ? IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_DISPATCH_POINTER
+                      : 0u);
+        EXPECT_EQ(launch.user_data.dispatch_pointer, packet ? 0 : UINT8_MAX);
+        EXPECT_EQ(launch.user_data.kernarg_pointer, packet ? 2 : 0);
+        // HIP may reserve additional padding SGPRs beyond the ABI inputs.
+        EXPECT_GE(launch.user_data_count, packet ? 4 : 2);
         ++prepared_count;
       }
     }

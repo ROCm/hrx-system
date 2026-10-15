@@ -4,6 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -108,13 +111,14 @@ iree_runtime_cc_library(
     name = "dispatch",
     srcs = ["dispatch.c"],
     hdrs = ["dispatch.h"],
-    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":commands",
+        ":launch",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amd/gpu:executable",
         "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
     ],
 )
 
@@ -133,14 +137,83 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "dispatch_test",
     srcs = ["dispatch_test.cc"],
-    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":dispatch",
+        ":launch",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amd/gpu:executable",
         "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:metadata",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+# The runtime ships relocation-free instruction words. These test-only products
+# check the source and complete descriptor contract for every supported family.
+# This comparison embeds all instruction families in one test executable.
+_PROGRAM_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_rdna3_5_core",
+    "//loom/config/target/amdgpu:descriptor_set_rdna4m_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_5_generic_core",
+])
+
+_PROGRAM_TARGETS = [
+    "gfx11-generic",
+    "gfx1151",
+    "gfx1170",
+    "gfx12-generic",
+    "gfx12-5-generic",
+]
+
+[
+    loom_target_profile(
+        name = "dispatch_program_profile_" + target,
+        family = "amdgpu",
+        selector = target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+        visibility = ["//visibility:private"],
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+[
+    loom_kernel_binary(
+        name = "dispatch_program_" + target,
+        testonly = True,
+        srcs = ["dispatch_info.loom"],
+        out = "dispatch_program_" + target + ".hsaco",
+        target = ":dispatch_program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "dispatch_programs",
+    testonly = True,
+    srcs = [":dispatch_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "dispatch_programs.c",
+    h_file_output = "dispatch_programs.h",
+    identifier = "iree_hal_amd_gpu_pm4_dispatch_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_test(
+    name = "dispatch_program_test",
+    srcs = ["dispatch_program_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    deps = [
+        ":dispatch",
+        ":dispatch_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -359,6 +432,7 @@ iree_runtime_cc_benchmark(
     srcs = ["launch_benchmark.cc"],
     deps = [
         ":commands",
+        ":dispatch",
         ":launch",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/drivers/amd/gpu/image",

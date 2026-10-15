@@ -40,6 +40,8 @@ typedef struct iree_hal_amd_gpu_executable_t {
   iree_hal_memory_type_t memory_type;
   // Immutable per-function state in metadata ordinal order.
   iree_hal_amd_gpu_pm4_function_t* functions;
+  // Inline prepared conversion program, or NULL when no function needs packets.
+  iree_hal_amd_gpu_pm4_launch_t* packet_program;
   // Contracts indexed by READ/WRITE permissions; only used classes exist.
   iree_hal_memory_contract_t* contracts[4];
   // Cold global-view publication lock; never acquired during dispatch.
@@ -75,7 +77,7 @@ static void iree_hal_amd_gpu_executable_free(void* user_data) {
     iree_hal_amd_gpu_kernarg_layout_free(executable->functions[i].kernarg);
   }
   iree_hal_amd_gpu_image_deinitialize(&executable->image);
-  iree_allocator_free(executable->host_allocator, executable);
+  iree_allocator_free_aligned(executable->host_allocator, executable);
 }
 
 static void iree_hal_amd_gpu_executable_cleanup(
@@ -395,6 +397,21 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
     }
     byte_length = iree_max(byte_length, end);
   }
+  iree_hal_amd_gpu_pm4_dispatch_program_t packet_program = {0};
+  uint64_t packet_program_offset = 0;
+  if (executable->packet_program) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_dispatch_program_query(
+        options->target->version, &packet_program));
+    if (!iree_checked_add_u64(
+            byte_length, 255 + IREE_HAL_AMD_GPU_PM4_DISPATCH_PROGRAM_LENGTH,
+            &byte_length)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "GPU dispatch preparation extent overflows");
+    }
+    byte_length &= ~UINT64_C(255);
+    packet_program_offset =
+        byte_length - IREE_HAL_AMD_GPU_PM4_DISPATCH_PROGRAM_LENGTH;
+  }
   IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocate(
       executable->context->api, options->memory, byte_length, image->alignment,
       executable->context->event_sink, &executable->memory));
@@ -476,6 +493,14 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
                                                        imports_offset),
       image->segment_count, mappings);
   iree_allocator_free(executable->host_allocator, storage);
+  if (executable->packet_program && iree_status_is_ok(status)) {
+    memcpy(executable->memory.contents.data + packet_program_offset,
+           packet_program.code.data, packet_program.code.data_length);
+    packet_program.kernel.entry_offset = packet_program_offset;
+    status = iree_hal_amd_gpu_pm4_launch_initialize(
+        options->target->version, &packet_program.kernel,
+        executable->bindings[1].device_address, executable->packet_program);
+  }
   for (iree_host_size_t i = 0;
        i < image->metadata.kernel_count && iree_status_is_ok(status); ++i) {
     iree_hal_amd_gpu_pm4_function_t* function = &executable->functions[i];
@@ -486,6 +511,13 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
       status = iree_hal_amd_gpu_pm4_launch_initialize(
           options->target->version, &image->kernels[i],
           executable->bindings[1].device_address, &function->launch);
+      if (function->packet) {
+        iree_hal_amd_gpu_pm4_dispatch_packet_info_t* packet =
+            (iree_hal_amd_gpu_pm4_dispatch_packet_info_t*)function->packet;
+        packet->kernel_object = executable->bindings[1].device_address +
+                                image->kernels[i].descriptor_offset;
+        packet->prepare = executable->packet_program;
+      }
     }
   }
   if (iree_status_is_ok(status)) {
@@ -541,12 +573,23 @@ iree_status_t iree_hal_amd_gpu_executable_create(
       iree_hal_amd_gpu_executable_admit(&image, options->target);
   iree_host_size_t byte_length = 0, functions_offset = 0, globals_offset = 0;
   iree_host_size_t exports_offset = 0;
+  iree_host_size_t packet_count = 0, packets_offset = 0, program_offset = 0;
+  for (iree_host_size_t i = 0; i < image.metadata.kernel_count; ++i) {
+    packet_count += (image.kernels[i].code_properties >> 1) & 1u;
+  }
   if (iree_status_is_ok(status)) {
     status = IREE_STRUCT_LAYOUT(
         sizeof(iree_hal_amd_gpu_executable_t), &byte_length,
+        IREE_STRUCT_FIELD_ALIGNED(image.metadata.kernel_count,
+                                  iree_hal_amd_gpu_pm4_function_t, 64,
+                                  &functions_offset),
         IREE_STRUCT_FIELD_ALIGNED(
-            image.metadata.kernel_count, iree_hal_amd_gpu_pm4_function_t,
-            iree_alignof(iree_hal_amd_gpu_pm4_function_t), &functions_offset),
+            packet_count, iree_hal_amd_gpu_pm4_dispatch_packet_info_t,
+            iree_alignof(iree_hal_amd_gpu_pm4_dispatch_packet_info_t),
+            &packets_offset),
+        IREE_STRUCT_FIELD_ALIGNED(
+            packet_count ? 1 : 0, iree_hal_amd_gpu_pm4_launch_t,
+            iree_alignof(iree_hal_amd_gpu_pm4_launch_t), &program_offset),
         IREE_STRUCT_FIELD_ALIGNED(image.symbol_count, iree_hal_buffer_t*,
                                   iree_alignof(iree_hal_buffer_t*),
                                   &globals_offset),
@@ -557,8 +600,8 @@ iree_status_t iree_hal_amd_gpu_executable_create(
   }
   iree_hal_amd_gpu_executable_t* executable = NULL;
   if (iree_status_is_ok(status)) {
-    status =
-        iree_allocator_malloc(host_allocator, byte_length, (void**)&executable);
+    status = iree_allocator_malloc_aligned(host_allocator, byte_length, 64, 0,
+                                           (void**)&executable);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_executable_initialize(family, &iree_hal_amd_gpu_executable_vtable,
@@ -572,6 +615,20 @@ iree_status_t iree_hal_amd_gpu_executable_create(
     executable->functions =
         (iree_hal_amd_gpu_pm4_function_t*)((uint8_t*)executable +
                                            functions_offset);
+    if (packet_count) {
+      executable->packet_program =
+          (iree_hal_amd_gpu_pm4_launch_t*)((uint8_t*)executable +
+                                           program_offset);
+      iree_hal_amd_gpu_pm4_dispatch_packet_info_t* packet =
+          (iree_hal_amd_gpu_pm4_dispatch_packet_info_t*)((uint8_t*)executable +
+                                                         packets_offset);
+      for (iree_host_size_t i = 0; i < executable->image.metadata.kernel_count;
+           ++i) {
+        if (executable->image.kernels[i].code_properties & 2u) {
+          executable->functions[i].packet = packet++;
+        }
+      }
+    }
     executable->globals =
         (iree_hal_buffer_t**)((uint8_t*)executable + globals_offset);
     iree_slim_mutex_initialize(&executable->global_mutex);

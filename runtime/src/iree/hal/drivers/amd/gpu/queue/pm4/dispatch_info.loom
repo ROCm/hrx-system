@@ -1,0 +1,35 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Each invocation prepares one immutable shader-visible dispatch packet.
+// The three input counts are workgroups; the packet's grid fields use items.
+kernel.def export("prepare_dispatch_info") @prepare_dispatch_info() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%counts: buffer, %packet: buffer) {
+  %zero = index.constant 0 : offset
+  %four = index.constant 4 : offset
+  %twelve = index.constant 12 : offset
+  %groups = buffer.view %counts[%zero] : buffer -> view<3xi32>
+  %sizes = buffer.view %packet[%four] : buffer -> view<3xi16>
+  %grid = buffer.view %packet[%twelve] : buffer -> view<3xi32>
+  %groups_x = view.load %groups[0] : view<3xi32> -> i32
+  %groups_y = view.load %groups[1] : view<3xi32> -> i32
+  %groups_z = view.load %groups[2] : view<3xi32> -> i32
+  %size_x = view.load %sizes[0] : view<3xi16> -> i16
+  %size_y = view.load %sizes[1] : view<3xi16> -> i16
+  %size_z = view.load %sizes[2] : view<3xi16> -> i16
+  %wide_x = scalar.extui %size_x : i16 to i32
+  %wide_y = scalar.extui %size_y : i16 to i32
+  %wide_z = scalar.extui %size_z : i16 to i32
+  %items_x = scalar.muli %groups_x, %wide_x : i32
+  %items_y = scalar.muli %groups_y, %wide_y : i32
+  %items_z = scalar.muli %groups_z, %wide_z : i32
+  view.store %items_x, %grid[0] : i32, view<3xi32>
+  view.store %items_y, %grid[1] : i32, view<3xi32>
+  view.store %items_z, %grid[2] : i32, view<3xi32>
+  kernel.return
+}

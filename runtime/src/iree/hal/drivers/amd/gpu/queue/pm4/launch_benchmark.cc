@@ -8,6 +8,7 @@
 
 #include "benchmark/benchmark.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/launch.h"
 
 namespace iree::hal::amd::gpu {
@@ -81,6 +82,60 @@ BENCHMARK(BM_EmitLaunch)
     ->Args({0x408, 2})
     ->Args({0x408, 15})
     ->Args({0x45e, 16});
+
+// Private argument/packet preparation on the caller or recorder. GPU-side
+// indirect count conversion and native publication are measured separately.
+static void BM_EmplaceDispatchArguments(benchmark::State& state) {
+  const iree_hal_amd_gpu_metadata_kernel_t metadata = {};
+  iree_hal_amd_gpu_kernarg_layout_t layout = {
+      .byte_length = 32,
+      .alignment = 8,
+      .native_byte_length = 32,
+  };
+  const iree_hal_amd_gpu_pm4_dispatch_packet_info_t packet = {
+      .kernel_object = UINT64_C(0x1234000040),
+  };
+  const iree_hal_amd_gpu_pm4_function_t function = {
+      .metadata = &metadata,
+      .kernarg = &layout,
+      .packet = state.range(0) ? &packet : nullptr,
+  };
+  const iree_hal_amd_gpu_pm4_dispatch_t dispatch = {
+      .workgroup_size = {32, 1, 1},
+      .workgroup_count = {64, 1, 1},
+  };
+  const iree_hal_dispatch_flags_t flags =
+      (state.range(1) ? IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS
+                      : 0) |
+      (state.range(2) ? IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS
+                      : IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS);
+  const std::array<uint64_t, 4> constants = {0x100000000, 17, 23, 29};
+  alignas(64) std::array<uint8_t, 192> bytes;
+  benchmark::DoNotOptimize(function);
+  benchmark::DoNotOptimize(dispatch);
+  benchmark::DoNotOptimize(flags);
+  for (auto _ : state) {
+    const auto storage =
+        iree_hal_amd_gpu_pm4_dispatch_storage(&function, flags);
+    if (storage.length) {
+      iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
+          &function, &dispatch,
+          iree_make_const_byte_span(constants.data(), sizeof(constants)),
+          nullptr, flags, bytes.data());
+    }
+    benchmark::DoNotOptimize(storage);
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_EmplaceDispatchArguments)
+    ->Args({0, 0, 0})
+    ->Args({0, 1, 0})
+    ->Args({0, 0, 1})
+    ->Args({1, 0, 0})
+    ->Args({1, 1, 0})
+    ->Args({1, 0, 1})
+    ->Args({1, 1, 1});
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu

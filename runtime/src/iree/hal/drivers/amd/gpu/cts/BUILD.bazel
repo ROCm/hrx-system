@@ -46,6 +46,7 @@ iree_runtime_cc_test(
 
 iree_runtime_cc_benchmark(
     name = "queue_benchmark",
+    size = "medium",
     srcs = ["queue_benchmark.cc"],
     # Explicit measurement iteration counts override the smoke's minimum time.
     args = ["--benchmark_dry_run"],
@@ -113,6 +114,7 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_test(
     name = "recording_test",
+    size = "medium",
     srcs = ["recording_test.cc"],
     deps = [
         ":test_device",

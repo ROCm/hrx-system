@@ -9,9 +9,12 @@ import os
 import bazel_to_cmake_config
 import bazel_to_cmake_converter
 import bazel_to_cmake_requirements
+from loom_binary import LoomBinaryBuildFileFunctions
 
 
-class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
+class RuntimeBuildFileFunctions(
+    LoomBinaryBuildFileFunctions, bazel_to_cmake_converter.BuildFileFunctions
+):
     def _custom_initialize(self):
         self._runtime_requirement_policy = (
             bazel_to_cmake_requirements.load_project_policy(

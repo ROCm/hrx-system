@@ -94,6 +94,8 @@ iree_amdgpu_binary_variants_embed_data(
     "iree_hal_amd_gpu_hip_images"
   SRCS
     "testdata/image.hip"
+  COPTS
+    "-fno-offload-uniform-block"
   SOURCE_FORMAT
     hip
   TESTONLY

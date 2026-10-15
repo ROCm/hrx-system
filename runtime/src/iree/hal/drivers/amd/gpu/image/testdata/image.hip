@@ -16,8 +16,8 @@ __attribute__((device, used, visibility("default"))) unsigned* image_pointer =
     &image_value;
 // Ordinary user storage has no runtime service semantics. Admission tests
 // rename this symbol to exercise each reserved runtime configuration name.
-__attribute__((device, used, visibility("default")))
-unsigned image_runtime_config[16];
+__attribute__((device, used,
+               visibility("default"))) unsigned image_runtime_config[16];
 
 __attribute__((global)) void image_transform(unsigned* output, unsigned value) {
   if (__builtin_amdgcn_workgroup_id_x() == 0 &&
@@ -74,6 +74,37 @@ __attribute__((global)) void image_geometry(unsigned* output, unsigned marker) {
     output[5] = __builtin_amdgcn_workgroup_size_z();
     output[6] = marker;
     output[7] = __ockl_get_work_dim();
+  }
+}
+
+// Observe the shader ABI directly, independently of how the runtime encodes its
+// command queue. Only one invocation writes the complete packet and its
+// address.
+__attribute__((global)) void image_dispatch_packet(unsigned* output,
+                                                   unsigned marker) {
+  if (__builtin_amdgcn_workgroup_id_x() == 0 &&
+      __builtin_amdgcn_workgroup_id_y() == 0 &&
+      __builtin_amdgcn_workgroup_id_z() == 0 &&
+      __builtin_amdgcn_workitem_id_x() == 0 &&
+      __builtin_amdgcn_workitem_id_y() == 0 &&
+      __builtin_amdgcn_workitem_id_z() == 0) {
+    const __attribute__((address_space(4))) unsigned* packet =
+        (const __attribute__((
+            address_space(4))) unsigned*)__builtin_amdgcn_dispatch_ptr();
+    for (unsigned i = 0; i < 16; ++i) {
+      output[i] = packet[i];
+    }
+    const unsigned long long address = (unsigned long long)packet;
+    output[16] = (unsigned)address;
+    output[17] = (unsigned)(address >> 32);
+    output[18] = marker;
+    const unsigned long long object =
+        (unsigned long long)packet[8] | ((unsigned long long)packet[9] << 32);
+    const __attribute__((address_space(4))) unsigned* descriptor =
+        (const __attribute__((address_space(4))) unsigned*)object;
+    output[19] = descriptor[0];
+    output[20] = descriptor[1];
+    output[21] = descriptor[2];
   }
 }
 }

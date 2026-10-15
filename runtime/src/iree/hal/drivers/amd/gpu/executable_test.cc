@@ -358,9 +358,10 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
   std::fill(bytes_.begin(), bytes_.end(), 0xa5);
   iree_hal_amd_gpu_image_deinitialize(&image_);
   EXPECT_EQ(iree_hal_executable_queue_family(executable_), &family_);
-  EXPECT_EQ(iree_hal_executable_function_count(executable_), 5u);
-  for (auto name : {"image_transform", "image_increment", "image_accumulate",
-                    "image_counts", "image_geometry"}) {
+  EXPECT_EQ(iree_hal_executable_function_count(executable_), 6u);
+  for (auto name :
+       {"image_transform", "image_increment", "image_accumulate",
+        "image_counts", "image_geometry", "image_dispatch_packet"}) {
     iree_hal_executable_function_t token;
     IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
         executable_, iree_make_cstring_view(name), &token));
@@ -371,6 +372,8 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
         iree_string_view_equal(info.name, iree_make_cstring_view(name)));
     const bool count_producer = std::strcmp(name, "image_counts") == 0;
     const bool geometry_consumer = std::strcmp(name, "image_geometry") == 0;
+    const bool packet_consumer =
+        std::strcmp(name, "image_dispatch_packet") == 0;
     EXPECT_EQ(info.binding_count, count_producer ? 2u : 1u);
     EXPECT_EQ(info.constant_byte_length, count_producer ? 0u : 4u);
     EXPECT_EQ(info.parameter_count, 2u);
@@ -382,6 +385,7 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
     const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_executable_lookup_pm4(executable_, token, &function));
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(function) & 63u, 0u);
     EXPECT_EQ(function->kernarg->native_byte_length,
               count_producer ? 16u : 12u);
     if (geometry_consumer) {
@@ -391,8 +395,59 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
     } else {
       EXPECT_EQ(function->kernarg->byte_length, count_producer ? 16u : 12u);
     }
-    EXPECT_EQ(function->launch.requirements, 0u);
+    EXPECT_EQ(function->launch.requirements,
+              packet_consumer
+                  ? IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_DISPATCH_POINTER
+                  : 0u);
+    EXPECT_EQ(function->packet != nullptr, packet_consumer);
+    if (packet_consumer) {
+      EXPECT_NE(function->packet->kernel_object, 0u);
+      EXPECT_EQ(function->packet->kernel_object & 63u, 0u);
+      ASSERT_NE(function->packet->prepare, nullptr);
+      EXPECT_EQ(function->packet->prepare->requirements, 0u);
+      EXPECT_EQ(function->packet->prepare->user_data_count, 2u);
+    }
   }
+}
+
+TEST_P(ExecutableTest, PreparationProgramSharesPlacedImageAndFetchBacking) {
+  IREE_ASSERT_OK(Load());
+  iree_hal_executable_function_t token;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable_, IREE_SV("image_dispatch_packet"), &token));
+  const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_executable_lookup_pm4(executable_, token, &function));
+  ASSERT_NE(function->packet, nullptr);
+  const auto& launch = *function->packet->prepare;
+  const uint64_t address =
+      uint64_t{launch.program[0]} << 8 | uint64_t{launch.program[1]} << 40;
+  constexpr uint64_t kBase = UINT64_C(0x1200000000);
+  ASSERT_GE(address, kBase + image_.byte_length);
+  const uint64_t offset = address - kBase;
+  ASSERT_LE(offset + IREE_HAL_AMD_GPU_PM4_DISPATCH_PROGRAM_LENGTH,
+            native_.bytes.size());
+  iree_hal_amd_gpu_pm4_dispatch_program_t program;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_pm4_dispatch_program_query(target_.version, &program));
+  EXPECT_EQ(memcmp(native_.bytes.data() + offset, program.code.data,
+                   program.code.data_length),
+            0);
+  for (size_t i = program.code.data_length;
+       i < IREE_HAL_AMD_GPU_PM4_DISPATCH_PROGRAM_LENGTH; ++i) {
+    EXPECT_EQ(native_.bytes[offset + i], 0u) << i;
+  }
+  bool found_descriptor = false;
+  for (size_t i = 0; i < image_.metadata.kernel_count; ++i) {
+    if (iree_string_view_equal(image_.metadata.kernels[i].name,
+                               IREE_SV("image_dispatch_packet"))) {
+      EXPECT_EQ(function->packet->kernel_object,
+                kBase + image_.kernels[i].descriptor_offset);
+      found_descriptor = true;
+    }
+  }
+  EXPECT_TRUE(found_descriptor);
+  EXPECT_EQ(native_.allocations, 1u);
 }
 
 TEST_P(ExecutableTest, GlobalsPreserveRelocationsPermissionsAndBorrowIdentity) {

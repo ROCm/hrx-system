@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 
 #include "iree/base/internal/arena.h"
+#include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/transfer.h"
@@ -17,6 +18,7 @@ enum {
   IREE_HAL_AMD_GPU_PM4_RECORD_DISPATCH = 1u << 0,
   IREE_HAL_AMD_GPU_PM4_RECORD_TRANSFER = 1u << 1,
   IREE_HAL_AMD_GPU_PM4_RECORD_JOIN_DMA = 1u << 2,
+  IREE_HAL_AMD_GPU_PM4_RECORD_INDIRECT_ARGUMENTS = 1u << 3,
   IREE_HAL_AMD_GPU_PM4_SITE_QUEUE = 0,
   IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM = 1,
   IREE_HAL_AMD_GPU_PM4_PATCH_ARGUMENT = 1u << 31,
@@ -37,7 +39,7 @@ struct iree_hal_amd_gpu_pm4_record_block_t {
 typedef struct iree_hal_amd_gpu_pm4_record_t {
   // Complete eight-byte-aligned extent to the following record.
   uint32_t byte_length;
-  // Native argument template extent, or zero for externally supplied arguments.
+  // Private invocation extent, including any kernargs and dispatch packet.
   uint32_t argument_length;
   // Required power-of-two native argument alignment.
   uint32_t argument_alignment;
@@ -45,10 +47,17 @@ typedef struct iree_hal_amd_gpu_pm4_record_t {
   uint16_t word_count;
   // Number of captured address relocations preceding the native words.
   uint16_t patch_count;
-  // Native kernarg user-data pair, or UINT16_MAX when absent/external.
-  uint16_t kernarg_word_offset;
-  // Native dispatch-ID user-data pair, or UINT16_MAX when absent.
-  uint16_t dispatch_id_word_offset;
+  // Native user-data relocations; UINT8_MAX denotes an absent input.
+  struct {
+    // Consumer kernarg pair, including externally supplied native arguments.
+    uint8_t kernarg;
+    // Consumer dispatch-packet pair.
+    uint8_t packet;
+    // Consumer dispatch-ID pair.
+    uint8_t dispatch_id;
+    // Preparation program's kernarg pair, when a packet has indirect counts.
+    uint8_t prepare;
+  } user_data;
   // Byte offset from this header to arguments or a native DMA span recipe.
   uint32_t payload_offset;
   // Native publication properties; no HAL operation is replayed.
@@ -63,6 +72,8 @@ typedef struct iree_hal_amd_gpu_pm4_record_t {
 } iree_hal_amd_gpu_pm4_record_t;
 static_assert(sizeof(iree_hal_amd_gpu_pm4_record_t) == 32,
               "record headers occupy half a cache line");
+static_assert(IREE_HAL_AMD_GPU_PM4_DISPATCH_MAX_WORDS + 17 < UINT8_MAX,
+              "launch and preceding barrier offsets fit byte relocations");
 
 typedef struct iree_hal_amd_gpu_pm4_patch_t {
   // Direct recorded buffer, or NULL for an invocation binding-table slot.
@@ -247,8 +258,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_append(
       .argument_alignment = argument_alignment,
       .word_count = word_count,
       .patch_count = patch_count,
-      .kernarg_word_offset = UINT16_MAX,
-      .dispatch_id_word_offset = UINT16_MAX,
+      .user_data = {UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX},
       .payload_offset = argument_offset,
       .flags = (buffer->pending_barrier.execution &
                 IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA)
@@ -516,8 +526,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
         iree_hal_resource_set_insert(buffer->resources, 1, &executable));
   }
   const bool indirect = iree_hal_dispatch_uses_indirect_arguments(flags);
+  const bool prepare_packet = function->packet && indirect_parameters;
+  const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
+      iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
   const uint16_t binding_patch_count =
-      indirect && function->launch.user_data.kernarg_pointer == UINT8_MAX
+      indirect && function->launch.user_data.kernarg_pointer == UINT8_MAX &&
+              !function->packet
           ? 0
           : (uint16_t)bindings.count;
   const uint32_t patch_count = binding_patch_count + indirect_parameters;
@@ -525,8 +539,17 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "recorded dispatch has too many native references");
   }
+  iree_hal_amd_gpu_pm4_barrier_t before = buffer->pending_barrier;
+  if (prepare_packet) {
+    // Indirect parameters are public command inputs. The private preparation
+    // shader additionally consumes them through its lower caches, including
+    // when the public edge only orders two command-processor operations.
+    before.cache_control |= buffer->profile.command_processor_bypasses_l2
+                                ? buffer->profile.acquire
+                                : buffer->profile.shader;
+  }
   const uint32_t barrier_words =
-      iree_hal_amd_gpu_pm4_barrier_word_count(buffer->pending_barrier);
+      iree_hal_amd_gpu_pm4_barrier_word_count(before);
   const uint32_t launch_words = function->launch.user_data_count
                                     ? 24 + function->launch.user_data_count
                                     : 22;
@@ -537,15 +560,20 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
       indirect_parameters ? iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(
                                 indirect_copy_count)
                           : 5;
-  const uint32_t word_count = barrier_words + launch_words + dispatch_words;
+  const uint32_t prepare_words =
+      prepare_packet ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS : 0u;
+  const uint32_t launch_offset = barrier_words + prepare_words;
+  const uint32_t word_count = launch_offset + launch_words + dispatch_words;
   iree_hal_amd_gpu_pm4_record_t* record = NULL;
   iree_hal_amd_gpu_pm4_record_block_t* previous_tail = buffer->tail;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_buffer_append(
-      buffer, (uint16_t)word_count, (uint16_t)patch_count,
-      indirect ? 0 : function->kernarg->byte_length,
-      indirect ? 1 : function->kernarg->alignment, &record));
+      buffer, (uint16_t)word_count, (uint16_t)patch_count, storage.length,
+      storage.alignment, &record));
   record->flags |= IREE_HAL_AMD_GPU_PM4_RECORD_DISPATCH;
-  record->indirect.word_offset = (uint16_t)(barrier_words + launch_words);
+  if (indirect) {
+    record->flags |= IREE_HAL_AMD_GPU_PM4_RECORD_INDIRECT_ARGUMENTS;
+  }
+  record->indirect.word_offset = (uint16_t)(launch_offset + launch_words);
   record->indirect.copy_count = indirect_copy_count;
   if (indirect_copy_count) {
     record->flags |= IREE_HAL_AMD_GPU_PM4_RECORD_JOIN_DMA;
@@ -554,16 +582,23 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
   uint16_t kernarg_word = iree_hal_amd_gpu_pm4_launch_user_data_word_offset(
       function->launch.user_data.kernarg_pointer);
   if (kernarg_word != UINT16_MAX) {
-    kernarg_word += barrier_words;
-    if (!indirect) {
-      record->kernarg_word_offset = kernarg_word;
-    }
+    kernarg_word += launch_offset;
+    record->user_data.kernarg = (uint8_t)kernarg_word;
   }
-  record->dispatch_id_word_offset =
+  const uint16_t dispatch_id_word =
       iree_hal_amd_gpu_pm4_launch_user_data_word_offset(
           function->launch.user_data.dispatch_id);
-  if (record->dispatch_id_word_offset != UINT16_MAX) {
-    record->dispatch_id_word_offset += barrier_words;
+  if (dispatch_id_word != UINT16_MAX) {
+    record->user_data.dispatch_id = (uint8_t)(launch_offset + dispatch_id_word);
+  }
+  if (function->packet) {
+    record->user_data.packet =
+        (uint8_t)(launch_offset +
+                  iree_hal_amd_gpu_pm4_launch_user_data_word_offset(
+                      function->launch.user_data.dispatch_pointer));
+    if (prepare_packet) {
+      record->user_data.prepare = (uint8_t)(barrier_words + 24);
+    }
   }
   const uint16_t* binding_offsets =
       iree_hal_amd_gpu_kernarg_layout_binding_offsets(function->kernarg);
@@ -572,8 +607,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
        i < binding_patch_count && iree_status_is_ok(status); ++i) {
     patches[i] = (iree_hal_amd_gpu_pm4_patch_t){
         .target_offset =
-            indirect ? (uint32_t)kernarg_word * 4
-                     : IREE_HAL_AMD_GPU_PM4_PATCH_ARGUMENT | binding_offsets[i],
+            indirect
+                ? (function->packet
+                       ? IREE_HAL_AMD_GPU_PM4_PATCH_ARGUMENT |
+                             (storage.packet_offset +
+                              offsetof(iree_hal_amd_gpu_pm4_dispatch_packet_t,
+                                       kernarg_address))
+                       : (uint32_t)kernarg_word * 4)
+                : IREE_HAL_AMD_GPU_PM4_PATCH_ARGUMENT | binding_offsets[i],
         .alignment = indirect ? function->kernarg->alignment : 1,
     };
     status = iree_hal_amd_gpu_pm4_command_buffer_capture_binding(
@@ -592,7 +633,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
   }
   if (iree_status_is_ok(status)) {
     uint32_t* words = (void*)(patches + patch_count);
-    words = iree_hal_amd_gpu_pm4_barrier_emit(words, buffer->pending_barrier);
+    words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
+    if (prepare_packet) {
+      words = iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
+          words, function->packet->prepare, 0, buffer->profile.shader);
+    }
     const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {0};
     words = iree_hal_amd_gpu_pm4_launch_emit(
         words, &function->launch, dispatch.workgroup_size,
@@ -611,7 +656,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
       iree_hal_amd_gpu_pm4_emit_dispatch_direct(words, dispatch.workgroup_count,
                                                 initiator);
     }
-    if (!indirect) {
+    if (storage.length) {
       iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
           function, &dispatch, constants, NULL, flags,
           (uint8_t*)record + record->payload_offset);
@@ -918,12 +963,42 @@ iree_status_t iree_hal_amd_gpu_pm4_command_prepare_chunk(
                                           iree_unaligned_load_le_u64(copy + 4));
         }
       }
-      if (record->kernarg_word_offset != UINT16_MAX) {
-        iree_unaligned_store_le_u64(words + record->kernarg_word_offset,
+      if (record->user_data.kernarg != UINT8_MAX &&
+          !(record->flags & IREE_HAL_AMD_GPU_PM4_RECORD_INDIRECT_ARGUMENTS)) {
+        iree_unaligned_store_le_u64(words + record->user_data.kernarg,
                                     argument_address + argument_offset);
       }
-      if (record->dispatch_id_word_offset != UINT16_MAX) {
-        iree_unaligned_store_le_u64(words + record->dispatch_id_word_offset,
+      if (record->user_data.packet != UINT8_MAX) {
+        const bool prepare_packet = record->user_data.prepare != UINT8_MAX;
+        const uint32_t packet_offset =
+            record->argument_length - (prepare_packet ? 80u : 64u);
+        const uint64_t packet_address =
+            argument_address + argument_offset + packet_offset;
+        iree_hal_amd_gpu_pm4_dispatch_packet_t* packet =
+            (void*)(target_arguments + packet_offset);
+        iree_unaligned_store_le_u64(words + record->user_data.packet,
+                                    packet_address);
+        if (record->flags & IREE_HAL_AMD_GPU_PM4_RECORD_INDIRECT_ARGUMENTS) {
+          // The binding relocation populated the packet, even when the shader
+          // only consumes that address through its packet pointer.
+          if (record->user_data.kernarg != UINT8_MAX) {
+            iree_unaligned_store_le_u64(words + record->user_data.kernarg,
+                                        packet->kernarg_address);
+          }
+        } else {
+          packet->kernarg_address = argument_address + argument_offset;
+        }
+        if (prepare_packet) {
+          uint64_t* inputs = (uint64_t*)(packet + 1);
+          inputs[0] =
+              iree_unaligned_load_le_u64(words + record->word_count - 3);
+          inputs[1] = packet_address;
+          iree_unaligned_store_le_u64(words + record->user_data.prepare,
+                                      packet_address + 64);
+        }
+      }
+      if (record->user_data.dispatch_id != UINT8_MAX) {
+        iree_unaligned_store_le_u64(words + record->user_data.dispatch_id,
                                     dispatch_id + out_chunk->dispatch_count);
       }
       out_chunk->dispatch_count +=

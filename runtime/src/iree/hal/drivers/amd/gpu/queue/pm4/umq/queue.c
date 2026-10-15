@@ -8,6 +8,7 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/base/cpu_data.h"
+#include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/continuation.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_call.h"
@@ -452,7 +453,7 @@ iree_hal_amd_gpu_pm4_umq_publish_transfer(
   const uint32_t word_budget =
       iree_min(queue->producer.ring.capacity / 2, 16384u);
   const uint32_t wait_words = first ? submission->native_wait_count * 7 : 0;
-  // Admission reserves 192 words beyond native waits. Keep 96 for barriers,
+  // Admission reserves launch capacity beyond native waits. Keep 96 words for
   // signals, retirement, notification, and alignment, leaving room for DMA
   // packets even at the maximum admitted native fan-in.
   iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
@@ -690,15 +691,18 @@ iree_hal_amd_gpu_pm4_umq_publish(
                     submission->dispatch.geometry.workgroup_count[2]));
   const bool indirect =
       iree_hal_dispatch_uses_indirect_arguments(submission->dispatch.flags);
-  const uint32_t argument_length =
-      dispatch && !indirect ? function->kernarg->byte_length : 0;
+  const iree_hal_amd_gpu_pm4_dispatch_storage_t argument_storage =
+      dispatch ? iree_hal_amd_gpu_pm4_dispatch_storage(
+                     function, submission->dispatch.flags)
+               : (iree_hal_amd_gpu_pm4_dispatch_storage_t){0};
+  const uint32_t argument_length = argument_storage.length;
   iree_hal_amd_gpu_pm4_argument_storage_t* arguments =
       queue->producer.arguments;
   uint64_t argument_offset = 0;
   uint64_t argument_end = arguments->end;
   uint64_t argument_address = 0;
   if (argument_length) {
-    const uint64_t alignment = function->kernarg->alignment;
+    const uint64_t alignment = argument_storage.alignment;
     if (argument_length > arguments->capacity ||
         alignment > arguments->capacity) {
       return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
@@ -731,10 +735,14 @@ iree_hal_amd_gpu_pm4_umq_publish(
       dispatch && indirect_parameters && !indirect
           ? function->kernarg->indirect_copy_count
           : 0;
+  const bool prepare_packet =
+      dispatch && function->packet && indirect_parameters;
   const uint32_t launch_words =
-      dispatch ? (function->launch.user_data_count
-                      ? 24 + function->launch.user_data_count
-                      : 22) +
+      dispatch ? (prepare_packet ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS
+                                 : 0u) +
+                     (function->launch.user_data_count
+                          ? 24 + function->launch.user_data_count
+                          : 22) +
                      (indirect_parameters
                           ? iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(
                                 indirect_copy_count)
@@ -816,6 +824,20 @@ iree_hal_amd_gpu_pm4_umq_publish(
         submission->dispatch.constants, addresses, submission->dispatch.flags,
         arguments->memory.contents.data + argument_offset);
   }
+  uint64_t packet_address = 0;
+  if (dispatch && function->packet) {
+    const uint64_t packet_offset =
+        argument_offset + argument_storage.packet_offset;
+    packet_address = arguments->address + packet_offset;
+    iree_hal_amd_gpu_pm4_dispatch_packet_t* packet =
+        (void*)(arguments->memory.contents.data + packet_offset);
+    packet->kernarg_address = argument_address;
+    if (prepare_packet) {
+      uint64_t* inputs = (uint64_t*)(packet + 1);
+      inputs[0] = parameters_address;
+      inputs[1] = packet_address;
+    }
+  }
   uint32_t* words = reservation.words;
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
     if (submission->waits[i].signal) {
@@ -826,7 +848,13 @@ iree_hal_amd_gpu_pm4_umq_publish(
   }
   words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
   if (dispatch) {
+    if (prepare_packet) {
+      words = iree_hal_amd_gpu_pm4_dispatch_emit_prepare(
+          words, function->packet->prepare, packet_address + 64,
+          queue->options.barriers.shader);
+    }
     const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
+        .dispatch_pointer = packet_address,
         .kernarg_pointer = argument_address,
         .dispatch_id = queue->producer.dispatch_count++};
     words = iree_hal_amd_gpu_pm4_launch_emit(
@@ -865,7 +893,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_admit(
     iree_hal_amd_gpu_pm4_wait_kind_t* out_kind) {
   *out_kind = IREE_HAL_AMD_GPU_PM4_WAIT_READY;
   // A bounded direct publication must fit strictly inside half the ring.
-  // Reserve a 96-word launch plus 96 words for barriers, signal, retirement,
+  // Reserve a bounded launch plus 96 words for barriers, signal, retirement,
   // notification, and alignment. Large fan-in joins use completed host
   // timelines, leaving command capacity independent of the semaphore list.
   const uint32_t word_budget =
@@ -1137,16 +1165,17 @@ static bool iree_hal_amd_gpu_pm4_umq_progress(void* user_data) {
           capacity = true;
           break;
         case IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS: {
-          const iree_hal_amd_gpu_pm4_command_arguments_t requirement =
-              submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE
-                  ? iree_hal_amd_gpu_pm4_command_next_arguments(
-                        submission->execute.cursor)
-                  : (iree_hal_amd_gpu_pm4_command_arguments_t){
-                        .length =
-                            submission->dispatch.function->kernarg->byte_length,
-                        .alignment =
-                            submission->dispatch.function->kernarg->alignment,
-                    };
+          iree_hal_amd_gpu_pm4_command_arguments_t requirement;
+          if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE) {
+            requirement = iree_hal_amd_gpu_pm4_command_next_arguments(
+                submission->execute.cursor);
+          } else {
+            const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
+                iree_hal_amd_gpu_pm4_dispatch_storage(
+                    submission->dispatch.function, submission->dispatch.flags);
+            requirement = (iree_hal_amd_gpu_pm4_command_arguments_t){
+                .length = storage.length, .alignment = storage.alignment};
+          }
           status = iree_hal_amd_gpu_pm4_umq_grow_arguments(
               queue, iree_max(requirement.length, requirement.alignment));
           break;

@@ -116,7 +116,6 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
 iree_cc_library(
   NAME
     dispatch
@@ -126,13 +125,14 @@ iree_cc_library(
     "dispatch.c"
   DEPS
     ::commands
+    ::launch
     iree::base
     iree::hal
-    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::drivers::amd::gpu::target::identity
   PUBLIC
 )
-endif()
 
 iree_cc_test(
   NAME
@@ -147,7 +147,6 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
-if(AMDF_BUILD)
 iree_cc_test(
   NAME
     dispatch_test
@@ -155,11 +154,185 @@ iree_cc_test(
     "dispatch_test.cc"
   DEPS
     ::dispatch
+    ::launch
     iree::base
     iree::hal
-    iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::image::metadata
     iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::drivers::amd::gpu::target::identity
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_target_profile(
+  NAME
+    "dispatch_program_profile_gfx11-generic"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx11-generic"
+  REQUIRES
+    LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE
+)
+
+loom_target_profile(
+  NAME
+    "dispatch_program_profile_gfx1151"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx1151"
+  REQUIRES
+    LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE
+)
+
+loom_target_profile(
+  NAME
+    "dispatch_program_profile_gfx1170"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx1170"
+  REQUIRES
+    LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE
+)
+
+loom_target_profile(
+  NAME
+    "dispatch_program_profile_gfx12-generic"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx12-generic"
+  REQUIRES
+    LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE
+)
+
+loom_target_profile(
+  NAME
+    "dispatch_program_profile_gfx12-5-generic"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx12-5-generic"
+  REQUIRES
+    LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE
+)
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "dispatch_program_gfx11-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:dispatch_program_gfx11-generic"
+  TARGET
+    "::dispatch_program_profile_gfx11-generic"
+  OUTPUT
+    "dispatch_program_gfx11-generic.hsaco"
+  SRCS
+    "dispatch_info.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "dispatch_program_gfx1151"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:dispatch_program_gfx1151"
+  TARGET
+    "::dispatch_program_profile_gfx1151"
+  OUTPUT
+    "dispatch_program_gfx1151.hsaco"
+  SRCS
+    "dispatch_info.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "dispatch_program_gfx1170"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:dispatch_program_gfx1170"
+  TARGET
+    "::dispatch_program_profile_gfx1170"
+  OUTPUT
+    "dispatch_program_gfx1170.hsaco"
+  SRCS
+    "dispatch_info.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "dispatch_program_gfx12-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:dispatch_program_gfx12-generic"
+  TARGET
+    "::dispatch_program_profile_gfx12-generic"
+  OUTPUT
+    "dispatch_program_gfx12-generic.hsaco"
+  SRCS
+    "dispatch_info.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+loom_kernel_binary(
+  NAME
+    "dispatch_program_gfx12-5-generic"
+  COMPONENT
+    "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:dispatch_program_gfx12-5-generic"
+  TARGET
+    "::dispatch_program_profile_gfx12-5-generic"
+  OUTPUT
+    "dispatch_program_gfx12-5-generic.hsaco"
+  SRCS
+    "dispatch_info.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+iree_c_embed_data(
+  NAME
+    dispatch_programs
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/dispatch_program_gfx11-generic.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/dispatch_program_gfx1151.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/dispatch_program_gfx1170.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/dispatch_program_gfx12-5-generic.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/dispatch_program_gfx12-generic.hsaco"
+  C_FILE_OUTPUT
+    "dispatch_programs.c"
+  H_FILE_OUTPUT
+    "dispatch_programs.h"
+  IDENTIFIER
+    "iree_hal_amd_gpu_pm4_dispatch_programs"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
+iree_cc_test(
+  NAME
+    dispatch_program_test
+  SRCS
+    "dispatch_program_test.cc"
+  DEPS
+    ::dispatch
+    ::dispatch_programs
+    iree::base
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::image::hsaco
+    iree::hal::drivers::amd::gpu::target::identity
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -412,6 +585,7 @@ iree_cc_binary_benchmark(
     "launch_benchmark.cc"
   DEPS
     ::commands
+    ::dispatch
     ::launch
     iree::base
     iree::hal::drivers::amd::gpu::image
