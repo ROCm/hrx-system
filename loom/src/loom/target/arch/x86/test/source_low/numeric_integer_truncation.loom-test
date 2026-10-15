@@ -115,3 +115,140 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
   %wide_results = avx512.vpmovqb.xmm.zmm %wides
   return %subregister_result, %word_results, %wide_results
 }
+
+// ====
+// RUN: emit source-low output=low
+
+x86.target<avx2> @avx2
+
+x86.target<avx512> @avx512
+
+func.def public target(@avx2) @truncate_loaded_vectors_avx2(%input: buffer, %output32a: buffer, %output32b: buffer, %output16: buffer, %output8: buffer) {
+  %c0 = index.constant 0 : offset
+  %inputs = buffer.view %input[%c0] : buffer -> view<8xi64>
+  %outputs32a = buffer.view %output32a[%c0] : buffer -> view<8xi32>
+  %outputs32b = buffer.view %output32b[%c0] : buffer -> view<8xi32>
+  %outputs16 = buffer.view %output16[%c0] : buffer -> view<8xi16>
+  %outputs8 = buffer.view %output8[%c0] : buffer -> view<8xi8>
+  %values = vector.load %inputs[0] : view<8xi64> -> vector<8xi64>
+  %narrowed32 = vector.trunci %values : vector<8xi64> to vector<8xi32>
+  %narrowed16 = vector.trunci %values : vector<8xi64> to vector<8xi16>
+  %narrowed8 = vector.trunci %values : vector<8xi64> to vector<8xi8>
+  vector.store %narrowed32, %outputs32a[0] : vector<8xi32>, view<8xi32>
+  vector.store %narrowed32, %outputs32b[0] : vector<8xi32>, view<8xi32>
+  vector.store %narrowed16, %outputs16[0] : vector<8xi16>, view<8xi16>
+  vector.store %narrowed8, %outputs8[0] : vector<8xi8>, view<8xi8>
+  func.return
+}
+
+func.def public target(@avx512) @truncate_loaded_vectors_avx512(%input: buffer, %output32: buffer, %output16: buffer, %output8: buffer) {
+  %c0 = index.constant 0 : offset
+  %inputs = buffer.view %input[%c0] : buffer -> view<16xi64>
+  %outputs32 = buffer.view %output32[%c0] : buffer -> view<16xi32>
+  %outputs16 = buffer.view %output16[%c0] : buffer -> view<16xi16>
+  %outputs8 = buffer.view %output8[%c0] : buffer -> view<16xi8>
+  %values = vector.load %inputs[0] : view<16xi64> -> vector<16xi64>
+  %narrowed32 = vector.trunci %values : vector<16xi64> to vector<16xi32>
+  %narrowed16 = vector.trunci %values : vector<16xi64> to vector<16xi16>
+  %narrowed8 = vector.trunci %values : vector<16xi64> to vector<16xi8>
+  vector.store %narrowed32, %outputs32[0] : vector<16xi32>, view<16xi32>
+  vector.store %narrowed16, %outputs16[0] : vector<16xi16>, view<16xi16>
+  vector.store %narrowed8, %outputs8[0] : vector<16xi8>, view<16xi8>
+  func.return
+}
+
+// ----
+low.func.def public target<x86.avx2.core>(@avx2) abi(object_function) @truncate_loaded_vectors_avx2(%input: reg<x86.gpr64>, %output32a: reg<x86.gpr64>, %output32b: reg<x86.gpr64>, %output16: reg<x86.gpr64>, %output8: reg<x86.gpr64>) asm {
+  %57 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %58 = vmovdqu32.load.ymm %input {disp32 = 32}
+  %59 = avx2.vmovdqu.rodata.ymm @__low_rodata_f2cabc4f
+  %60 = vpshufb.ymm %57, %59
+  %61 = vextractf128.xmm %60, 0
+  %62 = vextractf128.xmm %60, 1
+  %63 = vpunpcklqdq.xmm %61, %62
+  %65 = vpshufb.ymm %58, %59
+  %66 = vextractf128.xmm %65, 0
+  %67 = vextractf128.xmm %65, 1
+  %68 = vpunpcklqdq.xmm %66, %67
+  %69 = avx2.vmovdqu.rodata.ymm @__low_rodata_f67ff78f
+  %70 = vpshufb.ymm %57, %69
+  %71 = vextractf128.xmm %70, 0
+  %72 = vextractf128.xmm %70, 1
+  %73 = vpunpckldq.xmm %71, %72
+  %75 = vpshufb.ymm %58, %69
+  %76 = vextractf128.xmm %75, 0
+  %77 = vextractf128.xmm %75, 1
+  %78 = vpunpckldq.xmm %76, %77
+  %79 = avx2.vmovdqu.rodata.ymm @__low_rodata_9a5b1dff
+  %80 = vpshufb.ymm %57, %79
+  %81 = vextractf128.xmm %80, 0
+  %82 = vextractf128.xmm %80, 1
+  %83 = vpunpcklwd.xmm %81, %82
+  %85 = vpshufb.ymm %58, %79
+  %86 = vextractf128.xmm %85, 0
+  %87 = vextractf128.xmm %85, 1
+  %88 = vpunpcklwd.xmm %86, %87
+  vmovdqu32.store.xmm %63, %output32a {disp32 = 0}
+  vmovdqu32.store.xmm %68, %output32a {disp32 = 16}
+  vmovdqu32.store.xmm %63, %output32b {disp32 = 0}
+  vmovdqu32.store.xmm %68, %output32b {disp32 = 16}
+  vmovsd.store.xmm %73, %output16 {disp32 = 0}
+  vmovsd.store.xmm %78, %output16 {disp32 = 8}
+  vmovss.store.xmm %83, %output8 {disp32 = 0}
+  vmovss.store.xmm %88, %output8 {disp32 = 4}
+  return
+}
+
+low.func.def public target<x86.avx512.core>(@avx512) abi(object_function) @truncate_loaded_vectors_avx512(%input: reg<x86.gpr64>, %output32: reg<x86.gpr64>, %output16: reg<x86.gpr64>, %output8: reg<x86.gpr64>) asm {
+  %93 = vmovdqu32.load %input {disp32 = 0}
+  %94 = vmovdqu32.load %input {disp32 = 64}
+  %95 = avx512.vpmovqd.ymm.zmm %93
+  %96 = avx512.vpmovqd.ymm.zmm %94
+  %97 = avx512.vpmovqw.xmm.zmm %93
+  %98 = avx512.vpmovqw.xmm.zmm %94
+  %99 = avx512.vpmovqb.xmm.zmm %93
+  %100 = avx512.vpmovqb.xmm.zmm %94
+  vmovdqu32.store.ymm %95, %output32 {disp32 = 0}
+  vmovdqu32.store.ymm %96, %output32 {disp32 = 32}
+  vmovdqu32.store.xmm %97, %output16 {disp32 = 0}
+  vmovdqu32.store.xmm %98, %output16 {disp32 = 16}
+  vmovsd.store.xmm %99, %output8 {disp32 = 0}
+  vmovsd.store.xmm %100, %output8 {disp32 = 8}
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+x86.target<avx2> @target
+
+func.def public target(@target) @truncate_loaded_tail(%input: buffer, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %inputs = buffer.view %input[%c0] : buffer -> view<7xi64>
+  %outputs = buffer.view %output[%c0] : buffer -> view<7xi32>
+  %values = vector.load %inputs[0] : view<7xi64> -> vector<7xi64>
+  %narrowed = vector.trunci %values : vector<7xi64> to vector<7xi32>
+  vector.store %narrowed, %outputs[0] : vector<7xi32>, view<7xi32>
+  func.return
+}
+
+// ----
+low.func.def public target<x86.avx2.core>(@target) abi(object_function) @truncate_loaded_tail(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %20 = vmovdqu32.load.xmm %input {disp32 = 32}
+  %21 = vmovsd.load.xmm %input {disp32 = 48}
+  %22 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %23 = avx2.vmovdqu.rodata.ymm @__low_rodata_f2cabc4f
+  %24 = vpshufb.ymm %22, %23
+  %25 = vextractf128.xmm %24, 0
+  %26 = vextractf128.xmm %24, 1
+  %27 = vpunpcklqdq.xmm %25, %26
+  vmovdqu32.store.xmm %27, %output {disp32 = 0}
+  %28 = avx2.vmovdqu.rodata.xmm @__low_rodata_01a66567
+  %29 = vpshufb.xmm %20, %28
+  vmovsd.store.xmm %29, %output {disp32 = 16}
+  %30 = avx2.vmovdqu.rodata.xmm @__low_rodata_8c4a0ac3
+  %31 = vpshufb.xmm %21, %30
+  %32 = vpextrd.xmm %31, 0
+  mov.store.gpr32 %32, %output {disp32 = 24}
+  return
+}

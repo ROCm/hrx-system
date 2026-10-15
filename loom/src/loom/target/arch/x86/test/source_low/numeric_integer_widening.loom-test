@@ -179,3 +179,95 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
   %unsigned = avx512.vpmovzxbw.zmm.ymm %source
   return %signed, %unsigned
 }
+
+// ====
+// RUN: emit source-low output=low
+
+x86.target<avx2> @avx2
+
+x86.target<avx512> @avx512
+
+func.def public target(@avx2) @widen_loaded_vectors_avx2(%input: buffer, %output32: buffer, %output64: buffer) {
+  %c0 = index.constant 0 : offset
+  %inputs = buffer.view %input[%c0] : buffer -> view<32xi8>
+  %outputs32 = buffer.view %output32[%c0] : buffer -> view<32xi32>
+  %outputs64 = buffer.view %output64[%c0] : buffer -> view<32xi64>
+  %values = vector.load %inputs[0] : view<32xi8> -> vector<32xi8>
+  %signed32 = vector.extsi %values : vector<32xi8> to vector<32xi32>
+  %unsigned64 = vector.extui %values : vector<32xi8> to vector<32xi64>
+  vector.store %signed32, %outputs32[0] : vector<32xi32>, view<32xi32>
+  vector.store %unsigned64, %outputs64[0] : vector<32xi64>, view<32xi64>
+  func.return
+}
+
+func.def public target(@avx512) @widen_loaded_vectors_avx512(%input: buffer, %output32: buffer, %output64: buffer) {
+  %c0 = index.constant 0 : offset
+  %inputs = buffer.view %input[%c0] : buffer -> view<16xi16>
+  %outputs32 = buffer.view %output32[%c0] : buffer -> view<16xi32>
+  %outputs64 = buffer.view %output64[%c0] : buffer -> view<16xi64>
+  %values = vector.load %inputs[0] : view<16xi16> -> vector<16xi16>
+  %signed32 = vector.extsi %values : vector<16xi16> to vector<16xi32>
+  %unsigned64 = vector.extui %values : vector<16xi16> to vector<16xi64>
+  vector.store %signed32, %outputs32[0] : vector<16xi32>, view<16xi32>
+  vector.store %unsigned64, %outputs64[0] : vector<16xi64>, view<16xi64>
+  func.return
+}
+
+// ----
+low.func.def public target<x86.avx2.core>(@avx2) abi(object_function) @widen_loaded_vectors_avx2(%input: reg<x86.gpr64>, %output32: reg<x86.gpr64>, %output64: reg<x86.gpr64>) asm {
+  %59 = vmovss.load.xmm %input {disp32 = 0}
+  %60 = vmovss.load.xmm %input {disp32 = 4}
+  %61 = vmovss.load.xmm %input {disp32 = 8}
+  %62 = vmovss.load.xmm %input {disp32 = 12}
+  %63 = vmovss.load.xmm %input {disp32 = 16}
+  %64 = vmovss.load.xmm %input {disp32 = 20}
+  %65 = vmovss.load.xmm %input {disp32 = 24}
+  %66 = vmovss.load.xmm %input {disp32 = 28}
+  %67 = vpmovsxbd.xmm %59
+  %68 = vpmovsxbd.xmm %60
+  %69 = vpmovsxbd.xmm %61
+  %70 = vpmovsxbd.xmm %62
+  %71 = vpmovsxbd.xmm %63
+  %72 = vpmovsxbd.xmm %64
+  %73 = vpmovsxbd.xmm %65
+  %74 = vpmovsxbd.xmm %66
+  %75 = vpmovzxbq.ymm %59
+  %76 = vpmovzxbq.ymm %60
+  %77 = vpmovzxbq.ymm %61
+  %78 = vpmovzxbq.ymm %62
+  %79 = vpmovzxbq.ymm %63
+  %80 = vpmovzxbq.ymm %64
+  %81 = vpmovzxbq.ymm %65
+  %82 = vpmovzxbq.ymm %66
+  vmovdqu32.store.xmm %67, %output32 {disp32 = 0}
+  vmovdqu32.store.xmm %68, %output32 {disp32 = 16}
+  vmovdqu32.store.xmm %69, %output32 {disp32 = 32}
+  vmovdqu32.store.xmm %70, %output32 {disp32 = 48}
+  vmovdqu32.store.xmm %71, %output32 {disp32 = 64}
+  vmovdqu32.store.xmm %72, %output32 {disp32 = 80}
+  vmovdqu32.store.xmm %73, %output32 {disp32 = 96}
+  vmovdqu32.store.xmm %74, %output32 {disp32 = 112}
+  vmovdqu32.store.ymm %75, %output64 {disp32 = 0}
+  vmovdqu32.store.ymm %76, %output64 {disp32 = 32}
+  vmovdqu32.store.ymm %77, %output64 {disp32 = 64}
+  vmovdqu32.store.ymm %78, %output64 {disp32 = 96}
+  vmovdqu32.store.ymm %79, %output64 {disp32 = 128}
+  vmovdqu32.store.ymm %80, %output64 {disp32 = 160}
+  vmovdqu32.store.ymm %81, %output64 {disp32 = 192}
+  vmovdqu32.store.ymm %82, %output64 {disp32 = 224}
+  return
+}
+
+low.func.def public target<x86.avx512.core>(@avx512) abi(object_function) @widen_loaded_vectors_avx512(%input: reg<x86.gpr64>, %output32: reg<x86.gpr64>, %output64: reg<x86.gpr64>) asm {
+  %86 = vmovdqu32.load.xmm %input {disp32 = 0}
+  %87 = vmovdqu32.load.xmm %input {disp32 = 16}
+  %88 = vpmovsxwd.ymm %86
+  %89 = vpmovsxwd.ymm %87
+  %90 = avx512.vpmovzxwq.zmm.xmm %86
+  %91 = avx512.vpmovzxwq.zmm.xmm %87
+  vmovdqu32.store.ymm %88, %output32 {disp32 = 0}
+  vmovdqu32.store.ymm %89, %output32 {disp32 = 32}
+  vmovdqu32.store %90, %output64 {disp32 = 0}
+  vmovdqu32.store %91, %output64 {disp32 = 64}
+  return
+}

@@ -829,6 +829,8 @@ static iree_status_t loom_vector_packet_materialize_value(
     loom_vector_packetization_t* packetization,
     const loom_vector_packet_slice_t* slice,
     loom_vector_packetized_value_t* packetized_value) {
+  loom_target_legalization_record_component_packet_materialization(
+      packetization->context);
   loom_vector_packet_reset_value(packetized_value);
   if (packetized_value->source_mode ==
       LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT) {

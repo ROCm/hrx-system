@@ -268,13 +268,13 @@ loom_cc_library(
   HDRS
     "packet_insert_legalization.h"
     "packet_legalization.h"
+    "packet_plan.h"
   SRCS
     "packet_insert_legalization.c"
     "packet_legalization.c"
     "packet_materialization.c"
     "packet_materialization.h"
     "packet_plan.c"
-    "packet_plan.h"
   DEPS
     iree::base
     iree::base::internal

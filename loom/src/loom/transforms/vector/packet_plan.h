@@ -141,6 +141,14 @@ bool loom_vector_packet_shape_from_type(
     const loom_target_vector_packet_policy_t* policy, loom_type_t vector_type,
     loom_vector_packet_shape_t* out_shape);
 
+// Returns target-native lane candidates for a shape-preserving decomposable
+// operation. |out_producer_closure_candidate_bits| identifies the subset whose
+// target contract requires packet-local producer provenance.
+iree_status_t loom_vector_packet_component_candidate_bits(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    uint32_t source_lane_count, uint64_t* out_candidate_bits,
+    uint64_t* out_producer_closure_candidate_bits);
+
 iree_status_t loom_vector_packet_memory_shape_constrain(
     loom_target_legalization_context_t* context, const loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy, loom_type_t vector_type,
@@ -155,6 +163,14 @@ iree_status_t loom_vector_packet_memory_chunk_lane_count_select(
     loom_target_legalization_context_t* context, const loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy, loom_type_t vector_type,
     uint32_t maximum_lane_count, uint32_t* out_lane_count);
+
+// Returns exact load packet widths as a bitset over
+// |policy->native_lane_counts|. A width is admitted only when both its regular
+// packets and optional tail can be loaded without regrouping.
+iree_status_t loom_vector_packet_load_candidate_bits(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    const loom_target_vector_packet_policy_t* policy, loom_type_t vector_type,
+    uint64_t* out_candidate_bits);
 
 iree_status_t loom_vector_packet_reduce_shape_constrain(
     loom_target_legalization_context_t* context, const loom_op_t* op,

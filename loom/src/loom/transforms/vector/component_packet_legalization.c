@@ -16,6 +16,7 @@
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/contract.h"
 #include "loom/transforms/vector/packet_legalization.h"
+#include "loom/transforms/vector/packet_plan.h"
 
 #define LOOM_VECTOR_COMPONENT_INDEX_INVALID UINT32_MAX
 
@@ -59,6 +60,9 @@ typedef struct loom_vector_component_record_t {
   bool blocked;
   // True when this root contains an operation requiring packet legalization.
   bool demanded;
+  // True when every downstream use remains in the component graph or reaches
+  // a terminal store in the same block.
+  bool packet_terminal_owned;
   // True when the result escapes the selected component.
   bool escapes;
 } loom_vector_component_record_t;
@@ -76,6 +80,8 @@ typedef struct loom_vector_component_producer_closure_t {
   uint32_t retained_packet_count;
   // True when the operation belongs to this packet-local producer closure.
   bool demanded;
+  // True when whole-vector provenance requires the complete producer chain.
+  bool provenance_demanded;
   // True when one closure component selected a different packet shape.
   bool selection_mismatch;
 } loom_vector_component_producer_closure_t;
@@ -104,6 +110,13 @@ typedef struct loom_vector_component_t {
   bool blocked;
 } loom_vector_component_t;
 
+typedef struct loom_vector_component_retained_load_t {
+  // Native lane candidates admitted by the memory root.
+  uint64_t candidate_bits;
+  // First component record consuming the root, one-based.
+  uint32_t first_consumer_record_index;
+} loom_vector_component_retained_load_t;
+
 struct loom_vector_component_plan_t {
   // Active target legalization context.
   loom_target_legalization_context_t* context;
@@ -111,6 +124,8 @@ struct loom_vector_component_plan_t {
   loom_vector_component_packet_rewrite_callback_t rewrite_callback;
   // Dense one-based record index keyed by local value ordinal.
   uint32_t* value_record_indices;
+  // Retained memory roots keyed by local value ordinal.
+  loom_vector_component_retained_load_t* retained_loads;
   // Original producer records retained across component rewrites.
   uint32_t* retained_producer_record_indices;
   // Optional state for packet-local producer closures.
@@ -200,6 +215,40 @@ static bool loom_vector_component_describe(const loom_module_t* module,
   return true;
 }
 
+iree_status_t loom_vector_component_packet_op_has_vector_candidate(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    const loom_target_contract_query_result_t* authored_query_result,
+    bool* out_has_candidate) {
+  *out_has_candidate = false;
+  uint32_t lane_count = 0;
+  if (!loom_vector_component_describe(context->module, op, &lane_count)) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t result = loom_op_const_results(op)[0];
+  const loom_value_t* result_value = loom_module_value(context->module, result);
+  if (loom_value_has_attribute_uses(result_value) ||
+      loom_module_value_has_type_uses(context->module, result) ||
+      authored_query_result->outcome == LOOM_TARGET_CONTRACT_QUERY_INVALID_IR ||
+      (authored_query_result->outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL &&
+       loom_target_legalization_op_has_source_vector_carriers(context, op))) {
+    return iree_ok_status();
+  }
+  uint64_t candidate_bits = 0;
+  uint64_t producer_closure_candidate_bits = 0;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_component_candidate_bits(
+      context, op, lane_count, &candidate_bits,
+      &producer_closure_candidate_bits));
+  for (uint8_t i = 0;
+       i < context->vector_packet_policy->native_lane_count_count; ++i) {
+    if (context->vector_packet_policy->native_lane_counts[i] > 1u &&
+        iree_any_bit_set(candidate_bits, (uint64_t)1u << i)) {
+      *out_has_candidate = true;
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
 static const loom_op_t* loom_vector_component_user_anchor(
     const loom_op_t* user_op, const loom_block_t* source_block) {
   const loom_op_t* anchor = user_op;
@@ -258,95 +307,6 @@ static uint32_t loom_vector_component_direct_producer_record(
              : LOOM_VECTOR_COMPONENT_INDEX_INVALID;
 }
 
-static iree_status_t loom_vector_component_query(
-    loom_vector_component_plan_t* plan, const loom_op_t* op,
-    uint32_t source_lane_count, uint32_t packet_lane_count,
-    loom_target_contract_query_result_t* out_result) {
-  const loom_target_contract_vector_lane_projection_t projection = {
-      .source_lane_count = source_lane_count,
-      .projected_lane_count = packet_lane_count,
-  };
-  return loom_target_legalization_query_contract_with_vector_lane_projection(
-      plan->context, op, projection, out_result);
-}
-
-static bool loom_vector_component_packet_has_source_carriers(
-    const loom_vector_component_plan_t* plan, const loom_op_t* op,
-    uint32_t packet_lane_count) {
-  const loom_value_id_t* operands = loom_op_const_operands(op);
-  for (uint16_t i = 0; i < op->operand_count; ++i) {
-    const loom_type_t type =
-        loom_module_value_type(plan->context->module, operands[i]);
-    if (loom_type_is_vector(type) &&
-        !loom_target_legalization_has_source_vector_carrier(
-            plan->context,
-            loom_vector_component_packet_type(type, packet_lane_count),
-            LOOM_VALUE_ID_INVALID)) {
-      return false;
-    }
-  }
-  const loom_value_id_t* results = loom_op_const_results(op);
-  for (uint16_t i = 0; i < op->result_count; ++i) {
-    const loom_type_t type =
-        loom_module_value_type(plan->context->module, results[i]);
-    if (loom_type_is_vector(type) &&
-        !loom_target_legalization_has_source_vector_carrier(
-            plan->context,
-            loom_vector_component_packet_type(type, packet_lane_count),
-            LOOM_VALUE_ID_INVALID)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static iree_status_t loom_vector_component_candidate_bits(
-    loom_vector_component_plan_t* plan, const loom_op_t* op,
-    uint32_t source_lane_count, uint64_t* out_candidate_bits,
-    uint64_t* out_producer_closure_candidate_bits) {
-  *out_candidate_bits = 0;
-  *out_producer_closure_candidate_bits = 0;
-  const loom_target_vector_packet_policy_t* policy =
-      plan->context->vector_packet_policy;
-  for (uint8_t i = 0; i < policy->native_lane_count_count; ++i) {
-    const uint32_t packet_lane_count = policy->native_lane_counts[i];
-    if (packet_lane_count == 0 || packet_lane_count >= source_lane_count) {
-      continue;
-    }
-    loom_target_contract_query_result_t packet_result =
-        loom_target_contract_query_result_empty();
-    IREE_RETURN_IF_ERROR(loom_vector_component_query(
-        plan, op, source_lane_count, packet_lane_count, &packet_result));
-    if (packet_result.outcome != LOOM_TARGET_CONTRACT_QUERY_LEGAL ||
-        !loom_vector_component_packet_has_source_carriers(plan, op,
-                                                          packet_lane_count)) {
-      continue;
-    }
-    loom_target_contract_projection_flags_t projection_flags =
-        packet_result.projection_flags;
-    const uint32_t tail_lane_count = source_lane_count % packet_lane_count;
-    if (tail_lane_count != 0) {
-      loom_target_contract_query_result_t tail_result =
-          loom_target_contract_query_result_empty();
-      IREE_RETURN_IF_ERROR(loom_vector_component_query(
-          plan, op, source_lane_count, tail_lane_count, &tail_result));
-      if (tail_result.outcome != LOOM_TARGET_CONTRACT_QUERY_LEGAL ||
-          !loom_vector_component_packet_has_source_carriers(plan, op,
-                                                            tail_lane_count)) {
-        continue;
-      }
-      projection_flags |= tail_result.projection_flags;
-    }
-    *out_candidate_bits |= (uint64_t)1u << i;
-    if (iree_any_bit_set(
-            projection_flags,
-            LOOM_TARGET_CONTRACT_PROJECTION_FLAG_ROOT_PRODUCER_CLOSURE)) {
-      *out_producer_closure_candidate_bits |= (uint64_t)1u << i;
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_vector_component_classify_op(
     loom_vector_component_plan_t* plan, loom_op_t* op) {
   uint32_t lane_count = 0;
@@ -393,6 +353,49 @@ static iree_status_t loom_vector_component_classify_op(
   IREE_ASSERT_EQ(plan->value_record_indices[result_ordinal], 0u);
   plan->value_record_indices[result_ordinal] = record_index + 1u;
   return iree_ok_status();
+}
+
+// Classifies the straight-line suffixes whose values can remain packetized all
+// the way to memory. Reverse dominance order makes each direct consumer's
+// classification available before its producer. Control-flow, callable, and
+// other aggregate observations terminate the suffix so their existing carrier
+// projection remains authoritative.
+static void loom_vector_component_classify_packet_terminal_ownership(
+    loom_vector_component_plan_t* plan) {
+  for (uint32_t record_index = plan->record_count; record_index > 0;
+       --record_index) {
+    loom_vector_component_record_t* record = &plan->records[record_index - 1u];
+    const loom_value_id_t result = loom_op_const_results(record->op)[0];
+    const loom_value_t* result_value =
+        loom_module_value(plan->context->module, result);
+    bool packet_terminal_owned =
+        !record->blocked && result_value->use_count != 0;
+    const loom_use_t* use = NULL;
+    loom_value_for_each_use(result_value, use) {
+      const loom_op_t* user_op = loom_use_user_op(*use);
+      if (user_op->parent_block != record->op->parent_block) {
+        packet_terminal_owned = false;
+        break;
+      }
+      if (loom_vector_store_isa(user_op) &&
+          loom_vector_store_value(user_op) == result) {
+        continue;
+      }
+      if (user_op->result_count != 1) {
+        packet_terminal_owned = false;
+        break;
+      }
+      const uint32_t consumer_index = loom_vector_component_record_for_value(
+          plan, loom_op_const_results(user_op)[0]);
+      if (consumer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID ||
+          plan->records[consumer_index].lane_count != record->lane_count ||
+          !plan->records[consumer_index].packet_terminal_owned) {
+        packet_terminal_owned = false;
+        break;
+      }
+    }
+    record->packet_terminal_owned = packet_terminal_owned;
+  }
 }
 
 static uint32_t loom_vector_component_operand_root(
@@ -499,8 +502,8 @@ static iree_status_t loom_vector_component_classify_candidates(
         authored_legal != scope_is_legal) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_vector_component_candidate_bits(
-        plan, record->op, record->lane_count, &record->candidate_bits,
+    IREE_RETURN_IF_ERROR(loom_vector_packet_component_candidate_bits(
+        plan->context, record->op, record->lane_count, &record->candidate_bits,
         &record->producer_closure_candidate_bits));
   }
   return iree_ok_status();
@@ -512,6 +515,89 @@ static bool loom_vector_component_producer_closure_demanded(
          plan->producer_closures[record_index].demanded;
 }
 
+static bool loom_vector_component_result_requires_packet_retention(
+    const loom_vector_component_plan_t* plan, uint32_t record_index) {
+  const loom_op_t* op = plan->records[record_index].op;
+  const loom_value_id_t result = loom_op_const_results(op)[0];
+  return !loom_target_legalization_has_source_vector_carrier(
+      plan->context, loom_module_value_type(plan->context->module, result),
+      result);
+}
+
+static bool loom_vector_component_has_retained_packet_edge(
+    loom_vector_component_plan_t* plan, uint32_t consumer_index,
+    uint32_t producer_index) {
+  return producer_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID &&
+         !plan->records[consumer_index].blocked &&
+         !plan->records[producer_index].blocked &&
+         loom_vector_component_result_requires_packet_retention(plan,
+                                                                producer_index);
+}
+
+static bool loom_vector_component_load_is_component_owned(
+    const loom_vector_component_plan_t* plan, const loom_op_t* load_op,
+    loom_value_id_t result) {
+  const loom_value_t* result_value =
+      loom_module_value(plan->context->module, result);
+  if (loom_value_has_attribute_uses(result_value) ||
+      loom_module_value_has_type_uses(plan->context->module, result)) {
+    return false;
+  }
+  const loom_use_t* use = NULL;
+  loom_value_for_each_use(result_value, use) {
+    const loom_op_t* user_op = loom_use_user_op(*use);
+    if (user_op->result_count != 1) {
+      return false;
+    }
+    const uint32_t user_record_index = loom_vector_component_record_for_value(
+        plan, loom_op_const_results(user_op)[0]);
+    if (user_record_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID ||
+        user_op->parent_block != load_op->parent_block ||
+        !plan->records[user_record_index].packet_terminal_owned) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static loom_op_t* loom_vector_component_retained_load_for_operand(
+    const loom_vector_component_plan_t* plan,
+    const loom_vector_component_record_t* consumer, uint16_t operand_index,
+    loom_value_ordinal_t* out_ordinal) {
+  *out_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+  if (!iree_any_bit_set(
+          plan->context->vector_packet_policy->flags,
+          LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS)) {
+    return NULL;
+  }
+  const loom_value_id_t operand =
+      loom_op_const_operands(consumer->op)[operand_index];
+  const loom_type_t operand_type =
+      loom_module_value_type(plan->context->module, operand);
+  uint32_t operand_lane_count = 0;
+  if (!loom_vector_component_static_lane_count(operand_type,
+                                               &operand_lane_count) ||
+      operand_lane_count != consumer->lane_count) {
+    return NULL;
+  }
+  const loom_value_t* operand_value =
+      loom_module_value(plan->context->module, operand);
+  if (loom_value_is_block_arg(operand_value)) {
+    return NULL;
+  }
+  loom_op_t* operand_op = loom_value_def_op(operand_value);
+  if (operand_op == NULL || !loom_vector_load_isa(operand_op)) {
+    return NULL;
+  }
+  if (!loom_vector_component_load_is_component_owned(plan, operand_op,
+                                                     operand)) {
+    return NULL;
+  }
+  *out_ordinal =
+      loom_local_value_domain_try_ordinal(plan->context->value_domain, operand);
+  return *out_ordinal == LOOM_VALUE_ORDINAL_INVALID ? NULL : operand_op;
+}
+
 // Marks rejected roots that have no independent packet contract. Exact-lane
 // provenance contracts must rebuild their producer chain at packet width;
 // slicing an authored aggregate would retain an offset into the wide origin
@@ -519,6 +605,7 @@ static bool loom_vector_component_producer_closure_demanded(
 static iree_status_t loom_vector_component_mark_producer_closures(
     loom_vector_component_plan_t* plan) {
   bool has_producer_closure = false;
+  bool has_retained_load = false;
   for (uint32_t record_index = 0; record_index < plan->record_count;
        ++record_index) {
     const loom_vector_component_record_t* record = &plan->records[record_index];
@@ -531,8 +618,20 @@ static iree_status_t loom_vector_component_mark_producer_closures(
         record->producer_closure_candidate_bits != 0) {
       has_producer_closure = true;
     }
+    has_producer_closure |=
+        loom_vector_component_result_requires_packet_retention(plan,
+                                                               record_index);
+    for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+      const uint32_t producer_index =
+          loom_vector_component_direct_producer_record(plan, record, i);
+      has_producer_closure |= loom_vector_component_has_retained_packet_edge(
+          plan, record_index, producer_index);
+      loom_value_ordinal_t load_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+      has_retained_load |= loom_vector_component_retained_load_for_operand(
+                               plan, record, i, &load_ordinal) != NULL;
+    }
   }
-  if (!has_producer_closure) {
+  if (!has_producer_closure && !has_retained_load) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -543,13 +642,16 @@ static iree_status_t loom_vector_component_mark_producer_closures(
     const loom_vector_component_record_t* record = &plan->records[record_index];
     const uint64_t independent_candidate_bits =
         record->candidate_bits & ~record->producer_closure_candidate_bits;
+    const bool provenance_demanded =
+        record->demanded && !record->blocked &&
+        independent_candidate_bits == 0 &&
+        record->producer_closure_candidate_bits != 0;
     plan->producer_closures[record_index] =
         (loom_vector_component_producer_closure_t){
             .parent_index = record_index,
             .retained_producer_offset = LOOM_VECTOR_COMPONENT_INDEX_INVALID,
-            .demanded = record->demanded && !record->blocked &&
-                        independent_candidate_bits == 0 &&
-                        record->producer_closure_candidate_bits != 0,
+            .demanded = provenance_demanded,
+            .provenance_demanded = provenance_demanded,
         };
   }
   return iree_ok_status();
@@ -579,8 +681,142 @@ static void loom_vector_component_propagate_producer_closures(
         ++plan->demanded_record_count;
       }
       plan->producer_closures[producer_index].demanded = true;
+      plan->producer_closures[producer_index].provenance_demanded = true;
     }
   }
+}
+
+static iree_status_t loom_vector_component_prepare_retained_load_tables(
+    loom_vector_component_plan_t* plan) {
+  if (plan->retained_loads != NULL) {
+    return iree_ok_status();
+  }
+  const loom_value_ordinal_t definition_count =
+      plan->context->value_domain->definition_count;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      plan->context->arena, definition_count, sizeof(*plan->retained_loads),
+      (void**)&plan->retained_loads));
+  memset(plan->retained_loads, 0,
+         definition_count * sizeof(*plan->retained_loads));
+  return iree_ok_status();
+}
+
+static void loom_vector_component_enqueue_retained_record(
+    loom_vector_component_plan_t* plan, uint32_t record_index,
+    uint32_t* worklist, uint32_t* worklist_count) {
+  plan->producer_closures[record_index].demanded = true;
+  loom_vector_component_record_t* record = &plan->records[record_index];
+  if (record->demanded) {
+    return;
+  }
+  record->demanded = true;
+  ++plan->demanded_record_count;
+  worklist[(*worklist_count)++] = record_index;
+}
+
+// Expands from rejected roots through every edge that cannot preserve an
+// authored aggregate. A retained result reaches both its direct producers and
+// consumers; a retained load reaches all decomposable consumers that share its
+// packet tuple. The worklist keeps disconnected legal graphs untouched and
+// visits each newly demanded operation once.
+static iree_status_t loom_vector_component_expand_retained_packet_closures(
+    loom_vector_component_plan_t* plan) {
+  if (plan->producer_closures == NULL) {
+    return iree_ok_status();
+  }
+
+  uint32_t* worklist = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(plan->context->arena, plan->record_count,
+                                sizeof(*worklist), (void**)&worklist));
+  uint32_t worklist_count = 0;
+  for (uint32_t record_index = 0; record_index < plan->record_count;
+       ++record_index) {
+    if (plan->records[record_index].demanded) {
+      worklist[worklist_count++] = record_index;
+    }
+  }
+
+  uint32_t worklist_index = 0;
+  while (worklist_index < worklist_count) {
+    const uint32_t record_index = worklist[worklist_index++];
+    loom_vector_component_record_t* record = &plan->records[record_index];
+    for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+      const uint32_t producer_index =
+          loom_vector_component_direct_producer_record(plan, record, i);
+      if (loom_vector_component_has_retained_packet_edge(plan, record_index,
+                                                         producer_index)) {
+        plan->producer_closures[record_index].demanded = true;
+        loom_vector_component_enqueue_retained_record(
+            plan, producer_index, worklist, &worklist_count);
+      }
+
+      loom_value_ordinal_t load_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+      loom_op_t* load_op = loom_vector_component_retained_load_for_operand(
+          plan, record, i, &load_ordinal);
+      if (load_op == NULL) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_vector_component_prepare_retained_load_tables(plan));
+      loom_vector_component_retained_load_t* retained_load =
+          &plan->retained_loads[load_ordinal];
+      if (retained_load->first_consumer_record_index == 0) {
+        retained_load->first_consumer_record_index = record_index + 1u;
+        const loom_type_t load_type = loom_module_value_type(
+            plan->context->module, loom_op_const_results(load_op)[0]);
+        IREE_RETURN_IF_ERROR(loom_vector_packet_load_candidate_bits(
+            plan->context, load_op, plan->context->vector_packet_policy,
+            load_type, &retained_load->candidate_bits));
+      }
+      plan->producer_closures[record_index].demanded = true;
+
+      const loom_value_id_t load_result = loom_op_const_results(load_op)[0];
+      const loom_value_t* load_value =
+          loom_module_value(plan->context->module, load_result);
+      const loom_use_t* use = NULL;
+      loom_value_for_each_use(load_value, use) {
+        const loom_op_t* user_op = loom_use_user_op(*use);
+        if (user_op->result_count != 1) {
+          continue;
+        }
+        const uint32_t consumer_index = loom_vector_component_record_for_value(
+            plan, loom_op_const_results(user_op)[0]);
+        if (consumer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID ||
+            plan->records[consumer_index].blocked) {
+          continue;
+        }
+        loom_vector_component_enqueue_retained_record(
+            plan, consumer_index, worklist, &worklist_count);
+      }
+    }
+
+    if (!loom_vector_component_result_requires_packet_retention(plan,
+                                                                record_index)) {
+      continue;
+    }
+    const loom_value_id_t result = loom_op_const_results(record->op)[0];
+    const loom_value_t* result_value =
+        loom_module_value(plan->context->module, result);
+    const loom_use_t* use = NULL;
+    loom_value_for_each_use(result_value, use) {
+      const loom_op_t* user_op = loom_use_user_op(*use);
+      if (user_op->result_count != 1) {
+        continue;
+      }
+      const uint32_t consumer_index = loom_vector_component_record_for_value(
+          plan, loom_op_const_results(user_op)[0]);
+      if (consumer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID ||
+          !loom_vector_component_has_retained_packet_edge(plan, consumer_index,
+                                                          record_index)) {
+        continue;
+      }
+      plan->producer_closures[record_index].demanded = true;
+      loom_vector_component_enqueue_retained_record(plan, consumer_index,
+                                                    worklist, &worklist_count);
+    }
+  }
+  return iree_ok_status();
 }
 
 // Prefers contracts that consume slices of authored target-native producers.
@@ -627,6 +863,38 @@ static void loom_vector_component_constrain_producer_closures(
   if (plan->producer_closures == NULL) {
     return;
   }
+  if (plan->retained_loads != NULL) {
+    for (uint32_t record_index = 0; record_index < plan->record_count;
+         ++record_index) {
+      loom_vector_component_record_t* record = &plan->records[record_index];
+      if (!loom_vector_component_producer_closure_demanded(plan,
+                                                           record_index)) {
+        continue;
+      }
+      for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+        loom_value_ordinal_t load_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+        if (loom_vector_component_retained_load_for_operand(
+                plan, record, i, &load_ordinal) == NULL ||
+            plan->retained_loads[load_ordinal].first_consumer_record_index ==
+                0) {
+          continue;
+        }
+        const loom_vector_component_retained_load_t retained_load =
+            plan->retained_loads[load_ordinal];
+        record->candidate_bits &= retained_load.candidate_bits;
+        const uint32_t first_consumer_index =
+            retained_load.first_consumer_record_index - 1u;
+        const uint32_t consumer_root_index =
+            loom_vector_component_find_producer_closure_root(plan,
+                                                             record_index);
+        const uint32_t first_consumer_root_index =
+            loom_vector_component_find_producer_closure_root(
+                plan, first_consumer_index);
+        plan->producer_closures[first_consumer_root_index].parent_index =
+            consumer_root_index;
+      }
+    }
+  }
   for (uint32_t record_index = 0; record_index < plan->record_count;
        ++record_index) {
     loom_vector_component_record_t* record = &plan->records[record_index];
@@ -639,6 +907,16 @@ static void loom_vector_component_constrain_producer_closures(
       if (producer_index == LOOM_VECTOR_COMPONENT_INDEX_INVALID ||
           !loom_vector_component_producer_closure_demanded(plan,
                                                            producer_index)) {
+        continue;
+      }
+      const loom_vector_component_producer_closure_t* consumer_closure =
+          &plan->producer_closures[record_index];
+      const loom_vector_component_producer_closure_t* producer_closure =
+          &plan->producer_closures[producer_index];
+      const bool provenance_edge = consumer_closure->provenance_demanded &&
+                                   producer_closure->provenance_demanded;
+      if (!provenance_edge && !loom_vector_component_has_retained_packet_edge(
+                                  plan, record_index, producer_index)) {
         continue;
       }
       const uint32_t consumer_root_index =
@@ -823,8 +1101,10 @@ static iree_status_t loom_vector_component_select(
   uint32_t member_index = component->first_member_index;
   while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
     const loom_vector_component_record_t* record = &plan->records[member_index];
-    needs_legalization |= record->authored_query_result.outcome !=
-                          LOOM_TARGET_CONTRACT_QUERY_LEGAL;
+    needs_legalization |=
+        record->authored_query_result.outcome !=
+            LOOM_TARGET_CONTRACT_QUERY_LEGAL ||
+        loom_vector_component_producer_closure_demanded(plan, member_index);
     member_index = record->next_member_index;
   }
   if (!needs_legalization) {
@@ -1020,6 +1300,21 @@ static bool loom_vector_component_retained_producer_packet(
   }
   const loom_vector_component_producer_closure_t* producer_closure =
       &plan->producer_closures[producer_index];
+  uint32_t consumer_root_index = consumer_index;
+  while (plan->producer_closures[consumer_root_index].parent_index !=
+         consumer_root_index) {
+    consumer_root_index =
+        plan->producer_closures[consumer_root_index].parent_index;
+  }
+  uint32_t producer_root_index = producer_index;
+  while (plan->producer_closures[producer_root_index].parent_index !=
+         producer_root_index) {
+    producer_root_index =
+        plan->producer_closures[producer_root_index].parent_index;
+  }
+  if (consumer_root_index != producer_root_index) {
+    return false;
+  }
   IREE_ASSERT(producer_closure->retained_packets != NULL);
   IREE_ASSERT_EQ(producer_closure->retained_packet_lane_count,
                  component->packet_lane_count);
@@ -1158,16 +1453,12 @@ static bool loom_vector_component_result_escapes(
   return false;
 }
 
-static bool loom_vector_component_requires_memory_packets(
-    const loom_vector_component_plan_t* plan, loom_value_id_t value_id) {
-  return !loom_target_legalization_has_source_vector_carrier(
-      plan->context, loom_module_value_type(plan->context->module, value_id),
-      value_id);
-}
-
-static bool loom_vector_component_has_packetized_store_root(
+static iree_status_t loom_vector_component_query_packetized_store_roots(
     const loom_vector_component_plan_t* plan,
-    const loom_vector_component_t* component) {
+    const loom_vector_component_t* component, bool* out_has_store_root,
+    bool* out_supports_packet_lane_count) {
+  *out_has_store_root = false;
+  *out_supports_packet_lane_count = true;
   uint32_t member_index = component->first_member_index;
   while (member_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
     const loom_vector_component_record_t* record = &plan->records[member_index];
@@ -1179,27 +1470,37 @@ static bool loom_vector_component_has_packetized_store_root(
       const loom_op_t* user_op = loom_use_user_op(*use);
       if (loom_vector_store_isa(user_op) &&
           loom_vector_store_value(user_op) == result &&
-          loom_vector_component_requires_memory_packets(plan, result)) {
-        return true;
+          loom_vector_component_result_requires_packet_retention(
+              plan, member_index)) {
+        *out_has_store_root = true;
+        bool supported = false;
+        IREE_RETURN_IF_ERROR(loom_vector_packet_store_supports_lane_count(
+            plan->context, user_op, plan->context->vector_packet_policy,
+            component->packet_lane_count, &supported));
+        if (!supported) {
+          *out_supports_packet_lane_count = false;
+          return iree_ok_status();
+        }
       }
     }
     member_index = record->next_member_index;
   }
-  return false;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vector_component_rewrite_packetized_load_root(
     loom_vector_component_plan_t* plan, loom_op_t* source_op,
-    bool* out_rewritten) {
+    uint32_t maximum_lane_count, bool* out_rewritten) {
   loom_rewriter_t* rewriter = plan->context->rewriter;
   const bool observe_operation_creation =
       rewriter->operation_creation.callback.fn != NULL;
   if (observe_operation_creation) {
     loom_rewriter_set_operation_creation_source(rewriter, source_op);
   }
-  iree_status_t status = loom_vector_packet_legalize_load(
-      plan->context, source_op, plan->context->vector_packet_policy,
-      out_rewritten);
+  iree_status_t status =
+      loom_vector_packet_legalize_load_with_maximum_lane_count(
+          plan->context, source_op, plan->context->vector_packet_policy,
+          maximum_lane_count, out_rewritten);
   if (observe_operation_creation) {
     loom_rewriter_set_operation_creation_source(rewriter, NULL);
   }
@@ -1209,7 +1510,7 @@ static iree_status_t loom_vector_component_rewrite_packetized_load_root(
 IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
 loom_vector_component_rewrite_observed_packetized_load_root(
     loom_vector_component_plan_t* plan, loom_op_t* source_op,
-    bool* out_rewritten) {
+    uint32_t maximum_lane_count, bool* out_rewritten) {
   loom_target_contract_query_result_t authored_query_result =
       loom_target_contract_query_result_empty();
   IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
@@ -1217,7 +1518,7 @@ loom_vector_component_rewrite_observed_packetized_load_root(
   loom_rewriter_t* rewriter = plan->context->rewriter;
   const uint64_t created_op_count_before = rewriter->created_op_count;
   IREE_RETURN_IF_ERROR(loom_vector_component_rewrite_packetized_load_root(
-      plan, source_op, out_rewritten));
+      plan, source_op, maximum_lane_count, out_rewritten));
   if (!*out_rewritten) {
     return iree_ok_status();
   }
@@ -1257,19 +1558,38 @@ static iree_status_t loom_vector_component_prepare_packetized_load_roots(
       loom_op_t* operand_op = loom_value_is_block_arg(operand_value)
                                   ? NULL
                                   : loom_value_def_op(operand_value);
-      if (operand_op == NULL || !loom_vector_load_isa(operand_op) ||
-          !loom_vector_component_requires_memory_packets(plan, operand)) {
+      if (operand_op == NULL || !loom_vector_load_isa(operand_op)) {
         continue;
       }
+      const loom_value_ordinal_t operand_ordinal =
+          loom_local_value_domain_try_ordinal(plan->context->value_domain,
+                                              operand);
+      const bool retained_load =
+          operand_ordinal != LOOM_VALUE_ORDINAL_INVALID &&
+          plan->retained_loads != NULL &&
+          plan->retained_loads[operand_ordinal].first_consumer_record_index !=
+              0;
+      if (!retained_load &&
+          loom_target_legalization_has_source_vector_carrier(
+              plan->context,
+              loom_module_value_type(plan->context->module, operand),
+              operand)) {
+        continue;
+      }
+      // Oversized loads retain their ordinary memory-selected packet width.
+      // A load owned by a straight-line terminal closure instead uses the
+      // component width so its packets remain directly consumable downstream.
+      const uint32_t maximum_lane_count =
+          retained_load ? component->packet_lane_count : 0;
 
       bool rewritten = false;
       if (plan->rewrite_callback.fn == NULL) {
         IREE_RETURN_IF_ERROR(loom_vector_component_rewrite_packetized_load_root(
-            plan, operand_op, &rewritten));
+            plan, operand_op, maximum_lane_count, &rewritten));
       } else {
         IREE_RETURN_IF_ERROR(
             loom_vector_component_rewrite_observed_packetized_load_root(
-                plan, operand_op, &rewritten));
+                plan, operand_op, maximum_lane_count, &rewritten));
       }
       if (!rewritten) {
         *out_ready = false;
@@ -1291,13 +1611,19 @@ static iree_status_t loom_vector_component_materialize(
   }
   if (iree_any_bit_set(
           plan->context->vector_packet_policy->flags,
-          LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS) &&
-      loom_vector_component_has_packetized_store_root(plan, component)) {
-    return iree_ok_status();
-  }
-  if (iree_any_bit_set(
-          plan->context->vector_packet_policy->flags,
           LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_MEMORY_ROOT_COMPONENTS)) {
+    bool has_store_root = false;
+    bool stores_support_packet_lane_count = false;
+    IREE_RETURN_IF_ERROR(loom_vector_component_query_packetized_store_roots(
+        plan, component, &has_store_root, &stores_support_packet_lane_count));
+    if (has_store_root &&
+        (component->lane_count % component->packet_lane_count != 0 ||
+         !stores_support_packet_lane_count)) {
+      // Mixed-width tails and stores that prefer another packet width remain
+      // owned by the store planner, which can select a maximal sequence across
+      // the complete producer graph.
+      return iree_ok_status();
+    }
     bool load_roots_ready = false;
     uint32_t rewritten_load_count = 0;
     IREE_RETURN_IF_ERROR(loom_vector_component_prepare_packetized_load_roots(
@@ -1621,10 +1947,13 @@ iree_status_t loom_vector_component_packet_legalize(
   if (plan->demanded_record_count == 0) {
     return iree_ok_status();
   }
+  loom_vector_component_classify_packet_terminal_ownership(plan);
   IREE_RETURN_IF_ERROR(loom_vector_component_classify_candidates(
       plan, LOOM_VECTOR_COMPONENT_CANDIDATE_SCOPE_REJECTED_ROOTS));
   IREE_RETURN_IF_ERROR(loom_vector_component_mark_producer_closures(plan));
   loom_vector_component_propagate_producer_closures(plan);
+  IREE_RETURN_IF_ERROR(
+      loom_vector_component_expand_retained_packet_closures(plan));
   IREE_RETURN_IF_ERROR(loom_vector_component_classify_candidates(
       plan, LOOM_VECTOR_COMPONENT_CANDIDATE_SCOPE_LEGAL_PRODUCERS));
   loom_vector_component_select_independent_candidates(plan);

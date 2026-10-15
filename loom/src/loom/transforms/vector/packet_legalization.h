@@ -91,10 +91,28 @@ iree_status_t loom_vector_packet_legalize_load(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy, bool* out_rewritten);
 
-// Packetizes a dense vector store into target-admitted native widths.
-// Decomposable producer graphs stream packets; other SSA values retain their
-// authored snapshot. Shared snapshots are reified in private storage when
-// retaining the packet tuple across consumers would exceed the static
+// Packetizes a dense vector load using the widest target-admitted packet no
+// larger than |maximum_lane_count|. This lets a component closure preserve one
+// directly consumable packet width across a shared memory root. A zero maximum
+// retains the ordinary target-selected width.
+iree_status_t loom_vector_packet_legalize_load_with_maximum_lane_count(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    const loom_target_vector_packet_policy_t* policy,
+    uint32_t maximum_lane_count, bool* out_rewritten);
+
+// Returns whether a dense vector store can consume an exact packet of
+// |lane_count| without regrouping it through the logical aggregate.
+iree_status_t loom_vector_packet_store_supports_lane_count(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    const loom_target_vector_packet_policy_t* policy, uint32_t lane_count,
+    bool* out_supported);
+
+// Packetizes a dense vector store into target-admitted native widths. Exact
+// partitions retained from an oversized producer graph are stored directly
+// even when the logical result itself fits a target carrier. Other
+// decomposable producer graphs stream packets, while opaque SSA values retain
+// their authored snapshot. Shared snapshots are reified in private storage
+// when retaining the packet tuple across consumers would exceed the static
 // expansion bound. Returns false through |out_rewritten| when the access or
 // policy does not admit an exact packetization.
 iree_status_t loom_vector_packet_legalize_store(

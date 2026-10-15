@@ -1104,9 +1104,10 @@ iree_status_t loom_vector_packet_legalize_table_lookup(
   return iree_ok_status();
 }
 
-iree_status_t loom_vector_packet_legalize_load(
+iree_status_t loom_vector_packet_legalize_load_with_maximum_lane_count(
     loom_target_legalization_context_t* context, loom_op_t* op,
-    const loom_target_vector_packet_policy_t* policy, bool* out_rewritten) {
+    const loom_target_vector_packet_policy_t* policy,
+    uint32_t maximum_lane_count, bool* out_rewritten) {
   *out_rewritten = false;
 
   loom_vector_memory_footprint_t footprint = {0};
@@ -1120,7 +1121,22 @@ iree_status_t loom_vector_packet_legalize_load(
   loom_vector_memory_cache_policy_t cache_policy = {0};
   if (!loom_vector_packet_shape_from_type(context, policy,
                                           footprint.vector_type, &shape)) {
-    return iree_ok_status();
+    uint32_t lane_count = 0;
+    if (maximum_lane_count == 0 ||
+        !loom_vector_packet_static_lane_count(footprint.vector_type,
+                                              &lane_count) ||
+        maximum_lane_count >= lane_count) {
+      return iree_ok_status();
+    }
+    shape = (loom_vector_packet_shape_t){
+        .lane_count = lane_count,
+        .chunk_lane_count = maximum_lane_count,
+        .chunk_count = (lane_count - 1u) / maximum_lane_count + 1u,
+    };
+  } else if (maximum_lane_count != 0 &&
+             maximum_lane_count < shape.chunk_lane_count) {
+    shape.chunk_lane_count = maximum_lane_count;
+    shape.chunk_count = (shape.lane_count - 1u) / shape.chunk_lane_count + 1u;
   }
   bool packet_supported = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_memory_shape_constrain(
@@ -1138,10 +1154,98 @@ iree_status_t loom_vector_packet_legalize_load(
   return iree_ok_status();
 }
 
+iree_status_t loom_vector_packet_legalize_load(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    const loom_target_vector_packet_policy_t* policy, bool* out_rewritten) {
+  return loom_vector_packet_legalize_load_with_maximum_lane_count(
+      context, op, policy, /*maximum_lane_count=*/0, out_rewritten);
+}
+
+static iree_status_t loom_vector_packet_store_lane_count_is_supported(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    const loom_target_vector_packet_policy_t* policy,
+    const loom_vector_memory_footprint_t* footprint, uint32_t store_lane_count,
+    uint32_t lane_count, bool* out_supported) {
+  *out_supported = false;
+  if (lane_count == 0 || lane_count > store_lane_count) {
+    return iree_ok_status();
+  }
+  if (lane_count == 1) {
+    *out_supported = true;
+    return iree_ok_status();
+  }
+
+  const loom_type_t packet_type =
+      loom_vector_packet_type(footprint->vector_type, lane_count);
+  if (!loom_target_legalization_has_source_vector_carrier(
+          context, packet_type, LOOM_VALUE_ID_INVALID)) {
+    return iree_ok_status();
+  }
+  const loom_target_contract_vector_lane_projection_t projection = {
+      .source_lane_count = store_lane_count,
+      .projected_lane_count = lane_count,
+  };
+  loom_target_contract_query_result_t query_result =
+      loom_target_contract_query_result_empty();
+  IREE_RETURN_IF_ERROR(
+      loom_target_legalization_query_contract_with_vector_lane_projection(
+          context, op, projection, &query_result));
+  if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
+    *out_supported = true;
+    return iree_ok_status();
+  }
+  if (query_result.outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
+    return iree_ok_status();
+  }
+
+  uint32_t selected_lane_count = 0;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_memory_chunk_lane_count_select(
+      context, op, policy, footprint->vector_type, lane_count,
+      &selected_lane_count));
+  *out_supported = selected_lane_count == lane_count;
+  return iree_ok_status();
+}
+
+iree_status_t loom_vector_packet_store_supports_lane_count(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    const loom_target_vector_packet_policy_t* policy, uint32_t lane_count,
+    bool* out_supported) {
+  *out_supported = false;
+  loom_vector_memory_footprint_t footprint = {0};
+  if (!loom_vector_memory_footprint_describe(
+          loom_vector_packet_fact_context(context), context->module, op,
+          &footprint) ||
+      footprint.kind != LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE) {
+    return iree_ok_status();
+  }
+  loom_vector_memory_cache_policy_t cache_policy = {0};
+  if (!loom_vector_memory_cache_policy_from_op(context->module, op,
+                                               &cache_policy)) {
+    return iree_ok_status();
+  }
+  uint32_t store_lane_count = 0;
+  if (!loom_vector_packet_static_lane_count(footprint.vector_type,
+                                            &store_lane_count)) {
+    return iree_ok_status();
+  }
+  const loom_vector_packet_shape_t scalar_origin_shape = {
+      .lane_count = store_lane_count,
+      .chunk_lane_count = 1u,
+      .chunk_count = store_lane_count,
+  };
+  if (!loom_vector_packet_memory_can_build_chunk_origins(
+          context, &footprint, &scalar_origin_shape)) {
+    return iree_ok_status();
+  }
+  return loom_vector_packet_store_lane_count_is_supported(
+      context, op, policy, &footprint, store_lane_count, lane_count,
+      out_supported);
+}
+
 // Stores an exact retained partition without rebuilding and re-slicing its
 // logical aggregate. This is both the terminal consumer for mixed native and
-// scalar load tails and the ownership boundary that lets dead structural glue
-// disappear before target contract verification.
+// scalar load tails and the ownership boundary for packetized computations
+// whose logical result already fits a target carrier.
 static iree_status_t loom_vector_packet_legalize_partition_store(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy,
@@ -1154,6 +1258,18 @@ static iree_status_t loom_vector_packet_legalize_partition_store(
       !loom_vector_packet_static_lane_count(footprint->vector_type,
                                             &store_lane_count) ||
       partition.lane_count != store_lane_count) {
+    return iree_ok_status();
+  }
+  // Partition components begin at a subset of scalar lane origins. Proving the
+  // final scalar origin representable proves every component origin without
+  // assuming that the partition has a regular packet width.
+  const loom_vector_packet_shape_t scalar_origin_shape = {
+      .lane_count = store_lane_count,
+      .chunk_lane_count = 1u,
+      .chunk_count = store_lane_count,
+  };
+  if (!loom_vector_packet_memory_can_build_chunk_origins(
+          context, footprint, &scalar_origin_shape)) {
     return iree_ok_status();
   }
 
@@ -1196,11 +1312,11 @@ static iree_status_t loom_vector_packet_legalize_partition_store(
                                          footprint->vector_type)) {
         return iree_ok_status();
       }
-      uint32_t selected_lane_count = 0;
-      IREE_RETURN_IF_ERROR(loom_vector_packet_memory_chunk_lane_count_select(
-          context, op, policy, footprint->vector_type, component_lane_count,
-          &selected_lane_count));
-      if (selected_lane_count != component_lane_count) {
+      bool component_supported = false;
+      IREE_RETURN_IF_ERROR(loom_vector_packet_store_lane_count_is_supported(
+          context, op, policy, footprint, store_lane_count,
+          component_lane_count, &component_supported));
+      if (!component_supported) {
         return iree_ok_status();
       }
     }
@@ -1256,29 +1372,45 @@ static iree_status_t loom_vector_packet_legalize_partition_store(
   return iree_ok_status();
 }
 
-// Returns true when the exact partition contains a native vector component and
-// can remove structural work that the regular snapshot view cannot. Pure
+// Returns true when an exact partition already provides multiple vector
+// packets. Terminal memory operations consume these producer-selected packets
+// directly instead of rebuilding them at a wider memory-preferred shape. Pure
 // scalar partitions stay on the ordinary packet path so targets can regroup
 // their elements into native memory carriers.
-static bool loom_vector_packet_partition_has_distinct_vector_components(
+static bool loom_vector_packet_partition_has_vector_packets(
     const loom_module_t* module, loom_value_fact_vector_partition_t partition) {
-  if (partition.count == 0) {
+  if (partition.count < 2) {
     return false;
   }
-  bool has_vector_component = false;
-  bool differs_from_snapshot = partition.count != partition.snapshot_count;
   for (uint32_t i = 0; i < partition.count; ++i) {
-    has_vector_component |= loom_type_is_vector(
-        loom_module_value_type(module, partition.components[i].value));
-    if (!differs_from_snapshot &&
-        (partition.components[i].value !=
-             partition.snapshot_components[i].value ||
-         partition.components[i].lane_count !=
-             partition.snapshot_components[i].lane_count)) {
-      differs_from_snapshot = true;
+    if (loom_type_is_vector(
+            loom_module_value_type(module, partition.components[i].value))) {
+      return true;
     }
   }
-  return has_vector_component && differs_from_snapshot;
+  return false;
+}
+
+// Returns true when an exact partition exposes vector packets that the regular
+// snapshot view cannot reproduce directly. These partitions are consumed only
+// after the ordinary packet graph has enforced shared-snapshot staging.
+static bool loom_vector_packet_partition_has_distinct_vector_packets(
+    const loom_module_t* module, loom_value_fact_vector_partition_t partition) {
+  if (!loom_vector_packet_partition_has_vector_packets(module, partition)) {
+    return false;
+  }
+  if (partition.count != partition.snapshot_count) {
+    return true;
+  }
+  for (uint32_t i = 0; i < partition.count; ++i) {
+    if (partition.components[i].value !=
+            partition.snapshot_components[i].value ||
+        partition.components[i].lane_count !=
+            partition.snapshot_components[i].lane_count) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Returns true when |root_op| is the only semantic consumer of |value_id|.
@@ -1327,9 +1459,41 @@ iree_status_t loom_vector_packet_legalize_store(
       store_footprint.kind != LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE) {
     return iree_ok_status();
   }
+
+  loom_vector_memory_cache_policy_t store_cache_policy = {0};
+  if (!loom_vector_memory_cache_policy_from_op(context->module, op,
+                                               &store_cache_policy)) {
+    return iree_ok_status();
+  }
+  const loom_value_fact_vector_partition_t source_partition =
+      loom_value_fact_table_query_vector_partition(
+          context->rewriter->fact_table, store_footprint.value);
+  const bool has_vector_packet_components =
+      loom_vector_packet_partition_has_vector_packets(context->module,
+                                                      source_partition);
   loom_vector_packet_shape_t shape = {0};
-  if (!loom_vector_packet_shape_from_type(
-          context, policy, store_footprint.vector_type, &shape)) {
+  const bool requires_packet_shape = loom_vector_packet_shape_from_type(
+      context, policy, store_footprint.vector_type, &shape);
+  if (!requires_packet_shape && has_vector_packet_components) {
+    const loom_value_t* source_value =
+        loom_module_value(context->module, store_footprint.value);
+    loom_op_t* source_op = loom_value_is_block_arg(source_value)
+                               ? NULL
+                               : loom_value_def_op(source_value);
+    IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_partition_store(
+        context, op, policy, &store_footprint, store_cache_policy,
+        source_partition, out_rewritten));
+    if (*out_rewritten) {
+      if (source_op != NULL) {
+        bool erased = false;
+        IREE_RETURN_IF_ERROR(
+            loom_rewriter_erase_if_dead(context->rewriter, source_op, &erased));
+      }
+      return iree_ok_status();
+    }
+  }
+
+  if (!requires_packet_shape) {
     return iree_ok_status();
   }
   bool packet_supported = false;
@@ -1340,19 +1504,10 @@ iree_status_t loom_vector_packet_legalize_store(
     return iree_ok_status();
   }
 
-  loom_vector_memory_cache_policy_t store_cache_policy = {0};
-  if (!loom_vector_memory_cache_policy_from_op(context->module, op,
-                                               &store_cache_policy) ||
-      !loom_vector_packet_memory_can_build_chunk_origins(
+  if (!loom_vector_packet_memory_can_build_chunk_origins(
           context, &store_footprint, &shape)) {
     return iree_ok_status();
   }
-  const loom_value_fact_vector_partition_t source_partition =
-      loom_value_fact_table_query_vector_partition(
-          context->rewriter->fact_table, store_footprint.value);
-  const bool has_distinct_exact_components =
-      loom_vector_packet_partition_has_distinct_vector_components(
-          context->module, source_partition);
 
   loom_vector_packetization_t packetization = {0};
   loom_vector_packetization_initialize(context, policy, &packetization);
@@ -1374,7 +1529,9 @@ iree_status_t loom_vector_packet_legalize_store(
     return iree_ok_status();
   }
   if (!producer_selected) {
-    if (has_distinct_exact_components && source_partition.snapshot_count == 0 &&
+    if (loom_vector_packet_partition_has_distinct_vector_packets(
+            context->module, source_partition) &&
+        source_partition.snapshot_count == 0 &&
         loom_vector_packet_value_is_exclusive_to_op(
             context->module, store_footprint.value, op)) {
       IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_partition_store(
@@ -1429,7 +1586,9 @@ iree_status_t loom_vector_packet_legalize_store(
 
   const bool static_expansion_is_bounded =
       loom_vector_packet_static_expansion_is_bounded(&packetization, &shape);
-  if (static_expansion_is_bounded && has_distinct_exact_components) {
+  if (static_expansion_is_bounded &&
+      loom_vector_packet_partition_has_distinct_vector_packets(
+          context->module, source_partition)) {
     IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_partition_store(
         context, op, policy, &store_footprint, store_cache_policy,
         source_partition, out_rewritten));

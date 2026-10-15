@@ -153,6 +153,13 @@ typedef struct loom_target_legalization_context_t {
   loom_local_value_domain_t* value_domain;
   // Active rewriter for mutating the function body.
   loom_rewriter_t* rewriter;
+  // Packet graph creation observed during the active legalizer callback.
+  struct {
+    // Value checkpoint immediately before the first packet materialization.
+    loom_value_id_t value_checkpoint;
+    // True when value_checkpoint has been recorded.
+    bool recorded;
+  } component_packet_materialization;
   // Current legalization phase.
   loom_target_legalization_mode_t mode;
   // Representation state of callable, CFG, and LoopLike boundaries.
@@ -167,6 +174,19 @@ typedef struct loom_target_legalization_context_t {
   // Read-only target contract query for already-legal checks.
   loom_target_contract_query_callback_t contract_query;
 } loom_target_legalization_context_t;
+
+// Records that the active legalizer is about to materialize a packet graph.
+// The target legalization driver uses the first checkpoint to give generated
+// decomposable operations to the component planner before reference fallback.
+static inline void
+loom_target_legalization_record_component_packet_materialization(
+    loom_target_legalization_context_t* context) {
+  if (!context->component_packet_materialization.recorded) {
+    context->component_packet_materialization.value_checkpoint =
+        loom_rewriter_value_checkpoint(context->rewriter);
+    context->component_packet_materialization.recorded = true;
+  }
+}
 
 // Returns the common target bundle selected for |context|.
 static inline const loom_target_bundle_t*

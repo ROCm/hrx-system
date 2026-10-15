@@ -171,6 +171,9 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
         .legalize = loom_x86_legalize_vector_packets,
     },
     {
+        // A native-width store may terminate packets retained from an
+        // oversized producer graph without materializing its logical result.
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
         .root_kind = LOOM_OP_VECTOR_STORE,
         .legalize = loom_x86_legalize_vector_packets,
     },

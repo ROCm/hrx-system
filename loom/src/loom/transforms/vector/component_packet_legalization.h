@@ -43,6 +43,16 @@ loom_vector_component_packet_query_cache_empty(void) {
   return (loom_vector_component_packet_query_cache_t){0};
 }
 
+// Returns whether |op| is a locally eligible component packet root with at
+// least one multi-lane width under the active target contract. The authored
+// contract result must describe |op| in its current shape. Graph ownership,
+// shared producer constraints, and the component expansion limit can still
+// reject every locally admitted width.
+iree_status_t loom_vector_component_packet_op_has_vector_candidate(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    const loom_target_contract_query_result_t* authored_query_result,
+    bool* out_has_candidate);
+
 // Looks up the authored target contract result retained for |op|. Returns NULL
 // when |op| was outside the decomposable component family covered by the plan.
 const loom_target_contract_query_result_t*
@@ -54,11 +64,13 @@ loom_vector_component_packet_query_cache_lookup(
 // function-local value domain carried by |context|. The target contributes
 // candidate lane counts through |context->vector_packet_policy|; the target
 // contract remains the sole source of native legality. Authored-legal producers
-// remain target snapshots and narrower consumers slice their results without
-// replaying native work. A contract that consumes whole-vector lane provenance
-// retains its producer closure so each projected packet establishes a complete
-// local origin. Components requiring legalization are emitted packet-major so
-// direct SSA edges remain packet-local across mixed operations and fanout.
+// with target carriers remain snapshots available to narrower consumers. An
+// edge with no carrier retains packets and constrains its producer and consumer
+// to one common width. A contract that consumes whole-vector lane provenance
+// similarly retains its complete producer closure so each projected packet
+// establishes a complete local origin. Components requiring legalization are
+// emitted packet-major so direct SSA edges remain packet-local across mixed
+// operations and fanout.
 //
 // |rewrite_callback| observes each authored operation only after its packet
 // rewrite has completed and receives the contract result established for the
