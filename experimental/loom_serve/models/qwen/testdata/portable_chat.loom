@@ -34,11 +34,6 @@ func.def public @model_name() -> (buffer) {
   func.return %name : buffer
 }
 
-func.def public @chat_image_limits() -> (i64, i64, i64, i64, i64) {
-  %zero = scalar.constant 0 : i64
-  func.return %zero, %zero, %zero, %zero, %zero : i64, i64, i64, i64, i64
-}
-
 func.def public @request_defaults(%options: buffer) -> (buffer) {
   %empty = global.load @empty : buffer
   func.return %empty : buffer
@@ -54,7 +49,7 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
   func.return %empty, %c0 : buffer, i64
 }
 
-func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64, buffer) {
+func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64) -> (buffer, i64) {
   %label = global.load @label : buffer
   %newline = global.load @newline : buffer
   %prefix = func.call @join(%role, %label) : (buffer, buffer) -> (buffer)
@@ -63,8 +58,7 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   %result = func.call @join(%with_calls, %newline) : (buffer, buffer) -> (buffer)
   %c1 = scalar.constant 1 : i64
   %next = scalar.addi %state, %c1 : i64
-  %plan = global.load @empty : buffer
-  func.return %result, %next, %plan : buffer, i64, buffer
+  func.return %result, %next : buffer, i64
 }
 
 func.def public @chat_end(%state: i64) -> (buffer, i64) {
@@ -78,7 +72,7 @@ func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -
   func.return %arguments, %count : buffer, i64
 }
 
-func.def public @prepare_input(%text: buffer, %markers: buffer, %marker_count: i64, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64, buffer) {
+func.def public @prepare_input(%text: buffer, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i64
   %probe = scalar.addi %capacity, %c1 : i64
@@ -87,8 +81,7 @@ func.def public @prepare_input(%text: buffer, %markers: buffer, %marker_count: i
   %fits32 = scalar.extui %fits : i1 to i32
   %diagnostic = global.load @overflow : buffer
   func.call @require(%fits32, %diagnostic) : (i32, buffer)
-  %spans = global.load @empty : buffer
-  func.return %tokens, %count, %spans : buffer, i64, buffer
+  func.return %tokens, %count : buffer, i64
 }
 
 // This deliberately conservative streaming policy publishes at completion.
@@ -124,11 +117,26 @@ func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
   func.return %result : buffer
 }
 
-func.def public @complete_text(%prompt: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
+func.def public @complete_text(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
   %newline = global.load @newline : buffer
   %text = func.call @join(%prompt, %content) : (buffer, buffer) -> (buffer)
   %calls = func.call @join(%text, %tools) : (buffer, buffer) -> (buffer)
   %result = func.call @join(%calls, %newline) : (buffer, buffer) -> (buffer)
-  %reusable = scalar.constant 1 : i32
+  %origin = index.constant 0 : offset
+  %prompt_length = buffer.length %prompt
+  %calls_length = buffer.length %calls
+  %suffix_length = index.sub %calls_length, %prompt_length : offset
+  %response_length = buffer.length %response
+  %same_length = index.cmp eq, %suffix_length, %response_length : offset
+  %reusable = scf.if %same_length -> (i32) {
+    %zero = scalar.constant 0 : i32
+    %order = buffer.compare %calls[%prompt_length], %response[%origin], %response_length
+    %equal = scalar.cmpi eq, %order, %zero : i32
+    %value = scalar.extui %equal : i1 to i32
+    scf.yield %value : i32
+  } else {
+    %zero = scalar.constant 0 : i32
+    scf.yield %zero : i32
+  }
   func.return %result, %reusable : buffer, i32
 }

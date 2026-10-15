@@ -30,23 +30,6 @@ TOOLS = [
     }
 ]
 
-VISION_TOKENS = {
-    "<|vision_start|>": 131,
-    "<|image_pad|>": 132,
-    "<|vision_end|>": 133,
-}
-
-IMAGE_256 = (
-    "data:image/png;base64,"
-    "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAQMAAABmvDolAAAAIGNIUk0AAHomAACAhAAA+gAA"
-    "AIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURTNmmf////ENxh0AAAABYktHRAH/Ai3e"
-    "AAAAB3RJTUUH6goOFiked4aAnAAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyNi0xMC0xNFQyMj"
-    "o0MTozMCswMDowMBg77kkAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjYtMTAtMTRUMjI6NDE6"
-    "MzArMDA6MDBpZlb1AAAAKHRFWHRkYXRlOnRpbWVzdGFtcAAyMDI2LTEwLTE0VDIyOjQxOj"
-    "MwKzAwOjAwPnN3KgAAAB9JREFUaN7twQENAAAAwqD3T20ON6AAAAAAAAAAAL4NIQAAAX8Z"
-    "nKcAAAAASUVORK5CYII="
-)
-
 
 class RequestCheckTest(unittest.TestCase):
     def setUp(self):
@@ -55,7 +38,6 @@ class RequestCheckTest(unittest.TestCase):
         self.directory = Path(temporary.name)
         vocabulary = {chr(index): index for index in range(128)}
         vocabulary.update({"<bos>": 128, "<eos>": 129, "λ": 130})
-        vocabulary.update(VISION_TOKENS)
         tokenizer = {
             "model": {"type": "BPE", "vocab": vocabulary, "merges": []},
             "added_tokens": [
@@ -68,11 +50,7 @@ class RequestCheckTest(unittest.TestCase):
                     "normalized": False,
                     "special": True,
                 }
-                for spelling, index in (
-                    ("<bos>", 128),
-                    ("<eos>", 129),
-                    *VISION_TOKENS.items(),
-                )
+                for spelling, index in (("<bos>", 128), ("<eos>", 129))
             ],
             "post_processor": {
                 "type": "TemplateProcessing",
@@ -122,28 +100,12 @@ class RequestCheckTest(unittest.TestCase):
     def success(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
         value = json.loads(result.stdout)
-        expected_tokens = []
-        position = 0
-        while position < len(value["prompt"]):
-            special = next(
-                (
-                    (spelling, token)
-                    for spelling, token in VISION_TOKENS.items()
-                    if value["prompt"].startswith(spelling, position)
-                ),
-                None,
-            )
-            if special:
-                spelling, token = special
-                expected_tokens.append(token)
-                position += len(spelling)
-                continue
-            character = value["prompt"][position]
-            expected_tokens.append(130 if character == "λ" else ord(character))
-            position += 1
         self.assertEqual(
             value["tokens"],
-            expected_tokens,
+            [
+                130 if character == "λ" else ord(character)
+                for character in value["prompt"]
+            ],
         )
         return value
 
@@ -167,49 +129,40 @@ class RequestCheckTest(unittest.TestCase):
         self.assertEqual(value["checkpoint"], prompt + "Hi.<|im_end|>\n")
         self.assertEqual(value["output_cursor"], 3)
         self.assertEqual(value["tool_calls"], [])
+        self.assertTrue(value["reusable"])
 
-    def test_ordered_text_parts_use_the_same_qwen_prompt(self):
-        request = self.request(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Hello "},
-                        {"type": "text", "text": "λ."},
-                    ],
-                }
-            ]
-        )
-        value = self.success(self.execute(PACKAGE / "control.loom", request))
-        self.assertEqual(
-            value["prompt"],
-            "<|im_start|>user\nHello λ.<|im_end|>\n"
-            "<|im_start|>assistant\n<think>\n\n</think>\n\n",
-        )
+    def test_normalized_output_requires_replay(self):
+        call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
+        for response in (" Hi.", "Hi.\n", "Ready.\n\n" + call + "\n"):
+            for chunk_size in (0, 1, 7):
+                with self.subTest(response=response, chunk_size=chunk_size):
+                    value = self.success(
+                        self.execute(
+                            PACKAGE / "control.loom",
+                            self.request(tools=TOOLS),
+                            response,
+                            chunk_size=chunk_size,
+                        )
+                    )
+                    self.assertFalse(value["reusable"])
+                    self.assertTrue(value["checkpoint"].endswith("<|im_end|>\n"))
 
-    def test_ordered_image_parts_publish_projected_token_spans(self):
-        request = self.request(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "  before "},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": IMAGE_256, "detail": "high"},
-                        },
-                        {"type": "text", "text": " after  "},
-                    ],
-                }
-            ]
+    def test_text_deployment_rejects_image_content(self):
+        result = self.execute(
+            PACKAGE / "control.loom",
+            self.request(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": "image.png"}}
+                        ],
+                    }
+                ]
+            ),
         )
-        value = self.success(self.execute(PACKAGE / "control.loom", request))
-        self.assertEqual(value["tokens"].count(VISION_TOKENS["<|vision_start|>"]), 1)
-        self.assertEqual(value["tokens"].count(VISION_TOKENS["<|image_pad|>"]), 64)
-        self.assertEqual(value["tokens"].count(VISION_TOKENS["<|vision_end|>"]), 1)
-        self.assertEqual(value["media_spans"], [[0, 25, 64]])
-        self.assertIn("user\nbefore <|vision_start|>", value["prompt"])
-        self.assertIn("<|vision_end|> after<|im_end|>", value["prompt"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
 
     def test_production_xml_completion(self):
         call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
@@ -226,6 +179,7 @@ class RequestCheckTest(unittest.TestCase):
         function = value["tool_calls"][0]["function"]
         self.assertEqual(function["name"], "read")
         self.assertEqual(json.loads(function["arguments"]), {"path": "a.txt"})
+        self.assertTrue(value["reusable"])
 
     def test_independent_source_identity_roles_json_and_completion(self):
         response = json.dumps(
@@ -253,6 +207,7 @@ class RequestCheckTest(unittest.TestCase):
         self.assertEqual(value["prompt"], "developer: Hi.\nassistant: ")
         self.assertEqual(value["checkpoint"], value["prompt"] + '{"path":"a"}\n')
         self.assertEqual(value["output_cursor"], 0)
+        self.assertFalse(value["reusable"])
         self.assertEqual(
             value["tool_calls"][0]["function"]["arguments"], '{"path":"a"}'
         )
@@ -324,18 +279,19 @@ class RequestCheckTest(unittest.TestCase):
                     self.assertFalse(value["reusable"])
 
     def test_empty_reasoning_and_incomplete_answer_marker(self):
-        for chunk_size in (0, 1, 7):
-            value = self.success(
-                self.execute(
-                    PACKAGE / "control.loom",
-                    self.request(enable_thinking=True),
-                    "</think>\n\nUse <tool_ca",
-                    chunk_size=chunk_size,
+        for prefix in ("", "\n"):
+            for chunk_size in (0, 1, 7):
+                value = self.success(
+                    self.execute(
+                        PACKAGE / "control.loom",
+                        self.request(enable_thinking=True),
+                        prefix + "</think>\n\nUse <tool_ca",
+                        chunk_size=chunk_size,
+                    )
                 )
-            )
-            self.assertEqual(value["reasoning_content"], "")
-            self.assertEqual(value["content"], "Use <tool_ca")
-            self.assertTrue(value["reusable"])
+                self.assertEqual(value["reasoning_content"], prefix)
+                self.assertEqual(value["content"], "Use <tool_ca")
+                self.assertEqual(value["reusable"], bool(prefix))
 
     def test_source_sampling_defaults_and_request_overrides(self):
         source = PACKAGE / "control.loom"

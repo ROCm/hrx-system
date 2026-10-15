@@ -83,11 +83,6 @@
       "programs/qwen38/vision_projector.loom"
     ],
     "weights": "model.gguf",
-    "tokenizer": "tokenizer.json",
-    "image": {
-      "prepare": "vision_prepare.loom",
-      "control": "vision_control.loom",
-      "assets": "."
-    }
+    "tokenizer": "tokenizer.json"
   }
 }

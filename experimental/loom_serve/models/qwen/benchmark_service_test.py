@@ -257,7 +257,11 @@ class BenchmarkServiceTest(unittest.TestCase):
                 event = {
                     "model": body["model"],
                     "choices": [
-                        {"delta": {"content": "Review"}, "finish_reason": "stop"}
+                        {
+                            "index": 0,
+                            "delta": {"content": "Review"},
+                            "finish_reason": "stop",
+                        }
                     ],
                     "usage": {
                         "prompt_tokens": 20,
