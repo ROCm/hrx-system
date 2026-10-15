@@ -39,8 +39,8 @@ coissued components: 2
 
 // ====
 
-// Each padded accumulator is realized with multiple native moves. Early storage
-// slices forward the clear's payload deadline; the final move extends readiness.
+// Each padded accumulator is realized with multiple native moves. The physical
+// register frontier preserves the clear and each generated move's timing.
 // RUN: emit aie2p-leaf @padded_accumulators report=emission
 
 low.func.def target<amd.xdna.aie2p.core> @padded_accumulators(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %output: reg<aie2p.ep>) asm {
@@ -59,8 +59,8 @@ low.func.def target<amd.xdna.aie2p.core> @padded_accumulators(%left: reg<aie2p.v
 }
 
 // ----
-issue cycles: 25
-code bytes: 82
+issue cycles: 24
+code bytes: 80
 coissued bundles: 3
 coissued components: 7
 
@@ -334,3 +334,86 @@ low.func.def target<amd.xdna.aie2p.core> @move_overwrite(%input: reg<aie2p.ep>, 
 
 // ----
 code: 98 db 06 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 f8 92 56 18 f8 12 a0 1d 00 00
+
+// ====
+
+// A dependent MAC consumes the accumulator through its native bypass.
+// RUN: emit aie2p-leaf @direct_mac report=code
+
+low.func.def target<amd.xdna.aie2p.core> @direct_mac(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %initial: reg<aie2p.mbms x4>, %mode: reg<aie2p.er>) -> (reg<aie2p.mbms x4>) asm {
+  %first = vmac.bf16x32 %initial, %left, %right, %mode
+  %second = vmac.bf16x32 %first, %left, %right, %mode
+  return %second
+}
+
+// ----
+code: 48 21 00 00 00 00 00 00 48 21 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// A coalesced copy keeps the same accumulator bypass as the direct chain.
+// RUN: emit aie2p-leaf @copied_mac report=code
+
+low.func.def target<amd.xdna.aie2p.core> @copied_mac(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %initial: reg<aie2p.mbms x4>, %mode: reg<aie2p.er>) -> (reg<aie2p.mbms x4>) asm {
+  %first = vmac.bf16x32 %initial, %left, %right, %mode
+  %aliased = copy %first : reg<aie2p.mbms x4> -> reg<aie2p.mbms x4>
+  %second = vmac.bf16x32 %aliased, %left, %right, %mode
+  return %second
+}
+
+// ----
+code: 48 21 00 00 00 00 00 00 48 21 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// Slices and their concatenation preserve all four accumulator quarters.
+// RUN: emit aie2p-leaf @reassembled_mac report=code
+
+low.func.def target<amd.xdna.aie2p.core> @reassembled_mac(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %initial: reg<aie2p.mbms x4>, %mode: reg<aie2p.er>) -> (reg<aie2p.mbms x4>) asm {
+  %first = vmac.bf16x32 %initial, %left, %right, %mode
+  %quarter0 = slice %first[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %quarter1 = slice %first[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %quarter2 = slice %first[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %quarter3 = slice %first[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %aliased = concat(%quarter0, %quarter1, %quarter2, %quarter3) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %second = vmac.bf16x32 %aliased, %left, %right, %mode
+  return %second
+}
+
+// ----
+code: 48 21 00 00 00 00 00 00 48 21 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// A detached copy materializes native moves with their own read and write timing.
+// RUN: emit aie2p-leaf @detached_mac report=code
+
+low.func.def target<amd.xdna.aie2p.core> @detached_mac(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %initial: reg<aie2p.mbms x4>, %mode: reg<aie2p.er>) -> (reg<aie2p.mbms x4>) asm {
+  %first = vmac.bf16x32 %initial, %left, %right, %mode
+  %aliased = copy %first {detached = true} : reg<aie2p.mbms x4> -> reg<aie2p.mbms x4>
+  %second = vmac.bf16x32 %aliased, %left, %right, %mode
+  return %second
+}
+
+// ----
+code: 48 21 00 00 00 00 00 00 00 00 00 00 00 00 f8 12 00 19 f8 12 41 19 f8 12 82 19 62 21 20 00 e6 12 c3 01 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// The concatenation contains a new low quarter and three older loaded quarters.
+// Its concrete moves and the final MAC retain both producers' physical timing.
+// RUN: emit aie2p-leaf @mixed_accumulator_ages report=code
+
+low.func.def target<amd.xdna.aie2p.core> @mixed_accumulator_ages(%input: reg<aie2p.ep>, %left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %initial: reg<aie2p.mbms x4>, %mode: reg<aie2p.er>) -> (reg<aie2p.mbms x4>) asm {
+  %quarter1 = vlda.acc %input, 64
+  %quarter2 = vlda.acc %input, 128
+  %quarter3 = vlda.acc %input, 192
+  %newer = vmac.bf16x32 %initial, %left, %right, %mode
+  %quarter0 = slice %newer[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %assembled = concat(%quarter0, %quarter1, %quarter2, %quarter3) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %result = vmac.bf16x32 %assembled, %left, %right, %mode
+  return %result
+}
+
+// ----
+code: 62 21 00 00 04 b0 86 02 98 55 24 00 98 75 34 00 00 00 00 00 00 00 48 21 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00

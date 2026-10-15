@@ -1,4 +1,4 @@
-// RUN: with-checks emit aie2p-array-plan @private_atomic_array
+// RUN: emit aie2p-array-plan @private_atomic_array
 
 // Shared corpus programs own atomic result semantics. This target test checks
 // that private provenance and the shared rewrites survive the AIE2P array ABI,
@@ -106,22 +106,212 @@ low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array
 }
 
 // ----
-CHECK: array @private_atomic_array family=amd.xdna.npu2 groups=1 workers=1 bindings=2 channels=2 slots=4 locks=4 dma=4 routes=8
-CHECK: worker index=0 * resources=2 storage-domains=1
-CHECK: worker-storage worker=0 space=2 * bytes=24
-CHECK: binding-patch ordinal=0 channel=0 * span=40 transfer=40 repeat=1
-CHECK: binding-patch ordinal=1 channel=1 * span=72 transfer=72 repeat=1 completion-route=0
-CHECK: resident worker=0 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=826 resources=0 fixups=2
-CHECK: * = storage {byte_alignment = 8, byte_length = 24} : low.storage<private>
-CHECK: %cell_f32 = storage_address * : low.storage<private> -> reg<aie2p.ep>
-CHECK: %initial_f32 = lda.i32.index %input_f32, *
-CHECK: %increment_f32 = lda.i32.index %input_f32, *
-CHECK: st %initial_f32, %cell_f32, 16
-CHECK: %old_f32 = lda %cell_f32, 16
-CHECK: %final_f32 = lda %cell_f32, 16
-CHECK: st.i32.index %old_f32, %output_f32, *
-CHECK: st.i32.index %final_f32, %output_f32, *
-CHECK-NOT: *view.atomic*
+array @private_atomic_array family=amd.xdna.npu2 groups=1 workers=1 bindings=2 channels=2 slots=4 locks=4 dma=4 routes=8
+binding index=0 ordinal=0 access=read
+binding index=1 ordinal=1 access=write
+worker index=0 group=0 lane=0 entry=@private_atomic_worker tile=(0,2) resources=2 storage-domains=1
+channel index=0 transport=external-dma record-bytes=40 capacity=2 records=1 sender=binding[0]:0 partition=0/1 receiver=worker[0]:0
+channel index=1 transport=external-dma record-bytes=72 capacity=2 records=1 sender=worker[0]:1 receiver=binding[1]:0 partition=0/1
+worker-storage worker=0 space=2 offset=0x0c000 load-address=0x7c000 bytes=24
+worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
+worker-port worker=0 port=1 direction=send channel=1 first-slot=2
+slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=40 sender=external receiver=0x70000
+slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=40 sender=external receiver=0x74000
+slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=72 sender=0x78000 receiver=external
+slot channel=1 index=1 owner=(0,2) offset=0x0c040 bytes=72 sender=0x7c040 receiver=external
+lock channel=0 tile=(0,2) id=0 ring=receive role=credit initial=2
+lock channel=0 tile=(0,2) id=1 ring=receive role=ready initial=0
+lock channel=1 tile=(0,2) id=2 ring=send role=credit initial=2
+lock channel=1 tile=(0,2) id=3 ring=send role=ready initial=0
+dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
+dma channel=1 tile=(0,2) side=compute direction=memory-to-stream engine-channel=0 bd-start=2 bd-count=2
+dma channel=1 tile=(0,0) side=shim direction=stream-to-memory engine-channel=0 bd-start=1 bd-count=1
+route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
+route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
+route channel=0 tile=(0,2) kind=switch source=south[0] destination=dma[0]
+route channel=1 tile=(0,2) kind=switch source=dma[0] destination=south[0]
+route channel=1 tile=(0,1) kind=switch source=north[0] destination=south[0]
+route channel=1 tile=(0,0) kind=switch source=north[0] destination=south[2]
+route channel=1 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
+completion-route index=0 shim=(0,0) source=0 destination=2 packet=0 arbiter=0 master-select=0 rule-slot=0
+binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=40 transfer=40 repeat=1
+binding-patch ordinal=1 channel=1 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=72 transfer=72 repeat=1 completion-route=0
+
+array-program records=39 writes=21 masked-writes=13 block-writes=4 tile-loads=1 waits=0
+array-block record=26 address=0x0021d000 words=[0x0000000a,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=27 address=0x0021d020 words=[0x0400000a,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=28 address=0x0021d040 words=[0x08000012,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
+array-block record=29 address=0x0021d060 words=[0x0c040012,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
+array-tile-load record=30 tile-program=0
+control-program records=6 writes=2 masked-writes=1 block-writes=2 tile-loads=0 waits=1 relocations=2
+control-block record=0 address=0x0001d000 words=[0x0000000a,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=1 address=0x0001d214 value=0x00000000
+control-block record=2 address=0x0001d020 words=[0x00000012,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-mask-write record=3 address=0x0001d200 mask=0x00001f00 value=0x00000000
+control-write record=4 address=0x0001d204 value=0x80000001
+control-wait record=5 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1
+control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
+control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
+
+resident-program workers=1
+resident worker=0 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=824 resources=0 fixups=2
+
+low.func.def retain target<amd.xdna.aie2p.core> @private_atomic_array$worker$0() asm {
+  %4 = storage {byte_alignment = 8, byte_length = 24} : low.storage<private>
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  %109 = mov.local-address 458752
+  %110 = mov.local-address 491520
+  low.br ^_bb1(%109: reg<aie2p.ep>, %110: reg<aie2p.ep>)
+^_bb1(%97: reg<aie2p.ep>, %99: reg<aie2p.ep>):
+  acq %acquire_delta, 49
+  acq %acquire_delta, 50
+  %input_f32 = copy %97 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output_f32 = copy %99 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %cell_f32 = storage_address %4 : low.storage<private> -> reg<aie2p.ep>
+  %6 = lda %input_f32, 0
+  %7 = lda %input_f32, 4
+  %8 = lda %input_f32, 8
+  %9 = lda %input_f32, 12
+  %10 = lda %input_f32, 16
+  %11 = lda %input_f32, 20
+  st %6, %cell_f32, 0
+  st %7, %cell_f32, 4
+  %12 = lda %cell_f32, 0
+  %13 = lda %cell_f32, 4
+  %14, %15 = add.carry %12, %8
+  %16, %17 = adc %13, %9, %15
+  st %14, %cell_f32, 0
+  st %16, %cell_f32, 4
+  %18 = lda %cell_f32, 0
+  %19 = lda %cell_f32, 4
+  %20 = eq %18, %10
+  %21 = eq %19, %11
+  %22 = and %20, %21
+  %23 = copy %22 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %24 = sel.nez %8, %18, %23
+  %25 = copy %22 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %26 = sel.nez %9, %19, %25
+  st %24, %cell_f32, 0
+  st %26, %cell_f32, 4
+  %27 = lda %cell_f32, 0
+  %28 = lda %cell_f32, 4
+  %29 = xor %27, %8
+  %30 = xor %28, %9
+  st %29, %cell_f32, 0
+  st %30, %cell_f32, 4
+  %31 = lda %cell_f32, 0
+  %32 = lda %cell_f32, 4
+  st %12, %output_f32, 0
+  st %13, %output_f32, 4
+  st %18, %output_f32, 8
+  st %19, %output_f32, 12
+  st %31, %output_f32, 16
+  st %32, %output_f32, 20
+  st %8, %output_f32, 24
+  st %9, %output_f32, 28
+  %33 = lda %input_f32, 24
+  %34 = lda %input_f32, 28
+  st %33, %cell_f32, 8
+  st %34, %cell_f32, 12
+  %35 = mov.short 1
+  %36 = lda %cell_f32, 8
+  %37 = add.rr %36, %35
+  st %37, %cell_f32, 8
+  %38 = lda %cell_f32, 12
+  %39 = add.rr %38, %35
+  st %39, %cell_f32, 12
+  %40 = lda %cell_f32, 8
+  %41 = xor %40, %35
+  st %41, %cell_f32, 8
+  %42 = lda %cell_f32, 8
+  %43 = mov.short -1
+  %44 = add.rr %42, %43
+  st %44, %cell_f32, 8
+  %45 = lda %cell_f32, 12
+  %46 = add.rr %45, %43
+  st %46, %cell_f32, 12
+  %47 = lda %cell_f32, 8
+  %48 = add.rr %47, %35
+  st %48, %cell_f32, 8
+  %49 = mov.short -101
+  %50 = lda %cell_f32, 8
+  %51 = eq %50, %42
+  %52 = copy %51 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %53 = sel.nez %35, %50, %52
+  st %53, %cell_f32, 8
+  %54 = lda %cell_f32, 12
+  %55 = eq %54, %45
+  %56 = copy %55 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %57 = sel.nez %35, %54, %56
+  st %57, %cell_f32, 12
+  %58 = lda %cell_f32, 8
+  %59 = add.rr %58, %35
+  st %59, %cell_f32, 8
+  %60 = lda %cell_f32, 8
+  %61 = add.rr %60, %35
+  st %61, %cell_f32, 8
+  %62 = lda %cell_f32, 8
+  %63 = lda %cell_f32, 12
+  %64 = mov.static-byte-offset 32
+  %65 = mov.address-index %64
+  st.i32.index %42, %output_f32, %65
+  %66 = mov.static-byte-offset 36
+  %67 = mov.address-index %66
+  st.i32.index %45, %output_f32, %67
+  %68 = mov.static-byte-offset 40
+  %69 = mov.address-index %68
+  st.i32.index %47, %output_f32, %69
+  %70 = mov.static-byte-offset 44
+  %71 = mov.address-index %70
+  st.i32.index %49, %output_f32, %71
+  %72 = mov.static-byte-offset 48
+  %73 = mov.address-index %72
+  st.i32.index %50, %output_f32, %73
+  %74 = mov.static-byte-offset 52
+  %75 = mov.address-index %74
+  st.i32.index %54, %output_f32, %75
+  %76 = mov.static-byte-offset 56
+  %77 = mov.address-index %76
+  st.i32.index %62, %output_f32, %77
+  %78 = mov.static-byte-offset 60
+  %79 = mov.address-index %78
+  st.i32.index %63, %output_f32, %79
+  %initial_f32 = lda.i32.index %input_f32, %65
+  %increment_f32 = lda.i32.index %input_f32, %67
+  st %initial_f32, %cell_f32, 16
+  %old_f32 = lda %cell_f32, 16
+  %83 = vbcst.32 %old_f32
+  %84 = vbcst.32 %increment_f32
+  %85 = vmov.vector512.to.accumulator512.low %83
+  %86 = vmov.vector512.to.accumulator512.low %84
+  %87 = mova.i32 60
+  %88 = vadd.f32x16 %85, %86, %87
+  %89 = slice %88[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %90 = vmov.accumulator512.to.vector512 %89
+  %91 = vextract.32.imm %90, 0
+  st %91, %cell_f32, 16
+  %final_f32 = lda %cell_f32, 16
+  %93 = mov.static-byte-offset 64
+  %94 = mov.address-index %93
+  st.i32.index %old_f32, %output_f32, %94
+  %95 = mov.static-byte-offset 68
+  %96 = mov.address-index %95
+  st.i32.index %final_f32, %output_f32, %96
+  rel %release_delta, 51
+  rel %release_delta, 48
+  %101 = mov.address-to-scalar %97
+  %102 = mov.i32 16384
+  %103 = xor %101, %102
+  %104 = mov.scalar-to-address %103
+  %105 = mov.address-to-scalar %99
+  %106 = mov.i32 16448
+  %107 = xor %105, %106
+  %108 = mov.scalar-to-address %107
+  low.br ^_bb1(%104: reg<aie2p.ep>, %108: reg<aie2p.ep>)
+}
 
 // ====
 // RUN: emit source-low target=amd.xdna.aie2p:core output=none

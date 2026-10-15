@@ -60,11 +60,24 @@ void loom_low_physical_issue_commit_source(loom_low_physical_issue_t* issue,
         schedule->nodes[node].block_index) {
       continue;
     }
+    // Storage setup has no payload read until it becomes a concrete move.
+    // Its physical accesses, or those of a coalesced alias's eventual user,
+    // observe the original producer events through the register frontier.
+    // Carry issue order without forwarding the logical fallback latency for
+    // an operation that may emit no instruction. Memory effects retain their
+    // independent completion requirement.
+    const bool is_storage_setup =
+        iree_any_bit_set(schedule->nodes[consumer].flags,
+                         LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP) &&
+        loom_low_schedule_dependency_index_group_has_ssa(index, i) &&
+        !loom_low_schedule_dependency_index_group_has_effect(index, i);
+    const int32_t separation =
+        is_storage_setup ? 0
+                         : iree_max(0, group->minimum_issue_separation_cycles);
     issue->node_ready_cycles[consumer] =
         iree_max(issue->node_ready_cycles[consumer],
-                 loom_low_schedule_add_signed_issue_separation(
-                     available_cycle,
-                     iree_max(0, group->minimum_issue_separation_cycles)));
+                 loom_low_schedule_add_signed_issue_separation(available_cycle,
+                                                               separation));
   }
 }
 

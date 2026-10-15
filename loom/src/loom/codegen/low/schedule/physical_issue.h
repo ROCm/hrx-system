@@ -27,8 +27,8 @@ typedef struct loom_low_physical_instruction_t {
 } loom_low_physical_instruction_t;
 
 // Final issue admission for software-timed register machines. Logical ordering
-// has already established semantic dependencies. This owner carries those
-// deadlines through native expansion, adds the hard dependencies exposed by
+// has already established semantic dependencies. This owner carries their
+// ordering through native expansion, adds the hard dependencies exposed by
 // concrete storage reuse and generated instructions, and admits the collective
 // resource demand of each physical issue group. Physical access publication
 // remains in accepted semantic order while bounded native issue times may
@@ -61,13 +61,15 @@ iree_status_t loom_low_physical_issue_initialize(
 uint32_t loom_low_physical_issue_source_ready_cycle(
     const loom_low_physical_issue_t* issue, uint32_t scheduled_packet_index);
 
-// Forwards a source packet's actual issue and payload availability to its
+// Forwards a source packet's actual issue and semantic availability to its
 // same-block consumers through the retained outgoing groups. Call in source
 // schedule order, including coalesced packets without native instructions.
 // Repeat for successive native pieces of one source packet so all its pieces
-// establish consumer deadlines. Semantic separations are floored to zero;
-// physical storage reuse uses the signed event frontier. Cross-block timing
-// belongs to quiescence.
+// establish consumer deadlines. Storage setup carries producer issue order;
+// the concrete register frontier owns payload timing for both coalesced aliases
+// and generated moves. Other semantic separations are floored to zero; physical
+// storage reuse uses the signed event frontier. Cross-block timing belongs to
+// quiescence.
 void loom_low_physical_issue_commit_source(loom_low_physical_issue_t* issue,
                                            uint32_t scheduled_packet_index,
                                            uint32_t issue_cycle);
