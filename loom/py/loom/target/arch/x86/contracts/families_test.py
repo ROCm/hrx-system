@@ -202,6 +202,69 @@ def test_scalar_integer_to_float_native_encoding_family() -> None:
                 ]
 
 
+def test_scalar_float_comparisons_cover_types_predicates_and_selects() -> None:
+    expected_immediates = {
+        "oeq": 0,
+        "ogt": 30,
+        "oge": 29,
+        "olt": 17,
+        "ole": 18,
+        "one": 12,
+        "ord": 7,
+        "ueq": 8,
+        "ugt": 22,
+        "uge": 21,
+        "ult": 25,
+        "ule": 26,
+        "une": 4,
+        "uno": 3,
+    }
+    rules = tuple(
+        case
+        for case in X86_AVX2_CONTRACT_FRAGMENT.cases
+        if isinstance(case, DescriptorRule)
+        and case.source_op is scalar_comparison.scalar_cmpf
+    )
+    assert len(rules) == 4
+    for element, mnemonic in (("f32", "vcmpps"), ("f64", "vcmppd")):
+        typed_rules = tuple(
+            rule for rule in rules if _value_type_guard(rule, "lhs") == Scalar(element)
+        )
+        assert len(typed_rules) == 2
+        for rule in typed_rules:
+            assert _value_type_guard(rule, "rhs") == Scalar(element)
+            assert _value_type_guard(rule, "result") == Scalar("i1")
+            projection = rule.emit[0].immediates["predicate"]
+            assert isinstance(projection, AttrProject)
+            assert projection.kind is AttrProjectKind.ENUM_REMAP
+            assert dict(projection.enum_values) == expected_immediates
+
+        (materialized,) = (rule for rule in typed_rules if not rule.source_nodes)
+        assert [emit.descriptor.key for emit in materialized.emit] == [
+            f"x86.avx2.{mnemonic}.xmm",
+            "x86.avx2.vmovd.gpr32.xmm",
+            "x86.scalar.and.imm.gpr32",
+        ]
+        assert materialized.emit[-1].immediates == {"imm32": 1}
+        assert materialized.emit[-1].results == {"dst": ValueRef.result("result")}
+
+        (selected,) = (rule for rule in typed_rules if rule.source_nodes)
+        assert not selected.target_query
+        assert [emit.descriptor.key for emit in selected.emit] == [
+            f"x86.avx2.{mnemonic}.xmm",
+            "x86.avx2.vpblendvb.xmm",
+        ]
+        (select,) = selected.source_nodes
+        assert select.source_op is scf.scf_select
+        assert select.relation is SourceNodeRelation.EXCLUSIVE_USER
+        assert _source_node_value_type_guard(select, "condition") == Scalar("i1")
+        for field in ("true_value", "false_value", "result"):
+            assert _source_node_value_type_guard(select, field) == Scalar(element)
+        assert selected.emit[-1].results == {
+            "dst": ValueRef.result("result", source_node="select")
+        }
+
+
 def test_scalar_integer_conversions_cover_native_carrier_matrix() -> None:
     conversion_ops = (
         scalar_conversion.scalar_trunci,

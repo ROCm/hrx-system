@@ -248,3 +248,25 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
   %unsigned = avx512.vpsrld.zmm %signed, 31
   return %signed, %unsigned
 }
+
+// ====
+
+// Scalar floating comparison rules are inherited intact by AVX-512 profiles.
+x86.target<avx512> @target
+
+func.def target(@target) @scalar_float_comparison(%lhs: f32, %rhs: f32) -> (i1, f32) {
+  %result = scalar.cmpf one, %lhs, %rhs : f32
+  %condition = scalar.cmpf ugt, %lhs, %rhs : f32
+  %selected = scf.select %condition, %lhs, %rhs : f32
+  func.return %result, %selected : i1, f32
+}
+
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (f32, f32) -> (i1, f32)}) @scalar_float_comparison(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.xmm>) asm {
+  %11 = avx2.vcmpps.xmm %lhs, %rhs, 12
+  %12 = vmovd.gpr32.xmm %11
+  %result = and.imm.gpr32 %12 {imm32 = 1}
+  %14 = avx2.vcmpps.xmm %lhs, %rhs, 22
+  %selected = vpblendvb.xmm %rhs, %lhs, %14
+  return %result, %selected
+}

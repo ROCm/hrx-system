@@ -25,6 +25,37 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 
 // ====
 
+// Scalar comparisons materialize canonical GPR predicates only when the value
+// escapes. Same-width floating selects retain the packed comparison mask.
+x86.target<avx2> @target
+
+func.def target(@target) @scalar_float_comparisons(%f32_lhs: f32, %f32_rhs: f32, %f64_lhs: f64, %f64_rhs: f64) -> (i1, i1, f32, f64) {
+  %f32_result = scalar.cmpf olt, %f32_lhs, %f32_rhs : f32
+  %f64_result = scalar.cmpf uno, %f64_lhs, %f64_rhs : f64
+  %f32_condition = scalar.cmpf oge, %f32_lhs, %f32_rhs : f32
+  %f32_selected = scf.select %f32_condition, %f32_lhs, %f32_rhs : f32
+  %f64_condition = scalar.cmpf ule, %f64_lhs, %f64_rhs : f64
+  %f64_selected = scf.select %f64_condition, %f64_lhs, %f64_rhs : f64
+  func.return %f32_result, %f64_result, %f32_selected, %f64_selected : i1, i1, f32, f64
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (f32, f32, f64, f64) -> (i1, i1, f32, f64)}) @scalar_float_comparisons(%f32_lhs: reg<x86.xmm>, %f32_rhs: reg<x86.xmm>, %f64_lhs: reg<x86.xmm>, %f64_rhs: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %22 = avx2.vcmpps.xmm %f32_lhs, %f32_rhs, 17
+  %23 = vmovd.gpr32.xmm %22
+  %f32_result = and.imm.gpr32 %23 {imm32 = 1}
+  %25 = avx2.vcmppd.xmm %f64_lhs, %f64_rhs, 3
+  %26 = vmovd.gpr32.xmm %25
+  %f64_result = and.imm.gpr32 %26 {imm32 = 1}
+  %28 = avx2.vcmpps.xmm %f32_lhs, %f32_rhs, 29
+  %f32_selected = vpblendvb.xmm %f32_rhs, %f32_lhs, %28
+  %30 = avx2.vcmppd.xmm %f64_lhs, %f64_rhs, 26
+  %f64_selected = vpblendvb.xmm %f64_rhs, %f64_lhs, %30
+  return %f32_result, %f64_result, %f32_selected, %f64_selected
+}
+
+// ====
+
 // A V16 predicate widens byte lanes in XMM to word lanes for a YMM payload.
 x86.target<avx2> @target
 

@@ -429,6 +429,23 @@ AVX2_FLOAT_COMPARE_MNEMONICS = {
     "f64": "vcmppd",
 }
 
+X86_FLOAT_COMPARE_IMMEDIATES = {
+    "oeq": 0,
+    "ogt": 30,
+    "oge": 29,
+    "olt": 17,
+    "ole": 18,
+    "one": 12,
+    "ord": 7,
+    "ueq": 8,
+    "ugt": 22,
+    "uge": 21,
+    "ult": 25,
+    "ule": 26,
+    "une": 4,
+    "uno": 3,
+}
+
 AVX2_FLOAT_FMA_MNEMONICS = {
     "f32": "vfmadd231ps",
     "f64": "vfmadd231pd",

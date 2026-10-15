@@ -39,6 +39,7 @@ from loom.target.arch.x86.vector_families import (
     FLOAT_ELEMENTS,
     INTEGER_ELEMENTS,
     STORAGE_ELEMENTS,
+    X86_FLOAT_COMPARE_IMMEDIATES,
     X86_LANE_FAMILIES,
     VectorElement,
 )
@@ -114,22 +115,6 @@ _PREDICATE_TYPES = {
     8: _V8I1,
     16: _V16I1,
     32: _V32I1,
-}
-_FLOAT_COMPARE_IMMEDIATES = {
-    "oeq": 0,
-    "ogt": 30,
-    "oge": 29,
-    "olt": 17,
-    "ole": 18,
-    "one": 12,
-    "ord": 7,
-    "ueq": 8,
-    "ugt": 22,
-    "uge": 21,
-    "ult": 25,
-    "ule": 26,
-    "une": 4,
-    "uno": 3,
 }
 _PREDICATE_BITWISE_SOURCE_OPS = {
     "andi": vector.vector_andi,
@@ -1334,7 +1319,7 @@ def _floating_compare_rules(
                     result_types={"dst": operand_type} if requires_conversion else None,
                     immediates={
                         "predicate": AttrProject.enum_remap(
-                            "predicate", _FLOAT_COMPARE_IMMEDIATES
+                            "predicate", X86_FLOAT_COMPARE_IMMEDIATES
                         )
                     },
                 )

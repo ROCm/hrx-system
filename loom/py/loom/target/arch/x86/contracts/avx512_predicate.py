@@ -43,6 +43,7 @@ from loom.target.arch.x86.vector_families import (
     FP16_ELEMENT,
     INTEGER_ELEMENTS,
     STORAGE_ELEMENTS,
+    X86_FLOAT_COMPARE_IMMEDIATES,
 )
 from loom.target.contracts import (
     AttrProject,
@@ -107,22 +108,6 @@ _INTEGER_COMPARE_IMMEDIATES = {
 }
 _SIGNED_INTEGER_PREDICATES = ("eq", "ne", "slt", "sle", "sgt", "sge")
 _UNSIGNED_INTEGER_PREDICATES = ("ult", "ule", "ugt", "uge")
-_FLOAT_COMPARE_IMMEDIATES = {
-    "oeq": 0,
-    "ogt": 30,
-    "oge": 29,
-    "olt": 17,
-    "ole": 18,
-    "one": 12,
-    "ord": 7,
-    "ueq": 8,
-    "ugt": 22,
-    "uge": 21,
-    "ult": 25,
-    "ule": 26,
-    "une": 4,
-    "uno": 3,
-}
 _REGISTER_SUFFIXES = {
     16: "xmm",
     32: "xmm",
@@ -1094,7 +1079,7 @@ def _float_compare_rules(
                     descriptor_lookup,
                     source_op=vector.vector_cmpf,
                     predicates=None,
-                    predicate_immediates=_FLOAT_COMPARE_IMMEDIATES,
+                    predicate_immediates=X86_FLOAT_COMPARE_IMMEDIATES,
                     operand_type=operand_type,
                     result_type=result_type,
                     lane_count=lane_count,
@@ -1126,7 +1111,7 @@ def avx512_fp16_compare_rules(
                 descriptor_lookup,
                 source_op=vector.vector_cmpf,
                 predicates=None,
-                predicate_immediates=_FLOAT_COMPARE_IMMEDIATES,
+                predicate_immediates=X86_FLOAT_COMPARE_IMMEDIATES,
                 operand_type=operand_type,
                 result_type=result_type,
                 lane_count=lane_count,
@@ -1170,7 +1155,7 @@ def avx512_fp16_scalar_compare_rule(
                 result_types={"dst": DescriptorResultType()},
                 immediates={
                     "predicate": AttrProject.enum_remap(
-                        "predicate", _FLOAT_COMPARE_IMMEDIATES
+                        "predicate", X86_FLOAT_COMPARE_IMMEDIATES
                     )
                 },
             ),
