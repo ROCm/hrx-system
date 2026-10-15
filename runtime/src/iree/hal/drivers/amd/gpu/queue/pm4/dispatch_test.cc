@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 
 #include <array>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -125,6 +126,100 @@ TEST_F(DispatchTest, DirectArgumentsRespectDenseAndNativeExtents) {
   IREE_ASSERT_OK(Prepare(config, native, {constants.data(), 24}));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Prepare(config, native, {constants.data(), 11}));
+}
+
+TEST_F(DispatchTest, IndirectGeometryIgnoresHostCountsAndRejectsExactItems) {
+  auto config =
+      iree_hal_make_static_dispatch_config(UINT32_MAX, UINT32_MAX, UINT32_MAX);
+  for (int i = 0; i < 3; ++i) {
+    metadata_.max_workgroup_count[i] = 1;
+  }
+  for (auto flags : {IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS,
+                     IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS}) {
+    IREE_ASSERT_OK(Prepare(config, flags));
+    for (int i = 0; i < 3; ++i) {
+      EXPECT_EQ(dispatch_.workgroup_count[i], 0u);
+    }
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Prepare(config, flags | IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT));
+    layout_.indirect_copy_count = 32;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          Prepare(config, flags));
+    layout_.indirect_copy_count = 0;
+  }
+}
+
+TEST_F(DispatchTest, IndirectParameterReferencesCoverThreeAlignedCounts) {
+  std::array<uint32_t, 4> storage = {};
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      {}, IREE_HAL_MEMORY_TYPE_HOST_LOCAL, IREE_HAL_MEMORY_ACCESS_READ,
+      IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS, sizeof(storage),
+      iree_make_byte_span(storage.data(), sizeof(storage)), {},
+      iree_allocator_system(), &buffer));
+  for (auto flags : {IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS,
+                     IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS}) {
+    const auto validate = [&](iree_hal_buffer_ref_t reference) {
+      return iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
+          &layout_, reference, {}, flags);
+    };
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, validate({}));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          validate(iree_hal_make_buffer_ref(buffer, 1, 12)));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          validate(iree_hal_make_buffer_ref(buffer, 4, 8)));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        validate(iree_hal_make_buffer_ref(buffer, 8, IREE_HAL_WHOLE_BUFFER)));
+    IREE_ASSERT_OK(validate(iree_hal_make_buffer_ref(buffer, 4, 12)));
+    IREE_ASSERT_OK(
+        validate(iree_hal_make_buffer_ref(buffer, 4, IREE_HAL_WHOLE_BUFFER)));
+  }
+  iree_hal_buffer_release(buffer);
+}
+
+TEST_F(DispatchTest,
+       IndirectPacketsCopyOnlyAdmittedCountBytesAndJoinVisibility) {
+  std::array<iree_hal_amd_gpu_metadata_argument_t, 3> arguments = {};
+  for (uint32_t i = 0; i < 3; ++i) {
+    arguments[i].kind = static_cast<iree_hal_amd_gpu_metadata_argument_kind_t>(
+        IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X + i);
+    arguments[i].offset = 16 + i * 4;
+    arguments[i].size = 4;
+  }
+  metadata_.has_argument_metadata = true;
+  metadata_.arguments = arguments.data();
+  metadata_.argument_count = arguments.size();
+  metadata_.kernarg_segment_size = 32;
+  metadata_.kernarg_segment_alignment = 8;
+  iree_hal_amd_gpu_kernarg_layout_t* layout = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_kernarg_layout_allocate(
+      &metadata_, iree_allocator_system(), &layout));
+  ASSERT_EQ(layout->indirect_copy_count, 1u);
+  std::array<uint32_t, 28> words;
+  words.fill(0xCAFEBABE);
+  auto* end = iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
+      words.data() + 1, layout, layout->indirect_copy_count, 0x1234FFFFFFF4,
+      0x567800001000, 0x103E0, 0x8001);
+  EXPECT_EQ(end - words.data() - 1,
+            iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(1));
+  const std::vector<uint32_t> expected = {
+      0xC0055000, 0x60300000, 0xFFFFFFF4, 0x1234, 0x1010, 0x5678, 12,
+      0xC0055000, 0,          0,          0,      0,      0,      0,
+      0xC0065800, 0,          UINT32_MAX, 0xFF,   0,      0,      0xA,
+      0x103E0,    0xC0021602, 0xFFFFFFF4, 0x1234, 0x8001};
+  EXPECT_EQ(std::vector<uint32_t>(words.begin() + 1, words.end() - 1),
+            expected);
+  EXPECT_EQ(words.front(), 0xCAFEBABEu);
+  EXPECT_EQ(words.back(), 0xCAFEBABEu);
+  // Caller-owned native arguments receive no writes or inferred geometry.
+  end = iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
+      words.data(), layout, 0, 0x123400000010, 0, 0, 0x8001);
+  EXPECT_EQ(end - words.data(), 4);
+  EXPECT_EQ((std::array<uint32_t, 4>{words[0], words[1], words[2], words[3]}),
+            (std::array<uint32_t, 4>{0xC0021602, 0x10, 0x1234, 0x8001}));
+  iree_hal_amd_gpu_kernarg_layout_free(layout);
 }
 
 }  // namespace

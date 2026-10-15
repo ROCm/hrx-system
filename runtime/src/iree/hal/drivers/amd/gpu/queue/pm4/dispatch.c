@@ -6,17 +6,16 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 
+#include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
+
 iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
     const iree_hal_amd_gpu_pm4_function_t* function,
     uint32_t maximum_group_segment_byte_length,
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_host_size_t binding_count, iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_pm4_dispatch_t* out_dispatch) {
-  if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "PM4 indirect dispatch requires device-populated "
-                            "hidden launch geometry");
-  }
+  const bool indirect_parameters =
+      iree_hal_dispatch_uses_indirect_parameters(flags);
   if (function->launch.requirements || function->kernarg->requirements) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -63,6 +62,25 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
         config.workgroup_size[2]);
   const bool exact =
       iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT);
+  if (exact && indirect_parameters) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "exact work-item counts conflict with indirect parameters");
+  }
+  if (indirect_parameters) {
+    const uint16_t copy_count =
+        indirect_arguments ? 0 : function->kernarg->indirect_copy_count;
+    const uint32_t launch_words = function->launch.user_data_count
+                                      ? 24 + function->launch.user_data_count
+                                      : 22;
+    if (launch_words +
+            iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(copy_count) >
+        IREE_HAL_AMD_GPU_PM4_DISPATCH_MAX_WORDS) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "indirect argument copies exceed the native launch window");
+    }
+  }
   uint64_t flat_size = 1;
   bool partial = false;
   for (int i = 0; i < 3; ++i) {
@@ -96,7 +114,8 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "work-item dimensions require the exact flag");
       }
-      dispatch.workgroup_count[i] = config.workgroup_count[i];
+      dispatch.workgroup_count[i] =
+          indirect_parameters ? 0 : config.workgroup_count[i];
     }
     if (metadata->max_workgroup_count[i] &&
         dispatch.workgroup_count[i] > metadata->max_workgroup_count[i]) {
@@ -130,7 +149,21 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
 
 iree_status_t iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
     const iree_hal_amd_gpu_kernarg_layout_t* layout,
-    iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
+    iree_hal_buffer_ref_t parameters, iree_hal_buffer_ref_list_t bindings,
+    iree_hal_dispatch_flags_t flags) {
+  if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
+    if (!parameters.buffer || (parameters.offset & 3)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "indirect parameters require a DWORD-aligned buffer");
+    }
+    if (parameters.length != IREE_HAL_WHOLE_BUFFER && parameters.length < 12) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "indirect parameters require three DWORD counts");
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(parameters.buffer,
+                                                        parameters.offset, 12));
+  }
   const bool indirect_arguments =
       iree_hal_dispatch_uses_indirect_arguments(flags);
   for (iree_host_size_t i = 0; i < bindings.count; ++i) {
@@ -176,6 +209,11 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
       inputs.grid_dimensions = (uint16_t)(i + 1);
     }
   }
+  if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
+    // HAL supplies a three-axis tuple without a separate rank. Device copies
+    // populate its counts; unused dimensions have size and count one.
+    inputs.grid_dimensions = 3;
+  }
   if (iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)) {
     iree_hal_amd_gpu_kernarg_layout_emplace_native(function->kernarg, constants,
                                                    &inputs, target);
@@ -183,4 +221,23 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
     iree_hal_amd_gpu_kernarg_layout_emplace(function->kernarg, constants.data,
                                             binding_addresses, &inputs, target);
   }
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
+    uint32_t* words, const iree_hal_amd_gpu_kernarg_layout_t* layout,
+    uint16_t copy_count, uint64_t parameters_address, uint64_t argument_address,
+    uint32_t cache_control, uint32_t initiator) {
+  const iree_hal_amd_gpu_kernarg_copy_t* copies =
+      iree_hal_amd_gpu_kernarg_layout_indirect_copies(layout);
+  for (uint16_t i = 0; i < copy_count; ++i) {
+    words = iree_hal_amd_gpu_pm4_emit_dma_copy(
+        words, parameters_address + copies[i].source_offset,
+        argument_address + copies[i].target_offset, copies[i].length);
+  }
+  if (copy_count) {
+    words = iree_hal_amd_gpu_pm4_emit_dma_flush(words);
+    words = iree_hal_amd_gpu_pm4_emit_acquire(words, cache_control);
+  }
+  return iree_hal_amd_gpu_pm4_emit_dispatch_indirect(words, parameters_address,
+                                                     initiator);
 }

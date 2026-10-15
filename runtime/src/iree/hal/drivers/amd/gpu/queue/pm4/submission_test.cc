@@ -86,7 +86,7 @@ TEST_F(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
       &pool_, {1, &semaphore, &wait_value}, {1, &semaphore, &signal_value},
-      &executable.base, &function_, {},
+      &executable.base, &function_, {}, {},
       iree_make_const_byte_span(&constant, sizeof(constant)), {1, &reference},
       &profile_, nullptr, 0, &capture));
   ASSERT_EQ(capture->allocation_size, pool_.block_size);
@@ -132,6 +132,53 @@ TEST_F(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
   iree_async_proactor_release(proactor);
 }
 
+TEST_F(SubmissionTest, IndirectParametersRetireWithoutAddingShaderBindings) {
+  const iree_hal_queue_family_t family = {};
+  const iree_hal_executable_vtable_t vtable = {.destroy = Executable::Destroy};
+  Executable executable;
+  iree_hal_executable_initialize(&family, &vtable, &executable.base);
+  for (auto flags : {IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS,
+                     IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS}) {
+    std::array<uint32_t, 4> storage = {0, 3, 2, 1};
+    bool destroyed = false;
+    iree_hal_buffer_t* parameters = nullptr;
+    IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+        {}, IREE_HAL_MEMORY_TYPE_HOST_LOCAL, IREE_HAL_MEMORY_ACCESS_READ,
+        IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS, sizeof(storage),
+        iree_make_byte_span(storage.data(), sizeof(storage)),
+        {[](void* data, iree_hal_buffer_t*) {
+           *static_cast<bool*>(data) = true;
+         },
+         &destroyed},
+        iree_allocator_system(), &parameters));
+    uint32_t constant = 0x12345678;
+    auto reference = iree_hal_make_buffer_ref(parameters, 4, 12);
+    iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
+        &pool_, {}, {}, &executable.base, &function_, {}, reference,
+        iree_make_const_byte_span(&constant, sizeof(constant)), {}, &profile_,
+        nullptr, flags, &capture));
+    iree_hal_buffer_release(parameters);
+    EXPECT_FALSE(destroyed);
+    reference = {};
+    constant = 0;
+    EXPECT_EQ(capture->dispatch.bindings.count, 0u);
+    EXPECT_EQ(capture->dispatch.bindings.values[0].buffer, parameters);
+    EXPECT_EQ(capture->dispatch.bindings.values[0].offset, 4u);
+    EXPECT_EQ(capture->dispatch.bindings.values[0].length, 12u);
+    const auto tail = iree_hal_amd_gpu_pm4_submission_tail_storage(capture);
+    std::memset(tail.data, 0xA5, tail.data_length);
+    uint32_t captured_constant = 0;
+    std::memcpy(&captured_constant, capture->dispatch.constants.data, 4);
+    EXPECT_EQ(captured_constant, 0x12345678u);
+    iree_hal_amd_gpu_pm4_submission_retire(capture);
+    EXPECT_TRUE(destroyed);
+    iree_hal_amd_gpu_pm4_submission_release(capture);
+  }
+  iree_hal_executable_release(&executable.base);
+  EXPECT_TRUE(executable.destroyed);
+}
+
 TEST_F(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
   const iree_hal_queue_family_t family = {};
   const iree_hal_executable_vtable_t vtable = {.destroy = Executable::Destroy};
@@ -143,7 +190,7 @@ TEST_F(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
   const iree_hal_barrier_list_t empty = {};
   const iree_hal_queue_barriers_t barriers = {&empty, &empty};
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-      &pool_, {}, {}, &executable.base, &function_, {},
+      &pool_, {}, {}, &executable.base, &function_, {}, {},
       iree_make_const_byte_span(constants.data(), constants.size()), {},
       &profile_, &barriers, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
       &capture));
@@ -176,7 +223,7 @@ TEST_F(SubmissionTest, TailStoragePreservesArgumentsAtBlockBoundaries) {
     std::vector<uint8_t> constants(size, 0x35);
     iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-        &pool_, {}, {}, &executable.base, &function_, {},
+        &pool_, {}, {}, &executable.base, &function_, {}, {},
         iree_make_const_byte_span(constants.data(), constants.size()), {},
         &profile_, nullptr, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
         &capture));
@@ -205,7 +252,7 @@ TEST_F(SubmissionTest, CaptureOverflowRetainsNoInputs) {
       IREE_STATUS_OUT_OF_RANGE,
       iree_hal_amd_gpu_pm4_submission_create(
           &pool_, {IREE_HOST_SIZE_MAX, nullptr, nullptr}, {}, nullptr, nullptr,
-          {}, {}, {}, &profile_, nullptr, 0, &capture));
+          {}, {}, {}, {}, &profile_, nullptr, 0, &capture));
   EXPECT_EQ(capture, nullptr);
 }
 
@@ -245,36 +292,37 @@ TEST_F(SubmissionTest, PreparedAddressChecksDomainUsageAndCommitment) {
   auto reference = iree_hal_make_buffer_ref(&buffer, 4, 16);
   uint64_t address = 0;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_resolve_address(
-      &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE,
-      IREE_HAL_MEMORY_ACCESS_READ, &address));
+      &family, IREE_HAL_MEMORY_SITE_PROGRAM, reference,
+      IREE_HAL_BUFFER_USAGE_STORAGE, IREE_HAL_MEMORY_ACCESS_READ, &address));
   EXPECT_EQ(address, 0x100Cu);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
                         iree_hal_amd_gpu_pm4_submission_resolve_address(
-                            &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE,
+                            &family, IREE_HAL_MEMORY_SITE_PROGRAM, reference,
+                            IREE_HAL_BUFFER_USAGE_STORAGE,
                             IREE_HAL_MEMORY_ACCESS_WRITE, &address));
   buffer.allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_amd_gpu_pm4_submission_resolve_address(
-          &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_amd_gpu_pm4_submission_resolve_address(
+                            &family, IREE_HAL_MEMORY_SITE_PROGRAM, reference,
+                            IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
   buffer.allowed_usage = IREE_HAL_BUFFER_USAGE_STORAGE;
   family.memory.domain = &family;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_amd_gpu_pm4_submission_resolve_address(
-          &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_amd_gpu_pm4_submission_resolve_address(
+                            &family, IREE_HAL_MEMORY_SITE_PROGRAM, reference,
+                            IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
   family.memory.domain = this;
   binding.device_address = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      iree_hal_amd_gpu_pm4_submission_resolve_address(
-          &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_amd_gpu_pm4_submission_resolve_address(
+                            &family, IREE_HAL_MEMORY_SITE_PROGRAM, reference,
+                            IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
   binding.device_address = 0x1000;
   reference.offset = 60;
   layout_.binding_count = 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
-                            &layout_, {1, &reference}, 0));
+                            &layout_, {}, {1, &reference}, 0));
   iree_hal_memory_contract_release(contract);
 }
 

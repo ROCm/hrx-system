@@ -26,6 +26,16 @@ typedef struct iree_hal_amd_gpu_pm4_dispatch_t {
   uint32_t group_segment_byte_length;
 } iree_hal_amd_gpu_pm4_dispatch_t;
 
+// One launch, including any device-side ABI copies, fits the smallest queue's
+// bounded publication window alongside its dependencies and retirement tail.
+enum { IREE_HAL_AMD_GPU_PM4_DISPATCH_MAX_WORDS = 96 };
+
+// Copies and their visibility boundary precede one four-DWORD MEC dispatch.
+static inline uint32_t iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(
+    uint16_t copy_count) {
+  return copy_count ? (uint32_t)copy_count * 7 + 7 + 8 + 4 : 4;
+}
+
 // Admits public launch geometry and argument representation against a prepared
 // executable. Does not access buffers, capture caller storage, or resolve
 // native addresses. Direct calls and command recording use the same ABI
@@ -44,7 +54,8 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
 // its own accumulated binding requirements instead of this direct-only check.
 iree_status_t iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
     const iree_hal_amd_gpu_kernarg_layout_t* layout,
-    iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
+    iree_hal_buffer_ref_t parameters, iree_hal_buffer_ref_list_t bindings,
+    iree_hal_dispatch_flags_t flags);
 
 // Writes admitted native kernargs from captured or recording-time inputs. Dense
 // arguments consume one resolved address per binding; custom direct arguments
@@ -57,6 +68,17 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_pm4_dispatch_t* dispatch,
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
     iree_hal_dispatch_flags_t flags, void* target);
+
+// Emits admitted device-time geometry. copy_count is zero for caller-owned
+// indirect native arguments; otherwise it is layout->indirect_copy_count.
+// Exact count bytes are copied into private kernargs, joined, and made visible
+// using the prepared CP-to-shader cache control before the indirect launch.
+// Zero base addresses produce relocation templates containing relative offsets.
+// The input tuple remains stable through all CP and shader uses.
+uint32_t* iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
+    uint32_t* words, const iree_hal_amd_gpu_kernarg_layout_t* layout,
+    uint16_t copy_count, uint64_t parameters_address, uint64_t argument_address,
+    uint32_t cache_control, uint32_t initiator);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -9,17 +9,6 @@
 #include <stddef.h>
 #include <string.h>
 
-// Prepared copies are six bytes; offsets use the same range as HAL parameter
-// reflection. Image parsing already establishes non-overlapping destinations.
-typedef struct iree_hal_amd_gpu_kernarg_copy_t {
-  // Byte offset in the native kernarg segment.
-  uint16_t target_offset;
-  // Byte offset in the dense constants or typed runtime input record.
-  uint16_t source_offset;
-  // Number of bytes copied, without implicit alignment or padding.
-  uint16_t length;
-} iree_hal_amd_gpu_kernarg_copy_t;
-
 typedef struct iree_hal_amd_gpu_kernarg_runtime_field_t {
   // Byte offset in the typed host runtime input record.
   uint16_t offset;
@@ -101,6 +90,8 @@ static iree_status_t iree_hal_amd_gpu_kernarg_analyze(
   layout->byte_length = kernel->kernarg_segment_size;
   layout->alignment = kernel->kernarg_segment_alignment;
   uint32_t constant_end = UINT32_MAX;
+  uint32_t indirect_source_end = UINT32_MAX;
+  uint32_t indirect_target_end = UINT32_MAX;
   for (iree_host_size_t i = 0; i < kernel->argument_count; ++i) {
     const iree_hal_amd_gpu_metadata_argument_t* argument =
         &kernel->arguments[i];
@@ -121,6 +112,21 @@ static iree_status_t iree_hal_amd_gpu_kernarg_analyze(
       expected_size = field.size;
       layout->requirements |= field.requirements;
       ++layout->runtime_copy_count;
+      if (kind >=
+              IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X &&
+          kind <=
+              IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_Z) {
+        const uint32_t source_offset =
+            (kind -
+             IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X) *
+            4;
+        if (source_offset != indirect_source_end ||
+            argument->offset != indirect_target_end) {
+          ++layout->indirect_copy_count;
+        }
+        indirect_source_end = source_offset + 4;
+        indirect_target_end = argument->offset + 4;
+      }
     } else {
       ++layout->parameter_count;
       layout->native_byte_length = argument->offset + argument->size;
@@ -173,7 +179,8 @@ iree_status_t iree_hal_amd_gpu_kernarg_layout_allocate(
       IREE_STRUCT_FIELD_ALIGNED(plan.binding_count, uint16_t,
                                 iree_alignof(uint16_t), NULL),
       IREE_STRUCT_FIELD_ALIGNED(
-          (iree_host_size_t)plan.constant_copy_count + plan.runtime_copy_count,
+          (iree_host_size_t)plan.constant_copy_count + plan.runtime_copy_count +
+              plan.indirect_copy_count,
           iree_hal_amd_gpu_kernarg_copy_t,
           iree_alignof(iree_hal_amd_gpu_kernarg_copy_t), NULL),
       IREE_STRUCT_FIELD_ALIGNED(
@@ -192,11 +199,14 @@ iree_status_t iree_hal_amd_gpu_kernarg_layout_allocate(
       iree_hal_amd_gpu_kernarg_copies(layout);
   iree_hal_amd_gpu_kernarg_copy_t* runtime_copies =
       copies + layout->constant_copy_count;
+  iree_hal_amd_gpu_kernarg_copy_t* indirect_copies =
+      runtime_copies + layout->runtime_copy_count;
   iree_hal_executable_function_parameter_t* parameters =
       (iree_hal_executable_function_parameter_t*)((uint8_t*)layout +
                                                   parameters_offset);
   uint16_t binding_index = 0, copy_index = 0, runtime_index = 0;
   uint16_t parameter_index = 0, constant_offset = 0;
+  uint16_t indirect_index = 0;
   for (iree_host_size_t i = 0; i < kernel->argument_count; ++i) {
     const iree_hal_amd_gpu_metadata_argument_t* argument =
         &kernel->arguments[i];
@@ -209,6 +219,25 @@ iree_status_t iree_hal_amd_gpu_kernarg_layout_allocate(
           iree_hal_amd_gpu_kernarg_runtime_fields[kind];
       runtime_copies[runtime_index++] = (iree_hal_amd_gpu_kernarg_copy_t){
           (uint16_t)argument->offset, field.offset, field.size};
+      if (kind >=
+              IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X &&
+          kind <=
+              IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_Z) {
+        const uint16_t source_offset =
+            (uint16_t)((kind -
+                        IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X) *
+                       4);
+        iree_hal_amd_gpu_kernarg_copy_t* previous =
+            indirect_index ? &indirect_copies[indirect_index - 1] : NULL;
+        if (previous &&
+            previous->source_offset + previous->length == source_offset &&
+            previous->target_offset + previous->length == argument->offset) {
+          previous->length += 4;
+        } else {
+          indirect_copies[indirect_index++] = (iree_hal_amd_gpu_kernarg_copy_t){
+              (uint16_t)argument->offset, source_offset, 4};
+        }
+      }
       continue;
     }
     const bool is_binding = iree_hal_amd_gpu_kernarg_is_binding(kind);

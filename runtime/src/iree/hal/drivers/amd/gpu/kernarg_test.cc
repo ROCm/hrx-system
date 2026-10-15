@@ -65,7 +65,7 @@ TEST_F(KernargTest, DenseConstantsBindingsAndNativeReflection) {
              Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE, 20, 2),
              Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_GLOBAL_BUFFER, 24, 8)},
             40));
-  EXPECT_LE(sizeof(*layout_), 48u);
+  EXPECT_LE(sizeof(*layout_), 64u);
   EXPECT_EQ(layout_->constant_byte_length, 9u);
   EXPECT_EQ(layout_->native_byte_length, 32u);
   EXPECT_EQ(layout_->constant_copy_count, 2u);
@@ -331,27 +331,56 @@ TEST(KernargCorpusTest, RealHipReflectionReconstructsNativeArguments) {
         source, iree_allocator_system(), &image));
     iree_byte_sequence_release(source);
     for (size_t j = 0; j < image.metadata.kernel_count; ++j) {
+      const auto* kernel = &image.metadata.kernels[j];
+      const bool count_producer =
+          iree_string_view_equal(kernel->name, IREE_SV("image_counts"));
       iree_hal_amd_gpu_kernarg_layout_t* layout = nullptr;
       IREE_CHECK_OK(iree_hal_amd_gpu_kernarg_layout_allocate(
-          &image.metadata.kernels[j], iree_allocator_system(), &layout));
-      EXPECT_EQ(layout->constant_byte_length, 4u);
-      EXPECT_EQ(layout->binding_count, 1u);
+          kernel, iree_allocator_system(), &layout));
+      ASSERT_EQ(layout->constant_byte_length, count_producer ? 0u : 4u);
+      ASSERT_EQ(layout->binding_count, count_producer ? 2u : 1u);
       EXPECT_EQ(layout->parameter_count, 2u);
       EXPECT_EQ(layout->requirements, 0u);
       const auto* parameters =
           iree_hal_amd_gpu_kernarg_layout_parameters(layout);
       EXPECT_EQ(parameters[0].native_abi_offset, 0u);
       EXPECT_EQ(parameters[1].native_abi_offset, 8u);
-      const uint64_t binding = 0x123456789abc;
+      const uint64_t bindings[] = {0x123456789abc, 0xABCDEF987654};
       const uint8_t constants[] = {3, 2, 1, 0};
+      const iree_hal_amd_gpu_kernarg_inputs_t inputs = {};
       std::vector<uint8_t> actual(layout->byte_length, 0);
-      iree_hal_amd_gpu_kernarg_layout_emplace(layout, constants, &binding,
-                                              nullptr, actual.data());
-      EXPECT_EQ(iree_unaligned_load_le_u64(actual.data()), binding);
-      EXPECT_EQ(iree_unaligned_load_le_u32(actual.data() + 8), 0x010203u);
+      iree_hal_amd_gpu_kernarg_layout_emplace(layout, constants, bindings,
+                                              &inputs, actual.data());
+      EXPECT_EQ(iree_unaligned_load_le_u64(actual.data()), bindings[0]);
+      if (count_producer) {
+        EXPECT_EQ(iree_unaligned_load_le_u64(actual.data() + 8), bindings[1]);
+      } else {
+        EXPECT_EQ(iree_unaligned_load_le_u32(actual.data() + 8), 0x010203u);
+      }
       iree_hal_amd_gpu_kernarg_layout_free(layout);
     }
     iree_hal_amd_gpu_image_deinitialize(&image);
+  }
+}
+
+TEST_F(KernargTest, IndirectCountsRetainCoalescedNativeDestinations) {
+  IREE_ASSERT_OK(Build(
+      {Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X, 8, 4),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_Y, 12, 4),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_Z, 16, 4),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X, 32, 4),
+       Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_Z, 40,
+           4)},
+      64));
+  ASSERT_EQ(layout_->indirect_copy_count, 3u);
+  arguments_.clear();
+  const auto* copies = iree_hal_amd_gpu_kernarg_layout_indirect_copies(layout_);
+  const std::array<std::array<uint16_t, 3>, 3> expected = {
+      {{8, 0, 12}, {32, 0, 4}, {40, 8, 4}}};
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(copies[i].target_offset, expected[i][0]);
+    EXPECT_EQ(copies[i].source_offset, expected[i][1]);
+    EXPECT_EQ(copies[i].length, expected[i][2]);
   }
 }
 

@@ -76,7 +76,9 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
       iree_hal_executable_t* executable;
       // Borrowed prepared function dominated by executable.
       const iree_hal_amd_gpu_pm4_function_t* function;
-      // Copied buffer references; each non-NULL buffer is retained.
+      // Copied shader references, each retained. Indirect parameters append one
+      // additional retained reference after count, followed by address scratch
+      // for shader references. The public shader binding count is unchanged.
       iree_hal_buffer_ref_list_t bindings;
       // Copied caller constants, in dense HAL or explicit native ABI layout.
       iree_const_byte_span_t constants;
@@ -103,8 +105,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
     iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
     const iree_hal_amd_gpu_pm4_function_t* function,
-    iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_const_byte_span_t constants,
-    iree_hal_buffer_ref_list_t bindings,
+    iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_hal_buffer_ref_t parameters,
+    iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers, iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_pm4_submission_t** out_submission);
@@ -164,9 +166,9 @@ void iree_hal_amd_gpu_pm4_submission_release(
 // permissions, exact family domain, and queue-ordered backing commitment.
 // It never maps memory, retains a buffer, or inspects pointer-valued bytes.
 iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
-    const iree_hal_queue_family_t* family, iree_hal_buffer_ref_t reference,
-    iree_hal_buffer_usage_t usage, iree_hal_memory_access_t access,
-    uint64_t* out_address);
+    const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
+    iree_hal_buffer_ref_t reference, iree_hal_buffer_usage_t usage,
+    iree_hal_memory_access_t access, uint64_t* out_address);
 
 #ifdef __cplusplus
 }  // extern "C"

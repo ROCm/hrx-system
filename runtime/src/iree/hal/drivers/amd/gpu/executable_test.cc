@@ -357,8 +357,9 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
   std::fill(bytes_.begin(), bytes_.end(), 0xa5);
   iree_hal_amd_gpu_image_deinitialize(&image_);
   EXPECT_EQ(iree_hal_executable_queue_family(executable_), &family_);
-  EXPECT_EQ(iree_hal_executable_function_count(executable_), 3u);
-  for (auto name : {"image_transform", "image_increment", "image_accumulate"}) {
+  EXPECT_EQ(iree_hal_executable_function_count(executable_), 5u);
+  for (auto name : {"image_transform", "image_increment", "image_accumulate",
+                    "image_counts", "image_geometry"}) {
     iree_hal_executable_function_t token;
     IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
         executable_, iree_make_cstring_view(name), &token));
@@ -367,8 +368,10 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
         iree_hal_executable_function_info(executable_, token, &info));
     EXPECT_TRUE(
         iree_string_view_equal(info.name, iree_make_cstring_view(name)));
-    EXPECT_EQ(info.binding_count, 1u);
-    EXPECT_EQ(info.constant_byte_length, 4u);
+    const bool count_producer = std::strcmp(name, "image_counts") == 0;
+    const bool geometry_consumer = std::strcmp(name, "image_geometry") == 0;
+    EXPECT_EQ(info.binding_count, count_producer ? 2u : 1u);
+    EXPECT_EQ(info.constant_byte_length, count_producer ? 0u : 4u);
     EXPECT_EQ(info.parameter_count, 2u);
     iree_hal_executable_function_parameter_t parameters[2];
     IREE_ASSERT_OK(iree_hal_executable_function_parameters(executable_, token,
@@ -378,7 +381,15 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
     const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_executable_lookup_pm4(executable_, token, &function));
-    EXPECT_EQ(function->kernarg->byte_length, 12u);
+    EXPECT_EQ(function->kernarg->native_byte_length,
+              count_producer ? 16u : 12u);
+    if (geometry_consumer) {
+      EXPECT_GT(function->kernarg->byte_length,
+                function->kernarg->native_byte_length);
+      EXPECT_EQ(function->kernarg->indirect_copy_count, 1u);
+    } else {
+      EXPECT_EQ(function->kernarg->byte_length, count_producer ? 16u : 12u);
+    }
     EXPECT_EQ(function->launch.requirements, 0u);
   }
 }

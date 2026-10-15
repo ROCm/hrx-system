@@ -8,6 +8,8 @@
 // relocation. Public visibility prevents internalization from erasing the
 // module/global lookup contract exercised by HIP clients.
 extern "C" {
+__attribute__((device, const)) __SIZE_TYPE__ __ockl_get_num_groups(unsigned);
+__attribute__((device, const)) unsigned __ockl_get_work_dim();
 __attribute__((device, used, visibility("default"))) unsigned image_value = 19;
 __attribute__((device, used, visibility("default"))) unsigned image_zero[17];
 __attribute__((device, used, visibility("default"))) unsigned* image_pointer =
@@ -30,11 +32,44 @@ __attribute__((global)) void image_increment(unsigned* output, unsigned value) {
 }
 
 // Invocation-private state allows one immutable recording to run concurrently
-// on several queues with independent bindings and explicit intra-recording edges.
-__attribute__((global)) void image_accumulate(unsigned* output, unsigned value) {
+// on several queues with independent bindings and explicit intra-recording
+// edges.
+__attribute__((global)) void image_accumulate(unsigned* output,
+                                              unsigned value) {
   if (__builtin_amdgcn_workgroup_id_x() == 0 &&
       __builtin_amdgcn_workitem_id_x() == 0) {
     output[0] += value;
+  }
+}
+
+// Device-produced launch parameters exercise the producer-to-CP boundary.
+__attribute__((global)) void image_counts(unsigned* counts,
+                                          const unsigned* source) {
+  if (__builtin_amdgcn_workitem_id_x() == 0) {
+    counts[0] = source[0];
+    counts[1] = source[1];
+    counts[2] = source[2];
+  }
+}
+
+// Fixed-stride records expose the actual set of launched groups independently
+// of the shader's hidden count inputs. Each group has one writing work-item.
+__attribute__((global)) void image_geometry(unsigned* output, unsigned marker) {
+  if (__builtin_amdgcn_workitem_id_x() == 0 &&
+      __builtin_amdgcn_workitem_id_y() == 0 &&
+      __builtin_amdgcn_workitem_id_z() == 0) {
+    const unsigned group = __builtin_amdgcn_workgroup_id_x() +
+                           4 * __builtin_amdgcn_workgroup_id_y() +
+                           16 * __builtin_amdgcn_workgroup_id_z();
+    output += group * 8;
+    output[0] = (unsigned)__ockl_get_num_groups(0);
+    output[1] = (unsigned)__ockl_get_num_groups(1);
+    output[2] = (unsigned)__ockl_get_num_groups(2);
+    output[3] = __builtin_amdgcn_workgroup_size_x();
+    output[4] = __builtin_amdgcn_workgroup_size_y();
+    output[5] = __builtin_amdgcn_workgroup_size_z();
+    output[6] = marker;
+    output[7] = __ockl_get_work_dim();
   }
 }
 }

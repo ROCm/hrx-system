@@ -73,11 +73,23 @@ typedef struct iree_hal_amd_gpu_kernarg_inputs_t {
   } apertures;
 } iree_hal_amd_gpu_kernarg_inputs_t;
 
-// One immutable kernel argument layout. Its allocation contains a 48-byte
+// One admitted copy into native argument storage. Source offsets name either
+// dense constants, typed host inputs, or the three indirect workgroup counts,
+// according to the owning table. Destinations may have arbitrary ABI spacing.
+typedef struct iree_hal_amd_gpu_kernarg_copy_t {
+  // Byte offset in the native kernarg segment.
+  uint16_t target_offset;
+  // Byte offset in the owning table's source representation.
+  uint16_t source_offset;
+  // Exact byte extent, without implicit alignment or padding.
+  uint16_t length;
+} iree_hal_amd_gpu_kernarg_copy_t;
+
+// One immutable kernel argument layout. Its allocation contains a 56-byte
 // header on 64-bit hosts, then binding offsets, constant copies, runtime
-// copies, and cold HAL parameter reflection. No packet protocol or native
-// allocation is owned here. Strings in reflection borrow from the enclosing
-// image.
+// copies, indirect geometry copies, and cold HAL parameter reflection. No
+// packet protocol or native allocation is owned here. Strings in reflection
+// borrow from the enclosing image.
 typedef struct iree_hal_amd_gpu_kernarg_layout_t {
   // Complete native kernarg extent, including hidden arguments and padding.
   uint32_t byte_length;
@@ -95,6 +107,8 @@ typedef struct iree_hal_amd_gpu_kernarg_layout_t {
   uint16_t constant_copy_count;
   // Number of runtime input copies following the constant copies.
   uint16_t runtime_copy_count;
+  // Number of coalesced device-count copies following the runtime copies.
+  uint16_t indirect_copy_count;
   // Number of HAL-visible parameters; hidden arguments are excluded.
   uint16_t parameter_count;
   // Byte offset from this header to aligned cold parameter reflection.
@@ -109,6 +123,19 @@ typedef struct iree_hal_amd_gpu_kernarg_layout_t {
 static inline const uint16_t* iree_hal_amd_gpu_kernarg_layout_binding_offsets(
     const iree_hal_amd_gpu_kernarg_layout_t* layout) {
   return (const uint16_t*)(layout + 1);
+}
+
+// Borrows the prepared hidden-count copies for an indirect launch. Only this
+// compact table is consumed during emission; metadata is never revisited.
+static inline const iree_hal_amd_gpu_kernarg_copy_t*
+iree_hal_amd_gpu_kernarg_layout_indirect_copies(
+    const iree_hal_amd_gpu_kernarg_layout_t* layout) {
+  const uint16_t* binding_offsets =
+      iree_hal_amd_gpu_kernarg_layout_binding_offsets(layout);
+  const iree_hal_amd_gpu_kernarg_copy_t* copies =
+      (const iree_hal_amd_gpu_kernarg_copy_t*)(binding_offsets +
+                                               layout->binding_count);
+  return copies + layout->constant_copy_count + layout->runtime_copy_count;
 }
 
 // Constructs a layout from trusted, range-checked image metadata. This cold

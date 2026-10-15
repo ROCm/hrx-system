@@ -102,6 +102,7 @@ iree_cc_library(
   SRCS
     "dispatch.c"
   DEPS
+    ::commands
     iree::base
     iree::hal
     iree::hal::drivers::amd::gpu::executable

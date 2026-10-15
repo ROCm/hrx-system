@@ -91,6 +91,7 @@ iree_runtime_cc_library(
     hdrs = ["dispatch.h"],
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
+        ":commands",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/gpu:executable",

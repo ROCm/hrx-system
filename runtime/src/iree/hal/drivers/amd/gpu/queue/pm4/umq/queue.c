@@ -450,7 +450,7 @@ iree_hal_amd_gpu_pm4_umq_publish_transfer(
   const uint32_t word_budget =
       iree_min(queue->producer.ring.capacity / 2, 16384u);
   const uint32_t wait_words = first ? submission->native_wait_count * 7 : 0;
-  // Admission reserves 128 words beyond native waits. Keep 96 for barriers,
+  // Admission reserves 192 words beyond native waits. Keep 96 for barriers,
   // signals, retirement, notification, and alignment, leaving room for DMA
   // packets even at the maximum admitted native fan-in.
   iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
@@ -678,10 +678,14 @@ iree_hal_amd_gpu_pm4_umq_publish(
       submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH
           ? submission->dispatch.function
           : NULL;
-  const bool dispatch = function &&
-                        submission->dispatch.geometry.workgroup_count[0] &&
-                        submission->dispatch.geometry.workgroup_count[1] &&
-                        submission->dispatch.geometry.workgroup_count[2];
+  const bool indirect_parameters =
+      function &&
+      iree_hal_dispatch_uses_indirect_parameters(submission->dispatch.flags);
+  const bool dispatch =
+      function && (indirect_parameters ||
+                   (submission->dispatch.geometry.workgroup_count[0] &&
+                    submission->dispatch.geometry.workgroup_count[1] &&
+                    submission->dispatch.geometry.workgroup_count[2]));
   const bool indirect =
       iree_hal_dispatch_uses_indirect_arguments(submission->dispatch.flags);
   const uint32_t argument_length =
@@ -721,11 +725,18 @@ iree_hal_amd_gpu_pm4_umq_publish(
     // when the caller supplies an empty optional payload boundary.
     before.cache_control |= 1u | queue->options.barriers.acquire;
   }
+  const uint16_t indirect_copy_count =
+      dispatch && indirect_parameters && !indirect
+          ? function->kernarg->indirect_copy_count
+          : 0;
   const uint32_t launch_words =
       dispatch ? (function->launch.user_data_count
                       ? 24 + function->launch.user_data_count
                       : 22) +
-                     5
+                     (indirect_parameters
+                          ? iree_hal_amd_gpu_pm4_dispatch_indirect_word_count(
+                                indirect_copy_count)
+                          : 5)
                : 0;
   const uint32_t tail_words =
       (submission->after.execution & IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA)
@@ -748,19 +759,33 @@ iree_hal_amd_gpu_pm4_umq_publish(
           body_words, &reservation)) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
   }
+  const iree_host_size_t binding_count = submission->dispatch.bindings.count;
   uint64_t* addresses = (uint64_t*)(submission->dispatch.bindings.values +
-                                    submission->dispatch.bindings.count);
+                                    binding_count + indirect_parameters);
+  uint64_t parameters_address = 0;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        dispatch && i < submission->dispatch.bindings.count &&
        iree_status_is_ok(status);
        ++i) {
     status = iree_hal_amd_gpu_pm4_submission_resolve_address(
-        queue->base.queue_family, submission->dispatch.bindings.values[i],
+        queue->base.queue_family, IREE_HAL_MEMORY_SITE_PROGRAM,
+        submission->dispatch.bindings.values[i],
         indirect ? IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS
                  : IREE_HAL_BUFFER_USAGE_STORAGE |
                        IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ,
         indirect ? IREE_HAL_MEMORY_ACCESS_READ : 0, &addresses[i]);
+  }
+  if (indirect_parameters && iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_pm4_submission_resolve_address(
+        queue->base.queue_family, IREE_HAL_MEMORY_SITE_QUEUE,
+        submission->dispatch.bindings.values[binding_count],
+        IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
+        IREE_HAL_MEMORY_ACCESS_READ, &parameters_address);
+    if (iree_status_is_ok(status) && (parameters_address & 3)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "indirect parameter address is misaligned");
+    }
   }
   if (dispatch && indirect && iree_status_is_ok(status)) {
     argument_address = addresses[0];
@@ -809,8 +834,18 @@ iree_hal_amd_gpu_pm4_umq_publish(
     const uint32_t initiator =
         function->launch.dispatch_initiator |
         (submission->dispatch.geometry.partial_size[0] ? UINT32_C(1) << 6 : 0);
-    words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
-        words, submission->dispatch.geometry.workgroup_count, initiator);
+    if (indirect_parameters) {
+      words = iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
+          words, function->kernarg, indirect_copy_count, parameters_address,
+          argument_address,
+          queue->options.barriers.command_processor_bypasses_l2
+              ? queue->options.barriers.acquire
+              : queue->options.barriers.shader,
+          initiator);
+    } else {
+      words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
+          words, submission->dispatch.geometry.workgroup_count, initiator);
+    }
   }
   iree_hal_amd_gpu_pm4_umq_publish_commit(
       queue, submission, position, &reservation, body_words, words,
@@ -828,12 +863,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_admit(
     iree_hal_amd_gpu_pm4_wait_kind_t* out_kind) {
   *out_kind = IREE_HAL_AMD_GPU_PM4_WAIT_READY;
   // A bounded direct publication must fit strictly inside half the ring.
-  // Large fan-in joins use completed host timelines, leaving native command
-  // capacity independent of an unbounded public semaphore list.
+  // Reserve a 96-word launch plus 96 words for barriers, signal, retirement,
+  // notification, and alignment. Large fan-in joins use completed host
+  // timelines, leaving command capacity independent of the semaphore list.
   const uint32_t word_budget =
       iree_min(queue->producer.ring.capacity / 2, 16384u);
+  const uint32_t reserved_words = IREE_HAL_AMD_GPU_PM4_DISPATCH_MAX_WORDS + 96;
   const bool native_eligible =
-      submission->wait_count <= (word_budget - 128) / 7 &&
+      submission->wait_count <= (word_budget - reserved_words) / 7 &&
       !(submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER &&
         submission->transfer.host_wait_required);
   uint32_t native_wait_count = 0;
@@ -1317,9 +1354,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_barrier(
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create(
       &queue->captures, waits, signals, NULL, NULL,
-      (iree_hal_amd_gpu_pm4_dispatch_t){0}, iree_const_byte_span_empty(),
-      iree_hal_buffer_ref_list_empty(), &queue->options.barriers, barriers, 0,
-      &submission));
+      (iree_hal_amd_gpu_pm4_dispatch_t){0}, (iree_hal_buffer_ref_t){0},
+      iree_const_byte_span_empty(), iree_hal_buffer_ref_list_empty(),
+      &queue->options.barriers, barriers, 0, &submission));
   iree_hal_amd_gpu_pm4_umq_submit(queue, submission);
   return iree_ok_status();
 }
@@ -1343,12 +1380,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_dispatch(
           queue->context->target_info.compute.local_data_share_byte_length,
       config, constants, bindings.count, flags, &dispatch));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
-      function->kernarg, bindings, flags));
+      function->kernarg, config.workgroup_count_ref, bindings, flags));
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create(
       &queue->captures, waits, signals, executable, function, dispatch,
-      constants, bindings, &queue->options.barriers, barriers, flags,
-      &submission));
+      config.workgroup_count_ref, constants, bindings, &queue->options.barriers,
+      barriers, flags, &submission));
   iree_hal_amd_gpu_pm4_umq_submit(queue, submission);
   return iree_ok_status();
 }

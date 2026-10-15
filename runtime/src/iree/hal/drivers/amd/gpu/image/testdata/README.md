@@ -19,8 +19,8 @@ iree-bazel-fuzz //runtime/src/iree/hal/drivers/amd/gpu/image:hsaco_metadata_fuzz
 
 The wrapper retains corpora and failure inputs in the normal fuzz cache. Each
 target periodically seeds ordinary byte mutation with a compiler artifact or
-its MessagePack note. `max_len` must accommodate the corpus images (currently
-under 8 KiB). Without a configured HIP compiler, raw-input fuzzing still works;
+its MessagePack note. `max_len` must accommodate the linked corpus images.
+Without a configured HIP compiler, raw-input fuzzing still works;
 passing a populated corpus directory as another libFuzzer argument supplies
 valid starting points.
 

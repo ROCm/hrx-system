@@ -70,16 +70,23 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
     iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
     const iree_hal_amd_gpu_pm4_function_t* function,
-    iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_const_byte_span_t constants,
-    iree_hal_buffer_ref_list_t bindings,
+    iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_hal_buffer_ref_t parameters,
+    iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers, iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_pm4_submission_t** out_submission) {
   *out_submission = NULL;
+  const bool indirect_parameters =
+      iree_hal_dispatch_uses_indirect_parameters(flags);
+  iree_host_size_t reference_count = 0;
   iree_host_size_t payload_size = 0;
-  if (!iree_host_size_checked_mul_add(
-          constants.data_length, bindings.count,
-          sizeof(iree_hal_buffer_ref_t) + sizeof(uint64_t), &payload_size)) {
+  if (!iree_host_size_checked_add(bindings.count, indirect_parameters,
+                                  &reference_count) ||
+      !iree_host_size_checked_mul_add(constants.data_length, reference_count,
+                                      sizeof(iree_hal_buffer_ref_t),
+                                      &payload_size) ||
+      !iree_host_size_checked_mul_add(payload_size, bindings.count,
+                                      sizeof(uint64_t), &payload_size)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "dispatch capture size overflows");
   }
@@ -102,8 +109,12 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
     references[i] = bindings.values[i];
     iree_hal_buffer_retain(references[i].buffer);
   }
-  uint8_t* cursor = (uint8_t*)payload +
-                    bindings.count * (sizeof(*references) + sizeof(uint64_t));
+  if (indirect_parameters) {
+    references[bindings.count] = parameters;
+    iree_hal_buffer_retain(parameters.buffer);
+  }
+  uint8_t* cursor = (uint8_t*)(references + reference_count) +
+                    bindings.count * sizeof(uint64_t);
   submission->dispatch.constants =
       iree_make_const_byte_span(cursor, constants.data_length);
   if (constants.data_length) {
@@ -128,8 +139,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
   if (!layout.count) {
     return iree_hal_amd_gpu_pm4_submission_create(
         pool, waits, signals, NULL, NULL, (iree_hal_amd_gpu_pm4_dispatch_t){0},
-        iree_const_byte_span_empty(), iree_hal_buffer_ref_list_empty(), profile,
-        barriers, 0, out_submission);
+        (iree_hal_buffer_ref_t){0}, iree_const_byte_span_empty(),
+        iree_hal_buffer_ref_list_empty(), profile, barriers, 0, out_submission);
   }
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
@@ -202,7 +213,10 @@ void iree_hal_amd_gpu_pm4_submission_retain(
 void iree_hal_amd_gpu_pm4_submission_retire(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
   if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH) {
-    for (iree_host_size_t i = 0; i < submission->dispatch.bindings.count; ++i) {
+    const iree_host_size_t reference_count =
+        submission->dispatch.bindings.count +
+        iree_hal_dispatch_uses_indirect_parameters(submission->dispatch.flags);
+    for (iree_host_size_t i = 0; i < reference_count; ++i) {
       iree_hal_buffer_release(submission->dispatch.bindings.values[i].buffer);
     }
     iree_hal_executable_release(submission->dispatch.executable);
@@ -238,12 +252,13 @@ void iree_hal_amd_gpu_pm4_submission_release(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
-    const iree_hal_queue_family_t* family, iree_hal_buffer_ref_t reference,
-    iree_hal_buffer_usage_t usage, iree_hal_memory_access_t access,
-    uint64_t* out_address) {
+    const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
+    iree_hal_buffer_ref_t reference, iree_hal_buffer_usage_t usage,
+    iree_hal_memory_access_t access, uint64_t* out_address) {
   const iree_hal_memory_contract_t* contract =
       reference.buffer->memory.contract;
-  const uint64_t scope_id = (uint64_t)family->memory.queue_scope_id + 1;
+  const uint64_t scope_id = (uint64_t)family->memory.queue_scope_id +
+                            (site - IREE_HAL_MEMORY_SITE_QUEUE);
   if (!contract || !family->memory.domain ||
       family->memory.domain != contract->domain ||
       scope_id >= contract->scope_count) {
