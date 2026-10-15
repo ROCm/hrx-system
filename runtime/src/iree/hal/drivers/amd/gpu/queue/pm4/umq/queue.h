@@ -46,16 +46,28 @@ typedef struct iree_hal_amd_gpu_pm4_umq_queue_options_t {
 // keeps that source registered until accepted work has retired. Success assigns
 // one owning reference; failure leaves out_queue NULL.
 iree_status_t iree_hal_amd_gpu_pm4_umq_queue_create(
-    const iree_hal_queue_family_t* family,
-    const iree_hal_amd_gpu_context_t* context,
+    const iree_hal_queue_family_t* family, iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_gpu_pm4_umq_queue_options_t* options,
     const iree_hal_queue_params_t* params, iree_allocator_t host_allocator,
     iree_hal_queue_t** out_queue);
+
+// Assigns a group-owned completion axis before any public work is accepted.
+// Registration is transactional. NULL aborts a prior assignment during failed
+// group construction. The queue retains the tracker and retires its axis after
+// the completion observer joins. Native submission never advances this axis.
+iree_status_t iree_hal_amd_gpu_pm4_umq_queue_assign_frontier(
+    iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,
+    iree_async_axis_t axis);
 
 // Borrows the queue's bounded record observer for its device's sole completion
 // worker. A native failure fails accepted work but retains unproven GPU uses.
 iree_hal_amd_gpu_completion_source_t
 iree_hal_amd_gpu_pm4_umq_queue_completion_source(iree_hal_queue_t* queue);
+
+// Trims unused capture blocks, replaced argument generations, and inactive
+// signal backing on the device's shared service. Live publishers/readers keep
+// their storage. This never waits for native execution to complete.
+void iree_hal_amd_gpu_pm4_umq_queue_trim(iree_hal_queue_t* queue);
 
 // Rejects subsequent public submissions after the parent has joined external
 // API callers. Already accepted work retains its normal dependency semantics.

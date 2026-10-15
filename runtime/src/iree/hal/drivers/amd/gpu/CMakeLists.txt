@@ -11,6 +11,39 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    device
+  HDRS
+    "device.h"
+  SRCS
+    "device.c"
+  DEPS
+    ::completion
+    ::context
+    ::executable
+    amdf::headers
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::base::threading::thread
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::fabric::memory_backend
+    iree::hal::drivers::amd::gpu::queue::pm4::barrier
+    iree::hal::drivers::amd::gpu::queue::pm4::semaphore
+    iree::hal::drivers::amd::gpu::queue::pm4::umq::queue
+    iree::hal::drivers::amd::gpu::target::identity
+    iree::hal::drivers::amd::status
+    iree::hal::memory::maintenance
+    iree::hal::memory::maintenance_thread
+    iree::hal::utils::device_spec_builder
+    iree::hal::utils::files
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     executable
   HDRS
     "executable.h"

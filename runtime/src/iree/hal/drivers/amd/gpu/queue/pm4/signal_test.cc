@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <barrier>
 #include <cstdlib>
 #include <semaphore>
@@ -168,6 +169,45 @@ TEST(SignalTest, NotificationCanAcquireReturnedCapacity) {
   iree_hal_amd_gpu_pm4_signal_release(signal);
   EXPECT_EQ(observer.acquired, signal);
   iree_hal_amd_gpu_pm4_signal_release(observer.acquired);
+}
+
+TEST(SignalTest, InactiveBackingCanRetireWhileTheLastReleaseReturns) {
+  constexpr uint32_t kIterations = 256;
+  std::binary_semaphore ready{0};
+  std::binary_semaphore returned{0};
+  std::atomic<uint32_t> notifications{0};
+  Signal* signal = nullptr;
+  std::thread reader([&] {
+    for (uint32_t i = 0; i < kIterations; ++i) {
+      ready.acquire();
+      iree_hal_amd_gpu_pm4_signal_release(signal);
+      returned.release();
+    }
+  });
+  for (uint32_t i = 0; i < kIterations; ++i) {
+    auto* storage = new Storage<1>(
+        {[](void* user_data) {
+           static_cast<std::atomic<uint32_t>*>(user_data)->fetch_add(1);
+         },
+         &notifications});
+    signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage->pool);
+    ready.release();
+    // Service no longer acquires from an inactive pool. Its final native
+    // reader may finish on another queue while service reclaims the backing.
+    bool unused = false;
+    while (!unused) {
+      iree_slim_mutex_lock(&storage->pool.mutex);
+      unused = storage->pool.live_count == 0;
+      iree_slim_mutex_unlock(&storage->pool.mutex);
+      if (!unused) {
+        std::this_thread::yield();
+      }
+    }
+    delete storage;
+    returned.acquire();
+  }
+  reader.join();
+  EXPECT_EQ(notifications.load(), kIterations);
 }
 
 TEST(SignalTest, UnpublishedAndCompletedUsesCanBothReturn) {

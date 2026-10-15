@@ -57,6 +57,9 @@ typedef struct iree_hal_amd_gpu_context_t {
   amdf_memory_scope_t** memory_scopes;
   // Borrowed diagnostic destination, live through final native cleanup.
   iree_hal_device_event_sink_t event_sink;
+  // A child failed its native ownership join. The cold owner serializes this
+  // latch with final cleanup; no context resource may be released afterward.
+  bool cleanup_blocked;
 } iree_hal_amd_gpu_context_t;
 
 // Opens one exact GPU endpoint, creates its address domain and native event,

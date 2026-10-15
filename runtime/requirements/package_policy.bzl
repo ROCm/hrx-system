@@ -38,6 +38,12 @@ load(
 
 PACKAGE_POLICIES = [
     package_policy(
+        packages = ["runtime/src/iree/hal/drivers/amd/gpu/cts"],
+        build_requirements = [LIBAMDF, LIBAMDF_GPU],
+        run_requirements = [LIBAMDF_GPU_RESOURCE],
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    ),
+    package_policy(
         packages = ["runtime/src/iree/hal/drivers/amd/fabric/cts/xdna"],
         build_requirements = [LIBAMDF, LIBAMDF_GPU, LIBAMDF_XDNA],
         run_requirements = [LIBAMDF_GPU_RESOURCE, XDNA_RESOURCE],

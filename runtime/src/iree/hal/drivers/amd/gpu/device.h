@@ -1,0 +1,68 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_HAL_DRIVERS_AMD_GPU_DEVICE_H_
+#define IREE_HAL_DRIVERS_AMD_GPU_DEVICE_H_
+
+#include "iree/hal/device.h"
+#include "iree/hal/drivers/amd/gpu/context.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
+// Cold provisioning of an explicitly selected PM4 USER family. Native protocol
+// and publication capability determine admission, independently of RDNA/CDNA.
+typedef struct iree_hal_amd_gpu_device_options_t {
+  // Exact native family ordinal. No implicit SDMA or alternate family is used.
+  uint32_t queue_family_ordinal;
+  // Number of provisioned queues in this family, between 1 and 256.
+  uint32_t queue_count;
+  // Host NUMA node for both device workers and the shared proactor. UINT32_MAX
+  // leaves placement unspecified; GPU memory nodes are not CPU NUMA nodes.
+  uint32_t host_numa_node;
+  // Initial per-queue storage. Growth is placed on the shared service worker.
+  struct {
+    // Native primary-ring capacity in bytes.
+    uint64_t ring_byte_length;
+    // Power-of-two number of live native completion records.
+    uint32_t retirement_capacity;
+    // Power-of-two initial native argument-byte capacity.
+    uint32_t argument_capacity;
+    // Fixed CPU capture-block size; oversized calls use the host allocator.
+    iree_host_size_t capture_block_size;
+    // Number of blocks preallocated for each queue.
+    iree_host_size_t capture_block_count;
+  } pm4;
+} iree_hal_amd_gpu_device_options_t;
+
+// Initializes ordinary provisioning sizes. The caller selects a native family
+// from the captured context and may supply an explicit host NUMA placement.
+void iree_hal_amd_gpu_device_options_initialize(
+    iree_hal_amd_gpu_device_options_t* out_options);
+
+// Creates a refcounted HAL device with provisioned queues, one completion
+// worker, and one shared submission/memory service. Pools remain explicit.
+// Success transfers the unique context and returns one device reference.
+// Failure leaves out_device NULL and the context with the caller. Failed
+// native rollback latches context cleanup before returning an error.
+//
+// Families, queues, and resources borrow their parent device. The final device
+// release closes admission and transfers cleanup to its completion worker;
+// accepted operations retain their normal dependency semantics. An unresolved
+// external dependency may therefore keep the owner alive. Native failure never
+// permits releasing storage whose native uses have not been proven complete.
+iree_status_t iree_hal_amd_gpu_device_create(
+    iree_hal_amd_gpu_context_t* context, iree_string_view_t display_name,
+    const iree_hal_amd_gpu_device_options_t* options,
+    const iree_hal_device_create_params_t* create_params,
+    iree_allocator_t host_allocator, iree_hal_device_t** out_device);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
+
+#endif  // IREE_HAL_DRIVERS_AMD_GPU_DEVICE_H_

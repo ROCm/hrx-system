@@ -16,7 +16,7 @@ void iree_hal_amd_gpu_context_report(const iree_hal_amd_gpu_context_t* context,
 }
 
 void iree_hal_amd_gpu_context_free(iree_hal_amd_gpu_context_t* context) {
-  if (!context) {
+  if (!context || context->cleanup_blocked) {
     return;
   }
   if (context->event) {

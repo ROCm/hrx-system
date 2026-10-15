@@ -20,6 +20,37 @@ iree_amdgpu_target_selectors_flag(
 )
 
 iree_runtime_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    hdrs = ["device.h"],
+    visibility = ["//runtime/src/iree/hal/drivers/amd:__subpackages__"],
+    deps = [
+        ":completion",
+        ":context",
+        ":executable",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory_backend",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:barrier",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:semaphore",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/umq:queue",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+        "//runtime/src/iree/hal/memory:maintenance",
+        "//runtime/src/iree/hal/memory:maintenance_thread",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/hal/utils:files",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "executable",
     srcs = ["executable.c"],
     hdrs = ["executable.h"],

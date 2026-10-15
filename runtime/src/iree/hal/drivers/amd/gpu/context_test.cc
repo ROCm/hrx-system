@@ -381,4 +381,21 @@ TEST_F(ContextTest, FailedCleanupPreservesBorrowedParentsAndReportsFailure) {
   }
 }
 
+TEST_F(ContextTest, FailedChildJoinPreservesTheCompleteNativeOwner) {
+  iree_hal_amd_gpu_context_t* context = nullptr;
+  IREE_ASSERT_OK(Allocate(&context));
+  context->cleanup_blocked = true;
+  iree_hal_amd_gpu_context_free(context);
+  EXPECT_TRUE(native_.event_live);
+  EXPECT_TRUE(native_.device_live);
+  EXPECT_TRUE(native_.endpoint_live);
+  EXPECT_TRUE(native_.released.empty());
+  EXPECT_EQ(iree_atomic_ref_count_load(&fabric_.ref_count), 2);
+
+  // The controlled dependency has no remaining child. Reclaim only this test
+  // fixture; production cannot clear the latch after an unproven native join.
+  context->cleanup_blocked = false;
+  iree_hal_amd_gpu_context_free(context);
+}
+
 }  // namespace

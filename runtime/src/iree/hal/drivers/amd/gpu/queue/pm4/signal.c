@@ -69,9 +69,13 @@ void iree_hal_amd_gpu_pm4_signal_release(
     signal->state.next = pool->free_head;
     pool->free_head = signal;
     --pool->live_count;
+    const iree_hal_amd_gpu_pm4_signal_pool_notification_t notification =
+        pool->notification;
     iree_slim_mutex_unlock(&pool->mutex);
-    if (became_available && pool->notification.fn) {
-      pool->notification.fn(pool->notification.user_data);
+    // An inactive pool can be reclaimed as soon as its last slot returns.
+    // The enclosing progress owner, not this pool, owns the wake target.
+    if (became_available && notification.fn) {
+      notification.fn(notification.user_data);
     }
   }
 }

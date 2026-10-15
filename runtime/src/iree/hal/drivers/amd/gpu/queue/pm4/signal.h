@@ -81,8 +81,11 @@ void iree_hal_amd_gpu_pm4_signal_pool_initialize(
     iree_hal_amd_gpu_pm4_signal_pool_notification_t notification,
     iree_hal_amd_gpu_pm4_signal_pool_t* out_pool);
 
-// All external pool accesses have joined and every signal reference has been
-// returned. This does not wait for native execution or free the borrowed data.
+// All acquisitions have joined and every signal reference has been returned.
+// An owner that prevents further acquisitions can observe live_count == 0
+// under mutex to join the final release's pool access. A copied notification
+// may still run; its target belongs to the enclosing progress owner. This does
+// not wait for native execution or free the borrowed data.
 void iree_hal_amd_gpu_pm4_signal_pool_deinitialize(
     iree_hal_amd_gpu_pm4_signal_pool_t* pool);
 
