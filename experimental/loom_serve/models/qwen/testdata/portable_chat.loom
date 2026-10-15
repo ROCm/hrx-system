@@ -35,8 +35,8 @@ func.def public @model_name() -> (buffer) {
 }
 
 func.def public @chat_image_limits() -> (i64, i64, i64, i64, i64) {
-  %c0 = scalar.constant 0 : i64
-  func.return %c0, %c0, %c0, %c0, %c0 : i64, i64, i64, i64, i64
+  %zero = scalar.constant 0 : i64
+  func.return %zero, %zero, %zero, %zero, %zero : i64, i64, i64, i64, i64
 }
 
 func.def public @request_defaults(%options: buffer) -> (buffer) {
