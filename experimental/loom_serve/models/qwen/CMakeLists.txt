@@ -42,6 +42,19 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
     "${CMAKE_CURRENT_BINARY_DIR}/speculation_kernels.stamp"
 )
 
+loom_module(
+  NAME
+    speculation_library
+  SRCS
+    "kernels/qwen38/accept.loom"
+    "kernels/qwen38/continuation.loom"
+    "kernels/qwen38/mtp_proposal.loom"
+    "kernels/qwen38/spans.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
 file(GLOB _GLOB_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 file(GLOB _GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/qwen38/*.loom)
 file(GLOB _GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS programs/qwen38/*.loom)
@@ -76,7 +89,7 @@ loom_test_module(
   SRCS
     "kernels/qwen38/sampling.loom"
     "tests/sampling.loom"
-    "iree::experimental::loom_serve::motifs::tensor::sources"
+    "iree::experimental::loom_serve::motifs::tensor::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -142,7 +155,7 @@ loom_module(
     "kernels/qwen38/linear_q5k_f16_wmma_wave32.loom"
     "kernels/qwen38/linear_q6k_f16_wmma.loom"
     "kernels/qwen38/linear_q6k_f16_wmma_metadata.loom"
-    "iree::experimental::loom_serve::motifs::ggml::sources"
+    "iree::experimental::loom_serve::motifs::ggml::library"
   MODE merge
   OUTPUT_FORMAT bc
   STRICT_DEPS
@@ -429,7 +442,7 @@ loom_test_module(
   SRCS
     "kernels/qwen38/output_projection.loom"
     "tests/output_projection.loom"
-    "iree::experimental::loom_serve::motifs::ggml::sources"
+    "iree::experimental::loom_serve::motifs::ggml::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -747,7 +760,7 @@ loom_test_module(
   SRCS
     "kernels/qwen38/dflash_selection.loom"
     "tests/dflash_selection.loom"
-    "iree::experimental::loom_serve::motifs::tensor::sources"
+    "iree::experimental::loom_serve::motifs::tensor::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)

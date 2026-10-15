@@ -77,9 +77,9 @@ func.def public inline @qwen38_span_active(%epoch: buffer, %span: index) -> (i1)
 // M-RoPE position adjacent without enlarging the hot span table.
 func.def public inline @qwen38_descriptor_pack(%source_position: i32, %selection: i32) -> (i32) {
   %shift = scalar.constant 10 : i32
-  %one = scalar.constant 1 : i32
+  %c1 = scalar.constant 1 : i32
   %source_bits = scalar.shli %source_position, %shift : i32
-  %selection_code = scalar.addi %selection, %one : i32
+  %selection_code = scalar.addi %selection, %c1 : i32
   %word = scalar.ori %source_bits, %selection_code : i32
   func.return %word : i32
 }
@@ -92,9 +92,9 @@ func.def public inline @qwen38_descriptor_source_position(%word: i32) -> (i32) {
 
 func.def public inline @qwen38_descriptor_selection(%word: i32) -> (i32) {
   %mask = scalar.constant 1023 : i32
-  %one = scalar.constant 1 : i32
+  %c1 = scalar.constant 1 : i32
   %code = scalar.andi %word, %mask : i32
-  %selection = scalar.subi %code, %one : i32
+  %selection = scalar.subi %code, %c1 : i32
   func.return %selection : i32
 }
 

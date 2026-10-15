@@ -25,6 +25,17 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
     "${CMAKE_CURRENT_BINARY_DIR}/sources.stamp"
 )
 
+file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
+loom_module(
+  NAME
+    library
+  SRCS
+    "${_GLOB_X_LOOM}"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
 loom_test_module(
   NAME
     quantize_test_module
@@ -179,7 +190,7 @@ loom_test_module(
   NAME
     narrow_projection_test_module
   SRCS
-    "::sources"
+    "::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)

@@ -29,15 +29,15 @@ func.def public @text.next(%text: buffer, %position: offset) -> (i32, offset) {
     %long_mask = scf.select %three_bytes, %mask_three, %mask_four : i32
     %mask = scf.select %two_bytes, %mask_two, %long_mask : i32
     %initial = scalar.andi %first, %mask : i32
-    %two = index.constant 2 : index
-    %three = index.constant 3 : index
-    %four = index.constant 4 : index
-    %long_count = scf.select %three_bytes, %three, %four : index
-    %count = scf.select %two_bytes, %two, %long_count : index
-    %one = index.constant 1 : index
+    %c2 = index.constant 2 : index
+    %c3 = index.constant 3 : index
+    %c4 = index.constant 4 : index
+    %long_count = scf.select %three_bytes, %c3, %c4 : index
+    %count = scf.select %two_bytes, %c2, %long_count : index
+    %c1 = index.constant 1 : index
     %shift = scalar.constant 6 : i32
     %continuation_mask = scalar.constant 63 : i32
-    %value, %end = scf.for %i = [%one to %count step %one](%value = %initial : i32, %cursor = %after_first : offset) -> (i32, offset) {
+    %value, %end = scf.for %i = [%c1 to %count step %c1](%value = %initial : i32, %cursor = %after_first : offset) -> (i32, offset) {
       %byte = buffer.load.i8.u %text[%cursor]
       %low = scalar.andi %byte, %continuation_mask : i32
       %high = scalar.shli %value, %shift : i32
@@ -75,19 +75,19 @@ func.def public @text.write(%text: buffer, %position: offset, %codepoint: i32) -
   %ascii = scalar.cmpi ult, %codepoint, %ascii_limit : i32
   %two_bytes = scalar.cmpi ult, %codepoint, %two_limit : i32
   %three_bytes = scalar.cmpi ult, %codepoint, %three_limit : i32
-  %zero = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i32
   %two_marker = scalar.constant 192 : i32
   %three_marker = scalar.constant 224 : i32
   %four_marker = scalar.constant 240 : i32
   %long_marker = scf.select %three_bytes, %three_marker, %four_marker : i32
   %multibyte_marker = scf.select %two_bytes, %two_marker, %long_marker : i32
-  %marker = scf.select %ascii, %zero, %multibyte_marker : i32
-  %six = scalar.constant 6 : i32
-  %twelve = scalar.constant 12 : i32
-  %eighteen = scalar.constant 18 : i32
-  %long_shift = scf.select %three_bytes, %twelve, %eighteen : i32
-  %multibyte_shift = scf.select %two_bytes, %six, %long_shift : i32
-  %shift = scf.select %ascii, %zero, %multibyte_shift : i32
+  %marker = scf.select %ascii, %c0, %multibyte_marker : i32
+  %c6 = scalar.constant 6 : i32
+  %c12 = scalar.constant 12 : i32
+  %c18 = scalar.constant 18 : i32
+  %long_shift = scf.select %three_bytes, %c12, %c18 : i32
+  %multibyte_shift = scf.select %two_bytes, %c6, %long_shift : i32
+  %shift = scf.select %ascii, %c0, %multibyte_shift : i32
   %high = scalar.shrui %codepoint, %shift : i32
   %first = scalar.ori %high, %marker : i32
   buffer.store.i8 %first, %text[%position]
@@ -96,10 +96,10 @@ func.def public @text.write(%text: buffer, %position: offset, %codepoint: i32) -
   %mask = scalar.constant 63 : i32
   %continuation = scalar.constant 128 : i32
   %end, %unused = scf.while(%cursor = %after_first : offset, %remaining = %shift : i32) -> (offset, i32) {
-    %more = scalar.cmpi ugt, %remaining, %zero : i32
+    %more = scalar.cmpi ugt, %remaining, %c0 : i32
     scf.condition %more, %cursor, %remaining : i1, offset, i32
   } do(%cursor: offset, %remaining: i32) {
-    %next_shift = scalar.subi %remaining, %six : i32
+    %next_shift = scalar.subi %remaining, %c6 : i32
     %shifted = scalar.shrui %codepoint, %next_shift : i32
     %low = scalar.andi %shifted, %mask : i32
     %byte = scalar.ori %low, %continuation : i32

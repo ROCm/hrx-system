@@ -24,14 +24,22 @@ filegroup(
 )
 
 # Device acceptance, proposal, and continuation share the packed scheduler ABI.
+_SPECULATION_KERNEL_SOURCES = [
+    "kernels/qwen38/accept.loom",
+    "kernels/qwen38/continuation.loom",
+    "kernels/qwen38/mtp_proposal.loom",
+    "kernels/qwen38/spans.loom",
+]
+
 filegroup(
     name = "speculation_kernels",
-    srcs = [
-        "kernels/qwen38/accept.loom",
-        "kernels/qwen38/continuation.loom",
-        "kernels/qwen38/mtp_proposal.loom",
-        "kernels/qwen38/spans.loom",
-    ],
+    srcs = _SPECULATION_KERNEL_SOURCES,
+    visibility = ["//visibility:public"],
+)
+
+loom_library(
+    name = "speculation_library",
+    srcs = _SPECULATION_KERNEL_SOURCES,
     visibility = ["//visibility:public"],
 )
 
@@ -58,7 +66,7 @@ loom_test(
     srcs = [
         "kernels/qwen38/sampling.loom",
         "tests/sampling.loom",
-        "//experimental/loom_serve/motifs/tensor:sources",
+        "//experimental/loom_serve/motifs/tensor:library",
     ],
     benchmark_smoke = False,
     execution_profiles = [
@@ -77,7 +85,7 @@ loom_library(
         "kernels/qwen38/linear_q5k_f16_wmma_wave32.loom",
         "kernels/qwen38/linear_q6k_f16_wmma.loom",
         "kernels/qwen38/linear_q6k_f16_wmma_metadata.loom",
-        "//experimental/loom_serve/motifs/ggml:sources",
+        "//experimental/loom_serve/motifs/ggml:library",
     ],
 )
 
@@ -152,7 +160,7 @@ loom_test(
     srcs = [
         "kernels/qwen38/output_projection.loom",
         "tests/output_projection.loom",
-        "//experimental/loom_serve/motifs/ggml:sources",
+        "//experimental/loom_serve/motifs/ggml:library",
     ],
     benchmark_smoke = False,
     configs = {
@@ -215,7 +223,7 @@ loom_test(
     srcs = [
         "kernels/qwen38/dflash_selection.loom",
         "tests/dflash_selection.loom",
-        "//experimental/loom_serve/motifs/tensor:sources",
+        "//experimental/loom_serve/motifs/tensor:library",
     ],
     benchmark_smoke = False,
     execution_profiles = [

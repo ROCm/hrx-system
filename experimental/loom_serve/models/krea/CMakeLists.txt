@@ -36,7 +36,7 @@ loom_test_module(
     "block_projections.loom"
     "tests/adapter_down_traversal.loom"
     "tests/adapter_traversal.loom"
-    "iree::experimental::loom_serve::motifs::tensor::sources"
+    "iree::experimental::loom_serve::motifs::tensor::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -101,7 +101,7 @@ loom_test_module(
     "block_int8.loom"
     "block_projections.loom"
     "tests/value_adapter.loom"
-    "iree::experimental::loom_serve::motifs::tensor::sources"
+    "iree::experimental::loom_serve::motifs::tensor::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -222,7 +222,7 @@ loom_test_module(
   SRCS
     "block_attention.loom"
     "tests/attention_shared_k32.loom"
-    "iree::experimental::loom_serve::motifs::tensor::sources"
+    "iree::experimental::loom_serve::motifs::tensor::library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)

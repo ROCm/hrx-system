@@ -9,17 +9,17 @@ template.decl @sampling.reduce_key(%key: i64, %minimum: i1) -> (i64)
 // A strict descending-logit/ascending-ID order, including signed zero ties.
 // Inputs are finite F32 logits and nonnegative I32 vocabulary IDs.
 func.def @sampling_key(%value: f32, %id: i32) -> (i64) {
-  %zero = scalar.constant 0.0 : f32
-  %is_zero = scalar.cmpf oeq, %value, %zero : f32
-  %canonical = scf.select %is_zero, %zero, %value : f32
+  %c0 = scalar.constant 0.0 : f32
+  %is_zero = scalar.cmpf oeq, %value, %c0 : f32
+  %canonical = scf.select %is_zero, %c0, %value : f32
   %bits = scalar.bitcast %canonical : f32 to i32
   %zero32 = scalar.constant 0 : i32
   %sign = scalar.constant -2147483648 : i32
-  %ones = scalar.constant -1 : i32
+  %all_bits = scalar.constant -1 : i32
   %negative = scalar.cmpi slt, %bits, %zero32 : i32
-  %mask = scf.select %negative, %ones, %sign : i32
+  %mask = scf.select %negative, %all_bits, %sign : i32
   %ordered = scalar.xori %bits, %mask : i32
-  %inverse = scalar.xori %id, %ones : i32
+  %inverse = scalar.xori %id, %all_bits : i32
   %high = scalar.extui %ordered : i32 to i64
   %low = scalar.extui %inverse : i32 to i64
   %shift = scalar.constant 32 : i64
@@ -65,18 +65,18 @@ template.def<@sampling.reduce_key> device @sampling_reduce_key(%key: i64, %minim
   %high64 = scalar.shrui %key, %shift : i64
   %high = scalar.trunci %high64 : i64 to i32
   %low = scalar.trunci %key : i64 to i32
-  %zero = scalar.constant 0 : i32
-  %ones = scalar.constant -1 : i32
+  %c0 = scalar.constant 0 : i32
+  %all_bits = scalar.constant -1 : i32
   %result_high, %result_low = scf.if %minimum -> (i32, i32) {
     %best_high = kernel.workgroup.reduce<minui> %high : i32
     %matches = scalar.cmpi eq, %high, %best_high : i32
-    %candidate = scf.select %matches, %low, %ones : i32
+    %candidate = scf.select %matches, %low, %all_bits : i32
     %best_low = kernel.workgroup.reduce<minui> %candidate : i32
     scf.yield %best_high, %best_low : i32, i32
   } else {
     %best_high = kernel.workgroup.reduce<maxui> %high : i32
     %matches = scalar.cmpi eq, %high, %best_high : i32
-    %candidate = scf.select %matches, %low, %zero : i32
+    %candidate = scf.select %matches, %low, %c0 : i32
     %best_low = kernel.workgroup.reduce<maxui> %candidate : i32
     scf.yield %best_high, %best_low : i32, i32
   }
@@ -96,15 +96,15 @@ template.def<@sampling.cutoff_f32> device @sampling_cutoff_f32(%columns_value: i
   %columns = index.assume %columns_value [range(%columns_value, 1, 16777216)] : index
   %origin = index.constant 0 : offset
   %begin = index.constant 0 : index
-  %one_index = index.constant 1 : index
-  %last = index.sub %columns, %one_index : index
+  %c1_index = index.constant 1 : index
+  %last = index.sub %columns, %c1_index : index
   %thread = kernel.workitem.id<x> : index
   %threads = index.constant 256 : index
   %zero64 = scalar.constant 0 : i64
   %ones64 = scalar.constant -1 : i64
   %one64 = scalar.constant 1 : i64
-  %zero = scalar.constant 0.0 : f32
-  %one = scalar.constant 1.0 : f32
+  %c0 = scalar.constant 0.0 : f32
+  %c1 = scalar.constant 1.0 : f32
   %true = scalar.constant true : i1
   %false = scalar.constant false : i1
   %input = buffer.view %logits[%logits_origin] : buffer -> view<[%columns]xf32>
@@ -115,7 +115,7 @@ template.def<@sampling.cutoff_f32> device @sampling_cutoff_f32(%columns_value: i
     %distance = scalar.subi %high, %low : i64
     %half = scalar.shrui %distance, %one64 : i64
     %pivot = scalar.addi %low, %half : i64
-    %upper_mass, %upper_min, %upper_max, %lower_min, %lower_max = scf.for %base = [%begin to %columns step %threads](%mass = %zero : f32, %umin = %ones64 : i64, %umax = %zero64 : i64, %lmin = %ones64 : i64, %lmax = %zero64 : i64) -> (f32, i64, i64, i64, i64) {
+    %upper_mass, %upper_min, %upper_max, %lower_min, %lower_max = scf.for %base = [%begin to %columns step %threads](%mass = %c0 : f32, %umin = %ones64 : i64, %umax = %zero64 : i64, %lmin = %ones64 : i64, %lmax = %zero64 : i64) -> (f32, i64, i64, i64, i64) {
       %candidate = index.add %base, %thread : index
       %live = index.cmp ult, %candidate, %columns : index
       %clamped = index.min %candidate, %last : index
@@ -138,11 +138,11 @@ template.def<@sampling.cutoff_f32> device @sampling_cutoff_f32(%columns_value: i
           %weight = scalar.expf<afn> %scaled : f32
           scf.yield %weight : f32
         } else {
-          scf.yield %one : f32
+          scf.yield %c1 : f32
         }
         scf.yield %weight : f32
       } else {
-        scf.yield %zero : f32
+        scf.yield %c0 : f32
       }
       %u_low = scf.select %upper, %key, %ones64 : i64
       %u_high = scf.select %upper, %key, %zero64 : i64
@@ -180,8 +180,8 @@ template.def<@sampling.categorical_f32> device @sampling_categorical_f32(%column
   %columns = index.assume %columns_value [range(%columns_value, 1, 16777216)] : index
   %origin = index.constant 0 : offset
   %begin = index.constant 0 : index
-  %one_index = index.constant 1 : index
-  %last = index.sub %columns, %one_index : index
+  %c1_index = index.constant 1 : index
+  %last = index.sub %columns, %c1_index : index
   %thread = kernel.workitem.id<x> : index
   %threads = index.constant 256 : index
   %zero64 = scalar.constant 0 : i64
@@ -189,8 +189,8 @@ template.def<@sampling.categorical_f32> device @sampling_categorical_f32(%column
   %zero32 = scalar.constant 0 : i32
   %one32 = scalar.constant 1 : i32
   %largest = scalar.constant 2147483647 : i32
-  %zero = scalar.constant 0.0 : f32
-  %one = scalar.constant 1.0 : f32
+  %c0 = scalar.constant 0.0 : f32
+  %c1 = scalar.constant 1.0 : f32
   %negative = scalar.constant -inf : f32
   %input = buffer.view %logits[%logits_origin] : buffer -> view<[%columns]xf32>
   %local_min, %local_max, %local_logit = scf.for %base = [%begin to %columns step %threads](%minimum = %ones64 : i64, %maximum = %zero64 : i64, %greatest = %negative : f32) -> (i64, i64, f32) {
@@ -213,13 +213,13 @@ template.def<@sampling.categorical_f32> device @sampling_categorical_f32(%column
   %minimum = template.apply<@sampling.reduce_key>(%local_min, %true) : (i64, i1) -> (i64)
   %maximum = template.apply<@sampling.reduce_key>(%local_max, %false) : (i64, i1) -> (i64)
   %maximum_logit = kernel.workgroup.reduce<maxnumf> %local_logit : f32
-  %greedy = scalar.cmpf oeq, %temperature, %zero : f32
+  %greedy = scalar.cmpf oeq, %temperature, %c0 : f32
   %single = scalar.cmpi eq, %top_k, %one32 : i32
   %deterministic = scalar.ori %greedy, %single : i1
   %selected = scf.if %deterministic -> (i32) {
     %inverse = scalar.trunci %maximum : i64 to i32
-    %ones = scalar.constant -1 : i32
-    %id = scalar.xori %inverse, %ones : i32
+    %all_bits = scalar.constant -1 : i32
+    %id = scalar.xori %inverse, %all_bits : i32
     scf.yield %id : i32
   } else {
     %bounded = scalar.cmpi ne, %top_k, %zero32 : i32
@@ -232,9 +232,9 @@ template.def<@sampling.categorical_f32> device @sampling_categorical_f32(%column
     } else {
       scf.yield %minimum : i64
     }
-    %nucleus = scalar.cmpf olt, %top_p, %one : f32
+    %nucleus = scalar.cmpf olt, %top_p, %c1 : f32
     %cutoff = scf.if %nucleus -> (i64) {
-      %local_mass = scf.for %base = [%begin to %columns step %threads](%mass = %zero : f32) -> (f32) {
+      %local_mass = scf.for %base = [%begin to %columns step %threads](%mass = %c0 : f32) -> (f32) {
         %candidate = index.add %base, %thread : index
         %live = index.cmp ult, %candidate, %columns : index
         %clamped = index.min %candidate, %last : index
@@ -247,7 +247,7 @@ template.def<@sampling.categorical_f32> device @sampling_categorical_f32(%column
         %difference = scalar.subf %value, %maximum_logit : f32
         %scaled = scalar.divf<arcp> %difference, %temperature : f32
         %weight = scalar.expf<afn> %scaled : f32
-        %contribution = scf.select %eligible, %weight, %zero : f32
+        %contribution = scf.select %eligible, %weight, %c0 : f32
         %next = scalar.addf %mass, %contribution : f32
         scf.yield %next : f32
       }
