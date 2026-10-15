@@ -14,12 +14,14 @@ fabric/
   memory_backend.{c,h}           Complete pool qualification and captured facts.
   memory_transition.{c,h}        Native visibility recipes translated to HAL.
 xdna/                           Native NPU contexts, programs, and execution.
+gpu/                            Native GPU images, PM4 execution, and retirement.
 ```
 
 `fabric/` depends on libamdf core and HAL memory interfaces. It has no execution
 engine dependency. XDNA owns its extension, execution context, queue resources,
-private firmware scope, and firmware address interpretation. A GPU engine can
-occupy `gpu/` with the same dependency direction.
+private firmware scope, and firmware address interpretation. GPU owns its
+extension, native context, command storage, and completion resources, with the
+same dependency direction.
 
 ## Discovery lifetime and device selection
 
@@ -27,18 +29,31 @@ The registry retains one lazily created AMD driver per canonical factory ID.
 Several URI schemes can name that identity without creating separate native
 instances. The original scheme reaches enumeration and device creation, so each
 family has its own ordinal namespace. Independent registries and direct driver
-construction provide separate instances.
+construction provide separate instances. The registry uses PROCESS native
+lifetime to support Linux KFD host registration. Its primary VM can survive
+fabric destruction and prevent a fresh acquisition, so applications retain one
+registry/driver for devices using that native process context. Direct driver
+construction with INSTANCE bounds native reclamation to the fabric at the cost
+of services unsupported by secondary KFD contexts, including host registration.
 
-The implemented scheme is `xdna`. Both `xdna:0` and `xdna://0` select its first
-endpoint; `xdna:0?columns=4` configures the engine context. Enumeration returns
-`id/<32 hexadecimal digits>` paths for exact native identity selection. Such
-identities can expire on reset, removal, or reboot. Selection still checks the
-requested family.
+The `xdna` and `rdna` schemes share that driver identity. Both `rdna:0` and
+`rdna://0` select the first RDNA endpoint; `xdna:0?columns=4` configures an NPU
+context. Enumeration returns `id/<32 hexadecimal digits>` paths for exact native
+identity selection. Such identities can expire on reset, removal, or reboot.
+Selection checks the requested architecture, so ordinals exclude other GPU
+architectures and NPUs.
 
-RDNA and CDNA registration accompanies the GPU engine implementation. libamdf's
-`amdf_gpu_endpoint_architecture` classifies qualified GPU identity without
-conflating all GFX9 devices with CDNA. Engine qualification belongs to the engine
-path; passive fabric discovery does not activate other engines.
+GPU scheme filtering opens query-only endpoints and uses
+`amdf_gpu_endpoint_architecture`; it creates no device, address space, queue,
+or event. Queue admission then selects an advertised native protocol and
+publication mode. RDNA currently supports PM4 USER host-producer families with
+GFX11/GFX12 launch and cache encodings. Other native services fail explicitly at
+construction or operation admission.
+
+`rdna://0?queue_count=2` provisions two queues sharing the device's execution
+workers. `queue_family` selects an exact native family ordinal instead of the
+first supported family. `host_numa_node` selects CPU placement for the workers
+and shared proactor; GPU-local memory node IDs are not CPU NUMA node IDs.
 
 Each materialized device retains the fabric independently. Releasing the
 registry and driver leaves those devices operational. The fabric owns the native

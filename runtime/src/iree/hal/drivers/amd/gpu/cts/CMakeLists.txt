@@ -58,6 +58,7 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::device
     iree::hal::drivers::amd::gpu::image::hip_images
+    iree::hal::drivers::amd::registration
     iree::hal::drivers::amd::status
     iree::hal::memory::maintenance
     iree::testing::gtest

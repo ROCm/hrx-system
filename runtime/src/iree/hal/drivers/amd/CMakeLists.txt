@@ -57,6 +57,8 @@ iree_cc_library(
     iree::base
     iree::hal
     iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::device
     iree::hal::drivers::amd::xdna::context
     iree::hal::drivers::amd::xdna::device
   PUBLIC

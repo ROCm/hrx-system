@@ -11,13 +11,16 @@
 static iree_status_t iree_hal_amd_driver_factory_enumerate(
     void* self, iree_host_size_t* out_count,
     const iree_hal_driver_info_t** out_infos) {
-  static const iree_hal_driver_info_t info = {
-      .driver_id = 0,
-      .driver_name = IREE_SVL("xdna"),
-      .full_name = IREE_SVL("AMD XDNA execution using libamdf"),
+  static const iree_hal_driver_info_t infos[] = {
+      {.driver_id = 0,
+       .driver_name = IREE_SVL("xdna"),
+       .full_name = IREE_SVL("AMD XDNA execution using libamdf")},
+      {.driver_id = 0,
+       .driver_name = IREE_SVL("rdna"),
+       .full_name = IREE_SVL("AMD RDNA execution using libamdf")},
   };
-  *out_count = 1;
-  *out_infos = &info;
+  *out_count = IREE_ARRAYSIZE(infos);
+  *out_infos = infos;
   return iree_ok_status();
 }
 
