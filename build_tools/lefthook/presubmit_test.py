@@ -401,6 +401,17 @@ class PresubmitTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"IREE_CLANG_TIDY_JOBS": "48"}):
             self.assertEqual(presubmit.clang_tidy_jobs(), 48)
 
+    def test_clang_tidy_jobs_reject_invalid_overrides(self):
+        for value in ("invalid", "1.5", "0", "-1"):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(os.environ, {"IREE_CLANG_TIDY_JOBS": value}),
+            ):
+                with self.assertRaisesRegex(ValueError, "positive integer"):
+                    presubmit.clang_tidy_jobs()
+                with self.assertRaisesRegex(ValueError, "positive integer"):
+                    presubmit.clang_tidy_bazel_command(["//runtime/src/iree/base:all"])
+
     def test_clang_format_default_jobs_are_capped_on_large_machines(self):
         with (
             mock.patch.dict(os.environ, {}, clear=True),
@@ -785,6 +796,27 @@ class PresubmitTest(unittest.TestCase):
             )
 
         self.assertEqual(command[2:4], ["--jobs", "7"])
+
+    def test_clang_tidy_bazel_command_inherits_execution_concurrency(self):
+        for cpu_count in (None, 1, 32, 192):
+            for configured_jobs in (None, ""):
+                environment = (
+                    {}
+                    if configured_jobs is None
+                    else {"IREE_CLANG_TIDY_JOBS": configured_jobs}
+                )
+                with (
+                    self.subTest(cpu_count=cpu_count, configured_jobs=configured_jobs),
+                    mock.patch.dict(os.environ, environment, clear=True),
+                    mock.patch.object(
+                        presubmit.os, "cpu_count", return_value=cpu_count
+                    ),
+                ):
+                    command = presubmit.clang_tidy_bazel_command(
+                        ["//runtime/src/iree/base:all"]
+                    )
+                self.assertNotIn("--jobs", command)
+                self.assertFalse(any(arg.startswith("--jobs=") for arg in command))
 
     def test_clang_tidy_bazel_command_can_keep_going(self):
         command = presubmit.clang_tidy_bazel_command(

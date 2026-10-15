@@ -359,6 +359,12 @@ enablement:
 python dev.py bazel precommit --profile paranoid runtime/src/iree/base/status.c
 ```
 
+Bazel clang-tidy inherits the normal Bazel concurrency policy, including remote
+execution capacity configured by the developer. `IREE_CLANG_TIDY_JOBS` selects
+an explicit positive job count for clang-tidy in either lane. Without that
+override, the CMake lane uses half the local logical CPUs, rounded up and
+capped at 96; the Bazel lane does not impose a client-CPU-derived limit.
+
 Header and shared build-infrastructure changes can expand the analysis to all
 tracked C/C++ files. Changes under `build_tools/clang_tidy/` also run the plugin
 smoke test and action smoke target. The CMake lane analyzes selected sources

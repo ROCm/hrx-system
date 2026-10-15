@@ -1283,14 +1283,24 @@ def semgrep_jobs() -> int:
     return min(SEMGREP_DEFAULT_MAX_JOBS, max(1, int(cpu_count * 0.85)))
 
 
-def clang_tidy_jobs() -> int:
+def configured_clang_tidy_jobs() -> int | None:
     configured_jobs = os.environ.get("IREE_CLANG_TIDY_JOBS")
-    if configured_jobs:
-        try:
-            jobs = int(configured_jobs)
-        except ValueError:
-            return 1
-        return max(1, jobs)
+    if not configured_jobs:
+        return None
+    try:
+        jobs = int(configured_jobs)
+    except ValueError:
+        raise ValueError("IREE_CLANG_TIDY_JOBS must be a positive integer") from None
+    if jobs < 1:
+        raise ValueError("IREE_CLANG_TIDY_JOBS must be a positive integer")
+    return jobs
+
+
+def clang_tidy_jobs() -> int:
+    """Returns the local tool budget, independent of Bazel execution policy."""
+    configured_jobs = configured_clang_tidy_jobs()
+    if configured_jobs is not None:
+        return configured_jobs
     cpu_count = os.cpu_count() or 1
     default_jobs = max(
         1,
@@ -1837,7 +1847,9 @@ def clang_tidy_bazel_command(
     ]
     if keep_going:
         command.append("--keep_going")
-    command += ["--jobs", str(clang_tidy_jobs())]
+    configured_jobs = configured_clang_tidy_jobs()
+    if configured_jobs is not None:
+        command += ["--jobs", str(configured_jobs)]
     output_groups = [
         CLANG_TIDY_LOCAL_OUTPUT_GROUP if local_outputs else CLANG_TIDY_OUTPUT_GROUP
     ]
