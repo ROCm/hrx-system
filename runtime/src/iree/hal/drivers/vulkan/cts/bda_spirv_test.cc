@@ -1554,6 +1554,79 @@ TEST_P(BdaSpirvReplayCacheTest, EmptyGridsAcceptEmptyBindings) {
   TestEmptyGridDispatches(/*capture_profile=*/false);
 }
 
+TEST_P(BdaSpirvReplayCacheTest, CommandBufferRebindsIndirectCounts) {
+  ASSERT_GE(NativeReplayCacheStats().max_instance_count, 1);
+  for (auto flags : {IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS,
+                     IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS}) {
+    SCOPED_TRACE(flags);
+    for (bool indirect_reference : {false, true}) {
+      SCOPED_TRACE(indirect_reference);
+      Ref<iree_hal_buffer_t> input_buffer;
+      const int32_t input_data[] = {1, -2, 30, 400};
+      IREE_ASSERT_OK(CreateDeviceBufferWithData(input_data, sizeof(input_data),
+                                                input_buffer.out()));
+      const uint32_t counts_a[] = {0, 1, 1, kElementCount, 1, 1};
+      const uint32_t counts_b[] = {2, 1, 1};
+      Ref<iree_hal_buffer_t> count_buffer_a;
+      Ref<iree_hal_buffer_t> count_buffer_b;
+      IREE_ASSERT_OK(CreateDeviceBufferWithData(counts_a, sizeof(counts_a),
+                                                count_buffer_a.out()));
+      IREE_ASSERT_OK(CreateDeviceBufferWithData(counts_b, sizeof(counts_b),
+                                                count_buffer_b.out()));
+      const iree_device_size_t count_length = 3 * sizeof(uint32_t);
+      const iree_hal_dispatch_config_t config = {
+          .workgroup_count_ref =
+              indirect_reference
+                  ? iree_hal_make_indirect_buffer_ref(2, 0, count_length)
+                  : iree_hal_make_buffer_ref(count_buffer_a, count_length,
+                                             count_length),
+      };
+      iree_hal_buffer_ref_t binding_refs[] = {
+          iree_hal_make_indirect_buffer_ref(0, 0, kDispatchByteLength),
+          iree_hal_make_indirect_buffer_ref(1, 0, kDispatchByteLength),
+      };
+      Ref<iree_hal_command_buffer_t> command_buffer;
+      IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                         IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                         /*binding_capacity=*/3,
+                                         command_buffer.out()));
+      IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+          command_buffer, executable_,
+          iree_hal_executable_function_from_index(0), config,
+          iree_const_byte_span_empty(),
+          {IREE_ARRAYSIZE(binding_refs), binding_refs}, flags));
+      IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+      // Change the offset, then the allocation, then return to the empty grid.
+      // Shader bindings and native indirect-parameter references both rebind.
+      const uint32_t counts[] = {0, kElementCount, 2, 0};
+      const int32_t expected_values[] = {8, 5, 37, 407};
+      for (size_t iteration = 0; iteration < IREE_ARRAYSIZE(counts);
+           ++iteration) {
+        SCOPED_TRACE(iteration);
+        Ref<iree_hal_buffer_t> output_buffer;
+        IREE_ASSERT_OK(
+            CreateZeroedDeviceBuffer(kDispatchByteLength, output_buffer.out()));
+        iree_hal_buffer_binding_t table_entries[] = {
+            {input_buffer, 0, kDispatchByteLength},
+            {output_buffer, 0, kDispatchByteLength},
+            {iteration == 2 ? count_buffer_b.get() : count_buffer_a.get(),
+             iteration == 1 ? count_length : 0, count_length},
+        };
+        ExecuteCommandBufferAndWait(
+            command_buffer, {IREE_ARRAYSIZE(table_entries), table_entries});
+        std::vector<int32_t> expected(kElementCount, 0);
+        const uint32_t count =
+            indirect_reference ? counts[iteration] : kElementCount;
+        std::copy_n(expected_values, count, expected.begin());
+        EXPECT_THAT(ReadBufferData<int32_t>(output_buffer),
+                    ContainerEq(expected));
+      }
+    }
+  }
+}
+
 TEST_P(BdaSpirvReplayCacheTest, CommandBufferReusesCachedNativeReplay) {
   ASSERT_GE(NativeReplayCacheStats().max_instance_count, 1);
   ASSERT_EQ(0, NativeReplayCacheStats().retained_instance_count);

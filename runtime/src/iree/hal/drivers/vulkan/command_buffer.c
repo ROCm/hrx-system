@@ -228,8 +228,9 @@ typedef struct iree_hal_vulkan_command_buffer_t {
   iree_hal_vulkan_command_buffer_descriptor_requirements_t
       descriptor_requirements;
 
-  // Whether a transfer command resolves buffer handles from a binding table.
-  bool has_indirect_transfer;
+  // Whether a native command embeds buffer handles resolved from a binding
+  // table. BDA shader bindings instead use republishable address storage.
+  bool has_binding_dependent_native_commands;
 
   // Total byte length required for captured transfer staging payloads.
   iree_device_size_t transfer_staging_length;
@@ -1352,7 +1353,7 @@ bool iree_hal_vulkan_command_buffer_native_replay_compatible(
   // A cached replay retains its source command buffer. Direct buffer references
   // would therefore keep allocation-pool reservations live after terminal
   // semaphore publication, when callers are allowed to destroy the pool.
-  return !command_buffer->has_indirect_transfer &&
+  return !command_buffer->has_binding_dependent_native_commands &&
          !command_buffer->has_static_buffer_refs;
 }
 
@@ -3131,7 +3132,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_fill_buffer(
   fill_buffer->pattern_length = pattern_length;
   fill_buffer->flags = flags;
   command_buffer->transfer_staging_length = staging_length;
-  command_buffer->has_indirect_transfer |= !target_ref.buffer;
+  command_buffer->has_binding_dependent_native_commands |= !target_ref.buffer;
   return iree_ok_status();
 }
 
@@ -3213,7 +3214,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_update_buffer(
   update_buffer->source_data_length = (iree_host_size_t)target_ref.length;
   update_buffer->flags = flags;
   command_buffer->transfer_staging_length = staging_length;
-  command_buffer->has_indirect_transfer |= !target_ref.buffer;
+  command_buffer->has_binding_dependent_native_commands |= !target_ref.buffer;
   return iree_ok_status();
 }
 
@@ -3255,7 +3256,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_copy_buffer(
   copy_buffer->source_ref = source_ref;
   copy_buffer->target_ref = target_ref;
   copy_buffer->flags = flags;
-  command_buffer->has_indirect_transfer |=
+  command_buffer->has_binding_dependent_native_commands |=
       !source_ref.buffer || !target_ref.buffer;
   return iree_ok_status();
 }
@@ -3423,6 +3424,9 @@ static iree_status_t iree_hal_vulkan_command_buffer_dispatch(
     dispatch->constants_data_length = constants.data_length;
     dispatch->binding_count = bindings.count;
     dispatch->flags = flags;
+    command_buffer->has_binding_dependent_native_commands |=
+        iree_hal_dispatch_uses_indirect_parameters(flags) &&
+        !config.workgroup_count_ref.buffer;
     command_buffer->dispatch_count = command_buffer->dispatch_count + 1;
   }
   return status;
