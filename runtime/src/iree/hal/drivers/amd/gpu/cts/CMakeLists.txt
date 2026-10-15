@@ -10,6 +10,37 @@
 iree_add_all_subdirs()
 
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_binary_benchmark(
+  NAME
+    queue_benchmark
+  SRCS
+    "queue_benchmark.cc"
+  DEPS
+    amdf::amdf_static
+    amdf::headers
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::device
+    iree::hal::drivers::amd::gpu::image::hip_images
+    iree::hal::drivers::amd::status
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_test(
   NAME
     native_test
