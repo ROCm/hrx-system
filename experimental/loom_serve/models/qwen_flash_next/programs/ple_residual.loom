@@ -1,9 +1,3 @@
-// Copyright 2026 The IREE Authors
-//
-// Licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 command.program.decl @flash_next_ple_embed(%history_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %origins: buffer, %tokens: buffer, %arena: buffer, %output: buffer)
