@@ -857,8 +857,15 @@ def _vector_dot2f_bf16_rule(
     config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
     shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.configured")
     clear = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
-    move_to_accumulator = _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512")
+    move_to_accumulator = _descriptor(
+        "amd.xdna.aie2p.move.vector512.to.accumulator512.low"
+    )
     accumulate = _descriptor("amd.xdna.aie2p.accumulate.bf16x32.configured")
+    first_accumulate = (
+        accumulate
+        if initial_accumulator == "zero"
+        else _descriptor("amd.xdna.aie2p.accumulate.bf16x16.configured")
+    )
     move_from_accumulator = _descriptor(
         "amd.xdna.aie2p.move.accumulator512.to.vector512"
     )
@@ -899,14 +906,9 @@ def _vector_dot2f_bf16_rule(
         )
         for lane_group in ("even", "odd")
     }
-    emits.append(
-        _op_emit(
-            clear,
-            results={"dst": ValueRef.temporary("zero_accumulator")},
-            result_types={"dst": DescriptorResultType()},
-        )
+    accumulator = ValueRef.temporary(
+        "zero_accumulator" if initial_accumulator == "zero" else "initial_accumulator"
     )
-    accumulator = ValueRef.temporary("zero_accumulator")
     guards = (
         Guard.value_type("lhs", input_type),
         Guard.value_type("rhs", input_type),
@@ -915,37 +917,21 @@ def _vector_dot2f_bf16_rule(
     )
     if initial_accumulator == "zero":
         # Exact floating facts distinguish positive zero from negative zero.
-        # The cleared accumulator already supplies every source and padding lane.
         guards += (Guard.value_float_equals("acc", 0.0),)
+        emits.append(
+            _op_emit(
+                clear,
+                results={"dst": accumulator},
+                result_types={"dst": DescriptorResultType()},
+            )
+        )
     else:
-        accumulator = ValueRef.temporary("initial_accumulator")
-        emits.extend(
-            (
-                *(
-                    EmitRegisterSlice(
-                        source=ValueRef.temporary("zero_accumulator"),
-                        result=ValueRef.temporary(f"zero_accumulator_unit_{unit}"),
-                        unit_offset=unit,
-                        unit_count=1,
-                    )
-                    for unit in range(1, 4)
-                ),
-                _op_emit(
-                    move_to_accumulator,
-                    operands={"src": ValueRef.operand("acc")},
-                    results={"dst": ValueRef.temporary("initial_accumulator_unit")},
-                    result_types={"dst": DescriptorResultType()},
-                ),
-                EmitRegisterConcat(
-                    sources=(
-                        ValueRef.temporary("initial_accumulator_unit"),
-                        ValueRef.temporary("zero_accumulator_unit_1"),
-                        ValueRef.temporary("zero_accumulator_unit_2"),
-                        ValueRef.temporary("zero_accumulator_unit_3"),
-                    ),
-                    result=ValueRef.temporary("initial_accumulator"),
-                    result_type=_F32X64_ACCUMULATOR,
-                ),
+        emits.append(
+            _op_emit(
+                move_to_accumulator,
+                operands={"src": ValueRef.operand("acc")},
+                results={"dst": accumulator},
+                result_types={"dst": DescriptorResultType()},
             )
         )
     emits.extend(
@@ -956,7 +942,7 @@ def _vector_dot2f_bf16_rule(
                 _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
             ),
             _op_emit(
-                accumulate,
+                first_accumulate,
                 operands={
                     "acc1": accumulator,
                     "s1": ValueRef.temporary("lhs_even"),

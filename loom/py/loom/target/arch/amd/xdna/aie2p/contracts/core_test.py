@@ -971,19 +971,19 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
         "amd.xdna.aie2p.constant.i32.mova",
         "amd.xdna.aie2p.shuffle.x.configured",
         "amd.xdna.aie2p.shuffle.x.configured",
-        "amd.xdna.aie2p.accumulator.clear.f32x64",
-        "amd.xdna.aie2p.move.vector512.to.accumulator512",
+        "amd.xdna.aie2p.move.vector512.to.accumulator512.low",
         "amd.xdna.aie2p.constant.i32.mova",
-        "amd.xdna.aie2p.accumulate.bf16x32.configured",
+        "amd.xdna.aie2p.accumulate.bf16x16.configured",
         "amd.xdna.aie2p.accumulate.bf16x32.configured",
         "amd.xdna.aie2p.move.accumulator512.to.vector512",
     ]
     assert [bf16_dot2.emit[index].immediates["i"] for index in (0, 3)] == list(
         _BF16_DOT2_DEINTERLEAVE_CONTROLS
     )
-    assert bf16_dot2.emit[12].immediates == {"i": _BF16_ELEMENTWISE_MULTIPLY_CONTROL}
-    assert sum(isinstance(emit, EmitRegisterSlice) for emit in bf16_dot2.emit) == 4
-    assert sum(isinstance(emit, EmitRegisterConcat) for emit in bf16_dot2.emit) == 1
+    assert bf16_dot2.emit[7].immediates == {"i": _BF16_ELEMENTWISE_MULTIPLY_CONTROL}
+    assert sum(isinstance(emit, EmitRegisterSlice) for emit in bf16_dot2.emit) == 1
+    assert not any(isinstance(emit, EmitRegisterConcat) for emit in bf16_dot2.emit)
+    assert bf16_dot2.emit[9].operands["acc1"] == bf16_dot2.emit[8].results["dst"]
     bf16_dot2_input = Vector(
         "bf16", minimum_static_elements=2, maximum_static_elements=32
     )

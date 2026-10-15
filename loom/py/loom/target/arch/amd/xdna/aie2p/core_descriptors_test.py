@@ -671,7 +671,7 @@ def test_vector_encoding_roles_share_one_low_storage_class() -> None:
     )
 
 
-def test_f32_packet_descriptors_retain_complete_destination_clobbers() -> None:
+def test_floating_packet_descriptors_retain_complete_destination_clobbers() -> None:
     descriptors = {
         descriptor.key: descriptor
         for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
@@ -694,6 +694,16 @@ def test_f32_packet_descriptors_retain_complete_destination_clobbers() -> None:
         assert [operand.unit_count for operand in packet.operands[:4]] == [4, 1, 1, 1]
         assert packet.operands[0] == complete.operands[0]
         assert all(operand.encoding_adapter_id != 0 for operand in packet.operands[1:3])
+
+    packet = descriptors["amd.xdna.aie2p.accumulate.bf16x16.configured"]
+    complete = descriptors["amd.xdna.aie2p.accumulate.bf16x32.configured"]
+    assert packet.operands[0] == complete.operands[0]
+    assert packet.operands[0].unit_count == 4
+    assert packet.operands[1].reg_alts[0].reg_class == "aie2p.ebmll"
+    assert packet.operands[1].unit_count == 1
+    assert packet.operands[1].encoding_adapter_id != 0
+    assert packet.operands[1].read_event == complete.operands[1].read_event
+    assert packet.operands[2:] == complete.operands[2:]
 
     low_move = descriptors["amd.xdna.aie2p.move.vector512.to.accumulator512.low"]
     assert [operand.reg_alts[0].reg_class for operand in low_move.operands] == [

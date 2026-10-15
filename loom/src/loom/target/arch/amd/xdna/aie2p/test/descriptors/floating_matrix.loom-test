@@ -44,3 +44,18 @@ low.func.def target<amd.xdna.aie2p.core> @native_controls(%left: reg<aie2p.vec25
   %negative = vneg.f32x64 %accumulator, %mode0
   return %product, %repeated, %other_mode, %difference, %negative
 }
+
+// ====
+
+// The partial accumulator input encodes its containing DM register while both
+// MAC results clobber a complete accumulator and chain without a storage copy.
+// RUN: emit aie2p-leaf @partial_accumulation report=code
+
+low.func.def target<amd.xdna.aie2p.core> @partial_accumulation(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %initial: reg<aie2p.ebmll>, %mode: reg<aie2p.er>) -> (reg<aie2p.mbms x4>) asm {
+  %first = vmac.bf16x16 %initial, %left, %right, %mode
+  %second = vmac.bf16x32 %first, %left, %right, %mode
+  return %second
+}
+
+// ----
+code: 48 21 00 00 00 00 00 00 48 21 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00

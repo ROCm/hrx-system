@@ -14,17 +14,12 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_inte
   %13 = vshuffle %lhs, %lhs, %12
   %14 = mova.i32 3
   %15 = vshuffle %lhs, %lhs, %14
-  %16 = acc.clear.f32x64
-  %17 = slice %16[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %18 = slice %16[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %19 = slice %16[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %20 = vmov.vector512.to.accumulator512 %initial
-  %21 = concat(%20, %17, %18, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %22 = mova.i32 60
-  %23 = vmac.bf16x32 %21, %13, %even, %22
-  %24 = vmac.bf16x32 %23, %15, %odd, %22
-  %25 = slice %24[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %25
+  %16 = vmov.vector512.to.accumulator512.low %initial
+  %17 = mova.i32 60
+  %18 = vmac.bf16x16 %16, %13, %even, %17
+  %19 = vmac.bf16x32 %18, %15, %odd, %17
+  %20 = slice %19[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %20
   return %result
 }
 
@@ -74,16 +69,38 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_inte
   %19 = mova.i32 3
   %20 = vshuffle %lhs, %lhs, %19
   %21 = vshuffle %rhs, %rhs, %19
-  %22 = acc.clear.f32x64
-  %23 = slice %22[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %24 = slice %22[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %25 = slice %22[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %26 = vmov.vector512.to.accumulator512 %initial
-  %27 = concat(%26, %23, %24, %25) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %28 = mova.i32 60
-  %29 = vmac.bf16x32 %27, %17, %18, %28
-  %30 = vmac.bf16x32 %29, %20, %21, %28
-  %31 = slice %30[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %31
+  %22 = vmov.vector512.to.accumulator512.low %initial
+  %23 = mova.i32 60
+  %24 = vmac.bf16x16 %22, %17, %18, %23
+  %25 = vmac.bf16x32 %24, %20, %21, %23
+  %26 = slice %25[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %26
   return %result, %rhs
+}
+
+// ====
+
+// Partial packets retain only their observed lanes, including factored shapes.
+aie2p.target<core> @target
+
+func.def target(@target) @dot_partial_rank_two(%lhs: vector<1x6xbf16>, %rhs: vector<1x6xbf16>, %initial: vector<1x3xf32>) -> (vector<1x3xf32>) {
+  %result = vector.dot2f %lhs, %rhs, %initial : vector<1x6xbf16>, vector<1x6xbf16>, vector<1x3xf32>
+  func.return %result : vector<1x3xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_partial_rank_two(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %initial: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %9 = mova.i32 2
+  %10 = vshuffle %lhs, %lhs, %9
+  %11 = vshuffle %rhs, %rhs, %9
+  %12 = mova.i32 3
+  %13 = vshuffle %lhs, %lhs, %12
+  %14 = vshuffle %rhs, %rhs, %12
+  %15 = vmov.vector512.to.accumulator512.low %initial
+  %16 = mova.i32 60
+  %17 = vmac.bf16x16 %15, %10, %11, %16
+  %18 = vmac.bf16x32 %17, %13, %14, %16
+  %19 = slice %18[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %19
+  return %result
 }
