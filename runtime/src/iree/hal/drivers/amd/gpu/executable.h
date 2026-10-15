@@ -54,10 +54,11 @@ typedef struct iree_hal_amd_gpu_pm4_function_t {
 //
 // Native services named by launch/argument metadata remain requirements for
 // dispatch admission. Code upload flushes host writes; each queue establishes
-// instruction-cache visibility before shader use. Module lifecycle kernels and
-// required external linkage are rejected because loading alone cannot execute
-// their required actions. Global buffers follow HAL's executable-owned borrow
-// contract and never extend the executable's lifetime implicitly.
+// instruction-cache visibility before shader use. Module lifecycle kernels,
+// required external linkage, and unprovisioned runtime configuration globals
+// are rejected because loading alone cannot provide their required services.
+// Global buffers follow HAL's executable-owned borrow contract and never extend
+// the executable's lifetime implicitly.
 iree_status_t iree_hal_amd_gpu_executable_create(
     const iree_hal_queue_family_t* family,
     const iree_hal_amd_gpu_context_t* context,

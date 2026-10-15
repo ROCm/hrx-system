@@ -133,6 +133,23 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
                               image->imports[i].name.data);
     }
   }
+  // These globals request a host service even when the image supplies their
+  // zero-initialized storage. Loading that storage without provisioning the
+  // service would silently disable shader diagnostics and assertion reports.
+  const iree_string_view_t service_globals[] = {
+      IREE_SV("iree_asan_config"),
+      IREE_SV("iree_tsan_config"),
+      IREE_SV("iree_feedback_config"),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(service_globals); ++i) {
+    if (iree_hal_amd_gpu_image_find_symbol(image, service_globals[i])) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "GPU image requires runtime service global `%.*s`, which the native "
+          "device has not provisioned",
+          (int)service_globals[i].size, service_globals[i].data);
+    }
+  }
   iree_hal_amd_gpu_target_identity_t artifact = image->target;
   for (iree_host_size_t i = 0; i < image->metadata.kernel_count; ++i) {
     const iree_hal_amd_gpu_metadata_kernel_t* kernel =

@@ -14,6 +14,10 @@ __attribute__((device, used, visibility("default"))) unsigned image_value = 19;
 __attribute__((device, used, visibility("default"))) unsigned image_zero[17];
 __attribute__((device, used, visibility("default"))) unsigned* image_pointer =
     &image_value;
+// Ordinary user storage has no runtime service semantics. Admission tests
+// rename this symbol to exercise each reserved runtime configuration name.
+__attribute__((device, used, visibility("default")))
+unsigned image_runtime_config[16];
 
 __attribute__((global)) void image_transform(unsigned* output, unsigned value) {
   if (__builtin_amdgcn_workgroup_id_x() == 0 &&

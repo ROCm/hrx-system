@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/gpu/executable.h"
 
+#include <algorithm>
 #include <cstring>
 #include <semaphore>
 #include <set>
@@ -553,6 +554,29 @@ TEST_P(ExecutableTest, RejectsWrongTargetBeforeAllocatingNativeStorage) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE, Load());
   EXPECT_EQ(executable_, nullptr);
   EXPECT_EQ(native_.calls, 0u);
+}
+
+TEST_P(ExecutableTest, RuntimeConfigurationRequiresProvisionedServices) {
+  const auto original = bytes_;
+  constexpr char source[] = "image_runtime_config";
+  for (const char* name :
+       {"iree_asan_config", "iree_tsan_config", "iree_feedback_config"}) {
+    SCOPED_TRACE(name);
+    bytes_ = original;
+    size_t replacements = 0;
+    auto cursor = bytes_.begin();
+    while ((cursor = std::search(cursor, bytes_.end(), std::begin(source),
+                                 std::end(source))) != bytes_.end()) {
+      std::fill_n(cursor, sizeof(source), uint8_t{0});
+      std::memcpy(&*cursor, name, std::strlen(name));
+      cursor += sizeof(source);
+      ++replacements;
+    }
+    ASSERT_GT(replacements, 0u);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Load());
+    EXPECT_EQ(executable_, nullptr);
+    EXPECT_EQ(native_.calls, 0u);
+  }
 }
 
 TEST_P(ExecutableTest, NativeConstructionFailuresReleasePartialOwnership) {
