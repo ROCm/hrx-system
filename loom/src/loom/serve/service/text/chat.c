@@ -849,15 +849,15 @@ void loom_serve_text_chat_completion_deinitialize(
 // Returned buffers may alias any argument. Owned input clones make every such
 // result independent of HTTP claims, mutable builders and invocation storage.
 static iree_status_t loom_serve_text_chat_checkpoint(
-    const loom_serve_text_chat_t* chat, iree_string_view_t tools,
-    iree_allocator_t host_allocator,
+    const loom_serve_text_chat_t* chat, iree_string_view_t response,
+    iree_string_view_t tools, iree_allocator_t host_allocator,
     loom_serve_text_chat_completion_t* out_completion) {
   const loom_serve_text_chat_policy_t* policy = chat->policy;
   const iree_string_view_t inputs[] = {
-      iree_string_builder_view(&chat->prompt),
+      iree_string_builder_view(&chat->prompt), response,
       iree_string_builder_view(&chat->output.content),
       iree_string_builder_view(&chat->output.reasoning), tools};
-  iree_vm_variant_t arguments[6] = {0};
+  iree_vm_variant_t arguments[7] = {0};
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(inputs) && iree_status_is_ok(status); ++i) {
@@ -871,8 +871,8 @@ static iree_status_t loom_serve_text_chat_checkpoint(
           iree_vm_buffer_variant_from_ptr_move(&policy->types, &buffer);
     }
   }
-  arguments[4] = iree_vm_variant_from_i64(chat->output.initial_state);
-  arguments[5] = iree_vm_variant_from_i64(chat->output.state);
+  arguments[5] = iree_vm_variant_from_i64(chat->output.initial_state);
+  arguments[6] = iree_vm_variant_from_i64(chat->output.state);
   iree_vm_variant_t results[2] = {0};
   if (iree_status_is_ok(status)) {
     status = iree_vm_invoke(policy->invocation, policy->complete_text,
@@ -1309,8 +1309,8 @@ iree_status_t loom_serve_text_chat_complete(
   if (iree_status_is_ok(status)) {
     result.tool_count = tools.count;
     status = loom_serve_text_chat_checkpoint(
-        chat, iree_string_builder_view(&tools.rendered), tool_calls->allocator,
-        &result);
+        chat, response, iree_string_builder_view(&tools.rendered),
+        tool_calls->allocator, &result);
   }
   iree_string_builder_deinitialize(&tools.arguments);
   iree_string_builder_deinitialize(&tools.rendered);

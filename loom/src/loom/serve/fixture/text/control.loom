@@ -323,8 +323,8 @@ func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %ph
   func.return %content, %previous, %count, %state : i64, i64, i64, i64
 }
 
-func.def public @complete_text(%prompt: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
-  %result = func.call @join(%prompt, %content) : (buffer, buffer) -> (buffer)
+func.def public @complete_text(%prompt: buffer, %response: buffer, %content: buffer, %reasoning: buffer, %tools: buffer, %initial_state: i64, %final_state: i64) -> (buffer, i32) {
+  %result = func.call @join(%prompt, %response) : (buffer, buffer) -> (buffer)
   %reusable = scalar.constant 1 : i32
   func.return %result, %reusable : buffer, i32
 }

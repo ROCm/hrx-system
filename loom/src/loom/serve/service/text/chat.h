@@ -51,10 +51,11 @@ typedef struct loom_serve_text_chat_policy_t {
   iree_vm_function_t prepare_input;
   // Next typed output span and opaque parser state.
   iree_vm_function_t output_next;
-  // complete_text(prompt, content, reasoning, tools, initial_state,
-  // final_state) returns (owned transcript buffer, reusable i32 boolean). False
-  // requires replay instead of matching the canonical transcript to retained
-  // device state.
+  // complete_text(prompt, response, content, reasoning, tools, initial_state,
+  // final_state) returns (owned transcript buffer, reusable i32 boolean).
+  // Response preserves the complete decoded output before parsing or
+  // normalization. Source authorizes reuse only when its canonical transcript
+  // still represents that output; otherwise the next request replays history.
   iree_vm_function_t complete_text;
 } loom_serve_text_chat_policy_t;
 
