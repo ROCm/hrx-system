@@ -152,8 +152,16 @@ static uint32_t loom_low_allocation_search_location_preference_penalty(
       context->descriptor_set, &query->preferences, candidate, NULL);
 }
 
+static bool loom_low_allocation_search_storage_conflicts(
+    loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate,
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_value_id_t* ignored_storage_lease_value_ids,
+    uint16_t ignored_storage_lease_value_count,
+    loom_low_allocation_storage_release_policy_t release_policy);
+
 static bool loom_low_allocation_search_hard_relation_conflicts(
-    const loom_low_allocation_search_context_t* context,
+    loom_low_allocation_search_context_t* context,
     const loom_low_placement_relation_t* relation,
     const loom_low_allocation_assignment_t* candidate,
     bool candidate_is_result) {
@@ -179,7 +187,28 @@ static bool loom_low_allocation_search_hard_relation_conflicts(
     counterpart = fixed ? &fixed->assignment : NULL;
   }
   if (counterpart == NULL) {
-    return false;
+    const loom_liveness_interval_t* interval =
+        loom_liveness_interval_for_value_ordinal(context->liveness,
+                                                 counterpart_ordinal);
+    uint16_t candidate_ordinal = 0;
+    loom_low_descriptor_set_find_physical_register_candidate(
+        context->descriptor_set, candidate->descriptor_reg_class_id,
+        candidate->location_base, &candidate_ordinal);
+    const uint16_t counterpart_class = interval->value_class.register_class_id;
+    const uint32_t counterpart_location =
+        loom_low_descriptor_set_physical_register_candidate(
+            context->descriptor_set, counterpart_class, candidate_ordinal);
+    const loom_low_allocation_assignment_t projected =
+        loom_low_allocation_search_candidate_assignment(
+            context, interval, counterpart_class,
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+            counterpart_location, 1);
+    // Selecting this ordinal commits every tuple member to its corresponding
+    // register. Check the retained peer lifetime before making that choice;
+    // waiting until the peer is visited can leave it with no legal location.
+    return loom_low_allocation_search_storage_conflicts(
+        context, &projected, NULL, 0, NULL, 0,
+        LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED);
   }
   const loom_low_allocation_assignment_t* result_assignment =
       candidate_is_result ? candidate : counterpart;
@@ -190,7 +219,7 @@ static bool loom_low_allocation_search_hard_relation_conflicts(
 }
 
 static bool loom_low_allocation_search_hard_relations_conflict(
-    const loom_low_allocation_search_context_t* context,
+    loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate) {
   const loom_low_placement_table_t* placement = context->placement;
   if (placement == NULL || placement->hard_location_relation_count == 0) {
@@ -234,7 +263,7 @@ static bool loom_low_allocation_search_hard_relations_conflict(
   return false;
 }
 
-bool loom_low_allocation_search_assignment_conflicts(
+static bool loom_low_allocation_search_storage_conflicts(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
@@ -256,9 +285,6 @@ bool loom_low_allocation_search_assignment_conflicts(
           context->target_constraints
               ->fixed_value_indices_by_ordinal[retained_origin];
     }
-    return true;
-  }
-  if (loom_low_allocation_search_hard_relations_conflict(context, candidate)) {
     return true;
   }
   if (loom_low_allocation_active_set_conflicts(
@@ -286,6 +312,20 @@ bool loom_low_allocation_search_assignment_conflicts(
     return true;
   }
   return false;
+}
+
+bool loom_low_allocation_search_assignment_conflicts(
+    loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate,
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_value_id_t* ignored_storage_lease_value_ids,
+    uint16_t ignored_storage_lease_value_count,
+    loom_low_allocation_storage_release_policy_t release_policy) {
+  return loom_low_allocation_search_storage_conflicts(
+             context, candidate, ignored_value_ids, ignored_value_count,
+             ignored_storage_lease_value_ids, ignored_storage_lease_value_count,
+             release_policy) ||
+         loom_low_allocation_search_hard_relations_conflict(context, candidate);
 }
 
 bool loom_low_allocation_search_location_conflicts(

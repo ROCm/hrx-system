@@ -409,3 +409,21 @@ value %second: test.explicit32 -> physical_register[3:1]
 value %narrow: test.atomic.narrow -> physical_register[4:1]
 value %fixed0: test.fixed.r0 -> physical_register[0:1]
 value %fixed1: test.fixed.r0 -> physical_register[0:1]
+
+// ====
+
+// The first result must leave a matching register for the second result even
+// though its own register class has no conflict at ordinal zero.
+// RUN: emit low-allocation-query @coindexed_result_peer values=%live,%primary,%partner fixed=%live:physical_register:2:1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @coindexed_result_peer(%live: reg<test.coindexed.partner>) -> (reg<test.packed.narrow>, reg<test.coindexed.partner>, reg<test.coindexed.partner>) asm {
+  %primary, %partner = test.coindexed.results
+  return %primary, %partner, %live
+}
+
+// ----
+value %live: test.coindexed.partner -> physical_register[2:1]
+value %primary: test.packed.narrow -> physical_register[1:1]
+value %partner: test.coindexed.partner -> physical_register[3:1]

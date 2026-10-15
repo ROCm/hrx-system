@@ -685,3 +685,54 @@ low.func.def allocation(assigned) target<amd.xdna.aie2p.core> @assigned_input() 
 low.func.def allocation(fixed) target<amd.xdna.aie2p.core> @fixed_input() asm {
   return
 }
+
+// ====
+
+// A live address in p0 excludes tuple zero even when its pointer copy is
+// assigned after the FIFO. The tuple uses p1, lf1, and r25 together.
+// RUN: emit aie2p-leaf @future_pointer report=code fixed=%live:physical_register:200:1
+
+low.func.def target<amd.xdna.aie2p.core> @future_pointer(%live: reg<aie2p.ep>, %fifo: reg<aie2p.eldfiforeg>, %base: reg<aie2p.ep>) -> (reg<aie2p.vec256 x2>, reg<aie2p.ep>) asm {
+  %pointer = copy %base : reg<aie2p.ep> -> reg<aie2p.eps>
+  %position = mova.fifo.position 0
+  %filled_pointer, %filled_fifo, %filled_position = vldb.fill.512 %pointer, %fifo, %position
+  %data, %final_pointer, %final_fifo, %final_position = vldb.pop.512.i8x64 %filled_pointer, %filled_fifo, %filled_position
+  return %data, %live
+}
+
+// ----
+code: 18 c8 00 00 18 14 14 3d 18 14 00 39 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// A live scalar in r24 excludes tuple zero before the position is defined.
+// RUN: emit aie2p-leaf @future_position report=code fixed=%live:physical_register:270:1
+
+low.func.def target<amd.xdna.aie2p.core> @future_position(%live: reg<aie2p.er>, %fifo: reg<aie2p.eldfiforeg>, %pointer: reg<aie2p.eps>) -> (reg<aie2p.vec256 x2>, reg<aie2p.er>) asm {
+  %position = mova.fifo.position 0
+  %filled_pointer, %filled_fifo, %filled_position = vldb.fill.512 %pointer, %fifo, %position
+  %data, %final_pointer, %final_fifo, %final_position = vldb.pop.512.i8x64 %filled_pointer, %filled_fifo, %filled_position
+  return %data, %live
+}
+
+// ----
+code: 18 c8 00 00 18 14 14 3d 18 14 00 39 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// A retained FIFO in lf0 excludes tuple zero before the new FIFO halves
+// are loaded. The pointer and position must reserve tuple one.
+// RUN: emit aie2p-leaf @future_fifo report=code fixed=%live:physical_register:183:1
+
+low.func.def target<amd.xdna.aie2p.core> @future_fifo(%live: reg<aie2p.eldfiforeg>, %pointer: reg<aie2p.eps>, %address: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>, reg<aie2p.eldfiforeg>) asm {
+  %base = mov.scalar-to-address %address
+  %low = vlda.load-fifo.low512 %base, 0
+  %fifo = vlda.load-fifo.high512 %base, %low, 64
+  %position = mova.fifo.position 0
+  %filled_pointer, %filled_fifo, %filled_position = vldb.fill.512 %pointer, %fifo, %position
+  %data, %final_pointer, %final_fifo, %final_position = vldb.pop.512.i8x64 %filled_pointer, %filled_fifo, %filled_position
+  return %data, %live
+}
+
+// ----
+code: d4 41 c0 04 19 00 98 87 06 02 00 00 00 00 00 00 00 00 00 00 00 00 98 07 16 02 00 00 00 00 00 00 00 00 00 00 00 00 18 14 14 3d 18 14 00 39 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
