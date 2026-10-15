@@ -307,7 +307,8 @@ class JitTest : public ::testing::TestWithParam<int> {
     const loom_serve_sources_t sources = {
         .base_directory = iree_make_cstring_view(directory.c_str()),
         .count = IREE_ARRAYSIZE(providers),
-        .values = providers};
+        .values = providers,
+    };
     IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
         loom_serve_host_target_environment(
             loom_serve_device_host(device_owner_)),
@@ -489,17 +490,17 @@ TEST_P(JitTest, VmLibrariesPreserveMissingPrivateAndDuplicateDiagnostics) {
     const loom_serve_sources_t sources = {
         .base_directory = iree_make_cstring_view(directory_.c_str()),
         .count = test.library_count,
-        .values = providers};
+        .values = providers,
+    };
     loom_serve_compilation_report_t report = {};
-    iree_const_byte_span_t image = {};
+    iree_const_byte_span_t image = iree_const_byte_span_empty();
     auto status = loom_serve_jit_compile_vm(
         loom_serve_host_target_environment(
             loom_serve_device_host(device_owner_)),
         &sources, test.entry, 1, &root, &report, host_allocator_, &image);
-    EXPECT_FALSE(iree_status_is_ok(status));
+    IREE_EXPECT_NOT_OK(status);
     EXPECT_EQ(image.data, nullptr);
     EXPECT_GT(report.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 0u);
-    iree_status_free(status);
     iree_allocator_free(host_allocator_, const_cast<uint8_t*>(image.data));
   }
 }
