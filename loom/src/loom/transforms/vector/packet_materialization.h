@@ -60,6 +60,14 @@ iree_status_t loom_vector_packet_materialize(
     const loom_vector_packet_slice_t* slice,
     loom_vector_packetized_value_t** out_value);
 
+// Computes the exact number of operations needed to materialize one dynamic
+// packet from every selected producer. Returns false when the offset facts do
+// not intersect the source domain or the operation count overflows.
+bool loom_vector_packet_dynamic_materialization_operation_count(
+    const loom_vector_packetization_t* packetization,
+    loom_value_facts_t lane_offset_facts, uint32_t lane_count,
+    iree_host_size_t* out_operation_count);
+
 iree_status_t loom_vector_packet_store(
     loom_vector_packetization_t* packetization,
     const loom_vector_memory_footprint_t* store_footprint,

@@ -25,10 +25,11 @@
 
 static bool loom_vector_packet_dynamic_window_expansion_is_bounded(
     const loom_vector_packetization_t* packetization,
+    loom_value_id_t dynamic_offset,
     const loom_vector_packet_shape_t* result_shape, uint32_t consumer_count,
+    uint32_t consumer_branch_count,
     const loom_vector_packet_consumer_materializer_t* materializer) {
   iree_host_size_t operation_count = 0;
-  iree_host_size_t operations_per_chunk = 0;
   iree_host_size_t consumer_operation_count = 0;
   if (consumer_count != 0 &&
       (materializer == NULL || materializer->operation_count == 0)) {
@@ -37,21 +38,47 @@ static bool loom_vector_packet_dynamic_window_expansion_is_bounded(
   if (!iree_host_size_checked_mul(
           consumer_count,
           materializer == NULL ? 0 : materializer->operation_count,
-          &consumer_operation_count) ||
-      !iree_host_size_checked_add(packetization->value_count,
-                                  consumer_operation_count,
-                                  &operations_per_chunk) ||
-      !iree_host_size_checked_mul(
-          operations_per_chunk, result_shape->chunk_count, &operation_count)) {
+          &consumer_operation_count)) {
     return false;
   }
-  if (result_shape->chunk_count > 1) {
-    iree_host_size_t offset_operation_count = 0;
-    if (!iree_host_size_checked_mul(result_shape->chunk_count - 1u, 2u,
-                                    &offset_operation_count) ||
-        !iree_host_size_checked_add(operation_count, offset_operation_count,
+
+  const loom_target_legalization_context_t* context = packetization->context;
+  const loom_value_facts_t base_offset_facts =
+      context->fact_table == NULL
+          ? loom_value_facts_unknown()
+          : loom_value_fact_table_lookup(context->fact_table, dynamic_offset);
+  for (uint32_t chunk_index = 0; chunk_index < result_shape->chunk_count;
+       ++chunk_index) {
+    const uint32_t packet_offset = chunk_index * result_shape->chunk_lane_count;
+    const uint32_t packet_lane_count =
+        iree_min(result_shape->lane_count - packet_offset,
+                 result_shape->chunk_lane_count);
+    loom_value_facts_t packet_offset_facts = base_offset_facts;
+    if (packet_offset != 0) {
+      const loom_value_facts_t static_offset_facts =
+          loom_value_facts_exact_i64(packet_offset);
+      loom_value_facts_addi(&base_offset_facts, &static_offset_facts,
+                            &packet_offset_facts);
+    }
+    iree_host_size_t packet_operation_count = 0;
+    if (!loom_vector_packet_dynamic_materialization_operation_count(
+            packetization, packet_offset_facts, packet_lane_count,
+            &packet_operation_count) ||
+        !iree_host_size_checked_add(operation_count, packet_operation_count,
                                     &operation_count) ||
-        !iree_host_size_checked_add(operation_count, 1u, &operation_count)) {
+        !iree_host_size_checked_add(operation_count, consumer_operation_count,
+                                    &operation_count) ||
+        (packet_offset != 0 &&
+         !iree_host_size_checked_add(operation_count, 2u, &operation_count))) {
+      return false;
+    }
+  }
+
+  if (result_shape->chunk_count > 1) {
+    const uint32_t result_group_count =
+        consumer_branch_count == 0 ? 1u : consumer_branch_count;
+    if (!iree_host_size_checked_add(operation_count, result_group_count,
+                                    &operation_count)) {
       return false;
     }
   }
@@ -636,8 +663,8 @@ iree_status_t loom_vector_packet_legalize_dynamic_slice(
           (result_lane_count - 1u) / source_shape.chunk_lane_count + 1u,
   };
   if (!loom_vector_packet_dynamic_window_expansion_is_bounded(
-          &packetization, &result_shape, consumer_count,
-          consumer_materializer)) {
+          &packetization, window.dynamic_offset, &result_shape, consumer_count,
+          consumer_branch_count, consumer_materializer)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(

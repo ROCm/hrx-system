@@ -326,3 +326,63 @@ check.scenario @dynamic_shaped_tail_values {
   }
   check.return
 }
+
+// Scalar-authored register values retain runtime packet selection without
+// round-tripping through private storage.
+func.def @dynamic_register_window(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 3)] : index
+  %packet_width = index.constant 4 : index
+  %offset = index.mul %ordinal, %packet_width : index
+  %base = index.constant 0 : offset
+  %values = buffer.view %input[%base] : buffer -> view<16xi32>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  %v0 = view.load %values[0] : view<16xi32> -> i32
+  %v1 = view.load %values[1] : view<16xi32> -> i32
+  %v2 = view.load %values[2] : view<16xi32> -> i32
+  %v3 = view.load %values[3] : view<16xi32> -> i32
+  %v4 = view.load %values[4] : view<16xi32> -> i32
+  %v5 = view.load %values[5] : view<16xi32> -> i32
+  %v6 = view.load %values[6] : view<16xi32> -> i32
+  %v7 = view.load %values[7] : view<16xi32> -> i32
+  %v8 = view.load %values[8] : view<16xi32> -> i32
+  %v9 = view.load %values[9] : view<16xi32> -> i32
+  %v10 = view.load %values[10] : view<16xi32> -> i32
+  %v11 = view.load %values[11] : view<16xi32> -> i32
+  %v12 = view.load %values[12] : view<16xi32> -> i32
+  %v13 = view.load %values[13] : view<16xi32> -> i32
+  %v14 = view.load %values[14] : view<16xi32> -> i32
+  %v15 = view.load %values[15] : view<16xi32> -> i32
+  %source = vector.from_elements %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7, %v8, %v9, %v10, %v11, %v12, %v13, %v14, %v15 : vector<16xi32>
+  %window = vector.slice %source[%offset] : vector<16xi32> -> vector<4xi32>
+  vector.store %window, %results[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+func.def @dynamic_register_window_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 3)] : index
+  %packet_width = index.constant 4 : index
+  %offset = index.mul %ordinal, %packet_width : index
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %values = buffer.view %input[%base] : buffer -> view<16xi32>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  scf.for %i = [%begin to %end step %step] {
+    %source_index = index.add %offset, %i : index
+    %value = view.load %values[%source_index] : view<16xi32> -> i32
+    view.store %value, %results[%i] : i32, view<4xi32>
+  }
+  func.return
+}
+
+check.scenario @dynamic_register_window_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-2147483648) step(286331153) : tensor<16xi32>
+    %output = check.generate.fill value(-1431655766) : tensor<4xi32>
+    check.compare<@dynamic_register_window, @dynamic_register_window_oracle>(%trial, %input, %output) : (index, tensor<16xi32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4xi32>
+    }
+  }
+  check.return
+}

@@ -304,3 +304,44 @@ CHECK: COMPILE-REPORT: target_legalization * scalarized=0 *
 CHECK: COMPILE-REPORT: source_low[*] function=materialized_predicate_window_report source_op=vector.slice selection=plan plan_key=slice.dynamic-v128-packets emitted_ops=36
 CHECK-COUNT-2: COMPILE-REPORT: source_low[*] function=materialized_predicate_window_report source_op=vector.extui selection=plan plan_key=predicate.extend-unsigned.v128-packets emitted_ops=2
 CHECK-NOT: scalarized=true
+
+// ====
+
+// Runtime packet selection over scalar-authored register values stays in SSA
+// while the target legalizes the oversized source carrier.
+func.def @from_elements_packet_window(%offset0: index, %v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32, %v8: i32, %v9: i32, %v10: i32, %v11: i32, %v12: i32, %v13: i32, %v14: i32, %v15: i32) -> (vector<4xi32>) {
+  %offset = index.assume %offset0 [range(%offset0, 0, 12), multiple_of(%offset0, 4)] : index
+  %source = vector.from_elements %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7, %v8, %v9, %v10, %v11, %v12, %v13, %v14, %v15 : vector<16xi32>
+  %window = vector.slice %source[%offset] : vector<16xi32> -> vector<4xi32>
+  func.return %window : vector<4xi32>
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @from_elements_packet_window(%offset: reg<wasm.i32>, %v0: reg<wasm.i32>, %v1: reg<wasm.i32>, %v2: reg<wasm.i32>, %v3: reg<wasm.i32>, %v4: reg<wasm.i32>, %v5: reg<wasm.i32>, %v6: reg<wasm.i32>, %v7: reg<wasm.i32>, %v8: reg<wasm.i32>, %v9: reg<wasm.i32>, %v10: reg<wasm.i32>, %v11: reg<wasm.i32>, %v12: reg<wasm.i32>, %v13: reg<wasm.i32>, %v14: reg<wasm.i32>, %v15: reg<wasm.i32>) -> (reg<wasm.v128>) asm {
+  %68 = i32x4.splat %v0
+  %69 = i32x4.replace_lane %68, %v1, 1
+  %70 = i32x4.replace_lane %69, %v2, 2
+  %71 = i32x4.replace_lane %70, %v3, 3
+  %72 = i32x4.splat %v4
+  %73 = i32x4.replace_lane %72, %v5, 1
+  %74 = i32x4.replace_lane %73, %v6, 2
+  %75 = i32x4.replace_lane %74, %v7, 3
+  %76 = i32.const 4
+  %77 = i32.eq %offset, %76
+  %78 = v128.select %75, %71, %77
+  %79 = i32x4.splat %v8
+  %80 = i32x4.replace_lane %79, %v9, 1
+  %81 = i32x4.replace_lane %80, %v10, 2
+  %82 = i32x4.replace_lane %81, %v11, 3
+  %83 = i32.const 8
+  %84 = i32.eq %offset, %83
+  %85 = v128.select %82, %78, %84
+  %86 = i32x4.splat %v12
+  %87 = i32x4.replace_lane %86, %v13, 1
+  %88 = i32x4.replace_lane %87, %v14, 2
+  %89 = i32x4.replace_lane %88, %v15, 3
+  %90 = i32.const 12
+  %91 = i32.eq %offset, %90
+  %window = v128.select %89, %85, %91
+  return %window
+}

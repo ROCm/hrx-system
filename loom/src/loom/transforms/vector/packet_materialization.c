@@ -23,6 +23,81 @@
 #include "loom/ops/view/ops.h"
 #include "loom/util/fact_vector_partition.h"
 
+typedef struct loom_vector_packet_dynamic_element_domain_t {
+  // First possible source lane selected by the dynamic offset.
+  uint32_t first_lane_offset;
+  // Distance between possible source lanes, or zero for a singleton domain.
+  uint32_t lane_offset_step;
+  // Number of possible source lanes.
+  uint32_t lane_offset_count;
+} loom_vector_packet_dynamic_element_domain_t;
+
+// Intersects a dynamic lane offset's retained facts with the source vector's
+// valid packet starts. Divisibility facts remove starts the offset cannot take,
+// keeping register-authored packet selection proportional to the actual loop
+// domain instead of the complete source width.
+static bool loom_vector_packet_dynamic_element_domain(
+    uint32_t source_lane_count, uint32_t packet_lane_count,
+    loom_value_facts_t offset_facts,
+    loom_vector_packet_dynamic_element_domain_t* out_domain) {
+  *out_domain = (loom_vector_packet_dynamic_element_domain_t){0};
+  if (packet_lane_count == 0 || packet_lane_count > source_lane_count) {
+    return false;
+  }
+
+  const uint32_t maximum_lane_offset = source_lane_count - packet_lane_count;
+  const int64_t range_lo = iree_max(offset_facts.range_lo, INT64_C(0));
+  const int64_t range_hi =
+      iree_min(offset_facts.range_hi, (int64_t)maximum_lane_offset);
+  if (range_lo > range_hi) {
+    return false;
+  }
+
+  const uint64_t divisor = (uint64_t)offset_facts.known_divisor;
+  uint64_t first_lane_offset = (uint64_t)range_lo;
+  if (first_lane_offset != 0) {
+    if (divisor > (uint64_t)range_hi) {
+      return false;
+    }
+    const uint64_t remainder = first_lane_offset % divisor;
+    if (remainder != 0) {
+      const uint64_t adjustment = divisor - remainder;
+      if (adjustment > (uint64_t)range_hi - first_lane_offset) {
+        return false;
+      }
+      first_lane_offset += adjustment;
+    }
+  }
+
+  const uint64_t lane_offset_count =
+      ((uint64_t)range_hi - first_lane_offset) / divisor + 1u;
+  IREE_ASSERT_LE(first_lane_offset, UINT32_MAX);
+  IREE_ASSERT_LE(lane_offset_count, UINT32_MAX);
+  *out_domain = (loom_vector_packet_dynamic_element_domain_t){
+      .first_lane_offset = (uint32_t)first_lane_offset,
+      .lane_offset_step = lane_offset_count == 1u ? 0u : (uint32_t)divisor,
+      .lane_offset_count = (uint32_t)lane_offset_count,
+  };
+  return true;
+}
+
+static bool loom_vector_packet_dynamic_element_operation_count(
+    uint32_t source_lane_count, uint32_t packet_lane_count,
+    loom_value_facts_t offset_facts, iree_host_size_t* out_operation_count) {
+  *out_operation_count = 0;
+  loom_vector_packet_dynamic_element_domain_t domain = {0};
+  if (!loom_vector_packet_dynamic_element_domain(
+          source_lane_count, packet_lane_count, offset_facts, &domain)) {
+    return false;
+  }
+  iree_host_size_t selection_operation_count = 0;
+  return iree_host_size_checked_mul(domain.lane_offset_count - 1u, 3u,
+                                    &selection_operation_count) &&
+         iree_host_size_checked_add(domain.lane_offset_count,
+                                    selection_operation_count,
+                                    out_operation_count);
+}
+
 static iree_status_t loom_vector_packet_build_memory_origin(
     loom_target_legalization_context_t* context,
     const loom_vector_memory_footprint_t* footprint, const loom_op_t* source_op,
@@ -555,13 +630,64 @@ static iree_status_t loom_vector_packet_materialize_from_elements(
     loom_vector_packetization_t* packetization, loom_op_t* op,
     const loom_vector_packet_slice_t* slice,
     loom_vector_packetized_value_t* packetized_value) {
-  IREE_ASSERT_EQ(slice->dynamic_lane_offset, LOOM_VALUE_ID_INVALID);
   const loom_value_slice_t elements = loom_vector_from_elements_elements(op);
+  const loom_type_t packet_type =
+      loom_vector_packet_type(packetized_value->source_type, slice->lane_count);
+
+  if (slice->dynamic_lane_offset != LOOM_VALUE_ID_INVALID) {
+    loom_target_legalization_context_t* context = packetization->context;
+    const loom_value_facts_t offset_facts =
+        context->fact_table == NULL
+            ? loom_value_facts_unknown()
+            : loom_value_fact_table_lookup(context->fact_table,
+                                           slice->dynamic_lane_offset);
+    loom_vector_packet_dynamic_element_domain_t domain = {0};
+    const bool domain_available = loom_vector_packet_dynamic_element_domain(
+        (uint32_t)elements.count, slice->lane_count, offset_facts, &domain);
+    IREE_ASSERT_TRUE(domain_available);
+    (void)domain_available;
+
+    loom_builder_t* builder = &context->rewriter->builder;
+    const loom_type_t offset_type =
+        loom_module_value_type(context->module, slice->dynamic_lane_offset);
+    loom_value_id_t selected_packet = LOOM_VALUE_ID_INVALID;
+    for (uint32_t candidate_index = 0;
+         candidate_index < domain.lane_offset_count; ++candidate_index) {
+      const uint32_t candidate_lane_offset =
+          domain.first_lane_offset + candidate_index * domain.lane_offset_step;
+      loom_op_t* candidate_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_from_elements_build(
+          builder, elements.values + candidate_lane_offset, slice->lane_count,
+          packet_type, op->location, &candidate_op));
+      const loom_value_id_t candidate_packet =
+          loom_vector_from_elements_result(candidate_op);
+      if (candidate_index == 0) {
+        selected_packet = candidate_packet;
+        continue;
+      }
+
+      loom_op_t* expected_offset_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_index_constant_build(
+          builder, loom_attr_i64(candidate_lane_offset), offset_type,
+          op->location, &expected_offset_op));
+      loom_op_t* matches_offset_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_index_cmp_build(
+          builder, LOOM_INDEX_CMP_PREDICATE_EQ, slice->dynamic_lane_offset,
+          loom_index_constant_result(expected_offset_op), op->location,
+          &matches_offset_op));
+      loom_op_t* select_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_scf_select_build(
+          builder, loom_index_cmp_result(matches_offset_op), candidate_packet,
+          selected_packet, packet_type, op->location, &select_op));
+      selected_packet = loom_scf_select_result(select_op);
+    }
+    packetized_value->packet = selected_packet;
+    return iree_ok_status();
+  }
+
   IREE_ASSERT_LE(
       (iree_host_size_t)slice->static_lane_offset + slice->lane_count,
       elements.count);
-  const loom_type_t packet_type =
-      loom_vector_packet_type(packetized_value->source_type, slice->lane_count);
   loom_op_t* packet_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_from_elements_build(
       &packetization->context->rewriter->builder,
@@ -569,6 +695,34 @@ static iree_status_t loom_vector_packet_materialize_from_elements(
       packet_type, op->location, &packet_op));
   packetized_value->packet = loom_vector_from_elements_result(packet_op);
   return iree_ok_status();
+}
+
+bool loom_vector_packet_dynamic_materialization_operation_count(
+    const loom_vector_packetization_t* packetization,
+    loom_value_facts_t lane_offset_facts, uint32_t lane_count,
+    iree_host_size_t* out_operation_count) {
+  *out_operation_count = 0;
+  for (uint32_t i = 0; i < packetization->value_count; ++i) {
+    const loom_vector_packetized_value_t* packetized_value =
+        &packetization->values[i];
+    iree_host_size_t value_operation_count = 1u;
+    if (packetized_value->source_mode ==
+        LOOM_VECTOR_PACKET_SOURCE_MODE_STATIC_ELEMENTS) {
+      uint32_t source_lane_count = 0;
+      if (!loom_vector_packet_static_lane_count(packetized_value->source_type,
+                                                &source_lane_count) ||
+          !loom_vector_packet_dynamic_element_operation_count(
+              source_lane_count, lane_count, lane_offset_facts,
+              &value_operation_count)) {
+        return false;
+      }
+    }
+    if (!iree_host_size_checked_add(*out_operation_count, value_operation_count,
+                                    out_operation_count)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 static iree_status_t loom_vector_packet_materialize_captured(

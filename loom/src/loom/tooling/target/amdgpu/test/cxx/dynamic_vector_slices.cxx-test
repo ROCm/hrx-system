@@ -1,0 +1,60 @@
+// RUN: emit source-low @sum_packets target=amdgpu:gfx1151 output=low
+
+#include <loomcxx/kernel.h>
+#include <loomcxx/vector.h>
+
+using Values = unsigned __attribute__((ext_vector_type(16)));
+using Packet = unsigned __attribute__((ext_vector_type(4)));
+
+[[loom::config("dynamic_slice.packet_count")]] const unsigned packet_count = 4u;
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]] void sum_packets(const unsigned* input, Packet* output) {
+  Values values = {input[0],  input[1],  input[2],  input[3],
+                   input[4],  input[5],  input[6],  input[7],
+                   input[8],  input[9],  input[10], input[11],
+                   input[12], input[13], input[14], input[15]};
+  Packet sum = {};
+  [[loom::unroll]]
+  for (unsigned index = 0; index < packet_count; ++index) {
+    sum += loom::vector::slice<Packet>(values, index * 4u);
+  }
+  output[0] = sum;
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sum_packets() asm {
+  %input = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %315 = v_mov_b32 0
+  %316 = global_load_b32_saddr %315, %input
+  %318 = global_load_b32_saddr %315, %input {offset = 4}
+  %320 = global_load_b32_saddr %315, %input {offset = 8}
+  %322 = global_load_b32_saddr %315, %input {offset = 12}
+  %324 = global_load_b32_saddr %315, %input {offset = 16}
+  %326 = global_load_b32_saddr %315, %input {offset = 20}
+  %328 = global_load_b32_saddr %315, %input {offset = 24}
+  %330 = global_load_b32_saddr %315, %input {offset = 28}
+  %332 = global_load_b32_saddr %315, %input {offset = 32}
+  %334 = global_load_b32_saddr %315, %input {offset = 36}
+  %336 = global_load_b32_saddr %315, %input {offset = 40}
+  %338 = global_load_b32_saddr %315, %input {offset = 44}
+  %340 = global_load_b32_saddr %315, %input {offset = 48}
+  %342 = global_load_b32_saddr %315, %input {offset = 52}
+  %344 = global_load_b32_saddr %315, %input {offset = 56}
+  %346 = global_load_b32_saddr %315, %input {offset = 60}
+  %351 = v_add_u32 %316, %324
+  %354 = v_add_u32 %318, %326
+  %357 = v_add_u32 %320, %328
+  %360 = v_add_u32 %322, %330
+  %365 = v_add_u32 %351, %332
+  %368 = v_add_u32 %354, %334
+  %371 = v_add_u32 %357, %336
+  %374 = v_add_u32 %360, %338
+  %379 = v_add_u32 %365, %340
+  %382 = v_add_u32 %368, %342
+  %385 = v_add_u32 %371, %344
+  %388 = v_add_u32 %374, %346
+  %sum_3 = concat(%379, %382, %385, %388) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %315, %sum_3, %output
+  return
+}

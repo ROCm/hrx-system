@@ -279,3 +279,86 @@ func.def target(@target) @store_streamed_wide_predicate_window(%source: buffer, 
   vector.store %145, %output_view[64] : vector<1xi8>, view<65xi8>
   func.return
 }
+
+// ====
+
+// RUN: pass target-legalize{mode=final,policy=require-native}
+
+amdgpu.target<gfx11-generic> @target
+
+// A multi-packet dynamic window over scalar-authored register values selects
+// only offsets admitted by retained range and divisibility facts. Facts also
+// follow the adjusted second-packet offset without private staging.
+func.def target(@target) @from_elements_packet_window(%offset0: index, %v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32, %v8: i32, %v9: i32, %v10: i32, %v11: i32, %v12: i32, %v13: i32, %v14: i32, %v15: i32) -> (vector<8xi32>) {
+  %offset = index.assume %offset0 [range(%offset0, 0, 8), multiple_of(%offset0, 4)] : index
+  %source = vector.from_elements %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7, %v8, %v9, %v10, %v11, %v12, %v13, %v14, %v15 : vector<16xi32>
+  %window = vector.slice %source[%offset] : vector<16xi32> -> vector<8xi32>
+  func.return %window : vector<8xi32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @from_elements_packet_window(%offset0: index, %v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32, %v8: i32, %v9: i32, %v10: i32, %v11: i32, %v12: i32, %v13: i32, %v14: i32, %v15: i32) -> (vector<8xi32>) {
+  %offset = index.assume %offset0 [range(%offset0, 0, 8), multiple_of(%offset0, 4)] : index
+  %21 = vector.from_elements %v0, %v1, %v2, %v3 : vector<4xi32>
+  %22 = vector.from_elements %v4, %v5, %v6, %v7 : vector<4xi32>
+  %23 = index.constant 4 : index
+  %24 = index.cmp eq, %offset, %23 : index
+  %25 = scf.select %24, %22, %21 : vector<4xi32>
+  %26 = vector.from_elements %v8, %v9, %v10, %v11 : vector<4xi32>
+  %27 = index.constant 8 : index
+  %28 = index.cmp eq, %offset, %27 : index
+  %29 = scf.select %28, %26, %25 : vector<4xi32>
+  %30 = index.constant 4 : index
+  %31 = index.add %offset, %30 : index
+  %32 = vector.from_elements %v4, %v5, %v6, %v7 : vector<4xi32>
+  %33 = vector.from_elements %v8, %v9, %v10, %v11 : vector<4xi32>
+  %34 = index.constant 8 : index
+  %35 = index.cmp eq, %31, %34 : index
+  %36 = scf.select %35, %33, %32 : vector<4xi32>
+  %37 = vector.from_elements %v12, %v13, %v14, %v15 : vector<4xi32>
+  %38 = index.constant 12 : index
+  %39 = index.cmp eq, %31, %38 : index
+  %40 = scf.select %39, %37, %36 : vector<4xi32>
+  %window = vector.concat<0> %29, %40 : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  func.return %window : vector<8xi32>
+}
+
+// ====
+
+// RUN: pass target-legalize{mode=final,policy=require-native}
+
+amdgpu.target<gfx11-generic> @target
+
+// An unconstrained runtime offset enumerates every valid overlapping packet
+// when the complete expansion remains below the shared cost ceiling.
+func.def target(@target) @from_elements_unconstrained_window(%offset: index, %v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32) -> (vector<4xi32>) {
+  %source = vector.from_elements %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7 : vector<8xi32>
+  %window = vector.slice %source[%offset] : vector<8xi32> -> vector<4xi32>
+  func.return %window : vector<4xi32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @from_elements_unconstrained_window(%offset: index, %v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32) -> (vector<4xi32>) {
+  %12 = vector.from_elements %v0, %v1, %v2, %v3 : vector<4xi32>
+  %13 = vector.from_elements %v1, %v2, %v3, %v4 : vector<4xi32>
+  %14 = index.constant 1 : index
+  %15 = index.cmp eq, %offset, %14 : index
+  %16 = scf.select %15, %13, %12 : vector<4xi32>
+  %17 = vector.from_elements %v2, %v3, %v4, %v5 : vector<4xi32>
+  %18 = index.constant 2 : index
+  %19 = index.cmp eq, %offset, %18 : index
+  %20 = scf.select %19, %17, %16 : vector<4xi32>
+  %21 = vector.from_elements %v3, %v4, %v5, %v6 : vector<4xi32>
+  %22 = index.constant 3 : index
+  %23 = index.cmp eq, %offset, %22 : index
+  %24 = scf.select %23, %21, %20 : vector<4xi32>
+  %25 = vector.from_elements %v4, %v5, %v6, %v7 : vector<4xi32>
+  %26 = index.constant 4 : index
+  %27 = index.cmp eq, %offset, %26 : index
+  %window = scf.select %27, %25, %24 : vector<4xi32>
+  func.return %window : vector<4xi32>
+}

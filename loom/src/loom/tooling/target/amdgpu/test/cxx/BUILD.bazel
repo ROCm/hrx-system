@@ -393,6 +393,7 @@ loom_check_test(
     for name in [
         "assembly_lowering",
         "assembly_invalid",
+        "dynamic_vector_slices",
         "integer_extrema",
         "matrix_fragments",
         "opaque_pointers",
