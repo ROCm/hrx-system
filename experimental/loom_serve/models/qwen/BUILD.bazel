@@ -9,6 +9,7 @@ load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
 load("//loom/src/loom/tooling/target/spirv:execution_profiles.bzl", "SPIRV_VULKAN_HARDWARE_PROFILE")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "amdgpu_execution_profile")
+load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -33,6 +34,16 @@ filegroup(
         "kernels/qwen38/spans.loom",
     ],
     visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "epoch_encoding_test",
+    srcs = [
+        "control.loom",
+        "tests/epoch_encoding.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
 )
 
 filegroup(

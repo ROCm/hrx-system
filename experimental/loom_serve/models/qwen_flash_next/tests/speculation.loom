@@ -30,7 +30,7 @@ kernel.decl @flash_next_capture_rows(%span_capacity: index, %row_bytes: offset) 
 
 kernel.decl @flash_next_commit_ple_history() launch(%history_origin: offset, %epoch: buffer, %rows: buffer, %input: buffer, %arena: buffer)
 
-kernel.decl @qwen38_accept_spans() launch(%width: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
+kernel.decl @qwen38_accept_spans() launch(%width: index, %token_capacity: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
 
 // Direct reference execution publishes the prefix through the ordinary
 // convolution, independently of compact-history publication.
@@ -307,7 +307,7 @@ check.case public @accepted_prefixes_preserve_all_state {
   %committed = check.generate.fill value(-7) : tensor<387xi32>
   %replay = check.generate.fill value(-7) : tensor<387xi32>
   %results = check.generate.fill value(-7) : tensor<16x10xi32>
-  kernel.launch @qwen38_accept_spans(%width, %epoch, %ids, %predictions, %committed, %replay, %results) : (index, tensor<1528xi32>, tensor<20xi32>, tensor<128xi32>, tensor<387xi32>, tensor<387xi32>, tensor<16x10xi32>)
+  kernel.launch @qwen38_accept_spans(%width, %capacity, %epoch, %ids, %predictions, %committed, %replay, %results) : (index, index, tensor<1528xi32>, tensor<20xi32>, tensor<128xi32>, tensor<387xi32>, tensor<387xi32>, tensor<16x10xi32>)
   check.expect.bitwise actual(%results) expected(%expected_results) : tensor<16x10xi32>
   kernel.launch @gdn_convolve_commit(%replay, %rows, %history_origin, %qkv_capture, %weight, %actual, %convolved, %norm) : (tensor<387xi32>, tensor<64xi64>, offset, tensor<20x10240xbf16>, tensor<10240x4xf32>, tensor<6x848128xf32>, tensor<20x10240xbf16>, tensor<20x32xf32>)
   kernel.launch @gdn_recur_commit(%replay, %rows, %state_origin, %convolved, %norm, %alpha_capture, %beta_capture, %a, %bias, %actual, %raw) : (tensor<387xi32>, tensor<64xi64>, offset, tensor<20x10240xbf16>, tensor<20x32xf32>, tensor<20x48xf32>, tensor<20x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<6x848128xf32>, tensor<20x6144xbf16>)

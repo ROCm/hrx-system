@@ -1,12 +1,16 @@
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
+// The allocation holds two target planes. This extent is independent of the
+// compact draft batch and of either target epoch's selected execution shape.
+config.decl @flash_next.epoch_capacity : %value: index where [range(%value, 1, 32768)]
+
 config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
 
 config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
 
-kernel.decl @qwen38_mtp_proposal_prepare() launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer)
+kernel.decl @qwen38_mtp_proposal_prepare() launch(%target_capacity: index, %draft_capacity: index, %epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer)
 
-kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer)
+kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: index, %target_capacity: index, %draft_capacity: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer)
 
 kernel.decl @flash_next_map_tokens() launch(%epoch: buffer, %mapping: buffer)
 
@@ -14,7 +18,7 @@ kernel.decl @flash_next_mtp_restore() launch(%epoch: buffer, %carry: buffer, %ca
 
 kernel.decl @flash_next_mtp_sample() launch(%epoch: buffer, %logits: buffer, %output: buffer)
 
-kernel.decl @qwen38_continue_dispatch() launch(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer)
+kernel.decl @qwen38_continue_dispatch() launch(%context: index, %capacity: index, %epoch: buffer, %tokens: buffer, %results: buffer)
 
 command.program.decl @flash_next_mtp_input() launch(%parameters: buffer, %target_parameters: buffer, %epoch: buffer, %ids: buffer, %hidden: buffer, %residual: buffer)
 
@@ -29,6 +33,7 @@ command.program.decl @flash_next_head_logits(%predictor: index) launch(%paramete
 // The raw four-stream output, before the final head mixer, is recursive hidden.
 command.program.def public @flash_next_mtp_propose() launch(%parameters: buffer, %embedding_parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer, %carry: buffer) {
   %tokens = config.get @flash_next.token_count : index
+  %target_capacity = config.get @flash_next.epoch_capacity : index
   %pool = config.get @flash_next.pool_capacity : index
   %hidden_stride = index.constant 20480 : offset
   %logit_stride = index.constant 993280 : offset
@@ -38,7 +43,8 @@ command.program.def public @flash_next_mtp_propose() launch(%parameters: buffer,
   %mapping_bytes = index.scale %tokens, %mapping_stride : index, offset -> offset
   %control_bytes = index.constant 1548 : offset
   %origin_bytes = index.constant 64 : offset
-  %token_bytes = index.constant 2048 : offset
+  %token_stride = index.constant 4 : offset
+  %token_bytes = index.scale %tokens, %token_stride : index, offset -> offset
   %draft = buffer.alloca<global> align(16) %control_bytes : buffer
   %origins = buffer.alloca<global> align(16) %origin_bytes : buffer
   %ids = buffer.alloca<global> align(16) %token_bytes : buffer
@@ -48,7 +54,7 @@ command.program.def public @flash_next_mtp_propose() launch(%parameters: buffer,
   %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %attention = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %logits = buffer.alloca<global> align(256) %logit_bytes : buffer
-  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target_tokens, %draft, %origins, %ids) : (buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_mtp_proposal_prepare(%target_capacity, %tokens, %epoch, %target_tokens, %draft, %origins, %ids) : (index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @flash_next_mtp_restore(%draft, %carry, %cache, %hidden) : (buffer, buffer, buffer, buffer)
   %layer = index.constant 48 : index
   %key_origin = index.constant 0 : offset
@@ -66,13 +72,14 @@ command.program.def public @flash_next_mtp_propose() launch(%parameters: buffer,
     command.program.launch @flash_next_ffn_residual[%layer](%parameters, %draft, %attention, %hidden) : [index](buffer, buffer, buffer, buffer)
     command.program.launch @flash_next_head_logits[%c1](%parameters, %vocabulary_parameters, %draft, %hidden, %logits) : [index](buffer, buffer, buffer, buffer, buffer)
     kernel.launch @flash_next_mtp_sample(%draft, %logits, %predictions) : (buffer, buffer, buffer)
-    kernel.launch @qwen38_mtp_proposal_advance[%round](%round, %draft, %origins, %predictions, %ids, %target_tokens) : [index](index, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @qwen38_mtp_proposal_advance[%round](%round, %target_capacity, %tokens, %draft, %origins, %predictions, %ids, %target_tokens) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer)
   }
   command.return
 }
 
 command.program.def public @flash_next_continue() launch(%epoch: buffer, %tokens: buffer, %results: buffer) {
   %context = config.get @flash_next.context_capacity : index
-  kernel.launch @qwen38_continue_dispatch(%context, %epoch, %tokens, %results) : (index, buffer, buffer, buffer)
+  %capacity = config.get @flash_next.epoch_capacity : index
+  kernel.launch @qwen38_continue_dispatch(%context, %capacity, %epoch, %tokens, %results) : (index, index, buffer, buffer, buffer)
   command.return
 }
