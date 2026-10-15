@@ -22,6 +22,8 @@ iree_status_t loom_low_schedule_setup_order_initialize(
       (void**)&out_order->entry_nodes));
   memset(out_order->completion_nodes, 0xFF,
          node_count * sizeof(*out_order->completion_nodes));
+  memset(out_order->entry_nodes, 0xFF,
+         node_count * sizeof(*out_order->entry_nodes));
   return iree_ok_status();
 }
 
@@ -146,6 +148,7 @@ iree_status_t loom_low_schedule_setup_order_finish(
       const uint32_t node_index = i - 1;
       const loom_low_schedule_node_t* node = &state->nodes[node_index];
       const uint32_t successor = order->completion_nodes[node_index];
+      const uint32_t value_successor = order->entry_nodes[node_index];
       order->completion_nodes[node_index] = node_index;
       order->entry_nodes[node_index] = node_index;
       if (iree_any_bit_set(node->flags,
@@ -153,7 +156,11 @@ iree_status_t loom_low_schedule_setup_order_finish(
         range_end = node_index;
         continue;
       }
-      if (successor <= node_index || successor >= range_end ||
+      // An order-only successor does not consume the produced value. Grouping
+      // unrelated readers around their next state writer would retain all of
+      // their inputs together instead of completing each private setup.
+      if (successor != value_successor || successor <= node_index ||
+          successor >= range_end ||
           !iree_any_bit_set(node->flags,
                             LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP)) {
         continue;

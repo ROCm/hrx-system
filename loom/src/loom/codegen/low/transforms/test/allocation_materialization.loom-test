@@ -462,7 +462,7 @@ low.func.def target<test.low.core>(@test_target) @unsupported_stack_spill_space(
 
 test.target<low_core> @test_target
 
-// REMARK@+1: BACKEND/045 {function_name="rematerialize_live_frontier", trigger_value_class="test.packed.narrow", trigger_kind="allocation-failure", repaired_value_count="1", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0", reason_key="descriptor-rematerializable"}
+// REMARK@+1: BACKEND/045 {function_name="rematerialize_live_frontier", trigger_value_class="test.packed.narrow", trigger_kind="allocation-failure", repaired_value_count="1", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0", reason_key="producer-rematerializable"}
 low.func.def target<test.low.core>(@test_target) @rematerialize_live_frontier(%blocker: reg<test.packed.narrow>) -> (reg<test.i32>) asm {
   %literal = test.const.packed.narrow 7
   %seed = copy %literal : reg<test.packed.narrow> -> reg<test.i32>
@@ -583,7 +583,7 @@ low.func.def target<test.low.core>(@test_target) @do_not_rematerialize_consumed_
 
 test.target<low_core> @test_target
 
-// REMARK@+1: BACKEND/045 {function_name="rematerialize_spill_plan_diagnostics", trigger_value_class="test.i32", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0", reason_key="descriptor-rematerializable"}
+// REMARK@+1: BACKEND/045 {function_name="rematerialize_spill_plan_diagnostics", trigger_value_class="test.i32", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0", reason_key="producer-rematerializable"}
 low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan_diagnostics(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
   %literal = test.const.i32 7
   %ab = test.add.i32 %a, %b
@@ -1106,4 +1106,69 @@ low.func.def target<test.low.core>(@target) @spill_constants() asm {
   %third_remat = test.const.i32 3
   low.spill %third_remat, %storage {offset = 8} : reg<test.i32>, low.storage<private>
   return
+}
+
+// ====
+
+// Storage addresses carry their reservation and byte offset through each clone.
+// RUN: pass low-materialize-allocation{budgets=test.i32=3}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @storage_address(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 64} : low.storage<private>
+  %address = storage_address %storage {offset = 16} : low.storage<private> -> reg<test.i32>
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %first = test.add.i32 %ab, %address
+  %second = test.add.i32 %bc, %address
+  %result = test.add.i32 %first, %second
+  return %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @storage_address(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 64} : low.storage<private>
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %address_remat$11 = storage_address %storage {offset = 16} : low.storage<private> -> reg<test.i32>
+  %first = test.add.i32 %ab, %address_remat$11
+  %address_remat$12 = storage_address %storage {offset = 16} : low.storage<private> -> reg<test.i32>
+  %second = test.add.i32 %bc, %address_remat$12
+  %result = test.add.i32 %first, %second
+  return %result
+}
+
+// ====
+
+// One user with repeated operands receives one address materialization.
+// RUN: pass low-materialize-allocation{budgets=test.i32=3}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @repeated_storage_address(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<scratch>
+  %address = storage_address %storage : low.storage<scratch> -> reg<test.i32>
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %twice = test.add.i32 %address, %address
+  %first = test.add.i32 %ab, %twice
+  %result = test.add.i32 %first, %bc
+  return %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @repeated_storage_address(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<scratch>
+  %ab = test.add.i32 %a, %b
+  %bc = test.add.i32 %b, %c
+  %address_remat = storage_address %storage : low.storage<scratch> -> reg<test.i32>
+  %twice = test.add.i32 %address_remat, %address_remat
+  %first = test.add.i32 %ab, %twice
+  %result = test.add.i32 %first, %bc
+  return %result
 }

@@ -910,3 +910,124 @@ low.func.def target<amdgpu.rdna3.core>(@target) @retained_arithmetic_after_spill
   global_store_b32 v0, v1, s[2:3] offset:8
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @scratch_address_pressure amdgpu.vgpr=4 strategy=resource-stall
+
+// Four registers suffice for a scratch address, a packed payload, and the
+// global offset. Spilling an address must not recursively consume the bank
+// with the address and payload needed to access its spill slot.
+amdgpu.target<gfx90a> @target
+
+low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(128, 1, 1) @scratch_address_pressure() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %base = s_load_dwordx2_offset_only %kernarg
+  %zero = v_mov_b32 0
+  %slot0 = storage {byte_alignment = 8, byte_length = 8} : low.storage<scratch>
+  %slot1 = storage {byte_alignment = 8, byte_length = 8} : low.storage<scratch>
+  %slot2 = storage {byte_alignment = 8, byte_length = 8} : low.storage<scratch>
+  %slot3 = storage {byte_alignment = 8, byte_length = 8} : low.storage<scratch>
+  %address0 = storage_address %slot0 : low.storage<scratch> -> reg<amdgpu.vgpr>
+  %scalar0 = v_mov_b32 1
+  %packed0 = concat(%scalar0, %scalar0) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  scratch_store_dwordx2_vaddr %address0, %packed0
+  %address1 = storage_address %slot1 : low.storage<scratch> -> reg<amdgpu.vgpr>
+  %scalar1 = v_mov_b32 2
+  %packed1 = concat(%scalar1, %scalar1) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  scratch_store_dwordx2_vaddr %address1, %packed1
+  %address2 = storage_address %slot2 : low.storage<scratch> -> reg<amdgpu.vgpr>
+  %scalar2 = v_mov_b32 3
+  %packed2 = concat(%scalar2, %scalar2) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  scratch_store_dwordx2_vaddr %address2, %packed2
+  %address3 = storage_address %slot3 : low.storage<scratch> -> reg<amdgpu.vgpr>
+  %scalar3 = v_mov_b32 4
+  %packed3 = concat(%scalar3, %scalar3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  scratch_store_dwordx2_vaddr %address3, %packed3
+  %loaded0 = scratch_load_dwordx2_vaddr %address0 : reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %zero, %loaded0, %base
+  %loaded1 = scratch_load_dwordx2_vaddr %address1 : reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %zero, %loaded1, %base
+  %loaded2 = scratch_load_dwordx2_vaddr %address2 : reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %zero, %loaded2, %base
+  %loaded3 = scratch_load_dwordx2_vaddr %address3 : reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %zero, %loaded3, %base
+  return
+}
+
+// ----
+  s_load_dwordx2 s[2:3], s[0:1], 0
+  v_mov_b32 v0, 1
+  v_mov_b32 v2, 2
+  v_mov_b32 v1, v0
+  v_mov_b32 v3, 0
+  scratch_store_dwordx2 v3, v[0:1], off offset:0
+  v_mov_b32 v3, v2
+  v_mov_b32 v0, 8
+  scratch_store_dwordx2 v0, v[2:3], off offset:0
+  v_mov_b32 v0, 3
+  v_mov_b32 v1, 60
+  scratch_store_dword v1, v0, off offset:0
+  v_mov_b32 v0, 60
+  v_mov_b32 v1, 60
+  scratch_load_dword v0, v0, off offset:0
+  s_nop 0
+  scratch_load_dword v1, v1, off offset:0
+  v_mov_b32 v2, 16
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dwordx2 v2, v[0:1], off offset:0
+  v_mov_b32 v0, 4
+  v_mov_b32 v1, 64
+  scratch_store_dword v1, v0, off offset:0
+  v_mov_b32 v0, 64
+  v_mov_b32 v1, 64
+  scratch_load_dword v0, v0, off offset:0
+  s_nop 0
+  scratch_load_dword v1, v1, off offset:0
+  v_mov_b32 v2, 24
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dwordx2 v2, v[0:1], off offset:0
+  v_mov_b32 v0, 0
+  scratch_load_dwordx2 v[0:1], v0, off offset:0
+  v_mov_b32 v2, 0
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  global_store_dwordx2 v2, v[0:1], s[2:3] offset:0
+  v_mov_b32 v0, 8
+  scratch_load_dwordx2 v[0:1], v0, off offset:0
+  v_mov_b32 v2, 32
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dwordx2 v2, v[0:1], off offset:0
+  v_mov_b32 v0, 0
+  v_mov_b32 v1, 56
+  scratch_store_dword v1, v0, off offset:0
+  v_mov_b32 v0, 32
+  scratch_load_dwordx2 v[0:1], v0, off offset:0
+  v_mov_b32 v2, 56
+  scratch_load_dword v2, v2, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dwordx2 v2, v[0:1], s[2:3] offset:0
+  v_mov_b32 v0, 16
+  scratch_load_dwordx2 v[0:1], v0, off offset:0
+  v_mov_b32 v2, 0
+  v_mov_b32 v3, 52
+  scratch_store_dword v3, v2, off offset:0
+  v_mov_b32 v2, 52
+  scratch_load_dword v2, v2, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dwordx2 v2, v[0:1], s[2:3] offset:0
+  v_mov_b32 v0, 24
+  scratch_load_dwordx2 v[0:1], v0, off offset:0
+  v_mov_b32 v2, 40
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dwordx2 v2, v[0:1], off offset:0
+  v_mov_b32 v0, 0
+  v_mov_b32 v1, 48
+  scratch_store_dword v1, v0, off offset:0
+  v_mov_b32 v0, 40
+  scratch_load_dwordx2 v[0:1], v0, off offset:0
+  v_mov_b32 v2, 48
+  scratch_load_dword v2, v2, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dwordx2 v2, v[0:1], s[2:3] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm

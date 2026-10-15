@@ -250,8 +250,9 @@ static iree_status_t loom_low_schedule_append_dependency(
   const loom_low_schedule_dependency_timing_t timing =
       loom_low_schedule_resolve_dependency_timing(
           state, producer_node, kind, producer_endpoint, consumer_endpoint);
-  loom_low_schedule_setup_order_record_dependency(&state->setup_order,
-                                                  producer_node, consumer_node);
+  loom_low_schedule_setup_order_record_dependency(
+      &state->setup_order, producer_node, consumer_node,
+      kind == LOOM_LOW_SCHEDULE_DEPENDENCY_SSA);
   return loom_low_schedule_dependency_graph_append(
       &state->dependencies,
       (loom_low_schedule_dependency_t){

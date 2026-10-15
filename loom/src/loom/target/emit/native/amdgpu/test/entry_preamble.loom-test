@@ -97,8 +97,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_ordina
 // ----
   s_mov_b32 s2, s0
   s_mov_b32 s3, s1
-  s_mov_b32 s1, s2
   s_mov_b32 s0, s3
+  s_mov_b32 s1, s2
   v_cndmask_b32 v0, 0, v0, s[2:3]
 .Lbb1:
   s_endpgm
@@ -128,8 +128,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_succes
 .Lbb1:
   s_mov_b32 s2, s0
   s_mov_b32 s3, s1
-  s_mov_b32 s1, s2
   s_mov_b32 s0, s3
+  s_mov_b32 s1, s2
   v_cndmask_b32 v0, 0, v0, s[2:3]
 .Lbb2:
   s_endpgm

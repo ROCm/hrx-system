@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Descriptor-guided value rematerialization and allocation-pressure repair.
+// Value rematerialization and allocation-pressure repair.
 //
-// This layer mutates IR only when a pure descriptor packet explicitly opts its
-// result in to rematerialization. Allocation and scheduling retain the evidence
-// that selects a candidate; this utility owns cloning the producer ownership
-// chain near each user and retaining private producer placement across schedule
-// rebuilds. Every packet in a tied chain must opt in. Repeated operands in one
-// user share the same cloned chain.
+// Target packets explicitly opt their results in to rematerialization; pure
+// structural materializations are also eligible. Allocation and scheduling
+// retain the evidence that selects a candidate. This utility owns cloning the
+// producer ownership chain near each user and retaining private producer
+// placement across schedule rebuilds. Every producer in a tied chain must be
+// eligible. Repeated operands in one user share the same cloned chain.
 
 #ifndef LOOM_CODEGEN_LOW_REMATERIALIZATION_H_
 #define LOOM_CODEGEN_LOW_REMATERIALIZATION_H_
@@ -30,7 +30,7 @@ extern "C" {
 typedef struct loom_low_value_rematerialization_result_t {
   // SSA value whose defining packet was rematerialized or placement retained.
   loom_value_id_t value_id;
-  // Number of descriptor packet clones inserted across all distinct users.
+  // Number of producer clones inserted across all distinct users.
   uint32_t cloned_packet_count;
   // Number of operand uses rewritten to cloned packet results.
   uint32_t rewritten_operand_count;
@@ -41,7 +41,7 @@ typedef struct loom_low_value_rematerialization_result_t {
 typedef struct loom_low_rematerialization_batch_result_t {
   // Number of values repaired by cloning or retained placement.
   uint32_t repaired_value_count;
-  // Total descriptor packets cloned across the repaired values.
+  // Total producer operations cloned across the repaired values.
   uint32_t cloned_packet_count;
   // Total operand uses rewritten across the repaired values.
   uint32_t rewritten_operand_count;
@@ -68,7 +68,7 @@ typedef struct loom_low_rematerialization_state_t {
   iree_bitmap_t* required_register_values;
 } loom_low_rematerialization_state_t;
 
-// Rematerializes a descriptor-backed SSA value once near each distinct user.
+// Rematerializes an eligible SSA value once near each distinct user.
 // A tied result recreates its complete rematerializable ownership chain so each
 // clone consumes private storage. Multiple operands of one user share one
 // rematerialized value.

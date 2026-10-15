@@ -18,6 +18,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/ops/op_defs.h"
@@ -80,7 +81,7 @@ static bool loom_low_descriptor_packet_kind_may_rematerialize(
 }
 
 typedef struct loom_low_rematerialization_recipe_t {
-  // Descriptor packets from the selected value toward its ownership root.
+  // Producer operations from the selected value toward its ownership root.
   loom_op_t** packets;
   // Number of packets in the ownership chain.
   iree_host_size_t packet_count;
@@ -97,7 +98,7 @@ typedef enum loom_low_rematerialization_action_e {
 // One prepared value repair. Its recipe and captured uses remain valid until
 // application rewrites IR; placement retention leaves the snapshot unchanged.
 typedef struct loom_low_rematerialization_plan_t {
-  // Descriptor-backed ownership chain to recreate for each user.
+  // Rematerializable ownership chain to recreate for each user.
   loom_low_rematerialization_recipe_t recipe;
   // Existing uses captured once before deciding whether mutation is required.
   const loom_use_t* uses;
@@ -141,9 +142,19 @@ static bool loom_low_rematerialization_packet_is_eligible(
   loom_low_descriptor_packet_t packet = {0};
   loom_low_descriptor_packet_initialize(target->descriptor_set, defining_op,
                                         &packet);
-  if (!loom_low_descriptor_packet_kind_may_rematerialize(packet.kind) ||
-      !loom_low_descriptor_result_can_rematerialize(
-          target->descriptor_set, packet.descriptor, result_index)) {
+  if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
+    // Pure structural materializations can be recreated just like opted-in
+    // target packets. Ownership-creating copies and concatenations are not
+    // pure; input availability and register requirements are checked below.
+    if (!iree_any_bit_set(loom_op_vtable(module, defining_op)->vtable_flags,
+                          LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION) ||
+        !iree_any_bit_set(loom_op_effective_traits(module, defining_op),
+                          LOOM_TRAIT_PURE)) {
+      return false;
+    }
+  } else if (!loom_low_descriptor_packet_kind_may_rematerialize(packet.kind) ||
+             !loom_low_descriptor_result_can_rematerialize(
+                 target->descriptor_set, packet.descriptor, result_index)) {
     return false;
   }
   *out_defining_op = defining_op;
@@ -810,7 +821,7 @@ static iree_status_t loom_low_allocation_rematerialization_emit_summary(
       loom_param_u32(result->cloned_packet_count),
       loom_param_u32(result->rewritten_operand_count),
       loom_param_u32(result->retained_placement_count),
-      loom_param_string(IREE_SV("descriptor-rematerializable")),
+      loom_param_string(IREE_SV("producer-rematerializable")),
   };
   const loom_diagnostic_emission_t emission = {
       .op = table->function_op,

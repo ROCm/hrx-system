@@ -23,7 +23,8 @@ typedef struct loom_low_schedule_setup_order_t {
   // none, or the producer itself for fan-out. Finish replaces these facts
   // with transitive setup completion nodes. NULL disables setup ordering.
   uint32_t* completion_nodes;
-  // First setup node for each completion, populated by finish.
+  // During graph construction, an SSA successor or UINT32_MAX when none has
+  // been observed. Finish replaces these with each completion's first setup.
   uint32_t* entry_nodes;
 } loom_low_schedule_setup_order_t;
 
@@ -32,12 +33,15 @@ iree_status_t loom_low_schedule_setup_order_initialize(
     uint32_t node_count, iree_arena_allocator_t* arena,
     loom_low_schedule_setup_order_t* out_order);
 
-// Records complete dependency fan-out at its producer, including non-SSA edges.
+// Records complete dependency fan-out and whether a value consumer exists.
 static inline void loom_low_schedule_setup_order_record_dependency(
     loom_low_schedule_setup_order_t* order, uint32_t producer,
-    uint32_t consumer) {
+    uint32_t consumer, bool is_value_dependency) {
   if (order->completion_nodes == NULL) {
     return;
+  }
+  if (is_value_dependency) {
+    order->entry_nodes[producer] = consumer;
   }
   uint32_t* completion = &order->completion_nodes[producer];
   if (*completion == UINT32_MAX) {
@@ -59,8 +63,9 @@ void loom_low_schedule_setup_order_classify_node(
     struct loom_low_schedule_node_t* node, bool order_structural_setup);
 
 // Closes setup dependencies before adjacency construction. Every member has
-// one complete successor and remains inside its source-order range, so its
-// external prerequisites can precede the entire chain without creating a cycle.
+// one complete successor that consumes its value and remains inside its
+// source-order range, so external prerequisites can precede the entire chain
+// without creating a cycle.
 iree_status_t loom_low_schedule_setup_order_finish(
     struct loom_low_schedule_build_state_t* state);
 
