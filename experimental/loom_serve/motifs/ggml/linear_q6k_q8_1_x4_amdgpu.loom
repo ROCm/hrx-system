@@ -223,6 +223,7 @@ kernel.def target(@ggml_q6k_q8_gfx11_wave64) export("ggml_linear_q6k_q8_1_x4_m4"
 // Nonzero packed data independently exercises the wave64 schedule's
 // four-block contraction and channel tail.
 check.case public @ggml_linear_q6k_q8_1_x4_wave64_block4_nonzero_tail_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(2) : index
   %input_size = check.literal value(2048) : index
   %output_size = check.literal value(9) : index
@@ -240,6 +241,7 @@ check.case public @ggml_linear_q6k_q8_1_x4_wave64_block4_nonzero_tail_case {
 // Compares the gfx11 four-row schedule against four independent rows of the
 // established wave64 contraction on the same nonzero physical payload.
 check.case public @ggml_linear_q6k_q8_1_x4_m4_wave64_block4_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(4) : index
   %input_size = check.literal value(2048) : index
   %output_size = check.literal value(9) : index
@@ -256,6 +258,7 @@ check.case public @ggml_linear_q6k_q8_1_x4_m4_wave64_block4_differential_case {
 }
 
 check.case public @ggml_linear_q6k_q8_1_x4_vocabulary_wave64_block4_benchmark_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(1) : index
   %input_size = check.literal value(2048) : index
   %output_size = check.literal value(151936) : index

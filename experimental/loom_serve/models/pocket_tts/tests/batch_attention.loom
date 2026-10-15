@@ -347,6 +347,7 @@ kernel.def @metadata_flow_4() {
 }
 
 check.case public @changing_membership_flow {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %keys_seed = check.literal value(43) : i64
   %actual_keys = check.generate.random.uniform seed(%keys_seed) range(-0.5 to 0.5) : tensor<4x320x1024xf32>
   %reference_keys = check.generate.random.uniform seed(%keys_seed) range(-0.5 to 0.5) : tensor<4x320x1024xf32>
@@ -731,6 +732,7 @@ kernel.def @metadata_mimi_4() {
 }
 
 check.case public @changing_membership_mimi {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %keys_seed = check.literal value(43) : i64
   %actual_keys = check.generate.random.uniform seed(%keys_seed) range(-0.5 to 0.5) : tensor<4x265x512xf32>
   %reference_keys = check.generate.random.uniform seed(%keys_seed) range(-0.5 to 0.5) : tensor<4x265x512xf32>

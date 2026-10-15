@@ -252,6 +252,7 @@ kernel.def @ggml_q4k_fix_differential_headers() {
 }
 
 check.case public @ggml_linear_q4k_q8_1_x4_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(1) : index
   %input_size = check.literal value(256) : index
   %output_size = check.literal value(65) : index
@@ -269,6 +270,7 @@ check.case public @ggml_linear_q4k_q8_1_x4_differential_case {
 }
 
 check.case public @ggml_linear_q4k_q8_1_x4_benchmark_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.param.choice values([1, 32, 128, 512]) name("token_count") : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(48) : index

@@ -131,6 +131,7 @@ kernel.def export("qwen38_swiglu_f32_decode") @qwen38_swiglu_f32_decode() {
 }
 
 check.case public @qwen38_rmsnorm_f32_decode_known_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %epsilon = check.literal value(9.9999999999999995e-07) : f32
   %input = check.generate.fill value(2.0) : tensor<5120xf32>
   %weight = check.generate.fill value(0.5) : tensor<5120xf32>
@@ -162,6 +163,7 @@ check.case public @qwen38_swiglu_f32_decode_known_case {
 }
 
 check.case public @qwen38_layer_decode_primitives_known_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %epsilon = check.literal value(9.9999999999999995e-07) : f32
   %norm_input = check.generate.fill value(2.0) : tensor<5120xf32>
   %norm_weight = check.generate.fill value(0.5) : tensor<5120xf32>

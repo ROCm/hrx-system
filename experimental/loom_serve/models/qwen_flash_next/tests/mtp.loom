@@ -200,6 +200,7 @@ check.scenario public @predictor_normalization configure[2](%configuration: inde
 }
 
 check.scenario public @predictor_fusion {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %epoch = check.generate.fill value(2) : tensor<1xi32>

@@ -54,6 +54,7 @@ kernel.def target(@observer_wave32) @observe_routes() {
 // These cases cross the 512-thread producer stride. This first distribution
 // visits every expert, with 128 experts selected twice and the rest once.
 check.case public @distributed_then_empty {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %epoch = check.generate.fill value(64) : tensor<3xi32>
   %ids = check.generate.iota offset(0) step(1) period(512) : tensor<640xi32>
   %expected_counts = check.generate.fill value(1) : tensor<640xi32>
@@ -89,6 +90,7 @@ check.case public @distributed_then_empty {
 // Each of ten experts needs sixteen records: fifteen full records and one
 // three-route tail. The last ten route slots are outside the active epoch.
 check.case public @concentrated_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %epoch = check.generate.fill value(63) : tensor<3xi32>
   %ids = check.generate.iota offset(0) step(1) period(10) : tensor<640xi32>
   %expected_counts = check.generate.fill value(1) : tensor<630xi32>

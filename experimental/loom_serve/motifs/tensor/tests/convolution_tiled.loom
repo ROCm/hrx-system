@@ -70,6 +70,7 @@ kernel.def target(@convolution_test_wave32) @convolution_f32_tiled() {
 }
 
 check.case public @convolution_f32_single_row {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %width = check.param.choice values([1, 2, 33]) name("width") : index
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64
@@ -91,6 +92,7 @@ check.case public @convolution_f32_single_row {
 }
 
 check.case public @convolution_f32_spatial {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %channels = check.param.choice values([96, 192, 384]) name("channels") : index
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64

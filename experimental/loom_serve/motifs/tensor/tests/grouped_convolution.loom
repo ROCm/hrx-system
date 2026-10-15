@@ -91,6 +91,7 @@ func.def @input_block_reference(%input: buffer, %dynamic: buffer, %base: buffer,
 }
 
 check.scenario public @input_block_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %dynamic_seed = check.entropy.read %entropy[1] : check.entropy -> i64
@@ -140,6 +141,7 @@ func.def @residual_block_reference(%input: buffer, %dynamic: buffer, %base: buff
 }
 
 check.scenario public @residual_block_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %dynamic_seed = check.entropy.read %entropy[1] : check.entropy -> i64
@@ -189,6 +191,7 @@ func.def @partial_tile_reference(%input: buffer, %dynamic: buffer, %base: buffer
 }
 
 check.scenario public @partial_tile_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %dynamic_seed = check.entropy.read %entropy[1] : check.entropy -> i64
@@ -238,6 +241,7 @@ func.def @single_position_reference(%input: buffer, %dynamic: buffer, %base: buf
 }
 
 check.scenario public @single_position_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %dynamic_seed = check.entropy.read %entropy[1] : check.entropy -> i64

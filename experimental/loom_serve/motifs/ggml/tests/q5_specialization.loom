@@ -78,6 +78,7 @@ kernel.def target(@q5_specialization_wave32) @q5_k768_four() {
 // channel tails. Random packed bytes have finite floating headers. A fifth
 // output row remains untouched by both four-token invocations.
 check.case public @q5_independent_specializations {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %seed = check.param.seed base(37193) count(3) : i64
   %weight_seed = check.literal value(97531) : i64
   %input_256 = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<4x288xi8>

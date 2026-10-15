@@ -65,6 +65,7 @@ kernel.def target(@pocket) @batched_residual() {
 }
 
 check.case public @residual_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -143,6 +144,7 @@ kernel.def target(@pocket) @batched_gelu() {
 }
 
 check.case public @gelu_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -213,6 +215,7 @@ kernel.def target(@pocket) @batched_copy() {
 }
 
 check.case public @copy_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -283,6 +286,7 @@ kernel.def target(@pocket) @batched_silu() {
 }
 
 check.case public @silu_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -359,6 +363,7 @@ kernel.def target(@pocket) @batched_residual_scaled() {
 }
 
 check.case public @residual_scaled_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -445,6 +450,7 @@ kernel.def target(@pocket) @batched_elu() {
 }
 
 check.case public @elu_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32

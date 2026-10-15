@@ -91,6 +91,7 @@ func.def @reference(%query_begin_arg: index, %epoch: buffer, %mapping: buffer, %
 }
 
 check.scenario public @sparse_selection {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[5](%trial: index, %entropy: check.entropy) {
     %query_begin = check.literal value(3) : index
     %epoch = check.generate.fill value(0) : tensor<3xi32>

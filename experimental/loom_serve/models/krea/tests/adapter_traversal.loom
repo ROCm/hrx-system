@@ -9,6 +9,7 @@ kernel.decl @block_adapter_add_6144() launch(%input: buffer, %weight: buffer, %s
 kernel.decl @block_adapter_add_16384() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
 
 check.case public @adapter_traversal_6144 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.fill value(0.125) : tensor<80x32xbf16>
   %weight = check.generate.fill value(0.25) : tensor<6144x32xf32>
   %half = check.generate.fill value(0.5) : tensor<1xf32>
@@ -29,6 +30,7 @@ check.case public @adapter_traversal_6144 {
 }
 
 check.case public @adapter_traversal_16384 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.fill value(0.125) : tensor<80x32xbf16>
   %weight = check.generate.fill value(0.25) : tensor<16384x32xf32>
   %half = check.generate.fill value(0.5) : tensor<1xf32>

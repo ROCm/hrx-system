@@ -102,6 +102,7 @@ func.def @reference_256(%input: buffer, %output: buffer, %scales: buffer) {
 }
 
 check.scenario public @convrot_256_pattern {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %x = check.generate.iota offset(-1.0) step(0.0625) period(37) : tensor<4x256xbf16>
     %y = check.generate.fill value(99) : tensor<4x256xi8>
@@ -115,6 +116,7 @@ check.scenario public @convrot_256_pattern {
 }
 
 check.scenario public @convrot_256_zero {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %x = check.generate.fill value(0.0) : tensor<4x256xbf16>
     %y = check.generate.fill value(99) : tensor<4x256xi8>
@@ -128,6 +130,7 @@ check.scenario public @convrot_256_zero {
 }
 
 check.scenario public @convrot_256_tiny {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %x = check.generate.fill value(1.0000000000000001e-32) : tensor<4x256xbf16>
     %y = check.generate.fill value(99) : tensor<4x256xi8>
@@ -160,6 +163,7 @@ func.def @reference_6144(%input: buffer, %output: buffer, %scales: buffer) {
 }
 
 check.scenario public @convrot_6144_pattern {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %x = check.generate.iota offset(-1.0) step(0.0625) period(37) : tensor<4x6144xbf16>
     %y = check.generate.fill value(99) : tensor<4x6144xi8>
@@ -192,6 +196,7 @@ func.def @reference_16384(%input: buffer, %output: buffer, %scales: buffer) {
 }
 
 check.scenario public @convrot_16384_pattern {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %x = check.generate.iota offset(-1.0) step(0.0625) period(37) : tensor<1x16384xbf16>
     %y = check.generate.fill value(99) : tensor<1x16384xi8>

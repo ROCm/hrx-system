@@ -83,6 +83,7 @@ kernel.def target(@pocket) @initialize_previous_latent() {
 }
 
 check.case public @previous_latent_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -209,6 +210,7 @@ kernel.def target(@pocket) @initialize_advance() {
 }
 
 check.case public @advance_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -281,6 +283,7 @@ kernel.def target(@pocket) @batched_time_embedding() {
 }
 
 check.case public @time_embedding_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -361,6 +364,7 @@ kernel.def target(@pocket) @batched_conditioning() {
 }
 
 check.case public @conditioning_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -448,6 +452,7 @@ kernel.def target(@pocket) @batched_modulation() {
 }
 
 check.case public @modulation_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -528,6 +533,7 @@ kernel.def target(@pocket) @batched_gated_residual() {
 }
 
 check.case public @gated_residual_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -618,6 +624,7 @@ kernel.def target(@pocket) @batched_latent_output() {
 }
 
 check.case public @latent_output_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -764,6 +771,7 @@ kernel.def target(@pocket) @initialize_fade() {
 }
 
 check.case public @fade_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -876,6 +884,7 @@ kernel.def target(@pocket) @initialize_token() {
 }
 
 check.case public @token_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32

@@ -292,6 +292,7 @@ kernel.def target(@wave32) @quantized_dot(%format: index) {
 }
 
 check.scenario public @original_quantization configure[4](%format: index, %configuration_entropy: check.entropy) {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %gate_seed = check.literal value(73419) : i64
@@ -379,6 +380,7 @@ kernel.def target(@wave32) @quantized_rows(%format: index) {
 }
 
 check.scenario public @routed_quantization configure[4](%format: index, %configuration_entropy: check.entropy) {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[5](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %gate_seed = check.literal value(73419) : i64

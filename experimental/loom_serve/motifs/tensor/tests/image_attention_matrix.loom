@@ -108,6 +108,7 @@ func.def @attention_bf16_f64_oracle(%input: buffer, %output: buffer) {
 }
 
 check.scenario public @attention_full_head {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %seed = check.literal value(74111) : i64
     %input = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<3x384x32xf32>

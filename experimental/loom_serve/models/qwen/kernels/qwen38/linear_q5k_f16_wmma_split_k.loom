@@ -241,6 +241,7 @@ kernel.def target(@qwen38_dense_gfx11_wave64_split_k) export("qwen38_linear_q5k_
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_alpha_split_k_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(32) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(48) : index
@@ -258,6 +259,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_alpha_split_k_differential_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_alpha_split_k_benchmark_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(32) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(48) : index

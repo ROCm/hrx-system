@@ -240,6 +240,7 @@ kernel.def @untouched_speculation() {
 }
 
 check.case public @accepted_prefixes_preserve_all_state {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %seed = check.param.seed base(7139) count(2) : i64
   %capacity = check.literal value(20) : index
   %spans = check.literal value(5) : index

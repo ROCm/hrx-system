@@ -286,6 +286,7 @@ kernel.def @reference() {
 }
 
 check.case public @retained_forks {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %trial = check.literal value(0) : index
   %seed = check.literal value(75307) : i64
   %tail_origin = check.literal value(0) : offset
@@ -318,6 +319,7 @@ check.case public @retained_forks {
 }
 
 check.case public @retained_writers {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %trial = check.literal value(1) : index
   %seed = check.literal value(75307) : i64
   %tail_origin = check.literal value(0) : offset
@@ -350,6 +352,7 @@ check.case public @retained_writers {
 }
 
 check.case public @retained_empty {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %trial = check.literal value(2) : index
   %seed = check.literal value(75307) : i64
   %tail_origin = check.literal value(0) : offset

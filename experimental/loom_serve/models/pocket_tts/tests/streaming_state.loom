@@ -27,6 +27,7 @@ kernel.decl @pocket.fade() launch(%input: buffer, %position: buffer, %output: bu
 // Recurrent FlowLM input stays normalized. Only the codec input receives the
 // checkpoint's scale and mean; BOS is selected solely for the first frame.
 check.case public @latent_recurrence {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %previous = check.generate.fill value(-123.0) : tensor<32x1xf32>
   %position = check.generate.fill value(0) : tensor<1xi32>
   %bos = check.generate.iota offset(-1.0) step(0.0625) : tensor<32xbf16>
@@ -56,6 +57,7 @@ check.case public @latent_recurrence {
 // The second block consumes the first block's tail, independent of its input.
 // Every retained sample and every sample of the padded block is observed.
 check.case public @causal_history_two_blocks {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %first = check.generate.iota offset(1.0) step(1.0) : tensor<1x1920xf32>
   %second = check.generate.iota offset(100.0) step(1.0) : tensor<1x1920xf32>
   %history = check.generate.iota offset(-6.0) step(1.0) : tensor<1x6xf32>
@@ -104,6 +106,7 @@ kernel.def target(@pocket) @replication_expected() {
 }
 
 check.case public @replicated_history_two_blocks {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %first = check.generate.fill value(2.0) : tensor<512x16xf32>
   %second = check.generate.fill value(3.0) : tensor<512x16xf32>
   %history = check.generate.fill value(-123.0) : tensor<512x16xf32>
@@ -123,6 +126,7 @@ check.case public @replicated_history_two_blocks {
 }
 
 check.case public @overlap_two_blocks {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.iota offset(0.25) step(0.125) period(32) : tensor<512x32xf32>
   %history = check.generate.fill value(-0.5) : tensor<512x16xf32>
   %output = check.generate.fill value(-123.0) : tensor<512x16xf32>
@@ -164,6 +168,7 @@ kernel.def target(@pocket) @biased_overlap_expected() {
 // Transposed-convolution bias is already in the current block. Retaining it
 // in the overlap would add it again at each subsequent block boundary.
 check.case public @biased_overlap_two_blocks {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.fill value(2.0) : tensor<64x1924xf32>
   %history = check.generate.fill value(1.0) : tensor<64x4xf32>
   %bias = check.generate.fill value(0.25) : tensor<64xbf16>
@@ -186,6 +191,7 @@ check.case public @biased_overlap_two_blocks {
 }
 
 check.case public @waveform_startup_fade {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.fill value(119.0) : tensor<1x1920xf32>
   %position = check.generate.fill value(16) : tensor<1xi32>
   %output = check.generate.fill value(-123.0) : tensor<1x1920xf32>

@@ -25,6 +25,7 @@ kernel.def @selected_output_metadata() {
 }
 
 check.case public @selected_output_rows {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %four = check.literal value(4) : index
   %three = check.literal value(3) : i32
   %none = check.literal value(0) : i32

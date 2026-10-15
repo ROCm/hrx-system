@@ -617,6 +617,7 @@ kernel.def export("ggml_q5k_fix_differential_headers") @ggml_q5k_fix_differentia
 }
 
 check.case public @ggml_linear_q5k_q8_1_x4_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(1) : index
   %input_size = check.literal value(256) : index
   %output_size = check.literal value(65) : index
@@ -637,6 +638,7 @@ check.case public @ggml_linear_q5k_q8_1_x4_differential_case {
 // payload. Distinct activation rows expose row-address aliasing; odd/even
 // block counts and full projection widths exercise the reduction loop.
 check.case public @ggml_linear_q5k_q8_1_x4_m4_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(4) : index
   %input_size = check.param.choice values([256, 768, 5120, 17408]) name("input_size") : index
   %output_size = check.literal value(65) : index
@@ -656,6 +658,7 @@ check.case public @ggml_linear_q5k_q8_1_x4_m4_differential_case {
 }
 
 check.case public @ggml_linear_q5k_q8_1_x4_benchmark_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.param.choice values([1, 32, 128, 512]) name("token_count") : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -668,6 +671,7 @@ check.case public @ggml_linear_q5k_q8_1_x4_benchmark_case {
 
 // Exact Qwen3.8 four-row gate/up projection shape using independent rows.
 check.case public @ggml_linear_q5k_q8_1_x4_m4_baseline_benchmark_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(4) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -680,6 +684,7 @@ check.case public @ggml_linear_q5k_q8_1_x4_m4_baseline_benchmark_case {
 
 // Exact Qwen3.8 four-row gate/up projection shape using weight reuse.
 check.case public @ggml_linear_q5k_q8_1_x4_m4_benchmark_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(4) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index

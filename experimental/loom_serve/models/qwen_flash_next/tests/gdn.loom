@@ -230,6 +230,7 @@ kernel.def @prepare_single_span() {
 }
 
 check.case public @gdn_state_continuation {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.generate.fill value(0) : tensor<4xi64>
   %layer_origin = check.literal value(0) : offset
 

@@ -73,6 +73,7 @@ func.def @projection_expected_plain(%inputs: index, %outputs: index, %times: ind
 }
 
 check.scenario public @pocket_project_f32 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %inputs = check.literal value(7) : index
     %outputs = check.literal value(33) : index
@@ -89,6 +90,7 @@ check.scenario public @pocket_project_f32 {
 }
 
 check.scenario public @pocket_project_f64 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %inputs = check.literal value(7) : index
     %outputs = check.literal value(33) : index
@@ -111,6 +113,7 @@ func.def @projection_expected_bias(%inputs: index, %outputs: index, %times: inde
 }
 
 check.scenario public @pocket_project_bias_f32 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %inputs = check.literal value(7) : index
     %outputs = check.literal value(33) : index
@@ -127,6 +130,7 @@ check.scenario public @pocket_project_bias_f32 {
 }
 
 check.scenario public @pocket_project_bias_f64 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %inputs = check.literal value(7) : index
     %outputs = check.literal value(33) : index

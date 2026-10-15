@@ -7,6 +7,7 @@ kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc(%tokens: index, %inputs: i
 // cover production widths and every channel-tail class. Finite block scales
 // keep this an exact memory-layout differential, not an accuracy envelope.
 check.case public @qwen38_narrow_q5_block_staging {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(32) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.param.choice values([48, 64, 80, 96, 112, 128, 6144, 10240, 17408]) name("channels") : index
@@ -24,6 +25,7 @@ check.case public @qwen38_narrow_q5_block_staging {
 
 // Command programs use a zero workload to disable an otherwise prepared path.
 check.case public @qwen38_narrow_q5_zero_grid {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(0) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.param.choice values([48, 17408]) name("channels") : index

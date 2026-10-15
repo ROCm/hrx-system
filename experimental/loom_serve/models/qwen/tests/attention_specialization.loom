@@ -137,6 +137,7 @@ kernel.def @independent_cache_maps() {
 // physical cache element is checked, including the unused 47-token region,
 // and every padded output token must retain its sentinel.
 check.case public @attention_independent_specializations {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows_small = check.generate.fill value(-1) : tensor<260xi32>
   %rows_large = check.generate.fill value(-1) : tensor<262xi32>
   kernel.launch @independent_cache_maps(%rows_small, %rows_large) : (tensor<260xi32>, tensor<262xi32>)

@@ -108,6 +108,7 @@ func.def @expected_normalization_affine(%input: buffer, %output: buffer, %scale:
 }
 
 check.scenario public @normalization_affine {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(1.0) step(0.25) : tensor<7x3xf32>
     %output = check.generate.fill value(-123.0) : tensor<7x3xf32>
@@ -128,6 +129,7 @@ func.def @expected_normalization_variance(%input: buffer, %output: buffer, %scal
 }
 
 check.scenario public @normalization_variance {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(1.0) step(0.25) : tensor<7x3xf32>
     %output = check.generate.fill value(-123.0) : tensor<7x3xf32>
@@ -148,6 +150,7 @@ func.def @expected_normalization_plain(%input: buffer, %output: buffer, %scale: 
 }
 
 check.scenario public @normalization_plain {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(1.0) step(0.25) : tensor<7x3xf32>
     %output = check.generate.fill value(-123.0) : tensor<7x3xf32>

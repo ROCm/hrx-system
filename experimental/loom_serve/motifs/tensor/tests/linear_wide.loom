@@ -61,6 +61,7 @@ kernel.def target(@wide_wave32) @gemm_wide() {
 }
 
 check.case public @exact_short {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64
   %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<16x6144xbf16>
@@ -74,6 +75,7 @@ check.case public @exact_short {
 }
 
 check.case public @exact_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64
   %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<528x6144xbf16>

@@ -364,6 +364,7 @@ kernel.def target(@qwen38_dense_gfx11_wave32_x128) export("qwen38_linear_q5k_f16
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_wave32_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -383,6 +384,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_wave32_differential_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_wave32_prefill_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -395,6 +397,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_wave32_prefill_128_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_wave32_prefill_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -407,6 +410,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_wave32_prefill_512_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_wave32_input_f16_prefill_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -419,6 +423,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_wave32_input_f16_prefill_128_case 
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_wave32_input_f16_prefill_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index

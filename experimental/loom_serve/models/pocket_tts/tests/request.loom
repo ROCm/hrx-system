@@ -53,6 +53,7 @@ check.case public @maximum_context_geometry {
 // Context capacity 1 gives 12,324 conditioning words, 1,112,710 codec words,
 // and two request cursors. Observe every word, including fresh-stream reset.
 check.case public @fresh_state_overwrites_all_storage {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %state = check.generate.fill value(37) : tensor<1125036xi32>
   %numerical = check.tensor.view %state offset(0) : tensor<1125036xi32> -> tensor<1125034xi32>
   %chunk = check.tensor.view %state offset(4500136) : tensor<1125036xi32> -> tensor<1xi32>
@@ -68,6 +69,7 @@ check.case public @fresh_state_overwrites_all_storage {
 }
 
 check.case public @conditioning_restore_resets_chunk_state {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %state = check.generate.fill value(37) : tensor<1125036xi32>
   kernel.launch @pocket.initialize_request(%state) : (tensor<1125036xi32>)
   %voice_state = check.generate.iota offset(100) step(1) : tensor<1125036xi32>
@@ -110,6 +112,7 @@ kernel.def target(@pocket) @set_positions() {
 }
 
 check.case public @immutable_packets_and_voice_rows {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %state = check.generate.fill value(0) : tensor<1125036xi32>
   %request = check.generate.iota offset(100) step(1) : tensor<20xi32>
   %chunk = check.literal value(1) : i32
@@ -287,6 +290,7 @@ kernel.def target(@pocket) @noise_expected() {
 }
 
 check.case public @seeded_noise_counter_and_replay {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %state = check.generate.fill value(0) : tensor<1125036xi32>
   %request = check.generate.fill value(1311768467750121217) : tensor<1xi64>
   %chunk = check.literal value(3) : i32
@@ -326,6 +330,7 @@ kernel.def target(@pocket) @sampling_membership() {
 }
 
 check.case public @batch_noise_uses_request_identity {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %state = check.generate.fill value(0) : tensor<3375108xi32>
   %expected_state = check.generate.fill value(0) : tensor<3375108xi32>
   %row0 = check.tensor.view %state offset(0) : tensor<3375108xi32> -> tensor<1125036xi32>

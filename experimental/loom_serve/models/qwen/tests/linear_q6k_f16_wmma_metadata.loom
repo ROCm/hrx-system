@@ -21,6 +21,7 @@ kernel.decl @qwen38_residual_add_f32_prefill(%tokens: index) launch(%tokens_argu
 // pipelined metadata consumption, F32/F16 input storage, and fused residuals.
 // Every inactive output retains its original contents.
 check.case public @qwen38_q6_metadata_single {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(128) : index
   %active = check.literal value(1) : index
   %inputs = check.literal value(2048) : index
@@ -59,6 +60,7 @@ check.case public @qwen38_q6_metadata_single {
 }
 
 check.case public @qwen38_q6_metadata_full128 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(128) : index
   %active = check.literal value(128) : index
   %inputs = check.literal value(2048) : index
@@ -97,6 +99,7 @@ check.case public @qwen38_q6_metadata_full128 {
 }
 
 check.case public @qwen38_q6_metadata_partial256 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(256) : index
   %active = check.literal value(129) : index
   %inputs = check.literal value(2048) : index
@@ -135,6 +138,7 @@ check.case public @qwen38_q6_metadata_partial256 {
 }
 
 check.case public @qwen38_q6_metadata_partial512 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(512) : index
   %active = check.literal value(511) : index
   %inputs = check.literal value(2048) : index
@@ -173,6 +177,7 @@ check.case public @qwen38_q6_metadata_partial512 {
 }
 
 check.case public @qwen38_q6_metadata_zero {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(0) : index
   %active = check.literal value(0) : index
   %inputs = check.literal value(2048) : index
@@ -211,6 +216,7 @@ check.case public @qwen38_q6_metadata_zero {
 }
 
 check.case public @qwen38_q6_metadata_small_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(256) : index
   %active = check.literal value(129) : index
   %inputs = check.literal value(256) : index

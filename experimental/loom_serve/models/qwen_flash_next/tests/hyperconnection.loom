@@ -124,6 +124,7 @@ kernel.def @up_reference() {
 // Separate injection tests cover nonzero F32 and Q8 coefficients; zero weights
 // here isolate both entries' shared nonlinear down projection.
 check.case public @hyperconnection_publications {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %requested = check.param.choice values([0, 1, 4, 5]) name("active") : index
   %width = check.literal value(10240) : index
   %rank = check.literal value(320) : index

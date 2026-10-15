@@ -11,6 +11,7 @@ kernel.decl @qwen38_linear_q5k_f16_wmma_x128_direct(%tokens: index, %inputs: ind
 // The same padded matrix is contracted regardless of how many logical tokens
 // later stateful kernels consume. Check all output rows, not just active ones.
 check.case public @projection_capacity {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(32) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(64) : index
@@ -40,6 +41,7 @@ check.case public @projection_capacity {
 }
 
 check.case public @projection_capacity_wide {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(128) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(17408) : index

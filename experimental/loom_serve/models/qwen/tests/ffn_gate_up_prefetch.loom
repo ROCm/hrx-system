@@ -9,6 +9,7 @@ kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_c64_t128_wave32_output_f16(%capacit
 kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch(%capacity: index) launch(%count: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer)
 
 check.case public @ffn_prefetch_128_1_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(128) : index
   %hidden = check.literal value(5120) : index
   %channels = check.literal value(17408) : index
@@ -29,6 +30,7 @@ check.case public @ffn_prefetch_128_1_case {
 check.benchmark<@ffn_prefetch_128_1_case> @ffn_prefetch_128_1
 
 check.case public @ffn_prefetch_128_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(128) : index
   %hidden = check.literal value(5120) : index
   %channels = check.literal value(17408) : index
@@ -49,6 +51,7 @@ check.case public @ffn_prefetch_128_128_case {
 check.benchmark<@ffn_prefetch_128_128_case> @ffn_prefetch_128_128
 
 check.case public @ffn_prefetch_256_129_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(256) : index
   %hidden = check.literal value(5120) : index
   %channels = check.literal value(17408) : index
@@ -69,6 +72,7 @@ check.case public @ffn_prefetch_256_129_case {
 check.benchmark<@ffn_prefetch_256_129_case> @ffn_prefetch_256_129
 
 check.case public @ffn_prefetch_256_256_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(256) : index
   %hidden = check.literal value(5120) : index
   %channels = check.literal value(17408) : index
@@ -89,6 +93,7 @@ check.case public @ffn_prefetch_256_256_case {
 check.benchmark<@ffn_prefetch_256_256_case> @ffn_prefetch_256_256
 
 check.case public @ffn_prefetch_512_511_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(512) : index
   %hidden = check.literal value(5120) : index
   %channels = check.literal value(17408) : index
@@ -109,6 +114,7 @@ check.case public @ffn_prefetch_512_511_case {
 check.benchmark<@ffn_prefetch_512_511_case> @ffn_prefetch_512_511
 
 check.case public @ffn_prefetch_512_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(512) : index
   %hidden = check.literal value(5120) : index
   %channels = check.literal value(17408) : index
@@ -129,6 +135,7 @@ check.case public @ffn_prefetch_512_512_case {
 check.benchmark<@ffn_prefetch_512_512_case> @ffn_prefetch_512_512
 
 check.case public @ffn_prefetch_0_1_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(0) : index
   %hidden = check.literal value(5120) : index
   %channels = check.literal value(17408) : index

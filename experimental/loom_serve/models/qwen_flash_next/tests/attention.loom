@@ -286,6 +286,7 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
 }
 
 check.scenario public @paged_sparse_attention {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[4](%trial: index, %entropy: check.entropy) {
     %key_origin = check.literal value(128) : offset
     %value_origin = check.literal value(2162816) : offset

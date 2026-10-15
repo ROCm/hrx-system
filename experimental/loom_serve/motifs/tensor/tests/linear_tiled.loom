@@ -85,6 +85,7 @@ kernel.def target(@projection_test_wave32) @linear_bf16_tiled() {
 }
 
 check.case public @linear_bf16_6144_6144 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.param.choice values([16, 32, 48, 64, 80, 512, 528, 544, 560, 640, 704, 768, 832, 896, 960, 1088, 2048, 2560, 3072, 4608]) name("rows") : index
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64
@@ -99,6 +100,7 @@ check.case public @linear_bf16_6144_6144 {
 }
 
 check.case public @linear_bf16_6144_1536 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.param.choice values([16, 32, 48, 64, 80, 512, 528, 544, 560, 640, 704, 768, 832, 896, 960, 1088, 2048, 2560, 3072, 4608]) name("rows") : index
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64
@@ -113,6 +115,7 @@ check.case public @linear_bf16_6144_1536 {
 }
 
 check.case public @linear_bf16_6144_16384 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.param.choice values([16, 32, 48, 64, 80, 512, 528, 544, 560, 640, 704, 768, 832, 896, 960, 1088, 2048, 2560, 3072, 4608]) name("rows") : index
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64
@@ -127,6 +130,7 @@ check.case public @linear_bf16_6144_16384 {
 }
 
 check.case public @linear_bf16_16384_6144 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.param.choice values([16, 32, 48, 64, 80, 512, 528, 544, 560, 640, 704, 768, 832, 896, 960, 1088, 2048, 2560, 3072, 4608]) name("rows") : index
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64

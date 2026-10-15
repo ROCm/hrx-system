@@ -34,6 +34,7 @@ kernel.def target(@ffn_specialization_wave32) @ffn_k768_n128() {
 }
 
 check.case public @ffn_independent_specializations {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %seed = check.param.seed base(93719) count(3) : i64
   %up_seed = check.literal value(53921) : i64
   %capacity1 = check.literal value(128) : index

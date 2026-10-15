@@ -93,6 +93,7 @@ kernel.def @scatter_reference_pages() {
 // history loop, masked tail, absolute RoPE and all GQA heads must be identical
 // to dense addressing. Unused spans contain invalid metadata and never read it.
 check.case public @scattered_attention_pages {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(17) : index
   %spans = check.literal value(2) : index
   %epsilon = check.literal value(9.9999999999999995e-07) : f32

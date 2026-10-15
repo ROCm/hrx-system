@@ -9,6 +9,7 @@ kernel.decl @qwen38_linear_q5k_f16_wmma_c128_t128_wave32_input_f16(%tokens: inde
 // storage type. Finite encoded scales and channel-varying codes exercise
 // contraction order, all pipeline groups, tails, and untouched output padding.
 check.case public @qwen38_q5_read_ahead_single {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(128) : index
   %inputs = check.literal value(256) : index
   %outputs = check.param.choice values([1, 48, 129]) name("channels") : index
@@ -29,6 +30,7 @@ check.case public @qwen38_q5_read_ahead_single {
 }
 
 check.case public @qwen38_q5_read_ahead_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(256) : index
   %inputs = check.literal value(768) : index
   %outputs = check.param.choice values([65, 6144]) name("channels") : index
@@ -49,6 +51,7 @@ check.case public @qwen38_q5_read_ahead_tail {
 }
 
 check.case public @qwen38_q5_read_ahead_full_128 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(128) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.param.choice values([48, 6144, 10240]) name("channels") : index
@@ -69,6 +72,7 @@ check.case public @qwen38_q5_read_ahead_full_128 {
 }
 
 check.case public @qwen38_q5_read_ahead_full_512 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(512) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.param.choice values([10240]) name("channels") : index
@@ -89,6 +93,7 @@ check.case public @qwen38_q5_read_ahead_full_512 {
 }
 
 check.case public @qwen38_q5_read_ahead_tail_511 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %capacity = check.literal value(512) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.param.choice values([6144, 10240]) name("channels") : index
