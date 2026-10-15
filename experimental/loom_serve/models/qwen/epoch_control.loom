@@ -10,6 +10,10 @@ func.decl import("runner") @execute_7(%stage: i32, %b0: hal.buffer, %b1: hal.buf
 
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
+func.decl @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: buffer, %media_begin: index, %media_end: index, %count: index, %first: index, %metadata: buffer, %tokens: buffer, %packet_begin: index)
+
+func.decl @publish_media_positions(%plan: buffer, %media_plan: buffer, %count: index, %progress: buffer)
+
 // Ownership events provide {row, read_origin, write_origin, fork_position}.
 // The retained payload is source-owned; KV origins and unchanged rows survive.
 func.def public @encode_state(%bindings: buffer, %count: i32, %origins: buffer) {
@@ -40,7 +44,7 @@ func.def public @encode_state(%bindings: buffer, %count: i32, %origins: buffer) 
 // contiguous host stream. Descriptor word four packs source_position in its
 // high 22 bits and selected output + 1 in its low ten bits. Model-specific
 // descriptor, selection and verifier layouts stay in source.
-func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: index, %metadata: buffer, %metadata_origin: offset, %tokens: buffer, %token_origin: offset) -> (i32) {
+func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: index, %metadata: buffer, %metadata_origin: offset, %tokens: buffer, %token_origin: offset, %ordinary: i1) -> (i32) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -100,7 +104,9 @@ func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: ind
     %input_bytes = index.scale %input_extent, %c4 : index, offset -> offset
     %cursor_bytes = index.scale %cursor_index, %c4 : index, offset -> offset
     %target_offset = index.add %token_origin, %cursor_bytes : offset
-    buffer.copy %inputs[%source_offset], %tokens[%target_offset], %input_bytes
+    scf.if %ordinary {
+      buffer.copy %inputs[%source_offset], %tokens[%target_offset], %input_bytes
+    }
     %end = scalar.addi %cursor, %length : i32
     %selected_count = scf.select %speculative, %length, %one32 : i32
     %active_selections = scf.select %selected, %selected_count, %zero32 : i32
@@ -149,7 +155,9 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
   buffer.copy %control_state[%policy_source], %metadata[%policy_target], %policy_bytes
   %first_bounded = scalar.assume %first_count [range(%first_count, 1, 16)] : i32
   %first = index.cast %first_bounded : i32 to index
-  %outputs = func.call @encode_plan(%plan, %inputs, %first, %c0, %metadata, %origin, %tokens, %origin) : (buffer, buffer, index, index, buffer, offset, buffer, offset) -> (i32)
+  %media_count = scalar.addi %first_media_count, %next_media_count : i32
+  %ordinary = scalar.cmpi eq, %media_count, %zero32 : i32
+  %outputs = func.call @encode_plan(%plan, %inputs, %first, %c0, %metadata, %origin, %tokens, %origin, %ordinary) : (buffer, buffer, index, index, buffer, offset, buffer, offset, i1) -> (i32)
   %eos_offset = index.constant 2316 : offset
   %terminal = buffer.view %metadata[%eos_offset] : buffer -> view<1xi32>
   view.store %eos, %terminal[0] : i32, view<1xi32>
@@ -164,7 +172,7 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
     %plane_count = index.constant 2 : index
     %plane_bytes = index.div %token_byte_count, %plane_count : index
     %token_base = index.cast %plane_bytes : index to offset
-    %next_outputs = func.call @encode_plan(%plan, %inputs, %next, %c16, %metadata, %metadata_base, %tokens, %token_base) : (buffer, buffer, index, index, buffer, offset, buffer, offset) -> (i32)
+    %next_outputs = func.call @encode_plan(%plan, %inputs, %next, %c16, %metadata, %metadata_base, %tokens, %token_base, %ordinary) : (buffer, buffer, index, index, buffer, offset, buffer, offset, i1) -> (i32)
     %next_eos_offset = index.constant 4636 : offset
     %next_terminal = buffer.view %metadata[%next_eos_offset] : buffer -> view<1xi32>
     view.store %eos, %next_terminal[0] : i32, view<1xi32>
@@ -175,6 +183,21 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
       %record = index.add %c16, %i : index
       %first_span = view.load %requests[%record, 8] : view<32x9xi32> -> i32
       view.store %first_span, %indices[%i] : i32, view<16xi32>
+    }
+  }
+  %mixed = scalar.cmpi ne, %media_count, %zero32 : i32
+  scf.if %mixed {
+    %packet_shape_origin = index.constant 6112 : offset
+    %packet_shape = buffer.view %metadata[%packet_shape_origin] : buffer -> view<2xi32>
+    view.store %first_packet_capacity, %packet_shape[0] : i32, view<2xi32>
+    view.store %next_packet_capacity, %packet_shape[1] : i32, view<2xi32>
+    %first_media = index.cast %first_media_count : i32 to index
+    func.call @encode_media_plan(%plan, %inputs, %media_plan, %c0, %first_media, %first, %c0, %metadata, %tokens, %c0) : (buffer, buffer, buffer, index, index, index, index, buffer, buffer, index)
+    scf.if %continues {
+      %next = index.cast %next_count : i32 to index
+      %all_media = index.cast %media_count : i32 to index
+      %packet_begin = index.cast %first_packet_capacity : i32 to index
+      func.call @encode_media_plan(%plan, %inputs, %media_plan, %first_media, %all_media, %next, %c16, %metadata, %tokens, %packet_begin) : (buffer, buffer, buffer, index, index, index, index, buffer, buffer, index)
     }
   }
   func.return %outputs : i32
@@ -290,15 +313,22 @@ func.def public @publish_epoch(%plan: buffer, %media_plan: buffer, %count: i32, 
       }
     }
   }
+  %published_next_media = scf.select %has_next, %next_media_count, %zero32 : i32
+  %media_count = scalar.addi %first_media_count, %published_next_media : i32
+  %mixed = scalar.cmpi ne, %media_count, %zero32 : i32
+  scf.if %mixed {
+    %media_extent = index.cast %media_count : i32 to index
+    func.call @publish_media_positions(%plan, %media_plan, %media_extent, %progress) : (buffer, buffer, index, buffer)
+  }
   func.return
 }
 
 // The program is shared; all request state arrives as buffer bindings.
 func.def public @step(%state: buffer, %initialize: i32, %source_position: i32, %input_count: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64, i32) {
   %origin = index.constant 0 : offset
-  %view = buffer.view %state[%origin] : buffer -> view<6xi32>
-  %prefill = view.load %view[0] : view<6xi32> -> i32
-  %decode = view.load %view[1] : view<6xi32> -> i32
+  %view = buffer.view %state[%origin] : buffer -> view<8xi32>
+  %prefill = view.load %view[0] : view<8xi32> -> i32
+  %decode = view.load %view[1] : view<8xi32> -> i32
   %c0 = scalar.constant 0 : i32
   %is_prefill = scalar.cmpi ne, %initialize, %c0 : i32
   %stage = scf.select %is_prefill, %prefill, %decode : i32
@@ -314,13 +344,17 @@ func.def public @step(%state: buffer, %initialize: i32, %source_position: i32, %
 // Feedback slot zero holds ordinary tokens; slots one/two hold separate
 // verification banks. Neither branch waits: the owner joins both timelines
 // before advancing host frontiers.
-func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %feedback_slot: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer) -> (i64) {
+func.def @epoch_once(%control_state: buffer, %mixed: i1, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %feedback_slot: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer) -> (i64) {
   %origin = index.constant 0 : offset
-  %view = buffer.view %control_state[%origin] : buffer -> view<6xi32>
-  %shape_count = view.load %view[2] : view<6xi32> -> i32
-  %draft_first = view.load %view[3] : view<6xi32> -> i32
-  %draft_kind = view.load %view[4] : view<6xi32> -> i32
-  %target_first = view.load %view[5] : view<6xi32> -> i32
+  %view = buffer.view %control_state[%origin] : buffer -> view<8xi32>
+  %shape_count = view.load %view[2] : view<8xi32> -> i32
+  %ordinary_draft_first = view.load %view[3] : view<8xi32> -> i32
+  %mixed_draft_first = view.load %view[7] : view<8xi32> -> i32
+  %draft_first = scf.select %mixed, %mixed_draft_first, %ordinary_draft_first : i32
+  %draft_kind = view.load %view[4] : view<8xi32> -> i32
+  %ordinary_target_first = view.load %view[5] : view<8xi32> -> i32
+  %mixed_target_first = view.load %view[6] : view<8xi32> -> i32
+  %target_first = scf.select %mixed, %mixed_target_first, %ordinary_target_first : i32
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32
@@ -391,18 +425,22 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32
   %c16 = scalar.constant 16 : i32
-  %first = func.call @epoch_once(%control_state, %shape, %proposes, %verifies, %span_count, %output_count, %c1, %residual, %metadata, %origins, %state, %tokens, %outputs, %carry, %committed, %results, %draft_cache, %draft_origins) : (buffer, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %media_count = scalar.addi %first_media_count, %next_media_count : i32
+  %mixed = scalar.cmpi ne, %media_count, %c0 : i32
+  %first = func.call @epoch_once(%control_state, %mixed, %shape, %proposes, %verifies, %span_count, %output_count, %c1, %residual, %metadata, %origins, %state, %tokens, %outputs, %carry, %committed, %results, %draft_cache, %draft_origins) : (buffer, i1, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   %continues = scalar.cmpi eq, %epoch_count, %c2 : i32
   %completion = scf.if %continues -> (i64) {
     %origin = index.constant 0 : offset
-    %view = buffer.view %control_state[%origin] : buffer -> view<6xi32>
-    %shape_count = view.load %view[2] : view<6xi32> -> i32
-    %proposal = view.load %view[3] : view<6xi32> -> i32
+    %view = buffer.view %control_state[%origin] : buffer -> view<8xi32>
+    %shape_count = view.load %view[2] : view<8xi32> -> i32
+    %ordinary_proposal = view.load %view[3] : view<8xi32> -> i32
+    %mixed_proposal = view.load %view[7] : view<8xi32> -> i32
+    %proposal = scf.select %mixed, %mixed_proposal, %ordinary_proposal : i32
     %shapes = scalar.muli %shape_count, %c2 : i32
     %after_shapes = scalar.addi %proposal, %shapes : i32
     %continuation = scalar.addi %after_shapes, %c1 : i32
     %ready = func.call @execute_3(%continuation, %metadata, %tokens, %results) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-    %next = func.call @epoch_once(%control_state, %continuation_shape, %continuation_proposes, %c1, %c16, %c0, %c2, %residual, %metadata, %origins, %state, %tokens, %outputs, %carry, %committed, %next_results, %draft_cache, %draft_origins) : (buffer, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %next = func.call @epoch_once(%control_state, %mixed, %continuation_shape, %continuation_proposes, %c1, %c16, %c0, %c2, %residual, %metadata, %origins, %state, %tokens, %outputs, %carry, %committed, %next_results, %draft_cache, %draft_origins) : (buffer, i1, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     scf.yield %next : i64
   } else {
     scf.yield %first : i64
