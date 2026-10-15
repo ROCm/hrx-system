@@ -11,6 +11,9 @@ iree_setup_c_src_root(
   PACKAGE_ROOT_PREFIX "libamdf"
 )
 set(IREE_IMPLICIT_DEFS_CC_DEPS)
+# Private components are archives folded into the explicit public shared/static
+# pair. They are not independently deployable shared libraries.
+set(BUILD_SHARED_LIBS OFF)
 # Private C++ tests and tools use standard designated initializers.
 set(IREE_CXX_STANDARD 20)
 # These clients use headers, not C++ modules requiring dependency scans.
