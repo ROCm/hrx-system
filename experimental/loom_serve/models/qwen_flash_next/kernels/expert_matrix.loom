@@ -8,6 +8,8 @@ config.decl @flash_next.token_count : %value: index where [range(%value, 1, 3276
 
 amdgpu.target<gfx11-generic> @flash_next_expert_matrix_wave32 {subgroup_size = 32}
 
+func.decl pure @expert_record_extent(%capacity: index, %record_rows: index) -> (index, index, offset)
+
 func.decl @ggml_q4k_chunk(%weight: buffer, %row_origin: offset, %block: index, %group: index, %half: index) -> (vector<16xi8>, f32, f32)
 
 template.decl @ggml.q5k.chunk(%weight: buffer, %row_origin: offset, %block: index, %group: index, %half: index) -> (vector<16xi8>, f32, f32)
@@ -112,11 +114,13 @@ func.def inline @expert_matrix_gate_body(%q8: i1, %q5: i1, %input_arg: buffer, %
   %row_bytes = scf.select %q8, %q8_row_bytes, %qk_row_bytes : offset
   %route_capacity = index.mul %tokens, %c10 : index
   %last_route = index.sub %route_capacity, %c1 : index
+  %record_capacity, %record_fields, %record_bytes = func.call pure @expert_record_extent(%tokens, %c16) : (index, index) -> (index, index, offset)
+  %last_record = index.sub %record_capacity, %c1 : index
   %header = buffer.view %tasks[%origin] : buffer -> view<1xi32>
-  %records = buffer.view %tasks[%record_origin] : buffer -> view<[%route_capacity]x18xi32>
+  %records = buffer.view %tasks[%record_origin] : buffer -> view<[%record_capacity]x18xi32>
   %count_word = view.load %header[0] : view<1xi32> -> i32
   %count_value = index.cast %count_word : i32 to index
-  %count = index.assume %count_value [range(%count_value, 0, %route_capacity)] : index
+  %count = index.assume %count_value [range(%count_value, 0, %record_capacity)] : index
   %work_count = index.mul %count, %c20 : index
   %worker = kernel.workgroup.id<x> : index
   %workitem = kernel.workitem.id<x> : index
@@ -169,16 +173,16 @@ func.def inline @expert_matrix_gate_body(%q8: i1, %q5: i1, %input_arg: buffer, %
   %init = vector.fragment<init> %accumulator_zero shape [%c16, %c16] : vector<8xf32>
   scf.for %work = [%worker to %work_count step %workers] {
     %task_value = index.div %work, %c20 : index
-    %task = index.assume %task_value [range(%task_value, 0, %last_route)] : index
+    %task = index.assume %task_value [range(%task_value, 0, %last_record)] : index
     %group = index.rem %work, %c20 : index
     %channel_base = index.mul %group, %c32 : index
-    %expert_word = view.load %records[%task, 0] : view<[%route_capacity]x18xi32> -> i32
+    %expert_word = view.load %records[%task, 0] : view<[%record_capacity]x18xi32> -> i32
     %expert_value = index.cast %expert_word : i32 to index
     %expert = index.assume %expert_value [range(%expert_value, 0, 511)] : index
-    %live_word = view.load %records[%task, 1] : view<[%route_capacity]x18xi32> -> i32
+    %live_word = view.load %records[%task, 1] : view<[%record_capacity]x18xi32> -> i32
     %live_value = index.cast %live_word : i32 to index
     %live = index.assume %live_value [range(%live_value, 1, 16)] : index
-    %route_word = view.load %records[%task, %input_field] : view<[%route_capacity]x18xi32> -> i32
+    %route_word = view.load %records[%task, %input_field] : view<[%record_capacity]x18xi32> -> i32
     %route_value = index.cast %route_word : i32 to index
     %route = index.assume %route_value [range(%route_value, 0, %last_route)] : index
     %input_row = index.div %route, %c10 : index
@@ -217,7 +221,7 @@ func.def inline @expert_matrix_gate_body(%q8: i1, %q5: i1, %input_arg: buffer, %
     %publish_live = index.cmp ult, %publish_token, %live : index
     %publish = scalar.andi %publish_live, %publishing_wave : i1
     scf.if %publish {
-      %output_word = view.load %records[%task, %publish_field] : view<[%route_capacity]x18xi32> -> i32
+      %output_word = view.load %records[%task, %publish_field] : view<[%record_capacity]x18xi32> -> i32
       %output_value = index.cast %output_word : i32 to index
       %output_row = index.assume %output_value [range(%output_value, 0, %last_route)] : index
       %wave_channel_base = index.add %channel_base, %logical_wave_channel : index
@@ -270,11 +274,13 @@ func.def inline @expert_matrix_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
   %block_bytes = index.constant 24 : offset
   %route_capacity = index.mul %tokens, %c10 : index
   %last_route = index.sub %route_capacity, %c1 : index
+  %record_capacity, %record_fields, %record_bytes = func.call pure @expert_record_extent(%tokens, %c16) : (index, index) -> (index, index, offset)
+  %last_record = index.sub %record_capacity, %c1 : index
   %header = buffer.view %tasks[%origin] : buffer -> view<1xi32>
-  %records = buffer.view %tasks[%record_origin] : buffer -> view<[%route_capacity]x18xi32>
+  %records = buffer.view %tasks[%record_origin] : buffer -> view<[%record_capacity]x18xi32>
   %count_word = view.load %header[0] : view<1xi32> -> i32
   %count_value = index.cast %count_word : i32 to index
-  %count = index.assume %count_value [range(%count_value, 0, %route_capacity)] : index
+  %count = index.assume %count_value [range(%count_value, 0, %record_capacity)] : index
   %work_count = index.mul %count, %c40 : index
   %worker = kernel.workgroup.id<x> : index
   %workitem = kernel.workitem.id<x> : index
@@ -315,16 +321,16 @@ func.def inline @expert_matrix_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
   %init = vector.fragment<init> %accumulator_zero shape [%c16, %c16] : vector<8xf32>
   scf.for %work = [%worker to %work_count step %workers] {
     %task_value = index.div %work, %c40 : index
-    %task = index.assume %task_value [range(%task_value, 0, %last_route)] : index
+    %task = index.assume %task_value [range(%task_value, 0, %last_record)] : index
     %group = index.rem %work, %c40 : index
     %channel_base = index.mul %group, %c64 : index
-    %expert_word = view.load %records[%task, 0] : view<[%route_capacity]x18xi32> -> i32
+    %expert_word = view.load %records[%task, 0] : view<[%record_capacity]x18xi32> -> i32
     %expert_value = index.cast %expert_word : i32 to index
     %expert = index.assume %expert_value [range(%expert_value, 0, 511)] : index
-    %live_word = view.load %records[%task, 1] : view<[%route_capacity]x18xi32> -> i32
+    %live_word = view.load %records[%task, 1] : view<[%record_capacity]x18xi32> -> i32
     %live_value = index.cast %live_word : i32 to index
     %live = index.assume %live_value [range(%live_value, 1, 16)] : index
-    %route_word = view.load %records[%task, %input_field] : view<[%route_capacity]x18xi32> -> i32
+    %route_word = view.load %records[%task, %input_field] : view<[%record_capacity]x18xi32> -> i32
     %route_value = index.cast %route_word : i32 to index
     %route = index.assume %route_value [range(%route_value, 0, %last_route)] : index
     %input_live = index.cmp ult, %local_token, %live : index
@@ -375,7 +381,7 @@ func.def inline @expert_matrix_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     %publish_live = index.cmp ult, %publish_token, %live : index
     scf.if %publish_live {
-      %output_word = view.load %records[%task, %publish_field] : view<[%route_capacity]x18xi32> -> i32
+      %output_word = view.load %records[%task, %publish_field] : view<[%record_capacity]x18xi32> -> i32
       %output_value = index.cast %output_word : i32 to index
       %output_row = index.assume %output_value [range(%output_value, 0, %last_route)] : index
       %wave_channel_base = index.add %channel_base, %wave_channel : index
