@@ -95,333 +95,254 @@ kernel.def @paged_online_softmax_loop_f32() {
   kernel.return
 }
 
-// Uniform-score controls use query=0: the maximum is zero, the denominator
-// counts present logical rows, and each output channel is the arithmetic mean
-// of 4*physical_row - 4 + channel. Empty inputs retain the initial state.
-// Nonuniform controls use query=+/-1 and key(row, channel)=(4*row+channel)/16,
-// so score=+/- (row+3/8). Expected values use a direct normalized exponential
-// sum over physical row occurrences, independent of the online recurrence.
-// State and output are both checked: duplicating a whole page cycle cannot
-// hide behind an unchanged normalized average.
-check.case public @paged_online_softmax_loop_n0 {
-  %count = check.literal value(0) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(-1000000000.0) step(1000000000.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(0.0) step(0.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
+// Generates the shared-shape boundary and page-table controls at runtime so
+// their values do not specialize the kernel under test.
+func.def @paged_online_softmax_inputs(%trial: index, %query: buffer, %page_table: buffer) -> (index) {
+  %base = index.constant 0 : offset
+  %query_view = buffer.view %query[%base] : buffer -> view<4xf32>
+  %table = buffer.view %page_table[%base] : buffer -> view<8xi32>
+  %begin = index.constant 0 : index
+  %query_end = index.constant 4 : index
+  %page_end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c6 = index.constant 6 : index
+  %c9 = index.constant 9 : index
+  %c12 = index.constant 12 : index
+  %c14 = index.constant 14 : index
+  %c17 = index.constant 17 : index
+  %c18 = index.constant 18 : index
+  %c1 = index.constant 1 : index
+  %c19 = index.constant 19 : index
+
+  %below_six = index.cmp ult, %trial, %c6 : index
+  %count = scf.if %below_six -> (index) {
+    scf.yield %trial : index
+  } else {
+    %below_nine = index.cmp ult, %trial, %c9 : index
+    %upper_count = scf.if %below_nine -> (index) {
+      %value = index.add %trial, %c1 : index
+      scf.yield %value : index
+    } else {
+      %below_twelve = index.cmp ult, %trial, %c12 : index
+      %high_count = scf.if %below_twelve -> (index) {
+        %value = index.add %trial, %c6 : index
+        scf.yield %value : index
+      } else {
+        %below_fourteen = index.cmp ult, %trial, %c14 : index
+        %boundary_count = scf.if %below_fourteen -> (index) {
+          %value = index.add %trial, %c19 : index
+          scf.yield %value : index
+        } else {
+          %value = scf.switch %trial -> (index) {
+            case 14 {
+              %special = index.constant 9 : index
+              scf.yield %special : index
+            }
+            case 15 {
+              %special = index.constant 32 : index
+              scf.yield %special : index
+            }
+            case 16 {
+              %special = index.constant 32 : index
+              scf.yield %special : index
+            }
+            case 17 {
+              %special = index.constant 17 : index
+              scf.yield %special : index
+            }
+            default {
+              %special = index.constant 9 : index
+              scf.yield %special : index
+            }
+          }
+          scf.yield %value : index
+        }
+        scf.yield %boundary_count : index
+      }
+      scf.yield %high_count : index
+    }
+    scf.yield %upper_count : index
+  }
+
+  %custom_query = index.cmp uge, %trial, %c14 : index
+  scf.if %custom_query {
+    %negative_query = index.cmp eq, %trial, %c17 : index
+    %positive = scalar.constant 1.0 : f32
+    %negative = scalar.constant -1.0 : f32
+    %value = scf.select %negative_query, %negative, %positive : f32
+    scf.for %channel = [%begin to %query_end step %step] {
+      view.store %value, %query_view[%channel] : f32, view<4xf32>
+    }
+  }
+
+  scf.switch %trial {
+    case 14 {
+      %page_id = scalar.constant 1 : i32
+      scf.for %page = [%begin to %page_end step %step] {
+        view.store %page_id, %table[%page] : i32, view<8xi32>
+      }
+    }
+    case 15 {
+      %page_id = scalar.constant -1 : i32
+      scf.for %page = [%begin to %page_end step %step] {
+        view.store %page_id, %table[%page] : i32, view<8xi32>
+      }
+    }
+    case 18 {
+      %page_bias = scalar.constant 1 : i32
+      scf.for %page = [%begin to %page_end step %step] {
+        %phase = index.rem %page, %c4 : index
+        %phase_i32 = index.cast %phase : index to i32
+        %page_id = scalar.subi %phase_i32, %page_bias : i32
+        view.store %page_id, %table[%page] : i32, view<8xi32>
+      }
+    }
+    default {
+    }
+  }
+  func.return %count : index
 }
 
-check.case public @paged_online_softmax_loop_n1 {
-  %count = check.literal value(1) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(1.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(28.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
+func.def @paged_online_softmax_compact_count() -> (index) {
+  %count = index.constant 10 : index
+  func.return %count : index
 }
 
-check.case public @paged_online_softmax_loop_n2 {
-  %count = check.literal value(2) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(2.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(30.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
+// Returns whether a logical token is present, its scalar score, and its
+// physical row. This keeps the direct oracle independent of the online
+// recurrence and works with both full and exact-tail backing allocations.
+func.def inline @paged_online_softmax_sample(%token: index, %query: buffer, %page_table: buffer, %keys: buffer) -> (i1, f32, index) {
+  %base = index.constant 0 : offset
+  %query_view = buffer.view %query[%base] : buffer -> view<4xf32>
+  %table = buffer.view %page_table[%base] : buffer -> view<8xi32>
+  %begin = index.constant 0 : index
+  %channel_end = index.constant 4 : index
+  %page_rows = index.constant 4 : index
+  %step = index.constant 1 : index
+  %row_bytes = index.constant 16 : offset
+  %first_page_id = scalar.constant 0 : i32
+  %absent_score = scalar.constant 0.0 : f32
+  %logical_page = index.div %token, %page_rows : index
+  %row = index.rem %token, %page_rows : index
+  %page_id = view.load %table[%logical_page] : view<8xi32> -> i32
+  %present = scalar.cmpi sge, %page_id, %first_page_id : i32
+  %score, %physical_row = scf.if %present -> (f32, index) {
+    %page_index = index.cast %page_id : i32 to index
+    %page = index.assume %page_index [range(%page_index, 0, 2)] : index
+    %page_begin = index.mul %page, %page_rows : index
+    %physical = index.add %page_begin, %row : index
+    %row_offset = index.scale %physical, %row_bytes : index, offset -> offset
+    %key_row = buffer.view %keys[%row_offset] : buffer -> view<4xf32>
+    %dot = scf.for %channel = [%begin to %channel_end step %step](%sum = %absent_score : f32) -> (f32) {
+      %query_value = view.load %query_view[%channel] : view<4xf32> -> f32
+      %key_value = view.load %key_row[%channel] : view<4xf32> -> f32
+      %product = scalar.mulf %query_value, %key_value : f32
+      %next = scalar.addf %sum, %product : f32
+      scf.yield %next : f32
+    }
+    scf.yield %dot, %physical : f32, index
+  } else {
+    scf.yield %absent_score, %begin : f32, index
+  }
+  func.return %present, %score, %physical_row : i1, f32, index
 }
 
-check.case public @paged_online_softmax_loop_n3 {
-  %count = check.literal value(3) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(3.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(32.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
+// Direct normalized-softmax oracle. It first finds the maximum, then computes
+// the denominator and each output numerator in separate scalar passes.
+func.def @paged_online_softmax_loop_f32_oracle(%token_count: index, %query: buffer, %page_table: buffer, %keys: buffer, %values: buffer, %final_state: buffer, %output: buffer) {
+  %count = index.assume %token_count [range(%token_count, 0, 32)] : index
+  %base = index.constant 0 : offset
+  %state = buffer.view %final_state[%base] : buffer -> view<2xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xf32>
+  %begin = index.constant 0 : index
+  %channel_end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %row_bytes = index.constant 16 : offset
+  %initial_max = scalar.constant -1000000000.0 : f32
+  %empty_sum = scalar.constant 0.0 : f32
+
+  %maximum = scf.for %token = [%begin to %count step %step](%current = %initial_max : f32) -> (f32) {
+    %present, %score, %physical_row = func.call @paged_online_softmax_sample(%token, %query, %page_table, %keys) : (index, buffer, buffer, buffer) -> (i1, f32, index)
+    %next = scf.if %present -> (f32) {
+      %updated = scalar.maxnumf %current, %score : f32
+      scf.yield %updated : f32
+    } else {
+      scf.yield %current : f32
+    }
+    scf.yield %next : f32
+  }
+
+  %denominator = scf.for %token = [%begin to %count step %step](%sum = %empty_sum : f32) -> (f32) {
+    %present, %score, %physical_row = func.call @paged_online_softmax_sample(%token, %query, %page_table, %keys) : (index, buffer, buffer, buffer) -> (i1, f32, index)
+    %next = scf.if %present -> (f32) {
+      %delta = scalar.subf %score, %maximum : f32
+      %weight = scalar.expf<afn> %delta : f32
+      %updated = scalar.addf %sum, %weight : f32
+      scf.yield %updated : f32
+    } else {
+      scf.yield %sum : f32
+    }
+    scf.yield %next : f32
+  }
+
+  scf.for %channel = [%begin to %channel_end step %step] {
+    %numerator = scf.for %token = [%begin to %count step %step](%sum = %empty_sum : f32) -> (f32) {
+      %present, %score, %physical_row = func.call @paged_online_softmax_sample(%token, %query, %page_table, %keys) : (index, buffer, buffer, buffer) -> (i1, f32, index)
+      %next = scf.if %present -> (f32) {
+        %delta = scalar.subf %score, %maximum : f32
+        %weight = scalar.expf<afn> %delta : f32
+        %row_offset = index.scale %physical_row, %row_bytes : index, offset -> offset
+        %value_row = buffer.view %values[%row_offset] : buffer -> view<4xf32>
+        %value = view.load %value_row[%channel] : view<4xf32> -> f32
+        %weighted = scalar.mulf %weight, %value : f32
+        %updated = scalar.addf %sum, %weighted : f32
+        scf.yield %updated : f32
+      } else {
+        scf.yield %sum : f32
+      }
+      scf.yield %next : f32
+    }
+    %nonempty = scalar.cmpf ogt, %denominator, %empty_sum : f32
+    %normalized = scf.if %nonempty -> (f32) {
+      %value = scalar.divf %numerator, %denominator : f32
+      scf.yield %value : f32
+    } else {
+      scf.yield %empty_sum : f32
+    }
+    view.store %normalized, %output_view[%channel] : f32, view<4xf32>
+  }
+  view.store %maximum, %state[%begin] : f32, view<2xf32>
+  view.store %denominator, %state[%step] : f32, view<2xf32>
+  func.return
 }
 
-check.case public @paged_online_softmax_loop_n4 {
-  %count = check.literal value(4) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(4.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(34.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
+check.scenario @paged_online_softmax_loop_values {
+  check.trial[19](%trial: index, %entropy: check.entropy) {
+    %query = check.generate.fill value(0.0) : tensor<4xf32>
+    %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
+    %count = check.generate<@paged_online_softmax_inputs>(%trial, %query, %pages) : (index, tensor<4xf32>, tensor<8xi32>) -> (index)
+    %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
+    %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
+    %state = check.generate.fill value(-1000.0) : tensor<2xf32>
+    %output = check.generate.fill value(-1000.0) : tensor<4xf32>
+    check.compare<@paged_online_softmax_loop_f32, @paged_online_softmax_loop_f32_oracle>(%count, %query, %pages, %keys, %values, %state, %output) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>) -> () {
+      check.expect.close actual(%state) expected(%state) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<2xf32>
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.generate<@paged_online_softmax_compact_count>() : () -> (index)
+    %query = check.generate.fill value(1.0) : tensor<4xf32>
+    %pages = check.generate.iota offset(0) step(1) period(3) : tensor<8xi32>
+    %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<10x4xf32>
+    %values = check.generate.iota offset(-4.0) step(1.0) : tensor<10x4xf32>
+    %state = check.generate.fill value(-1000.0) : tensor<2xf32>
+    %output = check.generate.fill value(-1000.0) : tensor<4xf32>
+    check.compare<@paged_online_softmax_loop_f32, @paged_online_softmax_loop_f32_oracle>(%count, %query, %pages, %keys, %values, %state, %output) : (index, tensor<4xf32>, tensor<8xi32>, tensor<10x4xf32>, tensor<10x4xf32>, tensor<2xf32>, tensor<4xf32>) -> () {
+      check.expect.close actual(%state) expected(%state) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<2xf32>
+      check.expect.close actual(%output) expected(%output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
+    }
+  }
   check.return
 }
-
-check.case public @paged_online_softmax_loop_n5 {
-  %count = check.literal value(5) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(5.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(29.600000000000001) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_n7 {
-  %count = check.literal value(7) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(7.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(26.285714285714285) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_n8 {
-  %count = check.literal value(8) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(8.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(26.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_n9 {
-  %count = check.literal value(9) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(9.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(22.666666666666668) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_n15 {
-  %count = check.literal value(15) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(12.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(18.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_n16 {
-  %count = check.literal value(16) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(12.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(18.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_n17 {
-  %count = check.literal value(17) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(13.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(18.76923076923077) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_n31 {
-  %count = check.literal value(31) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(24.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(18.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_n32 {
-  %count = check.literal value(32) : index
-  %query = check.generate.fill value(0.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(0.0) step(24.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(18.0) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_duplicate {
-  %count = check.literal value(9) : index
-  %query = check.generate.fill value(1.0) : tensor<4xf32>
-  %pages = check.generate.fill value(1) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(7.375) step(-4.219209346080298) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(21.813310425446229) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_all_absent {
-  %count = check.literal value(32) : index
-  %query = check.generate.fill value(1.0) : tensor<4xf32>
-  %pages = check.generate.fill value(-1) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(-1000000000.0) step(1000000000.0) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(0.0) step(0.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_nonuniform {
-  %count = check.literal value(32) : index
-  %query = check.generate.fill value(1.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(11.375) step(-8.2110660262629978) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(37.672388096527733) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_negative_query {
-  %count = check.literal value(17) : index
-  %query = check.generate.fill value(-1.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(-0.375) step(1.957302449496404) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(-1.6660972781761736) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @paged_online_softmax_loop_leading_hole {
-  %count = check.literal value(9) : index
-  %query = check.generate.fill value(1.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(-1) step(1) period(4) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(4.375) step(-2.803682568335347) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(9.8077662706487789) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-// Only ten physical rows exist: the final two row slots have no backing storage.
-check.case public @paged_online_softmax_loop_compact_tail {
-  %count = check.literal value(10) : index
-  %query = check.generate.fill value(1.0) : tensor<4xf32>
-  %pages = check.generate.iota offset(0) step(1) period(3) : tensor<8xi32>
-  %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<10x4xf32>
-  %values = check.generate.iota offset(-4.0) step(1.0) : tensor<10x4xf32>
-  %state = check.generate.fill value(-1000.0) : tensor<2xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(9.375) step(-7.7930951147620515) : tensor<2xf32>
-  %expected_output = check.generate.iota offset(29.673909252163082) step(1.0) : tensor<4xf32>
-  kernel.launch @paged_online_softmax_loop_f32(%count, %query, %pages, %keys, %values, %state, %actual) : (index, tensor<4xf32>, tensor<8xi32>, tensor<10x4xf32>, tensor<10x4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%state) expected(%expected_state) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<2xf32>
-  check.expect.close actual(%actual) expected(%expected_output) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.benchmark<@paged_online_softmax_loop_nonuniform> @paged_online_softmax_loop

@@ -50,217 +50,156 @@ kernel.def @moe_routed_combine_loop_f32() {
   kernel.return
 }
 
-// For route i, expert = 3 - (i mod 5), weight = (i+1)/8, and channel c has
-// payload 4*expert - 8 + c. The -1 entries contribute nothing. Each checked output
-// is A + B*c, where B is the sum of valid weights and A is the weighted expert
-// origin. Five-route cycles contribute B=(20*k+10)/8 and A=-(40*k+40)/8;
-// the remaining prefix is evaluated separately. Repeated IDs keep distinct
-// weights, so omitted, duplicated, or stale route data is observable.
-check.case public @moe_routed_combine_loop_n0 {
-  %count = check.literal value(0) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
+// Produces boundary-count inputs plus duplicate, masked, and ordered rounding
+// witnesses without exposing the selected values to target compilation.
+func.def @moe_routed_combine_inputs(%trial: index, %route_ids: buffer, %route_weights: buffer, %expert_payloads: buffer) -> (index) {
+  %base = index.constant 0 : offset
+  %ids = buffer.view %route_ids[%base] : buffer -> view<32xi32>
+  %weights = buffer.view %route_weights[%base] : buffer -> view<32xf32>
+  %payloads = buffer.view %expert_payloads[%base] : buffer -> view<16xf32>
+  %begin = index.constant 0 : index
+  %route_end = index.constant 32 : index
+  %payload_end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %c6 = index.constant 6 : index
+  %c9 = index.constant 9 : index
+  %c12 = index.constant 12 : index
+  %c14 = index.constant 14 : index
+  %c1 = index.constant 1 : index
+  %c19 = index.constant 19 : index
+  %below_six = index.cmp ult, %trial, %c6 : index
+  %count = scf.if %below_six -> (index) {
+    scf.yield %trial : index
+  } else {
+    %below_nine = index.cmp ult, %trial, %c9 : index
+    %upper_count = scf.if %below_nine -> (index) {
+      %value = index.add %trial, %c1 : index
+      scf.yield %value : index
+    } else {
+      %below_twelve = index.cmp ult, %trial, %c12 : index
+      %high_count = scf.if %below_twelve -> (index) {
+        %value = index.add %trial, %c6 : index
+        scf.yield %value : index
+      } else {
+        %below_fourteen = index.cmp ult, %trial, %c14 : index
+        %boundary_count = scf.if %below_fourteen -> (index) {
+          %value = index.add %trial, %c19 : index
+          scf.yield %value : index
+        } else {
+          %value = scf.switch %trial -> (index) {
+            case 14 {
+              %special = index.constant 17 : index
+              scf.yield %special : index
+            }
+            case 15 {
+              %special = index.constant 32 : index
+              scf.yield %special : index
+            }
+            default {
+              %special = index.constant 3 : index
+              scf.yield %special : index
+            }
+          }
+          scf.yield %value : index
+        }
+        scf.yield %boundary_count : index
+      }
+      scf.yield %high_count : index
+    }
+    scf.yield %upper_count : index
+  }
+
+  scf.switch %trial {
+    case 14 {
+      %expert = scalar.constant 2 : i32
+      scf.for %route = [%begin to %route_end step %step] {
+        view.store %expert, %ids[%route] : i32, view<32xi32>
+      }
+    }
+    case 15 {
+      %masked = scalar.constant -1 : i32
+      scf.for %route = [%begin to %route_end step %step] {
+        view.store %masked, %ids[%route] : i32, view<32xi32>
+      }
+    }
+    case 16 {
+      %expert = scalar.constant 0 : i32
+      %period = index.constant 3 : index
+      scf.for %route = [%begin to %route_end step %step] {
+        view.store %expert, %ids[%route] : i32, view<32xi32>
+        %phase = index.rem %route, %period : index
+        %weight = scf.switch %phase -> (f32) {
+          case 0 {
+            %value = scalar.constant 16777216.0 : f32
+            scf.yield %value : f32
+          }
+          case 1 {
+            %value = scalar.constant 1.0 : f32
+            scf.yield %value : f32
+          }
+          default {
+            %value = scalar.constant -16777214.0 : f32
+            scf.yield %value : f32
+          }
+        }
+        view.store %weight, %weights[%route] : f32, view<32xf32>
+      }
+      %payload_value = scalar.constant 1.0 : f32
+      scf.for %element = [%begin to %payload_end step %step] {
+        view.store %payload_value, %payloads[%element] : f32, view<16xf32>
+      }
+    }
+    default {
+    }
+  }
+  func.return %count : index
 }
 
-check.case public @moe_routed_combine_loop_n1 {
-  %count = check.literal value(1) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(0.5) step(0.125) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
+// Scalar ordered reference for the vectorized pipelined kernel.
+func.def @moe_routed_combine_loop_f32_oracle(%route_count: index, %route_ids: buffer, %route_weights: buffer, %expert_payloads: buffer, %combined_payload: buffer) {
+  %count = index.assume %route_count [range(%route_count, 0, 32)] : index
+  %base = index.constant 0 : offset
+  %ids = buffer.view %route_ids[%base] : buffer -> view<32xi32>
+  %weights = buffer.view %route_weights[%base] : buffer -> view<32xf32>
+  %payloads = buffer.view %expert_payloads[%base] : buffer -> view<4x4xf32>
+  %output = buffer.view %combined_payload[%base] : buffer -> view<4xf32>
+  %begin = index.constant 0 : index
+  %channel_end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %first_expert_id = scalar.constant 0 : i32
+  %initial_sum = scalar.constant 0.0 : f32
+  scf.for %channel = [%begin to %channel_end step %step] {
+    %combined = scf.for %route = [%begin to %count step %step](%sum = %initial_sum : f32) -> (f32) {
+      %expert_id = view.load %ids[%route] : view<32xi32> -> i32
+      %valid = scalar.cmpi sge, %expert_id, %first_expert_id : i32
+      %next = scf.if %valid -> (f32) {
+        %expert_index = index.cast %expert_id : i32 to index
+        %expert = index.assume %expert_index [range(%expert_index, 0, 3)] : index
+        %weight = view.load %weights[%route] : view<32xf32> -> f32
+        %payload = view.load %payloads[%expert, %channel] : view<4x4xf32> -> f32
+        %weighted = scalar.mulf %payload, %weight : f32
+        %updated = scalar.addf %sum, %weighted : f32
+        scf.yield %updated : f32
+      } else {
+        scf.yield %sum : f32
+      }
+      scf.yield %next : f32
+    }
+    view.store %combined, %output[%channel] : f32, view<4xf32>
+  }
+  func.return
 }
 
-check.case public @moe_routed_combine_loop_n2 {
-  %count = check.literal value(2) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(0.5) step(0.375) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+check.scenario @moe_routed_combine_loop_values {
+  check.trial[17](%trial: index, %entropy: check.entropy) {
+    %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+    %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
+    %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+    %count = check.generate<@moe_routed_combine_inputs>(%trial, %ids, %weights, %payloads) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>) -> (index)
+    %output = check.generate.fill value(-1000.0) : tensor<4xf32>
+    check.compare<@moe_routed_combine_loop_f32, @moe_routed_combine_loop_f32_oracle>(%count, %ids, %weights, %payloads, %output) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4xf32>
+    }
+  }
   check.return
 }
-
-check.case public @moe_routed_combine_loop_n3 {
-  %count = check.literal value(3) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-1.0) step(0.75) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n4 {
-  %count = check.literal value(4) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-5.0) step(1.25) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n5 {
-  %count = check.literal value(5) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-5.0) step(1.25) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n7 {
-  %count = check.literal value(7) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-2.0) step(2.875) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n8 {
-  %count = check.literal value(8) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-6.0) step(3.875) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n9 {
-  %count = check.literal value(9) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-15.0) step(5.0) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n15 {
-  %count = check.literal value(15) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-30.0) step(11.25) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n16 {
-  %count = check.literal value(16) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-22.0) step(13.25) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n17 {
-  %count = check.literal value(17) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-22.0) step(15.375) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n31 {
-  %count = check.literal value(31) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-89.5) step(48.875) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_n32 {
-  %count = check.literal value(32) : index
-  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(-89.5) step(52.875) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_duplicate {
-  %count = check.literal value(17) : index
-  %ids = check.generate.fill value(2) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(0.0) step(19.125) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.case public @moe_routed_combine_loop_all_masked {
-  %count = check.literal value(32) : index
-  %ids = check.generate.fill value(-1) : tensor<32xi32>
-  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
-  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-// Ordered f32 accumulation of [2^24, 1, -(2^24-2)] returns 2: adding 1 to
-// 2^24 rounds back to 2^24. Reversing the order returns 3. This distinguishes
-// recurrence order from the exactly representable sums in the route controls.
-check.case public @moe_routed_combine_loop_rounding_order {
-  %count = check.literal value(3) : index
-  %ids = check.generate.fill value(0) : tensor<32xi32>
-  %weights = check.generate.iota offset(16777216.0) step(-16777215.0) period(3) : tensor<32xf32>
-  %payloads = check.generate.fill value(1.0) : tensor<4x4xf32>
-  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
-  %expected = check.generate.fill value(2.0) : tensor<4xf32>
-  kernel.launch @moe_routed_combine_loop_f32(%count, %ids, %weights, %payloads, %actual) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>)
-  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
-  check.return
-}
-
-check.benchmark<@moe_routed_combine_loop_n32> @moe_routed_combine_loop

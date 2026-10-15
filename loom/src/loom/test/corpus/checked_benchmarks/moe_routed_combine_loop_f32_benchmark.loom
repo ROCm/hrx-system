@@ -1,0 +1,15 @@
+kernel.decl @moe_routed_combine_loop_f32() launch(%route_count: index, %route_ids: buffer, %route_weights: buffer, %expert_payloads: buffer, %combined_payload: buffer)
+
+check.scenario @moe_routed_combine_loop_benchmark {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(32) : index
+    %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+    %weights = check.generate.iota offset(0.125) step(0.125) : tensor<32xf32>
+    %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+    %output = check.generate.fill value(-1000.0) : tensor<4xf32>
+    check.invoke<@moe_routed_combine_loop_f32>(%count, %ids, %weights, %payloads, %output) : (index, tensor<32xi32>, tensor<32xf32>, tensor<4x4xf32>, tensor<4xf32>) -> ()
+  }
+  check.return
+}
+
+check.benchmark<@moe_routed_combine_loop_benchmark> @moe_routed_combine_loop

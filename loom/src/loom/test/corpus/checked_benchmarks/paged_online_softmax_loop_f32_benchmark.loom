@@ -1,0 +1,17 @@
+kernel.decl @paged_online_softmax_loop_f32() launch(%token_count: index, %query: buffer, %page_table: buffer, %keys: buffer, %values: buffer, %final_state: buffer, %output: buffer)
+
+check.scenario @paged_online_softmax_loop_benchmark {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(32) : index
+    %query = check.generate.fill value(1.0) : tensor<4xf32>
+    %pages = check.generate.iota offset(2) step(-1) period(4) : tensor<8xi32>
+    %keys = check.generate.iota offset(0.0) step(0.0625) : tensor<12x4xf32>
+    %values = check.generate.iota offset(-4.0) step(1.0) : tensor<12x4xf32>
+    %state = check.generate.fill value(-1000.0) : tensor<2xf32>
+    %output = check.generate.fill value(-1000.0) : tensor<4xf32>
+    check.invoke<@paged_online_softmax_loop_f32>(%count, %query, %pages, %keys, %values, %state, %output) : (index, tensor<4xf32>, tensor<8xi32>, tensor<12x4xf32>, tensor<12x4xf32>, tensor<2xf32>, tensor<4xf32>) -> ()
+  }
+  check.return
+}
+
+check.benchmark<@paged_online_softmax_loop_benchmark> @paged_online_softmax_loop
