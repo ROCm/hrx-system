@@ -7,7 +7,7 @@ amdgpu.target<gfx11-generic> @flash_next_expert_wave32 {subgroup_size = 32}
 
 func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
-func.decl @flash_next_qk_partial(%q5_encoding: i1, %width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+func.decl @flash_next_qk_pair_partial(%q5_encoding: i1, %width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %gate_weight: buffer, %up_weight: buffer) -> (f32, f32)
 
 func.decl @flash_next_q51_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
 
@@ -54,8 +54,7 @@ func.def inline @expert_gate_up_body(%q8_encoding: i1, %q5_encoding: i1, %span_a
       %up = func.call @flash_next_q8_partial(%input_width, %token, %row, %lane, %stride, %input, %up_weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
       scf.yield %gate, %up : f32, f32
     } else {
-      %gate = func.call @flash_next_qk_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %gate_weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
-      %up = func.call @flash_next_qk_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %up_weight) : (i1, index, index, index, index, index, buffer, buffer) -> (f32)
+      %gate, %up = func.call @flash_next_qk_pair_partial(%q5_encoding, %input_width, %token, %row, %lane, %stride, %input, %gate_weight, %up_weight) : (i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32, f32)
       scf.yield %gate, %up : f32, f32
     }
     %gate = kernel.subgroup.reduce<addf> %gate_partial : f32

@@ -19,9 +19,14 @@ func.def inline @flash_next_affine_dot16(%codes: vector<16xi8>, %values: vector<
   func.return %result : f32
 }
 
-// Q4_K and Q5_K share group geometry. The caller supplies a constant format
-// choice so each kernel retains only its selected physical decoder.
-func.def public inline @flash_next_qk_partial(%q5_encoding: i1, %width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32) {
+// Gate and up share the activation load and affine input sum while retaining
+// independent chunk accumulators. Each projection keeps its original dot tree
+// and lane ownership, so pairing does not change the final BF16 result.
+// Q4_K and Q5_K share this geometry; the caller's constant format choice keeps
+// only the selected physical decoder in each kernel.
+func.def public inline @flash_next_qk_pair_partial(%q5_encoding: i1, %width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %gate_weight: buffer, %up_weight: buffer) -> (f32, f32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
@@ -37,26 +42,35 @@ func.def public inline @flash_next_qk_partial(%q5_encoding: i1, %width: index, %
   %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
   %input_origin = index.scale %token, %input_row_bytes : index, offset -> offset
   %input_view = buffer.view %input[%input_origin] : buffer -> view<[%chunks]x16xbf16>
-  %c0 = scalar.constant 0.0 : f32
-  %result = scf.for %chunk = [%lane to %chunks step %stride](%accumulator = %c0 : f32) -> (f32) {
+  %initial_sums = vector.constant 0.0 : vector<2xf32>
+  %result = scf.for %chunk = [%lane to %chunks step %stride](%sums = %initial_sums : vector<2xf32>) -> (vector<2xf32>) {
     %block = index.div %chunk, %c16 : index
     %group_index = index.div %chunk, %c2 : index
     %group = index.rem %group_index, %c8 : index
     %half = index.rem %chunk, %c2 : index
-    %codes, %scale, %minimum_magnitude = scf.if %q5_encoding -> (vector<16xi8>, f32, f32) {
-      %codes, %scale, %minimum = template.apply<@ggml.q5k.chunk>(%weight, %weight_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
-      scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
-    } else {
-      %codes, %scale, %minimum = func.call @ggml_q4k_chunk(%weight, %weight_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
-      scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
-    }
     %values = vector.load %input_view[%chunk, 0] : view<[%chunks]x16xbf16> -> vector<16xbf16>
-    %minimum = scalar.negf %minimum_magnitude : f32
-    %contribution = func.call @flash_next_affine_dot16(%codes, %values, %scale, %minimum) : (vector<16xi8>, vector<16xbf16>, f32, f32) -> (f32)
-    %next = scalar.addf %accumulator, %contribution : f32
-    scf.yield %next : f32
+    %next_sums = scf.for %projection = [%c0 to %c2 step %c1](%current = %sums : vector<2xf32>) -> (vector<2xf32>) unroll schedule(linear) {
+      %is_gate = index.cmp eq, %projection, %c0 : index
+      %weight = scf.select %is_gate, %gate_weight, %up_weight : buffer
+      %codes, %scale, %minimum_magnitude = scf.if %q5_encoding -> (vector<16xi8>, f32, f32) {
+        %codes, %scale, %minimum = template.apply<@ggml.q5k.chunk>(%weight, %weight_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+        scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
+      } else {
+        %codes, %scale, %minimum = func.call @ggml_q4k_chunk(%weight, %weight_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+        scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
+      }
+      %minimum = scalar.negf %minimum_magnitude : f32
+      %contribution = func.call @flash_next_affine_dot16(%codes, %values, %scale, %minimum) : (vector<16xi8>, vector<16xbf16>, f32, f32) -> (f32)
+      %prior = vector.extract %current[%projection] : vector<2xf32> -> f32
+      %sum = scalar.addf %prior, %contribution : f32
+      %next = vector.insert %sum into %current[%projection] : f32, vector<2xf32>
+      scf.yield %next : vector<2xf32>
+    }
+    scf.yield %next_sums : vector<2xf32>
   }
-  func.return %result : f32
+  %gate = vector.extract %result[0] : vector<2xf32> -> f32
+  %up = vector.extract %result[1] : vector<2xf32> -> f32
+  func.return %gate, %up : f32, f32
 }
 
 // Q5_1 stores two half scales, one high-bit word, and sixteen nibble pairs per
