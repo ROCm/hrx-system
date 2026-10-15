@@ -6,12 +6,14 @@
 
 """The authoring CLI uses the production caller with two real source policies."""
 
+import base64
 import json
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 CHECKER = Path(sys.argv.pop(1)).resolve()
@@ -37,7 +39,8 @@ class RequestCheckTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
         vocabulary = {chr(index): index for index in range(128)}
-        vocabulary.update({"<bos>": 128, "<eos>": 129, "λ": 130})
+        special_tokens = (("<bos>", 128), ("<eos>", 129), ("<|image_pad|>", 131))
+        vocabulary.update({"λ": 130, **dict(special_tokens)})
         tokenizer = {
             "model": {"type": "BPE", "vocab": vocabulary, "merges": []},
             "added_tokens": [
@@ -50,7 +53,7 @@ class RequestCheckTest(unittest.TestCase):
                     "normalized": False,
                     "special": True,
                 }
-                for spelling, index in (("<bos>", 128), ("<eos>", 129))
+                for spelling, index in special_tokens
             ],
             "post_processor": {
                 "type": "TemplateProcessing",
@@ -104,14 +107,37 @@ class RequestCheckTest(unittest.TestCase):
     def success(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
         value = json.loads(result.stdout)
+        expected_tokens = []
+        for index, text in enumerate(value["prompt"].split("<|image_pad|>")):
+            if index:
+                expected_tokens.append(131)
+            expected_tokens.extend(
+                130 if character == "λ" else ord(character) for character in text
+            )
         self.assertEqual(
             value["tokens"],
-            [
-                130 if character == "λ" else ord(character)
-                for character in value["prompt"]
-            ],
+            expected_tokens,
         )
         return value
+
+    def image(self, color):
+        def chunk(kind, payload):
+            data = kind + payload
+            return (
+                struct.pack(">I", len(payload))
+                + data
+                + struct.pack(">I", zlib.crc32(data))
+            )
+
+        pixels = (b"\x00" + bytes(color) * 256) * 256
+        png = (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", 256, 256, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(pixels))
+            + chunk(b"IEND", b"")
+        )
+        url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        return {"type": "image_url", "image_url": {"url": url}}
 
     def request(self, model="qwen3.8-27b", **options):
         return {
@@ -151,7 +177,7 @@ class RequestCheckTest(unittest.TestCase):
                     self.assertFalse(value["reusable"])
                     self.assertTrue(value["checkpoint"].endswith("<|im_end|>\n"))
 
-    def test_text_deployment_rejects_image_content(self):
+    def test_images_reject_non_data_urls(self):
         result = self.execute(
             PACKAGE / "control.loom",
             self.request(
@@ -167,7 +193,7 @@ class RequestCheckTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
-        self.assertIn("this model does not accept image input", result.stderr)
+        self.assertIn("image_url must be a base64", result.stderr)
 
     def test_text_parts_preserve_order_and_have_no_media_spans(self):
         request = self.request()
@@ -179,6 +205,44 @@ class RequestCheckTest(unittest.TestCase):
         self.assertEqual(actual["prompt"], expected["prompt"])
         self.assertEqual(actual["tokens"], expected["tokens"])
         self.assertEqual(actual["media_spans"], [])
+
+    def test_ordered_multiple_images_preserve_input_spans(self):
+        parts = [
+            {"type": "text", "text": "  Compare first: "},
+            self.image((255, 0, 0)),
+            {"type": "text", "text": " with second: "},
+            self.image((0, 0, 255)),
+            {"type": "text", "text": " and explain.  "},
+        ]
+        request = self.request(messages=[{"role": "user", "content": parts}])
+        value = self.success(self.execute(PACKAGE / "control.loom", request))
+        marker = "<|vision_start|>" + "<|image_pad|>" * 64 + "<|vision_end|>"
+        expected = "Compare first: " + marker + " with second: " + marker
+        self.assertIn(expected + " and explain.<|im_end|>", value["prompt"])
+        spans = value["media_spans"]
+        self.assertEqual([span[0] for span in spans], [0, 1])
+        for image, offset, count in spans:
+            self.assertEqual(count, 64)
+            self.assertEqual(value["tokens"][offset : offset + count], [131] * 64)
+            self.assertNotEqual(value["tokens"][offset - 1], 131)
+            self.assertNotEqual(value["tokens"][offset + count], 131)
+        self.assertGreater(spans[1][1], spans[0][1] + 64)
+
+    def test_images_across_turns_and_occurrence_limit(self):
+        image = self.image((0, 255, 0))
+        request = self.request(
+            messages=[
+                {"role": "user", "content": [image, image]},
+                {"role": "assistant", "content": "Two green images."},
+                {"role": "user", "content": [image, image]},
+            ]
+        )
+        value = self.success(self.execute(PACKAGE / "control.loom", request))
+        self.assertEqual([span[0] for span in value["media_spans"]], [0, 1, 2, 3])
+        request["messages"][-1]["content"].append(image)
+        result = self.execute(PACKAGE / "control.loom", request)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
 
     def test_production_xml_completion(self):
         call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
@@ -196,6 +260,26 @@ class RequestCheckTest(unittest.TestCase):
         self.assertEqual(function["name"], "read")
         self.assertEqual(json.loads(function["arguments"]), {"path": "a.txt"})
         self.assertTrue(value["reusable"])
+
+    def test_tool_catalog_matches_native_admission(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": f"tool_{index}",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for index in range(33)
+        ]
+        value = self.success(
+            self.execute(
+                PACKAGE / "control.loom", self.request(tools=tools), capacity=8192
+            )
+        )
+        self.assertEqual(value["declared_tool_count"], len(tools))
+        catalog = value["prompt"].split("<tools>\n", 1)[1].split("\n</tools>", 1)[0]
+        self.assertEqual([json.loads(line) for line in catalog.splitlines()], tools)
 
     def test_independent_source_identity_roles_json_and_completion(self):
         response = json.dumps(
