@@ -136,8 +136,8 @@ TEST_P(LivenessSelectionTest,
   ASSERT_EQ(registers.value_count, all.value_count);
   ASSERT_EQ(all.interval_count, 4u);
   ASSERT_EQ(registers.interval_count, 2u);
-  EXPECT_EQ(all.segment_count, 2u * block_count + 2u);
-  EXPECT_EQ(registers.segment_count, block_count + 1u);
+  EXPECT_EQ(all.segment_count, 4u);
+  EXPECT_EQ(registers.segment_count, 2u);
   EXPECT_EQ(registers.operation_count, all.operation_count);
   EXPECT_EQ(all.operation_use_count, 5u);
   EXPECT_EQ(registers.operation_use_count, 2u);
@@ -164,6 +164,8 @@ TEST_P(LivenessSelectionTest,
     ASSERT_NE(after, nullptr);
     EXPECT_EQ(after->start_point, before->start_point);
     EXPECT_EQ(after->end_point, before->end_point);
+    EXPECT_EQ(after->block_count, before->block_count);
+    EXPECT_EQ(after->block_count, value == first_address_ ? block_count : 1);
     const auto original = all.value_segment_ranges[ordinal];
     const auto selected = registers.value_segment_ranges[ordinal];
     ASSERT_EQ(selected.count, original.count);

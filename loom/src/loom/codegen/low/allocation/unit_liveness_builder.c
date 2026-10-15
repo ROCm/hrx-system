@@ -1756,18 +1756,25 @@ static iree_status_t loom_low_allocation_unit_liveness_refine_storage_segments(
   if (liveness->block_count < 2) {
     return iree_ok_status();
   }
-  bool has_sparse_tie = false;
+  bool has_cross_block_tie = false;
   for (iree_host_size_t i = 0; i < placement->relation_count; ++i) {
     const loom_low_placement_relation_t* relation = &placement->relations[i];
-    if (loom_low_allocation_unit_liveness_can_refine_tie(unit_liveness,
-                                                         relation) &&
-        (liveness->value_segment_ranges[relation->source_ordinal].count > 1 ||
-         liveness->value_segment_ranges[relation->result_ordinal].count > 1)) {
-      has_sparse_tie = true;
+    if (!loom_low_allocation_unit_liveness_can_refine_tie(unit_liveness,
+                                                          relation)) {
+      continue;
+    }
+    const loom_liveness_interval_t* source =
+        &liveness->intervals
+             [liveness->value_interval_indices[relation->source_ordinal]];
+    const loom_liveness_interval_t* result =
+        &liveness->intervals
+             [liveness->value_interval_indices[relation->result_ordinal]];
+    if (source->block_count > 1 || result->block_count > 1) {
+      has_cross_block_tie = true;
       break;
     }
   }
-  if (!has_sparse_tie) {
+  if (!has_cross_block_tie) {
     return iree_ok_status();
   }
   iree_arena_allocator_t scratch_arena;

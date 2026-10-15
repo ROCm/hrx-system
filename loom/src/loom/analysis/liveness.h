@@ -67,6 +67,9 @@ typedef struct loom_liveness_interval_t {
   uint32_t start_point;
   // One-past-last program point where the value is live.
   uint32_t end_point;
+  // Number of top-level blocks containing nonempty live segments. Contiguous
+  // segments may span several blocks; dead definitions have zero live blocks.
+  uint16_t block_count;
   // Pressure class used for grouped summaries.
   loom_liveness_value_class_t value_class;
   // Number of units contributed to |value_class| when live.
@@ -79,15 +82,16 @@ typedef struct loom_liveness_interval_t {
 static_assert(sizeof(loom_liveness_interval_t) <= 40,
               "liveness intervals must remain compact per-value records");
 
-// Contiguous half-open range where one value is live within one CFG block.
+// Maximal contiguous half-open range where one value is live.
 //
-// A value may have multiple segments when its uses span mutually exclusive
-// blocks. Segments for each value are non-empty, ordered by increasing program
-// point and never overlap.
+// Neighboring block-local ranges that touch form one segment. Real gaps remain
+// distinct even when an enclosing interval covers them. Segments for each
+// value are nonempty, ordered by increasing program point, and never touch or
+// overlap. Intervals retain live-block counts independently of segmentation.
 typedef struct loom_liveness_segment_t {
-  // First program point where the value is live in the block.
+  // First program point where the value is live in this segment.
   uint32_t start_point;
-  // One-past-last program point where the value is live in the block.
+  // One-past-last program point where the value is live in this segment.
   uint32_t end_point;
 } loom_liveness_segment_t;
 
@@ -281,7 +285,7 @@ typedef struct loom_liveness_analysis_t {
   const loom_liveness_pressure_summary_t* pressure_summaries;
   // Number of records in |pressure_summaries|.
   iree_host_size_t pressure_summary_count;
-  // Sparse block-local live segments grouped by value ordinal.
+  // Maximal contiguous live segments grouped by value ordinal.
   const loom_liveness_segment_t* segments;
   // Number of entries in |segments|.
   iree_host_size_t segment_count;
@@ -367,7 +371,7 @@ loom_liveness_operation_span_t loom_liveness_operation_span(
 loom_value_ordinal_t loom_liveness_operation_use_ordinal(
     const loom_liveness_analysis_t* analysis, uint32_t use_index);
 
-// Returns the block-local live segment containing one retained semantic
+// Returns the contiguous live segment containing one retained semantic
 // operation use. The returned index addresses |analysis->segments| directly.
 uint32_t loom_liveness_operation_use_segment_index(
     const loom_liveness_analysis_t* analysis, uint32_t use_index);

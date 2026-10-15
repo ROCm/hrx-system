@@ -216,6 +216,7 @@ func.def @linear(%a: i32, %b: i32) -> (i32) {
   EXPECT_EQ(dead_interval->definition_point, 2u);
   EXPECT_EQ(dead_interval->start_point, 2u);
   EXPECT_EQ(dead_interval->end_point, 2u);
+  EXPECT_EQ(dead_interval->block_count, 0u);
 
   ASSERT_EQ(analysis.operation_count, 3u);
   EXPECT_EQ(loom_liveness_operation_at(&analysis, 0)->op, add);
@@ -393,7 +394,8 @@ func.def @cfg_select(%cond: i1, %a: i32, %b: i32) -> (i32) {
   EXPECT_EQ(join_block.live_in_count, 0u);
 
   const auto expect_branch_use_segment = [&](const auto& block,
-                                             loom_value_id_t value) {
+                                             loom_value_id_t value,
+                                             uint32_t segment_count) {
     const loom_liveness_operation_point_t* branch =
         loom_liveness_operation_at(&analysis, block.operation_start);
     ASSERT_EQ(branch->direct_use_count, 1u);
@@ -403,16 +405,25 @@ func.def @cfg_select(%cond: i1, %a: i32, %b: i32) -> (i32) {
     ASSERT_EQ(analysis.value_ids[value_ordinal], value);
     const loom_liveness_segment_range_t range =
         loom_liveness_segment_range_for_value_ordinal(&analysis, value_ordinal);
-    ASSERT_EQ(range.count, 2u);
+    ASSERT_EQ(range.count, segment_count);
+    EXPECT_EQ(loom_liveness_interval_for_value_ordinal(&analysis, value_ordinal)
+                  ->block_count,
+              2u);
     const uint32_t segment_index =
         loom_liveness_operation_use_segment_index(&analysis, use_index);
-    EXPECT_EQ(segment_index, range.start + 1u);
+    EXPECT_EQ(segment_index, range.start + segment_count - 1u);
     EXPECT_LE(analysis.segments[segment_index].start_point,
               branch->start_point);
     EXPECT_GT(analysis.segments[segment_index].end_point, branch->start_point);
   };
-  expect_branch_use_segment(then_block, args[1]);
-  expect_branch_use_segment(else_block, args[2]);
+  // The first branch touches the entry's live-out range. The other value
+  // remains genuinely sparse across the intervening branch.
+  expect_branch_use_segment(then_block, args[1], 1);
+  expect_branch_use_segment(else_block, args[2], 2);
+  EXPECT_FALSE(loom_liveness_segment_range_contains(
+      analysis.segments,
+      analysis.value_segment_ranges[FindValueOrdinal(analysis, args[2])],
+      then_block.start_point));
 }
 
 class LivenessStorageTest : public LivenessTest {
@@ -506,8 +517,7 @@ class LivenessStorageTest : public LivenessTest {
     ASSERT_EQ(analysis.operation_count, body_->block_count);
     ASSERT_EQ(analysis.value_count, entry->arg_count);
     ASSERT_EQ(analysis.interval_count, entry->arg_count);
-    ASSERT_EQ(analysis.segment_count,
-              static_cast<size_t>(body_->block_count) * entry->arg_count);
+    ASSERT_EQ(analysis.segment_count, entry->arg_count);
     for (uint16_t i = 0; i < analysis.block_count; ++i) {
       EXPECT_EQ(loom_liveness_block_index_at_point(
                     &analysis, analysis.blocks[i].start_point),
@@ -520,20 +530,17 @@ class LivenessStorageTest : public LivenessTest {
       const auto ordinal = FindValueOrdinal(analysis, entry->arg_ids[i]);
       ASSERT_NE(ordinal, LOOM_VALUE_ORDINAL_INVALID);
       const auto range = analysis.value_segment_ranges[ordinal];
-      EXPECT_EQ(range.start, ordinal * body_->block_count);
-      ASSERT_EQ(range.count, body_->block_count);
+      EXPECT_EQ(range.start, ordinal);
+      ASSERT_EQ(range.count, 1u);
       const auto* interval =
           loom_liveness_interval_for_value_ordinal(&analysis, ordinal);
       ASSERT_NE(interval, nullptr);
       EXPECT_EQ(interval->start_point, 0u);
       EXPECT_EQ(interval->end_point, 2u * body_->block_count - 1u);
-      for (uint32_t block_index = 0; block_index < range.count; ++block_index) {
-        const auto segment = analysis.segments[range.start + block_index];
-        EXPECT_EQ(segment.start_point, 2u * block_index);
-        EXPECT_EQ(
-            segment.end_point,
-            2u * block_index + (block_index + 1u == range.count ? 1u : 2u));
-      }
+      EXPECT_EQ(interval->block_count, body_->block_count);
+      const auto segment = analysis.segments[range.start];
+      EXPECT_EQ(segment.start_point, interval->start_point);
+      EXPECT_EQ(segment.end_point, interval->end_point);
     }
     if (entry->arg_count != 0) {
       const auto* pressure = FindScalarPressure(analysis, LOOM_SCALAR_TYPE_I32);
@@ -578,7 +585,7 @@ TEST_P(LivenessStorageBoundaryTest, PreservesSegmentsAndReusesPoolBlocks) {
   EXPECT_EQ(allocation_count_, allocation_count);
 }
 
-INSTANTIATE_TEST_SUITE_P(SegmentChunks, LivenessStorageBoundaryTest,
+INSTANTIATE_TEST_SUITE_P(CfgChains, LivenessStorageBoundaryTest,
                          ::testing::Values(1, 31, 32, 33, 127, 128, 129, 1023,
                                            1024, 1025));
 
@@ -648,22 +655,26 @@ TEST_P(LivenessStorageFailureTest, BackingFailureLeavesNoPublishedAnalysis) {
 
 INSTANTIATE_TEST_SUITE_P(Construction, LivenessStorageFailureTest,
                          ::testing::Values(std::make_tuple(1025, 8, 128 * 1024),
+                                           std::make_tuple(3, 800, 128 * 1024),
                                            std::make_tuple(1, 800, 32 * 1024)));
 
 class LivenessOperationStorageTest
     : public LivenessStorageTest,
       public ::testing::WithParamInterface<uint32_t> {
  protected:
-  void BuildOperationUses(uint32_t operation_count) {
-    ASSERT_NO_FATAL_FAILURE(BuildChain(1, 1, 1));
+  void BuildOperationUses(uint32_t operation_count, uint16_t block_count = 1) {
+    ASSERT_NO_FATAL_FAILURE(BuildChain(block_count, 1, 1));
     auto* entry = loom_region_entry_block(body_);
     loom_builder_t builder;
     loom_builder_initialize(module_.get(), &module_->arena, entry, &builder);
-    loom_builder_set_before(&builder, entry->last_op);
-    for (uint32_t i = 1; i < operation_count; ++i) {
-      loom_op_t* use = nullptr;
-      IREE_ASSERT_OK(loom_test_use_build(&builder, entry->arg_ids, 1,
-                                         LOOM_LOCATION_UNKNOWN, &use));
+    for (uint16_t i = 0; i < block_count; ++i) {
+      auto* block = loom_region_block(body_, i);
+      loom_builder_set_before(&builder, block->last_op);
+      for (uint32_t j = 1; j < operation_count; ++j) {
+        loom_op_t* use = nullptr;
+        IREE_ASSERT_OK(loom_test_use_build(&builder, entry->arg_ids, 1,
+                                           LOOM_LOCATION_UNKNOWN, &use));
+      }
     }
   }
 };
@@ -742,6 +753,28 @@ TEST_P(LivenessOperationStorageTest, StableAcceptedOrderAndPoolReuse) {
 INSTANTIATE_TEST_SUITE_P(OperationSegments, LivenessOperationStorageTest,
                          ::testing::Values(1, 127, 128, 129, 2048, 2049, 4097,
                                            65537));
+
+TEST_F(LivenessOperationStorageTest,
+       CompactUseSegmentsCrossChunkAndBlockBoundaries) {
+  ASSERT_NO_FATAL_FAILURE(BuildOperationUses(777, 3));
+  loom_liveness_analysis_t analysis = {};
+  IREE_ASSERT_OK(loom_liveness_analyze_region(module_.get(), body_,
+                                              &result_arena_, &analysis));
+  ASSERT_EQ(analysis.interval_count, 1u);
+  EXPECT_EQ(analysis.intervals[0].block_count, 3u);
+  ASSERT_EQ(analysis.segment_count, 1u);
+  ASSERT_EQ(analysis.operation_use_count, 2329u);
+  for (uint32_t i = 0; i < analysis.operation_count; ++i) {
+    const auto* operation = loom_liveness_operation_at(&analysis, i);
+    for (uint32_t j = 0; j < operation->use_count; ++j) {
+      const uint32_t use = operation->use_start + j;
+      EXPECT_EQ(loom_liveness_operation_use_ordinal(&analysis, use), 0u);
+      EXPECT_EQ(loom_liveness_operation_use_segment_index(&analysis, use), 0u);
+      EXPECT_LE(analysis.segments[0].start_point, operation->start_point);
+      EXPECT_GT(analysis.segments[0].end_point, operation->start_point);
+    }
+  }
+}
 
 TEST_F(LivenessOperationStorageTest,
        EveryBackingFailureKeepsResultUnpublished) {
@@ -956,7 +989,8 @@ func.def @cfg_loop(%cond: i1, %x: i32) -> (i32) {
   const loom_liveness_segment_range_t invariant_segments =
       loom_liveness_segment_range_for_value_ordinal(
           &analysis, FindValueOrdinal(analysis, args[1]));
-  EXPECT_EQ(iter_segments.count, 4u);
+  EXPECT_EQ(iter_segments.count, 2u);
+  EXPECT_EQ(iter_interval->block_count, 4u);
   EXPECT_EQ(next_segments.count, 1u);
   EXPECT_FALSE(loom_liveness_segment_ranges_overlap(
       analysis.segments, iter_segments, next_segments));

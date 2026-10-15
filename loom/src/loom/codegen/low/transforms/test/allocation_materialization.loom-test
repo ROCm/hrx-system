@@ -191,7 +191,7 @@ low.func.def target<test.low.core>(@test_target) @reports_released_allocation_at
 }
 
 // ----
-{"invocations":[{"pass":"low-materialize-allocation","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"reports_released_allocation_attempt_storage","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"storage":2,"spills":2,"reloads":2,"rematerializations":0,"live_range_splits":0,"attempts":3,"attempt_arena_used_bytes_high_water":9440,"attempt_arena_owned_bytes_high_water":32768},"details":[]}]}
+{"invocations":[{"pass":"low-materialize-allocation","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"reports_released_allocation_attempt_storage","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"storage":2,"spills":2,"reloads":2,"rematerializations":0,"live_range_splits":0,"attempts":3,"attempt_arena_used_bytes_high_water":11456,"attempt_arena_owned_bytes_high_water":32768},"details":[]}]}
 
 // ====
 

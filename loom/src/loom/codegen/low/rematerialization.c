@@ -735,10 +735,10 @@ static iree_status_t loom_low_rematerialization_plan_failure_batch(
               table->failure.descriptor_reg_class_id ||
           loom_low_allocation_assignment_overlaps_failure_storage(
               table, &table->assignments[assignment_index])));
-    // Segments retain cross-block demand. The failed allocation independently
+    // Intervals retain cross-block demand. The failed allocation independently
     // identifies live pressure that can be repaired in the same stable batch.
     const bool is_cross_block_pressure =
-        liveness->value_segment_ranges[ordinal].count >= 2 &&
+        interval->block_count >= 2 &&
         pressure_classes[interval->value_class.register_class_id];
     if (!in_failure_frontier && !is_cross_block_pressure) {
       continue;

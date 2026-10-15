@@ -177,13 +177,15 @@ class LowAllocationUnitLivenessTest : public ::testing::Test {
 loom_liveness_interval_t RegisterInterval(loom_value_id_t value_id,
                                           uint32_t start_point,
                                           uint32_t end_point,
-                                          uint32_t unit_count) {
+                                          uint32_t unit_count,
+                                          uint16_t block_count = 1) {
   loom_liveness_interval_t interval = {
       .value_id = value_id,
   };
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.start_point = start_point;
   interval.end_point = end_point;
+  interval.block_count = start_point < end_point ? block_count : 0;
   interval.unit_count = unit_count;
   return interval;
 }
@@ -1045,9 +1047,9 @@ TEST_F(LowAllocationUnitLivenessTest,
   const loom_value_id_t value_ids[] = {0, 1, 2, 3};
   const uint32_t interval_indices[] = {0, 1, 2, 3};
   const loom_liveness_interval_t intervals[] = {
-      RegisterInterval(0, 10, 17, 1),
+      RegisterInterval(0, 10, 17, 1, /*block_count=*/2),
       RegisterInterval(1, 11, 12, 1),
-      RegisterInterval(2, 2, 14, 1),
+      RegisterInterval(2, 2, 14, 1, /*block_count=*/2),
       RegisterInterval(3, 17, 19, 1),
   };
   // The producer branches to an earlier-listed loop using its final identity
@@ -1179,8 +1181,8 @@ TEST_F(LowAllocationUnitLivenessTest,
   const uint32_t interval_indices[] = {0, 1, 2};
   const loom_liveness_interval_t intervals[] = {
       RegisterInterval(0, 0, 2, 1),
-      RegisterInterval(1, 2, 7, 1),
-      RegisterInterval(2, 6, 12, 1),
+      RegisterInterval(1, 2, 7, 1, /*block_count=*/2),
+      RegisterInterval(2, 6, 12, 1, /*block_count=*/2),
   };
   loom_liveness_block_info_t blocks[3] = {};
   blocks[0].end_point = 4;
@@ -1400,9 +1402,12 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsSparseTiedStorageReservations) {
   const loom_value_id_t value_ids[] = {0, 1, 2, 3, 4, 5};
   const uint32_t interval_indices[] = {0, 1, 2, 3, 4, 5};
   const loom_liveness_interval_t intervals[] = {
-      RegisterInterval(0, 0, 13, 1),  RegisterInterval(1, 4, 5, 1),
-      RegisterInterval(2, 8, 10, 1),  RegisterInterval(3, 13, 13, 1),
-      RegisterInterval(4, 15, 17, 1), RegisterInterval(5, 17, 19, 1),
+      RegisterInterval(0, 0, 13, 1, /*block_count=*/3),
+      RegisterInterval(1, 4, 5, 1),
+      RegisterInterval(2, 8, 10, 1),
+      RegisterInterval(3, 13, 13, 1),
+      RegisterInterval(4, 15, 17, 1),
+      RegisterInterval(5, 17, 19, 1),
   };
   loom_liveness_block_info_t blocks[4] = {};
   blocks[0].end_point = 5;
