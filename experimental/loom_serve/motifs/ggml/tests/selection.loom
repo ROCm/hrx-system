@@ -159,6 +159,7 @@ kernel.def target(@wave64) @chain_wave64() {
 // High-bit packed scales/codes and negative finite half headers exercise the
 // physical decoder independently of the rank contraction and greedy chain.
 check.scenario public @chain_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[4](%trial: index, %entropy: check.entropy) {
     %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
     %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
@@ -179,6 +180,7 @@ check.scenario public @chain_case {
 }
 
 check.scenario public @chain_wave64_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[4](%trial: index, %entropy: check.entropy) {
     %seed0 = check.entropy.read %entropy[0] : check.entropy -> i64
     %seed1 = check.entropy.read %entropy[1] : check.entropy -> i64
@@ -199,6 +201,7 @@ check.scenario public @chain_wave64_case {
 }
 
 check.scenario public @chain_ties {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %anchors = check.generate.iota offset(256) step(17) : tensor<3xi32>
     %candidates = check.generate.iota offset(335) step(-1) : tensor<3x7x16xi32>
