@@ -6,44 +6,57 @@ func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
 command.program.decl @flash_next_gdn_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %rows: buffer, %qkv: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer, %capture: buffer)
 
-func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+func.decl @flash_next_q8_batch_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
 
-// A subgroup contracts one original Q8_0 row and publishes BF16. The span
-// selects active token rows without changing the packed activation geometry.
+// A subgroup contracts one output column for four packed tokens. Reusing the
+// original Q8 codes reduces weight traffic without repacking, extra activation
+// quantization, shared memory, or a batch-dependent reduction order.
 kernel.def target(@flash_next_projection_wave32) @flash_next_linear_q8(%output_width: index) {
   %outputs = index.assume %output_width [range(%output_width, 4, 262144), multiple_of(%output_width, 4)] : index
   %c4 = index.constant 4 : index
   %groups = index.div %outputs, %c4 : index
   %tokens = config.get @flash_next.token_count : index
+  %c3 = index.constant 3 : index
+  %padded = index.add %tokens, %c3 : index
+  %batches = index.div %padded, %c4 : index
   %threads = index.constant 128 : index
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+  kernel.launch.config workgroups(%groups, %batches, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input_width: index, %output_width: index, %span_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
   %span, %input, %weight, %output = buffer.assume.noalias %span_arg, %input_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
   %inputs = index.assume %input_width [range(%input_width, 32, 10240), multiple_of(%input_width, 32)] : index
   %outputs = index.assume %output_width [range(%output_width, 4, 262144), multiple_of(%output_width, 4)] : index
   %tokens = config.get @flash_next.token_count : index
   %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
-  %token = kernel.workgroup.id<y> : index
-  %active = index.cmp ult, %token, %end : index
+  %batch = kernel.workgroup.id<y> : index
+  %c4 = index.constant 4 : index
+  %first = index.mul %batch, %c4 : index
+  %active = index.cmp ult, %first, %end : index
   scf.if %active {
     %group = kernel.workgroup.id<x> : index
     %wave = kernel.subgroup.id : index
     %lane = kernel.subgroup.lane.id : index
-    %c4 = index.constant 4 : index
+    %c1 = index.constant 1 : index
     %stride = index.constant 32 : index
     %c0 = index.constant 0 : index
     %row = index.madd %group, %c4, %wave : index
     %valid = index.cmp ult, %row, %outputs : index
     scf.if %valid {
-      %partial = func.call @flash_next_q8_partial(%inputs, %token, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
-      %sum = kernel.subgroup.reduce<addf> %partial : f32
+      %partial = func.call @flash_next_q8_batch_partial(%inputs, %first, %end, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+      %sums = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
       %leader = index.cmp eq, %lane, %c0 : index
       scf.if %leader {
         %origin = index.constant 0 : offset
         %view = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%outputs]xbf16>
-        %packed = scalar.fptrunc %sum : f32 to bf16
-        view.store %packed, %view[%token, %row] : bf16, view<[%tokens]x[%outputs]xbf16>
+        scf.for %ordinal = [%c0 to %c4 step %c1] unroll schedule(linear) {
+          %token = index.add %first, %ordinal : index
+          %live = index.cmp ult, %token, %end : index
+          scf.if %live {
+            %sum = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
+            %packed = scalar.fptrunc %sum : f32 to bf16
+            view.store %packed, %view[%token, %row] : bf16, view<[%tokens]x[%outputs]xbf16>
+          }
+        }
       }
     }
   }
