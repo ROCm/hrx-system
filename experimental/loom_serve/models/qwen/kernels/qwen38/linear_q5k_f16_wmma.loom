@@ -1,4 +1,4 @@
-template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
 
 template.decl @qwen38.dense_q5k_f16_wmma.x128.body(%token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %subgroup_count: index, %workitem: index, %subgroup: index, %lane: index, %input: buffer, %weight: buffer, %output: buffer)
 
@@ -93,7 +93,7 @@ func.def inline @qwen38_q5k_f16_vector4(%weight: buffer, %row_byte_base: offset,
   %block_bytes = index.constant 176 : offset
   %block_byte_add = index.scale %q5_block, %block_bytes : index, offset -> offset
   %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
-  %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%weight, %block_byte_base, %q5_group) : (buffer, offset, index) -> (f32, f32)
+  %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%weight, %block_byte_base, %q5_group) : (buffer, offset, index) -> (f32, f32)
   %values = func.call @qwen38_q5k_f16_vector4_prescaled(%weight, %row_byte_base, %q5_block, %q5_group, %packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
   func.return %values : vector<4xf16>
 }
@@ -362,7 +362,7 @@ template.def<@qwen38.dense_q5k_f16_wmma.x128.body> device @qwen38_dense_q5k_f16_
         %metadata_row_byte_base = index.cast %metadata_channel_byte_index : index to offset
         %metadata_block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
         %metadata_block_byte_base = index.add %metadata_row_byte_base, %metadata_block_byte_add : offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%weight_noalias, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%weight_noalias, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
@@ -709,7 +709,7 @@ kernel.def target(@qwen38_dense_gfx11_wave64) export("qwen38_linear_q5k_f16_wmma
       %metadata_row_byte_base = index.cast %metadata_channel_byte_index : index to offset
       %metadata_block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
       %metadata_block_byte_base = index.add %metadata_row_byte_base, %metadata_block_byte_add : offset
-      %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%weight_noalias, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+      %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%weight_noalias, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
       %metadata_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
       vector.store %metadata_pair, %metadata_stage_view[%metadata_row, %metadata_group, %c0] : vector<2xf32>, view<128x8x2xf32>
     }
@@ -901,7 +901,7 @@ template.def<@qwen38.dense_q5k_f16_wmma.x128.direct.body> device @qwen38_dense_q
     %metadata_row_byte_base = index.cast %metadata_channel_byte_index : index to offset
     %metadata_block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
     %metadata_block_byte_base = index.add %metadata_row_byte_base, %metadata_block_byte_add : offset
-    %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%weight_noalias, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+    %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%weight_noalias, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
     %metadata_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
     vector.store %metadata_pair, %metadata_stage_view[%metadata_row, %metadata_group, %c0] : vector<2xf32>, view<64x8x2xf32>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
@@ -1155,7 +1155,7 @@ template.def<@qwen38.dense_q5k_f16_wmma.c64t32.body> device @qwen38_dense_q5k_f1
       %valid_metadata_channel = scalar.ori %complete_channels, %metadata_in_range : i1
       %metadata_pair = scf.if %valid_metadata_channel -> (vector<2xf32>) {
         %metadata_block_byte_base = index.scale %metadata_row, %weight_block_bytes : index, offset -> offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%raw_stage, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%raw_stage, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {

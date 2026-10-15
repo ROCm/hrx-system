@@ -1,4 +1,4 @@
-template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
 
 template.decl @qwen38.dense_q5k_f16_wmma.wave32_x128.compute(%input_is_f16: i1, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %workitem: index, %subgroup: index, %input: buffer, %weight: buffer) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
 
@@ -95,7 +95,7 @@ template.def<@qwen38.dense_q5k_f16_wmma.wave32_x128.compute> device @qwen38_dens
         %metadata_row_byte_base = index.cast %metadata_channel_byte_index : index to offset
         %metadata_block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
         %metadata_block_byte_base = index.add %metadata_row_byte_base, %metadata_block_byte_add : offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%weight, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%weight, %metadata_block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {

@@ -1,4 +1,4 @@
-template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
 
 // Exact Q5_K gate/up contraction with local F32 SwiGLU.
 //
@@ -232,7 +232,7 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
       %valid_channel = index.cmp ult, %metadata_channel, %output_size : index
       %metadata_pair = scf.if %valid_channel -> (vector<2xf32>) {
         %block_byte_base = index.scale %metadata_row, %weight_block_bytes : index, offset -> offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
@@ -250,7 +250,7 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
       %metadata_pair = scf.if %valid_channel -> (vector<2xf32>) {
         %raw_metadata_row = index.add %metadata_row, %c64 : index
         %block_byte_base = index.scale %raw_metadata_row, %weight_block_bytes : index, offset -> offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
@@ -495,7 +495,7 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
         %row_byte_base = index.cast %channel_byte_index : index to offset
         %block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
         %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%gate_weight_noalias, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%gate_weight_noalias, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
@@ -515,7 +515,7 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
         %row_byte_base = index.cast %channel_byte_index : index to offset
         %block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
         %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%up_weight_noalias, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%up_weight_noalias, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {

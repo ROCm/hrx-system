@@ -6,7 +6,7 @@
 // The partial 192-thread packet round is ordered before the complete 512-thread
 // round so only the latter remains outstanding across the unrolled matrix work.
 
-template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
+template.decl @ggml.qk.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
 
 func.decl @qwen38_q5k_f16_vector4_prescaled(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %packet: index, %d_scale: f32, %dmin_scale: f32) -> (vector<4xf16>)
 
@@ -154,7 +154,7 @@ template.def<@qwen38.ffn_gate_up_q5k.block_prefetch.body> device @qwen38_ffn_gat
       %valid_channel = index.cmp ult, %metadata_channel, %output_size : index
       %metadata_pair = scf.if %valid_channel -> (vector<2xf32>) {
         %block_byte_base = index.scale %metadata_row, %weight_block_bytes : index, offset -> offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
@@ -172,7 +172,7 @@ template.def<@qwen38.ffn_gate_up_q5k.block_prefetch.body> device @qwen38_ffn_gat
       %metadata_pair = scf.if %valid_channel -> (vector<2xf32>) {
         %raw_metadata_row = index.add %metadata_row, %c64 : index
         %block_byte_base = index.scale %raw_metadata_row, %weight_block_bytes : index, offset -> offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %d_scale, %dmin_scale = template.apply<@ggml.qk.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
