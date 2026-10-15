@@ -847,6 +847,43 @@ class CxxExpressionRenderer(CxxRenderContext):
         )
         return ("static_offsets",)
 
+    def _render_vector_insert(self, operation: Operation) -> tuple[str, ...]:
+        resolved = self._resolved(operation)
+        indices = self._mixed_indices(
+            resolved,
+            dynamic_field="indices",
+            static_field="static_indices",
+        )
+        if len(indices) != 1:
+            raise CxxRenderError(
+                operation,
+                "native vector insertion requires one lane index",
+            )
+
+        result = resolved.value_id("result")
+        source = self.expression(resolved.value_id("dest"))
+        assignment_target = self.assignment_targets.get(result)
+        if assignment_target is None:
+            self._declare(result, source)
+            mutation_target = self.expression(result)
+        elif assignment_target == source:
+            mutation_target = assignment_target
+        else:
+            mutation_target = self._temporary_name(f"next_{self.names[result]}")
+            self.writer.line(
+                f"auto {mutation_target} = {_strip_outer_parentheses(source)};"
+            )
+        self.writer.line(
+            f"{mutation_target}[{indices[0]}] = "
+            f"{self.expression(resolved.value_id('value'))};"
+        )
+        if assignment_target is not None:
+            if mutation_target != assignment_target:
+                self.writer.line(f"{assignment_target} = {mutation_target};")
+            self.expressions[result] = assignment_target
+            self.expression_types[result] = self.cpp_type(result)
+        return ("static_indices",)
+
     def _render_scalar_conversion(self, operation: Operation) -> tuple[str, ...] | None:
         name = operation.name
         if name not in {
@@ -1067,6 +1104,8 @@ class CxxExpressionRenderer(CxxRenderContext):
                 inlineable=True,
             )
             return ("static_indices",)
+        if name == "vector.insert":
+            return self._render_vector_insert(operation)
         if name == "vector.splat":
             result = operation.results[0]
             self._declare(result, self.expression(operation.operands[0]))

@@ -2030,7 +2030,8 @@ with source object sizes determining pointer strides. The
 tail and ordinary pointer reinterpretation.
 
 GNU `vector_size` and Clang `ext_vector_type` forms admit arithmetic, bitwise
-operations, shifts, scalar splats, brace initialization and indexed lane reads.
+operations, shifts, scalar splats, brace initialization, and indexed lane reads
+and writes.
 Named brace initializers and typed temporaries such as `u32x16{1u, 2u}` use
 the same lane conversions and zero the remaining lanes. Typed temporaries can
 appear in returns, call arguments and larger expressions. Vector comparisons
@@ -2040,14 +2041,36 @@ the scalar language's integer promotions. Equal-size vector casts and
 `__builtin_bit_cast` reinterpret the bits. Whole vectors flow through local
 values, helper calls, returns, branches and loops.
 
+Lane assignment keeps an automatic vector in SSA. Plain assignment, compound
+assignment, and integral pre/post increment and decrement emit
+`vector.insert`; a surrounding structured region carries the updated vector:
+
+```cpp
+using u32x4 = unsigned __attribute__((ext_vector_type(4)));
+
+u32x4 fill(u32x4 values, unsigned begin) {
+  [[loom::unroll]] for (unsigned lane = 0; lane < 4; ++lane) {
+    values[lane] = begin + lane;
+  }
+  return values;
+}
+```
+
+A lane of a vector stored in memory uses one vector load and one vector store
+around the functional insertion. Nested record fields update only their vector
+component. The vector object and lane selector are each evaluated once, so
+side effects retain the source evaluation order for plain and compound updates.
+Native vectors are the register-resident spelling for dynamically selected
+fixed lanes; C++ arrays retain their object-storage and aliasing contract.
+
 Admission requires non-boolean lanes and an object layout with no padding beyond
 the lanes. Packed boolean vectors and padded three-lane objects need separate
-storage projections. Lane assignment, lane addresses, swizzles, vector `&&`/`||`
-and vector-conditioned `?:` also produce source diagnostics: they require
-additional lvalue or lane-selection projections. Target support remains a
-separate compilation boundary. For example, the VM can execute extracted lane
-programs but currently rejects vector aggregate transport across loop/branch
-arguments; that requires a shared aggregate representation through control flow.
+storage projections. Lane addresses, swizzles, vector `&&`/`||`, and
+vector-conditioned `?:` produce source diagnostics: they require additional
+address or lane-selection projections. Target support remains a separate
+compilation boundary. For example, the VM can execute extracted lane programs
+but currently rejects vector aggregate transport across loop/branch arguments;
+that requires a shared aggregate representation through control flow.
 
 Kernel launch contracts are explicit source attributes:
 

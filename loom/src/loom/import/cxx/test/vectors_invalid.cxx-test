@@ -13,12 +13,6 @@ V f(V x) { return x; }
 // ====
 // Unsupported vector forms diagnose at source admission.
 typedef int V __attribute__((vector_size(16)));
-// ERROR@+1: LOWERING/059 "vector lane subscripts require a value projection"
-void f(V x) { x[0] = 1; }
-
-// ====
-// Unsupported vector forms diagnose at source admission.
-typedef int V __attribute__((vector_size(16)));
 // ERROR@+1: LOWERING/059 "vector logical operators require lane-wise evaluation"
 V f(V x, V y) { return x && y; }
 

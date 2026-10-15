@@ -62,8 +62,18 @@ class Vectors {
   loom_value_id_t extract(loom_value_id_t value, loom_value_id_t index,
                           const cxx::Type* source_type,
                           const cxx::Type* index_type, cxx::AST* owner);
+  // Replaces one lane and returns the updated vector. Source-defined indices
+  // are nonnegative and below the lane count; the index carrier does not
+  // change that source bounds contract.
+  loom_value_id_t insert(loom_value_id_t destination, loom_value_id_t lane,
+                         loom_value_id_t index, const cxx::Type* source_type,
+                         const cxx::Type* index_type, cxx::AST* owner);
 
  private:
+  // Projects a source integral lane selector to Loom's index domain.
+  loom_value_id_t cast_index(loom_value_id_t index, const cxx::Type* index_type,
+                             cxx::AST* owner);
+
   // Resolved frontend types and object layout.
   cxx::TranslationUnit& unit_;
   // Source admission boundary.

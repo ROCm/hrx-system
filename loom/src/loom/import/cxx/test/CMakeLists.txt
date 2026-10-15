@@ -157,6 +157,7 @@ loom_check_test_suite(
     "vector_conversion_invalid.cxx-test"
     "vector_decode.cxx-test"
     "vector_decode_invalid.cxx-test"
+    "vector_lane_updates.cxx-test"
     "vector_list_assignment.cxx-test"
     "vector_list_assignment_invalid.cxx-test"
     "vector_lookup.cxx-test"

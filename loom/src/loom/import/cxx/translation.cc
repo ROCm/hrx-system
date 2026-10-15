@@ -845,18 +845,44 @@ class Translator final : private Initialization::Evaluation {
 
   enum class IncrementResult { Previous, Updated };
 
-  // Resolving the source lvalue executes its address expressions once. Reads
-  // and writes then share that location even when another binding changes.
-  struct Lvalue {
-    // Source element type retains qualifiers and arithmetic conversion rules.
+  // One complete object selected by an automatic binding or evaluated memory
+  // address. Reads and writes share this projection even when another binding
+  // changes.
+  struct ObjectLvalue {
+    // Source object type retains qualifiers and storage access rules.
     const cxx::Type* type;
     // An automatic SSA partition or an evaluated storage projection.
     std::variant<Destination, StorageAccess, StorageProjection> location;
   };
 
-  Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner) {
+  // One lane projected from a snapshot of its complete vector lvalue. The
+  // source base and index have both been evaluated exactly once.
+  struct VectorLaneLvalue {
+    // Complete vector destination receiving the functional lane update.
+    ObjectLvalue destination;
+    // Vector value loaded after evaluating the destination and lane selector.
+    Value value;
+    // Lane selector before projection to Loom's index domain.
+    loom_value_id_t index;
+    // Source selector type retaining its integer width and signedness.
+    const cxx::Type* index_type;
+  };
+
+  // Resolving a source lvalue executes every address and index expression once.
+  // A lane projection retains the complete vector snapshot required to replace
+  // that lane without reloading memory during a compound update.
+  struct Lvalue {
+    // Complete object or one evaluated lane within a complete vector object.
+    std::variant<ObjectLvalue, VectorLaneLvalue> projection;
+  };
+
+  ObjectLvalue object_destination(
+      cxx::ExpressionAST* expression, cxx::AST* owner,
+      std::optional<Destination> retained_destination = std::nullopt) {
     types_.require_mutable(expression->type, expression);
-    if (auto destination = control_->destination(expression)) {
+    auto destination = retained_destination ? retained_destination
+                                            : control_->destination(expression);
+    if (destination) {
       if (!locals_.contains(destination->binding)) {
         if (!values_.contains(destination->binding)) {
           fail(owner, "mutation requires an owned automatic source binding");
@@ -870,7 +896,7 @@ class Translator final : private Initialization::Evaluation {
     return {expression->type, address(expression)};
   }
 
-  Value read(const Lvalue& target, cxx::AST* owner) {
+  Value read(const ObjectLvalue& target, cxx::AST* owner) {
     if (auto* destination = std::get_if<Destination>(&target.location)) {
       auto value = values_.at(destination->binding);
       return destination->member ? value.project(*destination->member,
@@ -884,7 +910,7 @@ class Translator final : private Initialization::Evaluation {
                          owner);
   }
 
-  void write(const Lvalue& target, Value value, cxx::AST* owner) {
+  void write(const ObjectLvalue& target, Value value, cxx::AST* owner) {
     if (auto* destination = std::get_if<Destination>(&target.location)) {
       auto& binding = values_.at(destination->binding);
       binding = name(destination->member
@@ -899,6 +925,79 @@ class Translator final : private Initialization::Evaluation {
       storage_.store(std::get<StorageAccess>(target.location), value.ssa(),
                      target.type, owner);
     }
+  }
+
+  Lvalue vector_lane_destination(
+      cxx::SubscriptExpressionAST* subscript, cxx::AST* owner,
+      std::optional<Destination> retained_destination) {
+    if (subscript->symbol) {
+      fail(subscript, "overloaded indexing is not admitted");
+    }
+    auto* left_type = subscript->baseExpression->type;
+    auto* right_type = subscript->indexExpression->type;
+    bool left_vector = types_.native_vector(left_type);
+    bool right_vector = types_.native_vector(right_type);
+    if (!left_vector && !right_vector) {
+      fail(subscript, "vector lane destination requires a vector operand");
+    }
+
+    cxx::ExpressionAST* vector_expression =
+        left_vector ? subscript->baseExpression : subscript->indexExpression;
+    cxx::ExpressionAST* index_expression =
+        left_vector ? subscript->indexExpression : subscript->baseExpression;
+    if (left_vector) {
+      auto vector_destination =
+          object_destination(vector_expression, owner, retained_destination);
+      auto index_value = expression(index_expression);
+      auto vector_value = read(vector_destination, vector_expression);
+      return {VectorLaneLvalue{vector_destination, vector_value,
+                               index_value.ssa(), index_expression->type}};
+    }
+
+    // The commuted spelling i[v] still evaluates its written left operand
+    // before resolving and loading the vector on the right.
+    auto index_value = expression(index_expression);
+    auto vector_destination =
+        object_destination(vector_expression, owner, retained_destination);
+    auto vector_value = read(vector_destination, vector_expression);
+    return {VectorLaneLvalue{vector_destination, vector_value,
+                             index_value.ssa(), index_expression->type}};
+  }
+
+  Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner) {
+    auto* projected = strip_implicit_casts(expression);
+    while (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(projected)) {
+      projected = strip_implicit_casts(nested->expression);
+    }
+    if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
+        subscript && (types_.native_vector(subscript->baseExpression->type) ||
+                      types_.native_vector(subscript->indexExpression->type))) {
+      return vector_lane_destination(subscript, owner,
+                                     control_->destination(expression));
+    }
+    return {object_destination(expression, owner)};
+  }
+
+  Value read(const Lvalue& target, cxx::AST* owner) {
+    if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
+      return read(*object, owner);
+    }
+    const auto& lane = std::get<VectorLaneLvalue>(target.projection);
+    return Value(vectors_.extract(lane.value.ssa(), lane.index,
+                                  lane.destination.type, lane.index_type,
+                                  owner));
+  }
+
+  void write(const Lvalue& target, Value value, cxx::AST* owner) {
+    if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
+      write(*object, value, owner);
+      return;
+    }
+    const auto& lane = std::get<VectorLaneLvalue>(target.projection);
+    auto updated =
+        vectors_.insert(lane.value.ssa(), value.ssa(), lane.index,
+                        lane.destination.type, lane.index_type, owner);
+    write(lane.destination, Value(updated), owner);
   }
 
   Value increment(cxx::ExpressionAST* destination, cxx::TokenKind token,

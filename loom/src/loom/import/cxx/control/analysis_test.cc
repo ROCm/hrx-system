@@ -273,6 +273,54 @@ TEST(ControlFlowTest, NestedMemberWritesRetainTheOwningBindingAndSlice) {
   EXPECT_EQ(pointer->member, &kPointerPartition);
 }
 
+TEST(ControlFlowTest, VectorLaneWritesRetainTheOwningVectorSlice) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    using Lanes = unsigned __attribute__((ext_vector_type(4)));
+    struct Packet { unsigned prefix; Lanes lanes; };
+    void entry(Packet packet, Packet* memory, unsigned index) {
+      if (index < 4) {
+        packet.lanes[index++] += 1;
+        memory[index].lanes[index] = 2;
+      }
+    }
+  )"),
+                IREE_SV("vector_lane_writes.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  auto* branch = cxx::ast_cast<cxx::IfStatementAST>(body->statementList->value);
+  ASSERT_NE(branch, nullptr);
+  auto* arm = cxx::ast_cast<cxx::CompoundStatementAST>(branch->statement);
+  ASSERT_NE(arm, nullptr);
+  auto* automatic_statement =
+      cxx::ast_cast<cxx::ExpressionStatementAST>(arm->statementList->value);
+  auto* automatic = cxx::ast_cast<cxx::CompoundAssignmentExpressionAST>(
+      automatic_statement->expression);
+  ASSERT_NE(automatic, nullptr);
+  auto* memory_statement = cxx::ast_cast<cxx::ExpressionStatementAST>(
+      arm->statementList->next->value);
+  auto* memory =
+      cxx::ast_cast<cxx::AssignmentExpressionAST>(memory_statement->expression);
+  ASSERT_NE(memory, nullptr);
+
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
+  auto writes = analysis.written(branch);
+  ASSERT_EQ(writes.size(), 2u);
+  EXPECT_EQ(writes[0], function->symbol->parameters()[0]);
+  EXPECT_EQ(writes[1], function->symbol->parameters()[2]);
+  auto lane = analysis.destination(automatic->targetExpression);
+  ASSERT_TRUE(lane.has_value());
+  EXPECT_EQ(lane->binding, function->symbol->parameters()[0]);
+  EXPECT_EQ(lane->component_offset, 1u);
+  EXPECT_EQ(lane->member, &kSSAPartition);
+  EXPECT_FALSE(analysis.destination(memory->leftExpression).has_value());
+}
+
 TEST(ControlFlowTest, MemoryMembersRetainStorageIdentityAndAddressSideEffects) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

@@ -277,6 +277,19 @@ std::optional<Destination> ControlFlow::classify_destination(
   if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
     return classify_destination(nested->expression);
   }
+  if (auto* subscript =
+          cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
+    if (subscript->symbol) {
+      return std::nullopt;
+    }
+    if (types_.native_vector(subscript->baseExpression->type)) {
+      return classify_destination(subscript->baseExpression);
+    }
+    if (types_.native_vector(subscript->indexExpression->type)) {
+      return classify_destination(subscript->indexExpression);
+    }
+    return std::nullopt;
+  }
   auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
   if (!member || member->accessOp != cxx::TokenKind::T_DOT) {
     return std::nullopt;

@@ -188,6 +188,36 @@ def test_projects_loop_carried_ssa_as_mutable_cxx_state() -> None:
     assert "next" not in result
 
 
+def test_stages_vector_insert_before_replacing_a_distinct_loop_carrier() -> None:
+    source = """\
+kernel.def @replace_lane() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch() {
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %initial = vector.splat %zero : vector<4xi32>
+  %source = vector.splat %one : vector<4xi32>
+  %lower = index.constant 0 : offset
+  %upper = index.constant 4 : offset
+  %step = index.constant 1 : offset
+  %result = scf.for %index = [%lower to %upper step %step](%carried = %initial : vector<4xi32>) -> (vector<4xi32>) {
+    %lane = vector.extract %carried[0] : vector<4xi32> -> i32
+    %next = vector.insert %lane into %source[1] : i32, vector<4xi32>
+    scf.yield %next : vector<4xi32>
+  }
+  kernel.return
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert "unsigned lane = result[0];" in result
+    assert "auto next_next = source;" in result
+    assert "next_next[1] = lane;" in result
+    assert "result = next_next;" in result
+
+
 def test_projects_while_regions_as_guarded_cxx_state() -> None:
     source = """\
 kernel.def @bounded_loop() {

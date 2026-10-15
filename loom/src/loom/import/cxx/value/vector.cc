@@ -270,21 +270,42 @@ loom_value_id_t Vectors::constant(const cxx::ConstValue& value,
 loom_value_id_t Vectors::extract(loom_value_id_t value, loom_value_id_t index,
                                  const cxx::Type* source_type,
                                  const cxx::Type* index_type, cxx::AST* owner) {
-  if (!unit_.typeTraits().is_integral(index_type)) {
-    diagnostics_.reject(unit_, owner,
-                        "vector subscripts require integral indices");
-  }
+  index = cast_index(index, index_type, owner);
   auto* vector = types_.native_vector(source_type);
   types_.get(source_type, owner);
   auto output = types_.get(vector->elementType(), owner);
   loom_op_t* op;
-  check(loom_index_cast_build(&builder_, index, types_.get(index_type, owner),
-                              loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-                              locations_.get(owner), &op));
-  index = loom_op_results(op)[0];
   int64_t selector = INT64_MIN;
   check(loom_vector_extract_build(&builder_, value, &index, 1, &selector, 1,
                                   output, locations_.get(owner), &op));
+  return loom_op_results(op)[0];
+}
+
+loom_value_id_t Vectors::insert(loom_value_id_t destination,
+                                loom_value_id_t lane, loom_value_id_t index,
+                                const cxx::Type* source_type,
+                                const cxx::Type* index_type, cxx::AST* owner) {
+  index = cast_index(index, index_type, owner);
+  auto output = types_.get(source_type, owner);
+  loom_op_t* op;
+  int64_t selector = INT64_MIN;
+  check(loom_vector_insert_build(&builder_, lane, destination, &index, 1,
+                                 &selector, 1, output, locations_.get(owner),
+                                 &op));
+  return loom_op_results(op)[0];
+}
+
+loom_value_id_t Vectors::cast_index(loom_value_id_t index,
+                                    const cxx::Type* index_type,
+                                    cxx::AST* owner) {
+  if (!unit_.typeTraits().is_integral(index_type)) {
+    diagnostics_.reject(unit_, owner,
+                        "vector subscripts require integral indices");
+  }
+  loom_op_t* op;
+  check(loom_index_cast_build(&builder_, index, types_.get(index_type, owner),
+                              loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                              locations_.get(owner), &op));
   return loom_op_results(op)[0];
 }
 

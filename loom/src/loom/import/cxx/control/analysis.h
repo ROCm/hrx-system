@@ -22,8 +22,10 @@
 
 namespace loom::cxx_import {
 
-// Retained ownership of a source assignment destination. A field write replaces
-// a slice of its owning automatic binding; it is not a storage-backed store.
+// Retained ownership of a source assignment destination. A field or vector-lane
+// write replaces a slice of its owning automatic binding; it is not a
+// storage-backed store. Dynamic lane selection remains on the source expression
+// and is evaluated once by translation.
 struct Destination {
   // Owning local or parameter identity, borrowed from the source function.
   cxx::Symbol* binding;
@@ -77,7 +79,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   // identity. The complete function is classified before translation begins.
   bool addressed(cxx::Symbol* binding) const;
   // Retained automatic-object destination, or no value for a memory access or
-  // unsupported lvalue. Whole identifiers need no indexed projection record.
+  // unsupported lvalue. A vector lane names its owning vector slice; whole
+  // identifiers need no indexed projection record.
   std::optional<Destination> destination(cxx::ExpressionAST* expression) const;
   // Whether this member projects existing memory instead of an SSA record.
   // Object identity is propagated from visited children once during analysis.
