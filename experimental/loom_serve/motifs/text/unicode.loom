@@ -27,20 +27,20 @@ func.def public @text.uppercase(%codepoint: i32) -> (i32, i32, i32) {
   %count = global.load @text.uppercase_count : index
   %origin = index.constant 0 : offset
   %rows = buffer.view %storage[%origin] : buffer -> view<[%count]x4xi32>
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %position_value, %unused = scf.while(%lower = %zero : index, %upper = %count : index) -> (index, index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %position_value, %unused = scf.while(%lower = %c0 : index, %upper = %count : index) -> (index, index) {
     %search = index.cmp ult, %lower, %upper : index
     scf.condition %search, %lower, %upper : i1, index, index
   } do(%lower: index, %upper: index) {
     %sum = index.add %lower, %upper : index
-    %middle_value = index.div %sum, %two : index
+    %middle_value = index.div %sum, %c2 : index
     // The search interval remains within [0, count).
     %middle = index.assume %middle_value [ge(%middle_value, 0), lt(%middle_value, %count)] : index
     %key = view.load %rows[%middle, 0] : view<[%count]x4xi32> -> i32
     %before = scalar.cmpi ult, %key, %codepoint : i32
-    %after = index.add %middle, %one : index
+    %after = index.add %middle, %c1 : index
     %next_lower = scf.select %before, %after, %lower : index
     %next_upper = scf.select %before, %upper, %middle : index
     scf.yield %next_lower, %next_upper : index, index
@@ -67,20 +67,20 @@ func.def public @text.uppercase(%codepoint: i32) -> (i32, i32, i32) {
 func.def @text.in_ranges(%storage: buffer, %count: index, %codepoint: i32) -> (i1) {
   %origin = index.constant 0 : offset
   %rows = buffer.view %storage[%origin] : buffer -> view<[%count]x2xi32>
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %position_value, %unused = scf.while(%lower = %zero : index, %upper = %count : index) -> (index, index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %position_value, %unused = scf.while(%lower = %c0 : index, %upper = %count : index) -> (index, index) {
     %search = index.cmp ult, %lower, %upper : index
     scf.condition %search, %lower, %upper : i1, index, index
   } do(%lower: index, %upper: index) {
     %sum = index.add %lower, %upper : index
-    %middle_value = index.div %sum, %two : index
+    %middle_value = index.div %sum, %c2 : index
     // The search interval remains within [0, count).
     %middle = index.assume %middle_value [ge(%middle_value, 0), lt(%middle_value, %count)] : index
     %end = view.load %rows[%middle, 1] : view<[%count]x2xi32> -> i32
     %before = scalar.cmpi ult, %end, %codepoint : i32
-    %after = index.add %middle, %one : index
+    %after = index.add %middle, %c1 : index
     %next_lower = scf.select %before, %after, %lower : index
     %next_upper = scf.select %before, %upper, %middle : index
     scf.yield %next_lower, %next_upper : index, index
@@ -129,10 +129,10 @@ func.def public @text.is_digit(%codepoint: i32) -> (i1) {
   %ascii_end = scalar.constant 128 : i32
   %ascii = scalar.cmpi ult, %codepoint, %ascii_end : i32
   %result = scf.if %ascii -> (i1) {
-    %zero = scalar.constant 48 : i32
-    %nine = scalar.constant 57 : i32
-    %after = scalar.cmpi uge, %codepoint, %zero : i32
-    %before = scalar.cmpi ule, %codepoint, %nine : i32
+    %digit_begin = scalar.constant 48 : i32
+    %digit_end = scalar.constant 57 : i32
+    %after = scalar.cmpi uge, %codepoint, %digit_begin : i32
+    %before = scalar.cmpi ule, %codepoint, %digit_end : i32
     %inside = scalar.andi %after, %before : i1
     scf.yield %inside : i1
   } else {
