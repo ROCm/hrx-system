@@ -1500,7 +1500,7 @@ loom_execution_test(
     "::expert_buckets_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
-    "--config=flash_next.token_count=64"
+    "--config=flash_next.token_count=131"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -1527,7 +1527,7 @@ loom_execution_test(
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
-    "--config=flash_next.token_count=64"
+    "--config=flash_next.token_count=131"
   LABELS
     "notsan"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1558,7 +1558,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--amdgpu_tsan=true"
     "--amdgpu_tsan_report_policy=report-only"
-    "--config=flash_next.token_count=64"
+    "--config=flash_next.token_count=131"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
