@@ -1,11 +1,13 @@
-# Pocket TTS source commands
+# Pocket TTS source package
 
 This package implements Pocket's voice encoder, FlowLM, and streaming Mimi
 waveform decoder in Loom. It consumes the original BF16 Safetensors checkpoint
 by tensor key. Activations, recurrent state, and waveform samples are F32.
-The source modules provide numerical phases and native request commands. A
-speech controller owns text preparation, voice admission, termination, and wire
-encoding; request commands own immutable token selection and seeded sampling.
+The source modules provide numerical phases, native request commands, and the
+speech controller. Text preparation, registered-voice selection, chunking, and
+termination belong to the package. The serving runtime owns HTTP streaming and
+PCM encoding. Requests produce 80 ms blocks at 24 kHz, with independent history,
+sampling, cancellation, and output credit.
 
 The architecture follows
 [Pocket TTS](https://github.com/kyutai-labs/pocket-tts/tree/ec569b2dd3fec4a601b391aace185791e92b3785)
@@ -15,6 +17,50 @@ and its English checkpoint at revision
 voice encoder and BOS-before-voice embedding. Its original `flow_lm.*` and
 `mimi.*` names and BF16 storage remain intact. The upstream permission notice
 is preserved in [LICENSE.pocket-tts](LICENSE.pocket-tts).
+
+## Speech control and admission
+
+`prepare.loom` declares seven numerical phases and shared checkpoint domains.
+`control.loom` implements the speech service's request, next-work, batch,
+generation, and completion contracts. Compatible next phases batch even when
+requests have different voices, prefix lengths, chunk indices, and playback
+positions. A completed or cancelled request leaves the cohort independently.
+
+`options.loom` admits the deployment geometry and its registered voices. The
+`voices` array contains unique `{ "id": "alba", "frames": 126 }` records;
+`frames` counts 1,920-sample waveform blocks. IDs contain 1–64 UTF-8 bytes, and
+one model can register 1–256 voices. The asset directory contains the original
+`model.safetensors`, `tokenizer.json`, `rotary.safetensors`, and a separate
+`voices.safetensors` waveform bank. `weights.loom` preserves checkpoint bytes.
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `context_capacity` | 512 | FlowLM positions per resident request |
+| `rotary_capacity` | 4096 | Absolute positions in each rotary table |
+| `chunk_tokens` | 50 | Maximum final tokens in one text chunk |
+| `input_tokens` | 4096 | Maximum tokens in the complete normalized input |
+| `request_capacity` | 4 | Independently resident request rows |
+| `batch_capacity` | 4 | Compatible next operations in one batch |
+| `threads` | 128 | Workitems per numerical workgroup |
+
+Admission checks that a request context covers BOS, the longest voice prefix,
+one maximum-sized text chunk, and its complete generation allowance. Rotary
+tables cover both FlowLM and the codecs' sixteen positions per block. Batch
+capacity cannot exceed request capacity. Unknown or duplicate options, invalid
+voice metadata, and insufficient geometry fail during preparation.
+
+Whole-paragraph preparation follows the pinned English model's token-boundary
+sentence grouping, decimal handling, punctuation fallback, and final prompt
+normalization. Every chunk is admitted before numerical work begins. Oversized
+input or an indivisible sentence fails explicitly. Text packets retain token
+IDs, the final post-EOS tail, and the generation bound; output is never silently
+truncated to fit a request allocation.
+
+Each chunk restores its selected voice's retained prefix and starts fresh codec
+history. Its chunk index participates in sampling, while the published audio
+position remains continuous across the paragraph. The controller emits only
+blocks before the EOS tail boundary and fails if generation exhausts its
+admitted extent. Requests accept speed `1` and no instruction text.
 
 ## Phase and storage contract
 
@@ -67,9 +113,11 @@ in F64, Mimi decoder projections and convolutions in F32, and normalization
 and attention reductions in F64. These choices establish recurrent numerical
 accuracy; they are not a throughput qualification.
 
-## Request commands
+## Isolated request commands
 
-`request.loom` composes the numerical phases with an immutable request payload.
+`request.loom` provides isolated roots for direct numerical comparisons. The
+speech controller uses the batch roots described below. The isolated roots
+compose the numerical phases with an immutable request payload.
 Its first 16 bytes contain a 64-bit seed, I32 voice frame count, and I32 chunk
 count. Each chunk occupies `16 + 4 * pocket.chunk_tokens` bytes: four I32 header
 words (token count, post-EOS tail, generation bound, reserved) followed by the
