@@ -1,0 +1,57 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary")
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+
+package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "sources",
+    srcs = glob(["*.loom"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "model",
+    srcs = ["model.json"],
+    visibility = ["//visibility:public"],
+)
+
+iree_py_binary(
+    name = "check_service",
+    srcs = ["check_service.py"],
+    main = "check_service.py",
+    visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "state_test",
+    srcs = [
+        "encoder_state.loom",
+        "tests/state.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "numerics_test",
+    srcs = [
+        "frontend.loom",
+        "projection.loom",
+        "tests/numerics.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)

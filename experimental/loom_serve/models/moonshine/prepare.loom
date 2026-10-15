@@ -1,0 +1,79 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+// Moonshine streaming tiny has fixed geometry and accepts no model options.
+global.rodata.def @options_error = bytes("4d6f6f6e7368696e652073747265616d696e672074696e79206861732066697865642067656f6d6574727920616e642061636365707473206e6f206d6f64656c206f7074696f6e73")
+
+global.rodata.def @reset = bytes("7265736574")
+
+global.rodata.def @encode = bytes("656e636f6465")
+
+global.rodata.def @decode = bytes("6465636f6465")
+
+global.rodata.def @name = bytes("6d6f6f6e7368696e652d73747265616d696e672d74696e79")
+
+global.rodata.def @tokenizer = bytes("746f6b656e697a65722e6a736f6e")
+
+global.rodata.def @checkpoint = bytes("6d6f64656c2e7361666574656e736f7273")
+
+global.rodata.def @rotary = bytes("726f746172792e7361666574656e736f7273")
+
+global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
+
+global.rodata.def @empty = bytes("")
+
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %c2 = scalar.constant 2 : i64
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %members, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object_type = scalar.constant 2 : i32
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %none = scalar.cmpi eq, %count, %c0 : i64
+  %valid = scalar.andi %object, %none : i1
+  %condition = scalar.extui %valid : i1 to i32
+  %error = global.load @options_error : buffer
+  func.call @require(%condition, %error) : (i32, buffer)
+  %reset_name = global.load @reset : buffer
+  %encode_name = global.load @encode : buffer
+  %decode_name = global.load @decode : buffer
+  %policy = global.load @policy : buffer
+  %checkpoint = global.load @checkpoint : buffer
+  %rotary = global.load @rotary : buffer
+  %reset = func.call @stage(%reset_name, %c0) : (buffer, i64) -> (i32)
+  %encode = func.call @stage(%encode_name, %c1) : (buffer, i64) -> (i32)
+  %decode = func.call @stage(%decode_name, %c2) : (buffer, i64) -> (i32)
+  func.call @parameter(%encode, %zero32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%decode, %zero32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%decode, %one32, %directory, %rotary, %policy) : (i32, i32, buffer, buffer, buffer)
+  // Four resident histories and four packed rows. State includes convolution
+  // tails, encoder rings, immutable cross-attention memory, and decoder KV.
+  %requests = scalar.constant 4 : i64
+  %small = scalar.constant 16 : i64
+  %state = scalar.constant 40320208 : i64
+  %work = scalar.constant 5280 : i64
+  %output = scalar.constant 64 : i64
+  // A 20 ms input quantum yields one encoder position. The source owns the
+  // 2048-position bound (40.96 seconds) and 512-token hypothesis capacity.
+  %input_frames = scalar.constant 320 : i64
+  %frame_limit = scalar.constant 655360 : i64
+  %event_bytes = scalar.constant 16432 : i64
+  %rate = scalar.constant 16000 : i64
+  %tokenizer = global.load @tokenizer : buffer
+  %name = global.load @name : buffer
+  %empty = global.load @empty : buffer
+  func.return %requests, %requests, %small, %small, %state, %work, %output, %output, %input_frames, %frame_limit, %event_bytes, %rate, %c1, %tokenizer, %name, %empty, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
+}

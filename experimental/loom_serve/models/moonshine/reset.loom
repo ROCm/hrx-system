@@ -1,0 +1,38 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.def @moonshine.threads = 128 : index
+
+kernel.decl @moonshine.initialize.first_convolution() launch(%state_storage: buffer, %cohort: view<5xi32>, %row_y_base: offset)
+
+kernel.decl @moonshine.initialize.second_convolution() launch(%state_storage: buffer, %cohort: view<5xi32>, %row_y_base: offset)
+
+kernel.decl @moonshine.initialize.encoder() launch(%state_storage: buffer, %cohort: view<5xi32>, %row_y_base: offset)
+
+kernel.decl @moonshine.initialize.final_encoder() launch(%state_storage: buffer, %cohort: view<5xi32>, %row_y_base: offset)
+
+// Reset only the admitted resident rows named in the cohort.
+command.program.def public @reset() launch(%work: buffer, %requests: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %tensor_1_offset = index.constant 0 : offset
+  %tensor_1 = buffer.view %work[%tensor_1_offset] : buffer -> view<5xi32>
+  %state_origin_0 = index.constant 16 : offset
+  kernel.launch @moonshine.initialize.first_convolution(%state, %tensor_1, %state_origin_0) : (buffer, view<5xi32>, offset)
+  %state_origin_1 = index.constant 5136 : offset
+  kernel.launch @moonshine.initialize.second_convolution(%state, %tensor_1, %state_origin_1) : (buffer, view<5xi32>, offset)
+  %state_origin_2 = index.constant 15376 : offset
+  kernel.launch @moonshine.initialize.encoder(%state, %tensor_1, %state_origin_2) : (buffer, view<5xi32>, offset)
+  %state_origin_3 = index.constant 179248 : offset
+  kernel.launch @moonshine.initialize.encoder(%state, %tensor_1, %state_origin_3) : (buffer, view<5xi32>, offset)
+  %state_origin_4 = index.constant 343120 : offset
+  kernel.launch @moonshine.initialize.encoder(%state, %tensor_1, %state_origin_4) : (buffer, view<5xi32>, offset)
+  %state_origin_5 = index.constant 506992 : offset
+  kernel.launch @moonshine.initialize.encoder(%state, %tensor_1, %state_origin_5) : (buffer, view<5xi32>, offset)
+  %state_origin_6 = index.constant 670864 : offset
+  kernel.launch @moonshine.initialize.encoder(%state, %tensor_1, %state_origin_6) : (buffer, view<5xi32>, offset)
+  %state_origin_7 = index.constant 834736 : offset
+  kernel.launch @moonshine.initialize.final_encoder(%state, %tensor_1, %state_origin_7) : (buffer, view<5xi32>, offset)
+  command.return
+}

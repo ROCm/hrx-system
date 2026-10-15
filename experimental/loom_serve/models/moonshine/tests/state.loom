@@ -1,0 +1,105 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx11-generic> @moonshine {subgroup_size = 32}
+
+config.def @moonshine.threads = 128 : index
+
+kernel.decl @moonshine.encoder_state.input_readiness() launch(%state: buffer, %work: buffer, %cohort: view<5xi32>, %control_origin: offset, %valid_origin: offset, %final_origin: offset)
+
+// Two packed rows select residents 3 and 1. Before this quantum their received
+// and emitted counts are (10, 6) and (2, 0). Each receives one new feature.
+global.rodata.def @membership = bytes("0200000003000000010000000000000000000000")
+
+global.rodata.def @reordered_membership = bytes("0200000001000000030000000000000000000000")
+
+global.rodata.def @first_initial = bytes("0a0000000600000000000000000000000000000000000000")
+
+global.rodata.def @second_initial = bytes("020000000000000000000000000000000000000000000000")
+
+// Resident 3 has enough lookahead: 11 received, next query 6, window [0, 10).
+global.rodata.def @first_expected = bytes("0b000000060000000a000000010000000000000000000000")
+
+// Resident 1 has only three features: its first query is still waiting.
+global.rodata.def @second_expected = bytes("030000000000000000000000000000000000000000000000")
+
+// After EOF, resident 1's first query sees all three features without padding.
+global.rodata.def @final_expected = bytes("030000000000000003000000010000000000000000000000")
+
+// The second trial starts at the first trial's completed boundary, changes
+// packed membership order, and flushes only the short resident at EOF.
+func.def @initialize_readiness(%trial: index, %state: buffer, %work: buffer, %cohort: buffer) {
+  %zero = index.constant 0 : offset
+  %member_bytes = index.constant 20 : offset
+  %control_bytes = index.constant 24 : offset
+  %first_origin = index.constant 120976000 : offset
+  %second_origin = index.constant 40335584 : offset
+  %first_trial = index.constant 0 : index
+  %initial = index.cmp eq, %trial, %first_trial : index
+  %members, %first, %second = scf.if %initial -> (buffer, buffer, buffer) {
+    %members = global.load @membership : buffer
+    %first = global.load @first_initial : buffer
+    %second = global.load @second_initial : buffer
+    scf.yield %members, %first, %second : buffer, buffer, buffer
+  } else {
+    %members = global.load @reordered_membership : buffer
+    %first = global.load @first_expected : buffer
+    %second = global.load @second_expected : buffer
+    scf.yield %members, %first, %second : buffer, buffer, buffer
+  }
+  buffer.copy %members[%zero], %cohort[%zero], %member_bytes
+  buffer.copy %first[%zero], %state[%first_origin], %control_bytes
+  buffer.copy %second[%zero], %state[%second_origin], %control_bytes
+  %words = buffer.view %work[%zero] : buffer -> view<1320xi32>
+  %one = scalar.constant 1 : i32
+  %none = scalar.constant 0 : i32
+  %valid = scf.select %initial, %one, %none : i32
+  %final = scf.select %initial, %none, %one : i32
+  view.store %valid, %words[12] : i32, view<1320xi32>
+  view.store %valid, %words[340] : i32, view<1320xi32>
+  view.store %final, %words[13] : i32, view<1320xi32>
+  func.return
+}
+
+// Expected control records are derived from each row's three-position
+// lookahead and EOF boundary, independently of the source's cursor arithmetic.
+func.def @readiness_expected(%state: buffer, %work: buffer, %cohort: buffer, %control: offset, %valid: offset, %final: offset) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 24 : offset
+  %first_origin = index.constant 120976000 : offset
+  %second_origin = index.constant 40335584 : offset
+  %words = buffer.view %work[%zero] : buffer -> view<1320xi32>
+  %eof = view.load %words[13] : view<1320xi32> -> i32
+  %none = scalar.constant 0 : i32
+  %final_input = scalar.cmpi ne, %eof, %none : i32
+  %first = global.load @first_expected : buffer
+  %second = scf.if %final_input -> (buffer) {
+    %value = global.load @final_expected : buffer
+    scf.yield %value : buffer
+  } else {
+    %value = global.load @second_expected : buffer
+    scf.yield %value : buffer
+  }
+  buffer.copy %first[%zero], %state[%first_origin], %bytes
+  buffer.copy %second[%zero], %state[%second_origin], %bytes
+  func.return
+}
+
+check.scenario public @independent_lookahead_and_eof {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %state = check.generate.fill value(0) : tensor<40320208xi32>
+    %work = check.generate.fill value(0) : tensor<1320xi32>
+    %cohort = check.generate.fill value(0) : view<5xi32>
+    check.generate<@initialize_readiness>(%trial, %state, %work, %cohort) : (index, tensor<40320208xi32>, tensor<1320xi32>, view<5xi32>) -> ()
+    %control = check.literal value(15376) : offset
+    %packet = check.literal value(32) : offset
+    check.compare<@moonshine.encoder_state.input_readiness, @readiness_expected>(%state, %work, %cohort, %control, %packet, %packet) : (tensor<40320208xi32>, tensor<1320xi32>, view<5xi32>, offset, offset, offset) -> () {
+      check.expect.bitwise actual(%state) expected(%state) : tensor<40320208xi32>
+    }
+  }
+  check.return
+}
