@@ -131,6 +131,18 @@ static int kernel_copy_elements(
   return 0;
 }
 
+// Reports the exact accessible ranges supplied through the dispatch ABI.
+static int kernel_binding_lengths(
+    const iree_hal_executable_environment_v0_t* environment,
+    const iree_hal_executable_dispatch_state_v0_t* dispatch_state,
+    const iree_hal_executable_workgroup_state_v0_t* workgroup_state) {
+  auto* output = static_cast<size_t*>(dispatch_state->binding_ptrs[3]);
+  for (size_t i = 0; i < 3; ++i) {
+    output[i] = dispatch_state->binding_lengths[i];
+  }
+  return 0;
+}
+
 // Returns an error code.
 static int kernel_fail(
     const iree_hal_executable_environment_v0_t* environment,
@@ -1058,6 +1070,50 @@ TEST_P(BlockProcessorTest, DirectFixup) {
   IREE_ASSERT_OK(execute(&recording, NULL, 0));
 
   EXPECT_EQ(iree_atomic_load(&counter, iree_memory_order_relaxed), 5);
+
+  iree_hal_cmd_block_recording_release(&recording);
+  iree_hal_cmd_block_builder_deinitialize(&builder);
+}
+
+TEST_P(BlockProcessorTest, BindingExtentsRemainExactAcrossInvocations) {
+  uint8_t source[80] = {};
+  size_t lengths[3] = {};
+  iree_hal_cmd_fixup_t fixups[4] = {};
+  fixups[0].offset = 4;
+  fixups[0].length = 16;
+  fixups[1].data_index = 1;
+  fixups[1].offset = 8;
+  fixups[1].length = IREE_HAL_WHOLE_BUFFER;
+  fixups[2].data_index = 2;
+  fixups[2].offset = 20;
+  fixups[2].length = 0;
+  fixups[3].data_index = 3;
+  fixups[3].host_ptr = lengths;
+  fixups[3].length = sizeof(lengths);
+
+  iree_hal_cmd_block_builder_t builder;
+  iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
+  DispatchDesc desc = {.function = kernel_binding_lengths};
+  desc.workgroup_count[0] = desc.workgroup_count[1] = desc.workgroup_count[2] =
+      1;
+  desc.binding_count = 4;
+  IREE_ASSERT_OK(record_dispatch(&builder, desc, fixups, 4));
+  iree_hal_cmd_block_recording_t recording;
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_end(&builder, &recording));
+
+  for (size_t offset : {0u, 8u}) {
+    for (size_t length : {20u, 32u, 64u}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "offset=" << offset << " length=" << length);
+      const iree_hal_cmd_binding_entry_t binding = {source + offset, length};
+      std::memset(lengths, 0xff, sizeof(lengths));
+      IREE_ASSERT_OK(execute(&recording, &binding, 1));
+      EXPECT_EQ(lengths[0], 16u);
+      EXPECT_EQ(lengths[1], length - 8u);
+      EXPECT_EQ(lengths[2], 0u);
+    }
+  }
 
   iree_hal_cmd_block_recording_release(&recording);
   iree_hal_cmd_block_builder_deinitialize(&builder);

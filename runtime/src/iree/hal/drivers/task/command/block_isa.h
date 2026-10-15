@@ -218,8 +218,9 @@ typedef struct iree_hal_cmd_fixup_t {
   // For indirect fixups: per-reference offset within the binding.
   // For direct inline fixups: 0 (map_range already applied the offset).
   iree_device_size_t offset;
-  // Length of the accessible buffer region in bytes. Populates .data
-  // binding_lengths[] at block entry alongside binding_ptrs[].
+  // Exact accessible byte length, or WHOLE_BUFFER for an indirect reference
+  // extending to the end of the invocation's binding. Block entry resolves
+  // this into binding_lengths[] alongside binding_ptrs[].
   iree_device_size_t length;
   // .data binding_ptrs[] slot to write the resolved pointer into.
   uint16_t data_index;
@@ -237,7 +238,9 @@ static_assert(sizeof(iree_hal_cmd_fixup_t) == 32, "fixup entries are 4 qwords");
 //     if (!f->host_ptr) {
 //       binding_ptrs[f->data_index] =
 //           (uint8_t*)table[f->slot].base + f->offset;
-//       binding_lengths[f->data_index] = f->length;
+//       binding_lengths[f->data_index] =
+//           f->length == IREE_HAL_WHOLE_BUFFER
+//               ? table[f->slot].length - f->offset : f->length;
 //     } else if (!iree_any_bit_set(f->flags, IREE_HAL_CMD_FIXUP_FLAG_SPAN)) {
 //       binding_ptrs[f->data_index] = (uint8_t*)f->host_ptr + f->offset;
 //       binding_lengths[f->data_index] = f->length;

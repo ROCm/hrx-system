@@ -206,7 +206,9 @@ static void iree_hal_cmd_block_processor_resolve_bindings(
       binding_ptrs[fixup->data_index] =
           (uint8_t*)binding_table[fixup->slot].base + fixup->offset;
       binding_lengths[fixup->data_index] =
-          binding_table[fixup->slot].length - (size_t)fixup->offset;
+          fixup->length == IREE_HAL_WHOLE_BUFFER
+              ? binding_table[fixup->slot].length - (size_t)fixup->offset
+              : (size_t)fixup->length;
     } else if (iree_any_bit_set(fixup->flags, IREE_HAL_CMD_FIXUP_FLAG_SPAN)) {
       // Span fixup (rare): async/registered region dereference.
       binding_ptrs[fixup->data_index] =
