@@ -1,0 +1,238 @@
+template.decl @flash_next.q8_tile(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+// Contract original Q8 blocks against BF16 rows without activation quantization.
+// Shape and schedule arguments are ordinary caller-supplied SSA values. They
+// become exact before the matrix fragment and cooperative loop are lowered.
+// Each wave owns a rectangular set of 16x16 results; its accumulator vector
+// carries those fragments through K32 blocks. Original block scales apply in
+// F32 after each integer-code product, and only publication rounds to BF16.
+//
+// The caller launches ceil(outputs/tile_columns) by ceil(capacity/tile_rows)
+// groups of wave_rows*wave_columns*32 threads. Tile dimensions and each wave's
+// share are multiples of 16. The wave grid divides the output tile. Operands
+// and output are disjoint, and the active-row header is immutable for dispatch.
+// This provider uses the gfx11 wave32 result layout for per-column scales and
+// ragged publication. Full fragments use the ordinary fragment-store contract.
+template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %span, %input, %weight, %output = buffer.assume.noalias %span_arg, %input_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
+  %inputs = index.assume %input_width [range(%input_width, 32, 10240), multiple_of(%input_width, 32)] : index
+  %outputs = index.assume %output_width [range(%output_width, 4, 262144), multiple_of(%output_width, 4)] : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %span[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %end = index.assume %count_value [range(%count_value, 0, %capacity)] : index
+  %group = kernel.workgroup.id<x> : index
+  %batch = kernel.workgroup.id<y> : index
+  %workitem = kernel.workitem.id<x> : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c40 = index.constant 40 : index
+  %c64 = index.constant 64 : index
+  %waves = index.mul %wave_rows, %wave_columns : index
+  %threads = index.mul %waves, %c32 : index
+  %per_wave_rows = index.div %tile_rows, %wave_rows : index
+  %per_wave_columns = index.div %tile_columns, %wave_columns : index
+  %row_fragments = index.div %per_wave_rows, %c16 : index
+  %column_fragments = index.div %per_wave_columns, %c16 : index
+  %fragment_count = index.mul %row_fragments, %column_fragments : index
+  %thread_rounding = index.sub %threads, %c1 : index
+  %weight_packets = index.mul %tile_columns, %c8 : index
+  %input_packets = index.mul %tile_rows, %c8 : index
+  %weight_padded = index.add %weight_packets, %thread_rounding : index
+  %input_padded = index.add %input_packets, %thread_rounding : index
+  %weight_rounds = index.div %weight_padded, %threads : index
+  %input_rounds = index.div %input_padded, %threads : index
+  %first = index.mul %batch, %tile_rows : index
+  %active = index.cmp ult, %first, %end : index
+  scf.if %active {
+    %channel_base = index.mul %group, %tile_columns : index
+    %wave_column_group = index.rem %wave, %wave_columns : index
+    %wave_row_group = index.div %wave, %wave_columns : index
+    %wave_channel = index.mul %wave_column_group, %per_wave_columns : index
+    %wave_token = index.mul %wave_row_group, %per_wave_rows : index
+    %blocks = index.div %inputs, %c32 : index
+    %block_bytes = index.constant 34 : offset
+    %scale_bytes = index.constant 2 : offset
+    %stage_row_bytes = index.constant 80 : offset
+    %metadata_row_bytes = index.constant 4 : offset
+    %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+    %weight_stage_bytes = index.scale %tile_columns, %stage_row_bytes : index, offset -> offset
+    %input_stage_bytes = index.scale %tile_rows, %stage_row_bytes : index, offset -> offset
+    %metadata_bytes = index.scale %tile_columns, %metadata_row_bytes : index, offset -> offset
+    %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+    %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+    %metadata = buffer.alloca<workgroup> align(16) %metadata_bytes : buffer
+    %weight_view = buffer.view %weight_stage[%origin] : buffer -> view<[%tile_columns]x40xbf16>
+    %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<[%tile_rows]x40xbf16>
+    %weight_layout = encoding.layout.strided [1, %c40] : encoding<layout>
+    %weight_fragment = buffer.view %weight_stage[%origin] : buffer -> view<32x[%tile_columns]xbf16, %weight_layout>
+    %metadata_view = buffer.view %metadata[%origin] : buffer -> view<[%tile_columns]xf32>
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%capacity]x[%inputs]xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%end]x[%outputs]xbf16>
+    %zeros = vector.constant 0.0 : vector<4xbf16>
+    %accumulator_zero = vector.constant 0.0 : vector<8xf32>
+    %initial = vector.fragment<init> %accumulator_zero shape [%c16, %c16] : vector<8xf32>
+    %initial_tile = vector.constant 0.0 : vector<[%fragment_count]x8xf32>
+    %result_tile = scf.for %block = [%c0 to %blocks step %c1](%accumulators = %initial_tile : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) pipeline(%pipeline_depth) {
+      %input_k = index.mul %block, %c32 : index
+      %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+      // The 40-element pitch and packet permutation distribute each half-wave
+      // store across distinct LDS banks. The final round may use fewer lanes.
+      scf.for %round = [%c0 to %weight_rounds step %c1] unroll schedule(linear) {
+        %task = index.madd %round, %threads, %workitem : index
+        %owns_packet = index.cmp ult, %task, %weight_packets : index
+        scf.if %owns_packet {
+          %row_group = index.div %task, %c64 : index
+          %within_row_group = index.rem %task, %c8 : index
+          %local_channel = index.madd %row_group, %c8, %within_row_group : index
+          %packet_group = index.div %task, %c8 : index
+          %packet = index.rem %packet_group, %c8 : index
+          %local_k = index.mul %packet, %c4 : index
+          %channel = index.add %channel_base, %local_channel : index
+          %valid_channel = index.cmp ult, %channel, %outputs : index
+          %safe_channel = scf.select %valid_channel, %channel, %c0 : index
+          %row_origin = index.scale %safe_channel, %row_bytes : index, offset -> offset
+          %block_origin = index.add %row_origin, %block_delta : offset
+          %payload = index.add %block_origin, %scale_bytes : offset
+          %codes_view = buffer.view %weight[%payload] : buffer -> view<32xi8>
+          %codes = vector.load %codes_view[%local_k] : view<32xi8> -> vector<4xi8>
+          %wide = vector.sitofp %codes : vector<4xi8> to vector<4xf32>
+          %values = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
+          vector.store %values, %weight_view[%local_channel, %local_k] : vector<4xbf16>, view<[%tile_columns]x40xbf16>
+          %leader = index.cmp eq, %packet, %c0 : index
+          scf.if %leader {
+            %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+            %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+            %scale = scalar.extf %half_scale : f16 to f32
+            view.store %scale, %metadata_view[%local_channel] : f32, view<[%tile_columns]xf32>
+          }
+        }
+      }
+      scf.for %round = [%c0 to %input_rounds step %c1] unroll schedule(linear) {
+        %task = index.madd %round, %threads, %workitem : index
+        %owns_packet = index.cmp ult, %task, %input_packets : index
+        scf.if %owns_packet {
+          %row_group = index.div %task, %c64 : index
+          %within_row_group = index.rem %task, %c8 : index
+          %local_token = index.madd %row_group, %c8, %within_row_group : index
+          %packet_group = index.div %task, %c8 : index
+          %packet = index.rem %packet_group, %c8 : index
+          %local_k = index.mul %packet, %c4 : index
+          %token = index.add %first, %local_token : index
+          %live = index.cmp ult, %token, %end : index
+          %safe_token = scf.select %live, %token, %c0 : index
+          %k = index.add %input_k, %local_k : index
+          %loaded = vector.load %input_view[%safe_token, %k] : view<[%capacity]x[%inputs]xbf16> -> vector<4xbf16>
+          %mask = vector.splat %live : vector<4xi1>
+          %values = vector.select %mask, %loaded, %zeros : vector<4xbf16>
+          vector.store %values, %input_stage_view[%local_token, %local_k] : vector<4xbf16>, view<[%tile_rows]x40xbf16>
+        }
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %scale_column = index.rem %lane, %c16 : index
+      %next_tile = scf.for %ordinal = [%c0 to %fragment_count step %c1](%partial_tile = %accumulators : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) unroll schedule(linear) {
+        %row_fragment = index.div %ordinal, %column_fragments : index
+        %column_fragment = index.rem %ordinal, %column_fragments : index
+        %fragment_row = index.madd %row_fragment, %c16, %wave_token : index
+        %fragment_column = index.madd %column_fragment, %c16, %wave_channel : index
+        %scale_index = index.add %fragment_column, %scale_column : index
+        %scale_value = view.load %metadata_view[%scale_index] : view<[%tile_columns]xf32> -> f32
+        %scale = vector.splat %scale_value : vector<8xf32>
+        %rhs0 = vector.fragment.load<rhs> %weight_fragment[%c0, %fragment_column] shape [%c16, %c16] : view<32x[%tile_columns]xbf16, %weight_layout> -> vector<16xbf16>
+        %rhs1 = vector.fragment.load<rhs> %weight_fragment[%c16, %fragment_column] shape [%c16, %c16] : view<32x[%tile_columns]xbf16, %weight_layout> -> vector<16xbf16>
+        %lhs0 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %c0] shape [%c16, %c16] : view<[%tile_rows]x40xbf16> -> vector<16xbf16>
+        %lhs1 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %c16] shape [%c16, %c16] : view<[%tile_rows]x40xbf16> -> vector<16xbf16>
+        %half = vector.mma %lhs0, %rhs0, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+        %dot = vector.mma %lhs1, %rhs1, %half : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+        %accumulator = vector.extract %partial_tile[%ordinal] : vector<[%fragment_count]x8xf32> -> vector<8xf32>
+        %next = vector.fmaf %dot, %scale, %accumulator : vector<8xf32>
+        %updated = vector.insert %next into %partial_tile[%ordinal] : vector<8xf32>, vector<[%fragment_count]x8xf32>
+        scf.yield %updated : vector<[%fragment_count]x8xf32>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.yield %next_tile : vector<[%fragment_count]x8xf32>
+    }
+    %lane_column = index.rem %lane, %c16 : index
+    %lane_row = index.div %lane, %c16 : index
+    scf.for %ordinal = [%c0 to %fragment_count step %c1] unroll schedule(linear) {
+      %row_fragment = index.div %ordinal, %column_fragments : index
+      %column_fragment = index.rem %ordinal, %column_fragments : index
+      %fragment_row = index.madd %row_fragment, %c16, %wave_token : index
+      %fragment_column = index.madd %column_fragment, %c16, %wave_channel : index
+      %result_row = index.add %first, %fragment_row : index
+      %result_column = index.add %channel_base, %fragment_column : index
+      %result = vector.extract %result_tile[%ordinal] : vector<[%fragment_count]x8xf32> -> vector<8xf32>
+      %row_limit = index.add %result_row, %c16 : index
+      %column_limit = index.add %result_column, %c16 : index
+      %full_rows = index.cmp ule, %row_limit, %end : index
+      %full_columns = index.cmp ule, %column_limit, %outputs : index
+      %full_fragment = scalar.andi %full_rows, %full_columns : i1
+      scf.if %full_fragment {
+        %maximum_row = index.sub %end, %c16 : index
+        %maximum_column = index.sub %outputs, %c16 : index
+        %checked_row = index.assume %result_row [ge(%result_row, 0), le(%result_row, %maximum_row)] : index
+        %checked_column = index.assume %result_column [ge(%result_column, 0), le(%result_column, %maximum_column)] : index
+        %fragment = vector.fragment<result> %result shape [%c16, %c16] : vector<8xf32>
+        vector.fragment.store<result> %fragment, %output_view[%checked_row, %checked_column] shape [%c16, %c16] : vector<8xf32>, view<[%end]x[%outputs]xbf16>
+      } else {
+        %column = index.add %result_column, %lane_column : index
+        %live_column = index.cmp ult, %column, %outputs : index
+        %packed = vector.fptrunc %result : vector<8xf32> to vector<8xbf16>
+        scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
+          %within_row = index.madd %element, %c2, %lane_row : index
+          %token = index.add %result_row, %within_row : index
+          %live_row = index.cmp ult, %token, %end : index
+          %live = scalar.andi %live_row, %live_column : i1
+          scf.if %live {
+            %value = vector.extract %packed[%element] : vector<8xbf16> -> bf16
+            view.store %value, %output_view[%token, %column] : bf16, view<[%end]x[%outputs]xbf16>
+          }
+        }
+      }
+    }
+  }
+  template.return
+}
+
+// Schedule predicates are the public specialization contract. A kernel
+// launch class retains these exact values without inspecting the body.
+// Every selected provider calls the same contraction implementation.
+template.decl @flash_next.q8_schedule(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@flash_next.q8_schedule> device @flash_next_q8_16x64_waves_1x4(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 16), eq(%tile_columns, 64), eq(%wave_rows, 1), eq(%wave_columns, 4), eq(%pipeline_depth, 1)] {
+  template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@flash_next.q8_schedule> device @flash_next_q8_32x64_waves_2x2(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 32), eq(%tile_columns, 64), eq(%wave_rows, 2), eq(%wave_columns, 2), eq(%pipeline_depth, 1)] {
+  template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@flash_next.q8_schedule> device @flash_next_q8_32x32_waves_2x2(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 32), eq(%tile_columns, 32), eq(%wave_rows, 2), eq(%wave_columns, 2), eq(%pipeline_depth, 1)] {
+  template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@flash_next.q8_schedule> device @flash_next_q8_64x64_waves_2x2(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 64), eq(%tile_columns, 64), eq(%wave_rows, 2), eq(%wave_columns, 2), eq(%pipeline_depth, 1)] {
+  template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@flash_next.q8_schedule> device @flash_next_q8_64x64_waves_4x2(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 64), eq(%tile_columns, 64), eq(%wave_rows, 4), eq(%wave_columns, 2), eq(%pipeline_depth, 1)] {
+  template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+template.def<@flash_next.q8_schedule> device @flash_next_q8_128x128_waves_4x2(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 128), eq(%tile_columns, 128), eq(%wave_rows, 4), eq(%wave_columns, 2), eq(%pipeline_depth, 1)] {
+  template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  template.return
+}
