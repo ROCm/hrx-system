@@ -79,6 +79,20 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    transfer
+  HDRS
+    "transfer.h"
+  SRCS
+    "transfer.c"
+  DEPS
+    ::commands
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
@@ -91,6 +105,7 @@ iree_cc_library(
     ::barrier
     ::semaphore
     ::signal
+    ::transfer
     iree::base
     iree::base::internal
     iree::hal

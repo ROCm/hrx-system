@@ -31,9 +31,9 @@ enum class Timing { kSubmit, kCompletion, kSampledSubmit };
 // The allocator observes complete asynchronous device teardown so each row
 // starts after the previous row's workers and native owners have joined. Warm
 // dispatches reuse capture blocks; allocation counts report slow-path growth.
-class NativeDispatch {
+class NativeQueue {
  public:
-  ~NativeDispatch() {
+  ~NativeQueue() {
     for (auto& lane : lanes_) {
       iree_hal_semaphore_release(lane.timeline);
       iree_hal_executable_release(lane.executable);
@@ -109,7 +109,7 @@ class NativeDispatch {
     const auto* family = iree_hal_queue_family(queue_);
     const iree_hal_pool_family_access_t access = {
         .family = family,
-        .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+        .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
         .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
     };
     const iree_hal_pool_scope_t scope = {
@@ -149,7 +149,8 @@ class NativeDispatch {
     load.executable_data = artifact;
     for (auto& lane : lanes_) {
       IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
-          pool_, iree_hal_make_pool_reservation_request(sizeof(uint32_t), 4),
+          pool_,
+          iree_hal_make_pool_reservation_request(2 * sizeof(uint32_t), 4),
           iree_infinite_timeout(), &lane.output));
       lane.address = iree_hal_buffer_native_binding(lane.output, address_slot)
                          .device_address;
@@ -179,7 +180,8 @@ class NativeDispatch {
     auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
     config.workgroup_size[0] = 32;
     config.workgroup_size[1] = config.workgroup_size[2] = 1;
-    const iree_hal_queue_barriers_t empty_barriers = {};
+    const iree_hal_barrier_list_t empty = {};
+    const iree_hal_queue_barriers_t empty_barriers = {&empty, &empty};
     IREE_RETURN_IF_ERROR(iree_hal_queue_dispatch(
         queue_, {lane.epoch ? 1u : 0u, &lane.timeline, &before},
         {1, &lane.timeline, &after}, lane.executable, lane.function, config,
@@ -195,6 +197,86 @@ class NativeDispatch {
             : IREE_HAL_DISPATCH_FLAG_NONE));
     lane.expected = parameters.value * 3 + 19;
     lane.epoch = after;
+    return iree_ok_status();
+  }
+
+  iree_status_t PrepareTransfers() {
+    auto& lane = lanes_[0];
+    uint64_t after = lane.epoch + 1;
+    IREE_RETURN_IF_ERROR(iree_hal_queue_fill(
+        queue_, {}, {1, &lane.timeline, &after}, lane.output, 0, 8,
+        &lane.host_value, 4, nullptr, IREE_HAL_FILL_FLAG_NONE));
+    lane.epoch = after;
+    lane.expected = lane.host_value;
+    return Complete(0);
+  }
+
+  iree_status_t Transfer(iree_hal_transfer_operation_type_t type,
+                         Barriers barriers) {
+    auto& lane = lanes_[0];
+    uint64_t before = lane.epoch, after = lane.epoch + 1;
+    const uint32_t value = static_cast<uint32_t>(after);
+    iree_hal_transfer_operation_t operation = {.type = type};
+    switch (type) {
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+        operation.fill = {
+            .target_buffer = lane.output,
+            .length = 4,
+            .pattern = &value,
+            .pattern_length = 4,
+        };
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+        operation.update = {
+            .source_buffer = &value,
+            .target_buffer = lane.output,
+            .length = 4,
+        };
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
+        operation.copy = {
+            .source_buffer = lane.output,
+            .source_offset = 4,
+            .target_buffer = lane.output,
+            .length = 4,
+        };
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+        operation.upload = {
+            .source = &lane.host_value,
+            .target_buffer = lane.output,
+            .length = 4,
+        };
+        break;
+      case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+        operation.download = {
+            .source_buffer = lane.output,
+            .target = &lane.downloaded,
+            .length = 4,
+        };
+        break;
+    }
+    const iree_hal_barrier_list_t empty = {};
+    const iree_hal_queue_barriers_t empty_barriers = {&empty, &empty};
+    IREE_RETURN_IF_ERROR(iree_hal_queue_transfer(
+        queue_, {1, &lane.timeline, &before}, {1, &lane.timeline, &after}, 1,
+        &operation,
+        barriers == Barriers::kDefault ? nullptr : &empty_barriers));
+    lane.epoch = after;
+    lane.expected = type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL ||
+                            type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE
+                        ? value
+                        : lane.host_value;
+    return iree_ok_status();
+  }
+
+  iree_status_t CheckTransferOutput(iree_hal_transfer_operation_type_t type) {
+    IREE_RETURN_IF_ERROR(CheckOutput(0));
+    if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD &&
+        lanes_[0].downloaded != lanes_[0].expected) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "download did not complete before its signal");
+    }
     return iree_ok_status();
   }
 
@@ -242,7 +324,7 @@ class NativeDispatch {
   static iree_status_t Allocate(void* user_data,
                                 iree_allocator_command_t command,
                                 const void* params, void** inout_pointer) {
-    auto* self = static_cast<NativeDispatch*>(user_data);
+    auto* self = static_cast<NativeQueue*>(user_data);
     const bool had_pointer = *inout_pointer != nullptr;
     auto allocator = iree_allocator_system();
     IREE_RETURN_IF_ERROR(
@@ -291,6 +373,10 @@ class NativeDispatch {
     uint64_t epoch = 0;
     // Expected output from the last dispatch, checked after each burst.
     uint32_t expected = 0;
+    // Immutable source for borrowed uploads and the device copy seed.
+    uint32_t host_value = 0x13579BDF;
+    // Borrowed host destination, read only after terminal download completion.
+    uint32_t downloaded = 0;
   };
   // Stable per-producer state; mutable fields do not share cache lines.
   std::vector<Lane> lanes_;
@@ -306,7 +392,7 @@ class NativeDispatch {
 
 static void BM_Dispatch(benchmark::State& state, Arguments arguments,
                         Barriers barriers, Timing timing) {
-  NativeDispatch dispatch;
+  NativeQueue dispatch;
   iree::Status status = dispatch.Initialize();
   if (!status.ok()) {
     state.SkipWithError(status.ToString().c_str());
@@ -372,6 +458,62 @@ DISPATCH_CASE(BindingsDefaultCompletion, kBindings, kDefault, kCompletion);
 DISPATCH_CASE(BindingsDefaultLatency, kBindings, kDefault, kSampledSubmit);
 #undef DISPATCH_CASE
 
+static void BM_Transfer(benchmark::State& state,
+                        iree_hal_transfer_operation_type_t type,
+                        Barriers barriers, Timing timing) {
+  NativeQueue queue;
+  iree::Status status = queue.Initialize();
+  if (!status.ok()) {
+    state.SkipWithError(status.ToString().c_str());
+    return;
+  }
+  IREE_CHECK_OK(queue.PrepareTransfers());
+  const size_t count = state.range(0);
+  for (size_t i = 0; i < count * 2; ++i) {
+    IREE_CHECK_OK(queue.Transfer(type, barriers));
+  }
+  IREE_CHECK_OK(queue.Complete(0));
+  IREE_CHECK_OK(queue.CheckTransferOutput(type));
+  const uint64_t allocations_before = queue.allocation_count();
+  for (auto _ : state) {
+    for (size_t i = 0; i < count; ++i) {
+      IREE_CHECK_OK(queue.Transfer(type, barriers));
+    }
+    if (timing == Timing::kSubmit) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.Complete(0));
+    if (timing == Timing::kCompletion) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.CheckTransferOutput(type));
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations() * count);
+  state.counters["host_allocations"] =
+      queue.allocation_count() - allocations_before;
+}
+
+#define TRANSFER_CASE(name, kind, barriers, timing)          \
+  BENCHMARK_CAPTURE(BM_Transfer, name,                       \
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_##kind, \
+                    Barriers::barriers, Timing::timing)      \
+      ->Arg(1)                                               \
+      ->Arg(32)                                              \
+      ->Iterations(200)                                      \
+      ->UseRealTime()
+TRANSFER_CASE(FillDefaultSubmit, FILL, kDefault, kSubmit);
+TRANSFER_CASE(FillEmptySubmit, FILL, kExplicitEmpty, kSubmit);
+TRANSFER_CASE(CopyDefaultSubmit, COPY, kDefault, kSubmit);
+TRANSFER_CASE(CopyEmptySubmit, COPY, kExplicitEmpty, kSubmit);
+TRANSFER_CASE(UpdateDefaultSubmit, UPDATE, kDefault, kSubmit);
+TRANSFER_CASE(UpdateEmptySubmit, UPDATE, kExplicitEmpty, kSubmit);
+TRANSFER_CASE(UploadDefaultSubmit, UPLOAD, kDefault, kSubmit);
+TRANSFER_CASE(DownloadDefaultSubmit, DOWNLOAD, kDefault, kSubmit);
+TRANSFER_CASE(UploadDefaultCompletion, UPLOAD, kDefault, kCompletion);
+TRANSFER_CASE(DownloadDefaultCompletion, DOWNLOAD, kDefault, kCompletion);
+#undef TRANSFER_CASE
+
 // Persistent callers share one actual queue without a caller-side mutex.
 // Barrier rendezvous coordinate only benchmark epochs and stay outside each
 // caller's submission interval. Overall wall time includes start/join overhead.
@@ -379,7 +521,7 @@ DISPATCH_CASE(BindingsDefaultLatency, kBindings, kDefault, kSampledSubmit);
 static void BM_ConcurrentDispatch(benchmark::State& state) {
   const size_t producer_count = state.range(0);
   const size_t count = state.range(1);
-  NativeDispatch dispatch;
+  NativeQueue dispatch;
   iree::Status status = dispatch.Initialize(producer_count);
   if (!status.ok()) {
     state.SkipWithError(status.ToString().c_str());

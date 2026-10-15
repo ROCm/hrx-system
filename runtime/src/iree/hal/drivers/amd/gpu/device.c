@@ -131,7 +131,8 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .priority_count = 1,
       .priorities = &priority,
       .physical_device_affinity = 1,
-      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
   };
   const iree_hal_device_queue_spec_t queues = {
       .family_count = 1,
@@ -260,7 +261,8 @@ static void iree_hal_amd_gpu_device_initialize_memory(
   };
   device->memory.family = (iree_hal_amd_fabric_memory_family_t){
       .queue_family_ordinal = native_family_ordinal,
-      .supported_usage = IREE_HAL_BUFFER_USAGE_DISPATCH,
+      .supported_usage =
+          IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_TRANSFER,
       .binding_count = IREE_ARRAYSIZE(bindings),
       .bindings = bindings,
   };

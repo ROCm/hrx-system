@@ -75,6 +75,17 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "transfer",
+    srcs = ["transfer.c"],
+    hdrs = ["transfer.h"],
+    deps = [
+        ":commands",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "submission",
     srcs = ["submission.c"],
     hdrs = ["submission.h"],
@@ -83,6 +94,7 @@ iree_runtime_cc_library(
         ":barrier",
         ":semaphore",
         ":signal",
+        ":transfer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",

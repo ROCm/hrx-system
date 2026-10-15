@@ -153,7 +153,7 @@ struct Executable {
   }
 };
 
-TEST_F(SubmissionTest, CallerAndGpuOwnershipJoinBeforeReturningCapture) {
+TEST_F(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
   iree_async_proactor_t* proactor = nullptr;
   IREE_ASSERT_OK(
       iree_async_proactor_create_platform(iree_async_proactor_options_default(),
@@ -198,15 +198,15 @@ TEST_F(SubmissionTest, CallerAndGpuOwnershipJoinBeforeReturningCapture) {
   wait_value = signal_value = 99;
   EXPECT_EQ(capture->waits[0].value, 3u);
   EXPECT_EQ(capture->signals.payload_values[0], 4u);
-  EXPECT_EQ(capture->bindings.values[0].offset, 4u);
-  EXPECT_EQ(capture->bindings.values[0].length, 8u);
+  EXPECT_EQ(capture->dispatch.bindings.values[0].offset, 4u);
+  EXPECT_EQ(capture->dispatch.bindings.values[0].length, 8u);
   uint32_t copied = 0;
-  std::memcpy(&copied, capture->constants.data, sizeof(copied));
+  std::memcpy(&copied, capture->dispatch.constants.data, sizeof(copied));
   EXPECT_EQ(copied, 0x12345678u);
   EXPECT_EQ(reinterpret_cast<uintptr_t>(capture->signals.payload_values) %
                 alignof(uint64_t),
             0u);
-  EXPECT_EQ(reinterpret_cast<uintptr_t>(capture->bindings.values) %
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(capture->dispatch.bindings.values) %
                 alignof(iree_hal_buffer_ref_t),
             0u);
   iree_hal_amd_gpu_pm4_submission_retain(capture);
@@ -216,9 +216,18 @@ TEST_F(SubmissionTest, CallerAndGpuOwnershipJoinBeforeReturningCapture) {
   iree_hal_amd_gpu_pm4_submission_release(capture);
   EXPECT_FALSE(executable.destroyed);
   EXPECT_FALSE(buffer_destroyed);
-  iree_hal_amd_gpu_pm4_submission_release(capture);
+  // Native completion must release payloads before exposing its public
+  // signal, even when the publisher still owns the capture's bookkeeping.
+  iree_hal_amd_gpu_pm4_submission_retire(capture);
   EXPECT_TRUE(executable.destroyed);
   EXPECT_TRUE(buffer_destroyed);
+  uint64_t completed_value = UINT64_MAX;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(capture->signals.semaphores[0],
+                                          &completed_value));
+  EXPECT_EQ(completed_value, 0u);
+  EXPECT_EQ(capture->signals.payload_values[0], 4u);
+  EXPECT_EQ(capture->waits[0].value, 3u);
+  iree_hal_amd_gpu_pm4_submission_release(capture);
   iree_async_proactor_release(proactor);
 }
 
@@ -243,8 +252,9 @@ TEST_F(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
   EXPECT_EQ(capture->before.cache_control, 0u);
   EXPECT_EQ(capture->after.cache_control, 0u);
   constants.assign(constants.size(), 0xAB);
-  for (iree_host_size_t i = 0; i < capture->constants.data_length; ++i) {
-    ASSERT_EQ(capture->constants.data[i], 0x35);
+  for (iree_host_size_t i = 0; i < capture->dispatch.constants.data_length;
+       ++i) {
+    ASSERT_EQ(capture->dispatch.constants.data[i], 0x35);
   }
   iree_hal_executable_release(&executable.base);
   iree_hal_amd_gpu_pm4_submission_release(capture);
@@ -278,7 +288,7 @@ TEST_F(SubmissionTest, TailStoragePreservesArgumentsAtBlockBoundaries) {
       std::memset(tail.data, 0xA5, tail.data_length);
     }
     for (iree_host_size_t i = 0; i < size; ++i) {
-      EXPECT_EQ(capture->constants.data[i], 0x35);
+      EXPECT_EQ(capture->dispatch.constants.data[i], 0x35);
     }
     EXPECT_EQ(capture->allocation_size,
               size <= capacity ? pool_.block_size : sizeof(*capture) + size);

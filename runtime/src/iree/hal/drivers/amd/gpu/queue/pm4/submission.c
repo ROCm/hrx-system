@@ -148,28 +148,23 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_pm4_submission_create(
+// Captures common ownership and allocates the operation payload in one block.
+static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire(
     iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
-    const iree_hal_amd_gpu_pm4_function_t* function,
-    iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_const_byte_span_t constants,
-    iree_hal_buffer_ref_list_t bindings,
+    iree_hal_semaphore_list_t signals, iree_host_size_t payload_size,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
-    const iree_hal_queue_barriers_t* barriers, iree_hal_dispatch_flags_t flags,
-    iree_hal_amd_gpu_pm4_submission_t** out_submission) {
-  *out_submission = NULL;
-  iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_pm4_submission_t);
+    const iree_hal_queue_barriers_t* barriers,
+    iree_hal_amd_gpu_pm4_submission_t** out_submission, void** out_payload) {
+  iree_host_size_t payload_offset = sizeof(iree_hal_amd_gpu_pm4_submission_t);
+  iree_host_size_t total_size = 0;
   if (!iree_host_size_checked_mul_add(
-          total_size, waits.count,
-          sizeof(iree_hal_amd_gpu_pm4_submission_wait_t), &total_size) ||
+          payload_offset, waits.count,
+          sizeof(iree_hal_amd_gpu_pm4_submission_wait_t), &payload_offset) ||
       !iree_host_size_checked_mul_add(
-          total_size, signals.count,
-          sizeof(iree_hal_semaphore_t*) + sizeof(uint64_t), &total_size) ||
-      !iree_host_size_checked_mul_add(
-          total_size, bindings.count,
-          sizeof(iree_hal_buffer_ref_t) + sizeof(uint64_t), &total_size) ||
-      !iree_host_size_checked_add(total_size, constants.data_length,
-                                  &total_size)) {
+          payload_offset, signals.count,
+          sizeof(iree_hal_semaphore_t*) + sizeof(uint64_t), &payload_offset) ||
+      !iree_host_size_checked_align(payload_offset, 8, &payload_offset) ||
+      !iree_host_size_checked_add(payload_offset, payload_size, &total_size)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "submission capture size overflows");
   }
@@ -181,18 +176,14 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
       .native_wait_count = waits.count ? UINT32_MAX : 0,
       .pool = pool,
       .allocation_size = storage.data_length,
-      .executable = executable,
-      .function = function,
+      .capture_size = total_size,
       .wait_count = waits.count,
-      .flags = flags,
-      .dispatch = dispatch,
       .before = iree_hal_amd_gpu_pm4_barrier_prepare(
           profile, barriers ? barriers->before : NULL),
       .after = iree_hal_amd_gpu_pm4_barrier_prepare(
           profile, barriers ? barriers->after : NULL),
   };
   iree_atomic_ref_count_init(&submission->ref_count);
-  iree_hal_executable_retain(executable);
   uint8_t* cursor = (uint8_t*)(submission + 1);
   submission->waits = (iree_hal_amd_gpu_pm4_submission_wait_t*)cursor;
   cursor += waits.count * sizeof(*submission->waits);
@@ -202,26 +193,60 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
     iree_hal_semaphore_retain(waits.semaphores[i]);
   }
   submission->signals.count = signals.count;
-  // Keep 64-bit arrays before pointer-only arrays so odd signal counts retain
-  // their natural alignment on hosts with 32-bit pointers.
+  // Values precede pointers so odd signal counts retain alignment on 32-bit
+  // hosts. The payload begins at its independently aligned offset above.
   submission->signals.payload_values = (uint64_t*)cursor;
   cursor += signals.count * sizeof(uint64_t);
-  iree_hal_buffer_ref_t* references = (iree_hal_buffer_ref_t*)cursor;
-  submission->bindings =
-      (iree_hal_buffer_ref_list_t){bindings.count, references};
-  cursor += bindings.count * (sizeof(*references) + sizeof(uint64_t));
-  for (iree_host_size_t i = 0; i < bindings.count; ++i) {
-    references[i] = bindings.values[i];
-    iree_hal_buffer_retain(references[i].buffer);
-  }
   submission->signals.semaphores = (iree_hal_semaphore_t**)cursor;
-  cursor += signals.count * sizeof(iree_hal_semaphore_t*);
   for (iree_host_size_t i = 0; i < signals.count; ++i) {
     submission->signals.semaphores[i] = signals.semaphores[i];
     submission->signals.payload_values[i] = signals.payload_values[i];
     iree_hal_semaphore_retain(signals.semaphores[i]);
   }
-  submission->constants =
+  *out_submission = submission;
+  *out_payload = storage.data + payload_offset;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_submission_create(
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
+    const iree_hal_amd_gpu_pm4_function_t* function,
+    iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_const_byte_span_t constants,
+    iree_hal_buffer_ref_list_t bindings,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_dispatch_flags_t flags,
+    iree_hal_amd_gpu_pm4_submission_t** out_submission) {
+  *out_submission = NULL;
+  iree_host_size_t payload_size = 0;
+  if (!iree_host_size_checked_mul_add(
+          constants.data_length, bindings.count,
+          sizeof(iree_hal_buffer_ref_t) + sizeof(uint64_t), &payload_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "dispatch capture size overflows");
+  }
+  iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
+  void* payload = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
+      pool, waits, signals, payload_size, profile, barriers, &submission,
+      &payload));
+  submission->kind = function ? IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH
+                              : IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER;
+  submission->dispatch.executable = executable;
+  submission->dispatch.function = function;
+  submission->dispatch.geometry = dispatch;
+  submission->dispatch.flags = flags;
+  iree_hal_executable_retain(executable);
+  iree_hal_buffer_ref_t* references = payload;
+  submission->dispatch.bindings =
+      (iree_hal_buffer_ref_list_t){bindings.count, references};
+  for (iree_host_size_t i = 0; i < bindings.count; ++i) {
+    references[i] = bindings.values[i];
+    iree_hal_buffer_retain(references[i].buffer);
+  }
+  uint8_t* cursor = (uint8_t*)payload +
+                    bindings.count * (sizeof(*references) + sizeof(uint64_t));
+  submission->dispatch.constants =
       iree_make_const_byte_span(cursor, constants.data_length);
   if (constants.data_length) {
     memcpy(cursor, constants.data, constants.data_length);
@@ -230,16 +255,44 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t count,
+    const iree_hal_transfer_operation_t* operations,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    const iree_hal_queue_barriers_t* barriers,
+    iree_hal_amd_gpu_pm4_submission_t** out_submission) {
+  *out_submission = NULL;
+  iree_hal_amd_gpu_pm4_transfer_layout_t layout;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_pm4_transfer_measure(count, operations, &layout));
+  if (!layout.count) {
+    return iree_hal_amd_gpu_pm4_submission_create(
+        pool, waits, signals, NULL, NULL, (iree_hal_amd_gpu_pm4_dispatch_t){0},
+        iree_const_byte_span_empty(), iree_hal_buffer_ref_list_empty(), profile,
+        barriers, 0, out_submission);
+  }
+  iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
+  void* payload = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
+      pool, waits, signals, layout.byte_length, profile, barriers, &submission,
+      &payload));
+  submission->kind = IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER;
+  iree_status_t status = iree_hal_amd_gpu_pm4_transfer_initialize(
+      family, count, operations, layout, payload, &submission->transfer);
+  if (iree_status_is_ok(status)) {
+    *out_submission = submission;
+  } else {
+    iree_hal_amd_gpu_pm4_submission_release(submission);
+  }
+  return status;
+}
+
 iree_byte_span_t iree_hal_amd_gpu_pm4_submission_tail_storage(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
-  // Constants are the final region of the captured layout, including when
-  // empty. No later publication step grows or repacks the capture.
-  const iree_host_size_t used_size =
-      (iree_host_size_t)(submission->constants.data -
-                         (const uint8_t*)submission) +
-      submission->constants.data_length;
   const iree_host_size_t aligned_size =
-      iree_host_align(used_size, iree_max_align_t);
+      iree_host_align(submission->capture_size, iree_max_align_t);
   if (aligned_size >= submission->allocation_size) {
     return iree_byte_span_empty();
   }
@@ -254,9 +307,23 @@ void iree_hal_amd_gpu_pm4_submission_retain(
   }
 }
 
+void iree_hal_amd_gpu_pm4_submission_retire(
+    iree_hal_amd_gpu_pm4_submission_t* submission) {
+  if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH) {
+    for (iree_host_size_t i = 0; i < submission->dispatch.bindings.count; ++i) {
+      iree_hal_buffer_release(submission->dispatch.bindings.values[i].buffer);
+    }
+    iree_hal_executable_release(submission->dispatch.executable);
+  } else if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER) {
+    iree_hal_amd_gpu_pm4_transfer_deinitialize(&submission->transfer);
+  }
+  submission->kind = IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER;
+}
+
 static void iree_hal_amd_gpu_pm4_submission_destroy(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
   iree_hal_amd_gpu_capture_pool_t* pool = submission->pool;
+  iree_hal_amd_gpu_pm4_submission_retire(submission);
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
     iree_hal_amd_gpu_pm4_signal_release(submission->waits[i].signal);
     iree_hal_semaphore_release(submission->waits[i].semaphore);
@@ -264,11 +331,7 @@ static void iree_hal_amd_gpu_pm4_submission_destroy(
   for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
     iree_hal_semaphore_release(submission->signals.semaphores[i]);
   }
-  for (iree_host_size_t i = 0; i < submission->bindings.count; ++i) {
-    iree_hal_buffer_release(submission->bindings.values[i].buffer);
-  }
   iree_hal_amd_gpu_pm4_signal_release(submission->signal);
-  iree_hal_executable_release(submission->executable);
   iree_hal_amd_gpu_capture_pool_release(
       pool, iree_make_byte_span(submission, submission->allocation_size));
 }
@@ -330,11 +393,12 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
 void iree_hal_amd_gpu_pm4_submission_emplace_arguments(
     const iree_hal_amd_gpu_pm4_submission_t* submission,
     const uint64_t* binding_addresses, void* target) {
-  const iree_hal_amd_gpu_pm4_dispatch_t* dispatch = &submission->dispatch;
+  const iree_hal_amd_gpu_pm4_dispatch_t* dispatch =
+      &submission->dispatch.geometry;
   iree_hal_amd_gpu_kernarg_inputs_t inputs = {
       .dynamic_lds_size =
           dispatch->group_segment_byte_length -
-          submission->function->metadata->group_segment_fixed_size,
+          submission->dispatch.function->metadata->group_segment_fixed_size,
       .grid_dimensions = 1,
   };
   for (int i = 0; i < 3; ++i) {
@@ -347,13 +411,15 @@ void iree_hal_amd_gpu_pm4_submission_emplace_arguments(
       inputs.grid_dimensions = (uint16_t)(i + 1);
     }
   }
-  if (iree_any_bit_set(submission->flags,
+  if (iree_any_bit_set(submission->dispatch.flags,
                        IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)) {
     iree_hal_amd_gpu_kernarg_layout_emplace_native(
-        submission->function->kernarg, submission->constants, &inputs, target);
+        submission->dispatch.function->kernarg, submission->dispatch.constants,
+        &inputs, target);
   } else {
-    iree_hal_amd_gpu_kernarg_layout_emplace(submission->function->kernarg,
-                                            submission->constants.data,
-                                            binding_addresses, &inputs, target);
+    iree_hal_amd_gpu_kernarg_layout_emplace(
+        submission->dispatch.function->kernarg,
+        submission->dispatch.constants.data, binding_addresses, &inputs,
+        target);
   }
 }

@@ -59,6 +59,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::pm4::semaphore
     iree::hal::drivers::amd::gpu::queue::pm4::signal
     iree::hal::drivers::amd::gpu::queue::pm4::submission
+    iree::hal::drivers::amd::gpu::queue::pm4::transfer
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::status
     iree::hal::memory::maintenance
