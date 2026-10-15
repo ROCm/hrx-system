@@ -80,16 +80,91 @@ static bool loom_low_descriptor_packet_kind_may_rematerialize(
          kind == LOOM_LOW_DESCRIPTOR_PACKET_CONST;
 }
 
+#define LOOM_LOW_REMATERIALIZATION_INLINE_RESULT_COUNT 8
+
 typedef struct loom_low_rematerialization_recipe_t {
   // Producer operations from the selected value toward its replay root.
   loom_op_t** packets;
   // Number of packets in the replay chain.
   iree_host_size_t packet_count;
+  // Arena-allocated result membership slots for longer recipes.
+  loom_value_id_t* result_slots;
+  // Power-of-two capacity of result_slots, or zero for inline membership.
+  iree_host_size_t result_slot_capacity;
+  // Direct result membership for short recipes.
+  loom_value_id_t
+      inline_results[LOOM_LOW_REMATERIALIZATION_INLINE_RESULT_COUNT];
   // Whether cloning the recipe would add a use of a register-required value.
   bool has_required_external_input;
   // Whether the recipe followed an optional descriptor source edge.
   bool followed_explicit_source;
 } loom_low_rematerialization_recipe_t;
+
+static iree_host_size_t loom_low_rematerialization_recipe_result_slot(
+    loom_value_id_t value_id, iree_host_size_t slot_capacity) {
+  const uint32_t hash =
+      loom_structural_hash_finalize(loom_structural_hash_mix_u32(
+          loom_structural_hash_initialize(), value_id));
+  return hash & (slot_capacity - 1);
+}
+
+static iree_status_t loom_low_rematerialization_index_recipe_results(
+    iree_arena_allocator_t* arena,
+    loom_low_rematerialization_recipe_t* recipe) {
+  if (recipe->packet_count <= LOOM_LOW_REMATERIALIZATION_INLINE_RESULT_COUNT) {
+    for (iree_host_size_t i = 0; i < recipe->packet_count; ++i) {
+      recipe->inline_results[i] = loom_op_const_results(recipe->packets[i])[0];
+    }
+    return iree_ok_status();
+  }
+  const iree_host_size_t packet_capacity =
+      iree_host_size_next_power_of_two(recipe->packet_count);
+  if (packet_capacity > IREE_HOST_SIZE_MAX / 2) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "rematerialization recipe index exceeds host size");
+  }
+  recipe->result_slot_capacity = packet_capacity * 2;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, recipe->result_slot_capacity, sizeof(*recipe->result_slots),
+      (void**)&recipe->result_slots));
+  loom_value_id_t* slots = recipe->result_slots;
+  memset(slots, 0xFF, recipe->result_slot_capacity * sizeof(*slots));
+  const iree_host_size_t slot_mask = recipe->result_slot_capacity - 1;
+  for (iree_host_size_t i = 0; i < recipe->packet_count; ++i) {
+    const loom_value_id_t result = loom_op_const_results(recipe->packets[i])[0];
+    iree_host_size_t slot = loom_low_rematerialization_recipe_result_slot(
+        result, recipe->result_slot_capacity);
+    while (slots[slot] != LOOM_VALUE_ID_INVALID) {
+      slot = (slot + 1) & slot_mask;
+    }
+    slots[slot] = result;
+  }
+  return iree_ok_status();
+}
+
+static bool loom_low_rematerialization_recipe_contains_result(
+    const loom_low_rematerialization_recipe_t* recipe,
+    loom_value_id_t value_id) {
+  if (recipe->result_slots == NULL) {
+    for (iree_host_size_t i = 0; i < recipe->packet_count; ++i) {
+      if (recipe->inline_results[i] == value_id) {
+        return true;
+      }
+    }
+    return false;
+  }
+  const loom_value_id_t* slots = recipe->result_slots;
+  const iree_host_size_t slot_mask = recipe->result_slot_capacity - 1;
+  iree_host_size_t slot = loom_low_rematerialization_recipe_result_slot(
+      value_id, recipe->result_slot_capacity);
+  while (slots[slot] != LOOM_VALUE_ID_INVALID) {
+    if (slots[slot] == value_id) {
+      return true;
+    }
+    slot = (slot + 1) & slot_mask;
+  }
+  return false;
+}
 
 typedef enum loom_low_rematerialization_action_e {
   LOOM_LOW_REMATERIALIZATION_ACTION_NONE = 0,
@@ -170,24 +245,29 @@ static loom_value_id_t loom_low_rematerialization_tied_source(
 }
 
 static bool loom_low_rematerialization_inputs_remain_available(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_value_id_t recipe_source_value_id,
+    const loom_module_t* module,
+    const loom_low_rematerialization_recipe_t* recipe,
     const iree_bitmap_t* required_register_values,
     bool* inout_has_required_external_input) {
-  const loom_value_id_t* operands = loom_op_const_operands(op);
-  for (uint16_t i = 0; i < op->operand_count; ++i) {
-    const loom_value_id_t operand = operands[i];
-    if (operand == recipe_source_value_id) {
-      continue;
+  for (iree_host_size_t packet_index = 0; packet_index < recipe->packet_count;
+       ++packet_index) {
+    const loom_op_t* packet = recipe->packets[packet_index];
+    const loom_value_id_t* operands = loom_op_const_operands(packet);
+    for (uint16_t operand_index = 0; operand_index < packet->operand_count;
+         ++operand_index) {
+      const loom_value_id_t operand = operands[operand_index];
+      if (loom_low_rematerialization_recipe_contains_result(recipe, operand)) {
+        continue;
+      }
+      if (loom_consumption_find_consuming_use(
+              module, loom_module_value(module, operand), NULL)) {
+        return false;
+      }
+      *inout_has_required_external_input |=
+          required_register_values != NULL &&
+          operand < required_register_values->bit_count &&
+          iree_bitmap_test(*required_register_values, operand);
     }
-    if (loom_consumption_find_consuming_use(
-            module, loom_module_value(module, operand), NULL)) {
-      return false;
-    }
-    *inout_has_required_external_input |=
-        required_register_values != NULL &&
-        operand < required_register_values->bit_count &&
-        iree_bitmap_test(*required_register_values, operand);
   }
   return true;
 }
@@ -223,6 +303,7 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
           loom_low_rematerialization_tied_source(defining_op);
       if (!loom_low_rematerialization_packet_is_eligible(
               module, target, recipe_source_value_id, &source_op)) {
+        out_recipe->followed_explicit_source = followed_explicit_source;
         return iree_ok_status();
       }
     } else if (follow_explicit_sources) {
@@ -247,22 +328,26 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
         }
       }
     }
-    if (!loom_low_rematerialization_inputs_remain_available(
-            module, defining_op, recipe_source_value_id,
-            required_register_values, &has_required_external_input)) {
-      return iree_ok_status();
-    }
     if (recipe_source_value_id == LOOM_VALUE_ID_INVALID) {
       break;
     }
     current_value_id = recipe_source_value_id;
   }
-  *out_recipe = (loom_low_rematerialization_recipe_t){
+  loom_low_rematerialization_recipe_t recipe = {
       .packets = packets,
       .packet_count = packet_count,
-      .has_required_external_input = has_required_external_input,
       .followed_explicit_source = followed_explicit_source,
   };
+  IREE_RETURN_IF_ERROR(
+      loom_low_rematerialization_index_recipe_results(arena, &recipe));
+  if (!loom_low_rematerialization_inputs_remain_available(
+          module, &recipe, required_register_values,
+          &has_required_external_input)) {
+    out_recipe->followed_explicit_source = followed_explicit_source;
+    return iree_ok_status();
+  }
+  recipe.has_required_external_input = has_required_external_input;
+  *out_recipe = recipe;
   return iree_ok_status();
 }
 
@@ -567,12 +652,9 @@ static iree_status_t loom_low_rematerialization_apply_value(
       for (uint16_t operand_index = 0; operand_index < packet->operand_count;
            ++operand_index) {
         const loom_value_id_t operand = operands[operand_index];
-        bool is_recipe_result = false;
-        for (iree_host_size_t i = 0; i < recipe->packet_count; ++i) {
-          is_recipe_result |=
-              operand == loom_op_const_results(recipe->packets[i])[0];
-        }
-        if (!is_recipe_result && operand < state->per_user_values.bit_count) {
+        if (!loom_low_rematerialization_recipe_contains_result(recipe,
+                                                               operand) &&
+            operand < state->per_user_values.bit_count) {
           iree_bitmap_reset(state->per_user_values, operand);
         }
       }

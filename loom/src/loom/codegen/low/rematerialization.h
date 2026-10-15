@@ -9,9 +9,10 @@
 // Target packets explicitly opt their results in to rematerialization; pure
 // structural materializations are also eligible. Allocation and scheduling
 // retain the evidence that selects a candidate. This utility owns cloning the
-// producer ownership chain near each user and retaining private producer
-// placement across schedule rebuilds. Every producer in a tied chain must be
-// eligible. Repeated operands in one user share the same cloned chain.
+// declared producer recipe near each user and retaining private producer
+// placement across schedule rebuilds. Tied ownership predecessors are
+// mandatory; descriptor-declared replay sources enrich a packet's recipe when
+// available. Repeated operands in one user share the same cloned recipe.
 
 #ifndef LOOM_CODEGEN_LOW_REMATERIALIZATION_H_
 #define LOOM_CODEGEN_LOW_REMATERIALIZATION_H_
@@ -69,9 +70,9 @@ typedef struct loom_low_rematerialization_state_t {
 } loom_low_rematerialization_state_t;
 
 // Rematerializes an eligible SSA value once near each distinct user.
-// A tied result recreates its complete rematerializable ownership chain so each
-// clone consumes private storage. Multiple operands of one user share one
-// rematerialized value.
+// A result recreates its complete declared producer recipe so each tied clone
+// consumes private storage and optional replay sources remain adjacent.
+// Multiple operands of one user share one rematerialized value.
 // Consumes verified IR: the definition dominates its existing operand uses.
 // Recipes with consumed external inputs are ineligible, so every remaining
 // input and external type/attribute capture remains available at each clone.

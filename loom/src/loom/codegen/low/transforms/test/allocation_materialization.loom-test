@@ -432,6 +432,94 @@ low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_chain(%bl
 
 // ====
 
+// An operand can refer to a non-immediate ancestor in the replay chain. The
+// recipe result index keeps that operand internal even when its original value
+// is consumed after the recipe definition.
+// RUN: pass low-materialize-allocation{budgets=test.explicit32=2,spill-storage-spaces=none}
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_internal_cross_edge(%seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %root = test.const.explicit32 3
+  %chain0 = test.rematerialize.pair.explicit32 %root, %root
+  %chain1 = test.rematerialize.pair.explicit32 %chain0, %root
+  %moved_root = move %root : reg<test.explicit32> -> reg<test.explicit32>
+  %late = copy %seed : reg<test.i32> -> reg<test.explicit32>
+  %use0 = copy %moved_root : reg<test.explicit32> -> reg<test.i32>
+  %use1 = copy %late : reg<test.explicit32> -> reg<test.i32>
+  %chain_use0 = copy %chain1 : reg<test.explicit32> -> reg<test.i32>
+  %chain_use1 = copy %chain1 : reg<test.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum_chain = test.add.i32 %chain_use0, %chain_use1
+  %result = test.add.i32 %sum01, %sum_chain
+  return %result
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_internal_cross_edge(%seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %root = test.const.explicit32 3
+  %moved_root = move %root : reg<test.explicit32> -> reg<test.explicit32>
+  %late = copy %seed : reg<test.i32> -> reg<test.explicit32>
+  %use0 = copy %moved_root : reg<test.explicit32> -> reg<test.i32>
+  %use1 = copy %late : reg<test.explicit32> -> reg<test.i32>
+  %root_remat$14 = test.const.explicit32 3
+  %chain0_remat$15 = test.rematerialize.pair.explicit32 %root_remat$14, %root_remat$14
+  %chain1_remat$16 = test.rematerialize.pair.explicit32 %chain0_remat$15, %root_remat$14
+  %chain_use0 = copy %chain1_remat$16 : reg<test.explicit32> -> reg<test.i32>
+  %root_remat$17 = test.const.explicit32 3
+  %chain0_remat$18 = test.rematerialize.pair.explicit32 %root_remat$17, %root_remat$17
+  %chain1_remat$19 = test.rematerialize.pair.explicit32 %chain0_remat$18, %root_remat$17
+  %chain_use1 = copy %chain1_remat$19 : reg<test.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum_chain = test.add.i32 %chain_use0, %chain_use1
+  %result = test.add.i32 %sum01, %sum_chain
+  return %result
+}
+
+// ====
+
+// A tied predecessor is mandatory once selected, but an optional replay edge
+// must not make that unavailable ownership chain revoke packet-only replay.
+// RUN: pass low-materialize-allocation{budgets=test.explicit32=2,spill-storage-spaces=none}
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_tied_dead_end_fallback(%block0: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %owned = test.rematerialize.tied.explicit32 %block0
+  %root = test.rematerialize.pair.explicit32 %owned, %owned
+  %late = copy %seed : reg<test.i32> -> reg<test.explicit32>
+  %use0 = copy %owned : reg<test.explicit32> -> reg<test.i32>
+  %use1 = copy %late : reg<test.explicit32> -> reg<test.i32>
+  %root_use0 = copy %root : reg<test.explicit32> -> reg<test.i32>
+  %root_use1 = copy %root : reg<test.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum_root = test.add.i32 %root_use0, %root_use1
+  %result = test.add.i32 %sum01, %sum_root
+  return %result
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_tied_dead_end_fallback(%block0: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %owned = test.rematerialize.tied.explicit32 %block0
+  %late = copy %seed : reg<test.i32> -> reg<test.explicit32>
+  %use0 = copy %owned : reg<test.explicit32> -> reg<test.i32>
+  %use1 = copy %late : reg<test.explicit32> -> reg<test.i32>
+  %root_remat$13 = test.rematerialize.pair.explicit32 %owned, %owned
+  %root_use0 = copy %root_remat$13 : reg<test.explicit32> -> reg<test.i32>
+  %root_remat$14 = test.rematerialize.pair.explicit32 %owned, %owned
+  %root_use1 = copy %root_remat$14 : reg<test.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum_root = test.add.i32 %root_use0, %root_use1
+  %result = test.add.i32 %sum01, %sum_root
+  return %result
+}
+
+// ====
+
 // A richer recipe cannot replay %source after %seed is consumed. Preserve the
 // packet-only fallback and clone only %root at each repaired use.
 // RUN: pass low-materialize-allocation{spill-storage-spaces=none}

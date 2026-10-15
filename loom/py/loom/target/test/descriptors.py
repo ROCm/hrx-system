@@ -629,6 +629,21 @@ TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_REMATERIALIZE_PAIR_EXPLICIT32_DESCRIPTOR = Descriptor(
+    key="test.rematerialize.pair.explicit32",
+    mnemonic="test.rematerialize.pair.explicit32",
+    semantic_tag="test.rematerialize.pair.explicit32",
+    operands=(
+        _explicit32_result(),
+        _explicit32_operand("src"),
+        _explicit32_operand("other"),
+    ),
+    constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
+    asm_forms=_asm(results=("dst",), operands=("src", "other")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_ADD_I32_DESCRIPTOR = Descriptor(
     key="test.add.i32",
     mnemonic="test.add.i32",
@@ -2691,6 +2706,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR,
+        TEST_LOW_REMATERIALIZE_PAIR_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_ADD_LOW4_I32_DESCRIPTOR,
         TEST_LOW_TOTAL_ADD_I32_DESCRIPTOR,
