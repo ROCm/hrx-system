@@ -584,7 +584,9 @@ template.def<@qwen38.dense_q6k_f16_wmma.c64t32.epilogue> device @qwen38_dense_q6
   %c0_offset = index.constant 0 : offset
   %m = index.constant 16 : index
   %n = index.constant 16 : index
-  %output_view = buffer.view %output[%c0_offset] : buffer -> view<[%token_count]x[%output_size]xf32>
+  // Projection outputs come from 256-byte-aligned command allocations.
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%c0_offset] : buffer -> view<[%token_count]x[%output_size]xf32>
   vector.fragment.store<result> %result0, %output_view[%token_origin0, %channel_origin] shape [%m, %n] : vector<4xf32>, view<[%token_count]x[%output_size]xf32>
   vector.fragment.store<result> %result1, %output_view[%token_origin1, %channel_origin] shape [%m, %n] : vector<4xf32>, view<[%token_count]x[%output_size]xf32>
   template.return
