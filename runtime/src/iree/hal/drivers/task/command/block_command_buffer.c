@@ -907,19 +907,35 @@ static iree_status_t iree_hal_block_command_buffer_update_buffer(
       command_buffer->resource_set, 1, &target_ref,
       offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
 
-  iree_hal_cmd_fixup_t* fixups = NULL;
-  iree_hal_cmd_build_token_t token;
   IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
       command_buffer, command_buffer->profile.operations.count + 1));
-  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_update(
-      &command_buffer->builder, source_buffer, source_offset, target_ref.length,
-      &fixups, &token));
-
-  iree_status_t status = iree_hal_block_command_buffer_resolve_refs(
-      command_buffer, 1, &target_ref, fixups);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_cmd_build_rollback(&command_buffer->builder, token);
-  } else {
+  // Public updates may exceed one command's inline payload. Capture disjoint
+  // pieces in the existing immutable block stream; execution and retirement
+  // retain the same binding and block ownership as smaller updates.
+  const iree_device_size_t piece_capacity =
+      IREE_HAL_CMD_MAX_BYTE_LENGTH -
+      offsetof(iree_hal_cmd_update_t, source_data);
+  iree_status_t status = iree_ok_status();
+  for (iree_device_size_t offset = 0;
+       offset < target_ref.length && iree_status_is_ok(status);) {
+    iree_hal_buffer_ref_t piece = target_ref;
+    piece.offset += offset;
+    piece.length = iree_min(piece_capacity, target_ref.length - offset);
+    iree_hal_cmd_fixup_t* fixups = NULL;
+    iree_hal_cmd_build_token_t token;
+    status = iree_hal_cmd_build_update(&command_buffer->builder, source_buffer,
+                                       source_offset + offset, piece.length,
+                                       &fixups, &token);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_block_command_buffer_resolve_refs(command_buffer, 1,
+                                                          &piece, fixups);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_cmd_build_rollback(&command_buffer->builder, token);
+      }
+    }
+    offset += piece.length;
+  }
+  if (iree_status_is_ok(status)) {
     iree_hal_block_command_buffer_profile_append_target(
         command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_UPDATE,
         target_ref);

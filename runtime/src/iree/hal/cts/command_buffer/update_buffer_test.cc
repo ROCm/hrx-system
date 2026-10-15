@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -198,6 +199,49 @@ TEST_P(CommandBufferUpdateBufferTest, Subspan) {
   iree_hal_command_buffer_release(command_buffer);
   iree_hal_buffer_release(buffer_subspan);
   iree_hal_buffer_release(device_buffer);
+}
+
+TEST_P(CommandBufferUpdateBufferTest, CaptureExtentIsExplicitAndBounded) {
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(
+      IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE + 8, &target));
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     binding_capacity(), &recording));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  std::vector<uint8_t> source(IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE + 7);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>((i * 17 + i / 256) ^ 0x5A);
+  }
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_command_buffer_update_buffer(
+          recording, source.data(), 0,
+          MakeTargetRef(target, 0, IREE_HAL_WHOLE_BUFFER), 0));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_command_buffer_update_buffer(
+          recording, source.data(), 0,
+          MakeTargetRef(target, 0, IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE + 1),
+          0));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_command_buffer_update_buffer(
+                            recording, source.data(), IREE_HOST_SIZE_MAX,
+                            MakeTargetRef(target, 0, 4), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      recording, source.data(), 7,
+      MakeTargetRef(target, 4, IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  std::vector<uint8_t> expected(IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE + 8);
+  std::copy(source.begin() + 7, source.end(), expected.begin() + 4);
+  std::fill(source.begin(), source.end(), 0xCC);
+  IREE_ASSERT_OK(SubmitWithBindings(recording, target));
+  std::vector<uint8_t> actual(expected.size());
+  IREE_ASSERT_OK(DownloadBufferData(target, 0, actual.data(), actual.size()));
+  EXPECT_EQ(actual, expected);
+  iree_hal_command_buffer_release(recording);
+  iree_hal_buffer_release(target);
 }
 
 CTS_REGISTER_COMMAND_BUFFER_TEST_SUITE(CommandBufferUpdateBufferTest);

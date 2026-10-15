@@ -677,6 +677,9 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
 // the possibility of a zero-copy path.
 // The |source_buffer| may be released by the caller immediately after this
 // call returns.
+// The target range has an explicit length of at most
+// IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE; WHOLE_BUFFER cannot specify the
+// amount of host data captured during recording.
 // The |target_buffer| must be compatible with the devices owned by this
 // device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(

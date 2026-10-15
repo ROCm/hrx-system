@@ -458,10 +458,11 @@ iree_status_t iree_hal_cmd_block_builder_append_cmd(
         IREE_STATUS_INVALID_ARGUMENT,
         "command size (%" PRIhsz ") must be a multiple of 8", cmd_bytes);
   }
-  if (IREE_UNLIKELY(cmd_bytes > 255 * 8)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "command size (%" PRIhsz ") exceeds maximum (2040 bytes)", cmd_bytes);
+  if (IREE_UNLIKELY(cmd_bytes > IREE_HAL_CMD_MAX_BYTE_LENGTH)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "command size (%" PRIhsz
+                            ") exceeds maximum (%u bytes)",
+                            cmd_bytes, IREE_HAL_CMD_MAX_BYTE_LENGTH);
   }
   if (IREE_UNLIKELY(opcode == IREE_HAL_CMD_BARRIER ||
                     opcode == IREE_HAL_CMD_BRANCH ||

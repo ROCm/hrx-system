@@ -119,6 +119,9 @@ static inline iree_device_size_t iree_hal_cmd_transfer_tile_length(
 // Command header
 //===----------------------------------------------------------------------===//
 
+// The byte-sized qword count bounds each command, including its inline payload.
+enum { IREE_HAL_CMD_MAX_BYTE_LENGTH = UINT8_MAX * 8 };
+
 // Prefix of every command. Commands are 8-byte aligned; the next command is at
 // (uint8_t*)header + header->size_qwords * 8.
 typedef struct iree_hal_cmd_header_t {

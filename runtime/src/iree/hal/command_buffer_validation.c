@@ -439,6 +439,17 @@ iree_status_t iree_hal_command_buffer_update_buffer_validation(
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_categories(
       command_buffer, validation_state, IREE_HAL_COMMAND_CATEGORY_TRANSFER));
 
+  if (target_ref.length == IREE_HAL_WHOLE_BUFFER) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "recorded updates require an explicit byte count");
+  }
+  if (target_ref.length > IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE ||
+      source_offset > IREE_HOST_SIZE_MAX - target_ref.length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "recorded update exceeds the capture or host range "
+                            "limit");
+  }
+
   const iree_hal_buffer_binding_requirements_t target_reqs = {
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
       .access = IREE_HAL_MEMORY_ACCESS_WRITE,
