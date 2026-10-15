@@ -13,7 +13,7 @@ func.decl @flash_next_q51_partial(%width: index, %token: index, %row: index, %la
 
 func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
 
-kernel.decl @flash_next_linear_q8(%output_capacity: index) launch(%input_width: index, %output_width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @flash_next.project_dense_q8(%inputs: index, %outputs: index, %blocks: index, %span: buffer, %input: buffer, %weight: view<[%outputs]x[%blocks]x34xi8>, %output: buffer)
 
 kernel.decl @expert_bucket_routes() launch(%epoch: buffer, %ids: buffer, %ranks: buffer, %tasks: buffer)
 
@@ -367,7 +367,10 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %hidden_width = index.constant 640 : index
   %output_width = index.constant 2560 : index
   kernel.launch @shared_gate_up(%span, %input, %shared_gate_weight, %shared_up_weight, %shared_hidden) : (buffer, buffer, view<640x80x34xi8>, view<640x80x34xi8>, buffer)
-  kernel.launch @flash_next_linear_q8[%output_width](%hidden_width, %output_width, %span, %shared_hidden, %shared_down_weight, %shared) : [index](index, index, buffer, buffer, view<2560x20x34xi8>, buffer)
+  %shared_down_weight_block_size = index.constant 32 : index
+  %shared_down_weight_blocks = index.div %hidden_width, %shared_down_weight_block_size : index
+  %shared_down_weight_shaped = view.refine %shared_down_weight : view<2560x20x34xi8> -> view<[%output_width]x[%shared_down_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%hidden_width, %output_width, %shared_down_weight_blocks, %span, %shared_hidden, %shared_down_weight_shaped, %shared) : (index, index, index, buffer, buffer, view<[%output_width]x[%shared_down_weight_blocks]x34xi8>, buffer)
   kernel.launch @experts_combine(%span, %down, %weights, %shared, %shared_gate, %output) : (buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
