@@ -14,6 +14,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 from experimental.loom_serve.models.qwen import benchmark_cohort as benchmark
@@ -99,6 +100,18 @@ def endpoint(fault=None):
 
 
 class BenchmarkCohortTest(unittest.TestCase):
+    def test_subtick_completion_retains_verified_work_without_a_rate(self):
+        with (
+            endpoint() as (address, _),
+            patch("time.perf_counter_ns", return_value=123_456),
+        ):
+            result = benchmark.cohort(address, "loom", "reviewer", "subtick", 1, 0)
+        self.assertEqual(result["failures"], [])
+        self.assertEqual(result["verified_requests"], 2)
+        self.assertEqual(result["elapsed_ms"], 0)
+        self.assertIsNone(result["output_tokens_per_second"])
+        self.assertGreater(result["output_tokens"], 0)
+
     def test_complete_protocol_on_each_tokenizer_adapter(self):
         for engine in ("loom", "llama", "vllm"):
             with self.subTest(engine=engine), endpoint() as (address, requests):
