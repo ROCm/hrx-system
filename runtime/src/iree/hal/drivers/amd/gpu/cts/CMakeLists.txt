@@ -10,6 +10,40 @@
 iree_add_all_subdirs()
 
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
+    backends
+  SRCS
+    "backends.cc"
+  DEPS
+    iree::hal
+    iree::hal::cts::util::registry
+    iree::hal::drivers::amd::driver
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    file_test
+  DEPS
+    ::backends
+    iree::hal::cts::file::all_tests
+    iree::hal::cts::util::test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_binary_benchmark(
   NAME
     queue_benchmark

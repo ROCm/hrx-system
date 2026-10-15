@@ -412,31 +412,33 @@ loom_cc_test(
     ],
 )
 
-loom_cc_test(
-    name = "source_text_service_test",
-    data = EMBEDDING_SOURCES + PROJECTOR_SOURCES + TEXT_SOURCES,
-    env = {
-        "LOOM_SERVE_TEST_MEDIA_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
-        "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
-        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
-    },
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _ROCR_TEST_TAGS,
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:amdgpu_hal",
-        "//runtime/config/hal:driver_amdgpu",
-    ]) + select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-    deps = [
-        ":test_compiler",
-        ":test_device",
-        "//loom/src/loom/serve/service/text:elastic_storage_tests",
-        "//loom/src/loom/serve/service/text:source_execution_tests",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
+[
+    loom_cc_test(
+        name = prefix + "source_text_service_test",
+        data = EMBEDDING_SOURCES + PROJECTOR_SOURCES + TEXT_SOURCES,
+        env = {
+            "LOOM_SERVE_TEST_MEDIA_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
+            "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
+            "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        },
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+        tags = runtime_tags,
+        target_compatible_with = loom_config_compatible_with([
+            "//loom/config/target/arch:vm",
+            "//loom/config/execute:amdgpu_hal",
+        ] + runtime_requirements) + select({
+            "@platforms//os:linux": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        deps = [
+            ":test_compiler",
+            device,
+            "//loom/src/loom/serve/service/text:source_execution_tests",
+            "//runtime/src/iree/testing:gtest_main",
+        ] + (["//loom/src/loom/serve/service/text:elastic_storage_tests"] if not prefix else []),
+    )
+    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+]
 
 loom_cc_test(
     name = "source_image_service_test",

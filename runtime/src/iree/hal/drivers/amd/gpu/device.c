@@ -76,8 +76,13 @@ typedef struct iree_hal_amd_gpu_device_t {
     amdf_memory_device_access_t access;
     // Qualified coherent system backing for native control and placed images.
     iree_hal_amd_fabric_memory_options_t control;
-    // Address domain qualified by the control profile's GPU access.
-    uint32_t address_domain_ordinal;
+    // Device access facts qualified by the control profile.
+    struct {
+      // Native permissions that cannot be withheld from GPU allocations.
+      amdf_memory_access_t minimum_access;
+      // Ordinary GPU address domain shared by backing profiles.
+      uint32_t address_domain_ordinal;
+    } capabilities;
   } memory;
   // Group assignment; each queue retains the tracker through final retirement.
   iree_hal_device_topology_info_t topology;
@@ -235,7 +240,8 @@ static iree_status_t iree_hal_amd_gpu_device_prepare_control(
           .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
           .host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
       };
-      device->memory.address_domain_ordinal =
+      device->memory.capabilities.minimum_access = access.guaranteed_access;
+      device->memory.capabilities.address_domain_ordinal =
           access.device_address.address_domain_ordinal;
       found = true;
     }
@@ -267,6 +273,7 @@ static void iree_hal_amd_gpu_device_initialize_memory(
       .queue_family_ordinal = native_family_ordinal,
       .supported_usage =
           IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .minimum_access = device->memory.capabilities.minimum_access,
       .binding_count = IREE_ARRAYSIZE(bindings),
       .bindings = bindings,
   };
@@ -276,18 +283,21 @@ static void iree_hal_amd_gpu_device_initialize_memory(
         .scope = context->memory_scopes[i],
         .physical_device_affinity = 1,
         .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        .minimum_access = device->memory.capabilities.minimum_access,
     };
   }
   device->memory.storage[context->memory_scope_count] =
       (iree_hal_amd_fabric_memory_storage_t){
           .scope = context->fabric->system_scope,
           .memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+          .minimum_access = device->memory.capabilities.minimum_access,
       };
   const iree_hal_amd_fabric_memory_backend_options_t options = {
       .api = context->api,
       .instance = context->fabric->instance,
       .device = context->device,
-      .address_domain_ordinal = device->memory.address_domain_ordinal,
+      .address_domain_ordinal =
+          device->memory.capabilities.address_domain_ordinal,
       .storage_count = context->memory_scope_count + 1,
       .storage = device->memory.storage,
       .event_sink = context->event_sink,

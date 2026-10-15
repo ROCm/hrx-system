@@ -86,6 +86,25 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "file_transfer",
+    srcs = ["file_transfer.c"],
+    hdrs = ["file_transfer.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":barrier",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/fabric:file_transfer",
+        "//runtime/src/iree/hal/drivers/amd/gpu:context",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:host_wait",
+        "//runtime/src/iree/hal/memory:maintenance",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "dispatch",
     srcs = ["dispatch.c"],
     hdrs = ["dispatch.h"],

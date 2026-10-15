@@ -96,6 +96,29 @@ iree_cc_library(
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    file_transfer
+  HDRS
+    "file_transfer.h"
+  SRCS
+    "file_transfer.c"
+  DEPS
+    ::barrier
+    iree::async
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::fabric::file_transfer
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::host_wait
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     dispatch
   HDRS
     "dispatch.h"

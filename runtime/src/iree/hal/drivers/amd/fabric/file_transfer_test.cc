@@ -22,7 +22,7 @@ namespace {
 
 // Controls the platform I/O dependency so short writes and resubmission errors
 // are deterministic. The transfer implementation and native buffer view are
-// production code; actual platform files are exercised by the XDNA native CTS.
+// production code; actual platform files are exercised by the native HAL CTS.
 struct FileProvider {
   struct Request {
     // File-relative byte position submitted to the platform.
@@ -347,6 +347,42 @@ TEST_P(FileTransferTest, ZeroProgressFailsTheExactRange) {
   EXPECT_EQ(completion_code_, IREE_STATUS_OUT_OF_RANGE);
   EXPECT_EQ(transfer_.async.bytes_transferred, 7u);
   EXPECT_EQ(provider_.pending, nullptr);
+}
+
+TEST_P(FileTransferTest, EngineStagingDoesNotRequireOrTouchAHostBufferView) {
+  ASSERT_NO_FATAL_FAILURE(Initialize());
+  const auto original_buffer = storage_.contents;
+  std::array<uint8_t, 16> staging = {};
+  std::array<uint8_t, kLength> gathered = {};
+  for (size_t offset = 0; offset < kLength; offset += staging.size()) {
+    if (file_access() == IREE_HAL_MEMORY_ACCESS_WRITE) {
+      memcpy(staging.data(), original_buffer.data() + kNativeOffset + offset,
+             staging.size());
+    }
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_chunk(
+        &transfer_, iree_make_byte_span(staging.data(), staging.size())));
+    EXPECT_EQ(transfer_.async.chunk.offset, offset);
+    EXPECT_EQ(transfer_.async.chunk.contents.data, staging.data());
+    IREE_ASSERT_OK(Submit());
+    provider_.Complete(7);
+    provider_.Complete(9);
+    EXPECT_EQ(completion_count_, offset / staging.size() + 1);
+    EXPECT_EQ(completion_code_, IREE_STATUS_OK);
+    EXPECT_EQ(transfer_.async.bytes_transferred, offset + staging.size());
+    if (file_access() == IREE_HAL_MEMORY_ACCESS_READ) {
+      memcpy(gathered.data() + offset, staging.data(), staging.size());
+    }
+  }
+  EXPECT_EQ(transfer_.buffer_contents.data, nullptr);
+  EXPECT_EQ(transfer_.async.staging.data, nullptr);
+  EXPECT_TRUE(storage_.cache_operations.empty());
+  EXPECT_EQ(storage_.contents, original_buffer);
+  EXPECT_EQ(provider_.contents, expected_file_);
+  if (file_access() == IREE_HAL_MEMORY_ACCESS_READ) {
+    EXPECT_EQ(memcmp(gathered.data(), provider_.contents.data() + kFileOffset,
+                     kLength),
+              0);
+  }
 }
 
 TEST_P(FileTransferTest, AlignedPartialCompletionContinues) {

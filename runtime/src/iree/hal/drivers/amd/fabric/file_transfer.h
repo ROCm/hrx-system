@@ -15,7 +15,8 @@ extern "C" {
 #endif
 
 // Consumes terminal I/O status on the imported file's proactor. Successful
-// reads still require finish on the engine's host service before publication.
+// reads still require the engine's host publication or native copy before
+// their bytes become visible to buffer consumers.
 typedef struct iree_hal_amd_fabric_file_transfer_callback_t {
   // Called exactly once after an accepted chunk retires, including on failure.
   void (*fn)(void* user_data, iree_status_t status);
@@ -23,12 +24,11 @@ typedef struct iree_hal_amd_fabric_file_transfer_callback_t {
   void* user_data;
 } iree_hal_amd_fabric_file_transfer_callback_t;
 
-// Placed state for a file transfer through a prepared host execution binding.
-// The engine owns dependency resolution, host execution, and final signaling.
-// DIRECT files use bounded ordinary host staging because a device mapping need
-// not support native I/O page pinning. Allocation and payload copies run on the
-// engine's host service; native completion only advances I/O. Initialization
-// and deinitialization bracket accepted I/O and the engine's final cache work.
+// Placed state for a file transfer through a host execution binding or an
+// engine's native buffer copy. The engine owns dependency resolution, staging,
+// cache boundaries, and final signaling. Native completion only advances I/O.
+// Initialization and deinitialization bracket accepted I/O and the engine's
+// final cache work.
 typedef struct iree_hal_amd_fabric_file_transfer_t {
   // Allocator for ordinary host staging, independent of device memory pools.
   iree_allocator_t host_allocator;
@@ -52,17 +52,17 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
   struct {
     // Native handle retained through |file|; its proactor remains borrowed.
     iree_async_file_t* file;
-    // Owned ordinary host storage reused by DIRECT file chunks, or empty.
+    // Owned ordinary host staging reused by file chunks, or empty.
     iree_byte_span_t staging;
     // Current chunk, borrowed from staging or the buffer's host execution view.
     struct {
       // Transfer-relative position of the chunk's first byte.
-      iree_host_size_t offset;
+      uint64_t offset;
       // Complete chunk extent, including any successfully completed prefix.
       iree_byte_span_t contents;
     } chunk;
     // Byte count completed across all native requests.
-    iree_host_size_t bytes_transferred;
+    uint64_t bytes_transferred;
     // Terminal callback returning ownership to the engine.
     iree_hal_amd_fabric_file_transfer_callback_t callback;
     union {
@@ -98,6 +98,16 @@ void iree_hal_amd_fabric_file_transfer_deinitialize(
 // on first preparation and reused until the transfer completes.
 iree_status_t iree_hal_amd_fabric_file_transfer_prepare(
     iree_hal_amd_fabric_file_transfer_t* transfer);
+
+// Prepares the next platform-file chunk in an engine-owned ordinary host span.
+// The file must have an async handle. Geometry can reduce the supplied extent;
+// async.chunk records the exact admitted span and transfer-relative offset.
+// No buffer mapping, host cache maintenance, allocation, or copy occurs here.
+// GPU engines use this for staging, then order the native buffer copy
+// themselves. Contents remain borrowed until the accepted I/O and engine copy
+// both retire.
+iree_status_t iree_hal_amd_fabric_file_transfer_prepare_chunk(
+    iree_hal_amd_fabric_file_transfer_t* transfer, iree_byte_span_t contents);
 
 // Submits the prepared chunk, continuing partial requests until the exact
 // chunk completes or an error occurs. Failure retains caller ownership and does

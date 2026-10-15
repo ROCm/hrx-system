@@ -53,7 +53,8 @@ void iree_hal_amd_fabric_file_transfer_deinitialize(
 
 iree_status_t iree_hal_amd_fabric_file_transfer_finish(
     iree_hal_amd_fabric_file_transfer_t* transfer) {
-  const iree_host_size_t offset = transfer->async.chunk.offset;
+  const iree_host_size_t offset =
+      (iree_host_size_t)transfer->async.chunk.offset;
   const iree_host_size_t length =
       transfer->async.file ? transfer->async.chunk.contents.data_length
                            : transfer->buffer_contents.data_length;
@@ -123,25 +124,25 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare(
         transfer->async.staging.data_length = capacity;
       }
     }
-    const iree_host_size_t offset = transfer->async.bytes_transferred;
+    const iree_host_size_t offset =
+        (iree_host_size_t)transfer->async.bytes_transferred;
     uint8_t* data = transfer->async.staging.data
                         ? transfer->async.staging.data
                         : transfer->buffer_contents.data + offset;
-    const iree_host_size_t capacity = transfer->async.staging.data
-                                          ? transfer->async.staging.data_length
-                                          : UINT32_C(1) << 30;
-    iree_host_size_t length = 0;
+    const iree_host_size_t capacity =
+        transfer->async.staging.data
+            ? transfer->async.staging.data_length
+            : iree_min(transfer->buffer_contents.data_length - offset,
+                       UINT32_C(1) << 30);
     if (iree_status_is_ok(status)) {
-      status = iree_hal_file_prepare_transfer(
-          requirements, transfer->file_offset + offset, data,
-          transfer->buffer_contents.data_length - offset, capacity, &length);
+      status = iree_hal_amd_fabric_file_transfer_prepare_chunk(
+          transfer, iree_make_byte_span(data, capacity));
     }
     if (iree_status_is_ok(status)) {
-      transfer->async.chunk.offset = offset;
-      transfer->async.chunk.contents = iree_make_byte_span(data, length);
       if (transfer->async.staging.data &&
           transfer->file_access == IREE_HAL_MEMORY_ACCESS_WRITE) {
-        memcpy(data, transfer->buffer_contents.data + offset, length);
+        memcpy(data, transfer->buffer_contents.data + offset,
+               transfer->async.chunk.contents.data_length);
       }
     }
   }
@@ -149,11 +150,29 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare(
   return status;
 }
 
+iree_status_t iree_hal_amd_fabric_file_transfer_prepare_chunk(
+    iree_hal_amd_fabric_file_transfer_t* transfer, iree_byte_span_t contents) {
+  const iree_async_file_requirements_t* requirements =
+      iree_hal_file_requirements(transfer->file);
+  const uint64_t offset = transfer->async.bytes_transferred;
+  iree_host_size_t length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_file_prepare_transfer(
+      transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
+          ? &requirements->read
+          : &requirements->write,
+      transfer->file_offset + offset, contents.data, transfer->length - offset,
+      contents.data_length, &length));
+  transfer->async.chunk.offset = offset;
+  transfer->async.chunk.contents = iree_make_byte_span(contents.data, length);
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amd_fabric_file_transfer_issue(
     iree_hal_amd_fabric_file_transfer_t* transfer,
     iree_async_completion_fn_t completion) {
-  const iree_host_size_t offset = transfer->async.bytes_transferred;
-  const iree_host_size_t chunk_offset = offset - transfer->async.chunk.offset;
+  const uint64_t offset = transfer->async.bytes_transferred;
+  const iree_host_size_t chunk_offset =
+      (iree_host_size_t)(offset - transfer->async.chunk.offset);
   const iree_async_span_t span = iree_async_span_from_ptr(
       transfer->async.chunk.contents.data + chunk_offset,
       transfer->async.chunk.contents.data_length - chunk_offset);
@@ -198,17 +217,16 @@ static void iree_hal_amd_fabric_file_transfer_complete(
     if (byte_count == 0) {
       status = iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "file %s stopped after %" PRIhsz " of %" PRIhsz " bytes",
+          "file %s stopped after %" PRIu64 " of %" PRIu64 " bytes",
           transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ ? "read"
                                                                : "write",
-          transfer->async.bytes_transferred,
-          transfer->buffer_contents.data_length);
+          transfer->async.bytes_transferred, (uint64_t)transfer->length);
     } else if (transfer->async.bytes_transferred <
                transfer->async.chunk.offset +
                    transfer->async.chunk.contents.data_length) {
-      const iree_host_size_t offset = transfer->async.bytes_transferred;
+      const uint64_t offset = transfer->async.bytes_transferred;
       const iree_host_size_t chunk_offset =
-          offset - transfer->async.chunk.offset;
+          (iree_host_size_t)(offset - transfer->async.chunk.offset);
       const iree_host_size_t remaining =
           transfer->async.chunk.contents.data_length - chunk_offset;
       const iree_async_file_requirements_t* requirements =
