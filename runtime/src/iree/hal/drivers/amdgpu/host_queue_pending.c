@@ -1017,14 +1017,15 @@ static void iree_hal_amdgpu_pending_op_issue(iree_hal_amdgpu_pending_op_t* op) {
     return;
   }
 
-  iree_hal_amdgpu_pending_op_release_alloca_memory_wait(op);
   if (!iree_status_is_ok(status)) {
-    iree_hal_amdgpu_pending_op_fail_host_action(op, status);
-    iree_hal_semaphore_list_fail(op->signal_semaphore_list, status);
-    iree_hal_amdgpu_pending_op_abort_unsubmitted_dealloca(op);
-    iree_hal_amdgpu_pending_op_release_execute_binding_resource_set(op);
-    iree_hal_amdgpu_pending_op_release_retained(op);
+    // Failing a semaphore may synchronously complete a dependent operation
+    // on this queue. Its terminal path acquires submission_mutex to unlink.
+    // Completion ownership keeps this op alive until fail retires it.
+    iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+    iree_hal_amdgpu_pending_op_fail(op, status);
+    return;
   }
+  iree_hal_amdgpu_pending_op_release_alloca_memory_wait(op);
 
   // Clean up the pending op. Wait semaphore list is released (the clone holds
   // separate retains). Remaining retained_resources entries are either

@@ -583,6 +583,62 @@ TEST_F(HostQueuePendingTest, CancelPendingFillFailsSignalSemaphore) {
       iree_hal_semaphore_signal(wait_semaphore, wait_value, /*frontier=*/NULL));
 }
 
+TEST_F(HostQueuePendingTest, DeferredIssueFailureReachesDependentOperation) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
+
+  Ref<iree_hal_buffer_t> target_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+      test_device.allocator(), sizeof(uint32_t), target_buffer.out()));
+
+  // Neither operation can issue before the host releases the first semaphore.
+  // Failing the first operation must synchronously fail the dependent one,
+  // including its pending-list removal on this same queue.
+  Ref<iree_hal_semaphore_t> semaphores[3];
+  for (auto& semaphore : semaphores) {
+    IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), semaphore.out()));
+  }
+  uint64_t value = 1;
+  for (int i = 0; i < 2; ++i) {
+    iree_hal_semaphore_t* wait_semaphore = semaphores[i].get();
+    iree_hal_semaphore_t* signal_semaphore = semaphores[i + 1].get();
+    const uint32_t pattern = 0xCACE1100u;
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        test_device.queue(), MakeSemaphoreList(&wait_semaphore, &value),
+        MakeSemaphoreList(&signal_semaphore, &value), target_buffer,
+        /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
+        /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
+  }
+  ASSERT_TRUE(HostQueueHasPendingOps(queue));
+
+  // Closing admission before the wait resolves makes deferred issue fail.
+  // This uses the normal shutdown contract without cancelling the pending
+  // list first, so the issue path owns failure propagation and retirement.
+  iree_hal_amdgpu_host_queue_begin_deinitialize(queue);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[0], value,
+                                           /*frontier=*/NULL));
+  EXPECT_FALSE(HostQueueHasPendingOps(queue));
+  for (int i = 1; i < 3; ++i) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_CANCELLED,
+        iree_hal_semaphore_wait(semaphores[i], value, iree_infinite_timeout(),
+                                IREE_ASYNC_WAIT_FLAG_NONE));
+    uint64_t observed_value = 0;
+    iree_status_t status =
+        iree_hal_semaphore_query(semaphores[i], &observed_value);
+    EXPECT_TRUE(iree_string_view_equal(iree_status_message(status),
+                                       IREE_SV("queue shutting down")));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
+  }
+}
+
 TEST_F(HostQueuePendingTest, CapacityParkedHostActionRetriesAfterPostDrain) {
   static constexpr uint32_t kAqlCapacity = 64;
   static constexpr uint32_t kNotificationCapacity = 1;
