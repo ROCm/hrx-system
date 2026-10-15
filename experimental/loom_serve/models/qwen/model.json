@@ -5,6 +5,7 @@
     "prepare": "prepare.loom",
     "control": "control.loom",
     "sources": [
+      "epoch_control.loom",
       "config.loom",
       "prefill.loom",
       "weights_prepare.loom",
