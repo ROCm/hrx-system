@@ -20,6 +20,8 @@
       "kernels/projection.loom",
       "kernels/projection_qkv.loom",
       "kernels/q8.loom",
+      "kernels/q8_matrix.loom",
+      "kernels/q8_projection.loom",
       "kernels/qsa_attention.loom",
       "kernels/qsa_indexer.loom",
       "kernels/qsa_rotary.loom",
