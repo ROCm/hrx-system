@@ -98,8 +98,13 @@ not copy a complete recurrent endpoint for each candidate. Predictor carry adds
 21,248 bytes per retained owner, and predictor cache adds 2,112 bytes per pooled
 token, plus a 768-byte working tail per execution row.
 
-The deployment uses `continuation_epochs: 1`. MTP shares the hybrid scheduler's
-mixed prompt and generated spans, checkpoint forks, EOS, and cancellation.
+The deployment defaults to `continuation_epochs: 1`. Set it to `2` to pre-issue
+a second packed epoch without an intermediate host round trip. Device
+acceptance advances positions, filters EOS and exhausted output credit, and
+compacts surviving spans before the second traversal. A final single output
+uses ordinary decode, so continuation fits the same request reservation as
+host-scheduled work. MTP shares the hybrid scheduler's mixed prompt and
+generated spans, checkpoint forks, EOS, and cancellation.
 
 The default remains `draft_depth: 0`: the gain depends on accepted proposals
 repaying proposal, verification, and catch-up work. Compare the same prompts,
