@@ -790,12 +790,25 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("--config=local-tests", command)
 
     def test_clang_tidy_bazel_command_obeys_configured_jobs(self):
-        with mock.patch.dict(os.environ, {"IREE_CLANG_TIDY_JOBS": "7"}):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "IREE_CLANG_TIDY_JOBS": "7",
+                presubmit.project_presubmit.BAZEL_CONFIGS_ENV: json.dumps(
+                    ["remote-execution", "local-tests"]
+                ),
+            },
+            clear=True,
+        ):
             command = presubmit.clang_tidy_bazel_command(
                 ["//runtime/src/iree/base:all"]
             )
 
-        self.assertEqual(command[2:4], ["--jobs", "7"])
+        jobs_index = command.index("--jobs")
+        self.assertEqual(command[jobs_index + 1], "7")
+        self.assertGreater(jobs_index, command.index("--config=remote-execution"))
+        self.assertGreater(jobs_index, command.index("--config=local-tests"))
+        self.assertLess(jobs_index, command.index("--"))
 
     def test_clang_tidy_bazel_command_inherits_execution_concurrency(self):
         for cpu_count in (None, 1, 32, 192):

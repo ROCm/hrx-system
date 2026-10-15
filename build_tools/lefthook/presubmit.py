@@ -1847,9 +1847,6 @@ def clang_tidy_bazel_command(
     ]
     if keep_going:
         command.append("--keep_going")
-    configured_jobs = configured_clang_tidy_jobs()
-    if configured_jobs is not None:
-        command += ["--jobs", str(configured_jobs)]
     output_groups = [
         CLANG_TIDY_LOCAL_OUTPUT_GROUP if local_outputs else CLANG_TIDY_OUTPUT_GROUP
     ]
@@ -1873,6 +1870,9 @@ def clang_tidy_bazel_command(
             f"--build_event_json_file={build_events_path}",
             "--ui_event_filters=-info",
         ]
+    configured_jobs = configured_clang_tidy_jobs()
+    if configured_jobs is not None:
+        command += ["--jobs", str(configured_jobs)]
     command += [
         "--",
         *targets,
