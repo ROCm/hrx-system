@@ -1,0 +1,26 @@
+{
+  "name": "moonshine-streaming-tiny",
+  "definition": {
+    "kind": "recognition",
+    "prepare": "prepare.loom",
+    "control": "control.loom",
+    "sources": [
+      "convolution.loom",
+      "decoder.loom",
+      "decoder_attention.loom",
+      "decoder_state.loom",
+      "encoder.loom",
+      "encoder_attention.loom",
+      "encoder_state.loom",
+      "frontend.loom",
+      "initialize.loom",
+      "normalization.loom",
+      "pointwise.loom",
+      "projection.loom",
+      "reset.loom"
+    ],
+    "assets": ".",
+    "pending_requests": 4,
+    "options": {}
+  }
+}
