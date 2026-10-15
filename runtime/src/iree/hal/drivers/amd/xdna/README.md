@@ -7,11 +7,11 @@ admits `.xdna` ELFs and applies their declared storage and binding contracts.
 
 ## Running a Loom scenario
 
-Enable the XDNA HAL driver. This selects libamdf automatically; the default
+Enable the shared AMD HAL driver. This selects libamdf automatically; the default
 Loom product already includes XDNA emission and the VM reference target:
 
 ```sh
-python dev.py bazel configure -DIREE_HAL_DRIVER_XDNA=ON
+python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=ON
 python dev.py bazel run //loom/src/loom/tools/iree-test-loom -- \
   loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom --device=xdna
 ```
@@ -302,7 +302,7 @@ Native correctness suites declare an XDNA hardware requirement:
 
 ```sh
 iree-bazel-test --config=asan \
-  --//runtime/config/hal:drivers=task,xdna \
+  --//runtime/config/hal:drivers=task,amd \
   //runtime/src/iree/hal/drivers/amd/xdna/cts:native_test \
   //runtime/src/iree/hal/drivers/amd/fabric/cts/xdna:virtual_buffer_test \
   //loom/src/loom/tooling/target/amd/xdna:hal_execution_test
@@ -367,7 +367,7 @@ measured cases; execution, collection, and protocol failures remain errors.
 
 ```sh
 iree-bazel-build --config=opt \
-  --//runtime/config/hal:drivers=task,xdna \
+  --//runtime/config/hal:drivers=task,amd \
   //runtime/src/iree/hal/drivers/amd/xdna/cts:queue_benchmark
 bazel-bin/runtime/src/iree/hal/drivers/amd/xdna/cts/queue_benchmark \
   --benchmark_min_time=200x --benchmark_repetitions=7 \
@@ -409,6 +409,6 @@ profiling cases without collecting performance evidence:
 
 ```sh
 iree-bazel-test --config=asan \
-  --//runtime/config/hal:drivers=task,xdna \
+  --//runtime/config/hal:drivers=task,amd \
   //runtime/src/iree/hal/drivers/amd/xdna/cts:queue_benchmark_test
 ```

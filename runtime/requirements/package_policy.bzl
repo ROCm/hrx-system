@@ -29,10 +29,10 @@ load(
 load(
     "//runtime/requirements:defs.bzl",
     "AMDGPU_RESOURCE",
+    "HAL_AMD",
     "HAL_AMDGPU",
     "HAL_VULKAN",
     "HAL_WEBGPU",
-    "HAL_XDNA",
     "WEBGPU_DEVICE_RESOURCE",
 )
 
@@ -57,7 +57,7 @@ PACKAGE_POLICIES = [
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/amd/registration"],
-        build_requirements = [HAL_XDNA, LIBAMDF, LIBAMDF_XDNA],
+        build_requirements = [HAL_AMD, LIBAMDF],
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/amd/xdna/cts"],

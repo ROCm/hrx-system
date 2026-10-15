@@ -47,11 +47,11 @@ HAL_WEBGPU = build_requirement(
     cmake_condition = "IREE_HAL_DRIVER_WEBGPU",
 )
 
-HAL_XDNA = build_requirement(
-    id = "runtime.hal.xdna",
-    label = Label("//runtime/requirements:hal_xdna"),
-    enabled_by = Label("//runtime/config/hal:driver_xdna"),
-    cmake_condition = "IREE_HAL_DRIVER_XDNA",
+HAL_AMD = build_requirement(
+    id = "runtime.hal.amd",
+    label = Label("//runtime/requirements:hal_amd"),
+    enabled_by = Label("//runtime/config/hal:driver_amd"),
+    cmake_condition = "IREE_HAL_DRIVER_AMD",
 )
 
 AMDGPU_RESOURCE = run_requirement(
@@ -74,7 +74,7 @@ REQUIREMENTS = [
     HAL_TASK,
     HAL_VULKAN,
     HAL_WEBGPU,
-    HAL_XDNA,
+    HAL_AMD,
     AMDGPU_RESOURCE,
     WEBGPU_DEVICE_RESOURCE,
 ]

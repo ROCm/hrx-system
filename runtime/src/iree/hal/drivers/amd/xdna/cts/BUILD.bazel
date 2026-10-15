@@ -39,7 +39,7 @@ iree_runtime_cc_test(
         "//runtime/config/hal:driver_task": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }) + select({
-        "//runtime/config/hal:driver_xdna": [],
+        "//runtime/config/hal:driver_amd": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [

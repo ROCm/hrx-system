@@ -188,7 +188,7 @@ XDNA_CTEST_PACKAGE_REGEX = (
 AMD_CLIENT_BAZEL_OPTIONS = (
     "--//libamdf/config:enabled=true",
     "--//libamdf/config:families=rdna,xdna",
-    "--//runtime/config/hal:drivers=task,xdna",
+    "--//runtime/config/hal:drivers=task,amd",
     "--//loom/config/target:enable=amdgpu,vm,xdna,x86",
     "--//loom/config/execute:enable=iree_hal",
     "--//loom/config/import:enable=",
@@ -203,7 +203,7 @@ AMD_CLIENT_BAZEL_TARGETS = (
 AMD_CLIENT_WINDOWS_BAZEL_OPTIONS = AMD_CLIENT_BAZEL_OPTIONS + (
     "--//build_tools/vulkan/config:enabled=true",
     "--//build_tools/d3d12/config:enabled=true",
-    "--//runtime/config/hal:drivers=task,vulkan,xdna",
+    "--//runtime/config/hal:drivers=task,vulkan,amd",
     "--//loom/config/target:enable=amdgpu,spirv,vm,xdna,x86",
 )
 AMD_CLIENT_WINDOWS_BAZEL_TARGETS = AMD_CLIENT_BAZEL_TARGETS + (

@@ -35,13 +35,13 @@ BAZEL_HAL_DRIVER_DEFINES = (
     ("task", "IREE_HAL_DRIVER_TASK"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
-    ("xdna", "IREE_HAL_DRIVER_XDNA"),
+    ("amd", "IREE_HAL_DRIVER_AMD"),
 )
 CMAKE_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
-    ("xdna", "IREE_HAL_DRIVER_XDNA"),
+    ("amd", "IREE_HAL_DRIVER_AMD"),
 )
 CMAKE_LOOM_TARGET_DEFINES = (
     ("amdgpu", "LOOM_TARGET_AMDGPU"),
@@ -58,11 +58,11 @@ CMAKE_LOOM_IMPORTER_DEFINES = (
 )
 CI_SUPPORTED_HAL_DRIVERS = frozenset(driver for driver, _ in BAZEL_HAL_DRIVER_DEFINES)
 REPOSITORY_BUILD_HAL_DRIVERS = (
+    "amd",
     "amdgpu",
     "task",
     "vulkan",
     "webgpu",
-    "xdna",
 )
 REPOSITORY_BUILD_LOOM_TARGETS = (
     "amdgpu",
@@ -718,7 +718,7 @@ def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
     # Native ELF consumers and the HAL share the XDNA provider.
     options = (
         "--//libamdf/config:families=xdna",
-        "--//runtime/config/hal:drivers=task,xdna",
+        "--//runtime/config/hal:drivers=task,amd",
         "--//loom/config/execute:enable=iree_hal",
     )
     return [
@@ -1076,7 +1076,7 @@ def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     steps = [
         cmake_configure_step(
             command_name,
-            enabled_drivers=("xdna",),
+            enabled_drivers=("amd",),
             enabled_loom_targets=("vm", "xdna"),
             sanitizer=sanitizer,
             extra_options=(

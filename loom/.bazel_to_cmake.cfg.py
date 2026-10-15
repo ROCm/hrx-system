@@ -101,7 +101,7 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/execute:iree_hal_vulkan": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN",
     "//loom/config/execute:spirv_vulkan_hal": "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN",
     "//loom/config/execute:task_hal": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK",
-    "//loom/config/execute:xdna_hal": "LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA",
+    "//loom/config/execute:xdna_hal": "LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD",
     "//loom/config/import/cxx:embed_includes_enabled": "LOOM_IMPORT_CXX_EMBED_INCLUDES",
     "//loom/config/import:cxx": "LOOM_IMPORT_CXX",
     "//loom/config/import:mlir": "LOOM_IMPORT_MLIR",
