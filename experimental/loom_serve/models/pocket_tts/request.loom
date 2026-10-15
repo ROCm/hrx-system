@@ -39,14 +39,6 @@ template.decl @pocket.decode.step(%phase: buffer, %backbone: buffer, %rotary: bu
 // Initial chunk -1 becomes zero on the first conditioning restoration.
 template.decl pure @pocket.packet_stride(%tokens: index) -> (offset)
 
-template.def<@pocket.packet_stride> pure @pocket_packet_stride(%tokens: index) -> (offset) {
-  %word = index.constant 4 : offset
-  %header = index.constant 16 : offset
-  %ids = index.scale %tokens, %word : index, offset -> offset
-  %stride = index.add %header, %ids : offset
-  template.return %stride : offset
-}
-
 // Initialization writes every numerical and control byte. Allocator contents
 // never determine a fresh stream, including a stream following cancellation.
 kernel.def target(@pocket) @pocket.initialize_request() {

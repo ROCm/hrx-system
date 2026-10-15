@@ -18,6 +18,100 @@ voice encoder and BOS-before-voice embedding. Its original `flow_lm.*` and
 `mimi.*` names and BF16 storage remain intact. The upstream permission notice
 is preserved in [LICENSE.pocket-tts](LICENSE.pocket-tts).
 
+## Prepare and serve
+
+The prepared deployment registers four reference voices: `alba`, `marius`,
+`jean`, and `anna`. With [uv](https://docs.astral.sh/uv/) installed and access to
+the [cloning checkpoint](https://huggingface.co/kyutai/pocket-tts), run from the
+repository root:
+
+```sh
+pocket_assets="$HOME/.cache/loom/models/pocket-tts/default"
+uv run --python 3.12 experimental/loom_serve/models/pocket_tts/prepare_assets.py \
+  --output "$pocket_assets"
+
+iree-bazel-run --config=opt //loom/src/loom/tools/loom-serve -- \
+  --device=amdgpu --workers=8 --listen=127.0.0.1:8080 \
+  --model="$pocket_assets/model.json"
+```
+
+The server build needs the AMDGPU target and HAL enabled; see
+[building and loading models](../../README.md#build-and-load). An installed
+`loom-serve` accepts the same arguments. This package's learned execution is
+qualified on AMDGPU. Other devices need numerical qualification of these
+programs in addition to the service's device-independent lifecycle.
+
+Preparation pins the English checkpoint, tokenizer, and reference samples.
+Original downloads remain in the Hugging Face cache. The new deployment
+directory holds links to the checkpoint/tokenizer, two small tensor archives,
+and its model document. `--offline` requires already-cached downloads. A new
+directory is required for each prepared deployment, so preparing a voice set
+cannot overwrite assets used by a running server.
+
+The preparation environment is only needed to build assets. The running server
+uses Loom programs for voice encoding, text prefill, sampling, and waveform
+generation. It preserves the original BF16 checkpoint and performs no Python
+model inference.
+
+Request audio through the standard endpoint:
+
+```sh
+curl --fail --silent --show-error --no-buffer \
+  http://127.0.0.1:8080/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"pocket-tts","input":"Good day. Each voice has its own stream.","voice":"alba","seed":42,"response_format":"pcm"}' |
+  ffplay -nodisp -autoexit -f s16le -sample_rate 24000 -ch_layout mono -i pipe:0
+```
+
+The first request for a voice encodes its reference sample. Later requests reuse
+the immutable voice prefix. Audio arrives in 80 ms model blocks; HTTP reads may
+split or combine them. Disconnecting cancels the request, and slow readers do
+not stop other voices. A fixed seed retains the request's sampling sequence
+when batch membership changes.
+
+## Register your own voices
+
+Supply one or more named reference files instead of the default set:
+
+```sh
+uv run --python 3.12 experimental/loom_serve/models/pocket_tts/prepare_assets.py \
+  --output "$HOME/.cache/loom/models/pocket-tts/my-voices" \
+  --voice narrator=/path/to/reference.wav --voice alba
+```
+
+Each `--voice` adds one entry. Bare `alba`, `marius`, `jean`, and `anna` select
+the pinned reference recordings; `ID=PATH` registers a local recording under
+that ID. Audio is downmixed to mono, resampled to 24 kHz, and normalized to end
+on a short pause using the pinned reference implementation. Samples are padded
+to complete codec blocks without truncating speech. Preparation grows context
+and rotary capacity to cover the complete reference and generation allowance;
+an unsupported extent fails explicitly. WAV, FLAC, and other formats supported
+by the preparation environment's audio reader can be imported.
+
+Load the resulting `model.json` and use `"voice":"narrator"` in requests.
+The asset archive retains the source identity and digest for every reference;
+its ID/extent pairs stay in the model document. Reference files are deployment
+inputs, rather than per-request HTTP uploads.
+
+## Open WebUI
+
+In a full Open WebUI installation with FFmpeg, select the OpenAI TTS engine:
+
+| Setting | Value |
+| --- | --- |
+| API base URL | `http://HOST:8080/v1`, reachable from the Open WebUI backend |
+| API key | A nonempty local value, or the key required by your reverse proxy |
+| Model | `pocket-tts` |
+| Voice | `alba`, or another registered ID typed into the voice field |
+| Extra parameters | `{"response_format":"pcm"}` |
+
+Keep audio preprocessing enabled. The ordinary Open WebUI TTS adapter receives
+24 kHz mono PCM, converts it to MP3, and serves a cached playable file. It buffers
+the complete provider response, so this integration does not provide playback
+of partial responses inside Open WebUI. Its slim installation and preprocessing
+bypass do not support this raw PCM path. The server's native streaming and
+cancellation behavior remains available to clients that consume PCM directly.
+
 ## Speech control and admission
 
 `prepare.loom` declares seven numerical phases and shared checkpoint domains.

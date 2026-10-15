@@ -12,6 +12,8 @@ config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536
 
 template.decl pure @pocket.state_size(%capacity: index) -> (offset)
 
+template.decl pure @pocket.packet_stride(%tokens: index) -> (offset)
+
 template.decl pure @pocket.request_state_size(%capacity: index) -> (offset)
 
 template.decl pure @pocket.batch_work_header_size(%capacity: index) -> (offset)
@@ -21,6 +23,16 @@ template.decl pure @pocket.batch_work_size(%capacity: index) -> (offset)
 template.decl pure @pocket.conditioning_size(%voice_frames: index) -> (offset)
 
 template.decl @pocket.batch.work_record(%work: buffer, %packed: index) -> (view<8xi32>)
+
+// Text packets contain token count, final EOS tail, generation bound, and a
+// reserved word, followed by the admitted token capacity.
+template.def<@pocket.packet_stride> pure @pocket_packet_stride(%tokens: index) -> (offset) {
+  %word = index.constant 4 : offset
+  %header = index.constant 16 : offset
+  %ids = index.scale %tokens, %word : index, offset -> offset
+  %stride = index.add %header, %ids : offset
+  template.return %stride : offset
+}
 
 // The two request cursors follow numerical state. This extent is already a
 // multiple of 16 for every supported context capacity.

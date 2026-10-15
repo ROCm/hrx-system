@@ -11,6 +11,8 @@ are no per-model C implementations or compiler-internal dependencies here.
   recurrent GDN, paged sparse attention, and n-gram embeddings over packed epochs.
 - [Krea 2 Turbo](models/krea/README.md): text-to-image, BF16 or INT8 ConvRot DiT,
   and a separately loaded LoRA with request-time strength.
+- [Pocket TTS](models/pocket_tts/README.md): streaming speech, registered
+  reference voices, retained conditioning, and independent request batching.
 - [Shared motifs](motifs/README.md): reusable arithmetic receiving SSA operands
   and template arguments, independent of a model's configuration namespace.
 
@@ -30,7 +32,7 @@ iree-bazel-build --config=opt //loom/src/loom/tools/loom-serve:loom-serve
 ```
 
 The model guides produce deployment documents that bind local asset paths.
-The same binary accepts both:
+The same binary accepts several model documents:
 
 ```sh
 bazel-bin/loom/src/loom/tools/loom-serve/loom-serve \
@@ -78,7 +80,8 @@ iree-bazel-test --config=asan //experimental/loom_serve/...
 The [mixed-model check](models/krea/README.md#mixed-model-lifecycle-check) uses
 real assets and the supported HTTP server. It verifies exact outputs across
 weight eviction and retained-session restoration, rather than merely checking
-that a model loads. Python here is test and benchmark tooling, never inference.
+that a model loads. Python prepares assets and provides test and benchmark
+tooling; learned inference executes through the source programs.
 
 Performance measurements use an optimized server, exclusive device access and
 an explicitly recorded workload. ASan results establish correctness, not speed.
