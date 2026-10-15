@@ -96,3 +96,261 @@ template.def<@pocket.batch.elu> device @pocket_batch_elu(%membership: buffer, %e
   }
   template.return
 }
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+// Dispatch entry points specialize source geometry. Membership remains a
+// runtime packet; changing request progress never changes the compiled shape.
+target.decl @pocket
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.def target(@pocket) @pocket.batch.residual_1024x1_kernel() {
+  %elements = index.constant 1024 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 1024 : index
+  %channels = index.constant 1024 : index
+  %times = index.constant 1 : index
+  template.apply<@pocket.batch.residual>(%membership, %elements, %channels, %times, %x_storage, %update_storage, %y_storage, %x_offset, %x_stride, %update_offset, %update_stride, %y_offset, %y_stride) : (buffer, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.residual_256x96_kernel() {
+  %elements = index.constant 24576 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 24576 : index
+  %channels = index.constant 256 : index
+  %times = index.constant 96 : index
+  template.apply<@pocket.batch.residual>(%membership, %elements, %channels, %times, %x_storage, %update_storage, %y_storage, %x_offset, %x_stride, %update_offset, %update_stride, %y_offset, %y_stride) : (buffer, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.residual_128x480_kernel() {
+  %elements = index.constant 61440 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 61440 : index
+  %channels = index.constant 128 : index
+  %times = index.constant 480 : index
+  template.apply<@pocket.batch.residual>(%membership, %elements, %channels, %times, %x_storage, %update_storage, %y_storage, %x_offset, %x_stride, %update_offset, %update_stride, %y_offset, %y_stride) : (buffer, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.residual_64x1920_kernel() {
+  %elements = index.constant 122880 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 122880 : index
+  %channels = index.constant 64 : index
+  %times = index.constant 1920 : index
+  template.apply<@pocket.batch.residual>(%membership, %elements, %channels, %times, %x_storage, %update_storage, %y_storage, %x_offset, %x_stride, %update_offset, %update_stride, %y_offset, %y_stride) : (buffer, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.gelu_4096_kernel() {
+  %elements = index.constant 4096 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 4096 : index
+  template.apply<@pocket.batch.gelu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.gelu_32768_kernel() {
+  %elements = index.constant 32768 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 32768 : index
+  template.apply<@pocket.batch.gelu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.copy_1_kernel() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 1 : index
+  template.apply<@pocket.batch.copy>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.copy_1920_kernel() {
+  %elements = index.constant 1920 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 1920 : index
+  template.apply<@pocket.batch.copy>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.silu_512_kernel() {
+  %elements = index.constant 512 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 512 : index
+  template.apply<@pocket.batch.silu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.residual_scaled_512x16_kernel() {
+  %elements = index.constant 8192 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset) {
+  %elements = index.constant 8192 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 16 : index
+  template.apply<@pocket.batch.residual_scaled>(%membership, %elements, %channels, %times, %x_storage, %update_storage, %y_storage, %scale_storage, %x_offset, %x_stride, %update_offset, %update_stride, %y_offset, %y_stride, %scale_offset, %scale_stride) : (buffer, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.elu_8192_kernel() {
+  %elements = index.constant 8192 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 8192 : index
+  template.apply<@pocket.batch.elu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.elu_24576_kernel() {
+  %elements = index.constant 24576 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 24576 : index
+  template.apply<@pocket.batch.elu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.elu_12288_kernel() {
+  %elements = index.constant 12288 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 12288 : index
+  template.apply<@pocket.batch.elu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.elu_61440_kernel() {
+  %elements = index.constant 61440 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 61440 : index
+  template.apply<@pocket.batch.elu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.elu_30720_kernel() {
+  %elements = index.constant 30720 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 30720 : index
+  template.apply<@pocket.batch.elu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.elu_122880_kernel() {
+  %elements = index.constant 122880 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 122880 : index
+  template.apply<@pocket.batch.elu>(%membership, %elements, %x_storage, %y_storage, %x_offset, %x_stride, %y_offset, %y_stride) : (buffer, index, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
