@@ -10,6 +10,7 @@
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/transfer.h"
@@ -34,6 +35,7 @@ typedef enum iree_hal_amd_gpu_pm4_submission_kind_e {
   IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER,
   IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH,
   IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER,
+  IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE,
 } iree_hal_amd_gpu_pm4_submission_kind_t;
 
 // Captured public operation shared by publication and native retirement.
@@ -85,6 +87,8 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
     } dispatch;
     // Captured transfer descriptors and the exclusively owned publish cursor.
     iree_hal_amd_gpu_pm4_transfer_t transfer;
+    // Immutable recording and private table/cursor, owned through completion.
+    iree_hal_amd_gpu_pm4_command_invocation_t execute;
   };
 } iree_hal_amd_gpu_pm4_submission_t;
 
@@ -118,6 +122,18 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_pm4_submission_t** out_submission);
 
+// Captures a recording and its invocation table in the same reusable block as
+// semaphore ownership. Recorded barriers own payload visibility; execution adds
+// no implicit system-scope before/after boundary. Failure retains nothing.
+iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t bindings,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    iree_hal_queue_execute_flags_t flags,
+    iree_hal_amd_gpu_pm4_submission_t** out_submission);
+
 // Borrows the unused, naturally aligned tail of a reusable capture block.
 // Oversized captures have no spare storage. Admission may place sidecars here
 // without another allocation; their users must join before the capture's final
@@ -149,7 +165,8 @@ void iree_hal_amd_gpu_pm4_submission_release(
 // It never maps memory, retains a buffer, or inspects pointer-valued bytes.
 iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
     const iree_hal_queue_family_t* family, iree_hal_buffer_ref_t reference,
-    iree_hal_memory_access_t access, uint64_t* out_address);
+    iree_hal_buffer_usage_t usage, iree_hal_memory_access_t access,
+    uint64_t* out_address);
 
 #ifdef __cplusplus
 }  // extern "C"

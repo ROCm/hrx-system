@@ -28,4 +28,13 @@ __attribute__((global)) void image_increment(unsigned* output, unsigned value) {
     output[0] = *image_pointer;
   }
 }
+
+// Invocation-private state allows one immutable recording to run concurrently
+// on several queues with independent bindings and explicit intra-recording edges.
+__attribute__((global)) void image_accumulate(unsigned* output, unsigned value) {
+  if (__builtin_amdgcn_workgroup_id_x() == 0 &&
+      __builtin_amdgcn_workitem_id_x() == 0) {
+    output[0] += value;
+  }
+}
 }

@@ -7,6 +7,12 @@
 """Public execution profiles owned by the Loom AMDGPU target provider."""
 
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
+load(
+    "//libamdf/requirements:defs.bzl",
+    "LIBAMDF",
+    "LIBAMDF_GPU",
+    LIBAMDF_AMDGPU_RESOURCE = "AMDGPU_RESOURCE",
+)
 load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile")
 load(
     "//loom/requirements:defs.bzl",
@@ -17,6 +23,7 @@ load(
 load(
     "//runtime/requirements:defs.bzl",
     "AMDGPU_RESOURCE",
+    "HAL_AMD",
     "HAL_AMDGPU",
 )
 
@@ -48,6 +55,24 @@ def amdgpu_execution_profile(
 
 AMDGPU_HARDWARE_PROFILE = amdgpu_execution_profile(
     name = "amdgpu_hardware",
+)
+
+RDNA_HARDWARE_PROFILE = loom_execution_profile(
+    name = "rdna_hardware",
+    build_requirements = [
+        LIBAMDF,
+        LIBAMDF_GPU,
+        TARGET_ARCH_AMDGPU,
+        EMIT_AMDGPU,
+        EXECUTE_IREE_HAL,
+        HAL_AMD,
+    ],
+    executor = "hardware",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    run_requirements = [LIBAMDF_AMDGPU_RESOURCE],
+    runner_args = ["--device=rdna"],
+    target_class = "gpu",
+    target_family = "amdgpu",
 )
 
 AMDGPU_ACCESS_PROFILE = amdgpu_execution_profile(

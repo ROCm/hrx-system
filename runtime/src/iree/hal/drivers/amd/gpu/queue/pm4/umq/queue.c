@@ -11,6 +11,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/continuation.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/retirement.h"
@@ -157,6 +158,8 @@ struct iree_hal_amd_gpu_pm4_umq_queue_t {
     iree_hal_amd_gpu_pm4_signal_storage_t* signal_storage;
     // Number of accepted native publications, release-published before MMIO.
     iree_atomic_int64_t count;
+    // Next native dispatch ID, independent of publication chunk boundaries.
+    uint64_t dispatch_count;
   } producer;
   // Single completion observer's release-published capacity credit.
   struct {
@@ -529,6 +532,112 @@ iree_hal_amd_gpu_pm4_umq_publish_transfer(
                   : IREE_HAL_AMD_GPU_PM4_PUBLICATION_MORE;
 }
 
+static iree_hal_amd_gpu_pm4_publication_result_t
+iree_hal_amd_gpu_pm4_umq_publish_execute(
+    iree_hal_amd_gpu_pm4_umq_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position) {
+  iree_hal_amd_gpu_pm4_command_invocation_t* invocation = &submission->execute;
+  const bool first = invocation->first;
+  const iree_hal_amd_gpu_pm4_command_arguments_t requirement =
+      iree_hal_amd_gpu_pm4_command_next_arguments(invocation->cursor);
+  iree_hal_amd_gpu_pm4_argument_storage_t* arguments =
+      queue->producer.arguments;
+  if (requirement.length > arguments->capacity ||
+      requirement.alignment > arguments->capacity) {
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
+  }
+  uint64_t relative = iree_align_uint64(arguments->end - arguments->begin,
+                                        requirement.alignment);
+  uint64_t offset = relative & (arguments->capacity - 1);
+  if (requirement.length > arguments->capacity - offset) {
+    relative += arguments->capacity - offset;
+    offset = 0;
+  }
+  const uint64_t start = arguments->begin + relative;
+  const uint64_t completed = (uint64_t)iree_atomic_load(
+      &queue->completed.arguments, iree_memory_order_acquire);
+  const uint64_t reusable = completed >= arguments->end
+                                ? start
+                                : iree_max(completed, arguments->begin);
+  const uint64_t used = start - reusable;
+  const uint64_t available =
+      used >= arguments->capacity
+          ? 0
+          : iree_min(arguments->capacity - used, arguments->capacity - offset);
+  const uint32_t wait_words = first ? submission->native_wait_count * 7 : 0;
+  const uint32_t word_budget =
+      iree_min(queue->producer.ring.capacity / 2, 16384u);
+  iree_hal_amd_gpu_pm4_command_chunk_t chunk;
+  iree_status_t status = iree_hal_amd_gpu_pm4_command_prepare_chunk(
+      invocation,
+      iree_min(IREE_HAL_AMD_GPU_PM4_COMMAND_MAX_WORDS,
+               word_budget - wait_words - 64),
+      iree_make_byte_span(arguments->memory.contents.data + offset, available),
+      arguments->address + offset, queue->producer.dispatch_count, &chunk);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_pm4_umq_abandon(queue, submission, status);
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
+  }
+  if (!chunk.word_count && chunk.next.block) {
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
+  }
+  const bool terminal = !chunk.next.block;
+  // Transport-owned instruction/argument visibility is separate from recorded
+  // payload barriers. No system-scope release is added to an invocation tail.
+  const iree_hal_amd_gpu_pm4_barrier_t before = {
+      .cache_control =
+          chunk.dispatch_count ? 1u | queue->options.barriers.acquire : 0,
+  };
+  bool native_signal = false;
+  for (iree_host_size_t i = 0; terminal && i < submission->signals.count; ++i) {
+    native_signal |=
+        iree_hal_amd_gpu_pm4_semaphore_isa(submission->signals.semaphores[i]);
+  }
+  const uint32_t body_words = wait_words + chunk.word_count +
+                              iree_hal_amd_gpu_pm4_barrier_word_count(before) +
+                              (native_signal ? 8 : 0) + 14 + 8;
+  iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
+  iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
+  if (!iree_hal_amd_gpu_pm4_ring_try_reserve(
+          &candidate,
+          (uint64_t)iree_atomic_load(&queue->completed.words,
+                                     iree_memory_order_acquire),
+          body_words, &reservation)) {
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
+  }
+  if (native_signal) {
+    submission->signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
+        &queue->producer.signals->pool);
+    if (!submission->signal) {
+      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS;
+    }
+  }
+  if (chunk.argument_length) {
+    arguments->end = start + chunk.argument_length;
+  }
+  queue->producer.ring.reserved_words = candidate.reserved_words;
+  queue->producer.dispatch_count += chunk.dispatch_count;
+  invocation->cursor = chunk.next;
+  invocation->first = false;
+  uint32_t* words = reservation.words;
+  for (iree_host_size_t i = 0; first && i < submission->wait_count; ++i) {
+    if (submission->waits[i].signal) {
+      words = iree_hal_amd_gpu_pm4_emit_wait32(
+          words, submission->waits[i].signal->device_address, 1, UINT32_MAX,
+          IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
+    }
+  }
+  words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
+  memcpy(words, chunk.words, chunk.word_count * sizeof(*words));
+  words += chunk.word_count;
+  iree_hal_amd_gpu_pm4_umq_publish_commit(
+      queue, submission, position, &reservation, body_words, words,
+      (iree_hal_amd_gpu_pm4_barrier_t){0}, arguments->end,
+      (iree_hal_amd_gpu_pm4_download_t){0}, terminal);
+  return terminal ? IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED
+                  : IREE_HAL_AMD_GPU_PM4_PUBLICATION_MORE;
+}
+
 // The sole publisher performs no native call or host allocation here. Every
 // address/error check precedes committing either ring reservation. The caller
 // detached the entry before calling; immediate native retirement may free it.
@@ -554,6 +663,10 @@ iree_hal_amd_gpu_pm4_umq_publish(
   if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER) {
     return iree_hal_amd_gpu_pm4_umq_publish_transfer(queue, submission,
                                                      position);
+  }
+  if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE) {
+    return iree_hal_amd_gpu_pm4_umq_publish_execute(queue, submission,
+                                                    position);
   }
   const iree_hal_amd_gpu_pm4_function_t* function =
       submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH
@@ -638,6 +751,9 @@ iree_hal_amd_gpu_pm4_umq_publish(
        ++i) {
     status = iree_hal_amd_gpu_pm4_submission_resolve_address(
         queue->base.queue_family, submission->dispatch.bindings.values[i],
+        indirect ? IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS
+                 : IREE_HAL_BUFFER_USAGE_STORAGE |
+                       IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ,
         indirect ? IREE_HAL_MEMORY_ACCESS_READ : 0, &addresses[i]);
   }
   if (dispatch && indirect && iree_status_is_ok(status)) {
@@ -678,7 +794,8 @@ iree_hal_amd_gpu_pm4_umq_publish(
   words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
   if (dispatch) {
     const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
-        .kernarg_pointer = argument_address, .dispatch_id = position};
+        .kernarg_pointer = argument_address,
+        .dispatch_id = queue->producer.dispatch_count++};
     words = iree_hal_amd_gpu_pm4_launch_emit(
         words, &function->launch, submission->dispatch.geometry.workgroup_size,
         submission->dispatch.geometry.partial_size,
@@ -974,12 +1091,21 @@ static bool iree_hal_amd_gpu_pm4_umq_progress(void* user_data) {
         case IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY:
           capacity = true;
           break;
-        case IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS:
+        case IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS: {
+          const iree_hal_amd_gpu_pm4_command_arguments_t requirement =
+              submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE
+                  ? iree_hal_amd_gpu_pm4_command_next_arguments(
+                        submission->execute.cursor)
+                  : (iree_hal_amd_gpu_pm4_command_arguments_t){
+                        .length =
+                            submission->dispatch.function->kernarg->byte_length,
+                        .alignment =
+                            submission->dispatch.function->kernarg->alignment,
+                    };
           status = iree_hal_amd_gpu_pm4_umq_grow_arguments(
-              queue,
-              iree_max(submission->dispatch.function->kernarg->byte_length,
-                       submission->dispatch.function->kernarg->alignment));
+              queue, iree_max(requirement.length, requirement.alignment));
           break;
+        }
         case IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SIGNALS:
           // Reuse idle earlier backing before requesting more native memory.
           for (iree_hal_amd_gpu_pm4_signal_storage_t* storage =
@@ -1511,13 +1637,19 @@ iree_status_t iree_hal_amd_gpu_pm4_umq_queue_create(
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_execute(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings,
     iree_hal_queue_execute_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 command-buffer execution is not admitted");
+  iree_hal_amd_gpu_pm4_umq_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_umq_check_acceptance(queue));
+  iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_execute(
+      &queue->captures, waits, signals, command_buffer, bindings,
+      &queue->options.barriers, flags, &submission));
+  iree_hal_amd_gpu_pm4_umq_submit(queue, submission);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_host_call(

@@ -399,6 +399,32 @@ static iree_status_t loom_run_hal_lookup_dispatch_function(
                                                      out_function);
 }
 
+// Staging may use another queue or host access. These recording boundaries
+// publish payloads between that external work and the enclosed dispatches;
+// queue_execute's semaphore signals establish execution completion only.
+static iree_status_t loom_run_hal_record_dispatch_begin(
+    iree_hal_command_buffer_t* command_buffer) {
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
+  const iree_hal_barrier_t barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  return iree_hal_command_buffer_barrier(command_buffer, &barrier);
+}
+
+static iree_status_t loom_run_hal_record_dispatch_end(
+    iree_hal_command_buffer_t* command_buffer) {
+  const iree_hal_barrier_t barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_hal_command_buffer_barrier(command_buffer, &barrier));
+  return iree_hal_command_buffer_end(command_buffer);
+}
+
 static iree_status_t loom_run_hal_record_dispatch_sequence_edge(
     iree_hal_command_buffer_t* command_buffer) {
   const iree_hal_memory_barrier_t memory_barrier = {
@@ -440,7 +466,7 @@ static iree_status_t loom_run_hal_record_dispatch_batch(
       IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/0, &command_buffer);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_begin(command_buffer);
+    status = loom_run_hal_record_dispatch_begin(command_buffer);
   }
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < batch_options->dispatch_count; ++i) {
@@ -466,7 +492,7 @@ static iree_status_t loom_run_hal_record_dispatch_batch(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_end(command_buffer);
+    status = loom_run_hal_record_dispatch_end(command_buffer);
   }
   if (iree_status_is_ok(status)) {
     *out_command_buffer = command_buffer;
@@ -493,7 +519,7 @@ static iree_status_t loom_run_hal_record_dispatch_sequence_batch(
       IREE_HAL_COMMAND_CATEGORY_DISPATCH,
       /*binding_capacity=*/0, &command_buffer);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_begin(command_buffer);
+    status = loom_run_hal_record_dispatch_begin(command_buffer);
   }
   for (iree_host_size_t batch_index = 0;
        iree_status_is_ok(status) && batch_index < batch_options->dispatch_count;
@@ -547,7 +573,7 @@ static iree_status_t loom_run_hal_record_dispatch_sequence_batch(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_end(command_buffer);
+    status = loom_run_hal_record_dispatch_end(command_buffer);
   }
   if (iree_status_is_ok(status)) {
     *out_command_buffer = command_buffer;
@@ -570,7 +596,7 @@ static iree_status_t loom_run_hal_record_indirect_dispatch_sequence(
       iree_hal_queue_family(queue), command_buffer_mode,
       IREE_HAL_COMMAND_CATEGORY_DISPATCH, binding_count, &command_buffer);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_begin(command_buffer);
+    status = loom_run_hal_record_dispatch_begin(command_buffer);
   }
   uint32_t binding_slot = 0;
   for (iree_host_size_t step_index = 0;
@@ -608,7 +634,7 @@ static iree_status_t loom_run_hal_record_indirect_dispatch_sequence(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_end(command_buffer);
+    status = loom_run_hal_record_dispatch_end(command_buffer);
   }
   if (iree_status_is_ok(status)) {
     *out_command_buffer = command_buffer;

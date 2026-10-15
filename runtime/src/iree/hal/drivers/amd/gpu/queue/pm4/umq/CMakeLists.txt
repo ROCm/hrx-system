@@ -54,6 +54,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::continuation
     iree::hal::drivers::amd::gpu::queue::host_wait
     iree::hal::drivers::amd::gpu::queue::pm4::barrier
+    iree::hal::drivers::amd::gpu::queue::pm4::command_buffer
     iree::hal::drivers::amd::gpu::queue::pm4::commands
     iree::hal::drivers::amd::gpu::queue::pm4::dispatch
     iree::hal::drivers::amd::gpu::queue::pm4::launch

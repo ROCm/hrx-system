@@ -25,6 +25,7 @@
 namespace {
 
 enum class Arguments { kBindings, kNative };
+enum class BindingMode { kDirect, kTable };
 enum class Barriers { kDefault, kExplicitEmpty };
 enum class Timing { kSubmit, kCompletion, kSampledSubmit };
 
@@ -211,6 +212,91 @@ class NativeQueue {
     return Complete(0);
   }
 
+  // Includes public creation, validation, native recording, and finalization.
+  // Recorded dispatches use the same kernel and dependency shape as Submit.
+  iree_status_t Record(uint32_t count, BindingMode bindings,
+                       iree_hal_command_buffer_t** out_recording) {
+    *out_recording = nullptr;
+    const auto& lane = lanes_[0];
+    iree_hal_command_buffer_t* recording = nullptr;
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queue_), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+        bindings == BindingMode::kTable ? 1 : 0, &recording));
+    const auto reference = bindings == BindingMode::kTable
+                               ? iree_hal_make_indirect_buffer_ref(0, 0, 4)
+                               : iree_hal_make_buffer_ref(lane.output, 0, 4);
+    auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+    config.workgroup_size[0] = 32;
+    config.workgroup_size[1] = config.workgroup_size[2] = 1;
+    const iree_hal_memory_barrier_t memory = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+    };
+    const iree_hal_barrier_t dependency = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .memory_barrier_count = 1,
+        .memory_barriers = &memory,
+    };
+    const iree_hal_barrier_t acquire = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+    };
+    const iree_hal_barrier_t release = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    const uint32_t value = 1;
+    iree_status_t status = iree_hal_command_buffer_begin(recording);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_command_buffer_barrier(recording, &acquire);
+    }
+    for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+      if (i) {
+        status = iree_hal_command_buffer_barrier(recording, &dependency);
+      }
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_command_buffer_dispatch(
+            recording, lane.executable, lane.function, config,
+            iree_make_const_byte_span(&value, sizeof(value)), {1, &reference},
+            0);
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_command_buffer_barrier(recording, &release);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_command_buffer_end(recording);
+    }
+    if (iree_status_is_ok(status)) {
+      *out_recording = recording;
+    } else {
+      iree_hal_command_buffer_release(recording);
+    }
+    return status;
+  }
+
+  iree_status_t Execute(iree_hal_command_buffer_t* recording,
+                        BindingMode bindings) {
+    auto& lane = lanes_[0];
+    uint64_t before = lane.epoch, after = lane.epoch + 1;
+    const iree_hal_buffer_binding_t binding = {
+        .buffer = lane.output,
+        .length = 4,
+    };
+    IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
+        queue_, {lane.epoch ? 1u : 0u, &lane.timeline, &before},
+        {1, &lane.timeline, &after}, recording,
+        {bindings == BindingMode::kTable ? 1u : 0u, &binding}, 0));
+    lane.expected = 1 * 3 + 19;
+    lane.epoch = after;
+    return iree_ok_status();
+  }
+
   iree_status_t Transfer(iree_hal_transfer_operation_type_t type,
                          Barriers barriers) {
     auto& lane = lanes_[0];
@@ -325,7 +411,9 @@ class NativeQueue {
                                 iree_allocator_command_t command,
                                 const void* params, void** inout_pointer) {
     auto* self = static_cast<NativeQueue*>(user_data);
-    const bool had_pointer = *inout_pointer != nullptr;
+    const bool had_pointer = (command == IREE_ALLOCATOR_COMMAND_FREE ||
+                              command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
+                             *inout_pointer != nullptr;
     auto allocator = iree_allocator_system();
     IREE_RETURN_IF_ERROR(
         allocator.ctl(allocator.self, command, params, inout_pointer));
@@ -457,6 +545,113 @@ DISPATCH_CASE(NativeEmptySubmit, kNative, kExplicitEmpty, kSubmit);
 DISPATCH_CASE(BindingsDefaultCompletion, kBindings, kDefault, kCompletion);
 DISPATCH_CASE(BindingsDefaultLatency, kBindings, kDefault, kSampledSubmit);
 #undef DISPATCH_CASE
+
+// Completion and destruction are excluded from recording timing. One actual
+// invocation verifies the recorded program before measuring its construction.
+static void BM_Record(benchmark::State& state, BindingMode bindings) {
+  NativeQueue queue;
+  iree::Status status = queue.Initialize();
+  if (!status.ok()) {
+    state.SkipWithError(status.ToString().c_str());
+    return;
+  }
+  const uint32_t count = state.range(0);
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_CHECK_OK(queue.Record(count, bindings, &recording));
+  IREE_CHECK_OK(queue.Execute(recording, bindings));
+  IREE_CHECK_OK(queue.Complete(0));
+  IREE_CHECK_OK(queue.CheckOutput(0));
+  iree_hal_command_buffer_release(recording);
+  for (auto _ : state) {
+    IREE_CHECK_OK(queue.Record(count, bindings, &recording));
+    state.PauseTiming();
+    iree_hal_command_buffer_release(recording);
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations() * count);
+}
+BENCHMARK_CAPTURE(BM_Record, Direct, BindingMode::kDirect)
+    ->Arg(1)
+    ->Arg(1000)
+    ->Arg(8000)
+    ->Iterations(50)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_Record, Table, BindingMode::kTable)
+    ->Arg(1)
+    ->Arg(1000)
+    ->Arg(8000)
+    ->Iterations(50)
+    ->UseRealTime();
+
+// Submit timing covers one public invocation, including its bounded initial
+// publication. Completion rows additionally include every refill and GPU work.
+// Sampled rows isolate the API call from benchmark pause/resume overhead, at
+// the cost of two clock reads. No row measures calibrated time to first
+// workgroup.
+static void BM_Execute(benchmark::State& state, BindingMode bindings,
+                       Timing timing) {
+  NativeQueue queue;
+  iree::Status status = queue.Initialize();
+  if (!status.ok()) {
+    state.SkipWithError(status.ToString().c_str());
+    return;
+  }
+  const uint32_t count = state.range(0);
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_CHECK_OK(queue.Record(count, bindings, &recording));
+  for (uint32_t i = 0; i < 2; ++i) {
+    IREE_CHECK_OK(queue.Execute(recording, bindings));
+    IREE_CHECK_OK(queue.Complete(0));
+    IREE_CHECK_OK(queue.CheckOutput(0));
+  }
+  const uint64_t allocations_before = queue.allocation_count();
+  std::vector<iree_duration_t> samples;
+  if (timing == Timing::kSampledSubmit) {
+    samples.reserve(50);
+  }
+  for (auto _ : state) {
+    if (timing == Timing::kSampledSubmit) {
+      const iree_time_t begin = iree_time_now();
+      IREE_CHECK_OK(queue.Execute(recording, bindings));
+      samples.push_back(iree_time_now() - begin);
+    } else {
+      IREE_CHECK_OK(queue.Execute(recording, bindings));
+    }
+    if (timing != Timing::kCompletion) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.Complete(0));
+    if (timing == Timing::kCompletion) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.CheckOutput(0));
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations() * count);
+  state.counters["host_allocations"] =
+      queue.allocation_count() - allocations_before;
+  if (!samples.empty()) {
+    std::sort(samples.begin(), samples.end());
+    state.counters["call_p50_ns"] = samples[samples.size() / 2];
+    state.counters["call_p99_ns"] = samples[samples.size() * 99 / 100];
+    state.counters["call_max_ns"] = samples.back();
+  }
+  iree_hal_command_buffer_release(recording);
+}
+#define EXECUTE_CASE(name, bindings, timing)                                 \
+  BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings, Timing::timing) \
+      ->Arg(1)                                                               \
+      ->Arg(1000)                                                            \
+      ->Arg(8000)                                                            \
+      ->Iterations(50)                                                       \
+      ->UseRealTime()
+EXECUTE_CASE(DirectSubmit, kDirect, kSubmit);
+EXECUTE_CASE(TableSubmit, kTable, kSubmit);
+EXECUTE_CASE(DirectCompletion, kDirect, kCompletion);
+EXECUTE_CASE(TableCompletion, kTable, kCompletion);
+EXECUTE_CASE(DirectLatency, kDirect, kSampledSubmit);
+EXECUTE_CASE(TableLatency, kTable, kSampledSubmit);
+#undef EXECUTE_CASE
 
 static void BM_Transfer(benchmark::State& state,
                         iree_hal_transfer_operation_type_t type,

@@ -15,6 +15,7 @@
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/umq/queue.h"
 #include "iree/hal/drivers/amd/status.h"
@@ -715,8 +716,15 @@ static iree_status_t iree_hal_amd_gpu_device_create_command_buffer(
     iree_hal_command_buffer_mode_t mode, iree_hal_command_category_t categories,
     iree_host_size_t binding_capacity,
     iree_hal_command_buffer_t** out_command_buffer) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 command-buffer recording is unavailable");
+  iree_hal_amd_gpu_device_t* device = (void*)base;
+  iree_hal_amd_gpu_pm4_barrier_profile_t profile;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_barrier_profile_initialize(
+      device->target.version, &profile));
+  return iree_hal_amd_gpu_pm4_command_buffer_create(
+      family, mode, categories, binding_capacity,
+      (uint32_t)
+          device->context->target_info.compute.local_data_share_byte_length,
+      &profile, device->host_allocator, out_command_buffer);
 }
 
 static iree_status_t iree_hal_amd_gpu_device_import_file(

@@ -131,6 +131,30 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    command_buffer
+  HDRS
+    "command_buffer.h"
+  SRCS
+    "command_buffer.c"
+  DEPS
+    ::barrier
+    ::commands
+    ::dispatch
+    ::launch
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    iree::hal
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::utils::resource_set
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     submission
   HDRS
     "submission.h"
@@ -138,6 +162,7 @@ iree_cc_library(
     "submission.c"
   DEPS
     ::barrier
+    ::command_buffer
     ::dispatch
     ::semaphore
     ::signal
@@ -150,6 +175,22 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::publisher
   PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    command_buffer_test
+  SRCS
+    "command_buffer_test.cc"
+  DEPS
+    ::barrier
+    ::command_buffer
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 endif()
 

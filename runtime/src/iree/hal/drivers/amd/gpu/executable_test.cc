@@ -357,8 +357,8 @@ TEST_P(ExecutableTest, OwnsArtifactAndReflectsPreparedFunctions) {
   std::fill(bytes_.begin(), bytes_.end(), 0xa5);
   iree_hal_amd_gpu_image_deinitialize(&image_);
   EXPECT_EQ(iree_hal_executable_queue_family(executable_), &family_);
-  EXPECT_EQ(iree_hal_executable_function_count(executable_), 2u);
-  for (auto name : {"image_transform", "image_increment"}) {
+  EXPECT_EQ(iree_hal_executable_function_count(executable_), 3u);
+  for (auto name : {"image_transform", "image_increment", "image_accumulate"}) {
     iree_hal_executable_function_t token;
     IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
         executable_, iree_make_cstring_view(name), &token));

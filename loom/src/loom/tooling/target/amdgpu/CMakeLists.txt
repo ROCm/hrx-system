@@ -21,6 +21,7 @@ loom_cc_library(
     iree::base
     loom::binding::c::interop
     loom::binding::c::loomc
+    loom::binding::c::target::amdgpu::iree_hal
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::target_identity
     loom::target::arch::amdgpu::target_info_defs

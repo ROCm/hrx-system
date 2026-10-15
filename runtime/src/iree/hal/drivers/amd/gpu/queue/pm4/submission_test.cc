@@ -245,26 +245,30 @@ TEST_F(SubmissionTest, PreparedAddressChecksDomainUsageAndCommitment) {
   auto reference = iree_hal_make_buffer_ref(&buffer, 4, 16);
   uint64_t address = 0;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_resolve_address(
-      &family, reference, IREE_HAL_MEMORY_ACCESS_READ, &address));
+      &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE,
+      IREE_HAL_MEMORY_ACCESS_READ, &address));
   EXPECT_EQ(address, 0x100Cu);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_amd_gpu_pm4_submission_resolve_address(
+                            &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE,
+                            IREE_HAL_MEMORY_ACCESS_WRITE, &address));
+  buffer.allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
       iree_hal_amd_gpu_pm4_submission_resolve_address(
-          &family, reference, IREE_HAL_MEMORY_ACCESS_WRITE, &address));
-  buffer.allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
-                        iree_hal_amd_gpu_pm4_submission_resolve_address(
-                            &family, reference, 0, &address));
+          &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
   buffer.allowed_usage = IREE_HAL_BUFFER_USAGE_STORAGE;
   family.memory.domain = &family;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
-                        iree_hal_amd_gpu_pm4_submission_resolve_address(
-                            &family, reference, 0, &address));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_amd_gpu_pm4_submission_resolve_address(
+          &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
   family.memory.domain = this;
   binding.device_address = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        iree_hal_amd_gpu_pm4_submission_resolve_address(
-                            &family, reference, 0, &address));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_amd_gpu_pm4_submission_resolve_address(
+          &family, reference, IREE_HAL_BUFFER_USAGE_STORAGE, 0, &address));
   binding.device_address = 0x1000;
   reference.offset = 60;
   layout_.binding_count = 1;

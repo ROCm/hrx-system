@@ -11,6 +11,7 @@
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
 #include "loomc/interop.h"
+#include "loomc/target/amdgpu/iree_hal.h"
 
 // Copies the canonical identity while the selected profile is still owned.
 // The identity's target points into the process-lifetime target catalog.
@@ -40,7 +41,9 @@ static iree_status_t loom_amdgpu_hal_testbench_select_device_identity(
 static bool loom_amdgpu_hal_testbench_has_device(
     const loom_run_hal_testbench_context_t* context,
     loom_testbench_requirement_provider_result_t* out_result) {
-  if (iree_string_view_equal(context->driver_name, IREE_SV("amdgpu"))) {
+  if (context->selected_target_route &&
+      context->selected_target_route->provider ==
+          loomc_amdgpu_iree_hal_target_provider()) {
     return true;
   }
   *out_result = (loom_testbench_requirement_provider_result_t){

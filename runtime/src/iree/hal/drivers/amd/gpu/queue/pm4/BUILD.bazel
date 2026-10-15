@@ -115,12 +115,33 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "command_buffer",
+    srcs = ["command_buffer.c"],
+    hdrs = ["command_buffer.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":barrier",
+        ":commands",
+        ":dispatch",
+        ":launch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu:executable",
+        "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
+        "//runtime/src/iree/hal/utils:resource_set",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "submission",
     srcs = ["submission.c"],
     hdrs = ["submission.h"],
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":barrier",
+        ":command_buffer",
         ":dispatch",
         ":semaphore",
         ":signal",
@@ -132,6 +153,20 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "command_buffer_test",
+    srcs = ["command_buffer_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":barrier",
+        ":command_buffer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

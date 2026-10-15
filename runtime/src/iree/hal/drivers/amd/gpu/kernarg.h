@@ -103,6 +103,14 @@ typedef struct iree_hal_amd_gpu_kernarg_layout_t {
   iree_allocator_t host_allocator;
 } iree_hal_amd_gpu_kernarg_layout_t;
 
+// Borrows binding_count native byte offsets, indexed by dense HAL binding.
+// Recorders use these prepared destinations to relocate an argument template
+// without walking parameter reflection when the recording is invoked.
+static inline const uint16_t* iree_hal_amd_gpu_kernarg_layout_binding_offsets(
+    const iree_hal_amd_gpu_kernarg_layout_t* layout) {
+  return (const uint16_t*)(layout + 1);
+}
+
 // Constructs a layout from trusted, range-checked image metadata. This cold
 // semantic boundary admits argument kinds, widths, and HAL representation;
 // it does not repeat the image parser's ordering/range validation. Unsupported
@@ -130,7 +138,8 @@ iree_hal_amd_gpu_kernarg_layout_parameters(
 
 // Writes a complete native argument segment from admitted HAL inputs. Source
 // constants cover constant_byte_length bytes; binding_addresses contains
-// binding_count device addresses. The caller supplies byte_length writable
+// binding_count device addresses, or is NULL to leave zeroed relocation slots
+// in a recorded argument template. The caller supplies byte_length writable
 // bytes at target, disjoint from every input. Padding is zeroed and hidden
 // fields consume the typed runtime values. This hot transform cannot fail,
 // allocate, retain resources, or discover pointers inside user bytes.

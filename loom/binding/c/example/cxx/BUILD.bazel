@@ -62,6 +62,7 @@ loom_cc_test(
     ],
     target_compatible_with = _COMPATIBLE_WITH + loom_config_compatible_with([
         "//loom/config/import/cxx:embed_includes_enabled",
+        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = _DEPS,
 )

@@ -38,6 +38,7 @@ _EXECUTION_TAGS = [
 
 _GENERIC_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:amdgpu_hal",
+    "//runtime/config/hal:driver_amdgpu",
 ])
 
 _AMDGPU_SOURCE_COMPATIBLE_WITH = loom_config_compatible_with([

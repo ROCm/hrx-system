@@ -101,6 +101,14 @@ typedef struct iree_hal_amd_gpu_pm4_launch_inputs_t {
   uint32_t private_segment_size;
 } iree_hal_amd_gpu_pm4_launch_inputs_t;
 
+// DWORD offset of an enabled user SGPR within launch_emit's packet sequence.
+// UINT8_MAX denotes an absent input and produces UINT16_MAX. Recorders retain
+// these offsets instead of decoding register packets during invocation.
+static inline uint16_t iree_hal_amd_gpu_pm4_launch_user_data_word_offset(
+    uint8_t index) {
+  return index == UINT8_MAX ? UINT16_MAX : (uint16_t)(24 + index);
+}
+
 // Emits complete launch binding into caller-owned capacity and returns the next
 // DWORD. Emits 22 DWORDs when user_data_count is zero, otherwise
 // 24 + user_data_count. This hot transform is infallible: the caller has

@@ -52,6 +52,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:host_wait",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:barrier",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:command_buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:commands",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:dispatch",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:launch",

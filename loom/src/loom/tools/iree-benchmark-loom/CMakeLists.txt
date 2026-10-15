@@ -234,7 +234,7 @@ loom_cc_test(
 )
 
 set(_iree_benchmark_loom_platform_copts "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD))
   list(APPEND _iree_benchmark_loom_platform_copts "-DIREE_BENCHMARK_LOOM_HAVE_AMDGPU=1")
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
@@ -250,7 +250,7 @@ if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_H
   list(APPEND _iree_benchmark_loom_platform_copts "-DIREE_BENCHMARK_LOOM_HAVE_XDNA=1")
 endif()
 set(_iree_benchmark_loom_platform_deps "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD))
   list(APPEND _iree_benchmark_loom_platform_deps loom::binding::c::target::amdgpu::iree_hal)
   list(APPEND _iree_benchmark_loom_platform_deps loom::tooling::target::amdgpu::testbench_requirements)
 endif()

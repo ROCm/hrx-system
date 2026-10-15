@@ -30,6 +30,7 @@ load(
     "AMDGPU_HARDWARE_PROFILE",
     "AMDGPU_TSAN_CAPACITY_PROFILE",
     "AMDGPU_TSAN_PROFILE",
+    "RDNA_HARDWARE_PROFILE",
 )
 
 package(
@@ -61,6 +62,7 @@ iree_execution_test_suite(
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
         "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
     ]),
     tools = {"iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom"},
 )
@@ -186,6 +188,15 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
+)
+
+loom_test(
+    name = "rdna_hal_tests",
+    srcs = [
+        "amdgpu_hal_actual.loom",
+        "generated_tensor_cases.loom",
+    ],
+    execution_profiles = [RDNA_HARDWARE_PROFILE],
 )
 
 loom_test(

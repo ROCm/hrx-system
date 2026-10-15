@@ -147,6 +147,40 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
   return status;
 }
 
+iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t bindings,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    iree_hal_queue_execute_flags_t flags,
+    iree_hal_amd_gpu_pm4_submission_t** out_submission) {
+  *out_submission = NULL;
+  iree_host_size_t payload_size = 0;
+  if (!iree_host_size_checked_mul_add(
+          0, command_buffer->binding_count,
+          sizeof(iree_hal_amd_gpu_pm4_command_binding_t), &payload_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "recorded invocation binding table overflows");
+  }
+  const iree_hal_barrier_list_t empty = {0};
+  const iree_hal_queue_barriers_t barriers = {&empty, &empty};
+  iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
+  void* payload = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
+      pool, waits, signals, payload_size, profile, &barriers, &submission,
+      &payload));
+  submission->kind = IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE;
+  iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_initialize(
+      command_buffer, bindings, payload, flags, &submission->execute);
+  if (iree_status_is_ok(status)) {
+    *out_submission = submission;
+  } else {
+    iree_hal_amd_gpu_pm4_submission_release(submission);
+  }
+  return status;
+}
+
 iree_byte_span_t iree_hal_amd_gpu_pm4_submission_tail_storage(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
   const iree_host_size_t aligned_size =
@@ -174,6 +208,8 @@ void iree_hal_amd_gpu_pm4_submission_retire(
     iree_hal_executable_release(submission->dispatch.executable);
   } else if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER) {
     iree_hal_amd_gpu_pm4_transfer_deinitialize(&submission->transfer);
+  } else if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE) {
+    iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&submission->execute);
   }
   submission->kind = IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER;
 }
@@ -203,7 +239,8 @@ void iree_hal_amd_gpu_pm4_submission_release(
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
     const iree_hal_queue_family_t* family, iree_hal_buffer_ref_t reference,
-    iree_hal_memory_access_t access, uint64_t* out_address) {
+    iree_hal_buffer_usage_t usage, iree_hal_memory_access_t access,
+    uint64_t* out_address) {
   const iree_hal_memory_contract_t* contract =
       reference.buffer->memory.contract;
   const uint64_t scope_id = (uint64_t)family->memory.queue_scope_id + 1;
@@ -228,9 +265,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
         iree_hal_buffer_allowed_access(reference.buffer), access));
   }
   IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage_any(
-      scope->usage & iree_hal_buffer_allowed_usage(reference.buffer),
-      IREE_HAL_BUFFER_USAGE_STORAGE |
-          IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ));
+      scope->usage & iree_hal_buffer_allowed_usage(reference.buffer), usage));
   const uint64_t base =
       iree_hal_buffer_native_binding(reference.buffer,
                                      (iree_hal_buffer_native_binding_slot_t){

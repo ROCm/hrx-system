@@ -102,6 +102,32 @@ TEST_F(KernargTest, DenseConstantsBindingsAndNativeReflection) {
   EXPECT_EQ(std::vector<uint8_t>(storage.begin(), storage.end()), expected);
 }
 
+TEST_F(KernargTest, RecordedTemplateLeavesIndexedBindingRelocationsZero) {
+  IREE_ASSERT_OK(
+      Build({Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_GLOBAL_BUFFER, 0, 8),
+             Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE, 8, 4),
+             Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_GLOBAL_BUFFER, 16, 8),
+             Arg(IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X,
+                 24, 4)},
+            32));
+  uint32_t constant = 0x12345678;
+  const iree_hal_amd_gpu_kernarg_inputs_t inputs = {.block_count = {17, 1, 1}};
+  std::array<uint8_t, 32> bytes;
+  bytes.fill(0xCD);
+  iree_hal_amd_gpu_kernarg_layout_emplace(layout_, &constant, nullptr, &inputs,
+                                          bytes.data());
+  const auto* offsets =
+      iree_hal_amd_gpu_kernarg_layout_binding_offsets(layout_);
+  EXPECT_EQ(offsets[0], 0u);
+  EXPECT_EQ(offsets[1], 16u);
+  for (uint16_t i = 0; i < layout_->binding_count; ++i) {
+    EXPECT_EQ(iree_unaligned_load_le_u64(bytes.data() + offsets[i]), 0u);
+  }
+  EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data() + 8), constant);
+  EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data() + 24), 17u);
+  EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data() + 28), 0u);
+}
+
 TEST_F(KernargTest, EveryExplicitPointerKindAndGroupRelativeConstants) {
   std::vector<Argument> arguments;
   const Kind pointer_kinds[] = {

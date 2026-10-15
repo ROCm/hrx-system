@@ -49,6 +49,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/fabric:memory_backend",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:allocation",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:barrier",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:command_buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/umq:queue",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",

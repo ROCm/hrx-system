@@ -152,15 +152,10 @@ static iree_status_t iree_hal_amd_gpu_kernarg_analyze(
   return iree_ok_status();
 }
 
-static uint16_t* iree_hal_amd_gpu_kernarg_binding_offsets(
-    const iree_hal_amd_gpu_kernarg_layout_t* layout) {
-  return (uint16_t*)(layout + 1);
-}
-
 static iree_hal_amd_gpu_kernarg_copy_t* iree_hal_amd_gpu_kernarg_copies(
     const iree_hal_amd_gpu_kernarg_layout_t* layout) {
   return (
-      iree_hal_amd_gpu_kernarg_copy_t*)(iree_hal_amd_gpu_kernarg_binding_offsets(
+      iree_hal_amd_gpu_kernarg_copy_t*)(iree_hal_amd_gpu_kernarg_layout_binding_offsets(
                                             layout) +
                                         layout->binding_count);
 }
@@ -191,7 +186,8 @@ iree_status_t iree_hal_amd_gpu_kernarg_layout_allocate(
   *layout = plan;
   layout->parameters_offset = (uint32_t)parameters_offset;
   layout->host_allocator = host_allocator;
-  uint16_t* bindings = iree_hal_amd_gpu_kernarg_binding_offsets(layout);
+  uint16_t* bindings =
+      (uint16_t*)iree_hal_amd_gpu_kernarg_layout_binding_offsets(layout);
   iree_hal_amd_gpu_kernarg_copy_t* copies =
       iree_hal_amd_gpu_kernarg_copies(layout);
   iree_hal_amd_gpu_kernarg_copy_t* runtime_copies =
@@ -270,8 +266,9 @@ void iree_hal_amd_gpu_kernarg_layout_emplace(
   if (layout->byte_length) {
     memset(target, 0, layout->byte_length);
   }
-  const uint16_t* offsets = iree_hal_amd_gpu_kernarg_binding_offsets(layout);
-  for (uint16_t i = 0; i < layout->binding_count; ++i) {
+  const uint16_t* offsets =
+      iree_hal_amd_gpu_kernarg_layout_binding_offsets(layout);
+  for (uint16_t i = 0; binding_addresses && i < layout->binding_count; ++i) {
     iree_unaligned_store_le_u64((uint8_t*)target + offsets[i],
                                 binding_addresses[i]);
   }

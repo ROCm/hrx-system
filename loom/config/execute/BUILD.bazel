@@ -34,10 +34,18 @@ iree_string_list_flag(
 ]
 
 selects.config_setting_group(
+    name = "amdgpu_driver",
+    match_any = [
+        "//runtime/config/hal:driver_amd",
+        "//runtime/config/hal:driver_amdgpu",
+    ],
+)
+
+selects.config_setting_group(
     name = "iree_hal_amdgpu",
     match_all = [
+        ":amdgpu_driver",
         ":iree_hal",
-        "//runtime/config/hal:driver_amdgpu",
     ],
 )
 

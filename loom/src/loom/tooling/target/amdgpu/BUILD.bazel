@@ -22,6 +22,7 @@ loom_cc_library(
     deps = [
         "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu:iree_hal",
         "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:target_identity",
         "//loom/src/loom/target/arch/amdgpu:target_info_defs",

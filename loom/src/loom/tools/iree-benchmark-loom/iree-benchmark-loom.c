@@ -129,6 +129,14 @@ int main(int argc, char** argv) {
           .driver_name = IREE_SV("amdgpu"),
           .provider = loomc_amdgpu_iree_hal_target_provider(),
       },
+      {
+          .driver_name = IREE_SV("rdna"),
+          .provider = loomc_amdgpu_iree_hal_target_provider(),
+      },
+      {
+          .driver_name = IREE_SV("cdna"),
+          .provider = loomc_amdgpu_iree_hal_target_provider(),
+      },
 #endif  // IREE_BENCHMARK_LOOM_HAVE_AMDGPU
 #if IREE_BENCHMARK_LOOM_HAVE_SPIRV
       {

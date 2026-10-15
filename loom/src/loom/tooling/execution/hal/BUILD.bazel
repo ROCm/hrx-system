@@ -27,6 +27,7 @@ _TASK_DRIVER_COMPATIBLE_WITH = loom_config_compatible_with([
 
 _AMDGPU_EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:amdgpu_hal",
+    "//runtime/config/hal:driver_amdgpu",
 ])
 
 _AMDGPU_EXECUTION_TAGS = [
