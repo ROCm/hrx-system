@@ -20,9 +20,9 @@ def test_complete_f32_recipe_family_stays_compact() -> None:
         "approximate_f32_sin_turns",
         "approximate_f32_cos_turns",
     )
-    assert tuple(program.instruction_count for program in table.programs) == (47, 82, 78)
-    assert tuple(program.value_count for program in table.programs) == (48, 83, 79)
-    assert len(table.instructions) == 207
+    assert tuple(program.instruction_count for program in table.programs) == (47, 82, 76)
+    assert tuple(program.value_count for program in table.programs) == (48, 83, 77)
+    assert len(table.instructions) == 205
     assert len(table.descriptors) == 20
     assert len(table.constants) == 35
     assert table.maximum_value_count == 83
