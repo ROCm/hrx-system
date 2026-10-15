@@ -233,6 +233,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/tokenizer/normalizer:regex_replace",
         "//runtime/src/iree/tokenizer/normalizer:replace",
         "//runtime/src/iree/tokenizer/normalizer:sequence",
+        "//runtime/src/iree/tokenizer/normalizer:span",
         "//runtime/src/iree/tokenizer/normalizer:strip",
     ],
 )

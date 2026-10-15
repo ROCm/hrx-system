@@ -20,6 +20,7 @@
 #include "iree/tokenizer/normalizer/regex_replace.h"
 #include "iree/tokenizer/normalizer/replace.h"
 #include "iree/tokenizer/normalizer/sequence.h"
+#include "iree/tokenizer/normalizer/span.h"
 #include "iree/tokenizer/normalizer/strip.h"
 #include "iree/tokenizer/special_tokens.h"
 
@@ -298,6 +299,18 @@ iree_status_t iree_tokenizer_parse_huggingface_json(
         !iree_tokenizer_special_tokens_is_empty(&special_tokens_post_norm)) {
       iree_tokenizer_builder_set_special_tokens_post_norm(
           builder, &special_tokens_post_norm);
+    }
+  }
+
+  // Raw added tokens delimit independent invocations of the declared
+  // normalizer. Preserve that lifetime before composing pre-tokenizer
+  // transforms, whose prefix policy can span the entire original input.
+  if (iree_status_is_ok(status) && normalizer) {
+    iree_tokenizer_normalizer_t* span = NULL;
+    status =
+        iree_tokenizer_normalizer_span_allocate(normalizer, allocator, &span);
+    if (iree_status_is_ok(status)) {
+      normalizer = span;
     }
   }
 

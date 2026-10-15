@@ -26,7 +26,8 @@ std::string Expansion() {
 std::string Config(const std::string& normalizer,
                    const std::string& raw = "<aaaaaaaaa!>",
                    const std::string& normalized = "[N]",
-                   const std::string& merges = "[]") {
+                   const std::string& merges = "[]",
+                   const std::string& pre_tokenizer = "null") {
   return R"({"normalizer":)" + normalizer + R"(,
   "added_tokens":[
     {"id":8,"content":")" +
@@ -45,8 +46,9 @@ std::string Config(const std::string& normalizer,
       "TAIL":{"id":"TAIL","ids":[3],"tokens":["TAIL"]}}},
   "model":{"type":"BPE","vocab":{"c":0,"BOS":1,"EOS":2,"TAIL":3,
     "<":4,"?":5,"☃":6,"☂":7,"[":10,"N":11,"]":12,"cc":13,"c[":14,
-    "ᄀ":15,"ᅡ":16,"ᆨ":17,"가":18,"각":19,")" +
-         raw + R"(":8,")" + normalized + R"(":9},"merges":)" + merges + "}}";
+    "ᄀ":15,"ᅡ":16,"ᆨ":17,"가":18,"각":19,"▁":20,")" +
+         raw + R"(":8,")" + normalized + R"(":9},"merges":)" + merges +
+         R"(},"pre_tokenizer":)" + pre_tokenizer + "}";
 }
 
 std::string SpanConfig(const std::string& normalizer) {
@@ -245,5 +247,49 @@ TEST_F(TokenizerFinalizationTest, FailedNormalizedPrefixKeepsModelSpanOpen) {
 
 TEST_F(TokenizerFinalizationTest, NormalizedPrefixAtEofKeepsModelSpanOpen) {
   Check(SpanConfig("null"), "ccc[N", {13, 14, 11});
+}
+
+TEST_F(TokenizerFinalizationTest, DeclaredPrependRestartsAfterRawToken) {
+  Check(Config(R"({"type":"Prepend","prepend":"c"})", "<R>"), "c<R>c<R><R>c",
+        {0, 0, 8, 0, 0, 8, 8, 0, 0});
+}
+
+TEST_F(TokenizerFinalizationTest, RawTokensDoNotCreateEmptyNormalizationSpans) {
+  Check(Config(R"({"type":"Prepend","prepend":"c"})", "<R>"), "<R>c<R>",
+        {8, 0, 0, 8});
+}
+
+TEST_F(TokenizerFinalizationTest, NormalizedTokenDoesNotRestartNormalizer) {
+  Check(Config(R"({"type":"Prepend","prepend":"c"})", "<R>"), "[N]c[N]c",
+        {9, 9, 0});
+}
+
+TEST_F(TokenizerFinalizationTest, DeclaredSequenceRestartsAsOneComponent) {
+  Check(Config(R"({"type":"Sequence","normalizers":[
+                  {"type":"Prepend","prepend":"c"},
+                  {"type":"Replace","pattern":{"String":"c"},"content":"cc"}]})",
+               "<R>"),
+        "c<R>c", {0, 0, 0, 0, 8, 0, 0, 0, 0});
+}
+
+TEST_F(TokenizerFinalizationTest, DeclaredPrependWithMetaspace) {
+  Check(Config(R"({"type":"Prepend","prepend":"▁"})", "<R>", "[N]", "[]",
+               R"({"type":"Metaspace","replacement":"▁",
+                    "prepend_scheme":"always","split":true})"),
+        "c<R>c<R><R>c", {20, 0, 8, 20, 0, 8, 8, 20, 0});
+}
+
+TEST_F(TokenizerFinalizationTest, PreTokenizerPrefixPolicySurvivesRawToken) {
+  Check(Config(R"({"type":"Prepend","prepend":"c"})", "<R>", "[N]", "[]",
+               R"({"type":"Metaspace","replacement":"▁",
+                    "prepend_scheme":"first","split":true})"),
+        "c<R>c", {20, 0, 0, 8, 0, 0});
+}
+
+TEST_F(TokenizerFinalizationTest, RawTokenConsumesOriginalFirstPosition) {
+  Check(Config(R"({"type":"Prepend","prepend":"c"})", "<R>", "[N]", "[]",
+               R"({"type":"Metaspace","replacement":"▁",
+                    "prepend_scheme":"first","split":true})"),
+        "<R>c<R>c", {8, 0, 0, 8, 0, 0});
 }
 }  // namespace

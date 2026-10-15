@@ -253,6 +253,7 @@ iree_cc_library(
     iree::tokenizer::normalizer::regex_replace
     iree::tokenizer::normalizer::replace
     iree::tokenizer::normalizer::sequence
+    iree::tokenizer::normalizer::span
     iree::tokenizer::normalizer::strip
     iree::tokenizer::special_tokens
   PUBLIC
