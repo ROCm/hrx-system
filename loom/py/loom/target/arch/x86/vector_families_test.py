@@ -7,6 +7,7 @@
 from loom.target.arch.x86.descriptors import (
     X86_AVX2_DESCRIPTOR_SET,
     X86_AVX512_CORE_DESCRIPTOR_SET,
+    X86_AVX512_FP16_DESCRIPTOR_SET,
     X86_AVX_VNNI_INT8_DESCRIPTOR_SET,
 )
 from loom.target.arch.x86.vector_encoding import (
@@ -40,6 +41,7 @@ from loom.target.arch.x86.vector_families import (
     X86_VECTOR_INTEGER_NARROWING_FAMILIES,
     X86_VECTOR_INTEGER_WIDENING_FAMILIES,
 )
+from loom.target.low_descriptors import Constraint, ConstraintKind
 
 
 def test_extended_evex_opcode_maps_preserve_legacy_encoding_ids() -> None:
@@ -447,6 +449,29 @@ def test_avx512_direct_broadcasts_cover_every_width_and_payload_size() -> None:
         for vector_bit_width in AVX512_DIRECT_BROADCAST_VECTOR_BIT_WIDTHS
     }
     assert expected_keys <= descriptor_keys
+
+
+def test_vector_splat_materializations_replay_their_source_chain() -> None:
+    descriptors = (
+        *X86_AVX2_DESCRIPTOR_SET.descriptors,
+        *X86_AVX512_CORE_DESCRIPTOR_SET.descriptors,
+        *X86_AVX512_FP16_DESCRIPTOR_SET.descriptors,
+    )
+    rematerializable = Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1)
+    splat_descriptors = tuple(
+        descriptor for descriptor in descriptors if ".splat." in descriptor.semantic_tag
+    )
+    assert splat_descriptors
+    assert all(
+        rematerializable in descriptor.constraints for descriptor in splat_descriptors
+    )
+
+    descriptors_by_key = {descriptor.key: descriptor for descriptor in descriptors}
+    for key in (
+        "x86.avx2.vmovd.xmm.gpr32",
+        "x86.avx2.vmovq.xmm.gpr64",
+    ):
+        assert rematerializable in descriptors_by_key[key].constraints
 
 
 def test_avx512_predicate_descriptors_cover_every_core_width_and_element() -> None:

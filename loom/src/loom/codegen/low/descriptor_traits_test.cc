@@ -251,5 +251,43 @@ TEST(LowDescriptorTraitsTest, RematerializationIsPerResult) {
                                                             &descriptor, 2));
 }
 
+TEST(LowDescriptorTraitsTest, ProjectsRematerializationRecipeSource) {
+  const loom_low_descriptor_layout_t layout = {
+      .constraint_count = 1,
+  };
+  loom_low_operand_t operands[2] = {};
+  operands[0].role = LOOM_LOW_OPERAND_ROLE_RESULT;
+  operands[0].flags = LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE;
+  operands[1].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
+  operands[1].source_value_index = 3;
+  const uint16_t operand_indices[] = {0, 1};
+  const loom_low_constraint_t constraint = {
+      .kind = LOOM_LOW_CONSTRAINT_KIND_REMATERIALIZABLE,
+      .lhs_operand_index = 0,
+      .rhs_operand_index = 1,
+  };
+  const loom_low_descriptor_set_t descriptor_set = {
+      .descriptor_layouts = &layout,
+      .descriptor_layout_count = 1,
+      .operands = operands,
+      .operand_count = IREE_ARRAYSIZE(operands),
+      .operand_indices = operand_indices,
+      .operand_index_count = IREE_ARRAYSIZE(operand_indices),
+      .constraints = &constraint,
+      .constraint_count = 1,
+  };
+  const loom_low_descriptor_t descriptor = {
+      .operand_count = IREE_ARRAYSIZE(operands),
+      .result_count = 1,
+  };
+
+  EXPECT_EQ(loom_low_descriptor_result_rematerialization_source_operand(
+                &descriptor_set, &descriptor, 0),
+            3u);
+  EXPECT_EQ(loom_low_descriptor_result_rematerialization_source_operand(
+                &descriptor_set, &descriptor, 1),
+            LOOM_LOW_ID_NONE);
+}
+
 }  // namespace
 }  // namespace loom

@@ -52,6 +52,7 @@ from .common import (
     _vector_mask_compare_descriptor,
     _vector_operand,
     _vector_result,
+    _vector_splat_descriptor,
     _xmm_operand,
     _xmm_result,
 )
@@ -336,18 +337,14 @@ def _descriptors() -> tuple[Descriptor, ...]:
         ),
     )
     broadcast = _bind(
-        Descriptor(
+        _vector_splat_descriptor(
+            vector_bit_width=512,
             key="x86.avx512_fp16.vpbroadcastw.zmm.xmm",
             mnemonic="vpbroadcastw",
             semantic_tag="bits.splat.16.v512",
-            operands=(_vector_result(512), _xmm_operand("value")),
-            asm_forms=_asm(
-                mnemonic="vpbroadcastw.zmm.xmm",
-                results=("dst",),
-                operands=("value",),
-            ),
+            operand=_xmm_operand("value"),
             schedule_class=_vector_f32_schedule_class(512),
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+            asm_mnemonic="vpbroadcastw.zmm.xmm",
         ),
         native.VPBROADCASTW_VECTOR_UNARY,
         vector_bit_width=512,

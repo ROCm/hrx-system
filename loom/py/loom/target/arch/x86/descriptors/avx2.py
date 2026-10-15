@@ -38,6 +38,8 @@ from loom.target.arch.x86.vector_families import (
     VectorLaneFamily,
 )
 from loom.target.low_descriptors import (
+    Constraint,
+    ConstraintKind,
     Descriptor,
     DescriptorFlag,
     DescriptorSet,
@@ -485,6 +487,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
             mnemonic="vmovd",
             semantic_tag="bits.move.gpr32.xmm",
             operands=(_xmm_result(), _gpr32_operand("input")),
+            constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
             asm_forms=_asm(
                 mnemonic="vmovd.xmm.gpr32",
                 results=("dst",),
@@ -517,6 +520,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
             mnemonic="vmovq",
             semantic_tag="bits.move.gpr64.xmm",
             operands=(_xmm_result(), _gpr64_operand("input")),
+            constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
             asm_forms=_asm(
                 mnemonic="vmovq.xmm.gpr64",
                 results=("dst",),

@@ -1260,6 +1260,19 @@ static iree_status_t loom_low_verify_descriptor_constraints(
         }
         break;
       case LOOM_LOW_CONSTRAINT_KIND_REMATERIALIZABLE:
+        if (rhs != NULL) {
+          IREE_RETURN_IF_ERROR(loom_low_verify_binary_constraint(
+              constraint, "rematerializable"));
+        }
+        if (lhs->role != LOOM_LOW_OPERAND_ROLE_RESULT ||
+            (rhs != NULL &&
+             !loom_low_operand_role_is_packet_operand(rhs->role))) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "low rematerializable constraint requires a result lhs and "
+              "optional packet operand rhs");
+        }
+        break;
       case LOOM_LOW_CONSTRAINT_KIND_FOLDABLE:
         if (constraint->rhs_operand_index != LOOM_LOW_ID_NONE ||
             lhs->role != LOOM_LOW_OPERAND_ROLE_RESULT) {

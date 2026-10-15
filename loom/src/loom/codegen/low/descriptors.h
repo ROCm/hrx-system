@@ -339,7 +339,8 @@ typedef enum loom_low_constraint_kind_e {
   LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE = 3,
   // Result storage begins before the packet has consumed all untied inputs.
   LOOM_LOW_CONSTRAINT_KIND_EARLY_CLOBBER = 4,
-  // Descriptor may be rematerialized instead of spilled.
+  // Descriptor result may be rematerialized instead of spilled. An optional
+  // packet operand names the producer edge included in its replay recipe.
   LOOM_LOW_CONSTRAINT_KIND_REMATERIALIZABLE = 5,
   // Descriptor may participate in algebraic folding.
   LOOM_LOW_CONSTRAINT_KIND_FOLDABLE = 6,

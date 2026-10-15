@@ -85,6 +85,8 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_MUL_I32_DESCRIPTOR,
     TEST_LOW_NATIVE_COND_BR_I32_DESCRIPTOR,
+    TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+    TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR,
     TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
     TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
     TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
@@ -1479,6 +1481,82 @@ def test_compiler_projects_validated_rematerializable_results() -> None:
     compiled = compiler.compile_descriptor_set(descriptor_set)
 
     assert compiled.operand_rematerializable == [True]
+
+
+def test_compiler_accepts_rematerialization_recipe_source() -> None:
+    descriptor = replace(
+        TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.constraints == list(descriptor.constraints)
+    assert compiled.operand_rematerializable == [True, False]
+
+
+def test_compiler_rejects_rematerialization_recipe_same_operand() -> None:
+    descriptor = replace(
+        TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 0),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.rematerialize.i32' rematerializable constraint 0 cannot reference the same operand twice"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_rematerialization_recipe_result_source() -> None:
+    base = TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR
+    descriptor = replace(
+        base,
+        operands=(
+            base.operands[0],
+            replace(base.operands[0], field_name="other_result"),
+        ),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.rematerialize.i32' rematerializable constraint requires a packet operand rhs"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_rematerialization_recipe_source_with_ownership_tie() -> None:
+    base = TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR
+    descriptor = replace(
+        base,
+        constraints=(
+            *base.constraints[:-1],
+            Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.rematerialize.tied.explicit32' rematerializable result 0 cannot name a recipe source when its ownership tie already supplies one"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
 
 
 def _rematerializable_state_reader(

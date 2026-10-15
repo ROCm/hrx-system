@@ -803,6 +803,7 @@ def _vector_splat_descriptor(
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         operands=(_vector_result(vector_bit_width), operand),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0, 1),),
         asm_forms=_asm(
             mnemonic=(
                 _vector_asm_mnemonic(mnemonic, vector_bit_width)

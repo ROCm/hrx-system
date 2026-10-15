@@ -377,15 +377,15 @@ low.func.def target<test.low.core>(@test_target) @dense_slice_reload_cluster(%bl
 
 // ====
 
-// Tied packets consume their predecessors' storage. Rebuild the complete
-// ownership chain for each user so the clones consume distinct roots near
-// their uses.
+// Explicit replay edges and tied ownership edges form one recipe. Rebuild the
+// complete chain for each user so every clone receives a private constant root.
 // RUN: pass low-materialize-allocation{spill-storage-spaces=none}
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @rematerialize_tied_chain(%block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
-  %root = test.const.explicit32 3
+low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_chain(%block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %literal = test.const.i32 3
+  %root = test.rematerialize.explicit32 %literal
   %chain0 = test.rematerialize.tied.explicit32 %root
   %chain1 = test.rematerialize.tied.explicit32 %chain0
   %late = copy %seed : reg<test.i32> -> reg<test.explicit32>
@@ -406,25 +406,77 @@ low.func.def target<test.low.core>(@test_target) @rematerialize_tied_chain(%bloc
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @rematerialize_tied_chain(%block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_chain(%block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
   %late = copy %seed : reg<test.i32> -> reg<test.explicit32>
   %use0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
   %use1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
   %use2 = copy %block2 : reg<test.explicit32> -> reg<test.i32>
   %use3 = copy %late : reg<test.explicit32> -> reg<test.i32>
-  %root_remat$20 = test.const.explicit32 3
-  %chain0_remat$21 = test.rematerialize.tied.explicit32 %root_remat$20
-  %chain1_remat$22 = test.rematerialize.tied.explicit32 %chain0_remat$21
-  %chain_use0 = copy %chain1_remat$22 : reg<test.explicit32> -> reg<test.i32>
-  %root_remat$23 = test.const.explicit32 3
-  %chain0_remat$24 = test.rematerialize.tied.explicit32 %root_remat$23
-  %chain1_remat$25 = test.rematerialize.tied.explicit32 %chain0_remat$24
-  %chain_use1 = copy %chain1_remat$25 : reg<test.explicit32> -> reg<test.i32>
+  %literal_remat$21 = test.const.i32 3
+  %root_remat$22 = test.rematerialize.explicit32 %literal_remat$21
+  %chain0_remat$23 = test.rematerialize.tied.explicit32 %root_remat$22
+  %chain1_remat$24 = test.rematerialize.tied.explicit32 %chain0_remat$23
+  %chain_use0 = copy %chain1_remat$24 : reg<test.explicit32> -> reg<test.i32>
+  %literal_remat$25 = test.const.i32 3
+  %root_remat$26 = test.rematerialize.explicit32 %literal_remat$25
+  %chain0_remat$27 = test.rematerialize.tied.explicit32 %root_remat$26
+  %chain1_remat$28 = test.rematerialize.tied.explicit32 %chain0_remat$27
+  %chain_use1 = copy %chain1_remat$28 : reg<test.explicit32> -> reg<test.i32>
   %sum01 = test.add.i32 %use0, %use1
   %sum23 = test.add.i32 %use2, %use3
   %sum0123 = test.add.i32 %sum01, %sum23
   %sum_chain = test.add.i32 %chain_use0, %chain_use1
   %result = test.add.i32 %sum0123, %sum_chain
+  return %result
+}
+
+// ====
+
+// A richer recipe cannot replay %source after %seed is consumed. Preserve the
+// packet-only fallback and clone only %root at each repaired use.
+// RUN: pass low-materialize-allocation{spill-storage-spaces=none}
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_fallback(%block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %source = test.rematerialize.i32 %seed
+  %root = test.rematerialize.explicit32 %source
+  %next = move %seed : reg<test.i32> -> reg<test.i32>
+  %late = copy %next : reg<test.i32> -> reg<test.explicit32>
+  %use0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
+  %use1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
+  %use2 = copy %block2 : reg<test.explicit32> -> reg<test.i32>
+  %use3 = copy %late : reg<test.explicit32> -> reg<test.i32>
+  %root_use0 = copy %root : reg<test.explicit32> -> reg<test.i32>
+  %root_use1 = copy %root : reg<test.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum23 = test.add.i32 %use2, %use3
+  %sum0123 = test.add.i32 %sum01, %sum23
+  %sum_root = test.add.i32 %root_use0, %root_use1
+  %result = test.add.i32 %sum0123, %sum_root
+  return %result
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rematerialize_recipe_fallback(%block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %source = test.rematerialize.i32 %seed
+  %next = move %seed : reg<test.i32> -> reg<test.i32>
+  %late = copy %next : reg<test.i32> -> reg<test.explicit32>
+  %use0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
+  %use1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
+  %use2 = copy %block2 : reg<test.explicit32> -> reg<test.i32>
+  %use3 = copy %late : reg<test.explicit32> -> reg<test.i32>
+  %root_remat$20 = test.rematerialize.explicit32 %source
+  %root_use0 = copy %root_remat$20 : reg<test.explicit32> -> reg<test.i32>
+  %root_remat$21 = test.rematerialize.explicit32 %source
+  %root_use1 = copy %root_remat$21 : reg<test.explicit32> -> reg<test.i32>
+  %sum01 = test.add.i32 %use0, %use1
+  %sum23 = test.add.i32 %use2, %use3
+  %sum0123 = test.add.i32 %sum01, %sum23
+  %sum_root = test.add.i32 %root_use0, %root_use1
+  %result = test.add.i32 %sum0123, %sum_root
   return %result
 }
 

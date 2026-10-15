@@ -126,3 +126,27 @@ bool loom_low_descriptor_result_can_rematerialize(
           ->flags,
       LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE);
 }
+
+uint16_t loom_low_descriptor_result_rematerialization_source_operand(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, uint16_t result_index) {
+  IREE_ASSERT_ARGUMENT(descriptor_set);
+  IREE_ASSERT_ARGUMENT(descriptor);
+  if (result_index >= descriptor->result_count) {
+    return LOOM_LOW_ID_NONE;
+  }
+  const loom_low_descriptor_layout_t* layout =
+      loom_low_descriptor_layout(descriptor_set, descriptor);
+  for (uint16_t i = 0; i < layout->constraint_count; ++i) {
+    const loom_low_constraint_t* constraint =
+        &descriptor_set->constraints[layout->constraint_start + i];
+    if (constraint->kind != LOOM_LOW_CONSTRAINT_KIND_REMATERIALIZABLE ||
+        constraint->lhs_operand_index != result_index ||
+        constraint->rhs_operand_index == LOOM_LOW_ID_NONE) {
+      continue;
+    }
+    return loom_low_descriptor_operand_packet_index(
+        descriptor_set, descriptor, constraint->rhs_operand_index);
+  }
+  return LOOM_LOW_ID_NONE;
+}
