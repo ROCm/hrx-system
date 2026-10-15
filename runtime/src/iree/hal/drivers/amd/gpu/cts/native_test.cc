@@ -19,6 +19,8 @@
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/drivers/amd/registration/driver_module.h"
 #include "iree/hal/drivers/amd/status.h"
+#include "iree/hal/memory/fixed_block_pool.h"
+#include "iree/hal/memory/maintenance.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -585,6 +587,345 @@ INSTANTIATE_TEST_SUITE_P(Boundaries, GpuNativeTransferTest, ::testing::Bool(),
                          [](const ::testing::TestParamInfo<bool>& info) {
                            return info.param ? "ExplicitEmpty" : "Default";
                          });
+
+class GpuNativeAllocationTest : public GpuNativeTest {
+ protected:
+  void SetUp() override {
+    GpuNativeTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    Create();
+    if (HasFatalFailure()) {
+      return;
+    }
+    const iree_hal_pool_family_access_t access = {
+        .family = iree_hal_queue_family(queues_[0]),
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+        .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+    };
+    const iree_hal_pool_scope_t scope = {
+        .family_count = 1,
+        .families = &access,
+    };
+    iree_hal_slab_pool_options_t options;
+    iree_hal_slab_pool_options_initialize(&options);
+    IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &options,
+                                             iree_allocator_system(), &pool_));
+    iree_hal_memory_scope_t memory_scope;
+    IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+        group_, {.kind = IREE_HAL_MEMORY_SITE_PROGRAM, .family = access.family},
+        &memory_scope));
+    IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
+        pool_, memory_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS, &slot_));
+    for (auto& semaphore : semaphores_) {
+      CreateSemaphore(&semaphore);
+    }
+  }
+
+  void TearDown() override {
+    for (auto* semaphore : semaphores_) {
+      iree_hal_semaphore_release(semaphore);
+    }
+    iree_hal_pool_release(pool_);
+    GpuNativeTest::TearDown();
+  }
+
+  void Wait(iree_hal_semaphore_t* semaphore, uint64_t value = 1) {
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        semaphore, value, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+
+  void CreateFinitePool(iree_hal_pool_t** out_pool, uint32_t block_count = 1) {
+    iree_hal_fixed_block_pool_options_t options;
+    iree_hal_fixed_block_pool_options_initialize(&options);
+    options.block_size = 4096;
+    options.blocks_per_slab = block_count;
+    iree_hal_pool_reservation_request_t request;
+    IREE_ASSERT_OK(iree_hal_fixed_block_pool_query_backing_request(
+        pool_, &options, &request));
+    iree_hal_buffer_t* backing = nullptr;
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool_, request, iree_infinite_timeout(), &backing));
+    options.blocks_per_slab = 0;
+    IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
+        backing, 0, request.allocation_size, &options, iree_allocator_system(),
+        out_pool));
+    iree_hal_buffer_release(backing);
+  }
+
+  // Explicit native storage owner, kept alive through all borrowed roots.
+  iree_hal_pool_t* pool_ = nullptr;
+  // Resolved once from the pool's immutable access contract.
+  iree_hal_buffer_native_binding_slot_t slot_ = {};
+  // Independent allocation, transfer, release, and host-gate timelines.
+  std::array<iree_hal_semaphore_t*, 4> semaphores_ = {};
+};
+
+TEST_F(GpuNativeAllocationTest, PendingSubspansSurviveCrossQueueTransfers) {
+  uint64_t one = 1, two = 2;
+  std::array<iree_hal_pool_reservation_request_t, 2> requests;
+  requests.fill(iree_hal_make_pool_reservation_request(4096, 4));
+  std::array<iree_hal_buffer_t*, 2> roots = {}, spans = {};
+  IREE_ASSERT_OK(iree_hal_queue_alloca(
+      queues_[0], {1, &semaphores_[3], &one}, {1, &semaphores_[0], &one}, pool_,
+      requests.size(), requests.data(), roots.data()));
+  requests.fill({});
+  for (size_t i = 0; i < roots.size(); ++i) {
+    EXPECT_EQ(iree_hal_buffer_native_binding(roots[i], slot_).device_address,
+              0u);
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(roots[i], 17, 257,
+                                           iree_allocator_system(), &spans[i]));
+  }
+  // Failed capture must undo its prefix mark, even before backing exists.
+  iree_hal_buffer_t* duplicates[] = {roots[0], roots[0]};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[0], &one}, {},
+                              IREE_ARRAYSIZE(duplicates), duplicates));
+
+  std::array<std::array<uint8_t, 257>, 2> actual = {};
+  const std::array<uint8_t, 2> patterns = {0xA7, 0x53};
+  std::array<iree_hal_transfer_operation_t, 2> fills = {}, downloads = {};
+  for (size_t i = 0; i < roots.size(); ++i) {
+    fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    fills[i].fill.target_buffer = spans[i];
+    fills[i].fill.length = actual[i].size();
+    fills[i].fill.pattern = &patterns[i];
+    fills[i].fill.pattern_length = 1;
+    downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    downloads[i].download.source_buffer = spans[i];
+    downloads[i].download.target = actual[i].data();
+    downloads[i].download.length = actual[i].size();
+  }
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      queues_[1], {1, &semaphores_[1], &one}, {1, &semaphores_[1], &two},
+      downloads.size(), downloads.data(), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &semaphores_[0], &one},
+                                         {1, &semaphores_[1], &one},
+                                         fills.size(), fills.data(), nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[1], {1, &semaphores_[1], &two},
+                                         {1, &semaphores_[2], &one},
+                                         roots.size(), roots.data()));
+  for (auto* span : spans) {
+    iree_hal_buffer_release(span);
+  }
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores_[3], one, nullptr));
+  Wait(semaphores_[2]);
+  for (size_t i = 0; i < roots.size(); ++i) {
+    for (uint8_t byte : actual[i]) {
+      EXPECT_EQ(byte, i ? 0x53 : 0xA7);
+    }
+    EXPECT_EQ(iree_hal_buffer_native_binding(roots[i], slot_).device_address,
+              0u);
+    iree_hal_buffer_release(roots[i]);
+  }
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool_, &stats);
+  EXPECT_EQ(stats.reservation_count, 0u);
+}
+
+TEST_F(GpuNativeAllocationTest, CapacityWaitDoesNotBlockReleasingItsStorage) {
+  iree_hal_pool_t* finite_pool = nullptr;
+  CreateFinitePool(&finite_pool);
+  if (HasFatalFailure()) {
+    return;
+  }
+  const auto request = iree_hal_make_pool_reservation_request(4096, 4);
+  iree_hal_buffer_t* first = nullptr;
+  iree_hal_buffer_t* second = nullptr;
+  uint64_t one = 1, two = 2;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {},
+                                       {1, &semaphores_[0], &one}, finite_pool,
+                                       1, &request, &first));
+  Wait(semaphores_[0]);
+  const uint64_t address =
+      iree_hal_buffer_native_binding(first, slot_).device_address;
+  ASSERT_NE(address, 0u);
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[1], {},
+                                       {1, &semaphores_[1], &one}, finite_pool,
+                                       1, &request, &second));
+  // Join the initial service attempt, proving the next allocation is actually
+  // waiting on capacity before its producer is admitted to that same service.
+  iree_hal_memory_maintenance_call(
+      finite_pool->maintenance, [](void*) {}, nullptr);
+  uint64_t observed = 99;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphores_[1], &observed));
+  EXPECT_EQ(observed, 0u);
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[0], &one},
+                                         {1, &semaphores_[2], &one}, 1,
+                                         &first));
+  Wait(semaphores_[1]);
+  EXPECT_EQ(iree_hal_buffer_native_binding(second, slot_).device_address,
+            address);
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[1], {1, &semaphores_[1], &one},
+                                         {1, &semaphores_[2], &two}, 1,
+                                         &second));
+  iree_hal_buffer_release(first);
+  iree_hal_buffer_release(second);
+  Wait(semaphores_[2], two);
+  iree_hal_pool_release(finite_pool);
+}
+
+TEST_F(GpuNativeAllocationTest, RecycledBatchJoinsIndependentOwnerFrontiers) {
+  iree_hal_pool_t* finite_pool = nullptr;
+  CreateFinitePool(&finite_pool, 2);
+  if (HasFatalFailure()) {
+    return;
+  }
+  std::array<iree_hal_pool_reservation_request_t, 2> requests;
+  requests.fill(iree_hal_make_pool_reservation_request(4096, 4));
+  std::array<iree_hal_pool_reservation_t, 2> reservations;
+  std::array<iree_hal_pool_acquire_info_t, 2> infos;
+  iree_hal_pool_acquire_result_t result;
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
+      finite_pool, requests.size(), requests.data(), nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations.data(), infos.data(),
+      &result));
+  ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+  // Independent host participants return logical ownership before their
+  // outstanding accesses complete. The next queue acquisition must join both.
+  std::array<iree_async_axis_t, 2> axes;
+  for (size_t i = 0; i < axes.size(); ++i) {
+    axes[i] = iree_async_axis_make(1, 0, IREE_ASYNC_CAUSAL_DOMAIN_HOST, i);
+    IREE_ASSERT_OK(
+        iree_async_frontier_tracker_register_axis(tracker_, axes[i], nullptr));
+    CompletedFrontier returned = {};
+    iree_async_frontier_initialize(
+        iree_async_fixed_frontier_as_frontier(&returned), 2);
+    returned.entry_count = 1;
+    returned.entries[0] = {axes[i], 1};
+    iree_hal_pool_release_reservations(
+        finite_pool, 1, &reservations[i],
+        iree_async_fixed_frontier_as_frontier(&returned));
+  }
+  std::array<iree_hal_buffer_t*, 2> roots = {};
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(
+      queues_[0], {}, {1, &semaphores_[0], &one}, finite_pool, requests.size(),
+      requests.data(), roots.data()));
+  iree_hal_memory_maintenance_call(
+      finite_pool->maintenance, [](void*) {}, nullptr);
+  uint64_t observed = 99;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphores_[0], &observed));
+  EXPECT_EQ(observed, 0u);
+  iree_async_frontier_tracker_advance(tracker_, axes[1], 1);
+  iree_hal_memory_maintenance_call(
+      finite_pool->maintenance, [](void*) {}, nullptr);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphores_[0], &observed));
+  EXPECT_EQ(observed, 0u);
+  iree_async_frontier_tracker_advance(tracker_, axes[0], 1);
+  Wait(semaphores_[0]);
+  for (auto* root : roots) {
+    EXPECT_NE(iree_hal_buffer_native_binding(root, slot_).device_address, 0u);
+  }
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[1], {1, &semaphores_[0], &one},
+                                         {1, &semaphores_[1], &one},
+                                         roots.size(), roots.data()));
+  for (auto* root : roots) {
+    iree_hal_buffer_release(root);
+  }
+  Wait(semaphores_[1]);
+  iree_hal_pool_release(finite_pool);
+  for (auto axis : axes) {
+    iree_async_frontier_tracker_retire_axis(
+        tracker_, axis, iree_status_from_code(IREE_STATUS_CANCELLED));
+  }
+}
+
+TEST_F(GpuNativeAllocationTest, ReleaseTransactionSpansIndependentPools) {
+  std::array<iree_hal_pool_t*, 2> pools = {};
+  for (auto& pool : pools) {
+    CreateFinitePool(&pool);
+  }
+  if (HasFatalFailure()) {
+    return;
+  }
+  const auto request = iree_hal_make_pool_reservation_request(4096, 4);
+  std::array<iree_hal_buffer_t*, 2> roots = {};
+  std::array<uint64_t, 2> values = {1, 1};
+  for (size_t i = 0; i < roots.size(); ++i) {
+    IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[i], {},
+                                         {1, &semaphores_[i], &values[i]},
+                                         pools[i], 1, &request, &roots[i]));
+  }
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(
+      queues_[0], {2, semaphores_.data(), values.data()},
+      {1, &semaphores_[2], &one}, roots.size(), roots.data()));
+  for (auto* root : roots) {
+    iree_hal_buffer_release(root);
+  }
+  Wait(semaphores_[2]);
+  for (auto* pool : pools) {
+    iree_hal_pool_stats_t stats;
+    iree_hal_pool_query_stats(pool, &stats);
+    EXPECT_EQ(stats.reservation_count, 0u);
+    iree_hal_pool_release(pool);
+  }
+}
+
+TEST_F(GpuNativeAllocationTest, RejectedBatchLeavesOutputsAndPoolUntouched) {
+  iree_hal_pool_t* finite_pool = nullptr;
+  CreateFinitePool(&finite_pool);
+  if (HasFatalFailure()) {
+    return;
+  }
+  const iree_hal_pool_reservation_request_t requests[] = {
+      iree_hal_make_pool_reservation_request(4096, 4),
+      iree_hal_make_pool_reservation_request(4097, 4),
+  };
+  // Use existing live objects as sentinels; no output ownership transfers on
+  // synchronous rejection of a request the finite pool can never satisfy.
+  iree_hal_buffer_t* sentinel = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, requests[0], iree_infinite_timeout(), &sentinel));
+  std::array<iree_hal_buffer_t*, 2> outputs = {sentinel, sentinel};
+  uint64_t one = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_queue_alloca(queues_[0], {}, {1, &semaphores_[0], &one},
+                            finite_pool, IREE_ARRAYSIZE(requests), requests,
+                            outputs.data()));
+  for (auto* output : outputs) {
+    EXPECT_EQ(output, sentinel);
+  }
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(finite_pool, &stats);
+  EXPECT_EQ(stats.reservation_count, 0u);
+  uint64_t observed = 99;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphores_[0], &observed));
+  EXPECT_EQ(observed, 0u);
+  iree_hal_buffer_release(sentinel);
+  iree_hal_pool_release(finite_pool);
+}
+
+TEST_F(GpuNativeAllocationTest, FailedReleaseDependencyPreservesReservation) {
+  const auto request = iree_hal_make_pool_reservation_request(4096, 4);
+  iree_hal_buffer_t* root = nullptr;
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(
+      queues_[0], {}, {1, &semaphores_[0], &one}, pool_, 1, &request, &root));
+  Wait(semaphores_[0]);
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[3], &one},
+                                         {1, &semaphores_[1], &one}, 1, &root));
+  iree_hal_semaphore_fail(
+      semaphores_[3], iree_make_status(IREE_STATUS_ABORTED, "producer failed"));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_semaphore_wait(semaphores_[1], one, iree_infinite_timeout(),
+                              IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_NE(iree_hal_buffer_native_binding(root, slot_).device_address, 0u);
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool_, &stats);
+  EXPECT_EQ(stats.reservation_count, 1u);
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[1], {1, &semaphores_[0], &one},
+                                         {1, &semaphores_[2], &one}, 1, &root));
+  iree_hal_buffer_release(root);
+  Wait(semaphores_[2]);
+  iree_hal_pool_query_stats(pool_, &stats);
+  EXPECT_EQ(stats.reservation_count, 0u);
+}
 
 TEST_F(GpuNativeTest, AdmissionFailureReachesSignalsAndPreservesQueueProgress) {
   Create();

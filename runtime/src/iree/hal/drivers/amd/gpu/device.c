@@ -14,6 +14,7 @@
 #include "iree/base/threading/notification.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
+#include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/umq/queue.h"
 #include "iree/hal/drivers/amd/status.h"
@@ -60,6 +61,8 @@ typedef struct iree_hal_amd_gpu_device_t {
     // One service for cold memory, executable cleanup, and deferred
     // publication.
     iree_hal_memory_maintenance_t* service;
+    // Shared queue-allocation captures and transient-root metadata.
+    iree_hal_amd_gpu_allocation_context_t allocations;
     // Capacity notification driven by the existing shared proactor.
     iree_async_notification_t* notification;
     // Exact-family address and usage requirements for the shared backend.
@@ -334,6 +337,10 @@ static bool iree_hal_amd_gpu_device_release_children(
     iree_hal_queue_release(device->queues[i]);
     device->queues[i] = NULL;
   }
+  if (device->memory.service) {
+    iree_hal_amd_gpu_allocation_context_deinitialize(
+        &device->memory.allocations);
+  }
   iree_hal_memory_maintenance_release(device->memory.service);
   iree_async_notification_release(device->memory.notification);
   iree_async_proactor_pool_entry_release(device->proactor_entry);
@@ -488,6 +495,11 @@ iree_status_t iree_hal_amd_gpu_device_create(
   if (iree_status_is_ok(status)) {
     status = iree_hal_memory_maintenance_thread_create(affinity, host_allocator,
                                                        &device->memory.service);
+    if (iree_status_is_ok(status)) {
+      iree_hal_amd_gpu_allocation_context_initialize(
+          (iree_hal_device_t*)device, context, device->memory.service,
+          host_allocator, &device->memory.allocations);
+    }
   }
   iree_hal_amd_gpu_pm4_umq_queue_options_t queue_options = {
       .native = {.type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
@@ -500,6 +512,7 @@ iree_status_t iree_hal_amd_gpu_device_create(
                  .ring_byte_length = options->pm4.ring_byte_length},
       .memory = &device->memory.control,
       .service = device->memory.service,
+      .allocations = &device->memory.allocations,
       .retirement_capacity = options->pm4.retirement_capacity,
       .argument_capacity = options->pm4.argument_capacity,
       .capture_block_size = options->pm4.capture_block_size,
@@ -565,6 +578,7 @@ static void iree_hal_amd_gpu_device_replace_channel_provider(
 
 static void iree_hal_amd_gpu_device_trim_caches(void* user_data) {
   iree_hal_amd_gpu_device_t* device = user_data;
+  iree_arena_block_pool_trim(&device->memory.allocations.blocks);
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     iree_hal_amd_gpu_pm4_umq_queue_trim(device->queues[i]);
   }

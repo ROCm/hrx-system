@@ -203,27 +203,9 @@ static void iree_hal_amd_gpu_pm4_umq_complete(
 static void iree_hal_amd_gpu_pm4_umq_fail_signals(
     iree_hal_amd_gpu_pm4_umq_queue_t* queue, iree_hal_semaphore_list_t signals,
     iree_status_t status) {
-  char message[1024] = {0};
-  iree_host_size_t message_length = 0;
-  iree_status_format(status, sizeof(message), message, &message_length);
-  const iree_hal_device_driver_failure_event_t payload = {
-      .record_length = sizeof(payload),
-      .abi_version = IREE_HAL_DEVICE_DRIVER_FAILURE_EVENT_ABI_VERSION_0,
-      .status_code = iree_status_code(status),
-      .message = iree_make_string_view(
-          message, iree_min(message_length, sizeof(message) - 1)),
-  };
-  iree_hal_device_event_t event = iree_hal_device_event_default();
-  event.type = IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE;
-  event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
-  event.source.device = queue->base.queue_family->device;
-  event.source.driver_id = IREE_SV("amd");
-  event.payload = iree_make_const_byte_span(&payload, sizeof(payload));
-  iree_hal_device_event_sink_publish(queue->context->event_sink, &event);
-  for (iree_host_size_t i = 0; i < signals.count; ++i) {
-    iree_hal_semaphore_fail(signals.semaphores[i], iree_status_clone(status));
-  }
-  iree_status_free(status);
+  iree_hal_amd_gpu_context_report_status(
+      queue->context, queue->base.queue_family->device, status);
+  iree_hal_semaphore_list_fail(signals, status);
 }
 
 static void iree_hal_amd_gpu_pm4_umq_abandon(
@@ -1598,20 +1580,25 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_flush(
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_alloca(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
     iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
     iree_hal_buffer_t** out_buffers) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 queue allocation is not admitted");
+  iree_hal_amd_gpu_pm4_umq_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_umq_check_acceptance(queue));
+  return iree_hal_amd_gpu_queue_alloca(queue->options.allocations, waits,
+                                       signals, pool, count, requests,
+                                       out_buffers);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_dealloca(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_host_size_t count,
     iree_hal_buffer_t* const* buffers) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 queue deallocation is not admitted");
+  iree_hal_amd_gpu_pm4_umq_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_umq_check_acceptance(queue));
+  return iree_hal_amd_gpu_queue_dealloca(queue->options.allocations, waits,
+                                         signals, count, buffers);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_umq_queue_transfer(

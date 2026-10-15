@@ -9,6 +9,28 @@
 
 iree_add_all_subdirs()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    allocation
+  HDRS
+    "allocation.h"
+  SRCS
+    "allocation.c"
+  DEPS
+    ::host_wait
+    iree::async
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+    iree::hal::drivers::amd::fabric::transient_buffer
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+endif()
+
 iree_cc_library(
   NAME
     host_wait

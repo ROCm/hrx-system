@@ -8,6 +8,28 @@
 
 #include "iree/hal/drivers/amd/status.h"
 
+void iree_hal_amd_gpu_context_report_status(
+    const iree_hal_amd_gpu_context_t* context, iree_hal_device_t* device,
+    const iree_status_t status) {
+  char message[1024] = {0};
+  iree_host_size_t message_length = 0;
+  iree_status_format(status, sizeof(message), message, &message_length);
+  const iree_hal_device_driver_failure_event_t payload = {
+      .record_length = sizeof(payload),
+      .abi_version = IREE_HAL_DEVICE_DRIVER_FAILURE_EVENT_ABI_VERSION_0,
+      .status_code = iree_status_code(status),
+      .message = iree_make_string_view(
+          message, iree_min(message_length, sizeof(message) - 1)),
+  };
+  iree_hal_device_event_t event = iree_hal_device_event_default();
+  event.type = IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE;
+  event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
+  event.source.device = device;
+  event.source.driver_id = IREE_SV("amd");
+  event.payload = iree_make_const_byte_span(&payload, sizeof(payload));
+  iree_hal_device_event_sink_publish(context->event_sink, &event);
+}
+
 void iree_hal_amd_gpu_context_report(const iree_hal_amd_gpu_context_t* context,
                                      amdf_status_t status,
                                      const char* operation) {

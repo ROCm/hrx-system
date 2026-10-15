@@ -60,6 +60,7 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::image::hip_images
     iree::hal::drivers::amd::registration
     iree::hal::drivers::amd::status
+    iree::hal::memory::fixed_block_pool
     iree::hal::memory::maintenance
     iree::testing::gtest
     iree::testing::gtest_main

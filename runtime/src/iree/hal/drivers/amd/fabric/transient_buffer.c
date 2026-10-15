@@ -4,26 +4,27 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amd/xdna/transient_buffer.h"
+#include "iree/hal/drivers/amd/fabric/transient_buffer.h"
 
 #include "iree/base/threading/mutex.h"
 
-typedef enum iree_hal_amd_xdna_transient_buffer_deallocation_state_e {
-  IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE = 0,
-  IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING = 1,
-  IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE = 2,
-} iree_hal_amd_xdna_transient_buffer_deallocation_state_t;
+typedef enum iree_hal_amd_fabric_transient_buffer_deallocation_state_e {
+  IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE = 0,
+  IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING = 1,
+  IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE = 2,
+} iree_hal_amd_fabric_transient_buffer_deallocation_state_t;
 
 // Vtable dispatch for forwarding to the committed buffer's implementation.
 // Equivalent to IREE_HAL_VTABLE_DISPATCH from detail.h but accessible from
 // this driver-private implementation (detail.h is module-private to HAL core).
 static inline const iree_hal_buffer_vtable_t*
-iree_hal_amd_xdna_transient_buffer_committed_vtable(iree_hal_buffer_t* buffer) {
+iree_hal_amd_fabric_transient_buffer_committed_vtable(
+    iree_hal_buffer_t* buffer) {
   return (const iree_hal_buffer_vtable_t*)((const iree_hal_resource_t*)buffer)
       ->vtable;
 }
 
-struct iree_hal_amd_xdna_transient_buffer_t {
+struct iree_hal_amd_fabric_transient_buffer_t {
   // Base HAL buffer resource exposed to callers.
   iree_hal_buffer_t base;
 
@@ -33,7 +34,7 @@ struct iree_hal_amd_xdna_transient_buffer_t {
   // Borrowed reusable storage pool owned by |device|.
   iree_arena_block_pool_t* block_pool;
 
-  // Whole block containing this wrapper and its native table.
+  // Whole reusable block, or NULL for an oversized native table allocation.
   iree_arena_block_t* storage_block;
 
   // Stable nonzero id used to join profile rows for this wrapper lifetime.
@@ -62,7 +63,7 @@ struct iree_hal_amd_xdna_transient_buffer_t {
   bool reservation_armed;
 
   // State controlling exclusive queue deallocation capture.
-  iree_hal_amd_xdna_transient_buffer_deallocation_state_t deallocation_state;
+  iree_hal_amd_fabric_transient_buffer_deallocation_state_t deallocation_state;
 
   // Source-sized native table shared by subspans made before commitment. The
   // caller orders native reads after commit and before decommit. Trailing
@@ -70,21 +71,23 @@ struct iree_hal_amd_xdna_transient_buffer_t {
   iree_hal_buffer_native_binding_t bindings[];
 };
 
-static const iree_hal_buffer_vtable_t iree_hal_amd_xdna_transient_buffer_vtable;
+static const iree_hal_buffer_vtable_t
+    iree_hal_amd_fabric_transient_buffer_vtable;
 
-static iree_hal_amd_xdna_transient_buffer_t*
-iree_hal_amd_xdna_transient_buffer_cast(iree_hal_buffer_t* buffer) {
-  return (iree_hal_amd_xdna_transient_buffer_t*)buffer;
+static iree_hal_amd_fabric_transient_buffer_t*
+iree_hal_amd_fabric_transient_buffer_cast(iree_hal_buffer_t* buffer) {
+  return (iree_hal_amd_fabric_transient_buffer_t*)buffer;
 }
 
 static const iree_hal_buffer_binding_layout_t*
-iree_hal_amd_xdna_transient_buffer_binding_layout(const iree_hal_pool_t* pool) {
+iree_hal_amd_fabric_transient_buffer_binding_layout(
+    const iree_hal_pool_t* pool) {
   return pool->memory_contract ? &pool->memory_contract->binding_layout
                                : iree_hal_heap_buffer_binding_layout();
 }
 
-static iree_status_t iree_hal_amd_xdna_transient_buffer_retain_host_backing(
-    iree_hal_amd_xdna_transient_buffer_t* buffer,
+static iree_status_t iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+    iree_hal_amd_fabric_transient_buffer_t* buffer,
     iree_hal_pool_reservation_view_t* out_backing) {
   iree_slim_mutex_lock(&buffer->mutex);
   if (IREE_UNLIKELY(!buffer->backing_committed)) {
@@ -100,7 +103,7 @@ static iree_status_t iree_hal_amd_xdna_transient_buffer_retain_host_backing(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_xdna_transient_buffer_create(
+iree_status_t iree_hal_amd_fabric_transient_buffer_create(
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
     iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
@@ -119,30 +122,29 @@ iree_status_t iree_hal_amd_xdna_transient_buffer_create(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   const iree_hal_buffer_binding_layout_t* binding_layout =
-      iree_hal_amd_xdna_transient_buffer_binding_layout(source_pool);
+      iree_hal_amd_fabric_transient_buffer_binding_layout(source_pool);
   iree_host_size_t storage_size = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, IREE_STRUCT_LAYOUT(
-              sizeof(iree_hal_amd_xdna_transient_buffer_t), &storage_size,
+              sizeof(iree_hal_amd_fabric_transient_buffer_t), &storage_size,
               IREE_STRUCT_FIELD_FAM(binding_layout->byte_length, uint8_t)));
-  if (IREE_UNLIKELY(storage_size > block_pool->usable_block_size)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "XDNA transient wrapper requires %" PRIhsz
-                            " bytes but queue blocks provide %" PRIhsz,
-                            storage_size, block_pool->usable_block_size);
-  }
-
   iree_arena_block_t* storage_block = NULL;
-  iree_hal_amd_xdna_transient_buffer_t* buffer = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_arena_block_pool_acquire(block_pool, &storage_block,
-                                        (void**)&buffer));
+  iree_hal_amd_fabric_transient_buffer_t* buffer = NULL;
+  if (IREE_LIKELY(storage_size <= block_pool->usable_block_size)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_arena_block_pool_acquire(block_pool, &storage_block,
+                                          (void**)&buffer));
+  } else {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_allocator_malloc(block_pool->block_allocator, storage_size,
+                                  (void**)&buffer));
+  }
 
   iree_hal_buffer_initialize(
       placement, /*allocated_buffer=*/&buffer->base, allocation_size,
       /*byte_offset=*/0, byte_length, memory_type, allowed_access,
-      allowed_usage, &iree_hal_amd_xdna_transient_buffer_vtable, &buffer->base);
+      allowed_usage, &iree_hal_amd_fabric_transient_buffer_vtable,
+      &buffer->base);
   buffer->base.memory.bindings = buffer->bindings;
   buffer->base.memory.contract = source_pool->memory_contract;
   buffer->base.host_binding_index = binding_layout->host_binding_index;
@@ -160,7 +162,7 @@ iree_status_t iree_hal_amd_xdna_transient_buffer_create(
   memset(&buffer->reservation, 0, sizeof(buffer->reservation));
   buffer->reservation_armed = false;
   buffer->deallocation_state =
-      IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
 
   *out_buffer = &buffer->base;
   IREE_TRACE_ZONE_END(z0);
@@ -168,20 +170,20 @@ iree_status_t iree_hal_amd_xdna_transient_buffer_create(
 }
 
 static iree_hal_buffer_allocation_profile_t
-iree_hal_amd_xdna_transient_buffer_allocation_profile(
+iree_hal_amd_fabric_transient_buffer_allocation_profile(
     iree_hal_buffer_t* base_buffer) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   return (iree_hal_buffer_allocation_profile_t){
       .id = buffer->profile_id,
   };
 }
 
-void iree_hal_amd_xdna_transient_buffer_attach_reservation(
+void iree_hal_amd_fabric_transient_buffer_attach_reservation(
     iree_hal_buffer_t* base_buffer, iree_hal_pool_t* pool,
     const iree_hal_pool_reservation_t* reservation) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   IREE_ASSERT_ARGUMENT(pool);
   IREE_ASSERT_ARGUMENT(reservation);
   iree_slim_mutex_lock(&buffer->mutex);
@@ -192,11 +194,11 @@ void iree_hal_amd_xdna_transient_buffer_attach_reservation(
   iree_slim_mutex_unlock(&buffer->mutex);
 }
 
-void iree_hal_amd_xdna_transient_buffer_stage_backing(
+void iree_hal_amd_fabric_transient_buffer_stage_backing(
     iree_hal_buffer_t* base_buffer,
     const iree_hal_pool_reservation_view_t* backing) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   IREE_ASSERT_ARGUMENT(backing);
   iree_slim_mutex_lock(&buffer->mutex);
   IREE_ASSERT_FALSE(buffer->backing_staged);
@@ -207,9 +209,10 @@ void iree_hal_amd_xdna_transient_buffer_stage_backing(
   iree_slim_mutex_unlock(&buffer->mutex);
 }
 
-void iree_hal_amd_xdna_transient_buffer_commit(iree_hal_buffer_t* base_buffer) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+void iree_hal_amd_fabric_transient_buffer_commit(
+    iree_hal_buffer_t* base_buffer) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_slim_mutex_lock(&buffer->mutex);
   IREE_ASSERT_TRUE(buffer->backing_staged);
   IREE_ASSERT_FALSE(buffer->backing_committed);
@@ -220,7 +223,7 @@ void iree_hal_amd_xdna_transient_buffer_commit(iree_hal_buffer_t* base_buffer) {
         buffer->bindings);
   } else {
     // Unscoped materialization qualifies only host access, whose slot may
-    // differ from the XDNA wrapper's single host representation.
+    // differ from the transient wrapper's single host representation.
     buffer->bindings[0] = iree_hal_buffer_memory_native_binding(
         &buffer->backing.memory,
         (iree_hal_buffer_native_binding_slot_t){
@@ -232,82 +235,83 @@ void iree_hal_amd_xdna_transient_buffer_commit(iree_hal_buffer_t* base_buffer) {
   iree_slim_mutex_unlock(&buffer->mutex);
 }
 
-static void iree_hal_amd_xdna_transient_buffer_decommit(
+static void iree_hal_amd_fabric_transient_buffer_decommit(
     iree_hal_buffer_t* base_buffer) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_slim_mutex_lock(&buffer->mutex);
   iree_hal_buffer_t* backing_buffer = buffer->backing.buffer;
   memset(&buffer->backing, 0, sizeof(buffer->backing));
   buffer->backing_staged = false;
   buffer->backing_committed = false;
-  memset(buffer->bindings, 0,
-         iree_hal_amd_xdna_transient_buffer_binding_layout(buffer->source_pool)
-             ->byte_length);
+  memset(
+      buffer->bindings, 0,
+      iree_hal_amd_fabric_transient_buffer_binding_layout(buffer->source_pool)
+          ->byte_length);
   iree_slim_mutex_unlock(&buffer->mutex);
   iree_hal_buffer_release(backing_buffer);
 }
 
-static iree_status_t iree_hal_amd_xdna_transient_buffer_begin_dealloca(
+static iree_status_t iree_hal_amd_fabric_transient_buffer_begin_dealloca(
     iree_hal_buffer_t* base_buffer, iree_hal_pool_t** out_pool) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_slim_mutex_lock(&buffer->mutex);
   iree_status_t status = iree_ok_status();
   if (buffer->deallocation_state !=
-      IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE) {
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE) {
     status = iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "transient buffer has already been queued for deallocation");
   } else {
     buffer->deallocation_state =
-        IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING;
+        IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING;
     *out_pool = buffer->source_pool;
   }
   iree_slim_mutex_unlock(&buffer->mutex);
   return status;
 }
 
-static void iree_hal_amd_xdna_transient_buffer_abort_dealloca(
+static void iree_hal_amd_fabric_transient_buffer_abort_dealloca(
     iree_hal_buffer_t* base_buffer) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_slim_mutex_lock(&buffer->mutex);
   if (buffer->deallocation_state ==
-      IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING) {
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING) {
     buffer->deallocation_state =
-        IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
+        IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
   }
   iree_slim_mutex_unlock(&buffer->mutex);
 }
 
-static void iree_hal_amd_xdna_transient_buffer_take_dealloca_reservation(
+static void iree_hal_amd_fabric_transient_buffer_take_dealloca_reservation(
     iree_hal_buffer_t* base_buffer, iree_hal_pool_t** out_pool,
     iree_hal_pool_reservation_t* out_reservation) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_slim_mutex_lock(&buffer->mutex);
   IREE_ASSERT_TRUE(
       buffer->deallocation_state ==
-      IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING);
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING);
   IREE_ASSERT_TRUE(buffer->reservation_armed);
   *out_pool = buffer->source_pool;
   *out_reservation = buffer->reservation;
   memset(&buffer->reservation, 0, sizeof(buffer->reservation));
   buffer->reservation_armed = false;
   buffer->deallocation_state =
-      IREE_HAL_AMD_XDNA_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE;
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE;
   iree_slim_mutex_unlock(&buffer->mutex);
 }
 
 // Releases an attached reservation exactly once. A wrapper destroyed before
 // explicit queue deallocation has no later device use because every submitted
 // operation retains it through terminal completion.
-static void iree_hal_amd_xdna_transient_buffer_release_reservation(
+static void iree_hal_amd_fabric_transient_buffer_release_reservation(
     iree_hal_buffer_t* base_buffer,
     const iree_async_frontier_t* death_frontier) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_hal_pool_t* pool = NULL;
   iree_hal_pool_reservation_t reservation;
   iree_slim_mutex_lock(&buffer->mutex);
@@ -328,39 +332,43 @@ static void iree_hal_amd_xdna_transient_buffer_release_reservation(
   }
 }
 
-static void iree_hal_amd_xdna_transient_buffer_destroy(
+static void iree_hal_amd_fabric_transient_buffer_destroy(
     iree_hal_buffer_t* base_buffer) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_hal_device_t* device = buffer->device;
   iree_arena_block_pool_t* block_pool = buffer->block_pool;
   iree_arena_block_t* storage_block = buffer->storage_block;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_amd_xdna_transient_buffer_decommit(base_buffer);
-  iree_hal_amd_xdna_transient_buffer_release_reservation(
+  iree_hal_amd_fabric_transient_buffer_decommit(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_release_reservation(
       base_buffer,
       /*death_frontier=*/NULL);
 
   iree_slim_mutex_deinitialize(&buffer->mutex);
-  iree_arena_block_pool_release(block_pool, storage_block, storage_block);
+  if (storage_block) {
+    iree_arena_block_pool_release(block_pool, storage_block, storage_block);
+  } else {
+    iree_allocator_free(block_pool->block_allocator, buffer);
+  }
   iree_hal_device_release(device);
   IREE_TRACE_ZONE_END(z0);
 }
 
-static iree_status_t iree_hal_amd_xdna_transient_buffer_export_range(
+static iree_status_t iree_hal_amd_fabric_transient_buffer_export_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length,
     iree_hal_external_storage_class_t requested_class,
     iree_hal_external_storage_t* out_storage,
     iree_hal_buffer_range_t* out_logical_range) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_hal_pool_reservation_view_t backing;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_xdna_transient_buffer_retain_host_backing(buffer, &backing));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
   iree_status_t status =
-      iree_hal_amd_xdna_transient_buffer_committed_vtable(backing.buffer)
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
           ->export_range(backing.buffer,
                          backing.byte_offset + local_byte_offset,
                          local_byte_length, requested_class, out_storage,
@@ -369,18 +377,18 @@ static iree_status_t iree_hal_amd_xdna_transient_buffer_export_range(
   return status;
 }
 
-static iree_status_t iree_hal_amd_xdna_transient_buffer_map_range(
+static iree_status_t iree_hal_amd_fabric_transient_buffer_map_range(
     iree_hal_buffer_t* base_buffer, iree_hal_mapping_mode_t mapping_mode,
     iree_hal_memory_access_t memory_access, iree_hal_buffer_map_flags_t flags,
     iree_device_size_t local_byte_offset, iree_device_size_t local_byte_length,
     iree_hal_buffer_mapping_t* mapping) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_hal_pool_reservation_view_t backing;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_xdna_transient_buffer_retain_host_backing(buffer, &backing));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
   iree_status_t status =
-      iree_hal_amd_xdna_transient_buffer_committed_vtable(backing.buffer)
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
           ->map_range(backing.buffer, mapping_mode, memory_access, flags,
                       backing.byte_offset + local_byte_offset,
                       local_byte_length, mapping);
@@ -402,32 +410,32 @@ static iree_status_t iree_hal_amd_xdna_transient_buffer_map_range(
   return status;
 }
 
-static iree_status_t iree_hal_amd_xdna_transient_buffer_unmap_range(
+static iree_status_t iree_hal_amd_fabric_transient_buffer_unmap_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length, iree_hal_buffer_mapping_t* mapping) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_hal_pool_reservation_view_t backing;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_xdna_transient_buffer_retain_host_backing(buffer, &backing));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
   iree_status_t status =
-      iree_hal_amd_xdna_transient_buffer_committed_vtable(backing.buffer)
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
           ->unmap_range(backing.buffer, backing.byte_offset + local_byte_offset,
                         local_byte_length, mapping);
   iree_hal_buffer_release(backing.buffer);
   return status;
 }
 
-static iree_status_t iree_hal_amd_xdna_transient_buffer_invalidate_range(
+static iree_status_t iree_hal_amd_fabric_transient_buffer_invalidate_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_hal_pool_reservation_view_t backing;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_xdna_transient_buffer_retain_host_backing(buffer, &backing));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
   iree_status_t status =
-      iree_hal_amd_xdna_transient_buffer_committed_vtable(backing.buffer)
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
           ->invalidate_range(backing.buffer,
                              backing.byte_offset + local_byte_offset,
                              local_byte_length);
@@ -435,16 +443,16 @@ static iree_status_t iree_hal_amd_xdna_transient_buffer_invalidate_range(
   return status;
 }
 
-static iree_status_t iree_hal_amd_xdna_transient_buffer_flush_range(
+static iree_status_t iree_hal_amd_fabric_transient_buffer_flush_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      iree_hal_amd_xdna_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_hal_pool_reservation_view_t backing;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_xdna_transient_buffer_retain_host_backing(buffer, &backing));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
   iree_status_t status =
-      iree_hal_amd_xdna_transient_buffer_committed_vtable(backing.buffer)
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
           ->flush_range(backing.buffer, backing.byte_offset + local_byte_offset,
                         local_byte_length);
   iree_hal_buffer_release(backing.buffer);
@@ -452,10 +460,10 @@ static iree_status_t iree_hal_amd_xdna_transient_buffer_flush_range(
 }
 
 static iree_hal_buffer_memory_view_t
-iree_hal_amd_xdna_transient_buffer_query_memory(
+iree_hal_amd_fabric_transient_buffer_query_memory(
     const iree_hal_buffer_t* base_buffer) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      (iree_hal_amd_xdna_transient_buffer_t*)base_buffer;
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      (iree_hal_amd_fabric_transient_buffer_t*)base_buffer;
   iree_hal_buffer_memory_view_t view = buffer->base.memory;
   iree_slim_mutex_lock(&buffer->mutex);
   if (buffer->backing_committed) {
@@ -468,10 +476,10 @@ iree_hal_amd_xdna_transient_buffer_query_memory(
 }
 
 static iree_hal_virtual_buffer_view_t
-iree_hal_amd_xdna_transient_buffer_query_virtual(
+iree_hal_amd_fabric_transient_buffer_query_virtual(
     const iree_hal_buffer_t* base_buffer) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      (iree_hal_amd_xdna_transient_buffer_t*)base_buffer;
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      (iree_hal_amd_fabric_transient_buffer_t*)base_buffer;
   iree_hal_virtual_buffer_view_t view = {0};
   iree_slim_mutex_lock(&buffer->mutex);
   if (buffer->backing_committed) {
@@ -483,13 +491,13 @@ iree_hal_amd_xdna_transient_buffer_query_virtual(
   return view;
 }
 
-static iree_status_t iree_hal_amd_xdna_transient_buffer_detach_mappings(
+static iree_status_t iree_hal_amd_fabric_transient_buffer_detach_mappings(
     iree_hal_buffer_t* base_buffer, uint32_t scope_id) {
-  iree_hal_amd_xdna_transient_buffer_t* buffer =
-      (iree_hal_amd_xdna_transient_buffer_t*)base_buffer;
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      (iree_hal_amd_fabric_transient_buffer_t*)base_buffer;
   iree_hal_pool_reservation_view_t backing;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_xdna_transient_buffer_retain_host_backing(buffer, &backing));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
   const iree_hal_memory_scope_t scope = {
       .domain = base_buffer->memory.contract->domain, .id = scope_id};
   iree_status_t status = iree_hal_virtual_buffer_detach(backing.buffer, scope);
@@ -498,25 +506,26 @@ static iree_status_t iree_hal_amd_xdna_transient_buffer_detach_mappings(
 }
 
 static const iree_hal_buffer_allocation_vtable_t
-    iree_hal_amd_xdna_transient_buffer_allocation_vtable = {
-        .profile = iree_hal_amd_xdna_transient_buffer_allocation_profile,
-        .begin_dealloca = iree_hal_amd_xdna_transient_buffer_begin_dealloca,
-        .abort_dealloca = iree_hal_amd_xdna_transient_buffer_abort_dealloca,
+    iree_hal_amd_fabric_transient_buffer_allocation_vtable = {
+        .profile = iree_hal_amd_fabric_transient_buffer_allocation_profile,
+        .begin_dealloca = iree_hal_amd_fabric_transient_buffer_begin_dealloca,
+        .abort_dealloca = iree_hal_amd_fabric_transient_buffer_abort_dealloca,
         .take_dealloca_reservation =
-            iree_hal_amd_xdna_transient_buffer_take_dealloca_reservation,
-        .decommit = iree_hal_amd_xdna_transient_buffer_decommit,
+            iree_hal_amd_fabric_transient_buffer_take_dealloca_reservation,
+        .decommit = iree_hal_amd_fabric_transient_buffer_decommit,
 };
 
 static const iree_hal_buffer_vtable_t
-    iree_hal_amd_xdna_transient_buffer_vtable = {
-        .destroy = iree_hal_amd_xdna_transient_buffer_destroy,
-        .export_range = iree_hal_amd_xdna_transient_buffer_export_range,
-        .map_range = iree_hal_amd_xdna_transient_buffer_map_range,
-        .unmap_range = iree_hal_amd_xdna_transient_buffer_unmap_range,
-        .invalidate_range = iree_hal_amd_xdna_transient_buffer_invalidate_range,
-        .flush_range = iree_hal_amd_xdna_transient_buffer_flush_range,
-        .query_memory = iree_hal_amd_xdna_transient_buffer_query_memory,
-        .query_virtual = iree_hal_amd_xdna_transient_buffer_query_virtual,
-        .detach_mappings = iree_hal_amd_xdna_transient_buffer_detach_mappings,
-        .allocation = &iree_hal_amd_xdna_transient_buffer_allocation_vtable,
+    iree_hal_amd_fabric_transient_buffer_vtable = {
+        .destroy = iree_hal_amd_fabric_transient_buffer_destroy,
+        .export_range = iree_hal_amd_fabric_transient_buffer_export_range,
+        .map_range = iree_hal_amd_fabric_transient_buffer_map_range,
+        .unmap_range = iree_hal_amd_fabric_transient_buffer_unmap_range,
+        .invalidate_range =
+            iree_hal_amd_fabric_transient_buffer_invalidate_range,
+        .flush_range = iree_hal_amd_fabric_transient_buffer_flush_range,
+        .query_memory = iree_hal_amd_fabric_transient_buffer_query_memory,
+        .query_virtual = iree_hal_amd_fabric_transient_buffer_query_virtual,
+        .detach_mappings = iree_hal_amd_fabric_transient_buffer_detach_mappings,
+        .allocation = &iree_hal_amd_fabric_transient_buffer_allocation_vtable,
 };

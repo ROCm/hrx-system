@@ -274,4 +274,41 @@ iree_cc_test(
 )
 endif()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    transient_buffer
+  HDRS
+    "transient_buffer.h"
+  SRCS
+    "transient_buffer.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal::arena
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    transient_buffer_test
+  SRCS
+    "transient_buffer_test.cc"
+  DEPS
+    ::transient_buffer
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+    iree::hal::memory::heap_pool
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

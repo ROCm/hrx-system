@@ -8,7 +8,6 @@
 
 #include "iree/hal/drivers/amd/fabric/buffer.h"
 #include "iree/hal/drivers/amd/xdna/barrier.h"
-#include "iree/hal/drivers/amd/xdna/transient_buffer.h"
 
 static void iree_hal_amd_xdna_transfer_buffers(
     const iree_hal_amd_xdna_transfer_t* transfer,

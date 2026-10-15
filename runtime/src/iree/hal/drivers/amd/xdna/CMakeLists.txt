@@ -256,24 +256,6 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
-    transient_buffer
-  HDRS
-    "transient_buffer.h"
-  SRCS
-    "transient_buffer.c"
-  DEPS
-    iree::async
-    iree::base
-    iree::base::internal::arena
-    iree::base::threading
-    iree::hal
-  PUBLIC
-)
-endif()
-
-if(AMDF_BUILD)
-iree_cc_library(
-  NAME
     command_buffer
   HDRS
     "command_buffer.h"
@@ -362,7 +344,6 @@ iree_cc_library(
     ::queue_service
     ::queue_storage
     ::semaphore
-    ::transient_buffer
     amdf::headers
     iree::async
     iree::base
@@ -370,6 +351,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amd::fabric::buffer
     iree::hal::drivers::amd::fabric::file_transfer
+    iree::hal::drivers::amd::fabric::transient_buffer
     iree::hal::drivers::amd::status
   PUBLIC
 )

@@ -83,6 +83,12 @@ void iree_hal_amd_gpu_context_report(const iree_hal_amd_gpu_context_t* context,
                                      amdf_status_t status,
                                      const char* operation);
 
+// Reports a captured HAL failure without consuming it. The caller still owns
+// propagation to its operation's completion signals.
+void iree_hal_amd_gpu_context_report_status(
+    const iree_hal_amd_gpu_context_t* context, iree_hal_device_t* device,
+    const iree_status_t status);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

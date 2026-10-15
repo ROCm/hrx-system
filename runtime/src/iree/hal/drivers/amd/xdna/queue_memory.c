@@ -6,7 +6,7 @@
 
 #include "iree/hal/drivers/amd/xdna/queue_admission.h"
 #include "iree/hal/drivers/amd/xdna/queue_state.h"
-#include "iree/hal/drivers/amd/xdna/transient_buffer.h"
+#include "iree/hal/drivers/amd/fabric/transient_buffer.h"
 
 void iree_hal_amd_xdna_operation_release_alloca_reservations(
     iree_hal_amd_xdna_operation_t* operation) {
@@ -99,20 +99,20 @@ static iree_status_t iree_hal_amd_xdna_operation_prepare_alloca_storage(
         operation->alloca.reservations,
         IREE_HAL_ASAN_RANGE_ADVICE_FLAG_ALLOCATED);
     for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
-      iree_hal_amd_xdna_transient_buffer_attach_reservation(
+      iree_hal_amd_fabric_transient_buffer_attach_reservation(
           operation->alloca.transient_buffers[i], operation->alloca.pool,
           &operation->alloca.reservations[i]);
     }
     operation->alloca.reservations_held = false;
     for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
-      iree_hal_amd_xdna_transient_buffer_stage_backing(
+      iree_hal_amd_fabric_transient_buffer_stage_backing(
           operation->alloca.transient_buffers[i],
           &operation->alloca.reservation_views[i]);
       iree_hal_buffer_release(operation->alloca.materialized_buffers[i]);
       operation->alloca.materialized_buffers[i] = NULL;
     }
     for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
-      iree_hal_amd_xdna_transient_buffer_commit(
+      iree_hal_amd_fabric_transient_buffer_commit(
           operation->alloca.transient_buffers[i]);
     }
     iree_hal_amd_xdna_operation_merge_memory_frontiers(operation);
@@ -464,7 +464,7 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
     const iree_hal_buffer_usage_t allowed_usage =
         pool->memory_contract ? pool->memory_contract->allowed_usage
                               : capabilities.supported_usage;
-    status = iree_hal_amd_xdna_transient_buffer_create(
+    status = iree_hal_amd_fabric_transient_buffer_create(
         placement, capabilities.memory_type, allowed_access, allowed_usage,
         request->allocation_size, request->allocation_size, pool,
         operation->metadata_block_pool,

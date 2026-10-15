@@ -9,6 +9,7 @@
 
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/completion.h"
+#include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 
 #ifdef __cplusplus
@@ -27,6 +28,8 @@ typedef struct iree_hal_amd_gpu_pm4_umq_queue_options_t {
   const iree_hal_amd_fabric_memory_options_t* memory;
   // Borrowed device-shared thread-backed service, including cold cleanup.
   iree_hal_memory_maintenance_t* service;
+  // Borrowed device-shared allocation executor, independent of publication.
+  iree_hal_amd_gpu_allocation_context_t* allocations;
   // Prepared physical cache-control encoding.
   iree_hal_amd_gpu_pm4_barrier_profile_t barriers;
   // Power-of-two number of simultaneously published native completion records.
