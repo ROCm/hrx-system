@@ -5,8 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <sys/mman.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <utility>
@@ -436,6 +438,75 @@ TEST_F(XdnaLinuxMemoryTest,
                 logical_byte_length),
             AMDF_STATUS_OK);
   EXPECT_EQ(first_import_bytes[1], 0x6C);
+}
+
+TEST_F(XdnaLinuxMemoryTest,
+       OwnedHostViewsSupportKernelIoAcrossIndependentMappingLifetimes) {
+  // Kernel I/O pins pages through the host view. CPU load/store accessibility
+  // alone does not establish that property for native device mappings.
+  const long page_size = sysconf(_SC_PAGESIZE);
+  ASSERT_GT(page_size, 0);
+  const uint64_t byte_length = static_cast<uint64_t>(page_size) * 2;
+  const amdf_memory_create_info_t create = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create),
+      .memory_profile_ordinal = FindMemoryProfileOrdinal(
+          AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_EXPORT |
+              AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
+          AMDF_MEMORY_FLAG_HOST_VISIBLE),
+      .access_count = 1,
+      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      .byte_length = byte_length,
+      .accesses = &memory_access_,
+  };
+  ASSERT_NE(create.memory_profile_ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
+  ASSERT_EQ(api_->memory_create(system_scope_, &create, &memories_[0]),
+            AMDF_STATUS_OK);
+  uint64_t device_address = 0;
+  ASSERT_EQ(api_->memory_query_address(
+                memories_[0], 0, AMDF_MEMORY_ADDRESS_XDNA_DMA, &device_address),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(MapMemory(memories_[0], 0, byte_length), AMDF_STATUS_OK);
+  auto* contents = static_cast<uint8_t*>(mapping_infos_[0].pointer);
+  std::memset(contents, 0x5A, byte_length);
+  std::array<uint8_t, 128> payload;
+  for (size_t i = 0; i < payload.size(); ++i) {
+    payload[i] = static_cast<uint8_t>(i * 3);
+  }
+  const uint64_t offset = static_cast<uint64_t>(page_size) - 17;
+  const amdf_memory_map_info_t map = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+      .structure_size = sizeof(map),
+      .byte_offset = offset,
+      .byte_length = payload.size(),
+      .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+  };
+  ASSERT_EQ(api_->memory_map(memories_[0], &map, &mappings_[1]),
+            AMDF_STATUS_OK);
+  mapping_infos_[1].type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO;
+  mapping_infos_[1].structure_size = sizeof(mapping_infos_[1]);
+  ASSERT_EQ(api_->host_mapping_query_info(mappings_[1], &mapping_infos_[1]),
+            AMDF_STATUS_OK);
+  iovec local = {payload.data(), payload.size()};
+  iovec remote = {mapping_infos_[1].pointer, payload.size()};
+  ASSERT_EQ(process_vm_writev(getpid(), &local, 1, &remote, 1, 0),
+            static_cast<ssize_t>(payload.size()));
+  EXPECT_EQ(std::memcmp(contents + offset, payload.data(), payload.size()), 0);
+  EXPECT_EQ(contents[offset - 1], 0x5A);
+  EXPECT_EQ(contents[offset + payload.size()], 0x5A);
+  ASSERT_EQ(api_->host_mapping_destroy(std::exchange(mappings_[0], nullptr)),
+            AMDF_STATUS_OK);
+  std::array<uint8_t, 128> readback;
+  local.iov_base = readback.data();
+  ASSERT_EQ(process_vm_readv(getpid(), &local, 1, &remote, 1, 0),
+            static_cast<ssize_t>(readback.size()));
+  EXPECT_EQ(readback, payload);
+  uint64_t retained_address = 0;
+  ASSERT_EQ(
+      api_->memory_query_address(memories_[0], 0, AMDF_MEMORY_ADDRESS_XDNA_DMA,
+                                 &retained_address),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(retained_address, device_address);
 }
 
 }  // namespace

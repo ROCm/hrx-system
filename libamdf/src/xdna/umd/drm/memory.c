@@ -9,6 +9,7 @@
 #include <drm/amdxdna_accel.h>
 #include <limits.h>
 #include <stdint.h>
+#include <sys/mman.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/platform/linux/dma_buf.h"
@@ -20,6 +21,13 @@
 #include "libamdf/src/xdna/umd/drm/memory_profile.h"
 
 amdf_status_t amdf_xdna_umd_memory_destroy(amdf_xdna_umd_memory_t* memory) {
+  if (memory->host_view.mapped_length) {
+    if (munmap(memory->host_view.base, memory->host_view.mapped_length) != 0) {
+      return amdf_linux_error(errno);
+    }
+    memory->host_view.base = NULL;
+    memory->host_view.mapped_length = 0;
+  }
   const amdf_status_t status = amdf_linux_xdna_buffer_deinitialize(
       memory->device->descriptor, &memory->buffer);
   if (amdf_status_is_ok(status)) {
@@ -32,7 +40,7 @@ void amdf_xdna_umd_memory_abandon(amdf_xdna_umd_memory_t* memory) {
   amdf_free(memory->device->host_allocator, memory);
 }
 
-static amdf_status_t amdf_linux_xdna_memory_query_dma_buf(
+static amdf_status_t amdf_linux_xdna_memory_prepare_host_view(
     amdf_xdna_umd_memory_t* memory, amdf_linux_dma_buf_info_t* out_info) {
   int descriptor = -1;
   amdf_status_t status = amdf_linux_xdna_buffer_export_dma_buf(
@@ -44,6 +52,20 @@ static amdf_status_t amdf_linux_xdna_memory_query_dma_buf(
   if (amdf_status_is_ok(status) &&
       info.byte_length != memory->buffer.byte_length) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+  }
+  if (amdf_status_is_ok(status)) {
+    // The GEM mapping establishes NPU SVA but uses VM_PFNMAP, which cannot be
+    // pinned by ordinary kernel I/O. The owned DMA-BUF exporter installs page
+    // references for this CPU alias. Both mappings name the same backing; the
+    // original GEM mapping and device address remain live and unchanged.
+    void* mapping = mmap(NULL, memory->buffer.byte_length,
+                         PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
+    if (mapping == MAP_FAILED) {
+      status = amdf_linux_error(errno);
+    } else {
+      memory->host_view.base = mapping;
+      memory->host_view.mapped_length = memory->buffer.byte_length;
+    }
   }
   const amdf_status_t close_status = amdf_linux_file_close(&descriptor);
   if (!amdf_status_is_ok(close_status)) {
@@ -215,6 +237,7 @@ amdf_status_t amdf_xdna_umd_memory_prepare_private(
         memory, 0, create_info->byte_length, &dma_address);
   }
   if (amdf_status_is_ok(status)) {
+    memory->host_view.base = memory->buffer.host_pointer;
     // The first device writer must not race dirty allocation-origin CPU lines.
     // Release only this private range, not other live allocations in the heap.
     amdf_linux_host_cache_transfer(memory->buffer.host_pointer,
@@ -295,6 +318,7 @@ amdf_status_t amdf_xdna_umd_memory_prepare_import(
         external_memory->byte_length, &dma_address);
   }
   if (amdf_status_is_ok(status)) {
+    memory->host_view.base = memory->buffer.host_pointer;
     if (import_info->origin == AMDF_MEMORY_NATIVE_IMPORT_ORIGIN_CONSTRUCTION) {
       // A peer allocator's native initialization can leave dirty CPU lines.
       // This unpublished memory_create transaction owns their initial release
@@ -455,10 +479,12 @@ amdf_status_t amdf_xdna_umd_memory_prepare(
   }
   if (amdf_status_is_ok(status) && !registers_host) {
     amdf_linux_dma_buf_info_t info;
-    status = amdf_linux_xdna_memory_query_dma_buf(memory, &info);
+    status = amdf_linux_xdna_memory_prepare_host_view(memory, &info);
     if (amdf_status_is_ok(status)) {
       memory->physical_backing_id = info.physical_backing_id;
     }
+  } else if (amdf_status_is_ok(status)) {
+    memory->host_view.base = memory->buffer.host_pointer;
   }
   const uint64_t byte_length =
       registers_host ? create_info->byte_length : native_byte_length;
@@ -500,7 +526,7 @@ amdf_status_t amdf_xdna_umd_memory_map(
     amdf_xdna_umd_host_mapping_result_t* out_result) {
   amdf_xdna_umd_host_mapping_result_t result = {0};
   result.flags = capabilities->supported_access;
-  result.pointer = (uint8_t*)memory->buffer.host_pointer +
+  result.pointer = (uint8_t*)memory->host_view.base +
                    memory->source_byte_offset + map_info->byte_offset;
   result.byte_length = map_info->byte_length;
   result.visibility = memory->host_visibility;
@@ -517,7 +543,7 @@ amdf_status_t amdf_xdna_umd_host_mapping_cache_control(
   // The public mapping boundary has already validated operation and range.
   (void)operation;
   const amdf_xdna_umd_memory_t* memory = (amdf_xdna_umd_memory_t*)mapping;
-  amdf_linux_host_cache_transfer((uint8_t*)memory->buffer.host_pointer +
+  amdf_linux_host_cache_transfer((uint8_t*)memory->host_view.base +
                                      memory->source_byte_offset +
                                      memory_byte_offset,
                                  byte_length, memory->device->cache_line_size);

@@ -19,7 +19,16 @@ struct amdf_xdna_umd_memory_t {
   uint64_t source_byte_offset;
   // Canonical identity of imported memory or provider-local created backing.
   amdf_physical_memory_id_t physical_backing_id;
-  // SHARE allocation with its persistent SVA mapping.
+  // CPU view independent of the persistent native execution mapping. Owned
+  // SYSTEM backing uses a DMA-BUF alias supporting kernel page-pinned I/O;
+  // public host mappings borrow it for the complete backing lifetime.
+  struct {
+    // Complete backing base used by public host views and cache operations.
+    void* base;
+    // Owned alias extent, or zero when borrowing the native/caller mapping.
+    size_t mapped_length;
+  } host_view;
+  // Native GEM attachment retaining its execution address and mapping.
   amdf_linux_xdna_buffer_t buffer;
 };
 

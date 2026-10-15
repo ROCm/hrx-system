@@ -1045,10 +1045,20 @@ native teardown; leaked host reservations can remain until process exit. The
 native lifetime policy describes supported reclamation boundaries, not a
 guarantee of reclamation when the native release operation itself fails.
 
-Host mappings are lightweight views of their memory's persistent native mapping.
+Host mappings are lightweight views of their memory's persistent CPU mapping.
 Destroying a valid view consumes its metadata and succeeds; actual native unmap
 belongs to final memory release. Neither views nor queue commands register a
 memory-use count, and premature memory release is undefined behavior.
+
+Linux XDNA-owned system backing retains its GEM mapping for NPU execution and
+provides a DMA-BUF alias for public host views. The GEM mapping establishes the
+device's address, but its `VM_PFNMAP` representation cannot supply ordinary
+kernel page pins. The DMA-BUF alias installs page references usable by direct
+file I/O while sharing the same physical backing. Construction prepares the
+alias using the export already needed for backing identity; final memory release
+unmaps it before releasing the native attachment. There is no payload copy or
+submission-time mapping. Registered storage borrows the caller's pages, and
+imported storage retains its exporter's mapping and host-access contract.
 
 Registered source storage remains caller-owned. A failed native detach does not
 prove the source may be recycled, even though its libamdf handle was consumed.

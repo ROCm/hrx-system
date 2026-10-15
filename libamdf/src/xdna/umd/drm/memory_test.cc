@@ -190,6 +190,24 @@ TEST_F(LinuxXdnaMemoryRollbackTest, OwnerCanReleasePartiallyPreparedBuffer) {
   ReleasePreparedState();
 }
 
+TEST_F(LinuxXdnaMemoryRollbackTest,
+       ReleasesOwnedHostAliasWhenNativeBackingReleaseFails) {
+  const amdf_memory_native_profile_t profile = QueryProfile(0);
+  const amdf_memory_native_create_info_t create_info = {.byte_length = 4096};
+  ASSERT_EQ(amdf_xdna_umd_memory_prepare(&device_, &profile, &create_info,
+                                         &memory_, &result_),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
+  void* alias = mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(alias, MAP_FAILED);
+  memory_->host_view.base = alias;
+  memory_->host_view.mapped_length = 4096;
+  ReleasePreparedState();
+  unsigned char residency = 0;
+  EXPECT_EQ(mincore(alias, 4096, &residency), -1);
+  EXPECT_EQ(errno, ENOMEM);
+}
+
 TEST_F(LinuxXdnaMemoryRollbackTest, FailedRegistrationLeavesCallerPagesAlone) {
   void* pages = mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -289,6 +307,7 @@ TEST(LinuxXdnaHostViewTest, BorrowsIndependentSubrangesWithoutAllocating) {
       .device = &device,
   };
   memory.buffer.host_pointer = backing;
+  memory.host_view.base = backing;
   memory.source_byte_offset = 17;
   const amdf_host_mapping_capabilities_t capabilities = {
       .supported_access =

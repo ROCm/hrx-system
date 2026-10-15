@@ -282,11 +282,15 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
                                        &map_info, &mappings[i], &views[i]),
               AMDF_STATUS_OK);
   }
-  EXPECT_EQ(views[0].pointer,
-            static_cast<uint8_t*>(memory->buffer.host_pointer) +
-                map_info.byte_offset);
+  EXPECT_EQ(views[0].pointer, static_cast<uint8_t*>(memory->host_view.base) +
+                                  map_info.byte_offset);
   EXPECT_EQ(views[0].pointer, views[1].pointer);
   std::memset(views[0].pointer, 0xA5, map_info.byte_length);
+  EXPECT_EQ(std::memcmp(views[0].pointer,
+                        static_cast<uint8_t*>(memory->buffer.host_pointer) +
+                            map_info.byte_offset,
+                        map_info.byte_length),
+            0);
   ASSERT_EQ(amdf_xdna_umd_host_mapping_cache_control(
                 mappings[0], AMDF_HOST_CACHE_OPERATION_FLUSH,
                 map_info.byte_offset, map_info.byte_length),
