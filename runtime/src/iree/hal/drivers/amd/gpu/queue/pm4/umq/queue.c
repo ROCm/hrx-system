@@ -352,7 +352,7 @@ typedef enum iree_hal_amd_gpu_pm4_publication_result_e {
 
 // The sole publisher performs no native call or host allocation here. Every
 // address/error check precedes committing either ring reservation. The caller
-// captured next before entry; immediate native retirement may free submission.
+// detached the entry before calling; immediate native retirement may free it.
 static iree_hal_amd_gpu_pm4_publication_result_t
 iree_hal_amd_gpu_pm4_umq_publish(
     iree_hal_amd_gpu_pm4_umq_queue_t* queue,
@@ -771,10 +771,14 @@ static void iree_hal_amd_gpu_pm4_umq_enqueue(
                                           &submission->publication)) {
     return;
   }
-  iree_hal_amd_gpu_publication_list_t remainder = {0};
-  if (iree_hal_amd_gpu_pm4_umq_process(queue, submission) !=
-      IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED) {
-    remainder.head = remainder.tail = &submission->publication;
+  iree_hal_amd_gpu_publication_entry_t* remainder =
+      iree_hal_amd_gpu_publisher_next(&queue->publisher);
+  if (remainder &&
+      iree_hal_amd_gpu_pm4_umq_process(
+          queue, iree_containerof(remainder, iree_hal_amd_gpu_pm4_submission_t,
+                                  publication)) ==
+          IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED) {
+    remainder = NULL;
   }
   if (iree_hal_amd_gpu_publisher_handoff(&queue->publisher, remainder) ||
       iree_atomic_load(&queue->native_failure, iree_memory_order_acquire)) {
@@ -797,21 +801,25 @@ static bool iree_hal_amd_gpu_pm4_umq_progress(void* user_data) {
   // Growth and this retired list belong exclusively to service. Completion
   // can return their final credit without another submission arriving.
   iree_hal_amd_gpu_pm4_umq_trim_arguments(queue);
-  iree_hal_amd_gpu_publication_list_t work =
-      iree_hal_amd_gpu_publisher_take(&queue->publisher);
   bool more = false;
-  if (work.head) {
+  if (iree_hal_amd_gpu_publisher_acquire_service(&queue->publisher)) {
     bool capacity = false;
-    for (uint32_t i = 0; work.head && i < 32 && !capacity; ++i) {
-      iree_hal_amd_gpu_publication_entry_t* next = work.head->next;
+    iree_hal_amd_gpu_publication_entry_t* current = NULL;
+    for (uint32_t i = 0; i < 32 && !capacity; ++i) {
+      if (!current) {
+        current = iree_hal_amd_gpu_publisher_next(&queue->publisher);
+      }
+      if (!current) {
+        break;
+      }
       iree_hal_amd_gpu_pm4_submission_t* submission = iree_containerof(
-          work.head, iree_hal_amd_gpu_pm4_submission_t, publication);
+          current, iree_hal_amd_gpu_pm4_submission_t, publication);
       const iree_hal_amd_gpu_pm4_publication_result_t result =
           iree_hal_amd_gpu_pm4_umq_process(queue, submission);
       iree_status_t status = iree_ok_status();
       switch (result) {
         case IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED:
-          work.head = next;
+          current = NULL;
           break;
         case IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY:
           capacity = true;
@@ -847,10 +855,10 @@ static bool iree_hal_amd_gpu_pm4_umq_progress(void* user_data) {
       }
       if (!iree_status_is_ok(status)) {
         iree_hal_amd_gpu_pm4_umq_abandon(queue, submission, status);
-        work.head = next;
+        current = NULL;
       }
     }
-    more = iree_hal_amd_gpu_publisher_handoff(&queue->publisher, work) &&
+    more = iree_hal_amd_gpu_publisher_handoff(&queue->publisher, current) &&
            !capacity;
     iree_hal_amd_gpu_pm4_umq_wake_shutdown(queue);
   }

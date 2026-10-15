@@ -12,7 +12,6 @@
 namespace {
 
 using Entry = iree_hal_amd_gpu_publication_entry_t;
-using List = iree_hal_amd_gpu_publication_list_t;
 
 // Measures only metadata handoff. Native encoding, doorbells, notifications,
 // device execution and retirement belong to end-to-end queue measurements.
@@ -23,16 +22,17 @@ void BM_IdleCaller(benchmark::State& state) {
   for (auto _ : state) {
     benchmark::DoNotOptimize(
         iree_hal_amd_gpu_publisher_enqueue(&publisher, &entry));
+    benchmark::DoNotOptimize(iree_hal_amd_gpu_publisher_next(&publisher));
     benchmark::DoNotOptimize(
-        iree_hal_amd_gpu_publisher_handoff(&publisher, {}));
+        iree_hal_amd_gpu_publisher_handoff(&publisher, nullptr));
   }
   iree_hal_amd_gpu_publisher_deinitialize(&publisher);
   state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_IdleCaller);
 
-// Captures a ready burst behind an active caller, detaches it in O(1), and
-// returns the owner to idle. Work execution and reclamation are excluded.
+// Captures a burst behind an active caller, detaches each entry, and returns
+// the owner to idle. Work execution and reclamation are excluded.
 void BM_ReadyBurst(benchmark::State& state) {
   iree_hal_amd_gpu_publisher_t publisher;
   iree_hal_amd_gpu_publisher_initialize(&publisher);
@@ -41,43 +41,54 @@ void BM_ReadyBurst(benchmark::State& state) {
   for (auto _ : state) {
     benchmark::DoNotOptimize(
         iree_hal_amd_gpu_publisher_enqueue(&publisher, &entries[0]));
+    benchmark::DoNotOptimize(iree_hal_amd_gpu_publisher_next(&publisher));
     for (size_t i = 1; i <= count; ++i) {
       benchmark::DoNotOptimize(
           iree_hal_amd_gpu_publisher_enqueue(&publisher, &entries[i]));
     }
     benchmark::DoNotOptimize(
-        iree_hal_amd_gpu_publisher_handoff(&publisher, {}));
-    benchmark::DoNotOptimize(iree_hal_amd_gpu_publisher_take(&publisher));
+        iree_hal_amd_gpu_publisher_handoff(&publisher, nullptr));
     benchmark::DoNotOptimize(
-        iree_hal_amd_gpu_publisher_handoff(&publisher, {}));
+        iree_hal_amd_gpu_publisher_acquire_service(&publisher));
+    for (size_t i = 0; i < count; ++i) {
+      benchmark::DoNotOptimize(iree_hal_amd_gpu_publisher_next(&publisher));
+    }
+    benchmark::DoNotOptimize(
+        iree_hal_amd_gpu_publisher_handoff(&publisher, nullptr));
   }
   iree_hal_amd_gpu_publisher_deinitialize(&publisher);
   state.SetItemsProcessed(state.iterations() * (count + 1));
 }
 BENCHMARK(BM_ReadyBurst)->Arg(1)->Arg(8)->Arg(32)->Arg(128);
 
-// Repeatedly hands an unpublished suffix back to the service. Length does not
-// change the two pointer updates; capacity pressure adds no list traversal.
-void BM_DeferredSuffix(benchmark::State& state) {
+// Repeatedly defers one detached entry ahead of the unconsumed FIFO. Capacity
+// pressure adds no traversal, regardless of the number of queued entries.
+void BM_DeferredEntry(benchmark::State& state) {
   iree_hal_amd_gpu_publisher_t publisher;
   iree_hal_amd_gpu_publisher_initialize(&publisher);
   std::array<Entry, 129> entries;
   const size_t count = state.range(0);
-  for (size_t i = 0; i <= count; ++i) {
+  iree_hal_amd_gpu_publisher_enqueue(&publisher, &entries[0]);
+  iree_hal_amd_gpu_publisher_next(&publisher);
+  for (size_t i = 1; i <= count; ++i) {
     iree_hal_amd_gpu_publisher_enqueue(&publisher, &entries[i]);
   }
-  iree_hal_amd_gpu_publisher_handoff(&publisher, {});
-  List work = iree_hal_amd_gpu_publisher_take(&publisher);
+  iree_hal_amd_gpu_publisher_handoff(&publisher, nullptr);
+  iree_hal_amd_gpu_publisher_acquire_service(&publisher);
+  Entry* work = iree_hal_amd_gpu_publisher_next(&publisher);
   for (auto _ : state) {
     benchmark::DoNotOptimize(
         iree_hal_amd_gpu_publisher_handoff(&publisher, work));
-    work = iree_hal_amd_gpu_publisher_take(&publisher);
+    iree_hal_amd_gpu_publisher_acquire_service(&publisher);
+    work = iree_hal_amd_gpu_publisher_next(&publisher);
     benchmark::DoNotOptimize(work);
   }
-  iree_hal_amd_gpu_publisher_handoff(&publisher, {});
+  while (iree_hal_amd_gpu_publisher_next(&publisher)) {
+  }
+  iree_hal_amd_gpu_publisher_handoff(&publisher, nullptr);
   iree_hal_amd_gpu_publisher_deinitialize(&publisher);
   state.SetItemsProcessed(state.iterations());
 }
-BENCHMARK(BM_DeferredSuffix)->Arg(1)->Arg(8)->Arg(32)->Arg(128);
+BENCHMARK(BM_DeferredEntry)->Arg(1)->Arg(8)->Arg(32)->Arg(128);
 
 }  // namespace

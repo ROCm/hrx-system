@@ -18,7 +18,6 @@
 namespace {
 
 using Entry = iree_hal_amd_gpu_publication_entry_t;
-using List = iree_hal_amd_gpu_publication_list_t;
 
 class PublisherTest : public ::testing::Test {
  protected:
@@ -30,10 +29,13 @@ class PublisherTest : public ::testing::Test {
   bool Enqueue(Entry* entry) {
     return iree_hal_amd_gpu_publisher_enqueue(&publisher_, entry);
   }
-  bool Handoff(List remainder = {}) {
+  bool Handoff(Entry* remainder = nullptr) {
     return iree_hal_amd_gpu_publisher_handoff(&publisher_, remainder);
   }
-  List Take() { return iree_hal_amd_gpu_publisher_take(&publisher_); }
+  bool AcquireService() {
+    return iree_hal_amd_gpu_publisher_acquire_service(&publisher_);
+  }
+  Entry* Next() { return iree_hal_amd_gpu_publisher_next(&publisher_); }
 
   // Exact production owner shared by calling producers and one service.
   iree_hal_amd_gpu_publisher_t publisher_;
@@ -42,11 +44,12 @@ class PublisherTest : public ::testing::Test {
 TEST_F(PublisherTest, IdleCallerPublishesBeforeServiceTurn) {
   Entry first;
   EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
-  EXPECT_TRUE(Enqueue(&first));
+  ASSERT_TRUE(Enqueue(&first));
   EXPECT_FALSE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
-  EXPECT_EQ(Take().head, nullptr);
+  EXPECT_FALSE(AcquireService());
+  EXPECT_EQ(Next(), &first);
   EXPECT_FALSE(Handoff());
-  EXPECT_EQ(Take().head, nullptr);
+  EXPECT_FALSE(AcquireService());
   EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
 }
 
@@ -54,13 +57,13 @@ TEST_F(PublisherTest, FinalEnqueueBeforeHandoffTransfersToService) {
   Entry first;
   Entry last;
   ASSERT_TRUE(Enqueue(&first));
+  EXPECT_EQ(Next(), &first);
   EXPECT_FALSE(Enqueue(&last));
-  EXPECT_EQ(Take().head, nullptr);
+  EXPECT_FALSE(AcquireService());
   EXPECT_TRUE(Handoff());
-  const List work = Take();
-  EXPECT_EQ(work.head, &last);
-  EXPECT_EQ(work.tail, &last);
-  EXPECT_EQ(last.next, nullptr);
+  ASSERT_TRUE(AcquireService());
+  EXPECT_EQ(Next(), &last);
+  EXPECT_EQ(Next(), nullptr);
   EXPECT_FALSE(Handoff());
 }
 
@@ -68,107 +71,130 @@ TEST_F(PublisherTest, FinalEnqueueAfterHandoffClaimsCaller) {
   Entry first;
   Entry last;
   ASSERT_TRUE(Enqueue(&first));
+  EXPECT_EQ(Next(), &first);
   ASSERT_FALSE(Handoff());
-  EXPECT_TRUE(Enqueue(&last));
-  EXPECT_EQ(Take().head, nullptr);
+  ASSERT_TRUE(Enqueue(&last));
+  EXPECT_EQ(Next(), &last);
+  EXPECT_FALSE(AcquireService());
   EXPECT_FALSE(Handoff());
 }
 
-TEST_F(PublisherTest, DetachedSuffixPrecedesConcurrentAppends) {
+TEST_F(PublisherTest, PendingServiceOwnershipRemainsReserved) {
+  std::array<Entry, 3> entries;
+  ASSERT_TRUE(Enqueue(&entries[0]));
+  EXPECT_EQ(Next(), &entries[0]);
+  ASSERT_FALSE(Enqueue(&entries[1]));
+  ASSERT_TRUE(Handoff());
+  ASSERT_FALSE(Enqueue(&entries[2]));
+  ASSERT_TRUE(AcquireService());
+  EXPECT_EQ(Next(), &entries[1]);
+  EXPECT_EQ(Next(), &entries[2]);
+  EXPECT_FALSE(Handoff());
+}
+
+TEST_F(PublisherTest, BoundedServiceTurnPreservesUnconsumedEntries) {
   std::array<Entry, 6> entries;
   ASSERT_TRUE(Enqueue(&entries[0]));
+  EXPECT_EQ(Next(), &entries[0]);
   for (size_t i = 1; i < 4; ++i) {
     ASSERT_FALSE(Enqueue(&entries[i]));
   }
   ASSERT_TRUE(Handoff());
-  List work = Take();
-  ASSERT_EQ(work.head, &entries[1]);
-  ASSERT_EQ(work.tail, &entries[3]);
-  // One bounded publication finishes while two more callers append.
-  work.head = work.head->next;
+  ASSERT_TRUE(AcquireService());
+  EXPECT_EQ(Next(), &entries[1]);
   EXPECT_FALSE(Enqueue(&entries[4]));
   EXPECT_FALSE(Enqueue(&entries[5]));
-  ASSERT_TRUE(Handoff(work));
-  work = Take();
-  EXPECT_EQ(work.tail, &entries[5]);
-  for (size_t i = 2; i < entries.size(); ++i) {
-    ASSERT_EQ(work.head, &entries[i]);
-    work.head = work.head->next;
-  }
-  EXPECT_EQ(work.head, nullptr);
-  EXPECT_FALSE(Handoff(work));
-}
-
-TEST_F(PublisherTest, EnqueueDuringDetachedFinalItemIsNotLost) {
-  std::array<Entry, 3> entries;
-  ASSERT_TRUE(Enqueue(&entries[0]));
-  ASSERT_FALSE(Enqueue(&entries[1]));
   ASSERT_TRUE(Handoff());
-  List work = Take();
-  ASSERT_EQ(work.head, &entries[1]);
-  work.head = work.head->next;
-  ASSERT_EQ(work.head, nullptr);
-  EXPECT_FALSE(Enqueue(&entries[2]));
-  EXPECT_TRUE(Handoff(work));
-  work = Take();
-  EXPECT_EQ(work.head, &entries[2]);
-  EXPECT_EQ(work.tail, &entries[2]);
+  ASSERT_TRUE(AcquireService());
+  for (size_t i = 2; i < entries.size(); ++i) {
+    EXPECT_EQ(Next(), &entries[i]);
+  }
+  EXPECT_EQ(Next(), nullptr);
   EXPECT_FALSE(Handoff());
 }
 
-TEST_F(PublisherTest, CapacityDeferralPreservesUnpublishedCallerEntry) {
+TEST_F(PublisherTest, CapacityDeferralPreservesDetachedEntry) {
   std::array<Entry, 3> entries;
   ASSERT_TRUE(Enqueue(&entries[0]));
+  Entry* current = Next();
+  ASSERT_EQ(current, &entries[0]);
   ASSERT_FALSE(Enqueue(&entries[1]));
-  // The inline caller found no native capacity. It gives its own unpublished
-  // entry to the service before every entry that arrived while it owned state.
-  ASSERT_TRUE(Handoff({&entries[0], &entries[0]}));
-  List work = Take();
-  EXPECT_EQ(work.head, &entries[0]);
-  EXPECT_EQ(work.tail, &entries[1]);
+  ASSERT_TRUE(Handoff(current));
+  ASSERT_TRUE(AcquireService());
+  EXPECT_EQ(Next(), current);
   ASSERT_FALSE(Enqueue(&entries[2]));
-  // A failed capacity check does not consume the detached prefix.
-  ASSERT_TRUE(Handoff(work));
-  work = Take();
+  ASSERT_TRUE(Handoff(current));
+  ASSERT_TRUE(AcquireService());
   for (Entry& entry : entries) {
-    ASSERT_EQ(work.head, &entry);
-    work.head = work.head->next;
+    EXPECT_EQ(Next(), &entry);
   }
-  EXPECT_FALSE(Handoff(work));
+  EXPECT_FALSE(Handoff());
 }
 
 TEST_F(PublisherTest, CompletedEntriesMayBeFreedBeforeHandoff) {
   Entry* first = new Entry;
   Entry* second = new Entry;
   ASSERT_TRUE(Enqueue(first));
+  ASSERT_EQ(Next(), first);
   ASSERT_FALSE(Enqueue(second));
   delete first;
   ASSERT_TRUE(Handoff());
-  List work = Take();
-  ASSERT_EQ(work.head, second);
-  work.head = second->next;
+  ASSERT_TRUE(AcquireService());
+  ASSERT_EQ(Next(), second);
   delete second;
-  // The empty head means the already-retired tail is never dereferenced.
-  EXPECT_FALSE(Handoff(work));
+  // Detaching the last real node leaves only the permanent stub reachable.
+  EXPECT_EQ(Next(), nullptr);
+  EXPECT_FALSE(Handoff());
+}
+
+TEST_F(PublisherTest, UnfinishedProducerLinkLeavesEntriesOwned) {
+  Entry first;
+  ASSERT_TRUE(Enqueue(&first));
+  ASSERT_EQ(Next(), &first);
+  Entry delayed;
+  Entry later;
+  // Represent a producer paused after reserving the tail but before linking
+  // its predecessor. Another complete enqueue can follow this legal state.
+  iree_atomic_store(&delayed.next, 0, iree_memory_order_relaxed);
+  auto* predecessor = reinterpret_cast<Entry*>(iree_atomic_exchange(
+      &publisher_.tail, reinterpret_cast<intptr_t>(&delayed),
+      iree_memory_order_acq_rel));
+  ASSERT_FALSE(Enqueue(&later));
+  EXPECT_EQ(Next(), nullptr);
+  EXPECT_FALSE(Handoff());
+  EXPECT_FALSE(AcquireService());
+  // Finish the delayed link, then let an actual new caller claim progress.
+  // The consumer never detached or mutated either pending entry across the gap.
+  iree_atomic_store(&predecessor->next, reinterpret_cast<intptr_t>(&delayed),
+                    iree_memory_order_release);
+  Entry last;
+  ASSERT_TRUE(Enqueue(&last));
+  EXPECT_EQ(Next(), &last);
+  ASSERT_TRUE(Handoff());
+  ASSERT_TRUE(AcquireService());
+  EXPECT_EQ(Next(), &delayed);
+  EXPECT_EQ(Next(), &later);
+  EXPECT_EQ(Next(), nullptr);
+  EXPECT_FALSE(Handoff());
 }
 
 TEST_F(PublisherTest, EventPostedBetweenPredicateAndParkIsRemembered) {
   std::array<Entry, 2> entries;
   ASSERT_TRUE(Enqueue(&entries[0]));
+  EXPECT_EQ(Next(), &entries[0]);
   ASSERT_FALSE(Enqueue(&entries[1]));
   iree_notification_t notification;
   iree_notification_initialize(&notification);
   std::barrier<> rendezvous(2);
   std::thread service([&] {
     const auto token = iree_notification_prepare_wait(&notification);
-    EXPECT_EQ(Take().head, nullptr);
+    EXPECT_FALSE(AcquireService());
     rendezvous.arrive_and_wait();
     rendezvous.arrive_and_wait();
     EXPECT_TRUE(iree_notification_commit_wait(&notification, token, 0,
                                               IREE_TIME_INFINITE_FUTURE));
-    const List work = Take();
-    EXPECT_EQ(work.head, &entries[1]);
-    EXPECT_EQ(work.tail, &entries[1]);
+    ASSERT_TRUE(AcquireService());
+    EXPECT_EQ(Next(), &entries[1]);
     EXPECT_FALSE(Handoff());
   });
   rendezvous.arrive_and_wait();
@@ -182,17 +208,51 @@ TEST_F(PublisherTest, EventPostedBetweenPredicateAndParkIsRemembered) {
 TEST_F(PublisherTest, EventBeforeEnrollmentIsFoundByPredicate) {
   std::array<Entry, 2> entries;
   ASSERT_TRUE(Enqueue(&entries[0]));
+  EXPECT_EQ(Next(), &entries[0]);
   ASSERT_FALSE(Enqueue(&entries[1]));
   iree_notification_t notification;
   iree_notification_initialize(&notification);
   ASSERT_TRUE(Handoff());
   iree_notification_post(&notification, 1);
   iree_notification_prepare_wait(&notification);
-  const List work = Take();
-  EXPECT_EQ(work.head, &entries[1]);
+  ASSERT_TRUE(AcquireService());
+  EXPECT_EQ(Next(), &entries[1]);
   iree_notification_cancel_wait(&notification);
   EXPECT_FALSE(Handoff());
   iree_notification_deinitialize(&notification);
+}
+
+TEST_F(PublisherTest, FinalEnqueueRacesIdleHandoffWithoutLosingOwnership) {
+  constexpr size_t kEpochCount = 4096;
+  Entry first;
+  Entry last;
+  std::array<uint32_t, kEpochCount> visits = {};
+  std::barrier<> rendezvous(2);
+  std::thread producer([&] {
+    for (size_t i = 0; i < kEpochCount; ++i) {
+      rendezvous.arrive_and_wait();
+      if (Enqueue(&last)) {
+        EXPECT_EQ(Next(), &last);
+        ++visits[i];
+        EXPECT_FALSE(Handoff());
+      }
+      rendezvous.arrive_and_wait();
+    }
+  });
+  for (size_t i = 0; i < kEpochCount; ++i) {
+    EXPECT_TRUE(Enqueue(&first));
+    EXPECT_EQ(Next(), &first);
+    rendezvous.arrive_and_wait();
+    Handoff();
+    rendezvous.arrive_and_wait();
+    if (AcquireService()) {
+      EXPECT_EQ(Next(), &last);
+      ++visits[i];
+      EXPECT_FALSE(Handoff());
+    }
+    EXPECT_EQ(visits[i], 1u) << i;
+  }
+  producer.join();
 }
 
 TEST_F(PublisherTest, ConcurrentProducersReuseRetiredStorage) {
@@ -219,8 +279,7 @@ TEST_F(PublisherTest, ConcurrentProducersReuseRetiredStorage) {
   std::thread service([&] {
     while (true) {
       const auto token = iree_notification_prepare_wait(&notification);
-      List work = Take();
-      if (!work.head) {
+      if (!AcquireService()) {
         if (stopping.load(std::memory_order_acquire)) {
           iree_notification_cancel_wait(&notification);
           return;
@@ -231,12 +290,14 @@ TEST_F(PublisherTest, ConcurrentProducersReuseRetiredStorage) {
       }
       iree_notification_cancel_wait(&notification);
       // Deliberately cross the per-producer slot boundary across service turns.
-      for (size_t i = 0; work.head && i < 7; ++i) {
-        Entry* entry = work.head;
-        work.head = entry->next;
+      for (size_t i = 0; i < 7; ++i) {
+        Entry* entry = Next();
+        if (!entry) {
+          break;
+        }
         publish(entry);
       }
-      Handoff(work);
+      Handoff();
     }
   });
   std::barrier<> start(kProducerCount);
@@ -250,7 +311,10 @@ TEST_F(PublisherTest, ConcurrentProducersReuseRetiredStorage) {
           operation.reusable.acquire();
           operation.ordinal = (epoch * kProducerCount + i) * kSlotCount + slot;
           if (Enqueue(&operation)) {
-            publish(&operation);
+            Entry* entry = Next();
+            if (entry) {
+              publish(entry);
+            }
             if (Handoff()) {
               iree_notification_post(&notification, 1);
             }

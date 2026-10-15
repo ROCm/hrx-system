@@ -104,7 +104,7 @@ iree_runtime_cc_library(
     hdrs = ["publisher.h"],
     deps = [
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

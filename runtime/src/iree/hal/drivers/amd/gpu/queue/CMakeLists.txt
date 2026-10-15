@@ -116,7 +116,7 @@ iree_cc_library(
     "publisher.c"
   DEPS
     iree::base
-    iree::base::threading
+    iree::base::internal
   PUBLIC
 )
 
