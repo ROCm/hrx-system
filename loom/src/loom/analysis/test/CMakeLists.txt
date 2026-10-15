@@ -14,6 +14,7 @@ loom_check_test_suite(
     test
   SRCS
     "storage_calls.loom-test"
+    "storage_globals.loom-test"
     "storage_instances.loom-test"
     "storage_interference.loom-test"
 )

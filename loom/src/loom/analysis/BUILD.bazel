@@ -89,6 +89,7 @@ loom_cc_library(
         ":value_relation",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",

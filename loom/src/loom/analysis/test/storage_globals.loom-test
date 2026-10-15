@@ -1,0 +1,206 @@
+// RUN: emit storage-interference @test
+
+// Readonly definitions do not expose repeated private scratch.
+global.rodata.def @table = align(4) bytes("01000000")
+
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %sum = scf.for %i = [%begin to %limit step %step](%partial = %seed : i32) -> (i32) {
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %data = global.load @table : buffer
+    %table = buffer.view %data[%origin] : buffer -> view<1xi32>
+    %value = view.load %table[0] : view<1xi32> -> i32
+    view.store %value, %slot[0] : i32, view<1xi32>
+    %read = view.load %slot[0] : view<1xi32> -> i32
+    %next = scalar.addi %partial, %read : i32
+    scf.yield %next : i32
+  }
+  func.return %sum : i32
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// Forward readonly declarations have the same storage contract.
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %sum = scf.for %i = [%begin to %limit step %step](%partial = %seed : i32) -> (i32) {
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %data = global.load @table : buffer
+    %table = buffer.view %data[%origin] : buffer -> view<1xi32>
+    %value = view.load %table[0] : view<1xi32> -> i32
+    view.store %value, %slot[0] : i32, view<1xi32>
+    %read = view.load %slot[0] : view<1xi32> -> i32
+    %next = scalar.addi %partial, %read : i32
+    scf.yield %next : i32
+  }
+  func.return %sum : i32
+}
+
+global.rodata.decl @table
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// Value constants can be written during initialization.
+global.constant @value : i32
+
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %sum = scf.for %i = [%begin to %limit step %step](%partial = %seed : i32) -> (i32) {
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %value = global.load @value : i32
+    view.store %value, %slot[0] : i32, view<1xi32>
+    %read = view.load %slot[0] : view<1xi32> -> i32
+    %next = scalar.addi %partial, %read : i32
+    scf.yield %next : i32
+  }
+  func.return %sum : i32
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// Mutable global state remains an ambient effect.
+global.variable @value : i32
+
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %sum = scf.for %i = [%begin to %limit step %step](%partial = %seed : i32) -> (i32) {
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %value = global.load @value : i32
+    view.store %value, %slot[0] : i32, view<1xi32>
+    %read = view.load %slot[0] : view<1xi32> -> i32
+    %next = scalar.addi %partial, %read : i32
+    scf.yield %next : i32
+  }
+  func.return %sum : i32
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// Publishing scratch still makes its lifetime unproven.
+global.rodata.def @table = align(4) bytes("01000000")
+
+global.variable @published : buffer
+
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %sum = scf.for %i = [%begin to %limit step %step](%partial = %seed : i32) -> (i32) {
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %data = global.load @table : buffer
+    %table = buffer.view %data[%origin] : buffer -> view<1xi32>
+    %value = view.load %table[0] : view<1xi32> -> i32
+    global.store %storage, @published : buffer
+    view.store %value, %slot[0] : i32, view<1xi32>
+    %read = view.load %slot[0] : view<1xi32> -> i32
+    %next = scalar.addi %partial, %read : i32
+    scf.yield %next : i32
+  }
+  func.return %sum : i32
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// Readonly materialization does not make a synchronous helper opaque.
+global.rodata.def @table = align(4) bytes("01000000")
+
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %sum = scf.for %i = [%begin to %limit step %step](%partial = %seed : i32) -> (i32) {
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    func.call @load_table(%slot) : (view<1xi32>)
+    %read = view.load %slot[0] : view<1xi32> -> i32
+    %next = scalar.addi %partial, %read : i32
+    scf.yield %next : i32
+  }
+  func.return %sum : i32
+}
+
+func.def @load_table(%output: view<1xi32>) {
+  %origin = index.constant 0 : offset
+  %data = global.load @table : buffer
+  %table = buffer.view %data[%origin] : buffer -> view<1xi32>
+  %value = view.load %table[0] : view<1xi32> -> i32
+  view.store %value, %output[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// A real overlapping instance stays live across the next allocation.
+global.rodata.def @table = align(4) bytes("01000000")
+
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %initial_storage = buffer.alloca<private> align(4) %bytes : buffer
+  %initial_view = buffer.view %initial_storage[%origin] : buffer -> view<1xi32>
+  view.store %seed, %initial_view[0] : i32, view<1xi32>
+  %sum, %value, %last = scf.for %i = [%begin to %limit step %step](%accumulator = %seed : i32, %previous_value = %seed : i32, %previous = %initial_view : view<1xi32>) -> (i32, i32, view<1xi32>) {
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %data = global.load @table : buffer
+    %table = buffer.view %data[%origin] : buffer -> view<1xi32>
+    %increment = view.load %table[0] : view<1xi32> -> i32
+    %next_value = scalar.addi %previous_value, %increment : i32
+    view.store %next_value, %slot[0] : i32, view<1xi32>
+    %old_value = view.load %previous[0] : view<1xi32> -> i32
+    %next_sum = scalar.addi %accumulator, %old_value : i32
+    scf.yield %next_sum, %next_value, %slot : i32, i32, view<1xi32>
+  }
+  func.return %sum : i32
+}
+
+// ----
+initial_storage: accessed=yes single_instance=yes
+storage: accessed=yes single_instance=unproven
+initial_storage / storage: workgroup_nonoverlap=unproven

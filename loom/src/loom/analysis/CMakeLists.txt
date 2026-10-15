@@ -101,6 +101,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::ir
+    loom::ops::global
     loom::ops::kernel
     loom::ops::op_defs
     loom::util::walk

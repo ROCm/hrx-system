@@ -11,6 +11,7 @@
 #include "loom/analysis/movement.h"
 #include "loom/analysis/value_relation.h"
 #include "loom/ir/context.h"
+#include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/util/walk.h"
 
@@ -314,6 +315,17 @@ static iree_status_t loom_storage_access_visit(
   *out_result = LOOM_WALK_CONTINUE;
   loom_storage_access_state_t* state = user_data;
   loom_module_t* module = state->scope->module;
+  if (loom_global_load_isa(op)) {
+    const loom_symbol_ref_t symbol = loom_global_load_global(op);
+    if (symbol.module_id == 0 &&
+        loom_symbol_implements(&module->symbols.entries[symbol.symbol_id],
+                               LOOM_SYMBOL_INTERFACE_RODATA)) {
+      // Materializing an immutable artifact address neither accesses nor
+      // exposes local storage. Value globals retain their ambient effects:
+      // even global.constant may be written by an initializer.
+      return iree_ok_status();
+    }
+  }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   const loom_value_id_t* operands = loom_op_const_operands(op);
   const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
