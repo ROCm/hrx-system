@@ -31,6 +31,11 @@ iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
       // Filling a later gap must not lose the first deferred row's priority.
       deferred_row = row;
     }
+    // Once admission is full and next priority is known, later rows cannot
+    // change either decision.
+    if (deferred_row < row_count && (!remaining || count == span_capacity)) {
+      break;
+    }
   }
   for (iree_host_size_t i = 0; i < count && remaining; ++i) {
     loom_serve_packed_span_t* span = &spans[i];
