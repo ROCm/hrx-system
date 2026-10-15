@@ -110,6 +110,19 @@ iree_cc_library(
 )
 endif()
 
+iree_cc_test(
+  NAME
+    transfer_test
+  SRCS
+    "transfer_test.cc"
+  DEPS
+    ::transfer
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 if(AMDF_BUILD)
 iree_cc_test(
   NAME
@@ -141,6 +154,7 @@ iree_cc_library(
     ::commands
     ::dispatch
     ::launch
+    ::transfer
     iree::base
     iree::base::internal
     iree::base::internal::arena

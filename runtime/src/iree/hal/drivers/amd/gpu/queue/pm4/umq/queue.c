@@ -585,8 +585,14 @@ iree_hal_amd_gpu_pm4_umq_publish_execute(
   // Transport-owned instruction/argument visibility is separate from recorded
   // payload barriers. No system-scope release is added to an invocation tail.
   const iree_hal_amd_gpu_pm4_barrier_t before = {
-      .cache_control =
-          chunk.dispatch_count ? 1u | queue->options.barriers.acquire : 0,
+      .cache_control = (chunk.dispatch_count ? 1u : 0) |
+                       (chunk.dispatch_count || chunk.argument_length
+                            ? queue->options.barriers.acquire
+                            : 0),
+  };
+  const iree_hal_amd_gpu_pm4_barrier_t after = {
+      .execution =
+          chunk.pending_dma ? IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA : 0,
   };
   bool native_signal = false;
   for (iree_host_size_t i = 0; terminal && i < submission->signals.count; ++i) {
@@ -595,6 +601,7 @@ iree_hal_amd_gpu_pm4_umq_publish_execute(
   }
   const uint32_t body_words = wait_words + chunk.word_count +
                               iree_hal_amd_gpu_pm4_barrier_word_count(before) +
+                              (chunk.pending_dma ? 7 : 0) +
                               (native_signal ? 8 : 0) + 14 + 8;
   iree_hal_amd_gpu_pm4_ring_t candidate = queue->producer.ring;
   iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
@@ -631,9 +638,8 @@ iree_hal_amd_gpu_pm4_umq_publish_execute(
   memcpy(words, chunk.words, chunk.word_count * sizeof(*words));
   words += chunk.word_count;
   iree_hal_amd_gpu_pm4_umq_publish_commit(
-      queue, submission, position, &reservation, body_words, words,
-      (iree_hal_amd_gpu_pm4_barrier_t){0}, arguments->end,
-      (iree_hal_amd_gpu_pm4_download_t){0}, terminal);
+      queue, submission, position, &reservation, body_words, words, after,
+      arguments->end, (iree_hal_amd_gpu_pm4_download_t){0}, terminal);
   return terminal ? IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED
                   : IREE_HAL_AMD_GPU_PM4_PUBLICATION_MORE;
 }

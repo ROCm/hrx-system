@@ -26,6 +26,7 @@ namespace {
 
 enum class Arguments { kBindings, kNative };
 enum class BindingMode { kDirect, kTable };
+enum class Program { kDispatch, kTransfers };
 enum class Barriers { kDefault, kExplicitEmpty };
 enum class Timing { kSubmit, kCompletion, kSampledSubmit };
 
@@ -214,14 +215,25 @@ class NativeQueue {
 
   // Includes public creation, validation, native recording, and finalization.
   // Recorded dispatches use the same kernel and dependency shape as Submit.
-  iree_status_t Record(uint32_t count, BindingMode bindings,
+  iree_status_t Record(uint32_t count, BindingMode bindings, Program program,
                        iree_hal_command_buffer_t** out_recording) {
     *out_recording = nullptr;
     const auto& lane = lanes_[0];
+    const bool transfers = program == Program::kTransfers;
+    const iree_hal_execution_stage_t stage =
+        transfers ? IREE_HAL_EXECUTION_STAGE_TRANSFER
+                  : IREE_HAL_EXECUTION_STAGE_DISPATCH;
+    const iree_hal_access_scope_t write_scope =
+        transfers ? IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE
+                  : IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE;
+    const iree_hal_access_scope_t read_scope =
+        transfers ? IREE_HAL_ACCESS_SCOPE_TRANSFER_READ
+                  : IREE_HAL_ACCESS_SCOPE_DISPATCH_READ;
     iree_hal_command_buffer_t* recording = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
         iree_hal_queue_family(queue_), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+        transfers ? IREE_HAL_COMMAND_CATEGORY_TRANSFER
+                  : IREE_HAL_COMMAND_CATEGORY_DISPATCH,
         bindings == BindingMode::kTable ? 1 : 0, &recording));
     const auto reference = bindings == BindingMode::kTable
                                ? iree_hal_make_indirect_buffer_ref(0, 0, 4)
@@ -230,23 +242,22 @@ class NativeQueue {
     config.workgroup_size[0] = 32;
     config.workgroup_size[1] = config.workgroup_size[2] = 1;
     const iree_hal_memory_barrier_t memory = {
-        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
-        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+        .source_scope = write_scope,
+        .target_scope = read_scope | write_scope,
     };
     const iree_hal_barrier_t dependency = {
-        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
-        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .source_stage_mask = stage,
+        .target_stage_mask = stage,
         .memory_barrier_count = 1,
         .memory_barriers = &memory,
     };
     const iree_hal_barrier_t acquire = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .target_stage_mask = stage,
         .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
     };
     const iree_hal_barrier_t release = {
-        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .source_stage_mask = stage,
         .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
         .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
     };
@@ -259,7 +270,26 @@ class NativeQueue {
       if (i) {
         status = iree_hal_command_buffer_barrier(recording, &dependency);
       }
-      if (iree_status_is_ok(status)) {
+      if (iree_status_is_ok(status) && transfers) {
+        // Alternate captured updates, native fills, and device copies. The
+        // first operation initializes both words, and explicit edges protect
+        // the copy source when the recording crosses publication boundaries.
+        const uint32_t payload[] = {22, 22};
+        auto target = reference;
+        target.length = sizeof(payload);
+        if (i % 3 == 0) {
+          status = iree_hal_command_buffer_update_buffer(recording, payload, 0,
+                                                         target, 0);
+        } else if (i % 3 == 1) {
+          status = iree_hal_command_buffer_fill_buffer(
+              recording, target, payload, sizeof(payload[0]), 0);
+        } else {
+          auto source = reference;
+          source.offset += sizeof(payload[0]);
+          status = iree_hal_command_buffer_copy_buffer(recording, source,
+                                                       reference, 0);
+        }
+      } else if (iree_status_is_ok(status)) {
         status = iree_hal_command_buffer_dispatch(
             recording, lane.executable, lane.function, config,
             iree_make_const_byte_span(&value, sizeof(value)), {1, &reference},
@@ -286,7 +316,7 @@ class NativeQueue {
     uint64_t before = lane.epoch, after = lane.epoch + 1;
     const iree_hal_buffer_binding_t binding = {
         .buffer = lane.output,
-        .length = 4,
+        .length = 8,
     };
     IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
         queue_, {lane.epoch ? 1u : 0u, &lane.timeline, &before},
@@ -548,7 +578,8 @@ DISPATCH_CASE(BindingsDefaultLatency, kBindings, kDefault, kSampledSubmit);
 
 // Completion and destruction are excluded from recording timing. One actual
 // invocation verifies the recorded program before measuring its construction.
-static void BM_Record(benchmark::State& state, BindingMode bindings) {
+static void BM_Record(benchmark::State& state, BindingMode bindings,
+                      Program program) {
   NativeQueue queue;
   iree::Status status = queue.Initialize();
   if (!status.ok()) {
@@ -557,26 +588,41 @@ static void BM_Record(benchmark::State& state, BindingMode bindings) {
   }
   const uint32_t count = state.range(0);
   iree_hal_command_buffer_t* recording = nullptr;
-  IREE_CHECK_OK(queue.Record(count, bindings, &recording));
+  IREE_CHECK_OK(queue.Record(count, bindings, program, &recording));
   IREE_CHECK_OK(queue.Execute(recording, bindings));
   IREE_CHECK_OK(queue.Complete(0));
   IREE_CHECK_OK(queue.CheckOutput(0));
   iree_hal_command_buffer_release(recording);
   for (auto _ : state) {
-    IREE_CHECK_OK(queue.Record(count, bindings, &recording));
+    IREE_CHECK_OK(queue.Record(count, bindings, program, &recording));
     state.PauseTiming();
     iree_hal_command_buffer_release(recording);
     state.ResumeTiming();
   }
   state.SetItemsProcessed(state.iterations() * count);
 }
-BENCHMARK_CAPTURE(BM_Record, Direct, BindingMode::kDirect)
+BENCHMARK_CAPTURE(BM_Record, Direct, BindingMode::kDirect, Program::kDispatch)
     ->Arg(1)
     ->Arg(1000)
     ->Arg(8000)
     ->Iterations(50)
     ->UseRealTime();
-BENCHMARK_CAPTURE(BM_Record, Table, BindingMode::kTable)
+BENCHMARK_CAPTURE(BM_Record, Table, BindingMode::kTable, Program::kDispatch)
+    ->Arg(1)
+    ->Arg(1000)
+    ->Arg(8000)
+    ->Iterations(50)
+    ->UseRealTime();
+
+BENCHMARK_CAPTURE(BM_Record, TransfersDirect, BindingMode::kDirect,
+                  Program::kTransfers)
+    ->Arg(1)
+    ->Arg(1000)
+    ->Arg(8000)
+    ->Iterations(50)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_Record, TransfersTable, BindingMode::kTable,
+                  Program::kTransfers)
     ->Arg(1)
     ->Arg(1000)
     ->Arg(8000)
@@ -589,7 +635,7 @@ BENCHMARK_CAPTURE(BM_Record, Table, BindingMode::kTable)
 // the cost of two clock reads. No row measures calibrated time to first
 // workgroup.
 static void BM_Execute(benchmark::State& state, BindingMode bindings,
-                       Timing timing) {
+                       Timing timing, Program program) {
   NativeQueue queue;
   iree::Status status = queue.Initialize();
   if (!status.ok()) {
@@ -598,7 +644,7 @@ static void BM_Execute(benchmark::State& state, BindingMode bindings,
   }
   const uint32_t count = state.range(0);
   iree_hal_command_buffer_t* recording = nullptr;
-  IREE_CHECK_OK(queue.Record(count, bindings, &recording));
+  IREE_CHECK_OK(queue.Record(count, bindings, program, &recording));
   for (uint32_t i = 0; i < 2; ++i) {
     IREE_CHECK_OK(queue.Execute(recording, bindings));
     IREE_CHECK_OK(queue.Complete(0));
@@ -638,19 +684,26 @@ static void BM_Execute(benchmark::State& state, BindingMode bindings,
   }
   iree_hal_command_buffer_release(recording);
 }
-#define EXECUTE_CASE(name, bindings, timing)                                 \
-  BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings, Timing::timing) \
+#define EXECUTE_CASE(name, bindings, timing, program)                        \
+  BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings, Timing::timing, \
+                    Program::program)                                        \
       ->Arg(1)                                                               \
       ->Arg(1000)                                                            \
       ->Arg(8000)                                                            \
       ->Iterations(50)                                                       \
       ->UseRealTime()
-EXECUTE_CASE(DirectSubmit, kDirect, kSubmit);
-EXECUTE_CASE(TableSubmit, kTable, kSubmit);
-EXECUTE_CASE(DirectCompletion, kDirect, kCompletion);
-EXECUTE_CASE(TableCompletion, kTable, kCompletion);
-EXECUTE_CASE(DirectLatency, kDirect, kSampledSubmit);
-EXECUTE_CASE(TableLatency, kTable, kSampledSubmit);
+EXECUTE_CASE(DirectSubmit, kDirect, kSubmit, kDispatch);
+EXECUTE_CASE(TableSubmit, kTable, kSubmit, kDispatch);
+EXECUTE_CASE(DirectCompletion, kDirect, kCompletion, kDispatch);
+EXECUTE_CASE(TableCompletion, kTable, kCompletion, kDispatch);
+EXECUTE_CASE(DirectLatency, kDirect, kSampledSubmit, kDispatch);
+EXECUTE_CASE(TableLatency, kTable, kSampledSubmit, kDispatch);
+EXECUTE_CASE(TransfersDirectSubmit, kDirect, kSubmit, kTransfers);
+EXECUTE_CASE(TransfersTableSubmit, kTable, kSubmit, kTransfers);
+EXECUTE_CASE(TransfersDirectCompletion, kDirect, kCompletion, kTransfers);
+EXECUTE_CASE(TransfersTableCompletion, kTable, kCompletion, kTransfers);
+EXECUTE_CASE(TransfersDirectLatency, kDirect, kSampledSubmit, kTransfers);
+EXECUTE_CASE(TransfersTableLatency, kTable, kSampledSubmit, kTransfers);
 #undef EXECUTE_CASE
 
 static void BM_Transfer(benchmark::State& state,

@@ -84,7 +84,46 @@ typedef struct iree_hal_amd_gpu_pm4_download_t {
   iree_host_size_t length;
 } iree_hal_amd_gpu_pm4_download_t;
 
-enum { IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS = 32 * 7 };
+enum {
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS = 32 * 7,
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH = 32736,
+};
+
+// Admitted native DMA span, independent of direct or recorded ownership.
+// Addresses already name the logical beginning of each device range. Host
+// source bytes are immutable for this emission, and downloads use the caller's
+// staging window as their native target.
+typedef struct iree_hal_amd_gpu_pm4_transfer_span_t {
+  // Device source for copies and downloads.
+  uint64_t source_address;
+  // Device target for copies, fills, updates, and uploads.
+  uint64_t target_address;
+  // Borrowed source bytes for updates and uploads.
+  const uint8_t* source_bytes;
+  // Complete logical extent, before applying the publication cursor.
+  uint64_t length;
+  // Fill value expanded to four repeating bytes.
+  uint32_t pattern;
+  // Admitted DMA family; no public HAL operation is replayed.
+  iree_hal_transfer_operation_type_t type;
+} iree_hal_amd_gpu_pm4_transfer_span_t;
+
+typedef struct iree_hal_amd_gpu_pm4_transfer_packet_t {
+  // Bytes covered by the emitted seven-DWORD packet; zero means no capacity.
+  uint32_t length;
+  // Staging bytes owned through this packet's DMA completion.
+  uint32_t staging_length;
+} iree_hal_amd_gpu_pm4_transfer_packet_t;
+
+// Emits one native piece from a nonempty remaining span. Applies the firmware
+// byte-count limit and stages unaligned fill edges or host bytes when needed.
+// The caller supplies seven writable DWORDs and retains both ranges and staging
+// through DMA completion. Capacity exhaustion emits nothing. This trusted
+// transform performs no allocation, buffer lookup, or failure construction.
+iree_hal_amd_gpu_pm4_transfer_packet_t
+iree_hal_amd_gpu_pm4_transfer_emit_packet(
+    const iree_hal_amd_gpu_pm4_transfer_span_t* span, uint64_t offset,
+    iree_byte_span_t staging, uint64_t staging_address, uint32_t* words);
 
 // One bounded candidate publication. A download ends the batch, so retirement
 // needs one direct host copy instead of a list walk. No owner changes until the

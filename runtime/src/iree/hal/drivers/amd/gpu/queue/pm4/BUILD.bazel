@@ -99,6 +99,18 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
+    name = "transfer_test",
+    srcs = ["transfer_test.cc"],
+    deps = [
+        ":transfer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "dispatch_test",
     srcs = ["dispatch_test.cc"],
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
@@ -124,6 +136,7 @@ iree_runtime_cc_library(
         ":commands",
         ":dispatch",
         ":launch",
+        ":transfer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",

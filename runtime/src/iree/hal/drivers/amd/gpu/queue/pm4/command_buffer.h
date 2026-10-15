@@ -35,6 +35,8 @@ typedef struct iree_hal_amd_gpu_pm4_command_cursor_t {
   const iree_hal_amd_gpu_pm4_record_block_t* block;
   // Byte offset of the next record from the beginning of the block payload.
   uint32_t offset;
+  // Published bytes of a DMA record spanning multiple native pieces.
+  uint64_t transfer_offset;
 } iree_hal_amd_gpu_pm4_command_cursor_t;
 
 // Captured, qualified binding-table entry. Native addresses remain unread until
@@ -45,8 +47,10 @@ typedef struct iree_hal_amd_gpu_pm4_command_binding_t {
   iree_hal_buffer_t* buffer;
   // Byte offset from the logical beginning of buffer.
   iree_device_size_t offset;
-  // Direct index into buffer's immutable native binding layout.
-  iree_hal_buffer_native_binding_slot_t slot;
+  // Captured logical extent, including resolution of WHOLE_BUFFER.
+  iree_device_size_t length;
+  // Prepared native slots for the queue (0) and shader program (1) sites.
+  iree_hal_buffer_native_binding_slot_t slots[2];
 } iree_hal_amd_gpu_pm4_command_binding_t;
 
 // Invocation state embedded in the owning submission capture. Its table storage
@@ -81,11 +85,12 @@ iree_status_t iree_hal_amd_gpu_pm4_command_invocation_initialize(
 void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
     iree_hal_amd_gpu_pm4_command_invocation_t* invocation);
 
-// Exact requirement of the next record, or {0, 1} for an empty suffix. This
-// constant-time query lets the transport wrap or grow its argument FIFO without
-// inspecting the rest of the program.
+// Minimum requirement to progress the next record, or {0, 1} for an empty
+// suffix. Dispatches need their complete arguments; transfers can use a smaller
+// piece. This constant-time query lets the transport wrap or grow its argument
+// FIFO without inspecting the rest of the program.
 typedef struct iree_hal_amd_gpu_pm4_command_arguments_t {
-  // Native bytes needed by the next record, including hidden ABI fields.
+  // Minimum native argument/staging bytes needed by the next record.
   uint32_t length;
   // Required power-of-two GPU address alignment.
   uint32_t alignment;
@@ -110,11 +115,14 @@ typedef struct iree_hal_amd_gpu_pm4_command_chunk_t {
   uint32_t argument_length;
   // Number of dispatches, used to advance the queue's native dispatch IDs.
   uint32_t dispatch_count;
-  // First record not included in this candidate.
+  // DMA in this prefix still needs joining before staging and buffers retire.
+  bool pending_dma;
+  // Unpublished suffix, potentially partway through a native DMA span.
   iree_hal_amd_gpu_pm4_command_cursor_t next;
 } iree_hal_amd_gpu_pm4_command_chunk_t;
 
-// Copies admitted native templates and applies only captured relocations.
+// Copies admitted native templates, relocates captured addresses, and emits
+// bounded native DMA spans. No public HAL operation is replayed.
 // word_capacity is at most COMMAND_MAX_WORDS. Available argument bytes are a
 // contiguous FIFO window whose address satisfies next_arguments().alignment.
 // A zero-word result means capacity is unavailable or the program is empty;

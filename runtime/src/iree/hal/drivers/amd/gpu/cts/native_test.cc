@@ -699,6 +699,112 @@ TEST_P(GpuNativeRecordingSizeTest,
 INSTANTIATE_TEST_SUITE_P(ProgramSize, GpuNativeRecordingSizeTest,
                          ::testing::Values(1u, 1000u, 8000u));
 
+TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
+  for (bool indirect : {false, true}) {
+    SCOPED_TRACE(indirect);
+    iree_hal_semaphore_t* gate = nullptr;
+    iree_hal_semaphore_t* done = nullptr;
+    CreateSemaphore(&gate);
+    CreateSemaphore(&done);
+    uint64_t one = 1, two = 2, three = 3;
+    const auto request = iree_hal_make_pool_reservation_request(64, 4);
+    iree_hal_buffer_t* output = nullptr;
+    IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {1, &gate, &one},
+                                         {1, &done, &one}, pool_, 1, &request,
+                                         &output));
+    iree_hal_command_buffer_t* recording = nullptr;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queues_[0]),
+        IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+        indirect ? 3 : 0, &recording));
+    const auto reference = [&](uint64_t offset, uint64_t length) {
+      return indirect ? iree_hal_make_indirect_buffer_ref(2, offset, length)
+                      : iree_hal_make_buffer_ref(output, 8 + offset, length);
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+    const uint32_t zero = 0, initial = 10, increment = 17;
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        recording, reference(0, 32), &zero, sizeof(zero), 0));
+    const iree_hal_barrier_t transfer_dependency = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+    };
+    IREE_ASSERT_OK(
+        iree_hal_command_buffer_barrier(recording, &transfer_dependency));
+    IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(recording, &initial, 0,
+                                                         reference(8, 4), 0));
+    const iree_hal_memory_barrier_t to_shader_memory = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+    };
+    const iree_hal_barrier_t to_shader = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .memory_barrier_count = 1,
+        .memory_barriers = &to_shader_memory,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &to_shader));
+    auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+    config.workgroup_size[0] = 32;
+    config.workgroup_size[1] = config.workgroup_size[2] = 1;
+    const auto binding = reference(8, 4);
+    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+        recording, executable_, function_, config,
+        iree_make_const_byte_span(&increment, sizeof(increment)), {1, &binding},
+        0));
+    const iree_hal_memory_barrier_t to_transfer_memory = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+    };
+    const iree_hal_barrier_t to_transfer = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .memory_barrier_count = 1,
+        .memory_barriers = &to_transfer_memory,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &to_transfer));
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+        recording, reference(8, 4), reference(16, 4), 0));
+    const iree_hal_barrier_t release = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    std::array<iree_hal_buffer_binding_t, 3> table = {};
+    table[2] = {output, 8, 32};
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queues_[1], {1, &done, &one}, {1, &done, &two}, recording,
+        {indirect ? table.size() : 0, table.data()}, 0));
+    table.fill({});
+    iree_hal_command_buffer_release(recording);
+    std::array<uint32_t, 8> actual;
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = output,
+                .source_offset = 8,
+                .target = actual.data(),
+                .length = sizeof(actual),
+            },
+    };
+    IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &done, &two},
+                                           {1, &done, &three}, 1, &download,
+                                           nullptr));
+    iree_hal_buffer_release(output);
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, one, nullptr));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(done, three, iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+    EXPECT_EQ(actual, (std::array<uint32_t, 8>{0, 0, 27, 0, 27, 0, 0, 0}));
+    iree_hal_semaphore_release(done);
+    iree_hal_semaphore_release(gate);
+  }
+}
+
 class GpuNativeTransferTest : public GpuNativeTest,
                               public ::testing::WithParamInterface<bool> {
  protected:
@@ -775,6 +881,111 @@ class GpuNativeTransferTest : public GpuNativeTest,
   // Host-controlled readiness for borrowed uploads and captured updates.
   iree_hal_semaphore_t* gate_ = nullptr;
 };
+
+class GpuNativeRecordedTransferTest : public GpuNativeTransferTest {
+ protected:
+  iree_hal_buffer_ref_t Reference(size_t index, uint64_t offset,
+                                  uint64_t length) {
+    return GetParam()
+               ? iree_hal_make_indirect_buffer_ref(index + 1, offset, length)
+               : iree_hal_make_buffer_ref(buffers_[index], offset, length);
+  }
+};
+
+TEST_P(GpuNativeRecordedTransferTest,
+       ReusableTransfersCaptureBytesAndRetireBoundedPrefixes) {
+  std::vector<uint8_t> source(kLength);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = (i * 17 + 7) & 0xff;
+  }
+  auto expected = source;
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, GetParam() ? 3 : 0, &recording));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  const iree_hal_barrier_t acquire = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &acquire));
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      recording, source.data(), 0, Reference(0, 0, kLength), 0));
+  std::fill(source.begin(), source.end(), 0xAB);
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      recording, Reference(0, 0, IREE_HAL_WHOLE_BUFFER),
+      Reference(1, 0, IREE_HAL_WHOLE_BUFFER), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+  for (uint32_t i = 0; i < 48; ++i) {
+    const uint32_t pattern_length = 1u << (i % 3);
+    const uint32_t pattern = 0x71B36DA5u + i;
+    const size_t offset = i * 512 + pattern_length;
+    const size_t length = 65 * pattern_length;
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        recording, Reference(1, offset, length), &pattern, pattern_length, 0));
+    for (size_t j = 0; j < length; ++j) {
+      expected[offset + j] = (uint8_t)(pattern >> ((j % pattern_length) * 8));
+    }
+  }
+  // Empty remaining ranges still advance the invocation without requiring a
+  // native buffer access or an unbounded search for the next nonempty record.
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      recording, Reference(0, kLength, IREE_HAL_WHOLE_BUFFER),
+      Reference(1, kLength, IREE_HAL_WHOLE_BUFFER), 0));
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  uint64_t one = 1, two = 2, three = 3;
+  std::array<iree_hal_buffer_binding_t, 3> bindings = {};
+  bindings[1] = {buffers_[0], 0, IREE_HAL_WHOLE_BUFFER};
+  bindings[2] = {buffers_[1], 0, IREE_HAL_WHOLE_BUFFER};
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queues_[0], {1, &gate_, &one}, {1, &timeline_, &one}, recording,
+      {GetParam() ? bindings.size() : 0, bindings.data()}, 0));
+  std::swap(bindings[1], bindings[2]);
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queues_[1], {1, &timeline_, &one}, {1, &timeline_, &two}, recording,
+      {GetParam() ? bindings.size() : 0, bindings.data()}, 0));
+  bindings.fill({});
+  iree_hal_command_buffer_release(recording);
+  std::vector<uint8_t> downloaded(kLength, 0xCC);
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = buffers_[GetParam() ? 0 : 1],
+              .target = downloaded.data(),
+              .length = kLength,
+          },
+  };
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &timeline_, &two},
+                                         {1, &timeline_, &three}, 1, &download,
+                                         nullptr));
+  ReleaseBuffers();
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, one, nullptr));
+  Wait(three);
+  EXPECT_EQ(downloaded, expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(BindingMode, GpuNativeRecordedTransferTest,
+                         ::testing::Values(false, true));
 
 TEST_P(GpuNativeTransferTest, CapturedUpdatesAndDeferredHostTransfers) {
   std::vector<uint8_t> update(kLength), upload(kLength, 0);
