@@ -50,6 +50,7 @@ def amdf_cts_test_suite(
         policy["tags"],
         policy.get("resource_group"),
     )
+    corpus_tags = tags or []
     corpus_name = name + "_cases"
     amdf_cc_library(
         name = corpus_name,
@@ -59,6 +60,7 @@ def amdf_cts_test_suite(
         deps = deps,
         linkopts = linkopts,
         alwayslink = True,
+        tags = corpus_tags,
         target_compatible_with = target_compatible_with,
     )
     common_deps = [":" + corpus_name, "//libamdf/cts/util:test_main"]
@@ -74,6 +76,7 @@ def amdf_cts_test_suite(
             testonly = True,
             data = data,
             deps = common_deps + ["//libamdf/cts/util:" + mode + "_provider"],
+            tags = corpus_tags,
             target_compatible_with = target_compatible_with,
         )
         provider_args = []
@@ -98,6 +101,7 @@ def amdf_cts_test_suite(
             tests.append(":" + test_name)
     native.test_suite(
         name = name,
+        tags = test_tags,
         tests = tests,
         visibility = visibility,
     )
