@@ -147,6 +147,22 @@ packed rows. Shared checkpoint tensors have zero row stride. Direct and batched
 commands invoke the same arithmetic bodies, including their precision choices;
 membership and byte origins determine where that arithmetic reads and writes.
 
+`batch_prefill.loom`, `batch_voice.loom`, and `batch_decode.loom` compose complete
+phases through `pocket.batch.prefill.step`, `pocket.batch.voice.step`, and
+`pocket.batch.decode.step`. Their layer templates retain the original checkpoint
+keys and layer indices. Each phase takes the membership packet, packed input
+stride, resident state stride, and its weight/input/state bindings; decode also
+takes a packed output stride and output binding. Voice and prefill have no output
+binding. Scratch allocations scale with batch capacity, while cache origins come
+from the same configured layout as isolated commands. Different prefix lengths
+and codec positions do not require different compiled phases.
+
+`sampling.loom` owns the shared counter-based sampling body.
+`batch_sampling.loom` reads seeds from packed request rows and generation/chunk
+counters from the selected resident rows. Its packed output can feed the decode
+phase directly. Reordering, removing, or temporarily withholding another request
+does not advance a surviving request's random stream.
+
 The checkpoint-free tests use closed-form projection, strided-convolution,
 normalization, and attention oracles. Attention checks retain positions beyond
 256, mask future slots, and reach the last configured absolute rotary row.
@@ -156,7 +172,9 @@ fade behavior. Batched checks compare complete banks and outputs against isolate
 calls across staggered, reordered, removed, and resumed rows. Padded rows and
 nonzero origins expose accidental writes outside each tensor, and different
 packed and resident capacities expose identity/addressing confusion. An empty
-cohort leaves every cache and output unchanged. Both hardware and
+cohort leaves every cache and output unchanged. Sampling compares reordered and
+shrinking cohorts with isolated calls, preserves state and padding, and retains
+the independent Philox/Box-Muller oracle. Both hardware and
 memory-access-checking profiles run with:
 
 ```sh
