@@ -185,7 +185,7 @@ class Client:
             response = connection.getresponse()
             body = response.read()
             assert response.status == status, (target, response.status, body)
-            if response.getheader("Content-Type") == "application/octet-stream":
+            if response.getheader("Content-Type") == "audio/pcm;rate=24000;channels=1":
                 return body
             body = body.decode()
             if response.getheader("Content-Type") == "text/event-stream":
