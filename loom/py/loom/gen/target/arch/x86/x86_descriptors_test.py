@@ -215,6 +215,27 @@ def test_explicit_writemasks_use_seven_location_window() -> None:
     assert all(operand.address_map_kind is OperandAddressMapKind.DIRECT and operand.addressable_unit_count == 0 for operand in ordinary_k_operands)
 
 
+def test_native_vector_prefix_owns_simd_register_addressability() -> None:
+    for info in sorted_descriptor_set_infos():
+        spec = x86_descriptors._descriptor_set_for_info(info)
+        for descriptor in spec.descriptors:
+            if not descriptor.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER:
+                continue
+            # The extension bit denotes EVEX for maps 1/2/3. Maps 5/6 use
+            # encoded map zero and repurpose that bit to distinguish the maps.
+            evex = bool(descriptor.encoding_id & 0x2000) or not (descriptor.encoding_id & 0x300)
+            for operand in descriptor.operands:
+                if not any(alternative.reg_class in ("x86.xmm", "x86.ymm", "x86.zmm") for alternative in operand.reg_alts):
+                    continue
+                context = (spec.key, descriptor.key, operand.field_name)
+                if evex:
+                    assert operand.address_map_kind is OperandAddressMapKind.DIRECT, context
+                    assert operand.addressable_unit_count == 0, context
+                else:
+                    assert operand.address_map_kind is OperandAddressMapKind.LOW_SUBSET, context
+                    assert operand.addressable_unit_count == 16, context
+
+
 def test_narrow_memory_widths_are_independent_of_scalar_carriers() -> None:
     for info in sorted_descriptor_set_infos():
         if "x86.gpr32" not in info.register_classes:

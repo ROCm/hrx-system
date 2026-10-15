@@ -37,7 +37,6 @@ from .common import (
     _asm,
     _descriptor_support_tables,
     _gpr64_resource,
-    _restrict_vex_registers,
     _vector_operand,
     _vector_result,
     _vex_descriptor,
@@ -155,8 +154,6 @@ def _narrowing_descriptor(source_bit_width: int) -> Descriptor:
         feature_mask_words=(FEATURE_AVX_NE_CONVERT,),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
-    # VEX register fields address only the low 16 SIMD registers.
-    descriptor = _restrict_vex_registers(descriptor)
     return native.VCVTNEPS2BF16.bind(descriptor, VectorEncodingPrefix.VEX)
 
 

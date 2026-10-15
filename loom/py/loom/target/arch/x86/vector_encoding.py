@@ -11,7 +11,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum, IntEnum
 
-from loom.target.low_descriptors import Descriptor, ImmediateKind, OperandRole
+from loom.target.low_descriptors import (
+    Descriptor,
+    ImmediateKind,
+    OperandAddressMapKind,
+    OperandRole,
+)
 
 
 class VectorEncodingPrefix(Enum):
@@ -68,6 +73,27 @@ _LOAD_BEHAVIORS = (
 VECTOR_ENCODING_FORMAT_MARKER = 1 << 15
 _SIMD_REG_CLASSES = frozenset(("x86.xmm", "x86.ymm", "x86.zmm"))
 _SIMD_WIDTHS = {"x86.xmm": 128, "x86.ymm": 256, "x86.zmm": 512}
+_VEX_SIMD_REGISTER_COUNT = 16
+
+
+def restrict_vex_registers(descriptor: Descriptor) -> Descriptor:
+    """Retains the VEX register domain when a row joins an EVEX profile."""
+    return replace(
+        descriptor,
+        operands=tuple(
+            replace(
+                operand,
+                address_map_kind=OperandAddressMapKind.LOW_SUBSET,
+                addressable_unit_count=_VEX_SIMD_REGISTER_COUNT,
+            )
+            if any(
+                alternative.reg_class in ("x86.xmm", "x86.ymm")
+                for alternative in operand.reg_alts
+            )
+            else operand
+            for operand in descriptor.operands
+        ),
+    )
 
 
 def vector_encoding_recipe(
@@ -307,6 +333,8 @@ class VectorMachineInstruction:
                 f"{descriptor.key}: expected one {prefix.value} native encoding, "
                 f"found {len(variants)}"
             )
+        if prefix == VectorEncodingPrefix.VEX:
+            descriptor = restrict_vex_registers(descriptor)
         return replace(
             descriptor,
             encoding_format_id=self.encoding_format_id,

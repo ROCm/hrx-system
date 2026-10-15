@@ -107,8 +107,6 @@ _YMM_ALT = (RegClassAlt(_REG_YMM),)
 _ZMM_ALT = (RegClassAlt(_REG_ZMM),)
 _K_ALT = (RegClassAlt(_REG_K),)
 
-_X86_VEX_ADDRESSABLE_REGISTER_COUNT = 16
-
 
 def _merge_named_items[ItemT: (RegClass, Resource, ScheduleClass, EnumDomain)](
     item_groups: tuple[tuple[ItemT, ...], ...],
@@ -133,28 +131,10 @@ def _low_subset_operand(operand: Operand, addressable_unit_count: int) -> Operan
     )
 
 
-def _restrict_vex_registers(descriptor: Descriptor) -> Descriptor:
-    """Restricts VEX-encoded SIMD operands to the low 16 registers."""
-    return replace(
-        descriptor,
-        operands=tuple(
-            _low_subset_operand(operand, _X86_VEX_ADDRESSABLE_REGISTER_COUNT)
-            if any(
-                reg_alt.reg_class in (_REG_XMM, _REG_YMM)
-                for reg_alt in operand.reg_alts
-            )
-            else operand
-            for operand in descriptor.operands
-        ),
-    )
-
-
 def _vex_descriptor(
     descriptor: Descriptor, instruction: VectorMachineInstruction
 ) -> Descriptor:
-    return instruction.bind(
-        _restrict_vex_registers(descriptor), VectorEncodingPrefix.VEX
-    )
+    return instruction.bind(descriptor, VectorEncodingPrefix.VEX)
 
 
 def _descriptor_support_tables(

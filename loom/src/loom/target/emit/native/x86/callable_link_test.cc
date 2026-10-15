@@ -106,6 +106,7 @@ extern "C" void avx512_reverse_i32x16(const int32_t* input, int32_t* output);
 extern "C" void avx512_reduce_f32x16(const float* values, const float* bias,
                                      const float* initial, float* output);
 extern "C" void write_exact_avx512_lanes(double* output);
+extern "C" void avx512_scalar_load_pressure(const float* input, float* output);
 extern "C" void avx512_bf16_convert_indexed_masked(
     const float* low_values, uint64_t position, const float* high_values,
     const int8_t* mask_lhs, const int8_t* mask_rhs, const uint16_t* passthrough,
@@ -639,6 +640,24 @@ TEST(NativeCallableTest, Avx512CoreUsesOrdinaryCLinkage) {
   write_exact_avx512_lanes(exact_lanes.data());
   for (size_t i = 0; i < exact_lanes.size(); ++i) {
     EXPECT_EQ(exact_lanes[i], i % 2 == 0 ? 1.25 : -2.5);
+  }
+}
+
+TEST(NativeCallableTest, Avx512ScalarLoadsRespectVexRegisterDomain) {
+  if (!__builtin_cpu_supports("avx512f")) {
+    GTEST_SKIP() << "AVX-512F is unavailable on this test host";
+  }
+  std::array<float, 17> input;
+  for (size_t i = 0; i < input.size(); ++i) {
+    input[i] = static_cast<float>(i) - 8.5f;
+  }
+  std::array<float, 17 * 16> output = {};
+  avx512_scalar_load_pressure(input.data(), output.data());
+  for (size_t i = 0; i < input.size(); ++i) {
+    for (size_t lane = 0; lane < 16; ++lane) {
+      EXPECT_EQ(output[i * 16 + lane], input[i])
+          << "scalar " << i << ", lane " << lane;
+    }
   }
 }
 

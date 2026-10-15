@@ -22,7 +22,10 @@ from loom.target.arch.x86.packed_dot_data import (
     X86_PACKED_DOT_DESCRIPTORS,
     PackedDotDescriptor,
 )
-from loom.target.arch.x86.vector_encoding import VectorEncodingPrefix
+from loom.target.arch.x86.vector_encoding import (
+    VectorEncodingPrefix,
+    restrict_vex_registers,
+)
 from loom.target.low_descriptors import (
     Descriptor,
     DescriptorSet,
@@ -46,7 +49,6 @@ from .common import (
     _SCHEDULE_VECTOR_DOT_YMM,
     _SCHEDULE_VECTOR_DOT_ZMM,
     _packed_dot_descriptor,
-    _restrict_vex_registers,
     _vector_lane_units,
 )
 
@@ -161,8 +163,6 @@ def _packed_dot_target_descriptor(
         descriptor_data,
         qualify_asm_mnemonic=qualify_asm_mnemonic,
     )
-    if descriptor_data.family in _X86_VEX_PACKED_DOT_FAMILIES:
-        descriptor = _restrict_vex_registers(descriptor)
     if descriptor_data.family == FAMILY_AVX_VNNI_INT8:
         try:
             instruction = _AVX_VNNI_INT8_INSTRUCTIONS[descriptor_data.mnemonic]
@@ -171,6 +171,8 @@ def _packed_dot_target_descriptor(
                 f"{descriptor_data.key}: missing AVX-VNNI-INT8 machine facts"
             ) from error
         descriptor = instruction.bind(descriptor, VectorEncodingPrefix.VEX)
+    elif descriptor_data.family in _X86_VEX_PACKED_DOT_FAMILIES:
+        descriptor = restrict_vex_registers(descriptor)
     return descriptor
 
 

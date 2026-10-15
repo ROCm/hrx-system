@@ -370,6 +370,23 @@ realignment: r11, saved RSP at +8
 
 // ====
 
+// The highest VEX register feeds the highest EVEX register without truncating
+// either operand's encoded register number.
+// RUN: emit x86-native-bytes @vex_load_evex_broadcast fixed=%pointer:physical_register:7:1 fixed=%output:physical_register:6:1 fixed=%scalar:physical_register:15:1 fixed=%packet:physical_register:31:1
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @vex_load_evex_broadcast(%pointer: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %scalar = vmovss.load.xmm %pointer {disp32 = 4}
+  %packet = vbroadcastss %scalar
+  vmovdqu32.store %packet, %output {disp32 = 0}
+  return
+}
+
+// ----
+code: c5 7a 10 7f 04 62 42 7d 48 18 ff 62 61 7e 48 7f 3e c3
+
+// ====
+
 // Vector register ordinals never enter the callee-preserved GPR mask.
 // RUN: emit x86-frame @vector_load fixed=%value:physical_register:15:1
 x86.target<avx2> @target

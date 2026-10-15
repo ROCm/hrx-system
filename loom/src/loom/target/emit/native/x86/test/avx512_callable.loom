@@ -1,5 +1,64 @@
 x86.target<avx512> @target
 
+// Scalar VEX loads feed EVEX broadcasts with more than sixteen live SIMD
+// values. Allocation must honor the load encoding's smaller register domain.
+low.func.def public target<x86.avx512.core>(@target) abi(object_function) @avx512_scalar_load_pressure(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %value0 = vmovss.load.xmm %input {disp32 = 0}
+  %value1 = vmovss.load.xmm %input {disp32 = 4}
+  %value2 = vmovss.load.xmm %input {disp32 = 8}
+  %value3 = vmovss.load.xmm %input {disp32 = 12}
+  %value4 = vmovss.load.xmm %input {disp32 = 16}
+  %value5 = vmovss.load.xmm %input {disp32 = 20}
+  %value6 = vmovss.load.xmm %input {disp32 = 24}
+  %value7 = vmovss.load.xmm %input {disp32 = 28}
+  %value8 = vmovss.load.xmm %input {disp32 = 32}
+  %value9 = vmovss.load.xmm %input {disp32 = 36}
+  %value10 = vmovss.load.xmm %input {disp32 = 40}
+  %value11 = vmovss.load.xmm %input {disp32 = 44}
+  %value12 = vmovss.load.xmm %input {disp32 = 48}
+  %value13 = vmovss.load.xmm %input {disp32 = 52}
+  %value14 = vmovss.load.xmm %input {disp32 = 56}
+  %value15 = vmovss.load.xmm %input {disp32 = 60}
+  %value16 = vmovss.load.xmm %input {disp32 = 64}
+  low.br ^broadcast(%value0: reg<x86.xmm>, %value1: reg<x86.xmm>, %value2: reg<x86.xmm>, %value3: reg<x86.xmm>, %value4: reg<x86.xmm>, %value5: reg<x86.xmm>, %value6: reg<x86.xmm>, %value7: reg<x86.xmm>, %value8: reg<x86.xmm>, %value9: reg<x86.xmm>, %value10: reg<x86.xmm>, %value11: reg<x86.xmm>, %value12: reg<x86.xmm>, %value13: reg<x86.xmm>, %value14: reg<x86.xmm>, %value15: reg<x86.xmm>, %value16: reg<x86.xmm>)
+^broadcast(%scalar0: reg<x86.xmm>, %scalar1: reg<x86.xmm>, %scalar2: reg<x86.xmm>, %scalar3: reg<x86.xmm>, %scalar4: reg<x86.xmm>, %scalar5: reg<x86.xmm>, %scalar6: reg<x86.xmm>, %scalar7: reg<x86.xmm>, %scalar8: reg<x86.xmm>, %scalar9: reg<x86.xmm>, %scalar10: reg<x86.xmm>, %scalar11: reg<x86.xmm>, %scalar12: reg<x86.xmm>, %scalar13: reg<x86.xmm>, %scalar14: reg<x86.xmm>, %scalar15: reg<x86.xmm>, %scalar16: reg<x86.xmm>):
+  %packet0 = vbroadcastss %scalar0
+  vmovdqu32.store %packet0, %output {disp32 = 0}
+  %packet1 = vbroadcastss %scalar1
+  vmovdqu32.store %packet1, %output {disp32 = 64}
+  %packet2 = vbroadcastss %scalar2
+  vmovdqu32.store %packet2, %output {disp32 = 128}
+  %packet3 = vbroadcastss %scalar3
+  vmovdqu32.store %packet3, %output {disp32 = 192}
+  %packet4 = vbroadcastss %scalar4
+  vmovdqu32.store %packet4, %output {disp32 = 256}
+  %packet5 = vbroadcastss %scalar5
+  vmovdqu32.store %packet5, %output {disp32 = 320}
+  %packet6 = vbroadcastss %scalar6
+  vmovdqu32.store %packet6, %output {disp32 = 384}
+  %packet7 = vbroadcastss %scalar7
+  vmovdqu32.store %packet7, %output {disp32 = 448}
+  %packet8 = vbroadcastss %scalar8
+  vmovdqu32.store %packet8, %output {disp32 = 512}
+  %packet9 = vbroadcastss %scalar9
+  vmovdqu32.store %packet9, %output {disp32 = 576}
+  %packet10 = vbroadcastss %scalar10
+  vmovdqu32.store %packet10, %output {disp32 = 640}
+  %packet11 = vbroadcastss %scalar11
+  vmovdqu32.store %packet11, %output {disp32 = 704}
+  %packet12 = vbroadcastss %scalar12
+  vmovdqu32.store %packet12, %output {disp32 = 768}
+  %packet13 = vbroadcastss %scalar13
+  vmovdqu32.store %packet13, %output {disp32 = 832}
+  %packet14 = vbroadcastss %scalar14
+  vmovdqu32.store %packet14, %output {disp32 = 896}
+  %packet15 = vbroadcastss %scalar15
+  vmovdqu32.store %packet15, %output {disp32 = 960}
+  %packet16 = vbroadcastss %scalar16
+  vmovdqu32.store %packet16, %output {disp32 = 1024}
+  return
+}
+
 global.rodata.def @reverse_i32x16_control = align(64) bytes("0f0000000e0000000d0000000c0000000b0000000a00000009000000080000000700000006000000050000000400000003000000020000000100000000000000")
 
 // Full-width exact source lanes use the AVX-512 immutable-load rule and retain
