@@ -28,6 +28,81 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
 file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 loom_test_module(
   NAME
+    batch_conditioning_test_module
+  SRCS
+    "${_GLOB_X_LOOM}"
+    "tests/batch_conditioning.loom"
+    "iree::experimental::loom_serve::motifs::tensor::sources"
+    "iree::experimental::loom_serve::motifs::text::sources"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    batch_conditioning_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::batch_conditioning_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=pocket.batch_capacity=3"
+    "--config=pocket.context_capacity=4"
+    "--config=pocket.request_capacity=6"
+    "--config=pocket.threads=128"
+    "--config=pocket.voice_count=3"
+    "--config=pocket.voice_frame_capacity=2"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    batch_conditioning_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::batch_conditioning_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=pocket.batch_capacity=3"
+    "--config=pocket.context_capacity=4"
+    "--config=pocket.request_capacity=6"
+    "--config=pocket.threads=128"
+    "--config=pocket.voice_count=3"
+    "--config=pocket.voice_frame_capacity=2"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
+loom_test_module(
+  NAME
     request_test_module
   SRCS
     "${_GLOB_X_LOOM}"
