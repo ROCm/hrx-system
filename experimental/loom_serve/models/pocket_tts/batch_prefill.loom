@@ -1,0 +1,57 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Packed activations use source tensor extents; persistent histories retain
+// their independently supplied resident stride across every compatible cohort.
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.decl @pocket.batch.advance_1_kernel() launch(%membership: buffer, %position_storage: buffer, %position_offset: offset, %position_stride: offset)
+
+kernel.decl @pocket.batch.token_kernel() launch(%membership: buffer, %token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer, %token_offset: offset, %token_stride: offset, %bos_offset: offset, %bos_stride: offset, %embedding_offset: offset, %embedding_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.batch.flow_layer(%membership: buffer, %state_stride: offset, %layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer)
+
+template.decl @pocket.batch.prefill.step(%membership: buffer, %request_stride: offset, %state_stride: offset, %phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %state: buffer)
+
+template.decl pure @pocket.flow_cache_origin(%layer: index) -> (offset)
+
+template.def<@pocket.batch.prefill.step> @pocket_batch_prefill_step(%membership: buffer, %request_stride: offset, %state_stride: offset, %phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %state: buffer) {
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  %batch_zero = index.constant 0 : offset
+  %tensor_offset = index.constant 0 : offset
+  %parameter = command.parameter %phase, "flow_lm.bos_before_voice" : view<1x1x1024xbf16>
+  %parameter_2 = command.parameter %phase, "flow_lm.conditioner.embed.weight" : view<4001x1024xbf16>
+  %storage_bytes = index.constant 4096 : offset
+  %batch_bytes_1 = index.scale %batch_capacity, %storage_bytes : index, offset -> offset
+  %storage = buffer.alloca<global> align(16) %batch_bytes_1 : buffer
+  kernel.launch @pocket.batch.token_kernel(%membership, %request, %parameter, %parameter_2, %storage, %tensor_offset, %request_stride, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %tensor_offset, %storage_bytes) : (buffer, buffer, view<1x1x1024xbf16>, view<4001x1024xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %flow_layer_0 = index.constant 0 : index
+  %flow_cache_0_layer = index.constant 0 : index
+  %flow_cache_0 = template.apply<@pocket.flow_cache_origin>(%flow_cache_0_layer) pure : (index) -> (offset)
+  %flow_result = template.apply<@pocket.batch.flow_layer>(%membership, %state_stride, %flow_layer_0, %flow_cache_0, %backbone, %rotary, %state, %storage) : (buffer, offset, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %flow_layer_1 = index.constant 1 : index
+  %flow_cache_1_layer = index.constant 1 : index
+  %flow_cache_1 = template.apply<@pocket.flow_cache_origin>(%flow_cache_1_layer) pure : (index) -> (offset)
+  %flow_result_2 = template.apply<@pocket.batch.flow_layer>(%membership, %state_stride, %flow_layer_1, %flow_cache_1, %backbone, %rotary, %state, %flow_result) : (buffer, offset, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %flow_layer_2 = index.constant 2 : index
+  %flow_cache_2_layer = index.constant 2 : index
+  %flow_cache_2 = template.apply<@pocket.flow_cache_origin>(%flow_cache_2_layer) pure : (index) -> (offset)
+  %flow_result_3 = template.apply<@pocket.batch.flow_layer>(%membership, %state_stride, %flow_layer_2, %flow_cache_2, %backbone, %rotary, %state, %flow_result_2) : (buffer, offset, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %flow_layer_3 = index.constant 3 : index
+  %flow_cache_3_layer = index.constant 3 : index
+  %flow_cache_3 = template.apply<@pocket.flow_cache_origin>(%flow_cache_3_layer) pure : (index) -> (offset)
+  %flow_result_4 = template.apply<@pocket.batch.flow_layer>(%membership, %state_stride, %flow_layer_3, %flow_cache_3, %backbone, %rotary, %state, %flow_result_3) : (buffer, offset, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %flow_layer_4 = index.constant 4 : index
+  %flow_cache_4_layer = index.constant 4 : index
+  %flow_cache_4 = template.apply<@pocket.flow_cache_origin>(%flow_cache_4_layer) pure : (index) -> (offset)
+  %flow_result_5 = template.apply<@pocket.batch.flow_layer>(%membership, %state_stride, %flow_layer_4, %flow_cache_4, %backbone, %rotary, %state, %flow_result_4) : (buffer, offset, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  %flow_layer_5 = index.constant 5 : index
+  %flow_cache_5_layer = index.constant 5 : index
+  %flow_cache_5 = template.apply<@pocket.flow_cache_origin>(%flow_cache_5_layer) pure : (index) -> (offset)
+  %flow_result_6 = template.apply<@pocket.batch.flow_layer>(%membership, %state_stride, %flow_layer_5, %flow_cache_5, %backbone, %rotary, %state, %flow_result_5) : (buffer, offset, index, offset, buffer, buffer, buffer, buffer) -> (buffer)
+  kernel.launch @pocket.batch.advance_1_kernel(%membership, %state, %tensor_offset, %state_stride) : (buffer, buffer, offset, offset)
+  template.return
+}
