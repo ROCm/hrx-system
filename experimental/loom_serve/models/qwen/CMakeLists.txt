@@ -42,6 +42,30 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
     "${CMAKE_CURRENT_BINARY_DIR}/speculation_kernels.stamp"
 )
 
+loom_test_module(
+  NAME
+    epoch_encoding_test_module
+  SRCS
+    "control.loom"
+    "tests/epoch_encoding.loom"
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    epoch_encoding_test_execute_vm_reference_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::epoch_encoding_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
+
 file(GLOB _GLOB_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 file(GLOB _GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/qwen38/*.loom)
 file(GLOB _GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS programs/qwen38/*.loom)
