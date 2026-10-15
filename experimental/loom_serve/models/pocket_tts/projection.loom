@@ -10,7 +10,7 @@ config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
 
 template.decl @pocket.element() -> (index)
 
-template.decl @pocket.projection(%wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %row: index, %time: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32)
+template.decl @pocket.projection(%wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %row: index, %time: index, %input: buffer, %weight: buffer, %bias: buffer, %input_origin: offset, %weight_origin: offset, %bias_origin: offset) -> (f32)
 
 // Channels are the outer dimension of activations. BF16 checkpoint bytes are
 // extended at consumption; activations and the output boundary remain F32.
@@ -18,12 +18,11 @@ template.decl @pocket.projection(%wide: i1, %biased: i1, %inputs: index, %output
 // The waveform decoder selects F32 accumulation independently. Launch rows
 // along X and time along Y; shape operands agree in launch and dispatch.
 // Each output row/time pair has one writer, and output does not alias inputs.
-template.def<@pocket.projection> @pocket_projection(%wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %row: index, %time: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32) {
-  %origin = index.constant 0 : offset
+template.def<@pocket.projection> @pocket_projection(%wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %row: index, %time: index, %input: buffer, %weight: buffer, %bias: buffer, %input_origin: offset, %weight_origin: offset, %bias_origin: offset) -> (f32) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %x = buffer.view %input[%origin] : buffer -> view<[%inputs]x[%times]xf32>
-  %w = buffer.view %weight[%origin] : buffer -> view<[%outputs]x[%inputs]xbf16>
+  %x = buffer.view %input[%input_origin] : buffer -> view<[%inputs]x[%times]xf32>
+  %w = buffer.view %weight[%weight_origin] : buffer -> view<[%outputs]x[%inputs]xbf16>
   %sum = scf.if %wide -> (f32) {
     %initial = scalar.constant 0.0 : f64
     %total = scf.for %channel = [%zero to %inputs step %one](%sum = %initial : f64) -> (f64) {
@@ -49,7 +48,7 @@ template.def<@pocket.projection> @pocket_projection(%wide: i1, %biased: i1, %inp
     scf.yield %total : f32
   }
   %result = scf.if %biased -> (f32) {
-    %b = buffer.view %bias[%origin] : buffer -> view<[%outputs]xbf16>
+    %b = buffer.view %bias[%bias_origin] : buffer -> view<[%outputs]xbf16>
     %stored = view.load %b[%row] : view<[%outputs]xbf16> -> bf16
     %shift = scalar.extf %stored : bf16 to f32
     %result = scalar.addf %sum, %shift : f32
@@ -76,7 +75,8 @@ kernel.def target(@pocket) @pocket.project_f32(%outputs: index, %times: index) {
     %time = index.assume %time_unbounded [ge(%time_unbounded, 0), lt(%time_unbounded, %times)] : index
     %wide = scalar.constant false : i1
     %biased = scalar.constant false : i1
-    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    %projection_origin = index.constant 0 : offset
+    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias, %projection_origin, %projection_origin, %projection_origin) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset) -> (f32)
     %origin = index.constant 0 : offset
     %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
     view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>
@@ -100,7 +100,8 @@ kernel.def target(@pocket) @pocket.project_bias_f32(%outputs: index, %times: ind
     %time = index.assume %time_unbounded [ge(%time_unbounded, 0), lt(%time_unbounded, %times)] : index
     %wide = scalar.constant false : i1
     %biased = scalar.constant true : i1
-    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    %projection_origin = index.constant 0 : offset
+    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias, %projection_origin, %projection_origin, %projection_origin) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset) -> (f32)
     %origin = index.constant 0 : offset
     %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
     view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>
@@ -124,7 +125,8 @@ kernel.def target(@pocket) @pocket.project_f64(%outputs: index, %times: index) {
     %time = index.assume %time_unbounded [ge(%time_unbounded, 0), lt(%time_unbounded, %times)] : index
     %wide = scalar.constant true : i1
     %biased = scalar.constant false : i1
-    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    %projection_origin = index.constant 0 : offset
+    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias, %projection_origin, %projection_origin, %projection_origin) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset) -> (f32)
     %origin = index.constant 0 : offset
     %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
     view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>
@@ -148,7 +150,8 @@ kernel.def target(@pocket) @pocket.project_bias_f64(%outputs: index, %times: ind
     %time = index.assume %time_unbounded [ge(%time_unbounded, 0), lt(%time_unbounded, %times)] : index
     %wide = scalar.constant true : i1
     %biased = scalar.constant true : i1
-    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    %projection_origin = index.constant 0 : offset
+    %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias, %projection_origin, %projection_origin, %projection_origin) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset) -> (f32)
     %origin = index.constant 0 : offset
     %y = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%times]xf32>
     view.store %result, %y[%row, %time] : f32, view<[%outputs]x[%times]xf32>

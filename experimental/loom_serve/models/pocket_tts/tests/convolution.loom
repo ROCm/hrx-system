@@ -6,7 +6,7 @@
 
 amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
 
-template.decl @pocket.convolution_f32_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+template.decl @pocket.convolution_f32_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
 
 kernel.def target(@pocket) @test_convolution_f32_bias() {
   %one = index.constant 1 : index
@@ -20,11 +20,12 @@ kernel.def target(@pocket) @test_convolution_f32_bias() {
   %times = index.constant 5 : index
   %extent = index.constant 3 : index
   %stride = index.constant 2 : index
-  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output, %bias) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f32_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f32_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output, %bias, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin, %convolution_f32_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.convolution_f64_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer)
+template.decl @pocket.convolution_f64_bias.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset, %b_origin: offset)
 
 kernel.def target(@pocket) @test_convolution_f64_bias() {
   %one = index.constant 1 : index
@@ -38,11 +39,12 @@ kernel.def target(@pocket) @test_convolution_f64_bias() {
   %times = index.constant 5 : index
   %extent = index.constant 3 : index
   %stride = index.constant 2 : index
-  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output, %bias) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %convolution_f64_bias_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64_bias.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output, %bias, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin, %convolution_f64_bias_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.convolution_f64.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer)
+template.decl @pocket.convolution_f64.body(%elements: index, %inputs: index, %padded_times: index, %outputs: index, %times: index, %extent: index, %stride: index, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_origin: offset, %w_origin: offset, %y_origin: offset)
 
 kernel.def target(@pocket) @test_convolution_f64() {
   %one = index.constant 1 : index
@@ -56,7 +58,8 @@ kernel.def target(@pocket) @test_convolution_f64() {
   %times = index.constant 5 : index
   %extent = index.constant 3 : index
   %stride = index.constant 2 : index
-  template.apply<@pocket.convolution_f64.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer)
+  %convolution_f64_origin = index.constant 0 : offset
+  template.apply<@pocket.convolution_f64.body>(%elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %input, %weight, %output, %convolution_f64_origin, %convolution_f64_origin, %convolution_f64_origin) : (index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 

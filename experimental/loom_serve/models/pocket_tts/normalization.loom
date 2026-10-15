@@ -15,19 +15,18 @@ config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
 
 template.decl @pocket.element() -> (index)
 
-template.decl @pocket.normalization_affine.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer)
+template.decl @pocket.normalization_affine.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset, %bias_origin: offset)
 
-template.def<@pocket.normalization_affine.body> device @normalization_affine_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer) {
+template.def<@pocket.normalization_affine.body> device @normalization_affine_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset, %bias_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %scale_view = buffer.view %scale_storage[%origin] : buffer -> view<[%channels]xbf16>
-    %bias_view = buffer.view %bias_storage[%origin] : buffer -> view<[%channels]xbf16>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %scale_view = buffer.view %scale_storage[%scale_origin] : buffer -> view<[%channels]xbf16>
+    %bias_view = buffer.view %bias_storage[%bias_origin] : buffer -> view<[%channels]xbf16>
     %acc_zero = scalar.constant 0.0 : f64
     %total = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
       %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
@@ -79,7 +78,8 @@ kernel.def target(@pocket) @pocket.normalization_affine_1024x1_e1em05() {
   %divisor = scalar.constant 1024.0 : f64
   %variance_divisor = scalar.constant 1024.0 : f64
   %epsilon = scalar.constant 1.0000000000000001e-05 : f32
-  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer)
+  %normalization_affine_origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %normalization_affine_origin, %normalization_affine_origin, %normalization_affine_origin, %normalization_affine_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -98,7 +98,8 @@ kernel.def target(@pocket) @pocket.normalization_affine_512x1_e1em06() {
   %divisor = scalar.constant 512.0 : f64
   %variance_divisor = scalar.constant 512.0 : f64
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
-  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer)
+  %normalization_affine_origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %normalization_affine_origin, %normalization_affine_origin, %normalization_affine_origin, %normalization_affine_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -117,7 +118,8 @@ kernel.def target(@pocket) @pocket.normalization_affine_512x16_e1em05() {
   %divisor = scalar.constant 512.0 : f64
   %variance_divisor = scalar.constant 512.0 : f64
   %epsilon = scalar.constant 1.0000000000000001e-05 : f32
-  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer)
+  %normalization_affine_origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %normalization_affine_origin, %normalization_affine_origin, %normalization_affine_origin, %normalization_affine_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
   kernel.return
 }
 
@@ -192,18 +194,17 @@ kernel.def target(@pocket) @pocket.softmax_128x265() {
   kernel.return
 }
 
-template.decl @pocket.normalization_variance.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer)
+template.decl @pocket.normalization_variance.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset)
 
-template.def<@pocket.normalization_variance.body> device @normalization_variance_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer) {
+template.def<@pocket.normalization_variance.body> device @normalization_variance_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %scale_view = buffer.view %scale_storage[%origin] : buffer -> view<[%channels]xbf16>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %scale_view = buffer.view %scale_storage[%scale_origin] : buffer -> view<[%channels]xbf16>
     %acc_zero = scalar.constant 0.0 : f64
     %total = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
       %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
@@ -251,21 +252,21 @@ kernel.def target(@pocket) @pocket.normalization_variance_512x1_e1em05() {
   %divisor = scalar.constant 512.0 : f64
   %variance_divisor = scalar.constant 511.0 : f64
   %epsilon = scalar.constant 1.0000000000000001e-05 : f32
-  template.apply<@pocket.normalization_variance.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage) : (index, index, index, f64, f64, f32, buffer, buffer, buffer)
+  %normalization_variance_origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_variance.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %normalization_variance_origin, %normalization_variance_origin, %normalization_variance_origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, offset, offset, offset)
   kernel.return
 }
 
-template.decl @pocket.normalization_plain.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer)
+template.decl @pocket.normalization_plain.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
 
-template.def<@pocket.normalization_plain.body> device @normalization_plain_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer) {
+template.def<@pocket.normalization_plain.body> device @normalization_plain_body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset) {
   %element = template.apply<@pocket.element>() : () -> (index)
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %live = index.cmp ult, %element, %elements : index
   scf.if %live {
-    %origin = index.constant 0 : offset
-    %x_view = buffer.view %x_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
-    %y_view = buffer.view %y_storage[%origin] : buffer -> view<[%channels]x[%times]xf32>
+    %x_view = buffer.view %x_storage[%x_origin] : buffer -> view<[%channels]x[%times]xf32>
+    %y_view = buffer.view %y_storage[%y_origin] : buffer -> view<[%channels]x[%times]xf32>
     %acc_zero = scalar.constant 0.0 : f64
     %total = scf.for %channel = [%c0 to %channels step %c1](%acc = %acc_zero : f64) -> (f64) {
       %input = view.load %x_view[%channel, %element] : view<[%channels]x[%times]xf32> -> f32
@@ -311,6 +312,7 @@ kernel.def target(@pocket) @pocket.normalization_plain_512x1_e1em06() {
   %divisor = scalar.constant 512.0 : f64
   %variance_divisor = scalar.constant 512.0 : f64
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
-  template.apply<@pocket.normalization_plain.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage) : (index, index, index, f64, f64, f32, buffer, buffer)
+  %normalization_plain_origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_plain.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %normalization_plain_origin, %normalization_plain_origin) : (index, index, index, f64, f64, f32, buffer, buffer, offset, offset)
   kernel.return
 }
