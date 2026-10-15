@@ -237,6 +237,19 @@ static iree_status_t loom_serve_command_record(
     loom_serve_command_layout_t* layouts,
     iree_hal_command_buffer_t* command_buffer) {
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
+  // A program or selected range exchanges payloads with staging and other
+  // invocations. Its semaphore edges order execution; the recording owns
+  // visibility across that external boundary, including indirect count reads.
+  const iree_hal_execution_stage_t stages =
+      IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS |
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER;
+  const iree_hal_barrier_t acquire = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .target_stage_mask = stages,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_hal_command_buffer_barrier(command_buffer, &acquire));
   loom_cmd_program_barrier_wave_iterator_t iterator;
   loom_cmd_program_barrier_wave_iterator_initialize(program, &iterator);
   iterator.next_command = range.first_command;
@@ -280,6 +293,14 @@ static iree_status_t loom_serve_command_record(
                                          entries, layouts, command_buffer);
     }
     source_stages = target_stages;
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_hal_barrier_t release = {
+        .source_stage_mask = stages,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    status = iree_hal_command_buffer_barrier(command_buffer, &release);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(command_buffer);

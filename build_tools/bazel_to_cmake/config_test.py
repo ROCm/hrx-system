@@ -421,6 +421,19 @@ cc_library(
             functions._convert_select_condition("//libamdf/config:enabled_setting"),
             "AMDF_BUILD",
         )
+        for family, condition in (
+            ("rdna", "AMDF_FAMILY_RDNA"),
+            ("cdna", "AMDF_FAMILY_CDNA"),
+            ("xdna", "AMDF_FAMILY_XDNA"),
+            ("gpu", "AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA"),
+        ):
+            with self.subTest(family=family):
+                label = f"//libamdf/config/family:{family}"
+                self.assertEqual(functions._convert_select_condition(label), condition)
+                self.assertEqual(
+                    functions._target_compatible_condition([label]),
+                    f"({condition})" if family == "gpu" else condition,
+                )
 
     def test_target_compatible_with_composes_selects_and_requirements(self):
         functions = bazel_to_cmake_converter.BuildFileFunctions(

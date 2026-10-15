@@ -37,6 +37,10 @@ typedef struct loom_serve_command_entry_t {
 // A non-NULL range selects complete contiguous barrier waves. NULL selects the
 // complete program. Ranges retain the original binding/parameter layout; the
 // caller preserves live workspace and orders successive ranges with semaphores.
+// Every recording acquires external payload visibility before its first wave
+// and releases writes after its last wave. This includes indirect count
+// buffers; queue execution provides completion ordering without inferring cache
+// actions.
 iree_status_t loom_serve_command_create(
     const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode, const loom_cmd_program_t* program,

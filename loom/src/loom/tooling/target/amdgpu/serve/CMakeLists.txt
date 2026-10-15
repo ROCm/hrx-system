@@ -82,7 +82,24 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
+    test_device_rdna
+  SRCS
+    "test_device_rdna.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::registration
+    loom::serve::testing::device
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
     control_test
@@ -118,6 +135,49 @@ loom_cc_test(
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND AMDF_FAMILY_RDNA AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    rdna_control_test
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/control_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/control/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/control/kernels.loom"
+  DEPS
+    ::test_compiler
+    ::test_device_rdna
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::hal
+    iree::module::hal::types
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::module
+    loom::binding::c::loomc
+    loom::serve::runtime::execution
+    loom::serve::runtime::execution::workspace
+    loom::serve::runtime::host
+    loom::serve::runtime::program::jit
+    loom::serve::runtime::program::module
+    loom::serve::testing::compiler
+    loom::serve::testing::device
+  ARGS
+    "--control_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/control/kernels.loom}}"
+  LABELS
+    "iree-run-requirement=libamdf.resource.amd_gpu"
     "iree-build-requirement=loom.target.arch.vm"
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"

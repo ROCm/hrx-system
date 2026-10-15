@@ -94,44 +94,86 @@ loom_cc_test(
     ],
 )
 
-loom_cc_test(
-    name = "control_test",
-    srcs = ["//loom/src/loom/serve/runtime/program:control_test.cc"],
-    args = ["--control_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/control/kernels.loom)"],
-    data = [
-        "//loom/src/loom/serve/runtime/program:testdata/control/control.loom",
-        "//loom/src/loom/serve/runtime/program:testdata/control/kernels.loom",
-    ],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _ROCR_TEST_TAGS,
+# Both runtimes consume the same compiler and serving contracts. Their device
+# leaves and runtime dependencies remain independent.
+_SERVING_DEVICES = [
+    (
+        "",
+        ":test_device",
+        ["//runtime/config/hal:driver_amdgpu"],
+        _ROCR_TEST_TAGS,
+    ),
+    (
+        "rdna_",
+        ":test_device_rdna",
+        [
+            "//runtime/config/hal:driver_amd",
+            "//libamdf/config:enabled_setting",
+            "//libamdf/config/family:rdna",
+        ],
+        ["iree-run-requirement=libamdf.resource.amd_gpu"],
+    ),
+]
+
+loom_cc_library(
+    name = "test_device_rdna",
+    testonly = True,
+    srcs = ["test_device_rdna.c"],
     target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:amdgpu_hal",
-        "//runtime/config/hal:driver_amdgpu",
+        "//runtime/config/hal:driver_amd",
+        "//libamdf/config:enabled_setting",
+        "//libamdf/config/family:rdna",
     ]),
     deps = [
-        ":test_compiler",
-        ":test_device",
-        "//loom/binding/c:loomc",
-        "//loom/src/loom/serve/runtime/execution",
-        "//loom/src/loom/serve/runtime/execution:workspace",
-        "//loom/src/loom/serve/runtime/host",
-        "//loom/src/loom/serve/runtime/program:jit",
-        "//loom/src/loom/serve/runtime/program:module",
-        "//loom/src/loom/serve/testing:compiler",
         "//loom/src/loom/serve/testing:device",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/module/hal:types",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-        "//runtime/src/iree/vm",
-        "//runtime/src/iree/vm/bytecode:module",
+        "//runtime/src/iree/hal/drivers/amd/registration",
     ],
+    alwayslink = True,
 )
+
+[
+    loom_cc_test(
+        name = prefix + "control_test",
+        srcs = ["//loom/src/loom/serve/runtime/program:control_test.cc"],
+        args = ["--control_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/control/kernels.loom)"],
+        data = [
+            "//loom/src/loom/serve/runtime/program:testdata/control/control.loom",
+            "//loom/src/loom/serve/runtime/program:testdata/control/kernels.loom",
+        ],
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+        tags = runtime_tags,
+        target_compatible_with = loom_config_compatible_with([
+            "//loom/config/target/arch:vm",
+            "//loom/config/execute:amdgpu_hal",
+        ] + runtime_requirements),
+        deps = [
+            ":test_compiler",
+            device,
+            "//loom/binding/c:loomc",
+            "//loom/src/loom/serve/runtime/execution",
+            "//loom/src/loom/serve/runtime/execution:workspace",
+            "//loom/src/loom/serve/runtime/host",
+            "//loom/src/loom/serve/runtime/program:jit",
+            "//loom/src/loom/serve/runtime/program:module",
+            "//loom/src/loom/serve/testing:compiler",
+            "//loom/src/loom/serve/testing:device",
+            "//runtime/src/iree/async",
+            "//runtime/src/iree/async/util:proactor_pool",
+            "//runtime/src/iree/base",
+            "//runtime/src/iree/base/threading",
+            "//runtime/src/iree/base/tooling:flags",
+            "//runtime/src/iree/hal",
+            "//runtime/src/iree/module/hal:types",
+            "//runtime/src/iree/testing:gtest",
+            "//runtime/src/iree/testing:gtest_main",
+            "//runtime/src/iree/vm",
+            "//runtime/src/iree/vm/bytecode:module",
+        ],
+    )
+    for prefix, device, runtime_requirements, runtime_tags in _SERVING_DEVICES
+]
 
 loom_cc_test(
     name = "device_group_test",

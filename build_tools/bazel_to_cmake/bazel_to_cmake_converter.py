@@ -73,6 +73,10 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
 
 _API_CONFIG_CMAKE_OPTIONS = {
     "//libamdf/config:enabled_setting": "AMDF_BUILD",
+    "//libamdf/config/family:rdna": "AMDF_FAMILY_RDNA",
+    "//libamdf/config/family:cdna": "AMDF_FAMILY_CDNA",
+    "//libamdf/config/family:xdna": "AMDF_FAMILY_XDNA",
+    "//libamdf/config/family:gpu": "AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA",
     "//runtime/config/net:rdma_enabled": "IREE_NET_RDMA",
     "//build_tools/vulkan/config:available": "IREE_VULKAN_AVAILABLE",
     "//build_tools/d3d12/config:available": "IREE_D3D12_AVAILABLE",

@@ -53,8 +53,27 @@ struct loom_serve_test_control_state_t {
 class ControlTest
     : public ::testing::TestWithParam<iree_hal_command_buffer_mode_t> {
  protected:
+  static void SetUpTestSuite() {
+    IREE_ASSERT_OK(
+        loom_serve_test_host_create(2, iree_allocator_system(), &host_));
+    IREE_ASSERT_OK(loom_serve_test_driver_create(host_, iree_allocator_system(),
+                                                 &driver_));
+  }
+
+  static void TearDownTestSuite() {
+    iree_hal_driver_release(driver_);
+    loom_serve_host_release(host_);
+    driver_ = nullptr;
+    host_ = nullptr;
+  }
+
   void SetUp() override {
-    IREE_ASSERT_OK(CreateDevice());
+    iree::Status status = CreateDevice();
+    if (status.code() == iree::StatusCode::kUnimplemented ||
+        status.code() == iree::StatusCode::kUnavailable) {
+      GTEST_SKIP() << status.ToString();
+    }
+    IREE_ASSERT_OK(status);
     auto* dispatch =
         SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
     auto* transfer =
@@ -162,24 +181,14 @@ class ControlTest
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
     iree_async_frontier_tracker_release(frontier_tracker_);
-    loom_serve_host_release(host_);
   }
 
   iree_status_t CreateDevice() {
-    iree_status_t status =
-        loom_serve_test_host_create(2, host_allocator_, &host_);
-    iree_hal_driver_t* driver = nullptr;
-    if (iree_status_is_ok(status)) {
-      status = loom_serve_test_driver_create(host_, host_allocator_, &driver);
-    }
-    if (iree_status_is_ok(status)) {
-      auto params = iree_hal_device_create_params_default();
-      params.proactor_pool = loom_serve_host_proactor_pool(host_);
-      status = iree_hal_driver_create_device_by_uri(
-          driver, loom_serve_test_device()->device_uri, &params,
-          host_allocator_, &device_);
-    }
-    iree_hal_driver_release(driver);
+    auto params = iree_hal_device_create_params_default();
+    params.proactor_pool = loom_serve_host_proactor_pool(host_);
+    iree_status_t status = iree_hal_driver_create_device_by_uri(
+        driver_, loom_serve_test_device()->device_uri, &params, host_allocator_,
+        &device_);
     if (iree_status_is_ok(status)) {
       status = iree_async_frontier_tracker_create(
           iree_async_frontier_tracker_options_default(), host_allocator_,
@@ -351,7 +360,9 @@ class ControlTest
   // Copied compiler evidence retained beyond individual results.
   loom_serve_compilation_report_t compilation_ = {};
   // Shared compiler workers and I/O services outliving the device.
-  loom_serve_host_t* host_ = nullptr;
+  inline static loom_serve_host_t* host_ = nullptr;
+  // One application driver retains process-owned native context across devices.
+  inline static iree_hal_driver_t* driver_ = nullptr;
   // Cross-queue frontier registry retained through group destruction.
   iree_async_frontier_tracker_t* frontier_tracker_ = nullptr;
   // Owned target device.
