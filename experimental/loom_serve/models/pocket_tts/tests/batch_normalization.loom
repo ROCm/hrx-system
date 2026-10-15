@@ -1,0 +1,293 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Reordered active rows use independent packed scratch and resident state.
+// Every tensor has a nonzero origin and padding between rows. Comparing the
+// complete banks with isolated calls also observes all guards and inactive rows.
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.def target(@pocket) @batch_metadata() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%count: i32, %first: i32, %second: i32, %third: i32, %fourth: i32, %membership: buffer) {
+  %origin = index.constant 0 : offset
+  %map = buffer.view %membership[%origin] : buffer -> view<5xi32>
+  view.store %count, %map[0] : i32, view<5xi32>
+  view.store %first, %map[1] : i32, view<5xi32>
+  view.store %second, %map[2] : i32, view<5xi32>
+  view.store %third, %map[3] : i32, view<5xi32>
+  view.store %fourth, %map[4] : i32, view<5xi32>
+  kernel.return
+}
+
+template.decl @pocket.batch.normalization_affine(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset)
+
+template.decl @pocket.normalization_affine.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset, %bias_origin: offset)
+
+kernel.def target(@pocket) @isolated_normalization_affine() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 7 : index
+  %times = index.constant 3 : index
+  %divisor = scalar.constant 7.0 : f64
+  %variance_divisor = scalar.constant 7.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_affine.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %origin, %origin, %origin, %origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_normalization_affine() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 7 : index
+  %times = index.constant 3 : index
+  %divisor = scalar.constant 7.0 : f64
+  %variance_divisor = scalar.constant 7.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 112 : offset
+  %y_stride = index.constant 112 : offset
+  %scale_stride = index.constant 0 : offset
+  %bias_stride = index.constant 0 : offset
+  template.apply<@pocket.batch.normalization_affine>(%membership, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %bias_storage, %origin, %x_stride, %origin, %y_stride, %origin, %scale_stride, %origin, %bias_stride) : (buffer, index, index, index, f64, f64, f32, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @normalization_affine_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %y_seed = check.literal value(101) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %scale_seed = check.literal value(102) : i64
+  %actual_scale = check.generate.random.uniform seed(%scale_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %reference_scale = check.generate.random.uniform seed(%scale_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %bias_seed = check.literal value(103) : i64
+  %actual_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %reference_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_normalization_affine(%membership, %actual_x, %actual_y, %actual_scale, %actual_bias) : (tensor<5xi32>, tensor<116xf32>, tensor<116xf32>, tensor<30xbf16>, tensor<30xbf16>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %scale_0_0 = check.tensor.view %reference_scale offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %bias_0_0 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  kernel.launch @isolated_normalization_affine(%x_0_0, %y_0_0, %scale_0_0, %bias_0_0) : (tensor<21xf32>, tensor<21xf32>, tensor<7xbf16>, tensor<7xbf16>)
+  %x_0_1 = check.tensor.view %reference_x offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_1 = check.tensor.view %reference_y offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %scale_0_1 = check.tensor.view %reference_scale offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %bias_0_1 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  kernel.launch @isolated_normalization_affine(%x_0_1, %y_0_1, %scale_0_1, %bias_0_1) : (tensor<21xf32>, tensor<21xf32>, tensor<7xbf16>, tensor<7xbf16>)
+  %x_0_2 = check.tensor.view %reference_x offset(240) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_2 = check.tensor.view %reference_y offset(240) : tensor<116xf32> -> tensor<21xf32>
+  %scale_0_2 = check.tensor.view %reference_scale offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %bias_0_2 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  kernel.launch @isolated_normalization_affine(%x_0_2, %y_0_2, %scale_0_2, %bias_0_2) : (tensor<21xf32>, tensor<21xf32>, tensor<7xbf16>, tensor<7xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_scale) expected(%reference_scale) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_normalization_affine(%membership, %actual_x, %actual_y, %actual_scale, %actual_bias) : (tensor<5xi32>, tensor<116xf32>, tensor<116xf32>, tensor<30xbf16>, tensor<30xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_scale) expected(%reference_scale) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.return
+}
+
+template.decl @pocket.batch.normalization_variance(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset)
+
+template.decl @pocket.normalization_variance.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %x_origin: offset, %y_origin: offset, %scale_origin: offset)
+
+kernel.def target(@pocket) @isolated_normalization_variance() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %y_storage: buffer, %scale_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 7 : index
+  %times = index.constant 3 : index
+  %divisor = scalar.constant 7.0 : f64
+  %variance_divisor = scalar.constant 6.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_variance.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %origin, %origin, %origin) : (index, index, index, f64, f64, f32, buffer, buffer, buffer, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_normalization_variance() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 7 : index
+  %times = index.constant 3 : index
+  %divisor = scalar.constant 7.0 : f64
+  %variance_divisor = scalar.constant 6.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 112 : offset
+  %y_stride = index.constant 112 : offset
+  %scale_stride = index.constant 0 : offset
+  template.apply<@pocket.batch.normalization_variance>(%membership, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %scale_storage, %origin, %x_stride, %origin, %y_stride, %origin, %scale_stride) : (buffer, index, index, index, f64, f64, f32, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @normalization_variance_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %y_seed = check.literal value(101) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %scale_seed = check.literal value(102) : i64
+  %actual_scale = check.generate.random.uniform seed(%scale_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %reference_scale = check.generate.random.uniform seed(%scale_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_normalization_variance(%membership, %actual_x, %actual_y, %actual_scale) : (tensor<5xi32>, tensor<116xf32>, tensor<116xf32>, tensor<30xbf16>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %scale_0_0 = check.tensor.view %reference_scale offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  kernel.launch @isolated_normalization_variance(%x_0_0, %y_0_0, %scale_0_0) : (tensor<21xf32>, tensor<21xf32>, tensor<7xbf16>)
+  %x_0_1 = check.tensor.view %reference_x offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_1 = check.tensor.view %reference_y offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %scale_0_1 = check.tensor.view %reference_scale offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  kernel.launch @isolated_normalization_variance(%x_0_1, %y_0_1, %scale_0_1) : (tensor<21xf32>, tensor<21xf32>, tensor<7xbf16>)
+  %x_0_2 = check.tensor.view %reference_x offset(240) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_2 = check.tensor.view %reference_y offset(240) : tensor<116xf32> -> tensor<21xf32>
+  %scale_0_2 = check.tensor.view %reference_scale offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  kernel.launch @isolated_normalization_variance(%x_0_2, %y_0_2, %scale_0_2) : (tensor<21xf32>, tensor<21xf32>, tensor<7xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_scale) expected(%reference_scale) : tensor<30xbf16>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_normalization_variance(%membership, %actual_x, %actual_y, %actual_scale) : (tensor<5xi32>, tensor<116xf32>, tensor<116xf32>, tensor<30xbf16>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_scale) expected(%reference_scale) : tensor<30xbf16>
+  check.return
+}
+
+template.decl @pocket.batch.normalization_plain(%membership: buffer, %elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.normalization_plain.body(%elements: index, %channels: index, %times: index, %divisor: f64, %variance_divisor: f64, %epsilon: f32, %x_storage: buffer, %y_storage: buffer, %x_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_normalization_plain() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 7 : index
+  %times = index.constant 3 : index
+  %divisor = scalar.constant 7.0 : f64
+  %variance_divisor = scalar.constant 7.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.normalization_plain.body>(%elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %origin, %origin) : (index, index, index, f64, f64, f32, buffer, buffer, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_normalization_plain() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 3 : index
+  %channels = index.constant 7 : index
+  %times = index.constant 3 : index
+  %divisor = scalar.constant 7.0 : f64
+  %variance_divisor = scalar.constant 7.0 : f64
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 112 : offset
+  %y_stride = index.constant 112 : offset
+  template.apply<@pocket.batch.normalization_plain>(%membership, %elements, %channels, %times, %divisor, %variance_divisor, %epsilon, %x_storage, %y_storage, %origin, %x_stride, %origin, %y_stride) : (buffer, index, index, index, f64, f64, f32, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @normalization_plain_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %y_seed = check.literal value(101) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_normalization_plain(%membership, %actual_x, %actual_y) : (tensor<5xi32>, tensor<116xf32>, tensor<116xf32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @isolated_normalization_plain(%x_0_0, %y_0_0) : (tensor<21xf32>, tensor<21xf32>)
+  %x_0_1 = check.tensor.view %reference_x offset(128) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_1 = check.tensor.view %reference_y offset(128) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @isolated_normalization_plain(%x_0_1, %y_0_1) : (tensor<21xf32>, tensor<21xf32>)
+  %x_0_2 = check.tensor.view %reference_x offset(240) : tensor<116xf32> -> tensor<21xf32>
+  %y_0_2 = check.tensor.view %reference_y offset(240) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @isolated_normalization_plain(%x_0_2, %y_0_2) : (tensor<21xf32>, tensor<21xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_normalization_plain(%membership, %actual_x, %actual_y) : (tensor<5xi32>, tensor<116xf32>, tensor<116xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<116xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<116xf32>
+  check.return
+}
