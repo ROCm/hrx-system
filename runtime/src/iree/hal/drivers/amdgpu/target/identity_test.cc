@@ -231,7 +231,7 @@ TEST(TargetIdentityTest, LooksUpGeneratedWavefrontSupport) {
     iree_hal_amdgpu_wavefront_size_flags_t explicit_sizes;
   };
   static const Case cases[] = {
-      {"gfx90a", 64, IREE_HAL_AMDGPU_WAVEFRONT_SIZE_FLAG_NONE},
+      {"gfx90a", 64, IREE_HAL_AMDGPU_WAVEFRONT_SIZE_FLAG_64},
       {"gfx942", 64, IREE_HAL_AMDGPU_WAVEFRONT_SIZE_FLAG_64},
       {"gfx1100", 32,
        IREE_HAL_AMDGPU_WAVEFRONT_SIZE_FLAG_32 |
