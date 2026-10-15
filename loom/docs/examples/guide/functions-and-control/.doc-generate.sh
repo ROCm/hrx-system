@@ -37,14 +37,14 @@ cp -- "${script_dir}/guarded-read-ahead.loom" "${output_dir}/guarded-read-ahead.
 cp -- "${script_dir}/guarded-read-ahead-tests.loom" "${output_dir}/guarded-read-ahead-tests.loom"
 cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/streaming_packed_s8_dot.loom" \
   "${output_dir}/streaming-packed-dot.loom"
-cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/routed_row_combine_f32.loom" \
-  "${output_dir}/routed-row-combine.loom"
-cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/cooperative_paged_attention_f32.loom" \
-  "${output_dir}/cooperative-paged-attention.loom"
-cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/sparse_token_attention_f32.loom" \
-  "${output_dir}/sparse-token-attention.loom"
-cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/grouped_paged_attention_f32.loom" \
-  "${output_dir}/grouped-paged-attention.loom"
+# Each downloadable example includes its kernel and named benchmark workloads.
+corpus_dir="${repo_root}/loom/src/loom/test/corpus/checked_benchmarks"
+for name in routed_row_combine cooperative_paged_attention \
+  sparse_token_attention grouped_paged_attention; do
+  "${loom_link}" "${corpus_dir}/${name}_f32.loom" \
+    "${corpus_dir}/${name}_f32_benchmark.loom" --mode=merge --to=text \
+    --output="${output_dir}/${name//_/-}.loom"
+done
 cp -- "${repo_root}/loom/src/loom/tooling/target/amdgpu/test/corpus/split_barrier_reuse.loom" \
   "${output_dir}/split-barrier-reuse.loom"
 
