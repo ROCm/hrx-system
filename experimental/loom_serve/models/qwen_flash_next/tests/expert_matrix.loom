@@ -1,157 +1,288 @@
-// Each original-format consumer receives valid sixteen-route records, with
-// reversed full-record route order and one-route tails. The producer's separate
-// ownership test checks its publication contract. Here, independent F64
-// arithmetic ignores record order and checks every output, inactive output
-// sentinels, and immutable task/weight storage. The GPU traverses every K block.
+// Each original-format consumer receives a reversed full record and a
+// one-route tail for ten experts. The producer's separate ownership test
+// establishes publication. Independent F64 arithmetic ignores record order
+// and checks every output, inactive sentinels, and immutable input storage.
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @expert_test.tile_rows : %value: index where [range(%value, 64, 128), multiple_of(%value, 64)]
+
+func.decl pure @expert_record_extent(%capacity: index, %record_rows: index) -> (index, index, offset)
+
 func.decl @expert_matrix_fixture(%down: i1, %format: index, %input: buffer, %weight: buffer, %up_weight: buffer, %tasks: buffer)
 
-func.decl @expert_matrix_reference(%down: i1, %format: index, %input: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
+func.decl @expert_matrix_reference(%down: i1, %format: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
 
-kernel.decl @expert_matrix_gate_up_q4k() launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
+template.decl @flash_next.expert_schedule(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
+
+amdgpu.target<gfx11-generic> @expert_test_wave32 {subgroup_size = 32}
+
+// Configurations cover Q4_K/Q5_K/Q8 gate/up and Q5_1/Q8 down. Geometry
+// determines storage only; the oracle decodes original coefficients itself.
+func.def @expert_geometry(%down: i1, %format: index) -> (index, index, index, index, index, index, index, index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %ten = index.constant 10 : index
+  %block_size = index.constant 32 : index
+  %q8_block_bytes = index.constant 34 : index
+  %q4_row_bytes = index.constant 1440 : index
+  %q5_row_bytes = index.constant 1760 : index
+  %q51_row_bytes = index.constant 480 : index
+  %hidden = index.constant 640 : index
+  %model = index.constant 2560 : index
+  %rows = config.get @expert_test.tile_rows : index
+  %capacity = config.get @flash_next.token_count : index
+  %large = index.cmp uge, %format, %two : index
+  %q51 = index.cmp eq, %format, %one : index
+  %q5 = index.cmp eq, %format, %three : index
+  %inputs = scf.select %down, %hidden, %model : index
+  %outputs = scf.select %down, %model, %hidden : index
+  %routes = index.mul %capacity, %ten : index
+  %input_rows = scf.select %down, %routes, %capacity : index
+  %blocks = index.div %inputs, %block_size : index
+  %q8_row_bytes = index.mul %blocks, %q8_block_bytes : index
+  %large_row_bytes = scf.select %q5, %q5_row_bytes, %q4_row_bytes : index
+  %small_row_bytes = scf.select %q51, %q51_row_bytes, %q8_row_bytes : index
+  %row_bytes = scf.select %large, %large_row_bytes, %small_row_bytes : index
+  %weight_rows = index.mul %outputs, %ten : index
+  %weight_bytes = index.mul %weight_rows, %row_bytes : index
+  %up_bytes = scf.select %down, %one, %weight_bytes : index
+  %record_capacity, %fields, %task_bytes = func.call pure @expert_record_extent(%capacity, %rows) : (index, index) -> (index, index, offset)
+  %task_words = index.madd %record_capacity, %fields, %one : index
+  func.return %rows, %input_rows, %inputs, %outputs, %routes, %task_words, %weight_bytes, %up_bytes : index, index, index, index, index, index, index, index
+}
+
+// Bind the finite test geometry before compiling each GPU subject. Runtime
+// generators own only data; they do not specialize the matrix schedule.
+func.def inline @expert_matrix_subject(%down: i1, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %contraction = scf.select %down, %one, %zero : index
+  template.apply<@flash_next.expert_schedule>(%contraction, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  func.return
+}
+
+kernel.def target(@expert_test_wave32) @matrix_gate_up_q4k() {
+  %workers = index.constant 1280 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
+  %down = scalar.constant false : i1
+  %format = index.constant 2 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_subject(%down, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (i1, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
 
 func.def @reference_gate_up_q4k(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
-  %format = index.constant 2 : index
   %down = scalar.constant false : i1
-  func.call @expert_matrix_reference(%down, %format, %input, %weight, %up_weight, %output) : (i1, index, buffer, buffer, buffer, buffer)
+  %format = index.constant 2 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_reference(%down, %format, %input, %tasks, %weight, %up_weight, %output) : (i1, index, buffer, buffer, buffer, buffer, buffer)
   func.return
 }
 
 check.scenario public @gate_up_q4k {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %format = check.literal value(2) : index
     %down = check.literal value(false) : i1
-    %tasks = check.generate.fill value(1515870810) : tensor<3421xi32>
-    %input = check.generate.fill value(0.0) : tensor<19x2560xbf16>
+    %format = check.literal value(2) : index
+    %rows, %input_rows, %inputs, %outputs, %routes, %task_words, %weight_bytes, %up_bytes = check.generate<@expert_geometry>(%down, %format) : (i1, index) -> (index, index, index, index, index, index, index, index)
+    %tasks = check.generate.fill value(1515870810) : tensor<[%task_words]xi32>
+    %input = check.generate.fill value(0.0) : tensor<[%input_rows]x[%inputs]xbf16>
     %weight_seed = check.literal value(73419) : i64
     %up_seed = check.literal value(84327) : i64
-    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<9216000xi8>
-    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<9216000xi8>
-    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<19x2560xbf16>, tensor<9216000xi8>, tensor<9216000xi8>, tensor<3421xi32>) -> ()
-    %output = check.generate.fill value(-17.0) : tensor<190x640xbf16>
-    check.compare<@expert_matrix_gate_up_q4k, @reference_gate_up_q4k>(%input, %tasks, %weight, %up_weight, %output) : (tensor<19x2560xbf16>, tensor<3421xi32>, tensor<9216000xi8>, tensor<9216000xi8>, tensor<190x640xbf16>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<190x640xbf16>
-      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<3421xi32>
-      check.expect.bitwise actual(%weight) expected(%weight) : tensor<9216000xi8>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<[%weight_bytes]xi8>
+    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<[%up_bytes]xi8>
+    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%task_words]xi32>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<[%routes]x[%outputs]xbf16>
+    check.compare<@matrix_gate_up_q4k, @reference_gate_up_q4k>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%routes]x[%outputs]xbf16>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_rows]x[%inputs]xbf16>
+      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<[%task_words]xi32>
+      check.expect.bitwise actual(%weight) expected(%weight) : tensor<[%weight_bytes]xi8>
+      check.expect.bitwise actual(%up_weight) expected(%up_weight) : tensor<[%up_bytes]xi8>
     }
   }
   check.return
 }
 
-kernel.decl @expert_matrix_gate_up_q5k() launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
+kernel.def target(@expert_test_wave32) @matrix_gate_up_q5k() {
+  %workers = index.constant 1280 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
+  %down = scalar.constant false : i1
+  %format = index.constant 3 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_subject(%down, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (i1, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
 
 func.def @reference_gate_up_q5k(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
-  %format = index.constant 3 : index
   %down = scalar.constant false : i1
-  func.call @expert_matrix_reference(%down, %format, %input, %weight, %up_weight, %output) : (i1, index, buffer, buffer, buffer, buffer)
+  %format = index.constant 3 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_reference(%down, %format, %input, %tasks, %weight, %up_weight, %output) : (i1, index, buffer, buffer, buffer, buffer, buffer)
   func.return
 }
 
 check.scenario public @gate_up_q5k {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %format = check.literal value(3) : index
     %down = check.literal value(false) : i1
-    %tasks = check.generate.fill value(1515870810) : tensor<3421xi32>
-    %input = check.generate.fill value(0.0) : tensor<19x2560xbf16>
+    %format = check.literal value(3) : index
+    %rows, %input_rows, %inputs, %outputs, %routes, %task_words, %weight_bytes, %up_bytes = check.generate<@expert_geometry>(%down, %format) : (i1, index) -> (index, index, index, index, index, index, index, index)
+    %tasks = check.generate.fill value(1515870810) : tensor<[%task_words]xi32>
+    %input = check.generate.fill value(0.0) : tensor<[%input_rows]x[%inputs]xbf16>
     %weight_seed = check.literal value(73419) : i64
     %up_seed = check.literal value(84327) : i64
-    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<11264000xi8>
-    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<11264000xi8>
-    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<19x2560xbf16>, tensor<11264000xi8>, tensor<11264000xi8>, tensor<3421xi32>) -> ()
-    %output = check.generate.fill value(-17.0) : tensor<190x640xbf16>
-    check.compare<@expert_matrix_gate_up_q5k, @reference_gate_up_q5k>(%input, %tasks, %weight, %up_weight, %output) : (tensor<19x2560xbf16>, tensor<3421xi32>, tensor<11264000xi8>, tensor<11264000xi8>, tensor<190x640xbf16>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<190x640xbf16>
-      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<3421xi32>
-      check.expect.bitwise actual(%weight) expected(%weight) : tensor<11264000xi8>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<[%weight_bytes]xi8>
+    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<[%up_bytes]xi8>
+    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%task_words]xi32>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<[%routes]x[%outputs]xbf16>
+    check.compare<@matrix_gate_up_q5k, @reference_gate_up_q5k>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%routes]x[%outputs]xbf16>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_rows]x[%inputs]xbf16>
+      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<[%task_words]xi32>
+      check.expect.bitwise actual(%weight) expected(%weight) : tensor<[%weight_bytes]xi8>
+      check.expect.bitwise actual(%up_weight) expected(%up_weight) : tensor<[%up_bytes]xi8>
     }
   }
   check.return
 }
 
-kernel.decl @expert_matrix_gate_up_q8() launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
+kernel.def target(@expert_test_wave32) @matrix_gate_up_q8() {
+  %workers = index.constant 1280 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
+  %down = scalar.constant false : i1
+  %format = index.constant 0 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_subject(%down, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (i1, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
 
 func.def @reference_gate_up_q8(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
-  %format = index.constant 0 : index
   %down = scalar.constant false : i1
-  func.call @expert_matrix_reference(%down, %format, %input, %weight, %up_weight, %output) : (i1, index, buffer, buffer, buffer, buffer)
+  %format = index.constant 0 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_reference(%down, %format, %input, %tasks, %weight, %up_weight, %output) : (i1, index, buffer, buffer, buffer, buffer, buffer)
   func.return
 }
 
 check.scenario public @gate_up_q8 {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %format = check.literal value(0) : index
     %down = check.literal value(false) : i1
-    %tasks = check.generate.fill value(1515870810) : tensor<3421xi32>
-    %input = check.generate.fill value(0.0) : tensor<19x2560xbf16>
+    %format = check.literal value(0) : index
+    %rows, %input_rows, %inputs, %outputs, %routes, %task_words, %weight_bytes, %up_bytes = check.generate<@expert_geometry>(%down, %format) : (i1, index) -> (index, index, index, index, index, index, index, index)
+    %tasks = check.generate.fill value(1515870810) : tensor<[%task_words]xi32>
+    %input = check.generate.fill value(0.0) : tensor<[%input_rows]x[%inputs]xbf16>
     %weight_seed = check.literal value(73419) : i64
     %up_seed = check.literal value(84327) : i64
-    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<17408000xi8>
-    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<17408000xi8>
-    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<19x2560xbf16>, tensor<17408000xi8>, tensor<17408000xi8>, tensor<3421xi32>) -> ()
-    %output = check.generate.fill value(-17.0) : tensor<190x640xbf16>
-    check.compare<@expert_matrix_gate_up_q8, @reference_gate_up_q8>(%input, %tasks, %weight, %up_weight, %output) : (tensor<19x2560xbf16>, tensor<3421xi32>, tensor<17408000xi8>, tensor<17408000xi8>, tensor<190x640xbf16>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<190x640xbf16>
-      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<3421xi32>
-      check.expect.bitwise actual(%weight) expected(%weight) : tensor<17408000xi8>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<[%weight_bytes]xi8>
+    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<[%up_bytes]xi8>
+    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%task_words]xi32>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<[%routes]x[%outputs]xbf16>
+    check.compare<@matrix_gate_up_q8, @reference_gate_up_q8>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%routes]x[%outputs]xbf16>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_rows]x[%inputs]xbf16>
+      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<[%task_words]xi32>
+      check.expect.bitwise actual(%weight) expected(%weight) : tensor<[%weight_bytes]xi8>
+      check.expect.bitwise actual(%up_weight) expected(%up_weight) : tensor<[%up_bytes]xi8>
     }
   }
   check.return
 }
 
-kernel.decl @expert_matrix_down_q51() launch(%input: buffer, %tasks: buffer, %weight: buffer, %output: buffer)
-
-func.def @reference_down_q51(%input: buffer, %tasks: buffer, %weight: buffer, %output: buffer) {
-  %format = index.constant 1 : index
+kernel.def target(@expert_test_wave32) @matrix_down_q51() {
+  %workers = index.constant 1280 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %down = scalar.constant true : i1
-  func.call @expert_matrix_reference(%down, %format, %input, %weight, %weight, %output) : (i1, index, buffer, buffer, buffer, buffer)
+  %format = index.constant 1 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_subject(%down, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (i1, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @reference_down_q51(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
+  %down = scalar.constant true : i1
+  %format = index.constant 1 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_reference(%down, %format, %input, %tasks, %weight, %up_weight, %output) : (i1, index, buffer, buffer, buffer, buffer, buffer)
   func.return
 }
 
 check.scenario public @down_q51 {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %format = check.literal value(1) : index
     %down = check.literal value(true) : i1
-    %tasks = check.generate.fill value(1515870810) : tensor<3421xi32>
-    %input = check.generate.fill value(0.0) : tensor<190x640xbf16>
+    %format = check.literal value(1) : index
+    %rows, %input_rows, %inputs, %outputs, %routes, %task_words, %weight_bytes, %up_bytes = check.generate<@expert_geometry>(%down, %format) : (i1, index) -> (index, index, index, index, index, index, index, index)
+    %tasks = check.generate.fill value(1515870810) : tensor<[%task_words]xi32>
+    %input = check.generate.fill value(0.0) : tensor<[%input_rows]x[%inputs]xbf16>
     %weight_seed = check.literal value(73419) : i64
     %up_seed = check.literal value(84327) : i64
-    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<12288000xi8>
-    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<1xi8>
-    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<190x640xbf16>, tensor<12288000xi8>, tensor<1xi8>, tensor<3421xi32>) -> ()
-    %output = check.generate.fill value(-17.0) : tensor<190x2560xbf16>
-    check.compare<@expert_matrix_down_q51, @reference_down_q51>(%input, %tasks, %weight, %output) : (tensor<190x640xbf16>, tensor<3421xi32>, tensor<12288000xi8>, tensor<190x2560xbf16>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<190x2560xbf16>
-      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<3421xi32>
-      check.expect.bitwise actual(%weight) expected(%weight) : tensor<12288000xi8>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<[%weight_bytes]xi8>
+    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<[%up_bytes]xi8>
+    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%task_words]xi32>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<[%routes]x[%outputs]xbf16>
+    check.compare<@matrix_down_q51, @reference_down_q51>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%routes]x[%outputs]xbf16>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_rows]x[%inputs]xbf16>
+      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<[%task_words]xi32>
+      check.expect.bitwise actual(%weight) expected(%weight) : tensor<[%weight_bytes]xi8>
+      check.expect.bitwise actual(%up_weight) expected(%up_weight) : tensor<[%up_bytes]xi8>
     }
   }
   check.return
 }
 
-kernel.decl @expert_matrix_down_q8() launch(%input: buffer, %tasks: buffer, %weight: buffer, %output: buffer)
-
-func.def @reference_down_q8(%input: buffer, %tasks: buffer, %weight: buffer, %output: buffer) {
-  %format = index.constant 0 : index
+kernel.def target(@expert_test_wave32) @matrix_down_q8() {
+  %workers = index.constant 1280 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %down = scalar.constant true : i1
-  func.call @expert_matrix_reference(%down, %format, %input, %weight, %weight, %output) : (i1, index, buffer, buffer, buffer, buffer)
+  %format = index.constant 0 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_subject(%down, %format, %rows, %input, %tasks, %weight, %up_weight, %output) : (i1, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @reference_down_q8(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
+  %down = scalar.constant true : i1
+  %format = index.constant 0 : index
+  %rows = config.get @expert_test.tile_rows : index
+  func.call @expert_matrix_reference(%down, %format, %input, %tasks, %weight, %up_weight, %output) : (i1, index, buffer, buffer, buffer, buffer, buffer)
   func.return
 }
 
 check.scenario public @down_q8 {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %format = check.literal value(0) : index
     %down = check.literal value(true) : i1
-    %tasks = check.generate.fill value(1515870810) : tensor<3421xi32>
-    %input = check.generate.fill value(0.0) : tensor<190x640xbf16>
+    %format = check.literal value(0) : index
+    %rows, %input_rows, %inputs, %outputs, %routes, %task_words, %weight_bytes, %up_bytes = check.generate<@expert_geometry>(%down, %format) : (i1, index) -> (index, index, index, index, index, index, index, index)
+    %tasks = check.generate.fill value(1515870810) : tensor<[%task_words]xi32>
+    %input = check.generate.fill value(0.0) : tensor<[%input_rows]x[%inputs]xbf16>
     %weight_seed = check.literal value(73419) : i64
     %up_seed = check.literal value(84327) : i64
-    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<17408000xi8>
-    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<1xi8>
-    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<190x640xbf16>, tensor<17408000xi8>, tensor<1xi8>, tensor<3421xi32>) -> ()
-    %output = check.generate.fill value(-17.0) : tensor<190x2560xbf16>
-    check.compare<@expert_matrix_down_q8, @reference_down_q8>(%input, %tasks, %weight, %output) : (tensor<190x640xbf16>, tensor<3421xi32>, tensor<17408000xi8>, tensor<190x2560xbf16>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<190x2560xbf16>
-      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<3421xi32>
-      check.expect.bitwise actual(%weight) expected(%weight) : tensor<17408000xi8>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<[%weight_bytes]xi8>
+    %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<[%up_bytes]xi8>
+    check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%task_words]xi32>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<[%routes]x[%outputs]xbf16>
+    check.compare<@matrix_down_q8, @reference_down_q8>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%routes]x[%outputs]xbf16>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_rows]x[%inputs]xbf16>
+      check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<[%task_words]xi32>
+      check.expect.bitwise actual(%weight) expected(%weight) : tensor<[%weight_bytes]xi8>
+      check.expect.bitwise actual(%up_weight) expected(%up_weight) : tensor<[%up_bytes]xi8>
     }
   }
   check.return
