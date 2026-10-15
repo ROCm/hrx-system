@@ -106,6 +106,11 @@ Useful options:
 | `IREE_ROCM_PATH` | empty | ROCm or TheRock SDK root used for package-mode ROCm headers and device tooling. |
 | `IREE_HAL_AMDGPU_TARGETS` | checked-in AMDGPU generic set | AMDGPU target selectors supported by the runtime build. |
 
+`BUILD_SHARED_LIBS=ON` builds runtime components as shared libraries for in-tree
+development. Public HRX installation and `find_package(hrx)` use a build
+configured with `BUILD_SHARED_LIBS=OFF`, which incorporates the private runtime
+components into `libhrx`.
+
 `IREE_DEPENDENCY_MODE=pinned` uses the checked-in source lock and is the
 repository default. `package` requires embedding or distribution builds to
 provide package targets and never falls back to source fetching. `auto` tries

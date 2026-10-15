@@ -1,3 +1,8 @@
 @PACKAGE_INIT@
+if("@BUILD_SHARED_LIBS@")
+  message(FATAL_ERROR
+    "The HRX package requires BUILD_SHARED_LIBS=OFF. "
+    "This build uses shared runtime components for in-tree development.")
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/hrx-targets.cmake")
 check_required_components(hrx)
