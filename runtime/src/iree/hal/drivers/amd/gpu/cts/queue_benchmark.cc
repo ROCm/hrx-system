@@ -574,6 +574,9 @@ DISPATCH_CASE(NativeDefaultSubmit, kNative, kDefault, kSubmit);
 DISPATCH_CASE(NativeEmptySubmit, kNative, kExplicitEmpty, kSubmit);
 DISPATCH_CASE(BindingsDefaultCompletion, kBindings, kDefault, kCompletion);
 DISPATCH_CASE(BindingsDefaultLatency, kBindings, kDefault, kSampledSubmit);
+DISPATCH_CASE(BindingsEmptyLatency, kBindings, kExplicitEmpty, kSampledSubmit);
+DISPATCH_CASE(NativeDefaultLatency, kNative, kDefault, kSampledSubmit);
+DISPATCH_CASE(NativeEmptyLatency, kNative, kExplicitEmpty, kSampledSubmit);
 #undef DISPATCH_CASE
 
 // Completion and destruction are excluded from recording timing. One actual
