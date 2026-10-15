@@ -1,0 +1,159 @@
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+kernel.decl @hc_down_inject() launch(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
+
+kernel.decl @hc_down_inject_q8() launch(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
+
+kernel.decl @hc_up_mix() launch(%epoch: buffer, %normalized: buffer, %lowrank: buffer, %weight: buffer, %output: buffer)
+
+func.decl @flash_next_q8_fixture(%count: index, %inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer)
+
+func.decl @flash_next_q8_reference_dot(%inputs: index, %token: index, %row: index, %input: buffer, %weight: buffer) -> (f64)
+
+// The existing Q8 fixture assigns finite scales and poisons inactive inputs.
+// Both schedules use five-row backing allocations so the one-token variant
+// must also preserve storage beyond its specialized capacity.
+kernel.def @fixture() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%requested: index, %input_width: index, %output_width: index, %epoch: buffer, %input: buffer, %weight: buffer) {
+  %inputs = index.assume %input_width [range(%input_width, 320, 10240), multiple_of(%input_width, 32)] : index
+  %outputs = index.assume %output_width [range(%output_width, 320, 10240)] : index
+  %capacity = config.get @flash_next.token_count : index
+  %count = index.min %requested, %capacity : index
+  func.call @flash_next_q8_fixture(%count, %inputs, %outputs, %epoch, %input, %weight) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Each reference thread contracts a complete row in scalar F64. This shares
+// only the independent decoder with projection tests, not the production dot,
+// lane partition, or subgroup reductions. SiLU consumes the F32 contraction.
+kernel.def @down_reference() {
+  %groups = index.constant 5 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%requested: index, %input: buffer, %weight: buffer, %output: buffer, %injection: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %count = index.min %requested, %capacity : index
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %thread = kernel.workitem.id<x> : index
+    %threads = index.constant 64 : index
+    %row = index.madd %group, %threads, %thread : index
+    %width = index.constant 10240 : index
+    %dot = func.call @flash_next_q8_reference_dot(%width, %token, %row, %input, %weight) : (index, index, index, buffer, buffer) -> (f64)
+    %quarter = scalar.constant 0.25 : f64
+    %scaled = scalar.mulf %dot, %quarter : f64
+    %value = scalar.fptrunc %scaled : f64 to f32
+    %negative = scalar.negf %value : f32
+    %exponential = scalar.expf<afn> %negative : f32
+    %c1 = scalar.constant 1.0 : f32
+    %denominator = scalar.addf %c1, %exponential : f32
+    %activated = scalar.divf %value, %denominator : f32
+    %packed = scalar.fptrunc %activated : f32 to bf16
+    %origin = index.constant 0 : offset
+    %values = buffer.view %output[%origin] : buffer -> view<5x320xbf16>
+    view.store %packed, %values[%token, %row] : bf16, view<5x320xbf16>
+    %c4 = index.constant 4 : index
+    %is_gate = index.cmp ult, %row, %c4 : index
+    scf.if %is_gate {
+      %gates = buffer.view %injection[%origin] : buffer -> view<5x4xf32>
+      view.store %c1, %gates[%token, %row] : f32, view<5x4xf32>
+    }
+  }
+  kernel.return
+}
+
+// Independent low-rank inputs isolate the up/mix publication from down/SiLU
+// rounding. Each feature sums four gated streams in F64, without clusters or
+// a shared reduction tree. Inactive outputs retain their initial canaries.
+kernel.def @up_reference() {
+  %groups = index.constant 40 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 64 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%requested: index, %normalized: buffer, %lowrank: buffer, %weight: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %count = index.min %requested, %capacity : index
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %group = kernel.workgroup.id<x> : index
+    %thread = kernel.workitem.id<x> : index
+    %threads = index.constant 64 : index
+    %feature = index.madd %group, %threads, %thread : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %streams = index.constant 4 : index
+    %rank = index.constant 320 : index
+    %hidden = index.constant 2560 : index
+    %origin = index.constant 0 : offset
+    %input = buffer.view %normalized[%origin] : buffer -> view<5x4x2560xbf16>
+    %initial = scalar.constant 0.0 : f64
+    %unit = scalar.constant 1.0 : f32
+    %sum = scf.for %stream = [%c0 to %streams step %c1](%prior = %initial : f64) -> (f64) {
+      %row = index.madd %stream, %hidden, %feature : index
+      %dot = func.call @flash_next_q8_reference_dot(%rank, %token, %row, %lowrank, %weight) : (index, index, index, buffer, buffer) -> (f64)
+      %value = scalar.fptrunc %dot : f64 to f32
+      %negative = scalar.negf %value : f32
+      %exponential = scalar.expf<afn> %negative : f32
+      %denominator = scalar.addf %unit, %exponential : f32
+      %gate = scalar.divf %unit, %denominator : f32
+      %wide_gate = scalar.extf %gate : f32 to f64
+      %stored = view.load %input[%token, %stream, %feature] : view<5x4x2560xbf16> -> bf16
+      %normalized_value = scalar.extf %stored : bf16 to f64
+      %product = scalar.mulf %wide_gate, %normalized_value : f64
+      %next = scalar.addf %prior, %product : f64
+      scf.yield %next : f64
+    }
+    %quarter = scalar.constant 0.25 : f64
+    %mean = scalar.mulf %sum, %quarter : f64
+    %packed = scalar.fptrunc %mean : f64 to bf16
+    %values = buffer.view %output[%origin] : buffer -> view<5x2560xbf16>
+    view.store %packed, %values[%token, %feature] : bf16, view<5x2560xbf16>
+  }
+  kernel.return
+}
+
+// Empty, partial, and full token groups exercise publication ownership.
+// Separate injection tests cover nonzero F32 and Q8 coefficients; zero weights
+// here isolate both entries' shared nonlinear down projection.
+check.case public @hyperconnection_publications {
+  %requested = check.param.choice values([0, 1, 4, 5]) name("active") : index
+  %width = check.literal value(10240) : index
+  %rank = check.literal value(320) : index
+  %seed = check.literal value(3187) : i64
+  %epoch = check.generate.fill value(0) : tensor<3xi32>
+  %normalized = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<5x10240xbf16>
+  %down = check.generate.random.uniform seed(%seed) range(-127 to 127) : tensor<320x320x34xi8>
+  kernel.launch @fixture(%requested, %width, %rank, %epoch, %normalized, %down) : (index, index, index, tensor<3xi32>, tensor<5x10240xbf16>, tensor<320x320x34xi8>)
+  %f32_weight = check.generate.fill value(0.0) : tensor<4x10240xf32>
+  %q8_weight = check.generate.fill value(0) : tensor<4x320x34xi8>
+  %lowrank_f32 = check.generate.fill value(-17.0) : tensor<5x320xbf16>
+  %lowrank_q8 = check.generate.fill value(-17.0) : tensor<5x320xbf16>
+  %lowrank_expected = check.generate.fill value(-17.0) : tensor<5x320xbf16>
+  %injection_f32 = check.generate.fill value(-17.0) : tensor<5x4xf32>
+  %injection_q8 = check.generate.fill value(-17.0) : tensor<5x4xf32>
+  %injection_expected = check.generate.fill value(-17.0) : tensor<5x4xf32>
+  kernel.launch @down_reference(%requested, %normalized, %down, %lowrank_expected, %injection_expected) : (index, tensor<5x10240xbf16>, tensor<320x320x34xi8>, tensor<5x320xbf16>, tensor<5x4xf32>)
+  kernel.launch @hc_down_inject(%epoch, %normalized, %down, %f32_weight, %lowrank_f32, %injection_f32) : (tensor<3xi32>, tensor<5x10240xbf16>, tensor<320x320x34xi8>, tensor<4x10240xf32>, tensor<5x320xbf16>, tensor<5x4xf32>)
+  kernel.launch @hc_down_inject_q8(%epoch, %normalized, %down, %q8_weight, %lowrank_q8, %injection_q8) : (tensor<3xi32>, tensor<5x10240xbf16>, tensor<320x320x34xi8>, tensor<4x320x34xi8>, tensor<5x320xbf16>, tensor<5x4xf32>)
+  check.expect.close actual(%lowrank_f32) expected(%lowrank_expected) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<5x320xbf16>
+  check.expect.bitwise actual(%lowrank_q8) expected(%lowrank_f32) : tensor<5x320xbf16>
+  check.expect.bitwise actual(%injection_f32) expected(%injection_expected) : tensor<5x4xf32>
+  check.expect.bitwise actual(%injection_q8) expected(%injection_expected) : tensor<5x4xf32>
+  %up = check.generate.random.uniform seed(%seed) range(-127 to 127) : tensor<10240x10x34xi8>
+  %lowrank = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<5x320xbf16>
+  kernel.launch @fixture(%requested, %rank, %width, %epoch, %lowrank, %up) : (index, index, index, tensor<3xi32>, tensor<5x320xbf16>, tensor<10240x10x34xi8>)
+  %mixed = check.generate.fill value(-17.0) : tensor<5x2560xbf16>
+  %mixed_expected = check.generate.fill value(-17.0) : tensor<5x2560xbf16>
+  kernel.launch @up_reference(%requested, %normalized, %lowrank, %up, %mixed_expected) : (index, tensor<5x10240xbf16>, tensor<5x320xbf16>, tensor<10240x10x34xi8>, tensor<5x2560xbf16>)
+  kernel.launch @hc_up_mix(%epoch, %normalized, %lowrank, %up, %mixed) : (tensor<3xi32>, tensor<5x10240xbf16>, tensor<5x320xbf16>, tensor<10240x10x34xi8>, tensor<5x2560xbf16>)
+  check.expect.close actual(%mixed) expected(%mixed_expected) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<5x2560xbf16>
+  check.return
+}
