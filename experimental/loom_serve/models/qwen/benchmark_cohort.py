@@ -206,11 +206,11 @@ def cohort(address, engine, model, name, count, long_lines, *, reference=None):
 
     with ThreadPoolExecutor(max_workers=count) as workers:
         futures = [workers.submit(client, item) for item in fixtures]
-        started = time.monotonic_ns()
+        started = time.perf_counter_ns()
         gate.wait()
         for future in futures:
             future.result()
-        completed = time.monotonic_ns()
+        completed = time.perf_counter_ns()
     if any(item["failures"] for item in fixtures):
         result["failures"].append("one or more clients failed")
     if reference is not None:
@@ -232,7 +232,9 @@ def cohort(address, engine, model, name, count, long_lines, *, reference=None):
         output_tokens=outputs,
     )
     if not result["failures"]:
-        result["output_tokens_per_second"] = outputs * 1e9 / (completed - started)
+        result["output_tokens_per_second"] = (
+            outputs * 1e9 / (completed - started) if completed > started else None
+        )
     return result
 
 
