@@ -104,6 +104,11 @@ TEST_F(CommandsTest, AcquirePreservesTargetSpecificControls) {
                0xc0065800, 0, 0xffffffff, 0xff, 0, 0, 0x0a, 0x0001c1e1});
 }
 
+TEST_F(CommandsTest, DmaCompletionDoesNotTouchMemoryOrPfpOnlyFields) {
+  Expect(iree_hal_amd_gpu_pm4_emit_dma_flush(words()),
+         {0xc0055000, 0, 0, 0, 0, 0, 0});
+}
+
 TEST_F(CommandsTest, WaitsPreserveEveryComparisonWidthAndMask) {
   struct Comparison {
     // Native semantic selected by admission.

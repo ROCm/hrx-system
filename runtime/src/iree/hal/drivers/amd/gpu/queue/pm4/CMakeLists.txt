@@ -11,6 +11,21 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    barrier
+  HDRS
+    "barrier.h"
+  SRCS
+    "barrier.c"
+  DEPS
+    ::commands
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::target::identity
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     commands
   HDRS
     "commands.h"
@@ -80,6 +95,35 @@ iree_cc_library(
     iree::hal
     iree::hal::utils::host_semaphore
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    barrier_test
+  SRCS
+    "barrier_test.cc"
+  DEPS
+    ::barrier
+    ::commands
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::target::identity
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    barrier_benchmark
+  SRCS
+    "barrier_benchmark.cc"
+  DEPS
+    ::barrier
+    iree::base
+    iree::hal
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
 )
 
 iree_cc_test(

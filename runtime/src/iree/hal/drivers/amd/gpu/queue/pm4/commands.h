@@ -52,6 +52,11 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_dispatch_indirect(
 // This CS_PARTIAL_FLUSH establishes execution ordering, not cache visibility.
 uint32_t* iree_hal_amd_gpu_pm4_emit_compute_flush(uint32_t* words);
 
+// Emits seven DWORDs joining prior CP-DMA work. The zero-byte MEC DMA_DATA
+// accesses no source or destination memory and leaves PFP-only fields clear.
+// Shader completion and cache visibility require their own operations.
+uint32_t* iree_hal_amd_gpu_pm4_emit_dma_flush(uint32_t* words);
+
 // Emits eight DWORDs of whole-address-space ACQUIRE_MEM with the prepared
 // target-specific GCR word. This performs cache work and does not by itself
 // wait for prior shader execution or establish an external producer dependency.

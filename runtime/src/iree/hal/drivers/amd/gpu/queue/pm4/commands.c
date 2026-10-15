@@ -50,6 +50,12 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_compute_flush(uint32_t* words) {
   return words + 2;
 }
 
+uint32_t* iree_hal_amd_gpu_pm4_emit_dma_flush(uint32_t* words) {
+  words[0] = UINT32_C(0xc0055000);
+  memset(words + 1, 0, 6 * sizeof(*words));
+  return words + 7;
+}
+
 uint32_t* iree_hal_amd_gpu_pm4_emit_acquire(uint32_t* words,
                                             uint32_t cache_control) {
   words[0] = UINT32_C(0xc0065800);
@@ -69,7 +75,7 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_release32(uint32_t* words,
                                               uint64_t target_address,
                                               uint32_t value) {
   words[0] = UINT32_C(0xc0064900);
-  // CACHE_FLUSH_AND_INV_TS_EVENT, end-of-pipe index, prepared release GCR.
+  // BOTTOM_OF_PIPE_TS, end-of-pipe index, prepared release GCR.
   words[1] = 0x28 | (5 << 8) | (cache_control << 12);
   // Immediate DWORD, write confirmation without interrupt, TC/L2 destination.
   words[2] = (1 << 29) | (3 << 24) | (1 << 16);
