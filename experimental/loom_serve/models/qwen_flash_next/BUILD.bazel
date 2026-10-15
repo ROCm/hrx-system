@@ -82,8 +82,38 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
-    deps = [":residual_programs"],
+    deps = [
+        ":q8_reference",
+        ":residual_programs",
+    ],
 )
+
+loom_library(
+    name = "q8_reference",
+    srcs = ["tests/q8_reference.loom"],
+)
+
+[
+    loom_test(
+        name = "prepared_q8_{}_test".format(capacity),
+        srcs = ["tests/prepared_q8.loom"],
+        benchmark_smoke = False,
+        configs = {"flash_next.token_count": str(capacity)},
+        execution_profiles = [
+            AMDGPU_HARDWARE_PROFILE,
+            AMDGPU_ACCESS_PROFILE,
+        ],
+        deps = [
+            ":q8_reference",
+            ":residual_programs",
+        ],
+    )
+    for capacity in [
+        1,
+        4,
+        33,
+    ]
+]
 
 loom_test(
     name = "gdn_test",
