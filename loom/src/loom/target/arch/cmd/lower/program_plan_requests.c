@@ -135,6 +135,7 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
   for (iree_host_size_t root_ordinal = 0; root_ordinal < root_count;
        ++root_ordinal) {
     loom_cmd_program_kernel_site_root_t* root = &roots[root_ordinal];
+    IREE_ASSERT(root->schedule->command_count == 0 || root->dispatch_counts);
     for (iree_host_size_t command_ordinal = 0;
          command_ordinal < root->schedule->command_count; ++command_ordinal) {
       const loom_cmd_schedule_command_t* command =
@@ -145,9 +146,19 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
         continue;
       }
       const iree_host_size_t site_ordinal = site_cursors[symbol_id]++;
+      const loom_cmd_dispatch_count_t* dispatch_count =
+          &root->dispatch_counts[command_ordinal];
+      loom_target_dispatch_workgroup_count_t dispatch_grid = {0};
+      if (command->kind ==
+          LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT) {
+        IREE_ASSERT_EQ(dispatch_count->kind,
+                       LOOM_CMD_DISPATCH_COUNT_KIND_DIRECT);
+        dispatch_grid = dispatch_count->payload.direct;
+      }
       sites[site_ordinal] = (loom_kernel_class_site_t){
           .facts = source_facts,
           .argument_values = command->source_arguments.values,
+          .dispatch_grid = dispatch_grid,
       };
       requirement_locations[site_ordinal] =
           &root->requirement_indices[command_ordinal];

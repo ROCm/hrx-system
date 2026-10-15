@@ -784,6 +784,7 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
     for (iree_host_size_t i = 0; i < program_count && iree_status_is_ok(status);
          ++i) {
       kernel_site_roots[i].schedule = &root_builds[i].schedule;
+      kernel_site_roots[i].dispatch_counts = root_builds[i].dispatch_counts;
       kernel_site_roots[i].requirement_indices = NULL;
     }
     if (iree_status_is_ok(status)) {

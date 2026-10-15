@@ -211,7 +211,8 @@ kernel.def @tiles(%extent: index) {
     source.append(std::to_string(launch_count));
     source.append(" : index\n");
     if (launch_shape == LaunchShape::kRepeatedWorkload ||
-        launch_shape == LaunchShape::kRepeatedKernelClass) {
+        launch_shape == LaunchShape::kRepeatedKernelClass ||
+        launch_shape == LaunchShape::kDistinctKernelClasses) {
       source.append("  %extent = index.constant 1024 : index\n");
     }
     source.append("  scf.for %iteration = [%c0 to %cN step %c1] unroll {\n");
@@ -232,7 +233,7 @@ kernel.def @tiles(%extent: index) {
         break;
       case LaunchShape::kDistinctKernelClasses:
         source.append(
-            "    kernel.launch @tiles[%iteration](%iteration) : "
+            "    kernel.launch @tiles[%extent](%iteration) : "
             "[index](index)\n");
         break;
       case LaunchShape::kIndependentKernels:

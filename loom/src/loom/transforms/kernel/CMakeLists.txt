@@ -29,6 +29,7 @@ loom_cc_library(
     loom::ops::view
     loom::rewrite::remap
     loom::rewrite::rewriter
+    loom::target::types
     loom::util::fact_table
     loom::util::predicate_facts
   PUBLIC
@@ -50,6 +51,7 @@ loom_cc_library(
     loom::analysis::symbolic_expr
     loom::decision::class_partition
     loom::ir
+    loom::ops::kernel
     loom::ops::op_defs
     loom::ops::template
     loom::transforms::symbol::template_decision_model
@@ -108,6 +110,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::ir
     loom::ops::index
+    loom::ops::kernel
     loom::ops::scalar
     loom::ops::template
     loom::rewrite::module_projection

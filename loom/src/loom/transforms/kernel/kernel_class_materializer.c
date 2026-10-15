@@ -11,6 +11,8 @@
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/launch_config.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/rewrite/module_projection.h"
@@ -337,6 +339,49 @@ static iree_status_t loom_kernel_class_rewrite_application(
   return iree_ok_status();
 }
 
+static iree_status_t loom_kernel_class_bind_dispatch_grid(
+    const loom_target_dispatch_workgroup_count_t* grid,
+    loom_func_like_t function, loom_rewriter_t* rewriter) {
+  if (!loom_kernel_def_isa(function.op)) {
+    return iree_ok_status();
+  }
+
+  loom_op_t* launch_config =
+      (loom_op_t*)loom_kernel_def_launch_config_op(function.op);
+  IREE_ASSERT(launch_config != NULL);
+  loom_builder_set_before(&rewriter->builder, launch_config);
+
+  loom_value_id_t workgroup_counts[3] = {
+      LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID};
+  if (loom_kernel_dispatch_grid_can_specialize(grid)) {
+    const uint32_t values[] = {grid->x, grid->y, grid->z};
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+      loom_op_t* constant = NULL;
+      IREE_RETURN_IF_ERROR(loom_index_constant_build(
+          &rewriter->builder, loom_attr_i64((int64_t)values[i]),
+          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), launch_config->location,
+          &constant));
+      workgroup_counts[i] = loom_index_constant_result(constant);
+    }
+  } else {
+    loom_block_t* config_entry =
+        loom_region_entry_block(loom_kernel_def_config(function.op));
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(workgroup_counts); ++i) {
+      IREE_RETURN_IF_ERROR(loom_module_define_value(
+          rewriter->module, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+          &workgroup_counts[i]));
+      IREE_RETURN_IF_ERROR(loom_block_add_arg(rewriter->module, config_entry,
+                                              workgroup_counts[i]));
+    }
+  }
+
+  for (uint8_t i = 0; i < IREE_ARRAYSIZE(workgroup_counts); ++i) {
+    IREE_RETURN_IF_ERROR(loom_rewriter_set_operand(rewriter, launch_config, i,
+                                                   workgroup_counts[i]));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_kernel_class_materialize(
     const loom_kernel_class_classifier_t* classifier,
     const loom_kernel_class_collection_t* collection,
@@ -422,15 +467,21 @@ iree_status_t loom_kernel_class_materialize(
           ? loom_ir_module_projection_target_symbol(
                 &module_projection, classifier->kernel_symbol_id)
           : loom_symbol_ref_null();
+  loom_func_like_t target_function = {0};
+  if (iree_status_is_ok(status)) {
+    target_function = loom_func_like_cast(
+        target_module,
+        target_module->symbols.entries[target_kernel.symbol_id].defining_op);
+    status = loom_kernel_class_bind_dispatch_grid(
+        &collection->classes[class_ordinal].dispatch_grid, target_function,
+        &rewriter);
+  }
   if (iree_status_is_ok(status) && classifier->specialization_count != 0) {
     status = loom_kernel_specializations_apply(
         collection->specialization_module,
         collection->classes[class_ordinal].specializations,
-        classifier->specialization_count,
-        loom_func_like_cast(target_module, target_module->symbols
-                                               .entries[target_kernel.symbol_id]
-                                               .defining_op),
-        &rewriter, &scratch_arena);
+        classifier->specialization_count, target_function, &rewriter,
+        &scratch_arena);
   }
   loom_rewriter_deinitialize(&rewriter);
   iree_arena_deinitialize(&scratch_arena);

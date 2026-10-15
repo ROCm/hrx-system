@@ -182,6 +182,13 @@ typedef struct loom_kernel_class_classifier_t {
   // Module-local kernel source symbol.
   loom_symbol_id_t kernel_symbol_id;
 
+  // True when the source owns a kernel.launch.config region that can bind a
+  // physical dispatch grid into the published artifact.
+  bool has_launch_configuration;
+
+  // Reserved bytes. Always zero.
+  uint8_t reserved[3];
+
   // Projected source values sorted by ascending source SSA value ID.
   const loom_kernel_class_projection_t* projections;
 
@@ -270,6 +277,9 @@ typedef struct loom_kernel_class_trace_t {
 typedef struct loom_kernel_class_t {
   // Final trace node describing all accepted decisions for this class.
   loom_kernel_class_trace_id_t trace_id;
+
+  // Exact positive physical grid shared by every member, or a generic grid.
+  loom_target_dispatch_workgroup_count_t dispatch_grid;
 
   // Mandatory staged values shared by every site in this class.
   const loom_kernel_specialization_value_t* specializations;

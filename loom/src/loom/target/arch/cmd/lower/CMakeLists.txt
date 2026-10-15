@@ -223,11 +223,13 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::text_asm
+    loom::format::bytecode::reader
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::ir
     loom::link::module_index
     loom::ops::index
+    loom::ops::kernel
     loom::ops::low
     loom::ops::op_registry
     loom::pass::builtin_registry

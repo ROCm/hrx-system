@@ -22,11 +22,14 @@ namespace {
 class KernelClassClassifierBenchmarkFixture {
  public:
   KernelClassClassifierBenchmarkFixture(iree_host_size_t site_count,
-                                        uint32_t decision_count)
+                                        uint32_t decision_count,
+                                        uint32_t dispatch_grid_count = 0)
       : fact_entries_(site_count * kKernelArgumentCount),
         argument_values_(site_count * kKernelArgumentCount),
         sites_(site_count),
-        decisions_(decision_count) {
+        decisions_(decision_count),
+        expected_class_count_(
+            dispatch_grid_count == 0 ? 2 : dispatch_grid_count * 2) {
     iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &collection_arena_);
@@ -52,6 +55,13 @@ class KernelClassClassifierBenchmarkFixture {
           .facts = &fact_table_,
           .argument_values = &argument_values_[first_argument],
       };
+      if (dispatch_grid_count != 0) {
+        sites_[i].dispatch_grid = {
+            .x = static_cast<uint32_t>(i % dispatch_grid_count) + 1,
+            .y = 2,
+            .z = 3,
+        };
+      }
     }
 
     predicate_ = {
@@ -145,6 +155,7 @@ class KernelClassClassifierBenchmarkFixture {
     classifier_ = {
         .module = nullptr,
         .kernel_symbol_id = 0,
+        .has_launch_configuration = dispatch_grid_count != 0,
         .projections = &projection_,
         .decisions = decisions_.data(),
         .projection_count = 1,
@@ -167,7 +178,7 @@ class KernelClassClassifierBenchmarkFixture {
     IREE_CHECK_OK(loom_kernel_class_classifier_collect(
         &classifier_, nullptr, sites_.data(), sites_.size(), &options,
         &collection_arena_, &collection));
-    IREE_ASSERT_EQ(collection.class_count, 2u);
+    IREE_ASSERT_EQ(collection.class_count, expected_class_count_);
     IREE_ASSERT_EQ(collection.accepted_decision_count,
                    classifier_.decision_count);
     const uint64_t sink =
@@ -200,6 +211,7 @@ class KernelClassClassifierBenchmarkFixture {
   loom_kernel_class_action_t actions_[2] = {};
   std::vector<loom_kernel_class_decision_t> decisions_;
   loom_kernel_class_classifier_t classifier_ = {};
+  loom_decision_class_ordinal_t expected_class_count_ = 0;
 };
 
 static void BM_CollectBoundaryClasses(benchmark::State& state) {
@@ -217,6 +229,24 @@ BENCHMARK(BM_CollectBoundaryClasses)
     ->Args({1000, 16})
     ->Args({10000, 1})
     ->Args({10000, 16});
+
+static void BM_CollectDispatchGridClasses(benchmark::State& state) {
+  const iree_host_size_t site_count =
+      static_cast<iree_host_size_t>(state.range(0));
+  const uint32_t decision_count = static_cast<uint32_t>(state.range(1));
+  const uint32_t dispatch_grid_count = static_cast<uint32_t>(state.range(2));
+  KernelClassClassifierBenchmarkFixture fixture(site_count, decision_count,
+                                                dispatch_grid_count);
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(fixture.Collect());
+  }
+  state.SetItemsProcessed(state.iterations() * site_count);
+}
+BENCHMARK(BM_CollectDispatchGridClasses)
+    ->Args({1000, 1, 1})
+    ->Args({1000, 16, 16})
+    ->Args({10000, 1, 1})
+    ->Args({10000, 16, 16});
 
 }  // namespace
 }  // namespace loom

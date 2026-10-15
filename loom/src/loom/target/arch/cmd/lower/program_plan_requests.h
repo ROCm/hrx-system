@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/target/arch/cmd/lower/dispatch_counts.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
 #include "loom/target/arch/cmd/lower/schedule.h"
 #include "loom/util/fact_table.h"
@@ -23,6 +24,9 @@ extern "C" {
 typedef struct loom_cmd_program_kernel_site_root_t {
   // Planned command schedule borrowing the plan module.
   const loom_cmd_schedule_plan_t* schedule;
+
+  // Resolved physical count placement in schedule command order.
+  const loom_cmd_dispatch_count_t* dispatch_counts;
 
   // Scratch table indexed by schedule command ordinal. Source-backed commands
   // receive their class-specific plan requirement; external commands retain

@@ -4,18 +4,31 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Mandatory compile-time arguments of independently compiled kernel products.
+// Command-side class inputs and mandatory compile-time kernel arguments.
 
 #ifndef LOOM_TRANSFORMS_KERNEL_KERNEL_SPECIALIZATION_H_
 #define LOOM_TRANSFORMS_KERNEL_KERNEL_SPECIALIZATION_H_
 
 #include "loom/decision/class_partition.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/types.h"
 #include "loom/util/fact_table.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Returns true when |grid| can be published as an exact compile-time kernel
+// contract. A zero in any dimension is either unknown or an empty HAL dispatch
+// and remains generic because Low static workgroup-count contracts are
+// positive.
+bool loom_kernel_dispatch_grid_can_specialize(
+    const loom_target_dispatch_workgroup_count_t* grid);
+
+// Returns true when both grids have the same publishable contract.
+bool loom_kernel_dispatch_grid_equal(
+    const loom_target_dispatch_workgroup_count_t* lhs,
+    const loom_target_dispatch_workgroup_count_t* rhs);
 
 // One command-side launch fact environment.
 typedef struct loom_kernel_class_site_t {
@@ -24,6 +37,9 @@ typedef struct loom_kernel_class_site_t {
 
   // Complete source argument IDs in signature order, including staged values.
   const loom_value_id_t* argument_values;
+
+  // Physical dispatch grid already resolved by command planning.
+  loom_target_dispatch_workgroup_count_t dispatch_grid;
 } loom_kernel_class_site_t;
 
 typedef struct loom_kernel_specialization_value_t {

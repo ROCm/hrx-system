@@ -18,6 +18,23 @@
 #include "loom/rewrite/remap.h"
 #include "loom/util/predicate_facts.h"
 
+bool loom_kernel_dispatch_grid_can_specialize(
+    const loom_target_dispatch_workgroup_count_t* grid) {
+  return grid->x != 0 && grid->y != 0 && grid->z != 0;
+}
+
+bool loom_kernel_dispatch_grid_equal(
+    const loom_target_dispatch_workgroup_count_t* lhs,
+    const loom_target_dispatch_workgroup_count_t* rhs) {
+  const bool lhs_is_exact = loom_kernel_dispatch_grid_can_specialize(lhs);
+  const bool rhs_is_exact = loom_kernel_dispatch_grid_can_specialize(rhs);
+  if (lhs_is_exact != rhs_is_exact) {
+    return false;
+  }
+  return !lhs_is_exact ||
+         (lhs->x == rhs->x && lhs->y == rhs->y && lhs->z == rhs->z);
+}
+
 static iree_status_t loom_kernel_specialization_capture(
     const loom_module_t* module, const loom_kernel_class_site_t* site,
     uint16_t argument_ordinal, iree_arena_allocator_t* arena,

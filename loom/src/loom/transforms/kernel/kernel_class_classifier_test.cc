@@ -303,6 +303,7 @@ class ManualBinaryClassifier {
     classifier_ = {
         .module = nullptr,
         .kernel_symbol_id = 0,
+        .has_launch_configuration = true,
         .projections = projections_,
         .decisions = decisions_,
         .projection_count = 2,
@@ -540,6 +541,131 @@ TEST_F(KernelClassClassifierTest,
   EXPECT_EQ(collection.accepted_decision_count, kDecisionCount);
   EXPECT_EQ(collection.skipped_decision_count, 0u);
   EXPECT_EQ(collection.trace_count, 2u * kDecisionCount);
+}
+
+TEST_F(KernelClassClassifierTest, DispatchGridRefinesWithinTheClassLimit) {
+  ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  fixture.classifier()->decision_count = 0;
+  const loom_kernel_class_site_t sites[] = {
+      {
+          .dispatch_grid =
+              {
+                  .x = 2,
+                  .y = 3,
+                  .z = 4,
+              },
+      },
+      {
+          .dispatch_grid =
+              {
+                  .x = 2,
+                  .y = 3,
+                  .z = 4,
+              },
+      },
+      {
+          .dispatch_grid =
+              {
+                  .x = 5,
+                  .y = 1,
+                  .z = 1,
+              },
+      },
+      {},
+      {
+          .dispatch_grid =
+              {
+                  .x = 0,
+                  .y = 1,
+                  .z = 1,
+              },
+      },
+  };
+
+  const loom_kernel_class_collection_options_t options =
+      loom_kernel_class_collection_options_default();
+  loom_kernel_class_collection_t collection = {};
+  IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
+      fixture.classifier(), nullptr, sites, IREE_ARRAYSIZE(sites), &options,
+      &analysis_arena_, &collection));
+
+  ASSERT_EQ(collection.class_count, 3u);
+  EXPECT_EQ(collection.site_classes[0], collection.site_classes[1]);
+  EXPECT_NE(collection.site_classes[0], collection.site_classes[2]);
+  EXPECT_EQ(collection.site_classes[3], collection.site_classes[4]);
+  EXPECT_NE(collection.site_classes[0], collection.site_classes[3]);
+  EXPECT_NE(collection.site_classes[2], collection.site_classes[3]);
+  const loom_kernel_class_t& first =
+      collection.classes[collection.site_classes[0]];
+  EXPECT_EQ(first.member_count, 2u);
+  EXPECT_TRUE(loom_kernel_dispatch_grid_can_specialize(&first.dispatch_grid));
+  EXPECT_EQ(first.dispatch_grid.x, 2u);
+  EXPECT_EQ(first.dispatch_grid.y, 3u);
+  EXPECT_EQ(first.dispatch_grid.z, 4u);
+  const loom_kernel_class_t& generic =
+      collection.classes[collection.site_classes[3]];
+  EXPECT_EQ(generic.member_count, 2u);
+  EXPECT_FALSE(
+      loom_kernel_dispatch_grid_can_specialize(&generic.dispatch_grid));
+}
+
+TEST_F(KernelClassClassifierTest, DispatchGridGeneralizesAtTheClassLimit) {
+  ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  fixture.classifier()->decision_count = 0;
+  const loom_kernel_class_site_t sites[] = {
+      {
+          .dispatch_grid =
+              {
+                  .x = 2,
+                  .y = 1,
+                  .z = 1,
+              },
+      },
+      {
+          .dispatch_grid =
+              {
+                  .x = 4,
+                  .y = 1,
+                  .z = 1,
+              },
+      },
+      {},
+  };
+  loom_kernel_class_collection_options_t options =
+      loom_kernel_class_collection_options_default();
+  options.class_limit = 2;
+  loom_kernel_class_collection_t collection = {};
+  IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
+      fixture.classifier(), nullptr, sites, IREE_ARRAYSIZE(sites), &options,
+      &analysis_arena_, &collection));
+
+  ASSERT_EQ(collection.class_count, 1u);
+  EXPECT_EQ(collection.classes[0].member_count, 3u);
+  EXPECT_FALSE(loom_kernel_dispatch_grid_can_specialize(
+      &collection.classes[0].dispatch_grid));
+}
+
+TEST_F(KernelClassClassifierTest,
+       DispatchGridDoesNotPartitionSourcesWithoutLaunchConfiguration) {
+  ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  fixture.classifier()->decision_count = 0;
+  fixture.classifier()->has_launch_configuration = false;
+  const loom_kernel_class_site_t sites[] = {
+      {.dispatch_grid = {.x = 2, .y = 1, .z = 1}},
+      {.dispatch_grid = {.x = 4, .y = 1, .z = 1}},
+  };
+
+  const loom_kernel_class_collection_options_t options =
+      loom_kernel_class_collection_options_default();
+  loom_kernel_class_collection_t collection = {};
+  IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
+      fixture.classifier(), nullptr, sites, IREE_ARRAYSIZE(sites), &options,
+      &analysis_arena_, &collection));
+
+  ASSERT_EQ(collection.class_count, 1u);
+  EXPECT_EQ(collection.classes[0].member_count, 2u);
+  EXPECT_FALSE(loom_kernel_dispatch_grid_can_specialize(
+      &collection.classes[0].dispatch_grid));
 }
 
 TEST_F(KernelClassClassifierTest,

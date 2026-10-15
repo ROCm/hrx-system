@@ -81,7 +81,8 @@ std::string BuildSource(uint32_t decision_count) {
 
 class KernelClassMaterializerBenchmarkFixture {
  public:
-  explicit KernelClassMaterializerBenchmarkFixture(uint32_t decision_count)
+  explicit KernelClassMaterializerBenchmarkFixture(uint32_t decision_count,
+                                                   bool exact_dispatch_grid)
       : decision_count_(decision_count) {
     iree_arena_block_pool_initialize(64 * 1024, iree_allocator_system(),
                                      &block_pool_);
@@ -155,6 +156,11 @@ class KernelClassMaterializerBenchmarkFixture {
         .facts = &site_facts_,
         .argument_values = &site_argument_values_[1],
     };
+    if (exact_dispatch_grid) {
+      for (loom_kernel_class_site_t& site : sites_) {
+        site.dispatch_grid = {.x = 4, .y = 2, .z = 1};
+      }
+    }
     const loom_kernel_class_collection_options_t collection_options =
         loom_kernel_class_collection_options_default();
     IREE_CHECK_OK(loom_kernel_class_classifier_collect(
@@ -234,7 +240,7 @@ class KernelClassMaterializerBenchmarkFixture {
 
 void BM_MaterializeSpecializedKernelClass(benchmark::State& state) {
   KernelClassMaterializerBenchmarkFixture fixture(
-      static_cast<uint32_t>(state.range(0)));
+      static_cast<uint32_t>(state.range(0)), /*exact_dispatch_grid=*/false);
   for (auto _ : state) {
     loom_module_t* module = fixture.Materialize();
     benchmark::DoNotOptimize(module);
@@ -243,6 +249,23 @@ void BM_MaterializeSpecializedKernelClass(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * fixture.decision_count());
 }
 BENCHMARK(BM_MaterializeSpecializedKernelClass)
+    ->Arg(0)
+    ->Arg(1)
+    ->Arg(8)
+    ->Arg(32)
+    ->Arg(128);
+
+void BM_MaterializeExactGridKernelClass(benchmark::State& state) {
+  KernelClassMaterializerBenchmarkFixture fixture(
+      static_cast<uint32_t>(state.range(0)), /*exact_dispatch_grid=*/true);
+  for (auto _ : state) {
+    loom_module_t* module = fixture.Materialize();
+    benchmark::DoNotOptimize(module);
+    loom_module_free(module);
+  }
+  state.SetItemsProcessed(state.iterations() * fixture.decision_count());
+}
+BENCHMARK(BM_MaterializeExactGridKernelClass)
     ->Arg(0)
     ->Arg(1)
     ->Arg(8)

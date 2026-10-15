@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/ir/structural_hash.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/template/ops.h"
 #include "loom/transforms/kernel/kernel_specialization.h"
@@ -314,6 +316,7 @@ iree_status_t loom_kernel_class_classifier_build(
   out_classifier->kernel_argument_count = kernel_argument_count;
   out_classifier->specialization_count =
       (uint16_t)loom_func_like_specialization_count(kernel);
+  out_classifier->has_launch_configuration = loom_kernel_def_isa(kernel.op);
 
   const loom_symbol_reference_symbol_occurrences_t kernel_references =
       loom_symbol_reference_table_symbol(references, kernel_symbol_id);
@@ -760,6 +763,100 @@ static bool loom_kernel_class_action_is_publishable(
                            LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT);
 }
 
+typedef struct loom_kernel_dispatch_grid_bucket_t {
+  // Site supplying the bucket key, or IREE_HOST_SIZE_MAX when empty.
+  iree_host_size_t representative_site;
+
+  // Candidate class assigned to this key.
+  loom_decision_class_ordinal_t candidate_class;
+
+  // Reserved bytes in occupied entries. Empty entries are all-ones.
+  uint8_t reserved[6];
+} loom_kernel_dispatch_grid_bucket_t;
+
+static uint32_t loom_kernel_dispatch_grid_hash(
+    loom_decision_class_ordinal_t parent_class,
+    const loom_target_dispatch_workgroup_count_t* grid) {
+  uint32_t hash = loom_structural_hash_initialize();
+  hash = loom_structural_hash_mix_u16(hash, parent_class);
+  const bool is_exact = loom_kernel_dispatch_grid_can_specialize(grid);
+  hash = loom_structural_hash_mix_u8(hash, is_exact);
+  if (is_exact) {
+    hash = loom_structural_hash_mix_u32(hash, grid->x);
+    hash = loom_structural_hash_mix_u32(hash, grid->y);
+    hash = loom_structural_hash_mix_u32(hash, grid->z);
+  }
+  return loom_structural_hash_finalize(hash);
+}
+
+// Refines staged-value classes by publishable physical dispatch grids. The
+// refinement is optional: when distinct grids exceed the class limit, the
+// existing partition remains intact and later materialization stays generic.
+static iree_status_t loom_kernel_dispatch_grid_refine_classes(
+    const loom_kernel_class_site_t* sites,
+    loom_decision_class_partition_t* partition, iree_arena_allocator_t* arena) {
+  bool has_exact_grid = false;
+  for (iree_host_size_t i = 0; i < partition->site_count; ++i) {
+    has_exact_grid |=
+        loom_kernel_dispatch_grid_can_specialize(&sites[i].dispatch_grid);
+  }
+  if (!has_exact_grid) {
+    return iree_ok_status();
+  }
+
+  iree_host_size_t bucket_count = 1;
+  const iree_host_size_t minimum_bucket_count =
+      iree_min(partition->site_count,
+               (iree_host_size_t)partition->class_limit) *
+      2;
+  while (bucket_count < minimum_bucket_count) {
+    bucket_count *= 2;
+  }
+  loom_kernel_dispatch_grid_bucket_t* buckets = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, bucket_count, sizeof(*buckets), (void**)&buckets));
+  memset(buckets, 0xFF, bucket_count * sizeof(*buckets));
+
+  partition->candidate_class_count = 0;
+  for (iree_host_size_t site_ordinal = 0; site_ordinal < partition->site_count;
+       ++site_ordinal) {
+    const loom_decision_class_ordinal_t parent_class =
+        partition->site_classes[site_ordinal];
+    const loom_target_dispatch_workgroup_count_t* grid =
+        &sites[site_ordinal].dispatch_grid;
+    iree_host_size_t bucket =
+        loom_kernel_dispatch_grid_hash(parent_class, grid) & (bucket_count - 1);
+    while (buckets[bucket].representative_site != IREE_HOST_SIZE_MAX) {
+      const iree_host_size_t representative_site =
+          buckets[bucket].representative_site;
+      if (partition->site_classes[representative_site] == parent_class &&
+          loom_kernel_dispatch_grid_equal(
+              &sites[representative_site].dispatch_grid, grid)) {
+        break;
+      }
+      bucket = (bucket + 1) & (bucket_count - 1);
+    }
+
+    if (buckets[bucket].representative_site == IREE_HOST_SIZE_MAX) {
+      if (partition->candidate_class_count == partition->class_limit) {
+        return iree_ok_status();
+      }
+      const loom_decision_class_ordinal_t candidate_class =
+          partition->candidate_class_count++;
+      buckets[bucket] = (loom_kernel_dispatch_grid_bucket_t){
+          .representative_site = site_ordinal,
+          .candidate_class = candidate_class,
+      };
+      partition->candidate_parent_classes[candidate_class] = parent_class;
+    }
+    partition->candidate_site_classes[site_ordinal] =
+        buckets[bucket].candidate_class;
+  }
+
+  loom_decision_class_partition_commit(partition);
+  return iree_ok_status();
+}
+
 iree_status_t loom_kernel_class_classifier_collect(
     const loom_kernel_class_classifier_t* classifier,
     const loom_module_t* site_module, const loom_kernel_class_site_t* sites,
@@ -784,6 +881,10 @@ iree_status_t loom_kernel_class_classifier_collect(
     IREE_RETURN_IF_ERROR(loom_kernel_specializations_collect(
         site_module, sites, classifier->specialization_count, &partition, arena,
         &site_specializations));
+  }
+  if (classifier->has_launch_configuration) {
+    IREE_RETURN_IF_ERROR(
+        loom_kernel_dispatch_grid_refine_classes(sites, &partition, arena));
   }
 
   loom_kernel_class_decision_result_t* decision_results = NULL;
@@ -952,11 +1053,30 @@ iree_status_t loom_kernel_class_classifier_collect(
         .trace_id = current_trace_ids[i],
     };
   }
-  for (iree_host_size_t i = 0; i < site_count; ++i) {
-    loom_kernel_class_t* entry = &classes[partition.site_classes[i]];
-    ++entry->member_count;
-    entry->specializations =
-        site_specializations ? site_specializations[i] : NULL;
+  if (classifier->has_launch_configuration) {
+    for (iree_host_size_t i = 0; i < site_count; ++i) {
+      loom_kernel_class_t* entry = &classes[partition.site_classes[i]];
+      const loom_target_dispatch_workgroup_count_t site_grid =
+          loom_kernel_dispatch_grid_can_specialize(&sites[i].dispatch_grid)
+              ? sites[i].dispatch_grid
+              : (loom_target_dispatch_workgroup_count_t){0};
+      if (entry->member_count == 0) {
+        entry->dispatch_grid = site_grid;
+      } else if (!loom_kernel_dispatch_grid_equal(&entry->dispatch_grid,
+                                                  &site_grid)) {
+        entry->dispatch_grid = (loom_target_dispatch_workgroup_count_t){0};
+      }
+      ++entry->member_count;
+      entry->specializations =
+          site_specializations ? site_specializations[i] : NULL;
+    }
+  } else {
+    for (iree_host_size_t i = 0; i < site_count; ++i) {
+      loom_kernel_class_t* entry = &classes[partition.site_classes[i]];
+      ++entry->member_count;
+      entry->specializations =
+          site_specializations ? site_specializations[i] : NULL;
+    }
   }
 
   *out_collection = (loom_kernel_class_collection_t){

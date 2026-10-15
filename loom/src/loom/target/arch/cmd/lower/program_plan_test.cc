@@ -14,12 +14,14 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
+#include "loom/format/bytecode/reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/pass/builtin_registry.h"
@@ -180,6 +182,25 @@ class CmdProgramPlanTest : public ::testing::Test {
         iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
     iree_io_stream_release(stream);
     return bytes;
+  }
+
+  ModulePtr RoundTripBytecode(const loom_module_t* module) {
+    const std::vector<uint8_t> bytecode = WriteBytecode(module);
+    const loom_bytecode_read_options_t read_options = {
+        .diagnostic_sink =
+            {
+                .fn = loom_diagnostic_stderr_sink,
+            },
+    };
+    loom_bytecode_read_result_t read_result = {};
+    loom_module_t* round_tripped_module = nullptr;
+    IREE_EXPECT_OK(loom_bytecode_read_module(
+        iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+        IREE_SV("cmd_program_kernel.loombc"), &context_, &block_pool_,
+        &read_options, &read_result, &round_tripped_module,
+        iree_allocator_system()));
+    EXPECT_EQ(read_result.error_count, 0u);
+    return ModulePtr(round_tripped_module);
   }
 
   loom_op_t* FindSymbol(loom_module_t* module, iree_string_view_t name) {
@@ -778,6 +799,195 @@ command.program.def public @root_b() launch(%storage: buffer) {
     EXPECT_EQ(verify_result.error_count, 0u);
     loom_kernel_class_product_deinitialize(&request.product);
   }
+  loom_cmd_program_plan_deinitialize(&plan);
+}
+
+TEST_F(CmdProgramPlanTest,
+       IndexedPreparationBindsPhysicalDispatchGridsInKernelProducts) {
+  ModulePtr source_module = ParseAndVerify(R"(
+kernel.def @configured() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1024xi32>
+  %value = scalar.constant 1 : i32
+  view.store %value, %output_view[%workgroup] : i32, view<1024xi32>
+  kernel.return
+}
+
+kernel.def @produce_counts() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%counts: view<3xi32>) {
+  %unit = scalar.constant 1 : i32
+  view.store %unit, %counts[0] : i32, view<3xi32>
+  view.store %unit, %counts[1] : i32, view<3xi32>
+  view.store %unit, %counts[2] : i32, view<3xi32>
+  kernel.return
+}
+
+command.program.def public @root() launch(%static_count_storage: buffer, %output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  kernel.dispatch @configured[%c2, %c3, %c4](%output) : [index, index, index](buffer)
+  kernel.dispatch @configured[%c2, %c3, %c4](%output) : [index, index, index](buffer)
+  kernel.dispatch @configured[%c5](%output) : [index](buffer)
+  kernel.dispatch @configured[%c0](%output) : [index](buffer)
+  %static_counts = buffer.view %static_count_storage[%zero_offset] : buffer -> view<3xi32>
+  kernel.dispatch @configured[%static_counts](%output) : [view<3xi32>](buffer)
+  %count_bytes = index.constant 12 : offset
+  %dynamic_count_storage = buffer.alloca<global> align(4) %count_bytes : buffer
+  %dynamic_counts = buffer.view %dynamic_count_storage[%zero_offset] : buffer -> view<3xi32>
+  kernel.dispatch @produce_counts[%c1](%dynamic_counts) : [index](view<3xi32>)
+  kernel.dispatch @configured[%dynamic_counts](%output) : [view<3xi32>](buffer)
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+
+  loom_link_module_index_t* index = nullptr;
+  IREE_ASSERT_OK(loom_link_module_index_allocate(
+      &context_, &block_pool_, iree_allocator_system(), &index));
+  const loom_link_module_index_add_options_t add_options = {
+      .provider_name = IREE_SV("indexed_dispatch_grid_test"),
+  };
+  iree_host_size_t provider_ordinal = 0;
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      index, source_module.get(), &add_options, &provider_ordinal));
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(index, provider_ordinal);
+  ASSERT_NE(provider, nullptr);
+  const loom_link_module_index_module_t* indexed_module =
+      loom_link_module_index_module_at(index, provider->module_start_ordinal);
+  ASSERT_NE(indexed_module, nullptr);
+  const loom_symbol_ref_t source_root =
+      FindSymbolRef(source_module.get(), IREE_SV("root"));
+  const iree_host_size_t root_symbol_ordinal =
+      indexed_module->symbol_start_ordinal + source_root.symbol_id;
+
+  KernelRequestCapture request_capture = {
+      .block_pool = &block_pool_,
+  };
+  loom_cmd_program_plan_index_options_t plan_options;
+  loom_cmd_program_plan_index_options_initialize(&plan_options);
+  plan_options.kernel_request_sink = {
+      .publish = CaptureKernelRequest,
+      .user_data = &request_capture,
+  };
+  const loom_link_plan_materialization_environment_t environment = {
+      .context = &context_,
+      .block_pool = &block_pool_,
+      .low_repr_environment = {},
+      .diagnostic_sink = nullptr,
+      .prepare_module = nullptr,
+      .user_data = nullptr,
+      .allocator = iree_allocator_system(),
+  };
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  loom_cmd_program_plan_t plan = {};
+  DiagnosticEmissionCapture diagnostic_capture;
+  bool valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_build_from_index(
+      index, &root_symbol_ordinal, /*program_count=*/1, &plan_options,
+      loom_pass_builtin_registry(),
+      loom_cleanup_configured_pattern_provider_set(),
+      diagnostic_capture.emitter(), &environment, &scratch_arena, &valid,
+      &plan));
+  ASSERT_TRUE(valid);
+  loom_link_module_index_free(index);
+  source_module.reset();
+  iree_arena_deinitialize(&scratch_arena);
+
+  ASSERT_EQ(request_capture.requests.size(), 4u);
+  bool found_exact_234 = false;
+  bool found_exact_511 = false;
+  bool found_generic = false;
+  iree_host_size_t configured_request_count = 0;
+  for (CapturedKernelRequest& request : request_capture.requests) {
+    ASSERT_NE(request.product.module, nullptr);
+    ModulePtr round_tripped = RoundTripBytecode(request.product.module);
+    ASSERT_NE(round_tripped, nullptr);
+    loom_verify_options_t verify_options = {};
+    verify_options.sink.fn = loom_diagnostic_stderr_sink;
+    loom_verify_result_t verify_result = {};
+    IREE_ASSERT_OK(loom_verify_module(round_tripped.get(), &verify_options,
+                                      &verify_result));
+    EXPECT_EQ(verify_result.error_count, 0u);
+
+    ASSERT_EQ(request.product.kernel.module_id, 0u);
+    const loom_symbol_t& kernel_symbol =
+        round_tripped->symbols.entries[request.product.kernel.symbol_id];
+    const iree_string_view_t kernel_name =
+        loom_string_table_get(&round_tripped->strings, kernel_symbol.name_id);
+    if (!iree_string_view_equal(kernel_name, IREE_SV("configured"))) {
+      loom_kernel_class_product_deinitialize(&request.product);
+      continue;
+    }
+    ++configured_request_count;
+
+    loom_op_t* kernel_op = kernel_symbol.defining_op;
+    ASSERT_TRUE(loom_kernel_def_isa(kernel_op));
+    const loom_op_t* launch_config =
+        loom_kernel_def_launch_config_op(kernel_op);
+    ASSERT_NE(launch_config, nullptr);
+    const loom_value_id_t workgroup_counts[] = {
+        loom_kernel_launch_config_workgroup_count_x(launch_config),
+        loom_kernel_launch_config_workgroup_count_y(launch_config),
+        loom_kernel_launch_config_workgroup_count_z(launch_config),
+    };
+    const loom_block_t* config_entry =
+        loom_region_const_entry_block(loom_kernel_def_config(kernel_op));
+    ASSERT_NE(config_entry, nullptr);
+    if (config_entry->arg_count == 3) {
+      found_generic = true;
+      EXPECT_EQ(request.member_count, 3u);
+      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(workgroup_counts); ++i) {
+        EXPECT_EQ(workgroup_counts[i], config_entry->arg_ids[i]);
+      }
+    } else {
+      ASSERT_EQ(config_entry->arg_count, 0u);
+      uint32_t exact_counts[3] = {};
+      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(workgroup_counts); ++i) {
+        const loom_value_t* count_value =
+            loom_module_value(round_tripped.get(), workgroup_counts[i]);
+        ASSERT_FALSE(loom_value_is_block_arg(count_value));
+        const loom_op_t* count_op = loom_value_def_op(count_value);
+        ASSERT_TRUE(loom_index_constant_isa(count_op));
+        const int64_t count =
+            loom_attr_as_i64(loom_index_constant_value(count_op));
+        ASSERT_GE(count, 0);
+        ASSERT_LE(count, UINT32_MAX);
+        exact_counts[i] = static_cast<uint32_t>(count);
+      }
+      if (exact_counts[0] == 2 && exact_counts[1] == 3 &&
+          exact_counts[2] == 4) {
+        found_exact_234 = true;
+        EXPECT_EQ(request.member_count, 2u);
+      } else if (exact_counts[0] == 5 && exact_counts[1] == 1 &&
+                 exact_counts[2] == 1) {
+        found_exact_511 = true;
+        EXPECT_EQ(request.member_count, 1u);
+      } else {
+        ADD_FAILURE() << "unexpected configured dispatch grid "
+                      << exact_counts[0] << "x" << exact_counts[1] << "x"
+                      << exact_counts[2];
+      }
+    }
+    loom_kernel_class_product_deinitialize(&request.product);
+  }
+  EXPECT_EQ(configured_request_count, 3u);
+  EXPECT_TRUE(found_exact_234);
+  EXPECT_TRUE(found_exact_511);
+  EXPECT_TRUE(found_generic);
+
   loom_cmd_program_plan_deinitialize(&plan);
 }
 
