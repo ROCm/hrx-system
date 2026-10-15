@@ -139,15 +139,25 @@ FlowLM retains its full configured context, while Mimi wraps cache slots and
 keeps absolute rotary positions. These templates provide numerical batching;
 the controller owns phase selection and request eligibility.
 
+The other `batch_*.loom` modules apply the same ownership to projections,
+normalization, pointwise maps, convolution, and FlowLM state. Convolution
+histories, overlap tails, previous latents, and position counters remain in
+resident rows. Intermediate activations, solver inputs, and output blocks use
+packed rows. Shared checkpoint tensors have zero row stride. Direct and batched
+commands invoke the same arithmetic bodies, including their precision choices;
+membership and byte origins determine where that arithmetic reads and writes.
+
 The checkpoint-free tests use closed-form projection, strided-convolution,
 normalization, and attention oracles. Attention checks retain positions beyond
 256, mask future slots, and reach the last configured absolute rotary row.
 Streaming checks observe consecutive outputs and retained history, including
 startup replication, overlap bias, latent recurrence, and
-fade behavior. Batched attention checks compare complete cache banks and outputs
-across staggered, reordered, removed, and resumed rows. An empty cohort leaves
-every cache and output unchanged. Both hardware and memory-access-checking
-profiles run with:
+fade behavior. Batched checks compare complete banks and outputs against isolated
+calls across staggered, reordered, removed, and resumed rows. Padded rows and
+nonzero origins expose accidental writes outside each tensor, and different
+packed and resident capacities expose identity/addressing confusion. An empty
+cohort leaves every cache and output unchanged. Both hardware and
+memory-access-checking profiles run with:
 
 ```sh
 iree-bazel-test --config=asan \

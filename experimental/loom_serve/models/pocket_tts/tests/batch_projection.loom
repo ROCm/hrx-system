@@ -1,0 +1,344 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Reordered active rows use independent packed scratch and resident state.
+// Every tensor has a nonzero origin and padding between rows. Comparing the
+// complete banks with isolated calls also observes all guards and inactive rows.
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.decl @pocket.project_f32(%outputs$1: index, %times$2: index) launch(%inputs: index, %outputs$4: index, %times$5: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.project_bias_f32(%outputs$10: index, %times$11: index) launch(%inputs: index, %outputs$13: index, %times$14: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.project_f64(%outputs$19: index, %times$20: index) launch(%inputs: index, %outputs$22: index, %times$23: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.decl @pocket.project_bias_f64(%outputs$28: index, %times$29: index) launch(%inputs: index, %outputs$31: index, %times$32: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.def target(@pocket) @batch_metadata() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%count: i32, %first: i32, %second: i32, %third: i32, %fourth: i32, %membership: buffer) {
+  %origin = index.constant 0 : offset
+  %map = buffer.view %membership[%origin] : buffer -> view<5xi32>
+  view.store %count, %map[0] : i32, view<5xi32>
+  view.store %first, %map[1] : i32, view<5xi32>
+  view.store %second, %map[2] : i32, view<5xi32>
+  view.store %third, %map[3] : i32, view<5xi32>
+  view.store %fourth, %map[4] : i32, view<5xi32>
+  kernel.return
+}
+
+template.decl @pocket.batch.project(%membership: buffer, %wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset)
+
+kernel.def target(@pocket) @batched_project_f32() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 3 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %input_storage: buffer, %weight_storage: buffer, %bias_storage: buffer, %output_storage: buffer) {
+  %wide = scalar.constant false : i1
+  %biased = scalar.constant false : i1
+  %inputs = index.constant 5 : index
+  %outputs = index.constant 7 : index
+  %times = index.constant 3 : index
+  %origin = index.constant 16 : offset
+  %input_stride = index.constant 88 : offset
+  %weight_stride = index.constant 0 : offset
+  %bias_stride = index.constant 0 : offset
+  %output_stride = index.constant 112 : offset
+  template.apply<@pocket.batch.project>(%membership, %wide, %biased, %inputs, %outputs, %times, %input_storage, %weight_storage, %bias_storage, %output_storage, %origin, %input_stride, %origin, %weight_stride, %origin, %bias_stride, %origin, %output_stride) : (buffer, i1, i1, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @project_f32_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %inputs = check.literal value(5) : index
+  %outputs = check.literal value(7) : index
+  %times = check.literal value(3) : index
+  %input_seed = check.literal value(100) : i64
+  %actual_input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %weight_seed = check.literal value(101) : i64
+  %actual_weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<58xbf16>
+  %reference_weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<58xbf16>
+  %bias_seed = check.literal value(102) : i64
+  %actual_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %reference_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %output_seed = check.literal value(103) : i64
+  %actual_output = check.generate.random.uniform seed(%output_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_output = check.generate.random.uniform seed(%output_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_project_f32(%membership, %actual_input, %actual_weight, %actual_bias, %actual_output) : (tensor<5xi32>, tensor<92xf32>, tensor<58xbf16>, tensor<30xbf16>, tensor<116xf32>)
+  %input_0_0 = check.tensor.view %reference_input offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_0 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_0 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_0 = check.tensor.view %reference_output offset(16) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_f32[%outputs, %times](%inputs, %outputs, %times, %input_0_0, %weight_0_0, %bias_0_0, %output_0_0) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  %input_0_1 = check.tensor.view %reference_input offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_1 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_1 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_1 = check.tensor.view %reference_output offset(128) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_f32[%outputs, %times](%inputs, %outputs, %times, %input_0_1, %weight_0_1, %bias_0_1, %output_0_1) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  %input_0_2 = check.tensor.view %reference_input offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_2 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_2 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_2 = check.tensor.view %reference_output offset(240) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_f32[%outputs, %times](%inputs, %outputs, %times, %input_0_2, %weight_0_2, %bias_0_2, %output_0_2) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  check.expect.bitwise actual(%actual_input) expected(%reference_input) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_weight) expected(%reference_weight) : tensor<58xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_output) expected(%reference_output) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_project_f32(%membership, %actual_input, %actual_weight, %actual_bias, %actual_output) : (tensor<5xi32>, tensor<92xf32>, tensor<58xbf16>, tensor<30xbf16>, tensor<116xf32>)
+  check.expect.bitwise actual(%actual_input) expected(%reference_input) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_weight) expected(%reference_weight) : tensor<58xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_output) expected(%reference_output) : tensor<116xf32>
+  check.return
+}
+
+kernel.def target(@pocket) @batched_project_bias_f32() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 3 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %input_storage: buffer, %weight_storage: buffer, %bias_storage: buffer, %output_storage: buffer) {
+  %wide = scalar.constant false : i1
+  %biased = scalar.constant true : i1
+  %inputs = index.constant 5 : index
+  %outputs = index.constant 7 : index
+  %times = index.constant 3 : index
+  %origin = index.constant 16 : offset
+  %input_stride = index.constant 88 : offset
+  %weight_stride = index.constant 0 : offset
+  %bias_stride = index.constant 0 : offset
+  %output_stride = index.constant 112 : offset
+  template.apply<@pocket.batch.project>(%membership, %wide, %biased, %inputs, %outputs, %times, %input_storage, %weight_storage, %bias_storage, %output_storage, %origin, %input_stride, %origin, %weight_stride, %origin, %bias_stride, %origin, %output_stride) : (buffer, i1, i1, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @project_bias_f32_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %inputs = check.literal value(5) : index
+  %outputs = check.literal value(7) : index
+  %times = check.literal value(3) : index
+  %input_seed = check.literal value(100) : i64
+  %actual_input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %weight_seed = check.literal value(101) : i64
+  %actual_weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<58xbf16>
+  %reference_weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<58xbf16>
+  %bias_seed = check.literal value(102) : i64
+  %actual_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %reference_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %output_seed = check.literal value(103) : i64
+  %actual_output = check.generate.random.uniform seed(%output_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_output = check.generate.random.uniform seed(%output_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_project_bias_f32(%membership, %actual_input, %actual_weight, %actual_bias, %actual_output) : (tensor<5xi32>, tensor<92xf32>, tensor<58xbf16>, tensor<30xbf16>, tensor<116xf32>)
+  %input_0_0 = check.tensor.view %reference_input offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_0 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_0 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_0 = check.tensor.view %reference_output offset(16) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_bias_f32[%outputs, %times](%inputs, %outputs, %times, %input_0_0, %weight_0_0, %bias_0_0, %output_0_0) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  %input_0_1 = check.tensor.view %reference_input offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_1 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_1 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_1 = check.tensor.view %reference_output offset(128) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_bias_f32[%outputs, %times](%inputs, %outputs, %times, %input_0_1, %weight_0_1, %bias_0_1, %output_0_1) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  %input_0_2 = check.tensor.view %reference_input offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_2 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_2 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_2 = check.tensor.view %reference_output offset(240) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_bias_f32[%outputs, %times](%inputs, %outputs, %times, %input_0_2, %weight_0_2, %bias_0_2, %output_0_2) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  check.expect.bitwise actual(%actual_input) expected(%reference_input) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_weight) expected(%reference_weight) : tensor<58xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_output) expected(%reference_output) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_project_bias_f32(%membership, %actual_input, %actual_weight, %actual_bias, %actual_output) : (tensor<5xi32>, tensor<92xf32>, tensor<58xbf16>, tensor<30xbf16>, tensor<116xf32>)
+  check.expect.bitwise actual(%actual_input) expected(%reference_input) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_weight) expected(%reference_weight) : tensor<58xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_output) expected(%reference_output) : tensor<116xf32>
+  check.return
+}
+
+kernel.def target(@pocket) @batched_project_f64() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 3 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %input_storage: buffer, %weight_storage: buffer, %bias_storage: buffer, %output_storage: buffer) {
+  %wide = scalar.constant true : i1
+  %biased = scalar.constant false : i1
+  %inputs = index.constant 5 : index
+  %outputs = index.constant 7 : index
+  %times = index.constant 3 : index
+  %origin = index.constant 16 : offset
+  %input_stride = index.constant 88 : offset
+  %weight_stride = index.constant 0 : offset
+  %bias_stride = index.constant 0 : offset
+  %output_stride = index.constant 112 : offset
+  template.apply<@pocket.batch.project>(%membership, %wide, %biased, %inputs, %outputs, %times, %input_storage, %weight_storage, %bias_storage, %output_storage, %origin, %input_stride, %origin, %weight_stride, %origin, %bias_stride, %origin, %output_stride) : (buffer, i1, i1, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @project_f64_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %inputs = check.literal value(5) : index
+  %outputs = check.literal value(7) : index
+  %times = check.literal value(3) : index
+  %input_seed = check.literal value(100) : i64
+  %actual_input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %weight_seed = check.literal value(101) : i64
+  %actual_weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<58xbf16>
+  %reference_weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<58xbf16>
+  %bias_seed = check.literal value(102) : i64
+  %actual_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %reference_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %output_seed = check.literal value(103) : i64
+  %actual_output = check.generate.random.uniform seed(%output_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_output = check.generate.random.uniform seed(%output_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_project_f64(%membership, %actual_input, %actual_weight, %actual_bias, %actual_output) : (tensor<5xi32>, tensor<92xf32>, tensor<58xbf16>, tensor<30xbf16>, tensor<116xf32>)
+  %input_0_0 = check.tensor.view %reference_input offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_0 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_0 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_0 = check.tensor.view %reference_output offset(16) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_f64[%outputs, %times](%inputs, %outputs, %times, %input_0_0, %weight_0_0, %bias_0_0, %output_0_0) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  %input_0_1 = check.tensor.view %reference_input offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_1 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_1 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_1 = check.tensor.view %reference_output offset(128) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_f64[%outputs, %times](%inputs, %outputs, %times, %input_0_1, %weight_0_1, %bias_0_1, %output_0_1) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  %input_0_2 = check.tensor.view %reference_input offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_2 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_2 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_2 = check.tensor.view %reference_output offset(240) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_f64[%outputs, %times](%inputs, %outputs, %times, %input_0_2, %weight_0_2, %bias_0_2, %output_0_2) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  check.expect.bitwise actual(%actual_input) expected(%reference_input) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_weight) expected(%reference_weight) : tensor<58xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_output) expected(%reference_output) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_project_f64(%membership, %actual_input, %actual_weight, %actual_bias, %actual_output) : (tensor<5xi32>, tensor<92xf32>, tensor<58xbf16>, tensor<30xbf16>, tensor<116xf32>)
+  check.expect.bitwise actual(%actual_input) expected(%reference_input) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_weight) expected(%reference_weight) : tensor<58xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_output) expected(%reference_output) : tensor<116xf32>
+  check.return
+}
+
+kernel.def target(@pocket) @batched_project_bias_f64() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 3 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %input_storage: buffer, %weight_storage: buffer, %bias_storage: buffer, %output_storage: buffer) {
+  %wide = scalar.constant true : i1
+  %biased = scalar.constant true : i1
+  %inputs = index.constant 5 : index
+  %outputs = index.constant 7 : index
+  %times = index.constant 3 : index
+  %origin = index.constant 16 : offset
+  %input_stride = index.constant 88 : offset
+  %weight_stride = index.constant 0 : offset
+  %bias_stride = index.constant 0 : offset
+  %output_stride = index.constant 112 : offset
+  template.apply<@pocket.batch.project>(%membership, %wide, %biased, %inputs, %outputs, %times, %input_storage, %weight_storage, %bias_storage, %output_storage, %origin, %input_stride, %origin, %weight_stride, %origin, %bias_stride, %origin, %output_stride) : (buffer, i1, i1, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @project_bias_f64_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %inputs = check.literal value(5) : index
+  %outputs = check.literal value(7) : index
+  %times = check.literal value(3) : index
+  %input_seed = check.literal value(100) : i64
+  %actual_input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %reference_input = check.generate.random.uniform seed(%input_seed) range(-0.5 to 0.5) : tensor<92xf32>
+  %weight_seed = check.literal value(101) : i64
+  %actual_weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<58xbf16>
+  %reference_weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<58xbf16>
+  %bias_seed = check.literal value(102) : i64
+  %actual_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %reference_bias = check.generate.random.uniform seed(%bias_seed) range(-0.5 to 0.5) : tensor<30xbf16>
+  %output_seed = check.literal value(103) : i64
+  %actual_output = check.generate.random.uniform seed(%output_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  %reference_output = check.generate.random.uniform seed(%output_seed) range(-0.5 to 0.5) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_project_bias_f64(%membership, %actual_input, %actual_weight, %actual_bias, %actual_output) : (tensor<5xi32>, tensor<92xf32>, tensor<58xbf16>, tensor<30xbf16>, tensor<116xf32>)
+  %input_0_0 = check.tensor.view %reference_input offset(16) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_0 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_0 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_0 = check.tensor.view %reference_output offset(16) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_bias_f64[%outputs, %times](%inputs, %outputs, %times, %input_0_0, %weight_0_0, %bias_0_0, %output_0_0) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  %input_0_1 = check.tensor.view %reference_input offset(104) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_1 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_1 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_1 = check.tensor.view %reference_output offset(128) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_bias_f64[%outputs, %times](%inputs, %outputs, %times, %input_0_1, %weight_0_1, %bias_0_1, %output_0_1) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  %input_0_2 = check.tensor.view %reference_input offset(192) : tensor<92xf32> -> tensor<15xf32>
+  %weight_0_2 = check.tensor.view %reference_weight offset(16) : tensor<58xbf16> -> tensor<35xbf16>
+  %bias_0_2 = check.tensor.view %reference_bias offset(16) : tensor<30xbf16> -> tensor<7xbf16>
+  %output_0_2 = check.tensor.view %reference_output offset(240) : tensor<116xf32> -> tensor<21xf32>
+  kernel.launch @pocket.project_bias_f64[%outputs, %times](%inputs, %outputs, %times, %input_0_2, %weight_0_2, %bias_0_2, %output_0_2) : [index, index](index, index, index, tensor<15xf32>, tensor<35xbf16>, tensor<7xbf16>, tensor<21xf32>)
+  check.expect.bitwise actual(%actual_input) expected(%reference_input) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_weight) expected(%reference_weight) : tensor<58xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_output) expected(%reference_output) : tensor<116xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_project_bias_f64(%membership, %actual_input, %actual_weight, %actual_bias, %actual_output) : (tensor<5xi32>, tensor<92xf32>, tensor<58xbf16>, tensor<30xbf16>, tensor<116xf32>)
+  check.expect.bitwise actual(%actual_input) expected(%reference_input) : tensor<92xf32>
+  check.expect.bitwise actual(%actual_weight) expected(%reference_weight) : tensor<58xbf16>
+  check.expect.bitwise actual(%actual_bias) expected(%reference_bias) : tensor<30xbf16>
+  check.expect.bitwise actual(%actual_output) expected(%reference_output) : tensor<116xf32>
+  check.return
+}
