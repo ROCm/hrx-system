@@ -174,6 +174,7 @@ func.def public inline @qwen38_row_gdn_binding(%epoch: buffer, %control_origin: 
 // Locates one attention layer's token-major K/V planes. The layer origin uses
 // physical pool capacity for paged rows and logical capacity for dense rows,
 // independently of the currently consumed prefix in the span descriptor.
+// State origins and layer planes both begin on 256-byte boundaries.
 func.def public inline @qwen38_row_kv_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset) {
   %row_bytes = index.constant 32 : offset
   %table_origin = index.scale %row, %row_bytes : index, offset -> offset
@@ -181,8 +182,9 @@ func.def public inline @qwen38_row_kv_origin(%rows: buffer, %row: index, %layer_
   %entry = buffer.view %metadata[%table_origin] : buffer -> view<4xi64>
   %kv_index = index.constant 2 : index
   %origin_word = view.load %entry[%kv_index] : view<4xi64> -> i64
-  %nonnegative_origin = scalar.assume %origin_word [range(%origin_word, 0, 9223372036854775807)] : i64
+  %nonnegative_origin = scalar.assume %origin_word [range(%origin_word, 0, 9223372036854775807), multiple_of(%origin_word, 256)] : i64
   %row_origin = index.cast %nonnegative_origin : i64 to offset
-  %origin = index.add %row_origin, %layer_origin : offset
+  %aligned_layer_origin = index.assume %layer_origin [multiple_of(%layer_origin, 256)] : offset
+  %origin = index.add %row_origin, %aligned_layer_origin : offset
   func.return %origin : offset
 }
