@@ -1,0 +1,402 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+
+func.decl import("input", "decode") @pocket.decode_tokens(%tokens: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl @pocket.normalize_text(%text: buffer) -> (buffer, i32)
+
+func.decl @text.trim(%text: buffer) -> (offset, offset)
+
+func.decl @text.next(%text: buffer, %position: offset) -> (i32, offset)
+
+func.decl @text.previous(%text: buffer, %end: offset) -> (i32, offset)
+
+func.decl @text.is_digit(%codepoint: i32) -> (i1)
+
+template.decl pure @pocket.packet_stride(%tokens: index) -> (offset)
+
+global.rodata.def @pocket.sentence_punctuation = bytes("2e212e2e2e3f")
+
+global.rodata.def @pocket.fallback_punctuation = bytes("2c3b3a")
+
+// Pocket text must contain speech after normalization and token decoding
+global.rodata.def @pocket.empty_text_error = bytes("506f636b65742074657874206d75737420636f6e7461696e20737065656368206166746572206e6f726d616c697a6174696f6e20616e6420746f6b656e206465636f64696e67")
+
+// Pocket text exceeds the configured input token capacity
+global.rodata.def @pocket.input_capacity_error = bytes("506f636b6574207465787420657863656564732074686520636f6e6669677572656420696e70757420746f6b656e206361706163697479")
+
+// Pocket sentence exceeds chunk capacity after punctuation splitting
+global.rodata.def @pocket.chunk_capacity_error = bytes("506f636b65742073656e74656e63652065786365656473206368756e6b2063617061636974792061667465722070756e6374756174696f6e2073706c697474696e67")
+
+func.def @pocket.text_require(%condition: i1, %diagnostic: buffer) {
+  %value = scalar.extui %condition : i1 to i32
+  func.call @require(%value, %diagnostic) : (i32, buffer)
+  func.return
+}
+
+func.def @pocket.text_copy(%text: buffer, %begin: offset, %length: offset) -> (buffer) {
+  %output = buffer.alloca<private> align(4) %length : buffer
+  %origin = index.constant 0 : offset
+  buffer.copy %text[%begin], %output[%origin], %length
+  func.return %output : buffer
+}
+
+func.def @pocket.strip_text(%text: buffer) -> (buffer) {
+  %begin, %end = func.call @text.trim(%text) : (buffer) -> (offset, offset)
+  %length = index.sub %end, %begin : offset
+  %output = func.call @pocket.text_copy(%text, %begin, %length) : (buffer, offset, offset) -> (buffer)
+  func.return %output : buffer
+}
+
+// Each call decodes exactly the live token span with fresh leading-space state.
+// The pinned English vocabulary emits at most nine bytes per token, including
+// replacement output from byte fallback. Padding never enters text semantics.
+func.def @pocket.decode_span(%tokens: buffer, %begin: index, %end: index) -> (buffer) {
+  %word_bytes = index.constant 4 : offset
+  %position = index.scale %begin, %word_bytes : index, offset -> offset
+  %count = index.sub %end, %begin : index
+  %length = index.scale %count, %word_bytes : index, offset -> offset
+  %ids = func.call @pocket.text_copy(%tokens, %position, %length) : (buffer, offset, offset) -> (buffer)
+  %count64 = index.cast %count : index to i64
+  %maximum_bytes = scalar.constant 9 : i64
+  %capacity = scalar.muli %count64, %maximum_bytes : i64
+  %skip_special = scalar.constant 1 : i32
+  %decoded, %written64 = func.call @pocket.decode_tokens(%ids, %skip_special, %capacity) : (buffer, i32, i64) -> (buffer, i64)
+  %written_value = scalar.assume %written64 [range(%written64, 0, 9223372036854775807)] : i64
+  %written = index.cast %written_value : i64 to offset
+  %origin = index.constant 0 : offset
+  %text = func.call @pocket.text_copy(%decoded, %origin, %written) : (buffer, offset, offset) -> (buffer)
+  func.return %text : buffer
+}
+
+func.def @pocket.decimal_boundary(%tokens: buffer, %count: index, %position: index) -> (i1) {
+  %begin = index.constant 0 : index
+  %origin = index.constant 0 : offset
+  %prefix = func.call @pocket.decode_span(%tokens, %begin, %position) : (buffer, index, index) -> (buffer)
+  %suffix = func.call @pocket.decode_span(%tokens, %position, %count) : (buffer, index, index) -> (buffer)
+  %prefix_length = buffer.length %prefix
+  %suffix_length = buffer.length %suffix
+  %prefix_present = index.cmp ugt, %prefix_length, %origin : offset
+  %suffix_present = index.cmp ugt, %suffix_length, %origin : offset
+  %present = scalar.andi %prefix_present, %suffix_present : i1
+  %false = scalar.constant false : i1
+  %decimal = scf.if %present -> (i1) {
+    %last, %previous = func.call @text.previous(%prefix, %prefix_length) : (buffer, offset) -> (i32, offset)
+    %period = scalar.constant 46 : i32
+    %is_period = scalar.cmpi eq, %last, %period : i32
+    %has_previous = index.cmp ugt, %previous, %origin : offset
+    %candidate = scalar.andi %is_period, %has_previous : i1
+    %decimal = scf.if %candidate -> (i1) {
+      %before, %unused_before = func.call @text.previous(%prefix, %previous) : (buffer, offset) -> (i32, offset)
+      %after, %unused_after = func.call @text.next(%suffix, %origin) : (buffer, offset) -> (i32, offset)
+      %before_digit = func.call @text.is_digit(%before) : (i32) -> (i1)
+      %after_digit = func.call @text.is_digit(%after) : (i32) -> (i1)
+      %digits = scalar.andi %before_digit, %after_digit : i1
+      scf.yield %digits : i1
+    } else {
+      scf.yield %false : i1
+    }
+    scf.yield %decimal : i1
+  } else {
+    scf.yield %false : i1
+  }
+  func.return %decimal : i1
+}
+
+func.def @pocket.boundary_token(%token: i32, %set: buffer, %count: index) -> (i1) {
+  %origin = index.constant 0 : offset
+  %ids = buffer.view %set[%origin] : buffer -> view<[%count]xi32>
+  %one = index.constant 1 : index
+  %false = scalar.constant false : i1
+  // The first token is the tokenizer's prepended metaspace, not punctuation.
+  %member = scf.for %i = [%one to %count step %one](%member = %false : i1) -> (i1) {
+    %candidate = view.load %ids[%i] : view<[%count]xi32> -> i32
+    %same = scalar.cmpi eq, %candidate, %token : i32
+    %found = scalar.ori %member, %same : i1
+    scf.yield %found : i1
+  }
+  func.return %member : i1
+}
+
+// Boundaries follow runs of punctuation tokens, including the final extent.
+// Decimal exclusion observes fresh decoded prefix/suffix exactly as upstream.
+func.def @pocket.find_boundaries(%tokens: buffer, %count: index, %set: buffer, %set_count: index, %skip_decimals: i1) -> (buffer, index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  %word_bytes = index.constant 4 : offset
+  %capacity = index.add %count, %two : index
+  %bytes = index.scale %capacity, %word_bytes : index, offset -> offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %boundaries = buffer.view %storage[%origin] : buffer -> view<[%capacity]xi32>
+  %ids = buffer.view %tokens[%origin] : buffer -> view<[%count]xi32>
+  %zero32 = scalar.constant 0 : i32
+  view.store %zero32, %boundaries[0] : i32, view<[%capacity]xi32>
+  %false = scalar.constant false : i1
+  %boundary_count, %unused = scf.for %i = [%zero to %count step %one](%written = %one : index, %previous = %false : i1) -> (index, i1) {
+    %token = view.load %ids[%i] : view<[%count]xi32> -> i32
+    %member = func.call @pocket.boundary_token(%token, %set, %set_count) : (i32, buffer, index) -> (i1)
+    %ordinary = scalar.cmpi eq, %member, %false : i1
+    %candidate = scalar.andi %previous, %ordinary : i1
+    %check_decimal = scalar.andi %candidate, %skip_decimals : i1
+    %decimal = scf.if %check_decimal -> (i1) {
+      %value = func.call @pocket.decimal_boundary(%tokens, %count, %i) : (buffer, index, index) -> (i1)
+      scf.yield %value : i1
+    } else {
+      scf.yield %false : i1
+    }
+    %not_decimal = scalar.cmpi eq, %decimal, %false : i1
+    %boundary = scalar.andi %candidate, %not_decimal : i1
+    %next_written = scf.if %boundary -> (index) {
+      %slot = index.assume %written [ge(%written, 1), lt(%written, %capacity)] : index
+      %position32 = index.cast %i : index to i32
+      view.store %position32, %boundaries[%slot] : i32, view<[%capacity]xi32>
+      %next = index.add %written, %one : index
+      scf.yield %next : index
+    } else {
+      scf.yield %written : index
+    }
+    scf.yield %next_written, %member : index, i1
+  }
+  %last = index.assume %boundary_count [ge(%boundary_count, 1), lt(%boundary_count, %capacity)] : index
+  %end32 = index.cast %count : index to i32
+  view.store %end32, %boundaries[%last] : i32, view<[%capacity]xi32>
+  %length = index.add %last, %one : index
+  func.return %storage, %length : buffer, index
+}
+
+// Final packets retain the admitted tokens, EOS tail, and generation bound.
+// Geometric storage growth avoids reserving a full packet per input token.
+func.def @pocket.emit_text_packet(%group: buffer, %group_length: offset, %packets: buffer, %chunk: index, %limit: index) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %text = func.call @pocket.text_copy(%group, %origin, %group_length) : (buffer, offset, offset) -> (buffer)
+  %normalized, %tail = func.call @pocket.normalize_text(%text) : (buffer) -> (buffer, i32)
+  %length = buffer.length %normalized
+  %nonempty = index.cmp ugt, %length, %origin : offset
+  %empty_error = global.load @pocket.empty_text_error : buffer
+  func.call @pocket.text_require(%nonempty, %empty_error) : (i1, buffer)
+  %limit64 = index.cast %limit : index to i64
+  %one64 = scalar.constant 1 : i64
+  %capacity = scalar.addi %limit64, %one64 : i64
+  %flags = scalar.constant 4 : i32
+  %ids, %count = func.call @encode(%normalized, %flags, %capacity) : (buffer, i32, i64) -> (buffer, i64)
+  %bounded = scalar.cmpi ule, %count, %limit64 : i64
+  %capacity_error = global.load @pocket.chunk_capacity_error : buffer
+  func.call @pocket.text_require(%bounded, %capacity_error) : (i1, buffer)
+  %stride = template.apply<@pocket.packet_stride>(%limit) pure : (index) -> (offset)
+  %position = index.scale %chunk, %stride : index, offset -> offset
+  %required = index.add %position, %stride : offset
+  %old_capacity = buffer.length %packets
+  %grow = index.cmp ugt, %required, %old_capacity : offset
+  %output = scf.if %grow -> (buffer) {
+    %doubled = index.add %old_capacity, %old_capacity : offset
+    %enough = index.cmp uge, %doubled, %required : offset
+    %new_capacity = scf.select %enough, %doubled, %required : offset
+    %expanded = buffer.alloca<private> align(4) %new_capacity : buffer
+    buffer.copy %packets[%origin], %expanded[%origin], %position
+    scf.yield %expanded : buffer
+  } else {
+    scf.yield %packets : buffer
+  }
+  %zero = scalar.constant 0 : i32
+  buffer.fill %zero, %output[%position], %stride : i32
+  %header = buffer.view %output[%position] : buffer -> view<4xi32>
+  %count32 = scalar.trunci %count : i64 to i32
+  %twenty_five = scalar.constant 25 : i32
+  %five = scalar.constant 5 : i32
+  %six = scalar.constant 6 : i32
+  %scaled = scalar.muli %count32, %twenty_five : i32
+  %rounded = scalar.addi %scaled, %five : i32
+  %quotient = scalar.divui %rounded, %six : i32
+  %frames = scalar.addi %quotient, %twenty_five : i32
+  view.store %count32, %header[0] : i32, view<4xi32>
+  view.store %tail, %header[1] : i32, view<4xi32>
+  view.store %frames, %header[2] : i32, view<4xi32>
+  %header_bytes = index.constant 16 : offset
+  %word_bytes = index.constant 4 : offset
+  %token_position = index.add %position, %header_bytes : offset
+  %count_index = index.cast %count : i64 to index
+  %token_bytes = index.scale %count_index, %word_bytes : index, offset -> offset
+  buffer.copy %ids[%origin], %output[%token_position], %token_bytes
+  func.return %output : buffer
+}
+
+// Accumulator words retain group byte length, raw grouped token count, and
+// completed packet count. They are private to one preparation invocation.
+func.def @pocket.append_text_segment(%sentence: buffer, %tokens: index, %group: buffer, %state: buffer, %packets: buffer, %limit: index) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %state[%origin] : buffer -> view<3xi64>
+  %group_length64 = view.load %header[0] : view<3xi64> -> i64
+  %group_tokens64 = view.load %header[1] : view<3xi64> -> i64
+  %chunks64 = view.load %header[2] : view<3xi64> -> i64
+  %group_length_value = scalar.assume %group_length64 [range(%group_length64, 0, 9223372036854775807)] : i64
+  %group_length = index.cast %group_length_value : i64 to offset
+  %group_tokens = index.cast %group_tokens64 : i64 to index
+  %chunks = index.cast %chunks64 : i64 to index
+  %combined = index.add %group_tokens, %tokens : index
+  %nonempty = index.cmp ugt, %group_length, %origin : offset
+  %exceeds = index.cmp ugt, %combined, %limit : index
+  %flush = scalar.andi %nonempty, %exceeds : i1
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %one_byte = index.constant 1 : offset
+  %output, %length, %count, %next_chunks = scf.if %flush -> (buffer, offset, index, index) {
+    %next = func.call @pocket.emit_text_packet(%group, %group_length, %packets, %chunks, %limit) : (buffer, offset, buffer, index, index) -> (buffer)
+    %next_chunks = index.add %chunks, %one : index
+    scf.yield %next, %origin, %zero, %next_chunks : buffer, offset, index, index
+  } else {
+    scf.yield %packets, %group_length, %group_tokens, %chunks : buffer, offset, index, index
+  }
+  %joining = index.cmp ugt, %length, %origin : offset
+  %begin = scf.if %joining -> (offset) {
+    %space = scalar.constant 32 : i32
+    buffer.store.i8 %space, %group[%length]
+    %next = index.add %length, %one_byte : offset
+    scf.yield %next : offset
+  } else {
+    scf.yield %origin : offset
+  }
+  %sentence_length = buffer.length %sentence
+  buffer.copy %sentence[%origin], %group[%begin], %sentence_length
+  %next_length = index.add %begin, %sentence_length : offset
+  %joined_count = index.add %count, %tokens : index
+  %next_count = scf.select %joining, %joined_count, %tokens : index
+  %next_length64 = index.cast %next_length : offset to i64
+  %next_count64 = index.cast %next_count : index to i64
+  %next_chunks64 = index.cast %next_chunks : index to i64
+  view.store %next_length64, %header[0] : i64, view<3xi64>
+  view.store %next_count64, %header[1] : i64, view<3xi64>
+  view.store %next_chunks64, %header[2] : i64, view<3xi64>
+  func.return %output : buffer
+}
+
+func.def @pocket.refine_sentence(%sentence: buffer, %tokens: index, %fallback: buffer, %fallback_count: index, %group: buffer, %state: buffer, %packets: buffer, %limit: index) -> (buffer) {
+  %oversized = index.cmp ugt, %tokens, %limit : index
+  %output = scf.if %oversized -> (buffer) {
+    %stripped = func.call @pocket.strip_text(%sentence) : (buffer) -> (buffer)
+    %text_bytes = buffer.length %stripped
+    %text_bytes64 = index.cast %text_bytes : offset to i64
+    // Byte fallback needs at most one token per byte plus the prepended space.
+    %two64 = scalar.constant 2 : i64
+    %capacity = scalar.addi %text_bytes64, %two64 : i64
+    %flags = scalar.constant 4 : i32
+    %ids, %count64 = func.call @encode(%stripped, %flags, %capacity) : (buffer, i32, i64) -> (buffer, i64)
+    %count = index.cast %count64 : i64 to index
+    %false = scalar.constant false : i1
+    %boundaries, %boundary_count = func.call @pocket.find_boundaries(%ids, %count, %fallback, %fallback_count, %false) : (buffer, index, buffer, index, i1) -> (buffer, index)
+    %two = index.constant 2 : index
+    %split = index.cmp ugt, %boundary_count, %two : index
+    %refined = scf.if %split -> (buffer) {
+      %origin = index.constant 0 : offset
+      %positions = buffer.view %boundaries[%origin] : buffer -> view<[%boundary_count]xi32>
+      %zero = index.constant 0 : index
+      %one = index.constant 1 : index
+      %segments = index.sub %boundary_count, %one : index
+      %output = scf.for %i = [%zero to %segments step %one](%current = %packets : buffer) -> (buffer) {
+        %next = index.add %i, %one : index
+        %begin32 = view.load %positions[%i] : view<[%boundary_count]xi32> -> i32
+        %end32 = view.load %positions[%next] : view<[%boundary_count]xi32> -> i32
+        %begin = index.cast %begin32 : i32 to index
+        %end = index.cast %end32 : i32 to index
+        %segment = func.call @pocket.decode_span(%ids, %begin, %end) : (buffer, index, index) -> (buffer)
+        %segment_tokens = index.sub %end, %begin : index
+        %after = func.call @pocket.append_text_segment(%segment, %segment_tokens, %group, %state, %current, %limit) : (buffer, index, buffer, buffer, buffer, index) -> (buffer)
+        scf.yield %after : buffer
+      }
+      scf.yield %output : buffer
+    } else {
+      %output = func.call @pocket.append_text_segment(%sentence, %tokens, %group, %state, %packets, %limit) : (buffer, index, buffer, buffer, buffer, index) -> (buffer)
+      scf.yield %output : buffer
+    }
+    scf.yield %refined : buffer
+  } else {
+    %output = func.call @pocket.append_text_segment(%sentence, %tokens, %group, %state, %packets, %limit) : (buffer, index, buffer, buffer, buffer, index) -> (buffer)
+    scf.yield %output : buffer
+  }
+  func.return %output : buffer
+}
+
+// Cold preparation validates capacities once. Request text is valid UTF-8 from
+// public parsing. Every input/chunk is fully admitted before its upload exists.
+func.def public @pocket.prepare_text(%text: buffer, %chunk_tokens: i32, %input_tokens: i32) -> (buffer, i32) {
+  %normalized, %unused_tail = func.call @pocket.normalize_text(%text) : (buffer) -> (buffer, i32)
+  %origin = index.constant 0 : offset
+  %length = buffer.length %normalized
+  %nonempty = index.cmp ugt, %length, %origin : offset
+  %empty_error = global.load @pocket.empty_text_error : buffer
+  func.call @pocket.text_require(%nonempty, %empty_error) : (i1, buffer)
+  %input_limit = scalar.extui %input_tokens : i32 to i64
+  %one64 = scalar.constant 1 : i64
+  %capacity = scalar.addi %input_limit, %one64 : i64
+  %flags = scalar.constant 4 : i32
+  %ids, %count64 = func.call @encode(%normalized, %flags, %capacity) : (buffer, i32, i64) -> (buffer, i64)
+  %bounded = scalar.cmpi ule, %count64, %input_limit : i64
+  %input_error = global.load @pocket.input_capacity_error : buffer
+  func.call @pocket.text_require(%bounded, %input_error) : (i1, buffer)
+  %count = index.cast %count64 : i64 to index
+  %limit = index.cast %chunk_tokens : i32 to index
+  %sentence_text = global.load @pocket.sentence_punctuation : buffer
+  %fallback_text = global.load @pocket.fallback_punctuation : buffer
+  %set_capacity = scalar.constant 16 : i64
+  %sentence_set, %sentence_count64 = func.call @encode(%sentence_text, %flags, %set_capacity) : (buffer, i32, i64) -> (buffer, i64)
+  %fallback_set, %fallback_count64 = func.call @encode(%fallback_text, %flags, %set_capacity) : (buffer, i32, i64) -> (buffer, i64)
+  %sentence_count = index.cast %sentence_count64 : i64 to index
+  %fallback_count = index.cast %fallback_count64 : i64 to index
+  %true = scalar.constant true : i1
+  %boundaries, %boundary_count = func.call @pocket.find_boundaries(%ids, %count, %sentence_set, %sentence_count, %true) : (buffer, index, buffer, index, i1) -> (buffer, index)
+  // Decoded input uses <= 9 bytes/token. Each nonempty segment has at least
+  // one original byte; joining adds at most that many spaces. ASCII punctuation
+  // boundaries never bisect a byte-fallback Unicode scalar.
+  %bytes_per_token = index.constant 18 : offset
+  %group_capacity = index.scale %count, %bytes_per_token : index, offset -> offset
+  %group = buffer.alloca<private> align(4) %group_capacity : buffer
+  %state_bytes = index.constant 24 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %zero32 = scalar.constant 0 : i32
+  buffer.fill %zero32, %state[%origin], %state_bytes : i32
+  %empty_packets = buffer.alloca<private> align(4) %origin : buffer
+  %positions = buffer.view %boundaries[%origin] : buffer -> view<[%boundary_count]xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %segments = index.sub %boundary_count, %one : index
+  %packets = scf.for %i = [%zero to %segments step %one](%current = %empty_packets : buffer) -> (buffer) {
+    %next = index.add %i, %one : index
+    %begin32 = view.load %positions[%i] : view<[%boundary_count]xi32> -> i32
+    %end32 = view.load %positions[%next] : view<[%boundary_count]xi32> -> i32
+    %begin = index.cast %begin32 : i32 to index
+    %end = index.cast %end32 : i32 to index
+    %sentence = func.call @pocket.decode_span(%ids, %begin, %end) : (buffer, index, index) -> (buffer)
+    %sentence_tokens = index.sub %end, %begin : index
+    %next_packets = func.call @pocket.refine_sentence(%sentence, %sentence_tokens, %fallback_set, %fallback_count, %group, %state, %current, %limit) : (buffer, index, buffer, index, buffer, buffer, buffer, index) -> (buffer)
+    scf.yield %next_packets : buffer
+  }
+  %header = buffer.view %state[%origin] : buffer -> view<3xi64>
+  %group_length64 = view.load %header[0] : view<3xi64> -> i64
+  %chunks64 = view.load %header[2] : view<3xi64> -> i64
+  %group_length_value = scalar.assume %group_length64 [range(%group_length64, 0, 9223372036854775807)] : i64
+  %group_length = index.cast %group_length_value : i64 to offset
+  %chunks = index.cast %chunks64 : i64 to index
+  %has_group = index.cmp ugt, %group_length, %origin : offset
+  %completed, %chunk_count = scf.if %has_group -> (buffer, index) {
+    %output = func.call @pocket.emit_text_packet(%group, %group_length, %packets, %chunks, %limit) : (buffer, offset, buffer, index, index) -> (buffer)
+    %next = index.add %chunks, %one : index
+    scf.yield %output, %next : buffer, index
+  } else {
+    scf.yield %packets, %chunks : buffer, index
+  }
+  %has_chunks = index.cmp ugt, %chunk_count, %zero : index
+  func.call @pocket.text_require(%has_chunks, %empty_error) : (i1, buffer)
+  %stride = template.apply<@pocket.packet_stride>(%limit) pure : (index) -> (offset)
+  %packet_bytes = index.scale %chunk_count, %stride : index, offset -> offset
+  %result = func.call @pocket.text_copy(%completed, %origin, %packet_bytes) : (buffer, offset, offset) -> (buffer)
+  %chunk_count32 = index.cast %chunk_count : index to i32
+  func.return %result, %chunk_count32 : buffer, i32
+}
