@@ -48,7 +48,6 @@ def _memory_rule(
     role: str,
     scalar: StorageBufferScalar,
     element: str,
-    lanes: int,
     rows: int,
     columns: int,
     memory_space: str,
@@ -114,8 +113,15 @@ def _memory_rule(
             Guard.enum_attr_equals("role", role),
             Guard.value_type("view", View(scalar.source_type)),
             *storage_element_format_guards("view", scalar),
+            # The opaque cooperative type owns component distribution. Source
+            # carrier widths do not describe the driver's per-invocation data.
             Guard.value_type(
-                "result" if is_load else "value", Vector(element, lanes=lanes)
+                "result" if is_load else "value",
+                Vector(
+                    element,
+                    minimum_lanes=1,
+                    maximum_lanes="LOOM_DIM_MAX_STATIC_SIZE",
+                ),
             ),
             Guard.value_i64_range("rows", rows, rows),
             Guard.value_i64_range("columns", columns, columns),
@@ -147,17 +153,14 @@ def _memory_rule(
 
 
 COOPERATIVE_MATRIX_MEMORY_RULES = tuple(
-    _memory_rule(
-        case, role, scalar, element, lanes, rows, columns, memory_space, leading_axis
-    )
+    _memory_rule(case, role, scalar, element, rows, columns, memory_space, leading_axis)
     for case in COOPERATIVE_MATRIX_CASES
     if case.source_rule_enabled
-    for role, scalar, element, lanes, rows, columns in (
+    for role, scalar, element, rows, columns in (
         (
             "lhs",
             case.lhs_scalar,
             case.lhs_source_type,
-            case.lhs_vector_lanes,
             case.lhs_rows,
             case.lhs_columns,
         ),
@@ -165,7 +168,6 @@ COOPERATIVE_MATRIX_MEMORY_RULES = tuple(
             "rhs",
             case.rhs_scalar,
             case.rhs_source_type,
-            case.rhs_vector_lanes,
             case.rhs_rows,
             case.rhs_columns,
         ),
@@ -173,7 +175,6 @@ COOPERATIVE_MATRIX_MEMORY_RULES = tuple(
             "init",
             case.accumulator_scalar,
             case.accumulator_source_type,
-            case.accumulator_vector_lanes,
             case.accumulator_rows,
             case.accumulator_columns,
         ),
@@ -181,7 +182,6 @@ COOPERATIVE_MATRIX_MEMORY_RULES = tuple(
             "result",
             case.result_scalar,
             case.result_source_type,
-            case.accumulator_vector_lanes,
             case.accumulator_rows,
             case.accumulator_columns,
         ),

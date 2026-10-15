@@ -764,14 +764,14 @@ kernel.def target(@hal_target_coop_f16) @spirv_hal_cooperative_matrix_f16_loop()
   %rhs_view = buffer.view %rhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xf16>
   %init_view = buffer.view %init_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32>
   %out_view = buffer.view %out_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16> -> vector<16xf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<8xf32>
-  %result = scf.for %iteration = [%loop_begin to %iteration_count step %loop_step](%accumulator = %init : vector<8xf32>) -> (vector<8xf32>) {
-    %next = vector.mma %lhs, %rhs, %accumulator : vector<16xf16>, vector<16xf16>, vector<8xf32>
-    scf.yield %next : vector<8xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<4xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16> -> vector<4xf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<1xf32>
+  %result = scf.for %iteration = [%loop_begin to %iteration_count step %loop_step](%accumulator = %init : vector<1xf32>) -> (vector<1xf32>) {
+    %next = vector.mma %lhs, %rhs, %accumulator : vector<4xf16>, vector<4xf16>, vector<1xf32>
+    scf.yield %next : vector<1xf32>
   }
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<1xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -794,11 +794,11 @@ kernel.def target(@hal_target_coop_f16) @cooperative_matrix_strided_workgroup_tr
   %output_view = buffer.view %output_aligned[%base_offset] : buffer -> view<16x16xf32, %row_layout>
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%base_offset] : buffer -> view<16x32xf32, %column_layout>
-  %fragment = vector.fragment.load<init> %input_view[%tile_origin, %output_row] shape [%tile, %tile] : view<32x16xf32, %row_layout> -> vector<8xf32>
-  vector.fragment.store<result> %fragment, %scratch_view[0, 16] shape [%tile, %tile] : vector<8xf32>, view<16x32xf32, %column_layout>
+  %fragment = vector.fragment.load<init> %input_view[%tile_origin, %output_row] shape [%tile, %tile] : view<32x16xf32, %row_layout> -> vector<4xf32>
+  vector.fragment.store<result> %fragment, %scratch_view[0, 16] shape [%tile, %tile] : vector<4xf32>, view<16x32xf32, %column_layout>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %reloaded = vector.fragment.load<init> %scratch_view[0, 16] shape [%tile, %tile] : view<16x32xf32, %column_layout> -> vector<8xf32>
-  vector.fragment.store<result> %reloaded, %output_view[%output_row, %output_row] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32, %row_layout>
+  %reloaded = vector.fragment.load<init> %scratch_view[0, 16] shape [%tile, %tile] : view<16x32xf32, %column_layout> -> vector<4xf32>
+  vector.fragment.store<result> %reloaded, %output_view[%output_row, %output_row] shape [%tile, %tile] : vector<4xf32>, view<16x16xf32, %row_layout>
   kernel.return
 }
 
@@ -814,8 +814,8 @@ kernel.def target(@hal_target_coop_f16) @cooperative_matrix_broadcast_rows() {
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %input_view = buffer.view %input_aligned[%base_offset] : buffer -> view<16x16xf32, %broadcast>
   %output_view = buffer.view %output_aligned[%base_offset] : buffer -> view<16x16xf32>
-  %fragment = vector.fragment.load<init> %input_view[0, 0] shape [%tile, %tile] : view<16x16xf32, %broadcast> -> vector<8xf32>
-  vector.fragment.store<result> %fragment, %output_view[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
+  %fragment = vector.fragment.load<init> %input_view[0, 0] shape [%tile, %tile] : view<16x16xf32, %broadcast> -> vector<16xf32>
+  vector.fragment.store<result> %fragment, %output_view[0, 0] shape [%tile, %tile] : vector<16xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -943,11 +943,11 @@ kernel.def target(@hal_target_coop_bf16) @spirv_hal_cooperative_matrix_bf16() {
   %rhs_view = buffer.view %rhs_aligned[%byte_offset_aligned] : buffer -> view<16x16xbf16>
   %init_view = buffer.view %init_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32>
   %out_view = buffer.view %out_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<16xbf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16> -> vector<16xbf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<8xf32>
-  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<4xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16> -> vector<4xbf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32> -> vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
   kernel.return
 }
 
@@ -1001,11 +1001,11 @@ kernel.def target(@hal_target_coop_i8) @spirv_hal_cooperative_matrix_u8() {
   %rhs_view = buffer.view %rhs_aligned[%byte_offset_aligned] : buffer -> view<32x16xi8, %rhs_storage>
   %init_view = buffer.view %init_aligned[%byte_offset_aligned] : buffer -> view<16x16xi32, %acc_storage>
   %out_view = buffer.view %out_aligned[%byte_offset_aligned] : buffer -> view<16x16xi32, %acc_storage>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xi8, %lhs_storage> -> vector<32xi8>
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xi8, %rhs_storage> -> vector<32xi8>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xi32, %acc_storage> -> vector<8xi32>
-  %result = vector.mma %lhs, %rhs, %init : vector<32xi8>, vector<32xi8>, vector<8xi32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32, %acc_storage>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xi8, %lhs_storage> -> vector<16xi8>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xi8, %rhs_storage> -> vector<16xi8>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xi32, %acc_storage> -> vector<4xi32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xi8>, vector<16xi8>, vector<4xi32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32, %acc_storage>
   kernel.return
 }
 
@@ -1029,11 +1029,11 @@ kernel.def target(@hal_target_coop_i8) @spirv_hal_cooperative_matrix_s8() {
   %rhs_view = buffer.view %rhs_aligned[%byte_offset_aligned] : buffer -> view<32x16xi8, %rhs_storage>
   %init_view = buffer.view %init_aligned[%byte_offset_aligned] : buffer -> view<16x16xi32, %acc_storage>
   %out_view = buffer.view %out_aligned[%byte_offset_aligned] : buffer -> view<16x16xi32, %acc_storage>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xi8, %lhs_storage> -> vector<32xi8>
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xi8, %rhs_storage> -> vector<32xi8>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xi32, %acc_storage> -> vector<8xi32>
-  %result = vector.mma<saturate> %lhs, %rhs, %init : vector<32xi8>, vector<32xi8>, vector<8xi32>
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32, %acc_storage>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xi8, %lhs_storage> -> vector<8xi8>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xi8, %rhs_storage> -> vector<8xi8>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xi32, %acc_storage> -> vector<16xi32>
+  %result = vector.mma<saturate> %lhs, %rhs, %init : vector<8xi8>, vector<8xi8>, vector<16xi32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xi32>, view<16x16xi32, %acc_storage>
   kernel.return
 }
 

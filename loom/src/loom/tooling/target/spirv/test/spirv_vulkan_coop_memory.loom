@@ -1,6 +1,7 @@
 // Both subgroup widths execute the same padded and transposed memory flow.
 // Runtime stride and subgroup origins must survive source planning, including
 // axes whose coordinate is an SSA zero. Each workgroup publishes two tiles.
+// Four-element source carriers stay opaque at both subgroup widths.
 spirv.target<vulkan1_3> @wave32 {abi = hal_kernel, subgroup_size = 32}
 
 spirv.target<vulkan1_3> @wave64 {abi = hal_kernel, subgroup_size = 64}
@@ -69,11 +70,11 @@ template.def<@staged_matrix> @staged_matrix_impl(%lhs_buffer: buffer, %rhs_buffe
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %origin_id = index.mul %subgroup, %tile_size : index
   %origin = index.assume %origin_id [range(%origin_id, 0, 16), multiple_of(%origin_id, 16)] : index
-  %lhs = vector.fragment.load<lhs> %lhs_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf16, %row_layout> -> vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %rhs_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf16, %column_layout> -> vector<16xf16>
-  %init = vector.fragment.load<init> %init_view[%c0, %c0] shape [%tile_size, %tile_size] : view<16x16xf32> -> vector<8xf32>
-  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %result_staged[%origin, %c0] shape [%tile_size, %tile_size] : vector<8xf32>, view<32x16xf32, %row_layout>
+  %lhs = vector.fragment.load<lhs> %lhs_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf16, %row_layout> -> vector<4xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf16, %column_layout> -> vector<4xf16>
+  %init = vector.fragment.load<init> %init_view[%c0, %c0] shape [%tile_size, %tile_size] : view<16x16xf32> -> vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
+  vector.fragment.store<result> %result, %result_staged[%origin, %c0] shape [%tile_size, %tile_size] : vector<4xf32>, view<32x16xf32, %row_layout>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.for %chunk = [%c0 to %stage_elements step %copy_width] unroll {
     %element_id = index.add %chunk, %thread : index
