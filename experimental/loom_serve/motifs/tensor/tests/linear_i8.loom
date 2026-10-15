@@ -66,6 +66,7 @@ func.def @tail_dense_reference(%input: buffer, %input_scales: buffer, %weight: b
 }
 
 check.scenario public @tail_dense_contraction {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %x = check.generate.iota offset(-128) step(1) period(251) : tensor<80x256xi8>
     %w = check.generate.iota offset(-128) step(1) period(239) : tensor<128x256xi8>
@@ -105,6 +106,7 @@ func.def @tail_column_reference(%input: buffer, %input_scales: buffer, %weight: 
 }
 
 check.scenario public @tail_column_contraction {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %x = check.generate.iota offset(-128) step(1) period(251) : tensor<272x192xi8>
     %w = check.generate.iota offset(-128) step(1) period(239) : tensor<192x192xi8>
@@ -144,6 +146,7 @@ func.def @long_k_reference(%input: buffer, %input_scales: buffer, %weight: buffe
 }
 
 check.scenario public @long_k_contraction {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %x = check.generate.fill value(-128) : tensor<16x16384xi8>
     %w = check.generate.fill value(-128) : tensor<64x16384xi8>

@@ -131,6 +131,7 @@ kernel.def target(@pocket) @restore_prefix() {
 // Entire banks are compared, including the unused third voice, cache padding,
 // inactive residents, codec histories, and request cursors.
 check.case public @retained_voices_and_reused_request_rows {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %work = check.generate.fill value(-1) : tensor<32xi32>
   %zero = check.literal value(0) : i32
   %one = check.literal value(1) : i32
@@ -181,6 +182,7 @@ check.case public @retained_voices_and_reused_request_rows {
 }
 
 check.case public @initialization_clears_only_selected_residents {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %work = check.generate.fill value(-1) : tensor<32xi32>
   %count = check.literal value(3) : i32
   %first = check.literal value(5) : i32
@@ -206,6 +208,7 @@ check.case public @initialization_clears_only_selected_residents {
 }
 
 check.case public @packed_tokens_seeds_and_waveform_blocks {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %work = check.generate.fill value(-1) : tensor<32xi32>
   %count = check.literal value(3) : i32
   %first = check.literal value(5) : i32

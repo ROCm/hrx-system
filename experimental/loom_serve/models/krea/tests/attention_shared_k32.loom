@@ -69,6 +69,7 @@ func.def @shared_head_mean_gated(%query: buffer, %key: buffer, %value: buffer, %
 }
 
 check.scenario public @shared_head_k32_mean_ungated {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %query = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<64x6144xbf16>
     %key = check.generate.fill value(0.0) : tensor<64x1536xbf16>
@@ -85,6 +86,7 @@ check.scenario public @shared_head_k32_mean_ungated {
 }
 
 check.scenario public @shared_head_k32_mean_gated {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %query = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<64x6144xbf16>
     %key = check.generate.fill value(0.0) : tensor<64x1536xbf16>

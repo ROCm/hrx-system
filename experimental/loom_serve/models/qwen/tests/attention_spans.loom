@@ -161,6 +161,7 @@ kernel.def @mixed_attention_metadata() {
 // different absolute histories. A second issue changes cardinality, lengths,
 // positions and packed placement without recompiling the span kernels.
 check.case public @mixed_attention_spans {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_capacity = check.literal value(32) : index
   %span_capacity = check.literal value(8) : index
   %initial = check.literal value(false) : i1

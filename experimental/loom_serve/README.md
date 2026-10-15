@@ -77,6 +77,13 @@ No checkpoint download is needed for this suite:
 iree-bazel-test --config=asan //experimental/loom_serve/...
 ```
 
+Cases that depend on an authored GFX11 target declare
+`check.requires<hal.amdgpu.target> {target = "gfx11-generic"}`. They execute on
+compatible RDNA3 and RDNA3.5 devices and report an explicit skipped requirement
+elsewhere. Portable arithmetic, text, and control cases retain their wider
+execution scope; incompatible compiler input still fails when no requirement
+excludes it.
+
 The [mixed-model check](models/krea/README.md#mixed-model-lifecycle-check) uses
 real assets and the supported HTTP server. It verifies exact outputs across
 weight eviction and retained-session restoration, rather than merely checking
