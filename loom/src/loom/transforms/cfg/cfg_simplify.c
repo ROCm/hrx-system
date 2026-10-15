@@ -1387,6 +1387,46 @@ static iree_status_t loom_cfg_simplify_rebuild_br_for_block_args(
                                              retained_count);
 }
 
+static iree_status_t loom_cfg_simplify_materialize_constant_arg(
+    loom_cfg_simplify_state_t* state, const loom_block_t* block,
+    uint16_t arg_index, loom_value_id_t* out_replacement) {
+  *out_replacement = LOOM_VALUE_ID_INVALID;
+  const loom_value_id_t argument = loom_block_arg_id(block, arg_index);
+  if (!loom_module_value_has_uses(state->module, argument)) {
+    return iree_ok_status();
+  }
+  const loom_type_t type = loom_module_value_type(state->module, argument);
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(state->fact_table, argument);
+  if (!loom_value_facts_can_materialize_constant(facts, type)) {
+    return iree_ok_status();
+  }
+
+  // A dependent argument type binds incoming SSA identities, not just their
+  // numeric values. Keep that binder until type normalization removes it.
+  loom_type_use_iterator_t users;
+  loom_module_value_type_users(state->module, argument, &users);
+  for (loom_value_id_t carrier = loom_type_users_next(&users);
+       carrier != LOOM_VALUE_ID_INVALID;
+       carrier = loom_type_users_next(&users)) {
+    const loom_value_t* value = loom_module_value(state->module, carrier);
+    if (loom_value_is_block_arg(value) &&
+        loom_value_def_block(value) == block) {
+      return iree_ok_status();
+    }
+  }
+
+  // The literal is available on every path, including uses in nested types.
+  loom_builder_t* builder = &state->rewriter->builder;
+  const loom_builder_ip_t saved_ip = loom_builder_save(builder);
+  loom_builder_set_before(
+      builder, loom_region_entry_block(block->parent_region)->first_op);
+  const iree_status_t status = loom_constant_build(
+      builder, facts, type, block->first_op->location, out_replacement);
+  loom_builder_restore(builder, saved_ip);
+  return status;
+}
+
 static bool loom_cfg_simplify_block_arg_has_no_direct_uses(
     const loom_cfg_simplify_state_t* state, const loom_block_t* block,
     uint16_t arg_index) {
@@ -1556,7 +1596,11 @@ static iree_status_t loom_cfg_simplify_remove_redundant_block_args_from_block(
     if (!loom_cfg_simplify_find_forwarded_arg_replacement(
             state, block, pred_branches, predecessors.count, arg_index,
             &replacement)) {
-      continue;
+      IREE_RETURN_IF_ERROR(loom_cfg_simplify_materialize_constant_arg(
+          state, block, arg_index, &replacement));
+      if (replacement == LOOM_VALUE_ID_INVALID) {
+        continue;
+      }
     }
     const loom_value_id_t old_arg = loom_block_arg_id(block, arg_index);
     const loom_value_id_t resolved = loom_cfg_simplify_resolve_arg_replacement(

@@ -1,0 +1,213 @@
+// RUN: pass cfg-simplify
+
+// Equal branch-local constants need no carried state, even when adjacent
+// arguments vary and both branches have observable effects.
+func.def @constant_scalar_arguments(%choose: i1, %left_value: i32, %right_value: i32) -> (index, offset, i1, i8, i16, i32, i64, f8E4M3, f8E5M2, f16, bf16, f32, f64, i32) {
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  %left_0 = index.constant 7 : index
+  %left_1 = index.constant 4294967297 : offset
+  %left_2 = scalar.constant true : i1
+  %left_3 = scalar.constant -7 : i8
+  %left_4 = scalar.constant -32768 : i16
+  %left_5 = scalar.constant 0 : i32
+  %left_6 = scalar.constant -9223372036854775808 : i64
+  %left_7 = scalar.constant 1.5 : f8E4M3
+  %left_8 = scalar.constant -1.5 : f8E5M2
+  %left_9 = scalar.constant 2.5 : f16
+  %left_10 = scalar.constant -2.5 : bf16
+  %left_11 = scalar.constant inf : f32
+  %left_12 = scalar.constant -0.0 : f64
+  cfg.br ^join(%left_0: index, %left_1: offset, %left_2: i1, %left_3: i8, %left_4: i16, %left_5: i32, %left_6: i64, %left_7: f8E4M3, %left_8: f8E5M2, %left_9: f16, %left_10: bf16, %left_11: f32, %left_12: f64, %left_value: i32)
+^right:
+  test.use %right_value : i32
+  %right_0 = index.constant 7 : index
+  %right_1 = index.constant 4294967297 : offset
+  %right_2 = scalar.constant true : i1
+  %right_3 = scalar.constant -7 : i8
+  %right_4 = scalar.constant -32768 : i16
+  %right_5 = scalar.constant 0 : i32
+  %right_6 = scalar.constant -9223372036854775808 : i64
+  %right_7 = scalar.constant 1.5 : f8E4M3
+  %right_8 = scalar.constant -1.5 : f8E5M2
+  %right_9 = scalar.constant 2.5 : f16
+  %right_10 = scalar.constant -2.5 : bf16
+  %right_11 = scalar.constant inf : f32
+  %right_12 = scalar.constant -0.0 : f64
+  cfg.br ^join(%right_0: index, %right_1: offset, %right_2: i1, %right_3: i8, %right_4: i16, %right_5: i32, %right_6: i64, %right_7: f8E4M3, %right_8: f8E5M2, %right_9: f16, %right_10: bf16, %right_11: f32, %right_12: f64, %right_value: i32)
+^join(%joined_0: index, %joined_1: offset, %joined_2: i1, %joined_3: i8, %joined_4: i16, %joined_5: i32, %joined_6: i64, %joined_7: f8E4M3, %joined_8: f8E5M2, %joined_9: f16, %joined_10: bf16, %joined_11: f32, %joined_12: f64, %varying: i32):
+  func.return %joined_0, %joined_1, %joined_2, %joined_3, %joined_4, %joined_5, %joined_6, %joined_7, %joined_8, %joined_9, %joined_10, %joined_11, %joined_12, %varying : index, offset, i1, i8, i16, i32, i64, f8E4M3, f8E5M2, f16, bf16, f32, f64, i32
+}
+
+// ----
+func.def @constant_scalar_arguments(%choose: i1, %left_value: i32, %right_value: i32) -> (index, offset, i1, i8, i16, i32, i64, f8E4M3, f8E5M2, f16, bf16, f32, f64, i32) {
+  %69 = scalar.constant -0.0 : f64
+  %68 = scalar.constant inf : f32
+  %67 = scalar.constant -2.5 : bf16
+  %66 = scalar.constant 2.5 : f16
+  %65 = scalar.constant -1.5 : f8E5M2
+  %64 = scalar.constant 1.5 : f8E4M3
+  %63 = scalar.constant -9223372036854775808 : i64
+  %62 = scalar.constant 0 : i32
+  %61 = scalar.constant -32768 : i16
+  %60 = scalar.constant -7 : i8
+  %59 = scalar.constant true : i1
+  %58 = index.constant 4294967297 : offset
+  %57 = index.constant 7 : index
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  cfg.br ^join(%left_value: i32)
+^right:
+  test.use %right_value : i32
+  cfg.br ^join(%right_value: i32)
+^join(%varying: i32):
+  func.return %57, %58, %59, %60, %61, %62, %63, %64, %65, %66, %67, %68, %69, %varying : index, offset, i1, i8, i16, i32, i64, f8E4M3, f8E5M2, f16, bf16, f32, f64, i32
+}
+
+// ====
+
+// Equality of floating-point numeric values is insufficient for signed zero.
+func.def @signed_zero_and_nan(%choose: i1, %left_value: i32, %right_value: i32) -> (f32, f32, f64) {
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  %negative = scalar.constant -0.0 : f32
+  %nan_left = scalar.constant nan : f64
+  cfg.br ^join(%negative: f32, %negative: f32, %nan_left: f64)
+^right:
+  test.use %right_value : i32
+  %positive = scalar.constant 0.0 : f32
+  %same_negative = scalar.constant -0.0 : f32
+  %nan_right = scalar.constant nan : f64
+  cfg.br ^join(%positive: f32, %same_negative: f32, %nan_right: f64)
+^join(%different_zero: f32, %same_zero: f32, %same_nan: f64):
+  func.return %different_zero, %same_zero, %same_nan : f32, f32, f64
+}
+
+// ----
+func.def @signed_zero_and_nan(%choose: i1, %left_value: i32, %right_value: i32) -> (f32, f32, f64) {
+  %15 = scalar.constant nan : f64
+  %14 = scalar.constant -0.0 : f32
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  %negative = scalar.constant -0.0 : f32
+  cfg.br ^join(%negative: f32)
+^right:
+  test.use %right_value : i32
+  %positive = scalar.constant 0.0 : f32
+  cfg.br ^join(%positive: f32)
+^join(%different_zero: f32):
+  func.return %different_zero, %14, %15 : f32, f32, f64
+}
+
+// ====
+
+// The fixed point, rather than the first incoming edge, proves a carried value.
+func.def @constant_feedback(%choose: i1, %again: i1, %left_value: i32, %right_value: i32) -> (i64) {
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  %left_seed = scalar.constant 4294967297 : i64
+  cfg.br ^loop(%left_seed: i64)
+^right:
+  test.use %right_value : i32
+  %right_seed = scalar.constant 4294967297 : i64
+  cfg.br ^loop(%right_seed: i64)
+^loop(%carried: i64):
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %identity = scalar.constant 0 : i64
+  %next = scalar.addi %carried, %identity : i64
+  cfg.br ^loop(%next: i64)
+^exit:
+  func.return %carried : i64
+}
+
+// ----
+func.def @constant_feedback(%choose: i1, %again: i1, %left_value: i32, %right_value: i32) -> (i64) {
+  %10 = scalar.constant 4294967297 : i64
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  cfg.br ^loop
+^right:
+  test.use %right_value : i32
+  cfg.br ^loop
+^loop:
+  cfg.cond_br %again, ^loop, ^exit
+^exit:
+  func.return %10 : i64
+}
+
+// ====
+
+func.def @varying_feedback(%again: i1) -> (i32) {
+  %seed = scalar.constant 0 : i32
+  cfg.br ^loop(%seed: i32)
+^loop(%carried: i32):
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %increment = scalar.constant 1 : i32
+  %next = scalar.addi %carried, %increment : i32
+  cfg.br ^loop(%next: i32)
+^exit:
+  func.return %carried : i32
+}
+
+// ====
+
+// Equal numeric facts do not erase the SSA identity binding of dependent
+// argument types. Their incoming types must stay structurally compatible.
+func.def @constant_type_dependency(%choose: i1, %left_value: i32, %right_value: i32) {
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  %left_width = index.constant 4 : index
+  %left_vector = test.constant 1.0 : vector<[%left_width]xf32>
+  cfg.br ^join(%left_width: index, %left_vector: vector<[%left_width]xf32>)
+^right:
+  test.use %right_value : i32
+  %right_width = index.constant 4 : index
+  %right_vector = test.constant 2.0 : vector<[%right_width]xf32>
+  cfg.br ^join(%right_width: index, %right_vector: vector<[%right_width]xf32>)
+^join(%width: index, %values: vector<[%width]xf32>):
+  test.use %values : vector<[%width]xf32>
+  func.return
+}
+
+// ====
+
+// Ordinary type attributes can use the replacement because they introduce no
+// positional binding between predecessor values and the join signature.
+func.def @constant_type_attribute(%choose: i1, %left_value: i32, %right_value: i32, %element: f32) -> (f32) {
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  %left_width = index.constant 4 : index
+  cfg.br ^join(%left_width: index)
+^right:
+  test.use %right_value : i32
+  %right_width = index.constant 4 : index
+  cfg.br ^join(%right_width: index)
+^join(%width: index):
+  %annotated = test.attrs %element {shape = #test.options<mode = fast, element_type = vector<[%width]xf32>>} : f32
+  func.return %annotated : f32
+}
+
+// ----
+func.def @constant_type_attribute(%choose: i1, %left_value: i32, %right_value: i32, %element: f32) -> (f32) {
+  %9 = index.constant 4 : index
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  test.use %left_value : i32
+  cfg.br ^join
+^right:
+  test.use %right_value : i32
+  cfg.br ^join
+^join:
+  %annotated = test.attrs %element {shape = #test.options<mode = fast, element_type = vector<[%9]xf32>>} : f32
+  func.return %annotated : f32
+}

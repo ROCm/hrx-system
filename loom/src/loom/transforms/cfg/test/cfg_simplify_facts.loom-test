@@ -67,15 +67,10 @@ func.def @arithmetic_feedback(%again: i1, %good: i32, %bad: i32) -> (i32) {
 
 // ----
 func.def @arithmetic_feedback(%again: i1, %good: i32, %bad: i32) -> (i32) {
-  %c0 = index.constant 0 : index
-  %c2 = index.constant 2 : index
   %c9 = index.constant 9 : index
-  cfg.br ^header(%c2: index)
-^header(%carried: index):
-  cfg.cond_br %again, ^body, ^exit
-^body:
-  %next = index.add %carried, %c0 : index
-  cfg.br ^header(%next: index)
+  cfg.br ^header
+^header:
+  cfg.cond_br %again, ^header, ^exit
 ^exit:
   func.return %good : i32
 }
@@ -221,17 +216,16 @@ func.def @attribute_only_join(%offset: index, %choose: i1, %left_value: i32, %ri
 
 // ----
 func.def @attribute_only_join(%offset: index, %choose: i1, %left_value: i32, %right_value: i32) -> (i32) {
+  %13 = index.constant 2 : index
   cfg.cond_br %choose, ^left, ^right
 ^left:
   test.use %left_value : i32
-  %left = index.constant 2 : index
-  cfg.br ^join(%left: index)
+  cfg.br ^join
 ^right:
   test.use %right_value : i32
-  %right = index.constant 2 : index
-  cfg.br ^join(%right: index)
-^join(%joined: index):
-  %bounded = index.assume %offset [lt(%offset, %joined)] : index
+  cfg.br ^join
+^join:
+  %bounded = index.assume %offset [lt(%offset, %13)] : index
   test.use %bounded : index
   func.return %left_value : i32
 }
@@ -271,20 +265,10 @@ func.def @nested_branch_feedback(%choose: i1, %again: i1, %good: i32, %bad: i32)
 
 // ----
 func.def @nested_branch_feedback(%choose: i1, %again: i1, %good: i32, %bad: i32) -> (i32) {
-  %c0 = index.constant 0 : index
-  %c2 = index.constant 2 : index
   %c9 = index.constant 9 : index
-  cfg.br ^header(%c2: index)
-^header(%carried: index):
-  cfg.cond_br %again, ^body, ^exit
-^body:
-  %next = scf.if %choose -> (index) {
-    %left = index.add %carried, %c0 : index
-    scf.yield %left : index
-  } else {
-    scf.yield %carried : index
-  }
-  cfg.br ^header(%next: index)
+  cfg.br ^header
+^header:
+  cfg.cond_br %again, ^header, ^exit
 ^exit:
   func.return %good : i32
 }
@@ -321,19 +305,10 @@ func.def @nested_loop_feedback(%limit: index, %again: i1, %good: i32, %bad: i32)
 
 // ----
 func.def @nested_loop_feedback(%limit: index, %again: i1, %good: i32, %bad: i32) -> (i32) {
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %c2 = index.constant 2 : index
   %c9 = index.constant 9 : index
-  cfg.br ^header(%c2: index)
-^header(%carried: index):
-  cfg.cond_br %again, ^body, ^exit
-^body:
-  %next = scf.for %iv = [%c0 to %limit step %c1](%inner = %carried : index) -> (index) {
-    %forwarded = index.add %inner, %c0 : index
-    scf.yield %forwarded : index
-  }
-  cfg.br ^header(%next: index)
+  cfg.br ^header
+^header:
+  cfg.cond_br %again, ^header, ^exit
 ^exit:
   func.return %good : i32
 }

@@ -24,6 +24,7 @@ loom_check_test_suite(
         "branch_sink.loom-test",
         "branch_threading.loom-test",
         "cfg_compatibility.loom-test",
+        "cfg_constant_arguments.loom-test",
         "cfg_converge.loom-test",
         "cfg_simplify.loom-test",
         "cfg_simplify_conditions.loom-test",

@@ -504,29 +504,29 @@ pipeline.def<kernel> public retain target(@npu) @rotating_retirement() run(%outp
 
 // ----
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
-  %282 = mov.short 0
+  %280 = mov.short 0
   %payload = mov.local-address 393216
   %count = mov.short 5
   %step = mov.short 1
-  low.br ^_bb1(%282: reg<aie2p.er>, %282: reg<aie2p.er>)
+  low.br ^_bb1(%280: reg<aie2p.er>, %280: reg<aie2p.er>)
 ^_bb1(%value: reg<aie2p.er>, %write: reg<aie2p.er>):
-  %287 = lt %value, %count
-  low.cond_br %287, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %285 = lt %value, %count
+  low.cond_br %285, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
   %100 = mov.i32 -1
   acq %100, 32
-  %288 = mov.short 4
-  %289 = mov.short 8
-  %290 = add.rr %write, %288
-  %291 = eq %290, %289
-  %292 = copy %291 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %293 = sel.nez %282, %290, %292
-  %294 = mov.address-index %write
-  st.i32.index %value, %payload, %294
+  %286 = mov.short 4
+  %287 = mov.short 8
+  %288 = add.rr %write, %286
+  %289 = eq %288, %287
+  %290 = copy %289 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %291 = sel.nez %280, %288, %290
+  %292 = mov.address-index %write
+  st.i32.index %value, %payload, %292
   %109 = mov.i32 1
   rel %109, 33
-  %295 = add.rr %value, %step
-  low.br ^_bb1(%295: reg<aie2p.er>, %293: reg<aie2p.er>)
+  %293 = add.rr %value, %step
+  low.br ^_bb1(%293: reg<aie2p.er>, %291: reg<aie2p.er>)
 ^_bb3:
   %95 = mov.i32 1
   rel %95, 48
@@ -537,22 +537,22 @@ low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
 }
 
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_1() asm {
-  %311 = mov.i32 -1
-  acq %311, 49
+  %309 = mov.i32 -1
+  acq %309, 49
   %begin = mov.short 0
   %pairs = mov.short 2
   %step = mov.short 1
   low.br ^_bb1(%begin: reg<aie2p.er>)
 ^_bb1(%pair: reg<aie2p.er>):
-  %300 = lt %pair, %pairs
-  low.cond_br %300, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %298 = lt %pair, %pairs
+  low.cond_br %298, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
-  acq %311, 49
-  %306 = lshl %pair, %pairs
+  acq %309, 49
+  %304 = lshl %pair, %pairs
   %116 = mov.local-address 458760
   %117 = lda %116, 0
   %118 = lda %116, 4
-  %119 = add.rr %117, %306
+  %119 = add.rr %117, %304
   %120 = ltu %119, %117
   %121 = add.rr %118, %120
   %122 = mov.i32 -2147483648
@@ -578,9 +578,9 @@ low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_1() asm {
   %132 = mov.ss
   %194 = mov.i32 2
   rel %194, 48
-  acq %311, 49
-  %308 = add.rr %pair, %step
-  low.br ^_bb1(%308: reg<aie2p.er>)
+  acq %309, 49
+  %306 = add.rr %pair, %step
+  low.br ^_bb1(%306: reg<aie2p.er>)
 ^_bb3:
   %150 = mov.i32 -2147483648
   %151 = mov.i32 118816
