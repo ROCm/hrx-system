@@ -1,0 +1,347 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl import("input", "decode") @decode_tokens(%tokens: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+
+global.rodata.def @empty = bytes("")
+
+// Moonshine requires English, an empty prompt, and greedy decoding.
+global.rodata.def @options_error = bytes("4d6f6f6e7368696e6520726571756972657320456e676c6973682c20616e20656d7074792070726f6d70742c20616e6420677265656479206465636f64696e67")
+
+// Moonshine hypothesis exceeded the 512-token decoder capacity.
+global.rodata.def @tokens_error = bytes("4d6f6f6e7368696e65206879706f74686573697320657863656564656420746865203531322d746f6b656e206465636f646572206361706163697479")
+
+func.def @copy(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset, %length: offset) {
+  buffer.copy %source[%source_offset], %target[%target_offset], %length
+  func.return
+}
+
+// One stable utterance ID is revised in source sample time. The checkpoint
+// supplies neither speaker identity nor word alignment, so neither is invented.
+func.def @event(%text: buffer, %length64: i64, %revision: i32, %end: i32, %final: i32) -> (buffer) {
+  %bounded_length = scalar.assume %length64 [range(%length64, 0, 16384)] : i64
+  %length = index.cast %bounded_length : i64 to offset
+  %header_length = index.constant 48 : offset
+  %size = index.add %length, %header_length : offset
+  %packet = buffer.alloca<private> align(8) %size : buffer
+  %origin = index.constant 0 : offset
+  %header = buffer.view %packet[%origin] : buffer -> view<4xi64>
+  %c0 = scalar.constant 0 : i64
+  %revision64 = scalar.extui %revision : i32 to i64
+  %end64 = scalar.extui %end : i32 to i64
+  view.store %c0, %header[0] : i64, view<4xi64>
+  view.store %revision64, %header[1] : i64, view<4xi64>
+  view.store %c0, %header[2] : i64, view<4xi64>
+  view.store %end64, %header[3] : i64, view<4xi64>
+  %fields_offset = index.constant 32 : offset
+  %fields = buffer.view %packet[%fields_offset] : buffer -> view<4xi32>
+  %length32 = scalar.trunci %length64 : i64 to i32
+  %zero32 = scalar.constant 0 : i32
+  view.store %final, %fields[0] : i32, view<4xi32>
+  view.store %length32, %fields[1] : i32, view<4xi32>
+  view.store %zero32, %fields[2] : i32, view<4xi32>
+  view.store %zero32, %fields[3] : i32, view<4xi32>
+  func.call @copy(%text, %origin, %packet, %header_length, %length) : (buffer, offset, buffer, offset, offset)
+  func.return %packet : buffer
+}
+
+// CPU state is independent of device residency: phase, published features,
+// encoder EOF, decoder position, revision, last hypothesis sample, and consumed
+// sample end occupy words 0..6. Words 7..15 pad the 512-token buffer to 64 bytes.
+// Phases 0/1/2 select reset/encode/decode; the phase is also the compatibility tag.
+func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32) -> (buffer, buffer) {
+  %language_length = buffer.length %language
+  %prompt_length = buffer.length %prompt
+  %origin = index.constant 0 : offset
+  %two_bytes = index.constant 2 : offset
+  %no_language = index.cmp eq, %language_length, %origin : offset
+  %two_letters = index.cmp eq, %language_length, %two_bytes : offset
+  %english = scf.if %two_letters -> (i1) {
+    %letters = buffer.view %language[%origin] : buffer -> view<2xi8>
+    %first = view.load %letters[0] : view<2xi8> -> i8
+    %second = view.load %letters[1] : view<2xi8> -> i8
+    %e = scalar.constant 101 : i8
+    %n = scalar.constant 110 : i8
+    %first_ok = scalar.cmpi eq, %first, %e : i8
+    %second_ok = scalar.cmpi eq, %second, %n : i8
+    %both = scalar.andi %first_ok, %second_ok : i1
+    scf.yield %both : i1
+  } else {
+    scf.yield %no_language : i1
+  }
+  %no_prompt = index.cmp eq, %prompt_length, %origin : offset
+  %f0 = scalar.constant 0.0 : f32
+  %greedy = scalar.cmpf oeq, %temperature, %f0 : f32
+  %text_ok = scalar.andi %english, %no_prompt : i1
+  %valid = scalar.andi %text_ok, %greedy : i1
+  %condition = scalar.extui %valid : i1 to i32
+  %diagnostic = global.load @options_error : buffer
+  func.call @require(%condition, %diagnostic) : (i32, buffer)
+  %length = index.constant 2112 : offset
+  %state = buffer.alloca<private> align(8) %length : buffer
+  %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = index.constant 16 : index
+  %zero = scalar.constant 0 : i32
+  scf.for %i = [%c0 to %count step %c1] {
+    view.store %zero, %fields[%i] : i32, view<16xi32>
+  }
+  %empty = global.load @empty : buffer
+  func.return %state, %empty : buffer, buffer
+}
+
+// Work packets own eight control words followed by 320 F32 samples. A partial
+// final quantum is padded but reports only the real source frames as consumed.
+func.def public @prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %position: i64, %eof: i32) -> (buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
+  %phase = view.load %fields[0] : view<16xi32> -> i32
+  %features = view.load %fields[1] : view<16xi32> -> i32
+  %decode_position = view.load %fields[3] : view<16xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %c4 = scalar.constant 4 : i64
+  %quantum = scalar.constant 320 : i64
+  %length = buffer.length %pcm
+  %bytes = index.cast %length : offset to i64
+  %frames = scalar.divui %bytes, %c4 : i64
+  %encode = scalar.cmpi eq, %phase, %one : i32
+  %short = scalar.cmpi ult, %frames, %quantum : i64
+  %bounded = scf.select %short, %frames, %quantum : i64
+  %count64 = scf.select %encode, %bounded, %c0 : i64
+  %final_input = scalar.cmpi ne, %eof, %zero : i32
+  %full = scalar.cmpi uge, %frames, %quantum : i64
+  %input_ready = scalar.ori %full, %final_input : i1
+  %not_encode = scalar.cmpi ne, %phase, %one : i32
+  %ready = scalar.ori %not_encode, %input_ready : i1
+  %units = scf.select %ready, %c1, %c0 : i64
+  %any = scalar.cmpi ne, %count64, %c0 : i64
+  %valid32 = scalar.extui %any : i1 to i32
+  %all = scalar.cmpi eq, %count64, %frames : i64
+  %final = scalar.andi %all, %final_input : i1
+  %final32 = scalar.extui %final : i1 to i32
+  %count32 = scalar.trunci %count64 : i64 to i32
+  %end64 = scalar.addi %position, %count64 : i64
+  %end32 = scalar.trunci %end64 : i64 to i32
+  %first = scalar.cmpi eq, %decode_position, %zero : i32
+  %token = scf.if %first -> (i32) {
+    scf.yield %one : i32
+  } else {
+    %previous32 = scalar.subi %decode_position, %one : i32
+    %bounded_previous = scalar.assume %previous32 [range(%previous32, 0, 511)] : i32
+    %previous = index.cast %bounded_previous : i32 to index
+    %tokens_offset = index.constant 64 : offset
+    %tokens = buffer.view %state[%tokens_offset] : buffer -> view<512xi32>
+    %id = view.load %tokens[%previous] : view<512xi32> -> i32
+    scf.yield %id : i32
+  }
+  %size = index.constant 1312 : offset
+  %work = buffer.alloca<private> align(8) %size : buffer
+  %words = buffer.view %work[%origin] : buffer -> view<328xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %extent = index.constant 328 : index
+  scf.for %i = [%begin to %extent step %step] {
+    view.store %zero, %words[%i] : i32, view<328xi32>
+  }
+  view.store %token, %words[0] : i32, view<328xi32>
+  view.store %decode_position, %words[1] : i32, view<328xi32>
+  view.store %features, %words[2] : i32, view<328xi32>
+  view.store %count32, %words[3] : i32, view<328xi32>
+  view.store %valid32, %words[4] : i32, view<328xi32>
+  view.store %final32, %words[5] : i32, view<328xi32>
+  view.store %phase, %words[6] : i32, view<328xi32>
+  view.store %end32, %words[7] : i32, view<328xi32>
+  %copy_bytes64 = scalar.muli %count64, %c4 : i64
+  %bounded_bytes = scalar.assume %copy_bytes64 [range(%copy_bytes64, 0, 1280)] : i64
+  %copy_bytes = index.cast %bounded_bytes : i64 to offset
+  %audio_offset = index.constant 32 : offset
+  func.call @copy(%pcm, %origin, %work, %audio_offset, %copy_bytes) : (buffer, offset, buffer, offset, offset)
+  %tag = scalar.extui %phase : i32 to i64
+  func.return %work, %units, %tag : buffer, i64, i64
+}
+
+// The cohort header maps packed ordinals to resident identities. An accepted
+// plan retains that mapping through completion, even if a member is cancelled.
+func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %length = buffer.length %ranges
+  %bytes = index.cast %length : offset to i64
+  %record = scalar.constant 24 : i64
+  %count64 = scalar.divui %bytes, %record : i64
+  %bounded_count = scalar.assume %count64 [range(%count64, 1, 4)] : i64
+  %count = index.cast %bounded_count : i64 to index
+  %records = buffer.view %ranges[%origin] : buffer -> view<[%count]x3xi64>
+  %capacity = index.constant 5280 : offset
+  %payload = buffer.alloca<private> align(8) %capacity : buffer
+  %header = buffer.view %payload[%origin] : buffer -> view<5xi32>
+  %count32 = scalar.trunci %count64 : i64 to i32
+  view.store %count32, %header[0] : i32, view<5xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %stride = index.constant 1312 : offset
+  %header_length = index.constant 32 : offset
+  scf.for %i = [%begin to %count step %step] {
+    %source64 = view.load %records[%i, 1] : view<[%count]x3xi64> -> i64
+    %bounded_source = scalar.assume %source64 [range(%source64, 0, 3936)] : i64
+    %source_offset = index.cast %bounded_source : i64 to offset
+    %scaled = index.scale %i, %stride : index, offset -> offset
+    %target_offset = index.add %scaled, %header_length : offset
+    func.call @copy(%packed, %source_offset, %payload, %target_offset, %stride) : (buffer, offset, buffer, offset, offset)
+    %row = view.load %records[%i, 0] : view<[%count]x3xi64> -> i64
+    %row32 = scalar.trunci %row : i64 to i32
+    %member = index.add %i, %step : index
+    view.store %row32, %header[%member] : i32, view<5xi32>
+  }
+  func.return %payload, %payload : buffer, buffer
+}
+
+func.def public @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
+  %phase_offset = index.constant 56 : offset
+  %phase_view = buffer.view %plan[%phase_offset] : buffer -> view<1xi32>
+  %phase = view.load %phase_view[0] : view<1xi32> -> i32
+  %execution = func.call @execute_5(%phase, %work, %requests, %conditioning, %streams, %output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %zero = scalar.constant 0 : i32
+  %origin = scalar.constant 0 : i64
+  %length = scalar.constant 64 : i64
+  %feedback = func.call @feedback(%zero, %output, %origin, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return
+}
+
+func.def @encoded(%state: buffer, %work: buffer, %feedback: buffer, %output_offset: offset) -> (i64, buffer, i32) {
+  %origin = index.constant 0 : offset
+  %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
+  %input = buffer.view %work[%origin] : buffer -> view<8xi32>
+  %output = buffer.view %feedback[%output_offset] : buffer -> view<2xi32>
+  %features = view.load %output[0] : view<2xi32> -> i32
+  %finished = view.load %output[1] : view<2xi32> -> i32
+  %count = view.load %input[3] : view<8xi32> -> i32
+  %end = view.load %input[7] : view<8xi32> -> i32
+  %last_hypothesis = view.load %fields[5] : view<16xi32> -> i32
+  view.store %features, %fields[1] : i32, view<16xi32>
+  view.store %finished, %fields[2] : i32, view<16xi32>
+  view.store %end, %fields[6] : i32, view<16xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %period = scalar.constant 6400 : i32
+  %since = scalar.subi %end, %last_hypothesis : i32
+  %periodic = scalar.cmpi uge, %since, %period : i32
+  %final = scalar.cmpi ne, %finished, %zero : i32
+  %no_features = scalar.cmpi eq, %features, %zero : i32
+  %empty_final = scalar.andi %final, %no_features : i1
+  %empty = global.load @empty : buffer
+  %packet, %complete = scf.if %empty_final -> (buffer, i32) {
+    %length = scalar.constant 0 : i64
+    %event = func.call @event(%empty, %length, %one, %end, %one) : (buffer, i64, i32, i32, i32) -> (buffer)
+    scf.yield %event, %one : buffer, i32
+  } else {
+    %trigger = scalar.ori %periodic, %final : i1
+    %nonempty = scalar.cmpi ne, %features, %zero : i32
+    %decode = scalar.andi %trigger, %nonempty : i1
+    scf.if %decode {
+      view.store %two, %fields[0] : i32, view<16xi32>
+      view.store %zero, %fields[3] : i32, view<16xi32>
+    }
+    scf.yield %empty, %zero : buffer, i32
+  }
+  %count64 = scalar.extui %count : i32 to i64
+  func.return %count64, %packet, %complete : i64, buffer, i32
+}
+
+func.def @decoded(%state: buffer, %feedback: buffer, %output_offset: offset) -> (buffer, i32) {
+  %origin = index.constant 0 : offset
+  %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
+  %output = buffer.view %feedback[%output_offset] : buffer -> view<1xi32>
+  %token = view.load %output[0] : view<1xi32> -> i32
+  %position = view.load %fields[3] : view<16xi32> -> i32
+  %finished = view.load %fields[2] : view<16xi32> -> i32
+  %end = view.load %fields[6] : view<16xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %eos = scalar.constant 2 : i32
+  %limit = scalar.constant 511 : i32
+  %is_eos = scalar.cmpi eq, %token, %eos : i32
+  %room = scalar.cmpi ult, %position, %limit : i32
+  %can_finish = scalar.ori %room, %is_eos : i1
+  %condition = scalar.extui %can_finish : i1 to i32
+  %error = global.load @tokens_error : buffer
+  func.call @require(%condition, %error) : (i32, buffer)
+  %token_offset = index.constant 64 : offset
+  %tokens = buffer.view %state[%token_offset] : buffer -> view<512xi32>
+  %bounded_position = scalar.assume %position [range(%position, 0, 511)] : i32
+  %index = index.cast %bounded_position : i32 to index
+  view.store %token, %tokens[%index] : i32, view<512xi32>
+  %next = scalar.addi %position, %one : i32
+  view.store %next, %fields[3] : i32, view<16xi32>
+  %packet, %complete = scf.if %is_eos -> (buffer, i32) {
+    %bounded_next = scalar.assume %next [range(%next, 1, 512)] : i32
+    %count = index.cast %bounded_next : i32 to index
+    %stride = index.constant 4 : offset
+    %length = index.scale %count, %stride : index, offset -> offset
+    %ids = buffer.alloca<private> align(4) %length : buffer
+    func.call @copy(%state, %token_offset, %ids, %origin, %length) : (buffer, offset, buffer, offset, offset)
+    %capacity = scalar.constant 16384 : i64
+    %text, %written = func.call @decode_tokens(%ids, %one, %capacity) : (buffer, i32, i64) -> (buffer, i64)
+    %previous_revision = view.load %fields[4] : view<16xi32> -> i32
+    %revision = scalar.addi %previous_revision, %one : i32
+    view.store %revision, %fields[4] : i32, view<16xi32>
+    view.store %end, %fields[5] : i32, view<16xi32>
+    view.store %one, %fields[0] : i32, view<16xi32>
+    %event = func.call @event(%text, %written, %revision, %end, %finished) : (buffer, i64, i32, i32, i32) -> (buffer)
+    scf.yield %event, %finished : buffer, i32
+  } else {
+    %empty = global.load @empty : buffer
+    scf.yield %empty, %zero : buffer, i32
+  }
+  func.return %packet, %complete : buffer, i32
+}
+
+func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i32) {
+  %origin = index.constant 0 : offset
+  %bounded_ordinal = scalar.assume %ordinal [range(%ordinal, 0, 3)] : i64
+  %ordinal_index = index.cast %bounded_ordinal : i64 to index
+  %stride = index.constant 1312 : offset
+  %header_length = index.constant 32 : offset
+  %scaled = index.scale %ordinal_index, %stride : index, offset -> offset
+  %work_offset = index.add %scaled, %header_length : offset
+  %work = buffer.alloca<private> align(8) %header_length : buffer
+  func.call @copy(%plan, %work_offset, %work, %origin, %header_length) : (buffer, offset, buffer, offset, offset)
+  %input = buffer.view %work[%origin] : buffer -> view<8xi32>
+  %phase = view.load %input[6] : view<8xi32> -> i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %zero64 = scalar.constant 0 : i64
+  %empty = global.load @empty : buffer
+  %output_stride = index.constant 16 : offset
+  %output_offset = index.scale %ordinal_index, %output_stride : index, offset -> offset
+  %initializing = scalar.cmpi eq, %phase, %zero : i32
+  %count, %packet, %complete = scf.if %initializing -> (i64, buffer, i32) {
+    %fields = buffer.view %state[%origin] : buffer -> view<16xi32>
+    view.store %one, %fields[0] : i32, view<16xi32>
+    scf.yield %zero64, %empty, %zero : i64, buffer, i32
+  } else {
+    %encoding = scalar.cmpi eq, %phase, %one : i32
+    %consumed, %event, %done = scf.if %encoding -> (i64, buffer, i32) {
+      %frames, %transcript, %finished = func.call @encoded(%state, %work, %feedback, %output_offset) : (buffer, buffer, buffer, offset) -> (i64, buffer, i32)
+      scf.yield %frames, %transcript, %finished : i64, buffer, i32
+    } else {
+      %transcript, %finished = func.call @decoded(%state, %feedback, %output_offset) : (buffer, buffer, offset) -> (buffer, i32)
+      scf.yield %zero64, %transcript, %finished : i64, buffer, i32
+    }
+    scf.yield %consumed, %event, %done : i64, buffer, i32
+  }
+  func.return %count, %packet, %complete : i64, buffer, i32
+}

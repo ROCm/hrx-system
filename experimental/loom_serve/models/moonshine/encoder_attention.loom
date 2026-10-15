@@ -1,0 +1,577 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Local attention gathers a row's valid ring window around its pending query.
+// Lookahead layers use 19 positions; causal layers use 16. Padding is masked.
+target.decl @moonshine
+
+config.decl @moonshine.threads : index
+
+kernel.def target(@moonshine) @moonshine.encoder_attention.window19() {
+  %items = index.constant 6080 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%state_storage: buffer, %k: view<4x320x19xf32>, %v: view<4x320x19xf32>, %cohort: view<5xi32>, %row_control_base: offset, %row_keys_base: offset, %row_values_base: offset, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 6080 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_control_stride = index.constant 40320208 : offset
+    %row_control_row = index.scale %resident, %row_control_stride : index, offset -> offset
+    %row_control_offset = index.add %row_control_row, %row_control_base : offset
+    %row_control = buffer.view %state_storage[%row_control_offset] : buffer -> view<6xi32>
+    %row_keys_stride = index.constant 40320208 : offset
+    %row_keys_row = index.scale %resident, %row_keys_stride : index, offset -> offset
+    %row_keys_offset = index.add %row_keys_row, %row_keys_base : offset
+    %row_keys = buffer.view %state_storage[%row_keys_offset] : buffer -> view<320x32xf32>
+    %row_values_stride = index.constant 40320208 : offset
+    %row_values_row = index.scale %resident, %row_values_stride : index, offset -> offset
+    %row_values_offset = index.add %row_values_row, %row_values_base : offset
+    %row_values = buffer.view %state_storage[%row_values_offset] : buffer -> view<320x32xf32>
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+      %width = index.constant 19 : index
+      %row = index.div %element, %width : index
+      %column = index.rem %element, %width : index
+      %count32 = view.load %row_control[2] : view<6xi32> -> i32
+      %count = index.cast %count32 : i32 to index
+      %valid = index.cmp ult, %column, %count : index
+      %key, %value = scf.if %valid -> (f32, f32) {
+        %start32 = view.load %row_control[4] : view<6xi32> -> i32
+        %bounded_start = scalar.assume %start32 [range(%start32, 0, 2047)] : i32
+        %start = index.cast %bounded_start : i32 to index
+        %position = index.add %start, %column : index
+        %capacity = index.constant 32 : index
+        %slot = index.rem %position, %capacity : index
+        %key = view.load %row_keys[%row, %slot] : view<320x32xf32> -> f32
+        %value = view.load %row_values[%row, %slot] : view<320x32xf32> -> f32
+        scf.yield %key, %value : f32, f32
+      } else {
+        scf.yield %f0, %f0 : f32, f32
+      }
+      view.store %key, %k[%packed, %row, %column] : f32, view<4x320x19xf32>
+      view.store %value, %v[%packed, %row, %column] : f32, view<4x320x19xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.encoder_attention.scores19() {
+  %items = index.constant 152 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%q: view<4x320x1xf32>, %k: view<4x320x19xf32>, %y: view<4x8x19xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_length_base: offset, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 152 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_length_stride = index.constant 40320208 : offset
+    %row_length_row = index.scale %resident, %row_length_stride : index, offset -> offset
+    %row_length_offset = index.add %row_length_row, %row_length_base : offset
+    %row_length = buffer.view %state_storage[%row_length_offset] : buffer -> view<6xi32>
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+      %width = index.constant 19 : index
+      %row = index.div %element, %width : index
+      %column = index.rem %element, %width : index
+      %query_times = index.constant 1 : index
+      %head_width = index.constant 40 : index
+      %head = index.div %row, %query_times : index
+      %time = index.rem %row, %query_times : index
+      %window_valid = scalar.constant true : i1
+      %length32 = view.load %row_length[2] : view<6xi32> -> i32
+      %length_value = index.cast %length32 : i32 to index
+      %within_length = index.cmp ult, %column, %length_value : index
+      %valid = scalar.andi %window_valid, %within_length : i1
+      %score = scf.if %valid -> (f32) {
+        %sum = scf.for %d = [%c0 to %head_width step %c1](%acc = %f0 : f32) -> (f32) {
+          %channel = index.madd %head, %head_width, %d : index
+          %q_value = view.load %q[%packed, %channel, %time] : view<4x320x1xf32> -> f32
+          %k_value = view.load %k[%packed, %channel, %column] : view<4x320x19xf32> -> f32
+          %next = scalar.fmaf %q_value, %k_value, %acc : f32
+          scf.yield %next : f32
+        }
+        %scale = scalar.constant 0.15811388300841897 : f32
+        %scaled = scalar.mulf %sum, %scale : f32
+        scf.yield %scaled : f32
+      } else {
+        %masked = scalar.constant -1e+30 : f32
+        scf.yield %masked : f32
+      }
+      view.store %score, %y[%packed, %row, %column] : f32, view<4x8x19xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.encoder_attention.softmax19() {
+  %items = index.constant 8 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%x: view<4x8x19xf32>, %y: view<4x8x19xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 8 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+
+      %times = index.constant 19 : index
+      %negative = scalar.constant -1e+30 : f32
+      %maximum = scf.for %i = [%c0 to %times step %c1](%acc = %negative : f32) -> (f32) {
+        %value = view.load %x[%packed, %element, %i] : view<4x8x19xf32> -> f32
+        %next = scalar.maximumf %acc, %value : f32
+        scf.yield %next : f32
+      }
+      %total = scf.for %i = [%c0 to %times step %c1](%acc = %f0 : f32) -> (f32) {
+        %value = view.load %x[%packed, %element, %i] : view<4x8x19xf32> -> f32
+        %shifted = scalar.subf %value, %maximum : f32
+        %exponential = scalar.expf<afn> %shifted : f32
+        view.store %exponential, %y[%packed, %element, %i] : f32, view<4x8x19xf32>
+        %next = scalar.addf %acc, %exponential : f32
+        scf.yield %next : f32
+      }
+      scf.for %i = [%c0 to %times step %c1] {
+        %value = view.load %y[%packed, %element, %i] : view<4x8x19xf32> -> f32
+        %normalized = scalar.divf %value, %total : f32
+        view.store %normalized, %y[%packed, %element, %i] : f32, view<4x8x19xf32>
+      }
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.encoder_attention.values19() {
+  %items = index.constant 320 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%v: view<4x320x19xf32>, %p: view<4x8x19xf32>, %y: view<4x320x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_length_base: offset, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 320 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_length_stride = index.constant 40320208 : offset
+    %row_length_row = index.scale %resident, %row_length_stride : index, offset -> offset
+    %row_length_offset = index.add %row_length_row, %row_length_base : offset
+    %row_length = buffer.view %state_storage[%row_length_offset] : buffer -> view<6xi32>
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+      %width = index.constant 1 : index
+      %row = index.div %element, %width : index
+      %column = index.rem %element, %width : index
+      %length32 = view.load %row_length[2] : view<6xi32> -> i32
+      %bounded_length = scalar.assume %length32 [range(%length32, 1, 19)] : i32
+      %times = index.cast %bounded_length : i32 to index
+      %query_times = index.constant 1 : index
+      %head_width = index.constant 40 : index
+      %head = index.div %row, %head_width : index
+      %score_row = index.madd %head, %query_times, %column : index
+      %sum = scf.for %i = [%c0 to %times step %c1](%acc = %f0 : f32) -> (f32) {
+        %probability = view.load %p[%packed, %score_row, %i] : view<4x8x19xf32> -> f32
+        %value = view.load %v[%packed, %row, %i] : view<4x320x19xf32> -> f32
+        %next = scalar.fmaf %probability, %value, %acc : f32
+        scf.yield %next : f32
+      }
+      view.store %sum, %y[%packed, %row, %column] : f32, view<4x320x1xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.encoder_attention.window16() {
+  %items = index.constant 5120 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%state_storage: buffer, %k: view<4x320x16xf32>, %v: view<4x320x16xf32>, %cohort: view<5xi32>, %row_control_base: offset, %row_keys_base: offset, %row_values_base: offset, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 5120 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_control_stride = index.constant 40320208 : offset
+    %row_control_row = index.scale %resident, %row_control_stride : index, offset -> offset
+    %row_control_offset = index.add %row_control_row, %row_control_base : offset
+    %row_control = buffer.view %state_storage[%row_control_offset] : buffer -> view<6xi32>
+    %row_keys_stride = index.constant 40320208 : offset
+    %row_keys_row = index.scale %resident, %row_keys_stride : index, offset -> offset
+    %row_keys_offset = index.add %row_keys_row, %row_keys_base : offset
+    %row_keys = buffer.view %state_storage[%row_keys_offset] : buffer -> view<320x32xf32>
+    %row_values_stride = index.constant 40320208 : offset
+    %row_values_row = index.scale %resident, %row_values_stride : index, offset -> offset
+    %row_values_offset = index.add %row_values_row, %row_values_base : offset
+    %row_values = buffer.view %state_storage[%row_values_offset] : buffer -> view<320x32xf32>
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+      %width = index.constant 16 : index
+      %row = index.div %element, %width : index
+      %column = index.rem %element, %width : index
+      %count32 = view.load %row_control[2] : view<6xi32> -> i32
+      %count = index.cast %count32 : i32 to index
+      %valid = index.cmp ult, %column, %count : index
+      %key, %value = scf.if %valid -> (f32, f32) {
+        %start32 = view.load %row_control[4] : view<6xi32> -> i32
+        %bounded_start = scalar.assume %start32 [range(%start32, 0, 2047)] : i32
+        %start = index.cast %bounded_start : i32 to index
+        %position = index.add %start, %column : index
+        %capacity = index.constant 32 : index
+        %slot = index.rem %position, %capacity : index
+        %key = view.load %row_keys[%row, %slot] : view<320x32xf32> -> f32
+        %value = view.load %row_values[%row, %slot] : view<320x32xf32> -> f32
+        scf.yield %key, %value : f32, f32
+      } else {
+        scf.yield %f0, %f0 : f32, f32
+      }
+      view.store %key, %k[%packed, %row, %column] : f32, view<4x320x16xf32>
+      view.store %value, %v[%packed, %row, %column] : f32, view<4x320x16xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.encoder_attention.scores16() {
+  %items = index.constant 128 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%q: view<4x320x1xf32>, %k: view<4x320x16xf32>, %y: view<4x8x16xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_length_base: offset, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 128 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_length_stride = index.constant 40320208 : offset
+    %row_length_row = index.scale %resident, %row_length_stride : index, offset -> offset
+    %row_length_offset = index.add %row_length_row, %row_length_base : offset
+    %row_length = buffer.view %state_storage[%row_length_offset] : buffer -> view<6xi32>
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+      %width = index.constant 16 : index
+      %row = index.div %element, %width : index
+      %column = index.rem %element, %width : index
+      %query_times = index.constant 1 : index
+      %head_width = index.constant 40 : index
+      %head = index.div %row, %query_times : index
+      %time = index.rem %row, %query_times : index
+      %window_valid = scalar.constant true : i1
+      %length32 = view.load %row_length[2] : view<6xi32> -> i32
+      %length_value = index.cast %length32 : i32 to index
+      %within_length = index.cmp ult, %column, %length_value : index
+      %valid = scalar.andi %window_valid, %within_length : i1
+      %score = scf.if %valid -> (f32) {
+        %sum = scf.for %d = [%c0 to %head_width step %c1](%acc = %f0 : f32) -> (f32) {
+          %channel = index.madd %head, %head_width, %d : index
+          %q_value = view.load %q[%packed, %channel, %time] : view<4x320x1xf32> -> f32
+          %k_value = view.load %k[%packed, %channel, %column] : view<4x320x16xf32> -> f32
+          %next = scalar.fmaf %q_value, %k_value, %acc : f32
+          scf.yield %next : f32
+        }
+        %scale = scalar.constant 0.15811388300841897 : f32
+        %scaled = scalar.mulf %sum, %scale : f32
+        scf.yield %scaled : f32
+      } else {
+        %masked = scalar.constant -1e+30 : f32
+        scf.yield %masked : f32
+      }
+      view.store %score, %y[%packed, %row, %column] : f32, view<4x8x16xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.encoder_attention.softmax16() {
+  %items = index.constant 8 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%x: view<4x8x16xf32>, %y: view<4x8x16xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 8 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+
+      %times = index.constant 16 : index
+      %negative = scalar.constant -1e+30 : f32
+      %maximum = scf.for %i = [%c0 to %times step %c1](%acc = %negative : f32) -> (f32) {
+        %value = view.load %x[%packed, %element, %i] : view<4x8x16xf32> -> f32
+        %next = scalar.maximumf %acc, %value : f32
+        scf.yield %next : f32
+      }
+      %total = scf.for %i = [%c0 to %times step %c1](%acc = %f0 : f32) -> (f32) {
+        %value = view.load %x[%packed, %element, %i] : view<4x8x16xf32> -> f32
+        %shifted = scalar.subf %value, %maximum : f32
+        %exponential = scalar.expf<afn> %shifted : f32
+        view.store %exponential, %y[%packed, %element, %i] : f32, view<4x8x16xf32>
+        %next = scalar.addf %acc, %exponential : f32
+        scf.yield %next : f32
+      }
+      scf.for %i = [%c0 to %times step %c1] {
+        %value = view.load %y[%packed, %element, %i] : view<4x8x16xf32> -> f32
+        %normalized = scalar.divf %value, %total : f32
+        view.store %normalized, %y[%packed, %element, %i] : f32, view<4x8x16xf32>
+      }
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.encoder_attention.values16() {
+  %items = index.constant 320 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%v: view<4x320x16xf32>, %p: view<4x8x16xf32>, %y: view<4x320x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_length_base: offset, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 320 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_length_stride = index.constant 40320208 : offset
+    %row_length_row = index.scale %resident, %row_length_stride : index, offset -> offset
+    %row_length_offset = index.add %row_length_row, %row_length_base : offset
+    %row_length = buffer.view %state_storage[%row_length_offset] : buffer -> view<6xi32>
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+      %width = index.constant 1 : index
+      %row = index.div %element, %width : index
+      %column = index.rem %element, %width : index
+      %length32 = view.load %row_length[2] : view<6xi32> -> i32
+      %bounded_length = scalar.assume %length32 [range(%length32, 1, 16)] : i32
+      %times = index.cast %bounded_length : i32 to index
+      %query_times = index.constant 1 : index
+      %head_width = index.constant 40 : index
+      %head = index.div %row, %head_width : index
+      %score_row = index.madd %head, %query_times, %column : index
+      %sum = scf.for %i = [%c0 to %times step %c1](%acc = %f0 : f32) -> (f32) {
+        %probability = view.load %p[%packed, %score_row, %i] : view<4x8x16xf32> -> f32
+        %value = view.load %v[%packed, %row, %i] : view<4x320x16xf32> -> f32
+        %next = scalar.fmaf %probability, %value, %acc : f32
+        scf.yield %next : f32
+      }
+      view.store %sum, %y[%packed, %row, %column] : f32, view<4x320x1xf32>
+    }
+  }
+  kernel.return
+}
