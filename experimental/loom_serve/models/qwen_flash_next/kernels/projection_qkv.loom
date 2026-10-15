@@ -114,7 +114,6 @@ kernel.def target(@flash_next_qkv_wave32) @flash_next_project_qkv(%output_width:
         %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%outputs]xbf16>
         %accumulator_zero = vector.constant 0.0 : vector<8xf32>
         %zero_codes = vector.constant 0.0 : vector<4xbf16>
-        %shift = vector.constant 16 : vector<4xi32>
         %init = vector.fragment<init> %accumulator_zero shape [%c16, %c16] : vector<8xf32>
         // Pipeline depth two acquires the next block in registers while the
         // current block is staged and contracted. Barriers own LDS reuse.
@@ -151,10 +150,7 @@ kernel.def target(@flash_next_qkv_wave32) @flash_next_project_qkv(%output_width:
             %codes_view = buffer.view %weight[%payload] : buffer -> view<32xi8>
             %codes = vector.load %codes_view[%local_k] : view<32xi8> -> vector<4xi8>
             %wide = vector.sitofp %codes : vector<4xi8> to vector<4xf32>
-            %bits = vector.bitcast %wide : vector<4xf32> to vector<4xi32>
-            %upper = vector.shrui %bits, %shift : vector<4xi32>
-            %words = vector.trunci %upper : vector<4xi32> to vector<4xi16>
-            %values = vector.bitcast %words : vector<4xi16> to vector<4xbf16>
+            %values = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
             vector.store %values, %weight_view[%local_channel, %local_k] : vector<4xbf16>, view<64x40xbf16>
             %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
             %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
