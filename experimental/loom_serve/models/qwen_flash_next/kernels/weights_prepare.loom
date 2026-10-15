@@ -1,0 +1,70 @@
+// Four K2560 rows occupy 10,880 bytes in either representation. One workgroup
+// captures that entire disjoint range before publishing its permutation:
+//   [80 blocks x 4 channels x f16 scale]
+//   [80 blocks x 4 channels x 32 i8 codes]
+// No peer can still need this group's original bytes when it starts writing.
+// The loader orders consumers after preparation and reloads before reactivation.
+kernel.def @flash_next_prepare_qkv_channels(%output_width: index) {
+  %outputs = index.assume %output_width [range(%output_width, 4, 262144), multiple_of(%output_width, 4)] : index
+  %c4 = index.constant 4 : index
+  %groups = index.div %outputs, %c4 : index
+  %threads = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%weight: buffer) {
+  %group = kernel.workgroup.id<x> : index
+  %workitem = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %c17 = index.constant 17 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %inputs = index.constant 2560 : index
+  %c32 = index.constant 32 : index
+  %blocks = index.div %inputs, %c32 : index
+  %scale_words = index.mul %blocks, %c4 : index
+  %row_words = index.mul %blocks, %c17 : index
+  %group_words = index.mul %row_words, %c4 : index
+  %origin = index.constant 0 : offset
+  %word_bytes = index.constant 2 : offset
+  %group_bytes = index.scale %group_words, %word_bytes : index, offset -> offset
+  %group_origin = index.scale %group, %group_bytes : index, offset -> offset
+  %view = buffer.view %weight[%group_origin] : buffer -> view<[%group_words]xi16>
+  %stage = buffer.alloca<workgroup> align(16) %group_bytes : buffer
+  %staged = buffer.view %stage[%origin] : buffer -> view<[%group_words]xi16>
+  scf.for %word = [%workitem to %group_words step %c256] {
+    %channel = index.div %word, %row_words : index
+    %within = index.rem %word, %row_words : index
+    %block = index.div %within, %c17 : index
+    %field = index.rem %within, %c17 : index
+    %is_scale = index.cmp eq, %field, %c0 : index
+    %target = scf.if %is_scale -> (index) {
+      %scale_word = index.madd %block, %c4, %channel : index
+      scf.yield %scale_word : index
+    } else {
+      %code_word = index.sub %field, %c1 : index
+      %block_word = index.madd %block, %c64, %scale_words : index
+      %row_word = index.madd %channel, %c16, %block_word : index
+      %target_word = index.add %row_word, %code_word : index
+      scf.yield %target_word : index
+    }
+    %value = view.load %view[%word] : view<[%group_words]xi16> -> i16
+    view.store %value, %staged[%target] : i16, view<[%group_words]xi16>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.for %packet = [%workitem to %row_words step %c256] {
+    %word = index.mul %packet, %c4 : index
+    %values = vector.load %staged[%word] : view<[%group_words]xi16> -> vector<4xi16>
+    vector.store %values, %view[%word] : vector<4xi16>, view<[%group_words]xi16>
+  }
+  kernel.return
+}
+
+// Loader reflection sees one mutable binding with exactly the original size.
+command.program.def public @flash_next_prepare_qkv() launch(%weight: buffer) {
+  %outputs = index.constant 10240 : index
+  kernel.launch @flash_next_prepare_qkv_channels[%outputs](%weight) : [index](buffer)
+  command.return
+}
