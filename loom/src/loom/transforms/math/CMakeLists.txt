@@ -9,11 +9,28 @@
 
 iree_add_all_subdirs()
 
+loom_generated_file(
+  NAME
+    approximate_f32_recipe_tables_gen
+  GENERATOR
+    loom::py::loom::gen::math::recipe_program_generator
+  OUTPUT
+    "approximate_f32_recipe_tables.inl"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "--input=${PROJECT_SOURCE_DIR}/loom/src/loom/transforms/math/approximate_f32_recipes.loom"
+  INPUTS
+    "approximate_f32_recipes.loom"
+)
+
 loom_cc_library(
   NAME
     legalize
   HDRS
     "legalize.h"
+  TEXTUAL_HDRS
+    "approximate_f32_recipe_tables.inl"
   SRCS
     "evaluation.c"
     "evaluation.h"
@@ -21,6 +38,8 @@ loom_cc_library(
     "patterns.c"
     "patterns.h"
     "patterns_elementwise.c"
+    "recipe_program.c"
+    "recipe_program.h"
   DEPS
     iree::base
     iree::base::internal::arena

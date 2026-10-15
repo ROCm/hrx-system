@@ -32,6 +32,17 @@ static void loom_vm_math_policy_query(
     case LOOM_TARGET_MATH_OP_TRUNCF:
     case LOOM_TARGET_MATH_OP_LOG2F:
       break;
+    case LOOM_TARGET_MATH_OP_EXP2F:
+      if (query->element_type != LOOM_SCALAR_TYPE_F32 ||
+          !iree_all_bits_set(query->fastmath_flags,
+                             LOOM_TARGET_MATH_FASTMATH_FLAG_AFN)) {
+        *out_decision = (loom_target_math_policy_decision_t){
+            .action = LOOM_TARGET_MATH_POLICY_ACTION_REJECT,
+            .constraint_key = IREE_SVL("math.exp2.afn_f32"),
+        };
+        return;
+      }
+      break;
     case LOOM_TARGET_MATH_OP_SQRTF:
     case LOOM_TARGET_MATH_OP_RSQRTF:
       if (query->element_type != LOOM_SCALAR_TYPE_F32) {

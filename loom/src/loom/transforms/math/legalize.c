@@ -235,6 +235,8 @@ static loom_target_math_op_t loom_math_legalize_vector_geluf_op(
 static loom_target_math_op_t loom_math_legalize_scalar_op_kind(
     const loom_op_t* op) {
   switch (op->kind) {
+    case LOOM_OP_SCALAR_EXP2F:
+      return LOOM_TARGET_MATH_OP_EXP2F;
     case LOOM_OP_SCALAR_EXPF:
       return LOOM_TARGET_MATH_OP_EXPF;
     case LOOM_OP_SCALAR_LOGF:
@@ -291,6 +293,8 @@ static loom_target_math_op_t loom_math_legalize_scalar_op_kind(
 static loom_target_math_op_t loom_math_legalize_vector_op_kind(
     const loom_op_t* op) {
   switch (op->kind) {
+    case LOOM_OP_VECTOR_EXP2F:
+      return LOOM_TARGET_MATH_OP_EXP2F;
     case LOOM_OP_VECTOR_EXPF:
       return LOOM_TARGET_MATH_OP_EXPF;
     case LOOM_OP_VECTOR_LOGF:

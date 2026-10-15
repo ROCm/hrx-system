@@ -255,6 +255,9 @@ static void loom_amdgpu_math_policy_query(
       *out_decision =
           loom_amdgpu_math_keep_if_afn(query, IREE_SV("math.log2.exact_f32"));
       return;
+    case LOOM_TARGET_MATH_OP_EXP2F:
+      *out_decision = loom_amdgpu_math_keep(IREE_SV("math.op.native_f32"));
+      return;
     case LOOM_TARGET_MATH_OP_TANHF:
       *out_decision = loom_amdgpu_math_rewrite_if_afn(
           query, LOOM_TARGET_MATH_RECIPE_TANH_LOGISTIC_F32,

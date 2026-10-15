@@ -1,0 +1,555 @@
+// RUN: pass legalize-math
+
+// The authored scalar schematics are the semantic source of truth for all
+// three compact recipe programs. Exact output checks every generated operand,
+// predicate, constant payload, and result selection.
+x86.target<avx2> @target
+
+func.def target(@target) @scalar_leaf_family(%input: f32) -> (f32, f32, f32) {
+  %exp2 = scalar.exp2f<afn> %input : f32
+  %sin = scalar.sinturnsf<afn> %input : f32
+  %cos = scalar.costurnsf<afn> %input : f32
+  func.return %exp2, %sin, %cos : f32, f32, f32
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @scalar_leaf_family(%input: f32) -> (f32, f32, f32) {
+  %167 = scalar.bitcast %input : f32 to i32
+  %168 = scalar.constant 2147483647 : i32
+  %169 = scalar.andi %167, %168 : i32
+  %170 = scalar.bitcast %169 : i32 to f32
+  %171 = scalar.constant 12582912.0 : f32
+  %172 = scalar.addf %input, %171 : f32
+  %173 = scalar.subf %172, %171 : f32
+  %174 = scalar.bitcast %172 : f32 to i32
+  %175 = scalar.bitcast %171 : f32 to i32
+  %176 = scalar.subi %174, %175 : i32
+  %177 = scalar.subf %input, %173 : f32
+  %178 = scalar.mulf %177, %177 : f32
+  %179 = scalar.constant 0.0013183277333155274 : f32
+  %180 = scalar.constant 0.0096714366227388382 : f32
+  %181 = scalar.fmaf %179, %177, %180 : f32
+  %182 = scalar.constant 0.055510137230157852 : f32
+  %183 = scalar.constant 0.24022242426872253 : f32
+  %184 = scalar.fmaf %182, %177, %183 : f32
+  %185 = scalar.fmaf %181, %178, %184 : f32
+  %186 = scalar.constant 0.69314676523208618 : f32
+  %187 = scalar.mulf %177, %186 : f32
+  %188 = scalar.fmaf %185, %178, %187 : f32
+  %189 = scalar.constant 23 : i32
+  %190 = scalar.shli %176, %189 : i32
+  %191 = scalar.constant 1065353216 : i32
+  %192 = scalar.addi %190, %191 : i32
+  %193 = scalar.bitcast %192 : i32 to f32
+  %194 = scalar.fmaf %193, %188, %193 : f32
+  %195 = scalar.constant -2147483648 : i32
+  %196 = scalar.andi %167, %195 : i32
+  %197 = scalar.constant 6 : i32
+  %198 = scalar.shrui %196, %197 : i32
+  %199 = scalar.ori %196, %198 : i32
+  %200 = scalar.constant 2130706432 : i32
+  %201 = scalar.addi %199, %200 : i32
+  %202 = scalar.subi %190, %199 : i32
+  %203 = scalar.bitcast %201 : i32 to f32
+  %204 = scalar.bitcast %202 : i32 to f32
+  %205 = scalar.fmaf %204, %188, %204 : f32
+  %206 = scalar.mulf %205, %203 : f32
+  %207 = scalar.mulf %203, %203 : f32
+  %208 = scalar.constant 126.5 : f32
+  %209 = scalar.cmpf olt, %170, %208 : f32
+  %210 = scf.select %209, %194, %206 : f32
+  %211 = scalar.constant 192.0 : f32
+  %212 = scalar.cmpf ogt, %170, %211 : f32
+  %exp2 = scf.select %212, %207, %210 : f32
+  %85 = scalar.bitcast %input : f32 to i32
+  %86 = scalar.constant 2147483647 : i32
+  %87 = scalar.andi %85, %86 : i32
+  %88 = scalar.constant 2139095040 : i32
+  %89 = scalar.cmpi uge, %87, %88 : i32
+  %90 = scalar.constant 1241513984 : i32
+  %91 = scalar.cmpi uge, %87, %90 : i32
+  %92 = scalar.constant 8388607 : i32
+  %93 = scalar.andi %87, %92 : i32
+  %94 = scalar.constant 8388608 : i32
+  %95 = scalar.ori %93, %94 : i32
+  %96 = scalar.constant 3 : i32
+  %97 = scalar.andi %95, %96 : i32
+  %98 = scalar.constant 1 : i32
+  %99 = scalar.andi %95, %98 : i32
+  %100 = scalar.shli %99, %98 : i32
+  %101 = scalar.constant 0 : i32
+  %102 = scalar.constant 1249902592 : i32
+  %103 = scalar.cmpi ult, %87, %102 : i32
+  %104 = scalar.constant 1258291200 : i32
+  %105 = scalar.cmpi ult, %87, %104 : i32
+  %106 = scf.select %105, %100, %101 : i32
+  %107 = scf.select %103, %97, %106 : i32
+  %108 = scalar.constant -2147483648 : i32
+  %109 = scalar.andi %85, %108 : i32
+  %110 = scalar.constant 2 : i32
+  %111 = scalar.andi %107, %110 : i32
+  %112 = scalar.constant 30 : i32
+  %113 = scalar.shli %111, %112 : i32
+  %114 = scalar.constant 1065353216 : i32
+  %115 = scalar.xori %114, %113 : i32
+  %116 = scalar.andi %107, %98 : i32
+  %117 = scalar.xori %115, %109 : i32
+  %118 = scalar.cmpi eq, %116, %101 : i32
+  %119 = scf.select %118, %109, %117 : i32
+  %120 = scalar.bitcast %119 : i32 to f32
+  %121 = scalar.constant 2.0 : f32
+  %122 = scalar.mulf %input, %121 : f32
+  %123 = scalar.constant 12582912.0 : f32
+  %124 = scalar.addf %122, %123 : f32
+  %125 = scalar.subf %124, %123 : f32
+  %126 = scalar.bitcast %124 : f32 to i32
+  %127 = scalar.bitcast %123 : f32 to i32
+  %128 = scalar.subi %126, %127 : i32
+  %129 = scalar.subf %122, %125 : f32
+  %130 = scalar.mulf %129, %129 : f32
+  %131 = scalar.mulf %130, %130 : f32
+  %132 = scalar.constant 3.1415927410125732 : f32
+  %133 = scalar.constant -5.1677126884460449 : f32
+  %134 = scalar.constant 2.5501639842987061 : f32
+  %135 = scalar.constant -0.59926450252532959 : f32
+  %136 = scalar.constant 0.082145869731903076 : f32
+  %137 = scalar.constant -0.00737043097615242 : f32
+  %138 = scalar.fmaf %133, %130, %132 : f32
+  %139 = scalar.fmaf %135, %130, %134 : f32
+  %140 = scalar.fmaf %137, %130, %136 : f32
+  %141 = scalar.fmaf %140, %131, %139 : f32
+  %142 = scalar.fmaf %141, %131, %138 : f32
+  %143 = scalar.mulf %129, %142 : f32
+  %144 = scalar.bitcast %143 : f32 to i32
+  %145 = scalar.andi %128, %98 : i32
+  %146 = scalar.constant 31 : i32
+  %147 = scalar.shli %145, %146 : i32
+  %148 = scalar.xori %144, %147 : i32
+  %149 = scalar.bitcast %148 : i32 to f32
+  %150 = scalar.constant 0.0 : f32
+  %151 = scalar.cmpf oeq, %129, %150 : f32
+  %152 = scalar.absf %129 : f32
+  %153 = scalar.constant 0.5 : f32
+  %154 = scalar.cmpf oeq, %152, %153 : f32
+  %155 = scalar.bitcast %129 : f32 to i32
+  %156 = scalar.andi %155, %108 : i32
+  %157 = scalar.xori %114, %147 : i32
+  %158 = scalar.xori %157, %156 : i32
+  %159 = scalar.bitcast %158 : i32 to f32
+  %160 = scalar.bitcast %109 : i32 to f32
+  %161 = scf.select %154, %159, %149 : f32
+  %162 = scf.select %151, %160, %161 : f32
+  %163 = scf.select %91, %120, %162 : f32
+  %164 = scalar.constant 2143289344 : i32
+  %165 = scalar.bitcast %164 : i32 to f32
+  %sin = scf.select %89, %165, %163 : f32
+  %7 = scalar.bitcast %input : f32 to i32
+  %8 = scalar.constant 2147483647 : i32
+  %9 = scalar.andi %7, %8 : i32
+  %10 = scalar.constant 2139095040 : i32
+  %11 = scalar.cmpi uge, %9, %10 : i32
+  %12 = scalar.constant 1241513984 : i32
+  %13 = scalar.cmpi uge, %9, %12 : i32
+  %14 = scalar.constant 8388607 : i32
+  %15 = scalar.andi %9, %14 : i32
+  %16 = scalar.constant 8388608 : i32
+  %17 = scalar.ori %15, %16 : i32
+  %18 = scalar.constant 3 : i32
+  %19 = scalar.andi %17, %18 : i32
+  %20 = scalar.constant 1 : i32
+  %21 = scalar.andi %17, %20 : i32
+  %22 = scalar.shli %21, %20 : i32
+  %23 = scalar.constant 0 : i32
+  %24 = scalar.constant 1249902592 : i32
+  %25 = scalar.cmpi ult, %9, %24 : i32
+  %26 = scalar.constant 1258291200 : i32
+  %27 = scalar.cmpi ult, %9, %26 : i32
+  %28 = scf.select %27, %22, %23 : i32
+  %29 = scf.select %25, %19, %28 : i32
+  %30 = scalar.constant -2147483648 : i32
+  %31 = scalar.andi %7, %30 : i32
+  %32 = scalar.constant 2 : i32
+  %33 = scalar.andi %29, %32 : i32
+  %34 = scalar.constant 30 : i32
+  %35 = scalar.shli %33, %34 : i32
+  %36 = scalar.constant 1065353216 : i32
+  %37 = scalar.xori %36, %35 : i32
+  %38 = scalar.andi %29, %20 : i32
+  %39 = scalar.cmpi ne, %38, %23 : i32
+  %40 = scf.select %39, %23, %37 : i32
+  %41 = scalar.bitcast %40 : i32 to f32
+  %42 = scalar.constant 2.0 : f32
+  %43 = scalar.mulf %input, %42 : f32
+  %44 = scalar.constant 12582912.0 : f32
+  %45 = scalar.addf %43, %44 : f32
+  %46 = scalar.subf %45, %44 : f32
+  %47 = scalar.bitcast %45 : f32 to i32
+  %48 = scalar.bitcast %44 : f32 to i32
+  %49 = scalar.subi %47, %48 : i32
+  %50 = scalar.subf %43, %46 : f32
+  %51 = scalar.absf %50 : f32
+  %52 = scalar.constant 0.5 : f32
+  %53 = scalar.subf %52, %51 : f32
+  %54 = scalar.mulf %53, %53 : f32
+  %55 = scalar.mulf %54, %54 : f32
+  %56 = scalar.constant 3.1415927410125732 : f32
+  %57 = scalar.constant -5.1677126884460449 : f32
+  %58 = scalar.constant 2.5501639842987061 : f32
+  %59 = scalar.constant -0.59926450252532959 : f32
+  %60 = scalar.constant 0.082145869731903076 : f32
+  %61 = scalar.constant -0.00737043097615242 : f32
+  %62 = scalar.fmaf %57, %54, %56 : f32
+  %63 = scalar.fmaf %59, %54, %58 : f32
+  %64 = scalar.fmaf %61, %54, %60 : f32
+  %65 = scalar.fmaf %64, %55, %63 : f32
+  %66 = scalar.fmaf %65, %55, %62 : f32
+  %67 = scalar.mulf %53, %66 : f32
+  %68 = scalar.bitcast %67 : f32 to i32
+  %69 = scalar.andi %49, %20 : i32
+  %70 = scalar.constant 31 : i32
+  %71 = scalar.shli %69, %70 : i32
+  %72 = scalar.xori %68, %71 : i32
+  %73 = scalar.bitcast %72 : i32 to f32
+  %74 = scalar.constant 0.0 : f32
+  %75 = scalar.cmpf oeq, %53, %74 : f32
+  %76 = scalar.cmpf oeq, %50, %74 : f32
+  %77 = scalar.xori %36, %71 : i32
+  %78 = scalar.bitcast %77 : i32 to f32
+  %79 = scf.select %75, %74, %73 : f32
+  %80 = scf.select %76, %78, %79 : f32
+  %81 = scf.select %13, %41, %80 : f32
+  %82 = scalar.constant 2143289344 : i32
+  %83 = scalar.bitcast %82 : i32 to f32
+  %cos = scf.select %11, %83, %81 : f32
+  func.return %exp2, %sin, %cos : f32, f32, f32
+}
+
+// ====
+// RUN: emit source-low output=low
+
+x86.target<avx2> @target
+
+func.def target(@target) @scalar_exp2(%input: f32) -> (f32) {
+  %result = scalar.exp2f<afn> %input : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (f32) -> (f32)}) @scalar_exp2(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %54 = vmovd.gpr32.xmm %input
+  %55 = copy %54 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %56 = and.imm.gpr32 %55 {imm32 = 2147483647}
+  %57 = vmovd.xmm.gpr32 %56
+  %58 = mov.imm32 1262485504
+  %59 = vmovd.xmm.gpr32 %58
+  %60 = vaddss.xmm %input, %59
+  %61 = vsubss.xmm %60, %59
+  %62 = vmovd.gpr32.xmm %60
+  %63 = copy %62 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %64 = add.imm.gpr32 %63 {imm32 = -1262485504}
+  %65 = vsubss.xmm %input, %61
+  %66 = vmulss.xmm %65, %65
+  %67 = mov.imm32 984402877
+  %68 = vmovd.xmm.gpr32 %67
+  %69 = mov.imm32 1008628978
+  %70 = vmovd.xmm.gpr32 %69
+  %71 = copy %70 : reg<x86.xmm> -> reg<x86.xmm>
+  %72 = vfmadd231ss.xmm %71, %68, %65
+  %73 = mov.imm32 1029922457
+  %74 = vmovd.xmm.gpr32 %73
+  %75 = mov.imm32 1047919838
+  %76 = vmovd.xmm.gpr32 %75
+  %77 = copy %76 : reg<x86.xmm> -> reg<x86.xmm>
+  %78 = vfmadd231ss.xmm %77, %74, %65
+  %79 = copy %78 : reg<x86.xmm> -> reg<x86.xmm>
+  %80 = vfmadd231ss.xmm %79, %72, %66
+  %81 = mov.imm32 1060205073
+  %82 = vmovd.xmm.gpr32 %81
+  %83 = vmulss.xmm %65, %82
+  %84 = copy %83 : reg<x86.xmm> -> reg<x86.xmm>
+  %85 = vfmadd231ss.xmm %84, %80, %66
+  %86 = copy %64 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %87 = shl.imm.gpr32 %86 {shift = 23}
+  %88 = copy %87 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %89 = add.imm.gpr32 %88 {imm32 = 1065353216}
+  %90 = vmovd.xmm.gpr32 %89
+  %91 = copy %90 : reg<x86.xmm> -> reg<x86.xmm>
+  %92 = vfmadd231ss.xmm %91, %90, %85
+  %93 = copy %54 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %94 = and.imm.gpr32 %93 {imm32 = -2147483648}
+  %95 = copy %94 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %96 = shr.imm.gpr32 %95 {shift = 6}
+  %97 = copy %94 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %98 = or.gpr32 %97, %96
+  %99 = copy %98 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %100 = add.imm.gpr32 %99 {imm32 = 2130706432}
+  %101 = copy %87 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %102 = sub.gpr32 %101, %98
+  %103 = vmovd.xmm.gpr32 %100
+  %104 = vmovd.xmm.gpr32 %102
+  %105 = copy %104 : reg<x86.xmm> -> reg<x86.xmm>
+  %106 = vfmadd231ss.xmm %105, %104, %85
+  %107 = vmulss.xmm %106, %103
+  %108 = vmulss.xmm %103, %103
+  %109 = mov.imm32 1123876864
+  %110 = vmovd.xmm.gpr32 %109
+  %111 = avx2.vcmpps.xmm %57, %110, 17
+  %112 = vpblendvb.xmm %107, %92, %111
+  %113 = mov.imm32 1128267776
+  %114 = vmovd.xmm.gpr32 %113
+  %115 = avx2.vcmpps.xmm %57, %114, 30
+  %result = vpblendvb.xmm %112, %108, %115
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=low
+
+x86.target<avx2> @target
+
+func.def target(@target) @avx2_sin_turns(%input: vector<8xf32>) -> (vector<8xf32>) {
+  %result = vector.sinturnsf<afn> %input : vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<8xf32>) -> (vector<8xf32>)}) @avx2_sin_turns(%input: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %91 = mov.imm32 2147483647
+  %92 = vmovd.xmm.gpr32 %91
+  %93 = vpbroadcastd.ymm %92
+  %94 = vpand.ymm %input, %93
+  %95 = mov.imm32 2139095040
+  %96 = vmovd.xmm.gpr32 %95
+  %97 = vpbroadcastd.ymm %96
+  %98 = vpminud.ymm %94, %97
+  %99 = vpcmpeqd.ymm %98, %97
+  %100 = mov.imm32 1241513984
+  %101 = vmovd.xmm.gpr32 %100
+  %102 = vpbroadcastd.ymm %101
+  %103 = vpminud.ymm %94, %102
+  %104 = vpcmpeqd.ymm %103, %102
+  %105 = mov.imm32 8388607
+  %106 = vmovd.xmm.gpr32 %105
+  %107 = vpbroadcastd.ymm %106
+  %108 = vpand.ymm %94, %107
+  %109 = mov.imm32 8388608
+  %110 = vmovd.xmm.gpr32 %109
+  %111 = vpbroadcastd.ymm %110
+  %112 = vpor.ymm %108, %111
+  %113 = mov.imm32 3
+  %114 = vmovd.xmm.gpr32 %113
+  %115 = vpbroadcastd.ymm %114
+  %116 = vpand.ymm %112, %115
+  %117 = mov.imm32 1
+  %118 = vmovd.xmm.gpr32 %117
+  %119 = vpbroadcastd.ymm %118
+  %120 = vpand.ymm %112, %119
+  %121 = vpslld.ymm %120, 1
+  %122 = vxorps.zero.ymm
+  %123 = mov.imm32 1249902592
+  %124 = vmovd.xmm.gpr32 %123
+  %125 = vpbroadcastd.ymm %124
+  %126 = vpminud.ymm %94, %125
+  %127 = vpcmpeqd.ymm %126, %94
+  %128 = vpcmpeqd.ymm %94, %125
+  %129 = vpcmpeqd.ymm %94, %94
+  %130 = vpxor.ymm %128, %129
+  %131 = vpand.ymm %127, %130
+  %132 = mov.imm32 1258291200
+  %133 = vmovd.xmm.gpr32 %132
+  %134 = vpbroadcastd.ymm %133
+  %135 = vpminud.ymm %94, %134
+  %136 = vpcmpeqd.ymm %135, %94
+  %137 = vpcmpeqd.ymm %94, %134
+  %139 = vpxor.ymm %137, %129
+  %140 = vpand.ymm %136, %139
+  %141 = vpblendvb.ymm %122, %121, %140
+  %142 = vpblendvb.ymm %141, %116, %131
+  %143 = mov.imm32 -2147483648
+  %144 = vmovd.xmm.gpr32 %143
+  %145 = vpbroadcastd.ymm %144
+  %146 = vpand.ymm %input, %145
+  %147 = mov.imm32 2
+  %148 = vmovd.xmm.gpr32 %147
+  %149 = vpbroadcastd.ymm %148
+  %150 = vpand.ymm %142, %149
+  %151 = vpslld.ymm %150, 30
+  %152 = mov.imm32 1065353216
+  %153 = vmovd.xmm.gpr32 %152
+  %154 = vpbroadcastd.ymm %153
+  %155 = vpxor.ymm %154, %151
+  %156 = vpand.ymm %142, %119
+  %157 = vpxor.ymm %155, %146
+  %158 = vpcmpeqd.ymm %156, %122
+  %159 = vpblendvb.ymm %157, %146, %158
+  %160 = mov.imm32 1073741824
+  %161 = vmovd.xmm.gpr32 %160
+  %162 = vpbroadcastd.ymm %161
+  %163 = vmulps.ymm %input, %162
+  %164 = mov.imm32 1262485504
+  %165 = vmovd.xmm.gpr32 %164
+  %166 = vpbroadcastd.ymm %165
+  %167 = vaddps.ymm %163, %166
+  %168 = vsubps.ymm %167, %166
+  %169 = vpsubd.ymm %167, %166
+  %170 = vsubps.ymm %163, %168
+  %171 = vmulps.ymm %170, %170
+  %172 = vmulps.ymm %171, %171
+  %173 = mov.imm32 1078530011
+  %174 = vmovd.xmm.gpr32 %173
+  %175 = vpbroadcastd.ymm %174
+  %176 = mov.imm32 -1062904345
+  %177 = vmovd.xmm.gpr32 %176
+  %178 = vpbroadcastd.ymm %177
+  %179 = mov.imm32 1076049379
+  %180 = vmovd.xmm.gpr32 %179
+  %181 = vpbroadcastd.ymm %180
+  %182 = mov.imm32 -1088853658
+  %183 = vmovd.xmm.gpr32 %182
+  %184 = vpbroadcastd.ymm %183
+  %185 = mov.imm32 1034435608
+  %186 = vmovd.xmm.gpr32 %185
+  %187 = vpbroadcastd.ymm %186
+  %188 = mov.imm32 -1141800024
+  %189 = vmovd.xmm.gpr32 %188
+  %190 = vpbroadcastd.ymm %189
+  %191 = copy %175 : reg<x86.ymm> -> reg<x86.ymm>
+  %192 = vfmadd231ps.ymm %191, %178, %171
+  %193 = copy %181 : reg<x86.ymm> -> reg<x86.ymm>
+  %194 = vfmadd231ps.ymm %193, %184, %171
+  %195 = copy %187 : reg<x86.ymm> -> reg<x86.ymm>
+  %196 = vfmadd231ps.ymm %195, %190, %171
+  %197 = copy %194 : reg<x86.ymm> -> reg<x86.ymm>
+  %198 = vfmadd231ps.ymm %197, %196, %172
+  %199 = copy %192 : reg<x86.ymm> -> reg<x86.ymm>
+  %200 = vfmadd231ps.ymm %199, %198, %172
+  %201 = vmulps.ymm %170, %200
+  %202 = vpand.ymm %169, %119
+  %203 = vpslld.ymm %202, 31
+  %204 = vpxor.ymm %201, %203
+  %206 = avx2.vcmpps.ymm %170, %122, 0
+  %207 = vpand.ymm %170, %93
+  %208 = mov.imm32 1056964608
+  %209 = vmovd.xmm.gpr32 %208
+  %210 = vpbroadcastd.ymm %209
+  %211 = avx2.vcmpps.ymm %207, %210, 0
+  %212 = vpand.ymm %170, %145
+  %213 = vpxor.ymm %154, %203
+  %214 = vpxor.ymm %213, %212
+  %215 = vpblendvb.ymm %204, %214, %211
+  %216 = vpblendvb.ymm %215, %146, %206
+  %217 = vpblendvb.ymm %216, %159, %104
+  %218 = mov.imm32 2143289344
+  %219 = vmovd.xmm.gpr32 %218
+  %220 = vpbroadcastd.ymm %219
+  %result = vpblendvb.ymm %217, %220, %99
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=low
+
+x86.target<avx512> @target
+
+func.def target(@target) @avx512_cos_turns(%input: vector<16xf32>) -> (vector<16xf32>) {
+  %result = vector.costurnsf<afn> %input : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (vector<16xf32>) -> (vector<16xf32>)}) @avx512_cos_turns(%input: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %87 = mov.imm32 2147483647
+  %88 = vpbroadcastd %87
+  %89 = vpandd %input, %88
+  %90 = mov.imm32 2139095040
+  %91 = vpbroadcastd %90
+  %92 = vpcmpud %89, %91, 5
+  %93 = mov.imm32 1241513984
+  %94 = vpbroadcastd %93
+  %95 = vpcmpud %89, %94, 5
+  %96 = mov.imm32 8388607
+  %97 = vpbroadcastd %96
+  %98 = vpandd %89, %97
+  %99 = mov.imm32 8388608
+  %100 = vpbroadcastd %99
+  %101 = vpord %98, %100
+  %102 = mov.imm32 3
+  %103 = vpbroadcastd %102
+  %104 = vpandd %101, %103
+  %105 = mov.imm32 1
+  %106 = vpbroadcastd %105
+  %107 = vpandd %101, %106
+  %108 = avx512.vpslld.zmm %107, 1
+  %109 = vxorps.zero
+  %110 = mov.imm32 1249902592
+  %111 = vpbroadcastd %110
+  %112 = vpcmpud %89, %111, 1
+  %113 = mov.imm32 1258291200
+  %114 = vpbroadcastd %113
+  %115 = vpcmpud %89, %114, 1
+  %116 = vpblendmd %115, %108, %109
+  %117 = vpblendmd %112, %104, %116
+  %118 = mov.imm32 2
+  %119 = vpbroadcastd %118
+  %120 = vpandd %117, %119
+  %121 = avx512.vpslld.zmm %120, 30
+  %122 = mov.imm32 1065353216
+  %123 = vpbroadcastd %122
+  %124 = vpxord %123, %121
+  %125 = vpandd %117, %106
+  %126 = vpcmpd %125, %109, 4
+  %127 = vpblendmd %126, %109, %124
+  %128 = mov.imm32 1073741824
+  %129 = vpbroadcastd %128
+  %130 = vmulps %input, %129
+  %131 = mov.imm32 1262485504
+  %132 = vpbroadcastd %131
+  %133 = vaddps %130, %132
+  %134 = vsubps %133, %132
+  %135 = vpsubd %133, %132
+  %136 = vsubps %130, %134
+  %137 = vpandd %136, %88
+  %138 = mov.imm32 1056964608
+  %139 = vpbroadcastd %138
+  %140 = vsubps %139, %137
+  %141 = vmulps %140, %140
+  %142 = vmulps %141, %141
+  %143 = mov.imm32 1078530011
+  %144 = vpbroadcastd %143
+  %145 = mov.imm32 -1062904345
+  %146 = vpbroadcastd %145
+  %147 = mov.imm32 1076049379
+  %148 = vpbroadcastd %147
+  %149 = mov.imm32 -1088853658
+  %150 = vpbroadcastd %149
+  %151 = mov.imm32 1034435608
+  %152 = vpbroadcastd %151
+  %153 = mov.imm32 -1141800024
+  %154 = vpbroadcastd %153
+  %155 = copy %144 : reg<x86.zmm> -> reg<x86.zmm>
+  %156 = vfmadd231ps %155, %146, %141
+  %157 = copy %148 : reg<x86.zmm> -> reg<x86.zmm>
+  %158 = vfmadd231ps %157, %150, %141
+  %159 = copy %152 : reg<x86.zmm> -> reg<x86.zmm>
+  %160 = vfmadd231ps %159, %154, %141
+  %161 = copy %158 : reg<x86.zmm> -> reg<x86.zmm>
+  %162 = vfmadd231ps %161, %160, %142
+  %163 = copy %156 : reg<x86.zmm> -> reg<x86.zmm>
+  %164 = vfmadd231ps %163, %162, %142
+  %165 = vmulps %140, %164
+  %166 = vpandd %135, %106
+  %167 = avx512.vpslld.zmm %166, 31
+  %168 = vpxord %165, %167
+  %170 = vcmpps %140, %109, 0
+  %171 = vcmpps %136, %109, 0
+  %172 = vpxord %123, %167
+  %173 = vblendmps %170, %109, %168
+  %174 = vblendmps %171, %172, %173
+  %175 = vblendmps %95, %127, %174
+  %176 = mov.imm32 2143289344
+  %177 = vpbroadcastd %176
+  %result = vblendmps %92, %177, %175
+  return %result
+}

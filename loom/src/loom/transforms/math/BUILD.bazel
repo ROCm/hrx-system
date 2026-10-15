@@ -4,12 +4,27 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_generated_file",
+)
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+exports_files(["approximate_f32_recipes.loom"])
+
+loom_generated_file(
+    name = "approximate_f32_recipe_tables_gen",
+    args = ["--input=$(location approximate_f32_recipes.loom)"],
+    generator = "//loom/py/loom/gen/math:recipe_program_generator",
+    inputs = ["approximate_f32_recipes.loom"],
+    output = "approximate_f32_recipe_tables.inl",
+    output_flag = "--output=",
 )
 
 loom_cc_library(
@@ -21,8 +36,11 @@ loom_cc_library(
         "patterns.c",
         "patterns.h",
         "patterns_elementwise.c",
+        "recipe_program.c",
+        "recipe_program.h",
     ],
     hdrs = ["legalize.h"],
+    textual_hdrs = [":approximate_f32_recipe_tables.inl"],
     deps = [
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

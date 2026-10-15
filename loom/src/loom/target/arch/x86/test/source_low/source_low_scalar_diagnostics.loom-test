@@ -3,7 +3,7 @@
 x86.target<avx2> @target
 
 func.def target(@target) @scalar_powf_rejected_by_math_policy(%base: f32, %exponent: f32) -> (f32) {
-  // ERROR@+1: LOWERING/036 {op_name="scalar.powf", phase_name="legalize-math", policy_name="x86-math", math_op="powf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
+  // ERROR@+1: LOWERING/036 {op_name="scalar.powf", phase_name="legalize-math", policy_name="x86-math", math_op="powf", lane_domain="scalar", element_type="f32", constraint_key="math.basis.log2"}
   %result = scalar.powf<afn> %base, %exponent : f32
   func.return %result : f32
 }
@@ -12,9 +12,9 @@ func.def target(@target) @scalar_powf_rejected_by_math_policy(%base: f32, %expon
 
 x86.target<avx2> @target
 
-func.def target(@target) @scalar_tanhf_rejected_by_math_policy(%input: f32) -> (f32) {
-  // ERROR@+1: LOWERING/036 {op_name="scalar.tanhf", phase_name="legalize-math", policy_name="x86-math", math_op="tanhf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
-  %result = scalar.tanhf<afn> %input : f32
+func.def target(@target) @exact_scalar_tanhf_rejected_by_math_policy(%input: f32) -> (f32) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.tanhf", phase_name="legalize-math", policy_name="x86-math", math_op="tanhf", lane_domain="scalar", element_type="f32", constraint_key="math.tanh.exact_f32"}
+  %result = scalar.tanhf %input : f32
   func.return %result : f32
 }
 

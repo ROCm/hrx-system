@@ -21,9 +21,7 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    c_vector_scalarization
-  MAIN
-    "c_vector_scalarization.py"
+    c_vector_scalarization_lib
   SRCS
     "c_vector_scalarization.py"
   DEPS
@@ -31,6 +29,15 @@ iree_py_library(
     loom::py::loom::dialect::index::index
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::vector::vector
+)
+
+iree_py_library(
+  NAME
+    c_vector_scalarization
+  MAIN_MODULE
+    "loom.gen.ops.c_vector_scalarization"
+  DEPS
+    loom::py::loom::gen::ops::c_vector_scalarization_lib
 )
 
 iree_py_library(
@@ -599,16 +606,12 @@ iree_py_test(
   MAIN
     "../../tools/pytest_style_runner.py"
   SRCS
-    "c_vector_scalarization.py"
     "c_vector_scalarization_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.ops.c_vector_scalarization_test"
   DEPS
-    loom::py::loom::gen::ops::c_tables
-    loom::py::loom::dialect::index::index
-    loom::py::loom::dialect::scalar::scalar
-    loom::py::loom::dialect::vector::vector
+    loom::py::loom::gen::ops::c_vector_scalarization_lib
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

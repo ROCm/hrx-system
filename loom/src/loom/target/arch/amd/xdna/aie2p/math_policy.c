@@ -107,6 +107,19 @@ static const loom_target_math_evaluation_t
 
 static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     {
+        .math_op = LOOM_TARGET_MATH_OP_EXP2F,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
+        .lane_domains = LOOM_AIE2P_MATH_LANE_DOMAIN_SET_ALL,
+        .shape = LOOM_AIE2P_MATH_SHAPE_STATIC_ELEMENTS,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = INT64_MAX,
+        .element_constraint_key = IREE_SVL("math.element.f32"),
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_static_f32_exp2"),
+        .form_constraint_key = IREE_SVL("math.op.native_bf16_exp2"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.exp2.exact_f32"),
+    },
+    {
         .math_op = LOOM_TARGET_MATH_OP_SQRTF,
         .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domains = LOOM_AIE2P_MATH_LANE_DOMAIN_SET_SCALAR,

@@ -69,17 +69,22 @@ C_TABLES_SRCS = [
     "type_registry.py",
 ]
 
-iree_py_binary(
-    name = "c_vector_scalarization",
+iree_py_library(
+    name = "c_vector_scalarization_lib",
     srcs = ["c_vector_scalarization.py"],
-    main = "c_vector_scalarization.py",
-    visibility = GENERATOR_VISIBILITY,
     deps = [
         ":c_tables",
         "//loom/py/loom/dialect/index",
         "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/dialect/vector",
     ],
+)
+
+iree_py_binary(
+    name = "c_vector_scalarization",
+    main_module = "loom.gen.ops.c_vector_scalarization",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [":c_vector_scalarization_lib"],
 )
 
 C_TABLES_LIBRARY_DEPS = [
@@ -463,18 +468,12 @@ iree_py_test(
 iree_py_test(
     name = "c_vector_scalarization_test",
     srcs = [
-        "c_vector_scalarization.py",
         "c_vector_scalarization_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
     args = ["loom.gen.ops.c_vector_scalarization_test"],
     main = "pytest_style_runner.py",
-    deps = [
-        ":c_tables",
-        "//loom/py/loom/dialect/index",
-        "//loom/py/loom/dialect/scalar",
-        "//loom/py/loom/dialect/vector",
-    ],
+    deps = [":c_vector_scalarization_lib"],
 )
 
 iree_py_test(

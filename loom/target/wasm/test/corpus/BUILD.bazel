@@ -316,7 +316,7 @@ loom_corpus_build(
             "numeric/float/activations.loom:@softplus_observations": "LOWERING/036",
             "numeric/float/exponential.loom:@exponential_boundary_observations": "LOWERING/036",
             "numeric/float/exponential.loom:@exponential_entropy_observations": "LOWERING/036",
-            "numeric/float/exponential.loom:@power_of_two_observations": "TARGET/001",
+            "numeric/float/exponential.loom:@power_of_two_observations": "LOWERING/036",
             "numeric/float/extrema.loom:@float_extrema_f32": "TARGET/003",
             "numeric/float/half_extrema.loom:@half_extrema_pair": "WASM/001",
             "numeric/float/logarithm.loom:@logarithm_boundary_observations": "LOWERING/036",

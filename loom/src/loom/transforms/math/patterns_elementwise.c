@@ -11,6 +11,7 @@
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/math/evaluation.h"
 #include "loom/transforms/math/patterns.h"
+#include "loom/transforms/math/recipe_program.h"
 
 typedef iree_status_t (*loom_math_legalize_binary_build_fn_t)(
     loom_builder_t* builder, uint8_t instance_flags, loom_value_id_t lhs,
@@ -898,6 +899,17 @@ static iree_status_t loom_math_legalize_build_evaluated_recipe(
     case LOOM_TARGET_MATH_RECIPE_RSQRT_SQRT_DIV:
       return loom_math_legalize_build_rsqrt_sqrt_div(&rewriter->builder, source,
                                                      out_value);
+    case LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXP2_F32:
+      return loom_math_recipe_program_evaluate(
+          source, LOOM_MATH_RECIPE_PROGRAM_EXP2_F32, &source->input, out_value);
+    case LOOM_TARGET_MATH_RECIPE_APPROXIMATE_SIN_TURNS_F32:
+      return loom_math_recipe_program_evaluate(
+          source, LOOM_MATH_RECIPE_PROGRAM_SIN_TURNS_F32, &source->input,
+          out_value);
+    case LOOM_TARGET_MATH_RECIPE_APPROXIMATE_COS_TURNS_F32:
+      return loom_math_recipe_program_evaluate(
+          source, LOOM_MATH_RECIPE_PROGRAM_COS_TURNS_F32, &source->input,
+          out_value);
     case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND:
       IREE_ASSERT_UNREACHABLE("recipe is not elementwise math legalization");
       IREE_BUILTIN_UNREACHABLE();
@@ -960,6 +972,9 @@ static bool loom_math_legalize_elementwise_recipe_is_supported(
     case LOOM_TARGET_MATH_RECIPE_GELU_ERF_F32:
     case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_F32:
     case LOOM_TARGET_MATH_RECIPE_RSQRT_SQRT_DIV:
+    case LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXP2_F32:
+    case LOOM_TARGET_MATH_RECIPE_APPROXIMATE_SIN_TURNS_F32:
+    case LOOM_TARGET_MATH_RECIPE_APPROXIMATE_COS_TURNS_F32:
     case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND:
       return true;
     case LOOM_TARGET_MATH_RECIPE_UNKNOWN:

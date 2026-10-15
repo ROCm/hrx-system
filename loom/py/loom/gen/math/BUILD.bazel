@@ -1,0 +1,50 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//loom/py/loom/gen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "recipe_program",
+    srcs = [
+        "__init__.py",
+        "recipe_program.py",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/dialect/func",
+        "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/scf",
+        "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/format/text",
+        "//loom/py/loom/gen/ops:c_tables",
+        "//loom/py/loom/gen/ops:c_vector_scalarization_lib",
+        "//loom/py/loom/gen/support",
+    ],
+)
+
+iree_py_binary(
+    name = "recipe_program_generator",
+    main_module = "loom.gen.math.recipe_program",
+    visibility = ["//loom/src/loom/transforms/math:__pkg__"],
+    deps = [":recipe_program"],
+)
+
+iree_py_test(
+    name = "recipe_program_test",
+    srcs = [
+        "recipe_program_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.math.recipe_program_test"],
+    data = ["//loom/src/loom/transforms/math:approximate_f32_recipes.loom"],
+    main = "pytest_style_runner.py",
+    deps = [":recipe_program"],
+)

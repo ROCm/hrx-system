@@ -184,7 +184,7 @@ loom_corpus_build(
     "loom::target::wasm::simd128"
     "numeric/float/exponential.loom"
     "@power_of_two_observations"
-    "TARGET/001"
+    "LOWERING/036"
     "loom::target::wasm::simd128"
     "numeric/float/extrema.loom"
     "@float_extrema_f32"

@@ -31,7 +31,8 @@ static bool loom_spirv_math_op_is_native_arithmetic(
 
 static bool loom_spirv_math_op_is_approximate_transcendental(
     loom_target_math_op_t math_op) {
-  return math_op == LOOM_TARGET_MATH_OP_EXPF ||
+  return math_op == LOOM_TARGET_MATH_OP_EXP2F ||
+         math_op == LOOM_TARGET_MATH_OP_EXPF ||
          math_op == LOOM_TARGET_MATH_OP_LOGF ||
          math_op == LOOM_TARGET_MATH_OP_LOG2F;
 }

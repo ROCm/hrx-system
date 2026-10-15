@@ -53,7 +53,7 @@ func.def target(@vm) @wide_exponential(%value: f64) -> (f64) {
 vm.target<core> @vm
 
 func.def target(@vm) @exact_exp2(%value: f32) -> (f32) {
-  // ERROR@+1: TARGET/003 {target_key="vm", export_name="exact_exp2", config_key="vm", function_name="exact_exp2", op_name="scalar.exp2f", subject_role="flags", subject_name="fastmath", constraint_key="has_all.afn"}
+  // ERROR@+1: LOWERING/036 {op_name="scalar.exp2f", phase_name="legalize-math", policy_name="vm-math", math_op="exp2f", lane_domain="scalar", element_type="f32", constraint_key="math.exp2.afn_f32"}
   %result = scalar.exp2f %value : f32
   func.return %result : f32
 }
@@ -63,7 +63,7 @@ func.def target(@vm) @exact_exp2(%value: f32) -> (f32) {
 vm.target<core> @vm
 
 func.def target(@vm) @wide_exp2(%value: f64) -> (f64) {
-  // ERROR@+1: TARGET/002 {target_key="vm", export_name="wide_exp2", config_key="vm", function_name="wide_exp2", op_name="scalar.exp2f", field_name="input", actual_type="f64", expected_type="f32"}
+  // ERROR@+1: LOWERING/036 {op_name="scalar.exp2f", phase_name="legalize-math", policy_name="vm-math", math_op="exp2f", lane_domain="scalar", element_type="f64", constraint_key="math.exp2.afn_f32"}
   %result = scalar.exp2f<afn> %value : f64
   func.return %result : f64
 }
