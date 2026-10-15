@@ -67,7 +67,7 @@ class RequestCheckTest(unittest.TestCase):
             },
         }
         self.tokenizer = self.directory / "tokenizer.json"
-        self.tokenizer.write_text(json.dumps(tokenizer))
+        self.tokenizer.write_text(json.dumps(tokenizer), encoding="utf-8", newline="\n")
         self.model = self.directory / "model"
         self.model.mkdir()
 
@@ -77,7 +77,9 @@ class RequestCheckTest(unittest.TestCase):
         (self.model / "control.loom").write_bytes(source.read_bytes())
         request_path = self.directory / "request.json"
         request_path.write_text(
-            request if isinstance(request, str) else json.dumps(request)
+            request if isinstance(request, str) else json.dumps(request),
+            encoding="utf-8",
+            newline="\n",
         )
         defaults_json = (
             defaults if isinstance(defaults, str) else json.dumps(defaults or {})
@@ -93,9 +95,11 @@ class RequestCheckTest(unittest.TestCase):
         ]
         if response is not None:
             response_path = self.directory / "response.txt"
-            response_path.write_text(response)
+            response_path.write_text(response, encoding="utf-8", newline="\n")
             command.append(f"--response={response_path}")
-        return subprocess.run(command, capture_output=True, text=True, check=False)
+        return subprocess.run(
+            command, capture_output=True, encoding="utf-8", check=False
+        )
 
     def success(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -425,7 +429,7 @@ class RequestCheckTest(unittest.TestCase):
         self.assertEqual(result.stdout, "")
 
     def test_invalid_source_output_spans_fail_at_the_boundary(self):
-        source = (PACKAGE / "testdata/portable_chat.loom").read_text()
+        source = (PACKAGE / "testdata/portable_chat.loom").read_text(encoding="utf-8")
         begin = source.index("func.def public @output_next(")
         end = source.index("func.def public @parse_tools(", begin)
         invalid = self.directory / "invalid.loom"
@@ -446,7 +450,11 @@ class RequestCheckTest(unittest.TestCase):
 }}
 
 """
-                invalid.write_text(source[:begin] + output + source[end:])
+                invalid.write_text(
+                    source[:begin] + output + source[end:],
+                    encoding="utf-8",
+                    newline="\n",
+                )
                 result = self.execute(invalid, self.request("portable-chat"), "abc")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("invalid output span", result.stderr)
