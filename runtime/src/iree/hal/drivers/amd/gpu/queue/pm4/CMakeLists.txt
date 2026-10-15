@@ -79,6 +79,7 @@ iree_cc_library(
   PUBLIC
 )
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     submission
@@ -99,6 +100,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::publisher
   PUBLIC
 )
+endif()
 
 iree_cc_library(
   NAME
@@ -118,6 +120,7 @@ iree_cc_library(
   PUBLIC
 )
 
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     submission_test
@@ -138,6 +141,7 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+endif()
 
 iree_cc_test(
   NAME

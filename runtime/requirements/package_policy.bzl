@@ -69,6 +69,7 @@ PACKAGE_POLICIES = [
         packages = [
             "runtime/src/iree/hal/drivers/amd",
             "runtime/src/iree/hal/drivers/amd/fabric",
+            "runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/umq",
             "runtime/src/iree/hal/drivers/amd/xdna",
         ],
         build_requirements = [LIBAMDF],

@@ -19,10 +19,18 @@ iree_amdgpu_target_selectors_flag(
     name = "targets",
 )
 
+# Native device integration requires libamdf; pure image/packet/queue utilities
+# remain available in CPU-only builds.
+_NATIVE_DEVICE_COMPATIBLE_WITH = select({
+    "//libamdf/config:enabled_setting": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
 iree_runtime_cc_library(
     name = "device",
     srcs = ["device.c"],
     hdrs = ["device.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     visibility = ["//runtime/src/iree/hal/drivers/amd:__subpackages__"],
     deps = [
         ":completion",
@@ -54,6 +62,7 @@ iree_runtime_cc_library(
     name = "executable",
     srcs = ["executable.c"],
     hdrs = ["executable.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     visibility = ["//runtime/src/iree/hal/drivers/amd/gpu:__subpackages__"],
     deps = [
         ":context",
@@ -80,6 +89,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "executable_test",
     srcs = ["executable_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":context",
         ":executable",
@@ -146,6 +156,7 @@ iree_runtime_cc_library(
     name = "context",
     srcs = ["context.c"],
     hdrs = ["context.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     visibility = ["//runtime/src/iree/hal/drivers/amd:__subpackages__"],
     deps = [
         "//libamdf:headers",
@@ -159,6 +170,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "context_test",
     srcs = ["context_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":context",
         "//libamdf:headers",
@@ -174,6 +186,7 @@ iree_runtime_cc_library(
     name = "completion",
     srcs = ["completion.c"],
     hdrs = ["completion.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     visibility = ["//runtime/src/iree/hal/drivers/amd/gpu:__subpackages__"],
     deps = [
         ":context",
@@ -188,6 +201,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "completion_test",
     srcs = ["completion_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":completion",
         ":context",

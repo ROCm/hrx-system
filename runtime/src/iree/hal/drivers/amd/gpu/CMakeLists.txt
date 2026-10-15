@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     device
@@ -41,7 +42,9 @@ iree_cc_library(
     iree::hal::utils::files
   PUBLIC
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     executable
@@ -70,7 +73,9 @@ iree_cc_library(
     iree::hal::memory::maintenance
   PUBLIC
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     executable_test
@@ -96,6 +101,7 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+endif()
 
 iree_cc_library(
   NAME
@@ -144,6 +150,7 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     context
@@ -159,7 +166,9 @@ iree_cc_library(
     iree::hal::drivers::amd::status
   PUBLIC
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     context_test
@@ -174,7 +183,9 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     completion
@@ -191,7 +202,9 @@ iree_cc_library(
     iree::hal::drivers::amd::status
   PUBLIC
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     completion_test
@@ -207,5 +220,6 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

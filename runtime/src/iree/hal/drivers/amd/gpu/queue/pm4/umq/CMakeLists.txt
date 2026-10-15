@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     ring
@@ -24,7 +25,9 @@ iree_cc_library(
     iree::hal::drivers::amd::status
   PUBLIC
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     queue
@@ -61,7 +64,9 @@ iree_cc_library(
     iree::hal::memory::maintenance
   PUBLIC
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     ring_test
@@ -72,8 +77,12 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::queue::pm4::commands
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_binary_benchmark(
   NAME
     ring_benchmark
@@ -84,6 +93,9 @@ iree_cc_binary_benchmark(
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
   TESTONLY
+  LABELS
+    "iree-build-requirement=libamdf"
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
