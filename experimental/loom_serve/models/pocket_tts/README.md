@@ -150,11 +150,10 @@ input or an indivisible sentence fails explicitly. Text packets retain token
 IDs, the final post-EOS tail, and the generation bound; output is never silently
 truncated to fit a request allocation.
 
-Literal tokenizer controls such as `<s>`, `<pad>`, and `</s>` currently expose a
-shared tokenizer boundary error: prefix markers can be omitted after an
-extracted control token, changing subsequent chunk token counts. Exact reference
-chunking for these inputs requires the runtime to restart declared normalization
-independently of pre-tokenizer state.
+Literal tokenizer controls such as `<s>`, `<pad>`, and `</s>` retain their
+registered token IDs. Each ordinary text span around a raw control token receives
+the tokenizer's declared normalization, including its prefix marker. These
+markers participate in chunk sizing and final model input.
 
 Each chunk restores its selected voice's retained prefix and starts fresh codec
 history. Its chunk index participates in sampling, while the published audio
