@@ -1,0 +1,38 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Projection reduces each packed row independently. Shared BF16 weights and
+// biases have zero stride; each output element has one writer.
+template.decl @pocket.element() -> (index)
+
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.decl pure @pocket.batch.origin(%row: index, %offset: offset, %stride: offset) -> (offset)
+
+template.decl @pocket.projection(%wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %row: index, %time: index, %input: buffer, %weight: buffer, %bias: buffer, %input_origin: offset, %weight_origin: offset, %bias_origin: offset) -> (f32)
+
+template.decl @pocket.batch.project(%membership: buffer, %wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset)
+
+template.def<@pocket.batch.project> device @pocket_batch_project(%membership: buffer, %wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %element = template.apply<@pocket.element>() : () -> (index)
+    %live = index.cmp ult, %element, %outputs : index
+    scf.if %live {
+      %row = index.assume %element [ge(%element, 0), lt(%element, %outputs)] : index
+      %time_value = kernel.workgroup.id<y> : index
+      %time = index.assume %time_value [ge(%time_value, 0), lt(%time_value, %times)] : index
+      %input_origin = template.apply<@pocket.batch.origin>(%packed, %input_offset, %input_stride) pure : (index, offset, offset) -> (offset)
+      %weight_origin = template.apply<@pocket.batch.origin>(%packed, %weight_offset, %weight_stride) pure : (index, offset, offset) -> (offset)
+      %bias_origin = template.apply<@pocket.batch.origin>(%packed, %bias_offset, %bias_stride) pure : (index, offset, offset) -> (offset)
+      %output_origin = template.apply<@pocket.batch.origin>(%packed, %output_offset, %output_stride) pure : (index, offset, offset) -> (offset)
+      %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias, %input_origin, %weight_origin, %bias_origin) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset) -> (f32)
+      %view = buffer.view %output[%output_origin] : buffer -> view<[%outputs]x[%times]xf32>
+      view.store %result, %view[%row, %time] : f32, view<[%outputs]x[%times]xf32>
+    }
+  }
+  template.return
+}

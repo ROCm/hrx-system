@@ -1,0 +1,930 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Reordered active rows use independent packed scratch and resident state.
+// Every tensor has a nonzero origin and padding between rows. Comparing the
+// complete banks with isolated calls also observes all guards and inactive rows.
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.def target(@pocket) @batch_metadata() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%count: i32, %first: i32, %second: i32, %third: i32, %fourth: i32, %membership: buffer) {
+  %origin = index.constant 0 : offset
+  %map = buffer.view %membership[%origin] : buffer -> view<5xi32>
+  view.store %count, %map[0] : i32, view<5xi32>
+  view.store %first, %map[1] : i32, view<5xi32>
+  view.store %second, %map[2] : i32, view<5xi32>
+  view.store %third, %map[3] : i32, view<5xi32>
+  view.store %fourth, %map[4] : i32, view<5xi32>
+  kernel.return
+}
+
+template.decl @pocket.batch.previous_latent(%membership: buffer, %elements: index, %previous_storage: buffer, %position_storage: buffer, %bos_storage: buffer, %y_storage: buffer, %previous_offset: offset, %previous_stride: offset, %position_offset: offset, %position_stride: offset, %bos_offset: offset, %bos_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.previous_latent.body(%elements: index, %previous_storage: buffer, %position_storage: buffer, %bos_storage: buffer, %y_storage: buffer, %previous_origin: offset, %position_origin: offset, %bos_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_previous_latent() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%previous_storage: buffer, %position_storage: buffer, %bos_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 32 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.previous_latent.body>(%elements, %previous_storage, %position_storage, %bos_storage, %y_storage, %origin, %origin, %origin, %origin) : (index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_previous_latent() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %previous_storage: buffer, %position_storage: buffer, %bos_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 32 : index
+  %origin = index.constant 16 : offset
+  %previous_stride = index.constant 156 : offset
+  %position_stride = index.constant 32 : offset
+  %bos_stride = index.constant 0 : offset
+  %y_stride = index.constant 156 : offset
+  template.apply<@pocket.batch.previous_latent>(%membership, %elements, %previous_storage, %position_storage, %bos_storage, %y_storage, %origin, %previous_stride, %origin, %position_stride, %origin, %bos_stride, %origin, %y_stride) : (buffer, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @initialize_previous_latent() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %buffer[%origin] : buffer -> view<52xi32>
+  %value_0 = scalar.constant 0 : i32
+  view.store %value_0, %view[4] : i32, view<52xi32>
+  %value_1 = scalar.constant 16 : i32
+  view.store %value_1, %view[12] : i32, view<52xi32>
+  %value_2 = scalar.constant 32 : i32
+  view.store %value_2, %view[20] : i32, view<52xi32>
+  %value_3 = scalar.constant 48 : i32
+  view.store %value_3, %view[28] : i32, view<52xi32>
+  %value_4 = scalar.constant 64 : i32
+  view.store %value_4, %view[36] : i32, view<52xi32>
+  %value_5 = scalar.constant 80 : i32
+  view.store %value_5, %view[44] : i32, view<52xi32>
+  kernel.return
+}
+
+check.case public @previous_latent_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %previous_seed = check.literal value(100) : i64
+  %actual_previous = check.generate.random.uniform seed(%previous_seed) range(-0.5 to 0.5) : tensor<238xf32>
+  %reference_previous = check.generate.random.uniform seed(%previous_seed) range(-0.5 to 0.5) : tensor<238xf32>
+  %position_seed = check.literal value(101) : i64
+  %actual_position = check.generate.fill value(-17) : tensor<52xi32>
+  kernel.launch @initialize_previous_latent(%actual_position) : (tensor<52xi32>)
+  %reference_position = check.generate.fill value(-17) : tensor<52xi32>
+  kernel.launch @initialize_previous_latent(%reference_position) : (tensor<52xi32>)
+  %bos_seed = check.literal value(102) : i64
+  %actual_bos = check.generate.random.uniform seed(%bos_seed) range(-0.5 to 0.5) : tensor<54xbf16>
+  %reference_bos = check.generate.random.uniform seed(%bos_seed) range(-0.5 to 0.5) : tensor<54xbf16>
+  %y_seed = check.literal value(103) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<160xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<160xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_previous_latent(%membership, %actual_previous, %actual_position, %actual_bos, %actual_y) : (tensor<5xi32>, tensor<238xf32>, tensor<52xi32>, tensor<54xbf16>, tensor<160xf32>)
+  %previous_0_0 = check.tensor.view %reference_previous offset(796) : tensor<238xf32> -> tensor<32xf32>
+  %position_0_0 = check.tensor.view %reference_position offset(176) : tensor<52xi32> -> tensor<1xi32>
+  %bos_0_0 = check.tensor.view %reference_bos offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_previous_latent(%previous_0_0, %position_0_0, %bos_0_0, %y_0_0) : (tensor<32xf32>, tensor<1xi32>, tensor<32xbf16>, tensor<32xf32>)
+  %previous_0_1 = check.tensor.view %reference_previous offset(16) : tensor<238xf32> -> tensor<32xf32>
+  %position_0_1 = check.tensor.view %reference_position offset(16) : tensor<52xi32> -> tensor<1xi32>
+  %bos_0_1 = check.tensor.view %reference_bos offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(172) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_previous_latent(%previous_0_1, %position_0_1, %bos_0_1, %y_0_1) : (tensor<32xf32>, tensor<1xi32>, tensor<32xbf16>, tensor<32xf32>)
+  %previous_0_2 = check.tensor.view %reference_previous offset(172) : tensor<238xf32> -> tensor<32xf32>
+  %position_0_2 = check.tensor.view %reference_position offset(48) : tensor<52xi32> -> tensor<1xi32>
+  %bos_0_2 = check.tensor.view %reference_bos offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(328) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_previous_latent(%previous_0_2, %position_0_2, %bos_0_2, %y_0_2) : (tensor<32xf32>, tensor<1xi32>, tensor<32xbf16>, tensor<32xf32>)
+  check.expect.bitwise actual(%actual_previous) expected(%reference_previous) : tensor<238xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  check.expect.bitwise actual(%actual_bos) expected(%reference_bos) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<160xf32>
+  kernel.launch @batch_metadata(%word_2, %word_1, %word_5, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_previous_latent(%membership, %actual_previous, %actual_position, %actual_bos, %actual_y) : (tensor<5xi32>, tensor<238xf32>, tensor<52xi32>, tensor<54xbf16>, tensor<160xf32>)
+  %previous_1_0 = check.tensor.view %reference_previous offset(172) : tensor<238xf32> -> tensor<32xf32>
+  %position_1_0 = check.tensor.view %reference_position offset(48) : tensor<52xi32> -> tensor<1xi32>
+  %bos_1_0 = check.tensor.view %reference_bos offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_1_0 = check.tensor.view %reference_y offset(16) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_previous_latent(%previous_1_0, %position_1_0, %bos_1_0, %y_1_0) : (tensor<32xf32>, tensor<1xi32>, tensor<32xbf16>, tensor<32xf32>)
+  %previous_1_1 = check.tensor.view %reference_previous offset(796) : tensor<238xf32> -> tensor<32xf32>
+  %position_1_1 = check.tensor.view %reference_position offset(176) : tensor<52xi32> -> tensor<1xi32>
+  %bos_1_1 = check.tensor.view %reference_bos offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_1_1 = check.tensor.view %reference_y offset(172) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_previous_latent(%previous_1_1, %position_1_1, %bos_1_1, %y_1_1) : (tensor<32xf32>, tensor<1xi32>, tensor<32xbf16>, tensor<32xf32>)
+  check.expect.bitwise actual(%actual_previous) expected(%reference_previous) : tensor<238xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  check.expect.bitwise actual(%actual_bos) expected(%reference_bos) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<160xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_previous_latent(%membership, %actual_previous, %actual_position, %actual_bos, %actual_y) : (tensor<5xi32>, tensor<238xf32>, tensor<52xi32>, tensor<54xbf16>, tensor<160xf32>)
+  check.expect.bitwise actual(%actual_previous) expected(%reference_previous) : tensor<238xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  check.expect.bitwise actual(%actual_bos) expected(%reference_bos) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<160xf32>
+  check.return
+}
+
+template.decl @pocket.batch.advance(%membership: buffer, %elements: index, %increment: i32, %position_storage: buffer, %position_offset: offset, %position_stride: offset)
+
+template.decl @pocket.advance.body(%elements: index, %increment: i32, %position_storage: buffer, %position_origin: offset)
+
+kernel.def target(@pocket) @isolated_advance() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%position_storage: buffer) {
+  %elements = index.constant 1 : index
+  %increment = scalar.constant 16 : i32
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.advance.body>(%elements, %increment, %position_storage, %origin) : (index, i32, buffer, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_advance() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %position_storage: buffer) {
+  %elements = index.constant 1 : index
+  %increment = scalar.constant 16 : i32
+  %origin = index.constant 16 : offset
+  %position_stride = index.constant 32 : offset
+  template.apply<@pocket.batch.advance>(%membership, %elements, %increment, %position_storage, %origin, %position_stride) : (buffer, index, i32, buffer, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @initialize_advance() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %buffer[%origin] : buffer -> view<52xi32>
+  %value_0 = scalar.constant 0 : i32
+  view.store %value_0, %view[4] : i32, view<52xi32>
+  %value_1 = scalar.constant 16 : i32
+  view.store %value_1, %view[12] : i32, view<52xi32>
+  %value_2 = scalar.constant 32 : i32
+  view.store %value_2, %view[20] : i32, view<52xi32>
+  %value_3 = scalar.constant 48 : i32
+  view.store %value_3, %view[28] : i32, view<52xi32>
+  %value_4 = scalar.constant 64 : i32
+  view.store %value_4, %view[36] : i32, view<52xi32>
+  %value_5 = scalar.constant 80 : i32
+  view.store %value_5, %view[44] : i32, view<52xi32>
+  kernel.return
+}
+
+check.case public @advance_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %position_seed = check.literal value(100) : i64
+  %actual_position = check.generate.fill value(-17) : tensor<52xi32>
+  kernel.launch @initialize_advance(%actual_position) : (tensor<52xi32>)
+  %reference_position = check.generate.fill value(-17) : tensor<52xi32>
+  kernel.launch @initialize_advance(%reference_position) : (tensor<52xi32>)
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_advance(%membership, %actual_position) : (tensor<5xi32>, tensor<52xi32>)
+  %position_0_0 = check.tensor.view %reference_position offset(176) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_advance(%position_0_0) : (tensor<1xi32>)
+  %position_0_1 = check.tensor.view %reference_position offset(16) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_advance(%position_0_1) : (tensor<1xi32>)
+  %position_0_2 = check.tensor.view %reference_position offset(48) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_advance(%position_0_2) : (tensor<1xi32>)
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  kernel.launch @batch_metadata(%word_2, %word_1, %word_5, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_advance(%membership, %actual_position) : (tensor<5xi32>, tensor<52xi32>)
+  %position_1_0 = check.tensor.view %reference_position offset(48) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_advance(%position_1_0) : (tensor<1xi32>)
+  %position_1_1 = check.tensor.view %reference_position offset(176) : tensor<52xi32> -> tensor<1xi32>
+  kernel.launch @isolated_advance(%position_1_1) : (tensor<1xi32>)
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_advance(%membership, %actual_position) : (tensor<5xi32>, tensor<52xi32>)
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  check.return
+}
+
+template.decl @pocket.batch.time_embedding(%membership: buffer, %elements: index, %time_storage: buffer, %frequencies_storage: buffer, %y_storage: buffer, %time_offset: offset, %time_stride: offset, %frequencies_offset: offset, %frequencies_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.time_embedding.body(%elements: index, %time_storage: buffer, %frequencies_storage: buffer, %y_storage: buffer, %time_origin: offset, %frequencies_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_time_embedding() {
+  %groups = index.constant 2 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%time_storage: buffer, %frequencies_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 256 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.time_embedding.body>(%elements, %time_storage, %frequencies_storage, %y_storage, %origin, %origin, %origin) : (index, buffer, buffer, buffer, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_time_embedding() {
+  %groups = index.constant 2 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %time_storage: buffer, %frequencies_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 256 : index
+  %origin = index.constant 16 : offset
+  %time_stride = index.constant 32 : offset
+  %frequencies_stride = index.constant 0 : offset
+  %y_stride = index.constant 1052 : offset
+  template.apply<@pocket.batch.time_embedding>(%membership, %elements, %time_storage, %frequencies_storage, %y_storage, %origin, %time_stride, %origin, %frequencies_stride, %origin, %y_stride) : (buffer, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @time_embedding_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %time_seed = check.literal value(100) : i64
+  %actual_time = check.generate.random.uniform seed(%time_seed) range(-0.5 to 0.5) : tensor<36xf32>
+  %reference_time = check.generate.random.uniform seed(%time_seed) range(-0.5 to 0.5) : tensor<36xf32>
+  %frequencies_seed = check.literal value(101) : i64
+  %actual_frequencies = check.generate.random.uniform seed(%frequencies_seed) range(-0.5 to 0.5) : tensor<150xbf16>
+  %reference_frequencies = check.generate.random.uniform seed(%frequencies_seed) range(-0.5 to 0.5) : tensor<150xbf16>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<1056xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<1056xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_time_embedding(%membership, %actual_time, %actual_frequencies, %actual_y) : (tensor<5xi32>, tensor<36xf32>, tensor<150xbf16>, tensor<1056xf32>)
+  %time_0_0 = check.tensor.view %reference_time offset(16) : tensor<36xf32> -> tensor<1xf32>
+  %frequencies_0_0 = check.tensor.view %reference_frequencies offset(16) : tensor<150xbf16> -> tensor<128xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<1056xf32> -> tensor<256xf32>
+  kernel.launch @isolated_time_embedding(%time_0_0, %frequencies_0_0, %y_0_0) : (tensor<1xf32>, tensor<128xbf16>, tensor<256xf32>)
+  %time_0_1 = check.tensor.view %reference_time offset(48) : tensor<36xf32> -> tensor<1xf32>
+  %frequencies_0_1 = check.tensor.view %reference_frequencies offset(16) : tensor<150xbf16> -> tensor<128xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(1068) : tensor<1056xf32> -> tensor<256xf32>
+  kernel.launch @isolated_time_embedding(%time_0_1, %frequencies_0_1, %y_0_1) : (tensor<1xf32>, tensor<128xbf16>, tensor<256xf32>)
+  %time_0_2 = check.tensor.view %reference_time offset(80) : tensor<36xf32> -> tensor<1xf32>
+  %frequencies_0_2 = check.tensor.view %reference_frequencies offset(16) : tensor<150xbf16> -> tensor<128xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(2120) : tensor<1056xf32> -> tensor<256xf32>
+  kernel.launch @isolated_time_embedding(%time_0_2, %frequencies_0_2, %y_0_2) : (tensor<1xf32>, tensor<128xbf16>, tensor<256xf32>)
+  check.expect.bitwise actual(%actual_time) expected(%reference_time) : tensor<36xf32>
+  check.expect.bitwise actual(%actual_frequencies) expected(%reference_frequencies) : tensor<150xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<1056xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_time_embedding(%membership, %actual_time, %actual_frequencies, %actual_y) : (tensor<5xi32>, tensor<36xf32>, tensor<150xbf16>, tensor<1056xf32>)
+  check.expect.bitwise actual(%actual_time) expected(%reference_time) : tensor<36xf32>
+  check.expect.bitwise actual(%actual_frequencies) expected(%reference_frequencies) : tensor<150xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<1056xf32>
+  check.return
+}
+
+template.decl @pocket.batch.conditioning(%membership: buffer, %elements: index, %c_storage: buffer, %s_storage: buffer, %t_storage: buffer, %y_storage: buffer, %c_offset: offset, %c_stride: offset, %s_offset: offset, %s_stride: offset, %t_offset: offset, %t_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.conditioning.body(%elements: index, %c_storage: buffer, %s_storage: buffer, %t_storage: buffer, %y_storage: buffer, %c_origin: offset, %s_origin: offset, %t_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_conditioning() {
+  %groups = index.constant 4 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%c_storage: buffer, %s_storage: buffer, %t_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.conditioning.body>(%elements, %c_storage, %s_storage, %t_storage, %y_storage, %origin, %origin, %origin, %origin) : (index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_conditioning() {
+  %groups = index.constant 4 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %c_storage: buffer, %s_storage: buffer, %t_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  %origin = index.constant 16 : offset
+  %c_stride = index.constant 2076 : offset
+  %s_stride = index.constant 2076 : offset
+  %t_stride = index.constant 2076 : offset
+  %y_stride = index.constant 2076 : offset
+  template.apply<@pocket.batch.conditioning>(%membership, %elements, %c_storage, %s_storage, %t_storage, %y_storage, %origin, %c_stride, %origin, %s_stride, %origin, %t_stride, %origin, %y_stride) : (buffer, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @conditioning_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %c_seed = check.literal value(100) : i64
+  %actual_c = check.generate.random.uniform seed(%c_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_c = check.generate.random.uniform seed(%c_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %s_seed = check.literal value(101) : i64
+  %actual_s = check.generate.random.uniform seed(%s_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_s = check.generate.random.uniform seed(%s_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %t_seed = check.literal value(102) : i64
+  %actual_t = check.generate.random.uniform seed(%t_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_t = check.generate.random.uniform seed(%t_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %y_seed = check.literal value(103) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_conditioning(%membership, %actual_c, %actual_s, %actual_t, %actual_y) : (tensor<5xi32>, tensor<2080xf32>, tensor<2080xf32>, tensor<2080xf32>, tensor<2080xf32>)
+  %c_0_0 = check.tensor.view %reference_c offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  %s_0_0 = check.tensor.view %reference_s offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  %t_0_0 = check.tensor.view %reference_t offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_conditioning(%c_0_0, %s_0_0, %t_0_0, %y_0_0) : (tensor<512xf32>, tensor<512xf32>, tensor<512xf32>, tensor<512xf32>)
+  %c_0_1 = check.tensor.view %reference_c offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  %s_0_1 = check.tensor.view %reference_s offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  %t_0_1 = check.tensor.view %reference_t offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  %y_0_1 = check.tensor.view %reference_y offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_conditioning(%c_0_1, %s_0_1, %t_0_1, %y_0_1) : (tensor<512xf32>, tensor<512xf32>, tensor<512xf32>, tensor<512xf32>)
+  %c_0_2 = check.tensor.view %reference_c offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  %s_0_2 = check.tensor.view %reference_s offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  %t_0_2 = check.tensor.view %reference_t offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  %y_0_2 = check.tensor.view %reference_y offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_conditioning(%c_0_2, %s_0_2, %t_0_2, %y_0_2) : (tensor<512xf32>, tensor<512xf32>, tensor<512xf32>, tensor<512xf32>)
+  check.expect.bitwise actual(%actual_c) expected(%reference_c) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_s) expected(%reference_s) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_t) expected(%reference_t) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<2080xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_conditioning(%membership, %actual_c, %actual_s, %actual_t, %actual_y) : (tensor<5xi32>, tensor<2080xf32>, tensor<2080xf32>, tensor<2080xf32>, tensor<2080xf32>)
+  check.expect.bitwise actual(%actual_c) expected(%reference_c) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_s) expected(%reference_s) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_t) expected(%reference_t) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<2080xf32>
+  check.return
+}
+
+template.decl @pocket.batch.modulation(%membership: buffer, %elements: index, %x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %modulation_offset: offset, %modulation_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.modulation.body(%elements: index, %x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer, %x_origin: offset, %modulation_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_modulation() {
+  %groups = index.constant 4 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.modulation.body>(%elements, %x_storage, %modulation_storage, %y_storage, %origin, %origin, %origin) : (index, buffer, buffer, buffer, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_modulation() {
+  %groups = index.constant 4 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 2076 : offset
+  %modulation_stride = index.constant 4124 : offset
+  %y_stride = index.constant 2076 : offset
+  template.apply<@pocket.batch.modulation>(%membership, %elements, %x_storage, %modulation_storage, %y_storage, %origin, %x_stride, %origin, %modulation_stride, %origin, %y_stride) : (buffer, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @modulation_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %modulation_seed = check.literal value(101) : i64
+  %actual_modulation = check.generate.random.uniform seed(%modulation_seed) range(-0.5 to 0.5) : tensor<4128xf32>
+  %reference_modulation = check.generate.random.uniform seed(%modulation_seed) range(-0.5 to 0.5) : tensor<4128xf32>
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_modulation(%membership, %actual_x, %actual_modulation, %actual_y) : (tensor<5xi32>, tensor<2080xf32>, tensor<4128xf32>, tensor<2080xf32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  %modulation_0_0 = check.tensor.view %reference_modulation offset(16) : tensor<4128xf32> -> tensor<1024xf32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_modulation(%x_0_0, %modulation_0_0, %y_0_0) : (tensor<512xf32>, tensor<1024xf32>, tensor<512xf32>)
+  %x_0_1 = check.tensor.view %reference_x offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  %modulation_0_1 = check.tensor.view %reference_modulation offset(4140) : tensor<4128xf32> -> tensor<1024xf32>
+  %y_0_1 = check.tensor.view %reference_y offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_modulation(%x_0_1, %modulation_0_1, %y_0_1) : (tensor<512xf32>, tensor<1024xf32>, tensor<512xf32>)
+  %x_0_2 = check.tensor.view %reference_x offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  %modulation_0_2 = check.tensor.view %reference_modulation offset(8264) : tensor<4128xf32> -> tensor<1024xf32>
+  %y_0_2 = check.tensor.view %reference_y offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_modulation(%x_0_2, %modulation_0_2, %y_0_2) : (tensor<512xf32>, tensor<1024xf32>, tensor<512xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_modulation) expected(%reference_modulation) : tensor<4128xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<2080xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_modulation(%membership, %actual_x, %actual_modulation, %actual_y) : (tensor<5xi32>, tensor<2080xf32>, tensor<4128xf32>, tensor<2080xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_modulation) expected(%reference_modulation) : tensor<4128xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<2080xf32>
+  check.return
+}
+
+template.decl @pocket.batch.gated_residual(%membership: buffer, %elements: index, %x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %modulation_offset: offset, %modulation_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.gated_residual.body(%elements: index, %x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer, %x_origin: offset, %update_origin: offset, %modulation_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_gated_residual() {
+  %groups = index.constant 4 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.gated_residual.body>(%elements, %x_storage, %update_storage, %modulation_storage, %y_storage, %origin, %origin, %origin, %origin) : (index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_gated_residual() {
+  %groups = index.constant 4 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 512 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 2076 : offset
+  %update_stride = index.constant 2076 : offset
+  %modulation_stride = index.constant 6172 : offset
+  %y_stride = index.constant 2076 : offset
+  template.apply<@pocket.batch.gated_residual>(%membership, %elements, %x_storage, %update_storage, %modulation_storage, %y_storage, %origin, %x_stride, %origin, %update_stride, %origin, %modulation_stride, %origin, %y_stride) : (buffer, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @gated_residual_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %update_seed = check.literal value(101) : i64
+  %actual_update = check.generate.random.uniform seed(%update_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_update = check.generate.random.uniform seed(%update_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %modulation_seed = check.literal value(102) : i64
+  %actual_modulation = check.generate.random.uniform seed(%modulation_seed) range(-0.5 to 0.5) : tensor<6176xf32>
+  %reference_modulation = check.generate.random.uniform seed(%modulation_seed) range(-0.5 to 0.5) : tensor<6176xf32>
+  %y_seed = check.literal value(103) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<2080xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_gated_residual(%membership, %actual_x, %actual_update, %actual_modulation, %actual_y) : (tensor<5xi32>, tensor<2080xf32>, tensor<2080xf32>, tensor<6176xf32>, tensor<2080xf32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  %update_0_0 = check.tensor.view %reference_update offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  %modulation_0_0 = check.tensor.view %reference_modulation offset(16) : tensor<6176xf32> -> tensor<1536xf32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_gated_residual(%x_0_0, %update_0_0, %modulation_0_0, %y_0_0) : (tensor<512xf32>, tensor<512xf32>, tensor<1536xf32>, tensor<512xf32>)
+  %x_0_1 = check.tensor.view %reference_x offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  %update_0_1 = check.tensor.view %reference_update offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  %modulation_0_1 = check.tensor.view %reference_modulation offset(6188) : tensor<6176xf32> -> tensor<1536xf32>
+  %y_0_1 = check.tensor.view %reference_y offset(2092) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_gated_residual(%x_0_1, %update_0_1, %modulation_0_1, %y_0_1) : (tensor<512xf32>, tensor<512xf32>, tensor<1536xf32>, tensor<512xf32>)
+  %x_0_2 = check.tensor.view %reference_x offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  %update_0_2 = check.tensor.view %reference_update offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  %modulation_0_2 = check.tensor.view %reference_modulation offset(12360) : tensor<6176xf32> -> tensor<1536xf32>
+  %y_0_2 = check.tensor.view %reference_y offset(4168) : tensor<2080xf32> -> tensor<512xf32>
+  kernel.launch @isolated_gated_residual(%x_0_2, %update_0_2, %modulation_0_2, %y_0_2) : (tensor<512xf32>, tensor<512xf32>, tensor<1536xf32>, tensor<512xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_update) expected(%reference_update) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_modulation) expected(%reference_modulation) : tensor<6176xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<2080xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_gated_residual(%membership, %actual_x, %actual_update, %actual_modulation, %actual_y) : (tensor<5xi32>, tensor<2080xf32>, tensor<2080xf32>, tensor<6176xf32>, tensor<2080xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_update) expected(%reference_update) : tensor<2080xf32>
+  check.expect.bitwise actual(%actual_modulation) expected(%reference_modulation) : tensor<6176xf32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<2080xf32>
+  check.return
+}
+
+template.decl @pocket.batch.latent_output(%membership: buffer, %elements: index, %noise_storage: buffer, %delta_storage: buffer, %previous_storage: buffer, %scale_storage: buffer, %mean_storage: buffer, %y_storage: buffer, %noise_offset: offset, %noise_stride: offset, %delta_offset: offset, %delta_stride: offset, %previous_offset: offset, %previous_stride: offset, %scale_offset: offset, %scale_stride: offset, %mean_offset: offset, %mean_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.latent_output.body(%elements: index, %noise_storage: buffer, %delta_storage: buffer, %previous_storage: buffer, %scale_storage: buffer, %mean_storage: buffer, %y_storage: buffer, %noise_origin: offset, %delta_origin: offset, %previous_origin: offset, %scale_origin: offset, %mean_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_latent_output() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%noise_storage: buffer, %delta_storage: buffer, %previous_storage: buffer, %scale_storage: buffer, %mean_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 32 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.latent_output.body>(%elements, %noise_storage, %delta_storage, %previous_storage, %scale_storage, %mean_storage, %y_storage, %origin, %origin, %origin, %origin, %origin, %origin) : (index, buffer, buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_latent_output() {
+  %groups = index.constant 1 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %noise_storage: buffer, %delta_storage: buffer, %previous_storage: buffer, %scale_storage: buffer, %mean_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 32 : index
+  %origin = index.constant 16 : offset
+  %noise_stride = index.constant 156 : offset
+  %delta_stride = index.constant 156 : offset
+  %previous_stride = index.constant 156 : offset
+  %scale_stride = index.constant 0 : offset
+  %mean_stride = index.constant 0 : offset
+  %y_stride = index.constant 156 : offset
+  template.apply<@pocket.batch.latent_output>(%membership, %elements, %noise_storage, %delta_storage, %previous_storage, %scale_storage, %mean_storage, %y_storage, %origin, %noise_stride, %origin, %delta_stride, %origin, %previous_stride, %origin, %scale_stride, %origin, %mean_stride, %origin, %y_stride) : (buffer, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+check.case public @latent_output_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %noise_seed = check.literal value(100) : i64
+  %actual_noise = check.generate.random.uniform seed(%noise_seed) range(-0.5 to 0.5) : tensor<160xf32>
+  %reference_noise = check.generate.random.uniform seed(%noise_seed) range(-0.5 to 0.5) : tensor<160xf32>
+  %delta_seed = check.literal value(101) : i64
+  %actual_delta = check.generate.random.uniform seed(%delta_seed) range(-0.5 to 0.5) : tensor<160xf32>
+  %reference_delta = check.generate.random.uniform seed(%delta_seed) range(-0.5 to 0.5) : tensor<160xf32>
+  %previous_seed = check.literal value(102) : i64
+  %actual_previous = check.generate.random.uniform seed(%previous_seed) range(-0.5 to 0.5) : tensor<238xf32>
+  %reference_previous = check.generate.random.uniform seed(%previous_seed) range(-0.5 to 0.5) : tensor<238xf32>
+  %scale_seed = check.literal value(103) : i64
+  %actual_scale = check.generate.random.uniform seed(%scale_seed) range(-0.5 to 0.5) : tensor<54xbf16>
+  %reference_scale = check.generate.random.uniform seed(%scale_seed) range(-0.5 to 0.5) : tensor<54xbf16>
+  %mean_seed = check.literal value(104) : i64
+  %actual_mean = check.generate.random.uniform seed(%mean_seed) range(-0.5 to 0.5) : tensor<54xbf16>
+  %reference_mean = check.generate.random.uniform seed(%mean_seed) range(-0.5 to 0.5) : tensor<54xbf16>
+  %y_seed = check.literal value(105) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<160xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<160xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_latent_output(%membership, %actual_noise, %actual_delta, %actual_previous, %actual_scale, %actual_mean, %actual_y) : (tensor<5xi32>, tensor<160xf32>, tensor<160xf32>, tensor<238xf32>, tensor<54xbf16>, tensor<54xbf16>, tensor<160xf32>)
+  %noise_0_0 = check.tensor.view %reference_noise offset(16) : tensor<160xf32> -> tensor<32xf32>
+  %delta_0_0 = check.tensor.view %reference_delta offset(16) : tensor<160xf32> -> tensor<32xf32>
+  %previous_0_0 = check.tensor.view %reference_previous offset(796) : tensor<238xf32> -> tensor<32xf32>
+  %scale_0_0 = check.tensor.view %reference_scale offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %mean_0_0 = check.tensor.view %reference_mean offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_latent_output(%noise_0_0, %delta_0_0, %previous_0_0, %scale_0_0, %mean_0_0, %y_0_0) : (tensor<32xf32>, tensor<32xf32>, tensor<32xf32>, tensor<32xbf16>, tensor<32xbf16>, tensor<32xf32>)
+  %noise_0_1 = check.tensor.view %reference_noise offset(172) : tensor<160xf32> -> tensor<32xf32>
+  %delta_0_1 = check.tensor.view %reference_delta offset(172) : tensor<160xf32> -> tensor<32xf32>
+  %previous_0_1 = check.tensor.view %reference_previous offset(16) : tensor<238xf32> -> tensor<32xf32>
+  %scale_0_1 = check.tensor.view %reference_scale offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %mean_0_1 = check.tensor.view %reference_mean offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(172) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_latent_output(%noise_0_1, %delta_0_1, %previous_0_1, %scale_0_1, %mean_0_1, %y_0_1) : (tensor<32xf32>, tensor<32xf32>, tensor<32xf32>, tensor<32xbf16>, tensor<32xbf16>, tensor<32xf32>)
+  %noise_0_2 = check.tensor.view %reference_noise offset(328) : tensor<160xf32> -> tensor<32xf32>
+  %delta_0_2 = check.tensor.view %reference_delta offset(328) : tensor<160xf32> -> tensor<32xf32>
+  %previous_0_2 = check.tensor.view %reference_previous offset(172) : tensor<238xf32> -> tensor<32xf32>
+  %scale_0_2 = check.tensor.view %reference_scale offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %mean_0_2 = check.tensor.view %reference_mean offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(328) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_latent_output(%noise_0_2, %delta_0_2, %previous_0_2, %scale_0_2, %mean_0_2, %y_0_2) : (tensor<32xf32>, tensor<32xf32>, tensor<32xf32>, tensor<32xbf16>, tensor<32xbf16>, tensor<32xf32>)
+  check.expect.bitwise actual(%actual_noise) expected(%reference_noise) : tensor<160xf32>
+  check.expect.bitwise actual(%actual_delta) expected(%reference_delta) : tensor<160xf32>
+  check.expect.bitwise actual(%actual_previous) expected(%reference_previous) : tensor<238xf32>
+  check.expect.bitwise actual(%actual_scale) expected(%reference_scale) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_mean) expected(%reference_mean) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<160xf32>
+  kernel.launch @batch_metadata(%word_2, %word_1, %word_5, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_latent_output(%membership, %actual_noise, %actual_delta, %actual_previous, %actual_scale, %actual_mean, %actual_y) : (tensor<5xi32>, tensor<160xf32>, tensor<160xf32>, tensor<238xf32>, tensor<54xbf16>, tensor<54xbf16>, tensor<160xf32>)
+  %noise_1_0 = check.tensor.view %reference_noise offset(16) : tensor<160xf32> -> tensor<32xf32>
+  %delta_1_0 = check.tensor.view %reference_delta offset(16) : tensor<160xf32> -> tensor<32xf32>
+  %previous_1_0 = check.tensor.view %reference_previous offset(172) : tensor<238xf32> -> tensor<32xf32>
+  %scale_1_0 = check.tensor.view %reference_scale offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %mean_1_0 = check.tensor.view %reference_mean offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_1_0 = check.tensor.view %reference_y offset(16) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_latent_output(%noise_1_0, %delta_1_0, %previous_1_0, %scale_1_0, %mean_1_0, %y_1_0) : (tensor<32xf32>, tensor<32xf32>, tensor<32xf32>, tensor<32xbf16>, tensor<32xbf16>, tensor<32xf32>)
+  %noise_1_1 = check.tensor.view %reference_noise offset(172) : tensor<160xf32> -> tensor<32xf32>
+  %delta_1_1 = check.tensor.view %reference_delta offset(172) : tensor<160xf32> -> tensor<32xf32>
+  %previous_1_1 = check.tensor.view %reference_previous offset(796) : tensor<238xf32> -> tensor<32xf32>
+  %scale_1_1 = check.tensor.view %reference_scale offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %mean_1_1 = check.tensor.view %reference_mean offset(16) : tensor<54xbf16> -> tensor<32xbf16>
+  %y_1_1 = check.tensor.view %reference_y offset(172) : tensor<160xf32> -> tensor<32xf32>
+  kernel.launch @isolated_latent_output(%noise_1_1, %delta_1_1, %previous_1_1, %scale_1_1, %mean_1_1, %y_1_1) : (tensor<32xf32>, tensor<32xf32>, tensor<32xf32>, tensor<32xbf16>, tensor<32xbf16>, tensor<32xf32>)
+  check.expect.bitwise actual(%actual_noise) expected(%reference_noise) : tensor<160xf32>
+  check.expect.bitwise actual(%actual_delta) expected(%reference_delta) : tensor<160xf32>
+  check.expect.bitwise actual(%actual_previous) expected(%reference_previous) : tensor<238xf32>
+  check.expect.bitwise actual(%actual_scale) expected(%reference_scale) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_mean) expected(%reference_mean) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<160xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_latent_output(%membership, %actual_noise, %actual_delta, %actual_previous, %actual_scale, %actual_mean, %actual_y) : (tensor<5xi32>, tensor<160xf32>, tensor<160xf32>, tensor<238xf32>, tensor<54xbf16>, tensor<54xbf16>, tensor<160xf32>)
+  check.expect.bitwise actual(%actual_noise) expected(%reference_noise) : tensor<160xf32>
+  check.expect.bitwise actual(%actual_delta) expected(%reference_delta) : tensor<160xf32>
+  check.expect.bitwise actual(%actual_previous) expected(%reference_previous) : tensor<238xf32>
+  check.expect.bitwise actual(%actual_scale) expected(%reference_scale) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_mean) expected(%reference_mean) : tensor<54xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<160xf32>
+  check.return
+}
+
+template.decl @pocket.batch.fade(%membership: buffer, %elements: index, %x_storage: buffer, %position_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %position_offset: offset, %position_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.fade.body(%elements: index, %x_storage: buffer, %position_storage: buffer, %y_storage: buffer, %x_origin: offset, %position_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_fade() {
+  %groups = index.constant 15 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%x_storage: buffer, %position_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 1920 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.fade.body>(%elements, %x_storage, %position_storage, %y_storage, %origin, %origin, %origin) : (index, buffer, buffer, buffer, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_fade() {
+  %groups = index.constant 15 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %position_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 1920 : index
+  %origin = index.constant 16 : offset
+  %x_stride = index.constant 7708 : offset
+  %position_stride = index.constant 32 : offset
+  %y_stride = index.constant 7708 : offset
+  template.apply<@pocket.batch.fade>(%membership, %elements, %x_storage, %position_storage, %y_storage, %origin, %x_stride, %origin, %position_stride, %origin, %y_stride) : (buffer, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @initialize_fade() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %buffer[%origin] : buffer -> view<52xi32>
+  %value_0 = scalar.constant 0 : i32
+  view.store %value_0, %view[4] : i32, view<52xi32>
+  %value_1 = scalar.constant 16 : i32
+  view.store %value_1, %view[12] : i32, view<52xi32>
+  %value_2 = scalar.constant 32 : i32
+  view.store %value_2, %view[20] : i32, view<52xi32>
+  %value_3 = scalar.constant 48 : i32
+  view.store %value_3, %view[28] : i32, view<52xi32>
+  %value_4 = scalar.constant 64 : i32
+  view.store %value_4, %view[36] : i32, view<52xi32>
+  %value_5 = scalar.constant 80 : i32
+  view.store %value_5, %view[44] : i32, view<52xi32>
+  kernel.return
+}
+
+check.case public @fade_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %x_seed = check.literal value(100) : i64
+  %actual_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<7712xf32>
+  %reference_x = check.generate.random.uniform seed(%x_seed) range(-0.5 to 0.5) : tensor<7712xf32>
+  %position_seed = check.literal value(101) : i64
+  %actual_position = check.generate.fill value(-17) : tensor<52xi32>
+  kernel.launch @initialize_fade(%actual_position) : (tensor<52xi32>)
+  %reference_position = check.generate.fill value(-17) : tensor<52xi32>
+  kernel.launch @initialize_fade(%reference_position) : (tensor<52xi32>)
+  %y_seed = check.literal value(102) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<7712xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<7712xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_fade(%membership, %actual_x, %actual_position, %actual_y) : (tensor<5xi32>, tensor<7712xf32>, tensor<52xi32>, tensor<7712xf32>)
+  %x_0_0 = check.tensor.view %reference_x offset(16) : tensor<7712xf32> -> tensor<1920xf32>
+  %position_0_0 = check.tensor.view %reference_position offset(176) : tensor<52xi32> -> tensor<1xi32>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<7712xf32> -> tensor<1920xf32>
+  kernel.launch @isolated_fade(%x_0_0, %position_0_0, %y_0_0) : (tensor<1920xf32>, tensor<1xi32>, tensor<1920xf32>)
+  %x_0_1 = check.tensor.view %reference_x offset(7724) : tensor<7712xf32> -> tensor<1920xf32>
+  %position_0_1 = check.tensor.view %reference_position offset(16) : tensor<52xi32> -> tensor<1xi32>
+  %y_0_1 = check.tensor.view %reference_y offset(7724) : tensor<7712xf32> -> tensor<1920xf32>
+  kernel.launch @isolated_fade(%x_0_1, %position_0_1, %y_0_1) : (tensor<1920xf32>, tensor<1xi32>, tensor<1920xf32>)
+  %x_0_2 = check.tensor.view %reference_x offset(15432) : tensor<7712xf32> -> tensor<1920xf32>
+  %position_0_2 = check.tensor.view %reference_position offset(48) : tensor<52xi32> -> tensor<1xi32>
+  %y_0_2 = check.tensor.view %reference_y offset(15432) : tensor<7712xf32> -> tensor<1920xf32>
+  kernel.launch @isolated_fade(%x_0_2, %position_0_2, %y_0_2) : (tensor<1920xf32>, tensor<1xi32>, tensor<1920xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<7712xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<7712xf32>
+  kernel.launch @batch_metadata(%word_2, %word_1, %word_5, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_fade(%membership, %actual_x, %actual_position, %actual_y) : (tensor<5xi32>, tensor<7712xf32>, tensor<52xi32>, tensor<7712xf32>)
+  %x_1_0 = check.tensor.view %reference_x offset(16) : tensor<7712xf32> -> tensor<1920xf32>
+  %position_1_0 = check.tensor.view %reference_position offset(48) : tensor<52xi32> -> tensor<1xi32>
+  %y_1_0 = check.tensor.view %reference_y offset(16) : tensor<7712xf32> -> tensor<1920xf32>
+  kernel.launch @isolated_fade(%x_1_0, %position_1_0, %y_1_0) : (tensor<1920xf32>, tensor<1xi32>, tensor<1920xf32>)
+  %x_1_1 = check.tensor.view %reference_x offset(7724) : tensor<7712xf32> -> tensor<1920xf32>
+  %position_1_1 = check.tensor.view %reference_position offset(176) : tensor<52xi32> -> tensor<1xi32>
+  %y_1_1 = check.tensor.view %reference_y offset(7724) : tensor<7712xf32> -> tensor<1920xf32>
+  kernel.launch @isolated_fade(%x_1_1, %position_1_1, %y_1_1) : (tensor<1920xf32>, tensor<1xi32>, tensor<1920xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<7712xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<7712xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_fade(%membership, %actual_x, %actual_position, %actual_y) : (tensor<5xi32>, tensor<7712xf32>, tensor<52xi32>, tensor<7712xf32>)
+  check.expect.bitwise actual(%actual_x) expected(%reference_x) : tensor<7712xf32>
+  check.expect.bitwise actual(%actual_position) expected(%reference_position) : tensor<52xi32>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<7712xf32>
+  check.return
+}
+
+template.decl @pocket.batch.token(%membership: buffer, %elements: index, %token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer, %token_offset: offset, %token_stride: offset, %bos_offset: offset, %bos_stride: offset, %embedding_offset: offset, %embedding_stride: offset, %y_offset: offset, %y_stride: offset)
+
+template.decl @pocket.token.body(%elements: index, %token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer, %token_origin: offset, %bos_origin: offset, %embedding_origin: offset, %y_origin: offset)
+
+kernel.def target(@pocket) @isolated_token() {
+  %groups = index.constant 8 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 1024 : index
+  %origin = index.constant 0 : offset
+  template.apply<@pocket.token.body>(%elements, %token_storage, %bos_storage, %embedding_storage, %y_storage, %origin, %origin, %origin, %origin) : (index, buffer, buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @batched_token() {
+  %groups = index.constant 8 : index
+  %one = index.constant 1 : index
+  %times = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %token_storage: buffer, %bos_storage: buffer, %embedding_storage: buffer, %y_storage: buffer) {
+  %elements = index.constant 1024 : index
+  %origin = index.constant 16 : offset
+  %token_stride = index.constant 32 : offset
+  %bos_stride = index.constant 0 : offset
+  %embedding_stride = index.constant 0 : offset
+  %y_stride = index.constant 4124 : offset
+  template.apply<@pocket.batch.token>(%membership, %elements, %token_storage, %bos_storage, %embedding_storage, %y_storage, %origin, %token_stride, %origin, %bos_stride, %origin, %embedding_stride, %origin, %y_stride) : (buffer, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @initialize_token() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %buffer[%origin] : buffer -> view<36xi32>
+  %value_0 = scalar.constant -1 : i32
+  view.store %value_0, %view[4] : i32, view<36xi32>
+  %value_1 = scalar.constant 0 : i32
+  view.store %value_1, %view[12] : i32, view<36xi32>
+  %value_2 = scalar.constant 1234 : i32
+  view.store %value_2, %view[20] : i32, view<36xi32>
+  %value_3 = scalar.constant 4000 : i32
+  view.store %value_3, %view[28] : i32, view<36xi32>
+  kernel.return
+}
+
+check.case public @token_row_ownership {
+  %membership = check.generate.fill value(-1) : tensor<5xi32>
+  %unused = check.literal value(-1) : i32
+  %word_0 = check.literal value(0) : i32
+  %word_1 = check.literal value(1) : i32
+  %word_2 = check.literal value(2) : i32
+  %word_3 = check.literal value(3) : i32
+  %word_4 = check.literal value(4) : i32
+  %word_5 = check.literal value(5) : i32
+  %word_6 = check.literal value(6) : i32
+  %token_seed = check.literal value(100) : i64
+  %actual_token = check.generate.fill value(-17) : tensor<36xi32>
+  kernel.launch @initialize_token(%actual_token) : (tensor<36xi32>)
+  %reference_token = check.generate.fill value(-17) : tensor<36xi32>
+  kernel.launch @initialize_token(%reference_token) : (tensor<36xi32>)
+  %bos_seed = check.literal value(101) : i64
+  %actual_bos = check.generate.random.uniform seed(%bos_seed) range(-0.5 to 0.5) : tensor<1046xbf16>
+  %reference_bos = check.generate.random.uniform seed(%bos_seed) range(-0.5 to 0.5) : tensor<1046xbf16>
+  %embedding_seed = check.literal value(102) : i64
+  %actual_embedding = check.generate.random.uniform seed(%embedding_seed) range(-0.5 to 0.5) : tensor<4097046xbf16>
+  %reference_embedding = check.generate.random.uniform seed(%embedding_seed) range(-0.5 to 0.5) : tensor<4097046xbf16>
+  %y_seed = check.literal value(103) : i64
+  %actual_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<4128xf32>
+  %reference_y = check.generate.random.uniform seed(%y_seed) range(-0.5 to 0.5) : tensor<4128xf32>
+  kernel.launch @batch_metadata(%word_3, %word_5, %word_0, %word_1, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_token(%membership, %actual_token, %actual_bos, %actual_embedding, %actual_y) : (tensor<5xi32>, tensor<36xi32>, tensor<1046xbf16>, tensor<4097046xbf16>, tensor<4128xf32>)
+  %token_0_0 = check.tensor.view %reference_token offset(16) : tensor<36xi32> -> tensor<1xi32>
+  %bos_0_0 = check.tensor.view %reference_bos offset(16) : tensor<1046xbf16> -> tensor<1024xbf16>
+  %embedding_0_0 = check.tensor.view %reference_embedding offset(16) : tensor<4097046xbf16> -> tensor<4097024xbf16>
+  %y_0_0 = check.tensor.view %reference_y offset(16) : tensor<4128xf32> -> tensor<1024xf32>
+  kernel.launch @isolated_token(%token_0_0, %bos_0_0, %embedding_0_0, %y_0_0) : (tensor<1xi32>, tensor<1024xbf16>, tensor<4097024xbf16>, tensor<1024xf32>)
+  %token_0_1 = check.tensor.view %reference_token offset(48) : tensor<36xi32> -> tensor<1xi32>
+  %bos_0_1 = check.tensor.view %reference_bos offset(16) : tensor<1046xbf16> -> tensor<1024xbf16>
+  %embedding_0_1 = check.tensor.view %reference_embedding offset(16) : tensor<4097046xbf16> -> tensor<4097024xbf16>
+  %y_0_1 = check.tensor.view %reference_y offset(4140) : tensor<4128xf32> -> tensor<1024xf32>
+  kernel.launch @isolated_token(%token_0_1, %bos_0_1, %embedding_0_1, %y_0_1) : (tensor<1xi32>, tensor<1024xbf16>, tensor<4097024xbf16>, tensor<1024xf32>)
+  %token_0_2 = check.tensor.view %reference_token offset(80) : tensor<36xi32> -> tensor<1xi32>
+  %bos_0_2 = check.tensor.view %reference_bos offset(16) : tensor<1046xbf16> -> tensor<1024xbf16>
+  %embedding_0_2 = check.tensor.view %reference_embedding offset(16) : tensor<4097046xbf16> -> tensor<4097024xbf16>
+  %y_0_2 = check.tensor.view %reference_y offset(8264) : tensor<4128xf32> -> tensor<1024xf32>
+  kernel.launch @isolated_token(%token_0_2, %bos_0_2, %embedding_0_2, %y_0_2) : (tensor<1xi32>, tensor<1024xbf16>, tensor<4097024xbf16>, tensor<1024xf32>)
+  check.expect.bitwise actual(%actual_token) expected(%reference_token) : tensor<36xi32>
+  check.expect.bitwise actual(%actual_bos) expected(%reference_bos) : tensor<1046xbf16>
+  check.expect.bitwise actual(%actual_embedding) expected(%reference_embedding) : tensor<4097046xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<4128xf32>
+  kernel.launch @batch_metadata(%word_0, %unused, %unused, %unused, %unused, %membership) : (i32, i32, i32, i32, i32, tensor<5xi32>)
+  kernel.launch @batched_token(%membership, %actual_token, %actual_bos, %actual_embedding, %actual_y) : (tensor<5xi32>, tensor<36xi32>, tensor<1046xbf16>, tensor<4097046xbf16>, tensor<4128xf32>)
+  check.expect.bitwise actual(%actual_token) expected(%reference_token) : tensor<36xi32>
+  check.expect.bitwise actual(%actual_bos) expected(%reference_bos) : tensor<1046xbf16>
+  check.expect.bitwise actual(%actual_embedding) expected(%reference_embedding) : tensor<4097046xbf16>
+  check.expect.bitwise actual(%actual_y) expected(%reference_y) : tensor<4128xf32>
+  check.return
+}
