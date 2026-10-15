@@ -94,7 +94,10 @@ http_archive(
     build_file = "//build_tools/third_party/linux_uapi:libdrm_headers.BUILD.bazel",
     sha256 = "ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95",
     strip_prefix = "libdrm-2.4.134",
-    url = "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz",
+    urls = [
+        "https://mirrors.edge.kernel.org/gentoo/distfiles/13/libdrm-2.4.134.tar.xz",
+        "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz",
+    ],
 )
 
 # Linux 7.3-rc6 public protocol headers share one source revision.

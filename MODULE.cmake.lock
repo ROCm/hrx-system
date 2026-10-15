@@ -207,6 +207,7 @@ set(IREE_DEP_LIBDRM_HEADERS_VERSION "")
 set(IREE_DEP_LIBDRM_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_LIBDRM_HEADERS_SOURCE_URL "")
 set(IREE_DEP_LIBDRM_HEADERS_URLS
+  "https://mirrors.edge.kernel.org/gentoo/distfiles/13/libdrm-2.4.134.tar.xz"
   "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz"
 )
 set(IREE_DEP_LIBDRM_HEADERS_SHA256 "ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95")
