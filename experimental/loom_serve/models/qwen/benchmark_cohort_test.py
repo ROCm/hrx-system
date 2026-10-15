@@ -63,7 +63,13 @@ def endpoint(fault=None):
                 content_type = "text/event-stream"
                 event = {
                     "model": body["model"],
-                    "choices": [{"delta": {"content": text}, "finish_reason": reason}],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": text},
+                            "finish_reason": reason,
+                        }
+                    ],
                     "usage": usage,
                 }
                 payload = (
