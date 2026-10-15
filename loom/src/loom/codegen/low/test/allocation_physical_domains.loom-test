@@ -356,3 +356,56 @@ low.func.def target<test.low.core>(@target) @soft_affinity_fallback_counts_as_br
 value %probe: test.explicit32 -> physical_register[3:1]
 value %affine0: test.explicit32 -> physical_register[0:1]
 value %affine2: test.explicit32 -> physical_register[2:1]
+
+// ====
+
+// Both inputs prefer a later R0 copy, but their fallback storage must leave
+// both narrow registers available until those copies execute.
+// RUN: emit low-allocation-query @fallback_reserves_narrow values=%first,%second,%narrow0,%narrow1,%fixed0,%fixed1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @fallback_reserves_narrow(%first: reg<test.explicit32>, %second: reg<test.explicit32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %narrow0 = test.const.packed.narrow 7
+  %narrow1 = test.const.packed.narrow 9
+  %narrow_value0 = copy %narrow0 : reg<test.packed.narrow> -> reg<test.i32>
+  %narrow_value1 = copy %narrow1 : reg<test.packed.narrow> -> reg<test.i32>
+  %fixed0 = copy %first : reg<test.explicit32> -> reg<test.fixed.r0>
+  %value0 = copy %fixed0 : reg<test.fixed.r0> -> reg<test.i32>
+  %fixed1 = copy %second : reg<test.explicit32> -> reg<test.fixed.r0>
+  %value1 = copy %fixed1 : reg<test.fixed.r0> -> reg<test.i32>
+  return %narrow_value0, %narrow_value1, %value0, %value1
+}
+
+// ----
+value %first: test.explicit32 -> physical_register[2:1]
+value %second: test.explicit32 -> physical_register[3:1]
+value %narrow0: test.packed.narrow -> physical_register[1:1]
+value %narrow1: test.packed.narrow -> physical_register[0:1]
+value %fixed0: test.fixed.r0 -> physical_register[0:1]
+value %fixed1: test.fixed.r0 -> physical_register[0:1]
+
+// ====
+
+// The restricted register is a differently named pair of atomic scalar units.
+// Copy preferences still leave both units available across the pair's lifetime.
+// RUN: emit low-allocation-query @fallback_reserves_atomic_pair values=%first,%second,%narrow,%fixed0,%fixed1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @fallback_reserves_atomic_pair(%first: reg<test.explicit32>, %second: reg<test.explicit32>, %source: reg<test.i64>) -> (reg<test.i64>, reg<test.i32>, reg<test.i32>) asm {
+  %narrow = copy %source : reg<test.i64> -> reg<test.atomic.narrow>
+  %narrow_value = copy %narrow : reg<test.atomic.narrow> -> reg<test.i64>
+  %fixed0 = copy %first : reg<test.explicit32> -> reg<test.fixed.r0>
+  %value0 = copy %fixed0 : reg<test.fixed.r0> -> reg<test.i32>
+  %fixed1 = copy %second : reg<test.explicit32> -> reg<test.fixed.r0>
+  %value1 = copy %fixed1 : reg<test.fixed.r0> -> reg<test.i32>
+  return %narrow_value, %value0, %value1
+}
+
+// ----
+value %first: test.explicit32 -> physical_register[1:1]
+value %second: test.explicit32 -> physical_register[3:1]
+value %narrow: test.atomic.narrow -> physical_register[4:1]
+value %fixed0: test.fixed.r0 -> physical_register[0:1]
+value %fixed1: test.fixed.r0 -> physical_register[0:1]
