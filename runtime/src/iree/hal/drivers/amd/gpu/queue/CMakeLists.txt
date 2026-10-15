@@ -146,4 +146,42 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+iree_cc_library(
+  NAME
+    capture_pool
+  HDRS
+    "capture_pool.h"
+  SRCS
+    "capture_pool.c"
+  DEPS
+    iree::base
+    iree::base::threading
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    capture_pool_test
+  SRCS
+    "capture_pool_test.cc"
+  DEPS
+    ::capture_pool
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    capture_pool_benchmark
+  SRCS
+    "capture_pool_benchmark.cc"
+  DEPS
+    ::capture_pool
+    iree::base
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -149,7 +149,7 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create(
-    iree_arena_block_pool_t* pool, iree_hal_semaphore_list_t waits,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
     const iree_hal_amd_gpu_pm4_function_t* function,
     iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_const_byte_span_t constants,
@@ -173,19 +173,14 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "submission capture size overflows");
   }
-  iree_arena_block_t* block = NULL;
-  iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
-  if (total_size <= pool->usable_block_size) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_block_pool_acquire(pool, &block, (void**)&submission));
-  } else {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        pool->block_allocator, total_size, (void**)&submission));
-  }
+  iree_byte_span_t storage = iree_byte_span_empty();
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_gpu_capture_pool_acquire(pool, total_size, &storage));
+  iree_hal_amd_gpu_pm4_submission_t* submission = (void*)storage.data;
   *submission = (iree_hal_amd_gpu_pm4_submission_t){
       .native_wait_count = waits.count ? UINT32_MAX : 0,
       .pool = pool,
-      .block = block,
+      .allocation_size = storage.data_length,
       .executable = executable,
       .function = function,
       .wait_count = waits.count,
@@ -237,9 +232,6 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
 
 iree_byte_span_t iree_hal_amd_gpu_pm4_submission_tail_storage(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
-  if (!submission->block) {
-    return iree_byte_span_empty();
-  }
   // Constants are the final region of the captured layout, including when
   // empty. No later publication step grows or repacks the capture.
   const iree_host_size_t used_size =
@@ -248,12 +240,11 @@ iree_byte_span_t iree_hal_amd_gpu_pm4_submission_tail_storage(
       submission->constants.data_length;
   const iree_host_size_t aligned_size =
       iree_host_align(used_size, iree_max_align_t);
-  if (aligned_size >= submission->pool->usable_block_size) {
+  if (aligned_size >= submission->allocation_size) {
     return iree_byte_span_empty();
   }
-  return iree_make_byte_span(
-      (uint8_t*)submission + aligned_size,
-      submission->pool->usable_block_size - aligned_size);
+  return iree_make_byte_span((uint8_t*)submission + aligned_size,
+                             submission->allocation_size - aligned_size);
 }
 
 void iree_hal_amd_gpu_pm4_submission_retain(
@@ -265,7 +256,7 @@ void iree_hal_amd_gpu_pm4_submission_retain(
 
 static void iree_hal_amd_gpu_pm4_submission_destroy(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
-  iree_arena_block_pool_t* pool = submission->pool;
+  iree_hal_amd_gpu_capture_pool_t* pool = submission->pool;
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
     iree_hal_amd_gpu_pm4_signal_release(submission->waits[i].signal);
     iree_hal_semaphore_release(submission->waits[i].semaphore);
@@ -278,12 +269,8 @@ static void iree_hal_amd_gpu_pm4_submission_destroy(
   }
   iree_hal_amd_gpu_pm4_signal_release(submission->signal);
   iree_hal_executable_release(submission->executable);
-  iree_arena_block_t* block = submission->block;
-  if (block) {
-    iree_arena_block_pool_release(pool, block, block);
-  } else {
-    iree_allocator_free(pool->block_allocator, submission);
-  }
+  iree_hal_amd_gpu_capture_pool_release(
+      pool, iree_make_byte_span(submission, submission->allocation_size));
 }
 
 void iree_hal_amd_gpu_pm4_submission_release(

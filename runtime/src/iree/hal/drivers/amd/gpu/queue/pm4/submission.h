@@ -7,8 +7,8 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_SUBMISSION_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_SUBMISSION_H_
 
-#include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
+#include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/publisher.h"
@@ -53,9 +53,9 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   // Captured-work link; the publisher parks unresolved operations separately.
   iree_hal_amd_gpu_publication_entry_t publication;
   // Borrowed allocation owner, live through the capture's final release.
-  iree_arena_block_pool_t* pool;
-  // Non-NULL when this allocation came from the reusable capture block pool.
-  iree_arena_block_t* block;
+  iree_hal_amd_gpu_capture_pool_t* pool;
+  // Complete owned extent, including unused tail storage, in bytes.
+  iree_host_size_t allocation_size;
   // Owned executable, or NULL for a barrier.
   iree_hal_executable_t* executable;
   // Borrowed prepared function dominated by executable.
@@ -104,7 +104,7 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
 // cease borrowing the caller on success. Buffer addresses remain unresolved
 // until queue-ordered allocation and dependency admission permit reading them.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create(
-    iree_arena_block_pool_t* pool, iree_hal_semaphore_list_t waits,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
     const iree_hal_amd_gpu_pm4_function_t* function,
     iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_const_byte_span_t constants,

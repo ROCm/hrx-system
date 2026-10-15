@@ -93,10 +93,10 @@ iree_cc_library(
     ::signal
     iree::base
     iree::base::internal
-    iree::base::internal::arena
     iree::hal
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::publisher
   PUBLIC
 )
@@ -133,11 +133,11 @@ iree_cc_test(
     iree::async
     iree::async::platform
     iree::base
-    iree::base::internal::arena
     iree::hal
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::image::metadata
     iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::testing::gtest
     iree::testing::gtest_main
 )

@@ -129,3 +129,34 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/testing:benchmark_main",
     ],
 )
+
+iree_runtime_cc_library(
+    name = "capture_pool",
+    srcs = ["capture_pool.c"],
+    hdrs = ["capture_pool.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "capture_pool_test",
+    srcs = ["capture_pool_test.cc"],
+    deps = [
+        ":capture_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "capture_pool_benchmark",
+    srcs = ["capture_pool_benchmark.cc"],
+    deps = [
+        ":capture_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)

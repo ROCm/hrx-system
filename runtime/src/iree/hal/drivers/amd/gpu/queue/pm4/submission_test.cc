@@ -21,11 +21,14 @@ class SubmissionTest : public ::testing::Test {
   void SetUp() override {
     function_.metadata = &metadata_;
     function_.kernarg = &layout_;
-    iree_arena_block_pool_initialize(1024, iree_allocator_system(), &pool_);
+    iree_hal_amd_gpu_capture_pool_initialize(1024, iree_allocator_system(),
+                                             &pool_);
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_pm4_barrier_profile_initialize({11, 0, 0}, &profile_));
   }
-  void TearDown() override { iree_arena_block_pool_deinitialize(&pool_); }
+  void TearDown() override {
+    iree_hal_amd_gpu_capture_pool_deinitialize(&pool_);
+  }
   iree_status_t Prepare(
       iree_hal_dispatch_config_t config, iree_hal_dispatch_flags_t flags = 0,
       iree_const_byte_span_t constants = iree_const_byte_span_empty(),
@@ -42,7 +45,7 @@ class SubmissionTest : public ::testing::Test {
   // Admitted geometry output.
   iree_hal_amd_gpu_pm4_dispatch_t dispatch_ = {};
   // Real reusable capture storage.
-  iree_arena_block_pool_t pool_;
+  iree_hal_amd_gpu_capture_pool_t pool_;
   // Physical cache policy used to capture public barriers.
   iree_hal_amd_gpu_pm4_barrier_profile_t profile_;
 };
@@ -185,7 +188,7 @@ TEST_F(SubmissionTest, CallerAndGpuOwnershipJoinBeforeReturningCapture) {
       &executable.base, &function_, {},
       iree_make_const_byte_span(&constant, sizeof(constant)), {1, &reference},
       &profile_, nullptr, 0, &capture));
-  ASSERT_NE(capture->block, nullptr);
+  ASSERT_EQ(capture->allocation_size, pool_.block_size);
   const auto tail = iree_hal_amd_gpu_pm4_submission_tail_storage(capture);
   ASSERT_GT(tail.data_length, 0u);
   EXPECT_EQ(reinterpret_cast<uintptr_t>(tail.data) % iree_max_align_t, 0u);
@@ -234,7 +237,7 @@ TEST_F(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
       iree_make_const_byte_span(constants.data(), constants.size()), {},
       &profile_, &barriers, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
       &capture));
-  EXPECT_EQ(capture->block, nullptr);
+  EXPECT_EQ(capture->allocation_size, sizeof(*capture) + constants.size());
   EXPECT_EQ(iree_hal_amd_gpu_pm4_submission_tail_storage(capture).data_length,
             0u);
   EXPECT_EQ(capture->before.cache_control, 0u);
@@ -254,7 +257,7 @@ TEST_F(SubmissionTest, TailStoragePreservesArgumentsAtBlockBoundaries) {
   Executable executable;
   iree_hal_executable_initialize(&family, &vtable, &executable.base);
   const iree_host_size_t capacity =
-      pool_.usable_block_size - sizeof(iree_hal_amd_gpu_pm4_submission_t);
+      pool_.block_size - sizeof(iree_hal_amd_gpu_pm4_submission_t);
   const std::array<iree_host_size_t, 8> sizes = {
       0, 1, 15, 16, 17, capacity - 1, capacity, capacity + 1};
   for (iree_host_size_t size : sizes) {
@@ -277,7 +280,8 @@ TEST_F(SubmissionTest, TailStoragePreservesArgumentsAtBlockBoundaries) {
     for (iree_host_size_t i = 0; i < size; ++i) {
       EXPECT_EQ(capture->constants.data[i], 0x35);
     }
-    EXPECT_EQ(capture->block != nullptr, size <= capacity);
+    EXPECT_EQ(capture->allocation_size,
+              size <= capacity ? pool_.block_size : sizeof(*capture) + size);
     iree_hal_amd_gpu_pm4_submission_release(capture);
   }
   iree_hal_executable_release(&executable.base);
