@@ -1318,6 +1318,7 @@ kernel.def target(@qwen38_dense_gfx11_wave64) export("qwen38_linear_q5k_f16_wmma
 // Uses the existing scalar Q5_K oracle to cover a partial output tile and all
 // eight packed scale groups without depending on model data.
 check.case public @qwen38_linear_q5k_f16_wmma_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(1) : index
   %input_size = check.literal value(256) : index
   %output_size = check.literal value(65) : index
@@ -1336,6 +1337,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_differential_case {
 // Covers one full aligned tile and requires bit-identical output from the
 // accepted and four-wave schedules.
 check.case public @qwen38_linear_q5k_f16_wmma_c128_t128_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1351,6 +1353,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_c128_t128_differential_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_x128_direct_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1366,6 +1369,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_x128_direct_differential_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_x128_gdn_prefill_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(6144) : index
@@ -1378,6 +1382,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_x128_gdn_prefill_128_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_prefill_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1390,6 +1395,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_prefill_512_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_prefill_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1402,6 +1408,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_prefill_128_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_c128_t128_prefill_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1414,6 +1421,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_c128_t128_prefill_128_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_x128_direct_prefill_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1426,6 +1434,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_x128_direct_prefill_128_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_c128_t128_prefill_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1438,6 +1447,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_c128_t128_prefill_512_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_x64_prefill_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1450,6 +1460,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_x64_prefill_512_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_x64_prefill_32_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(32) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1462,6 +1473,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_x64_prefill_32_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_prefill_32_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(32) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -1476,6 +1488,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_prefill_32_case {
 // Covers the GDN alpha projection's 48-channel tail and requires bit-identical
 // output from the generic and 32-token schedules.
 check.case public @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_alpha_32_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(32) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(48) : index
@@ -1491,6 +1504,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_alpha_32_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_x64_alpha_32_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(32) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(48) : index
@@ -1503,6 +1517,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_x64_alpha_32_case {
 }
 
 check.case public @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_alpha_32_benchmark_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(32) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(48) : index
@@ -1515,6 +1530,7 @@ check.case public @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_alpha_32_benchmark_c
 }
 
 check.case public @qwen38_linear_q5k_q8_1_x4_prefill_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index

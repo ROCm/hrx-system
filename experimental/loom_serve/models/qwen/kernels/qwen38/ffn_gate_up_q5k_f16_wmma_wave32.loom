@@ -717,6 +717,7 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
 }
 
 check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(129) : index
   %input_size = check.literal value(512) : index
   %output_size = check.literal value(129) : index
@@ -741,6 +742,7 @@ check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_differential_case {
 }
 
 check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_baseline_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -758,6 +760,7 @@ check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_baseline_128_case {
 }
 
 check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_candidate_128_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -771,6 +774,7 @@ check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_candidate_128_case {
 }
 
 check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_baseline_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -788,6 +792,7 @@ check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_baseline_512_case {
 }
 
 check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_candidate_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index
@@ -801,6 +806,7 @@ check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_candidate_512_case {
 }
 
 check.case public @qwen38_ffn_gate_up_q5k_f16_wmma_wave32_owned_512_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(512) : index
   %input_size = check.literal value(5120) : index
   %output_size = check.literal value(17408) : index

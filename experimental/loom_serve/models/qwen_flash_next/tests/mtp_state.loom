@@ -165,6 +165,7 @@ kernel.def @fixture() {
 }
 
 check.case public @accepted_carry_with_holes {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %epoch = check.generate.fill value(-7) : tensor<83xi32>
   %compact = check.generate.fill value(-7) : tensor<83xi32>
   %expected_epoch = check.generate.fill value(-7) : tensor<83xi32>

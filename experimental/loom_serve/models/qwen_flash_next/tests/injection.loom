@@ -119,6 +119,7 @@ func.def @injection_reference(%epoch: buffer, %input: buffer, %down: buffer, %we
 }
 
 check.scenario public @f32_injection {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %q8 = check.literal value(false) : i1
@@ -153,6 +154,7 @@ check.scenario public @f32_injection {
 }
 
 check.scenario public @q8_injection {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %q8 = check.literal value(true) : i1

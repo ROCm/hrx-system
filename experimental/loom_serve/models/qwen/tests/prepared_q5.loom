@@ -27,6 +27,7 @@ kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch(%tokens: index) laun
 kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8(%tokens: index) launch(%control: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer)
 
 check.case public @qwen38_prepared_narrow {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(32) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.param.choice values([48, 64, 80, 96, 112, 128, 17408]) name("channels") : index
@@ -44,6 +45,7 @@ check.case public @qwen38_prepared_narrow {
 }
 
 check.case public @qwen38_prepared_narrow_zero {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(0) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(17408) : index
@@ -61,6 +63,7 @@ check.case public @qwen38_prepared_narrow_zero {
 }
 
 check.case public @qwen38_prepared_generic_1_1 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(1) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(17408) : index
@@ -78,6 +81,7 @@ check.case public @qwen38_prepared_generic_1_1 {
 }
 
 check.case public @qwen38_prepared_generic_4_4 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(4) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(17408) : index
@@ -95,6 +99,7 @@ check.case public @qwen38_prepared_generic_4_4 {
 }
 
 check.case public @qwen38_prepared_generic_8_8 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(8) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(17408) : index
@@ -112,6 +117,7 @@ check.case public @qwen38_prepared_generic_8_8 {
 }
 
 check.case public @qwen38_prepared_generic_64_33 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(64) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(17408) : index
@@ -129,6 +135,7 @@ check.case public @qwen38_prepared_generic_64_33 {
 }
 
 check.case public @qwen38_prepared_generic_64_64 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(64) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(17408) : index
@@ -146,6 +153,7 @@ check.case public @qwen38_prepared_generic_64_64 {
 }
 
 check.case public @qwen38_prepared_generic_0_1 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(0) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.literal value(17408) : index
@@ -163,6 +171,7 @@ check.case public @qwen38_prepared_generic_0_1 {
 }
 
 check.case public @qwen38_prepared_q8_1 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(1) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.param.choice values([8, 48, 17408]) name("channels") : index
@@ -181,6 +190,7 @@ check.case public @qwen38_prepared_q8_1 {
 }
 
 check.case public @qwen38_prepared_q8_4 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(4) : index
   %inputs = check.literal value(5120) : index
   %outputs = check.param.choice values([8, 48, 17408]) name("channels") : index
@@ -199,6 +209,7 @@ check.case public @qwen38_prepared_q8_4 {
 }
 
 check.case public @qwen38_prepared_wide_128_1 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(128) : index
   %outputs = check.literal value(17408) : index
   %control = check.generate.fill value(1) : tensor<1xi32>
@@ -218,6 +229,7 @@ check.case public @qwen38_prepared_wide_128_1 {
 }
 
 check.case public @qwen38_prepared_wide_128_128 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(128) : index
   %outputs = check.literal value(17408) : index
   %control = check.generate.fill value(128) : tensor<1xi32>
@@ -237,6 +249,7 @@ check.case public @qwen38_prepared_wide_128_128 {
 }
 
 check.case public @qwen38_prepared_wide_256_129 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(256) : index
   %outputs = check.literal value(17408) : index
   %control = check.generate.fill value(129) : tensor<1xi32>
@@ -256,6 +269,7 @@ check.case public @qwen38_prepared_wide_256_129 {
 }
 
 check.case public @qwen38_prepared_wide_256_256 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(256) : index
   %outputs = check.literal value(17408) : index
   %control = check.generate.fill value(256) : tensor<1xi32>
@@ -275,6 +289,7 @@ check.case public @qwen38_prepared_wide_256_256 {
 }
 
 check.case public @qwen38_prepared_wide_512_511 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(512) : index
   %outputs = check.literal value(17408) : index
   %control = check.generate.fill value(511) : tensor<1xi32>
@@ -294,6 +309,7 @@ check.case public @qwen38_prepared_wide_512_511 {
 }
 
 check.case public @qwen38_prepared_wide_512_512 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(512) : index
   %outputs = check.literal value(17408) : index
   %control = check.generate.fill value(512) : tensor<1xi32>
@@ -313,6 +329,7 @@ check.case public @qwen38_prepared_wide_512_512 {
 }
 
 check.case public @qwen38_prepared_wide_0_1 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %tokens = check.literal value(0) : index
   %outputs = check.literal value(17408) : index
   %control = check.generate.fill value(1) : tensor<1xi32>
