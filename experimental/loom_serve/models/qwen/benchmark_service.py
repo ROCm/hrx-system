@@ -246,14 +246,14 @@ def main(argv=None):
             else pool.submit(client, arguments, address, index, barrier)
             for index in range(arguments.clients)
         ]
-        start = time.monotonic_ns()
+        start = time.perf_counter_ns()
         barrier.wait()
         results = []
         for future in as_completed(futures):
             result = future.result()
             results.append(result)
             print(json.dumps({"event": "client_complete", **result}), flush=True)
-    seconds = (time.monotonic_ns() - start) / 1e9
+    seconds = (time.perf_counter_ns() - start) / 1e9
     turns = [turn for result in results for turn in result["turns"]]
     outputs = sum(turn["usage"]["completion_tokens"] for turn in turns)
     cached = sum(
@@ -277,9 +277,13 @@ def main(argv=None):
                 "elapsed_seconds": seconds,
                 "appended_prompt_tokens": inputs,
                 "cached_prompt_tokens": cached,
-                "aggregate_appended_prompt_tokens_per_second": inputs / seconds,
+                "aggregate_appended_prompt_tokens_per_second": (
+                    inputs / seconds if seconds > 0 else None
+                ),
                 "output_tokens_including_eos": outputs,
-                "aggregate_output_tokens_per_second": outputs / seconds,
+                "aggregate_output_tokens_per_second": (
+                    outputs / seconds if seconds > 0 else None
+                ),
                 "followup_cache": followup_cache_summary(results),
                 "request_latency_ms": latency_distribution(
                     turn["request_ms"] for turn in turns
