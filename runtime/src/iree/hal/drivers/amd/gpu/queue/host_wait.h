@@ -22,7 +22,7 @@ extern "C" {
 typedef void(IREE_API_PTR* iree_hal_amd_gpu_host_wait_fn_t)(
     void* user_data, iree_status_t status);
 
-// Cold sidecar for waits that cannot yet be admitted as native dependencies.
+// Sidecar for waits that cannot yet be admitted as native dependencies.
 // Ready submissions do not allocate or initialize this state. The existing
 // async tracker owns timepoint registration, failure, cancellation, and
 // callback joining; the existing device service owns finalization and
@@ -53,7 +53,9 @@ typedef struct iree_hal_amd_gpu_host_wait_t {
 // Success transfers storage to the callback, which may run and free it before
 // this call returns. All enclosing capture state must be initialized first;
 // the caller makes no further access after successful acceptance. Allocation
-// uses host_allocator only for the cold tracker and its timepoints.
+// uses host_allocator only for the tracker and its timepoints. Fixed-capacity
+// callers may supply an inline arena sized by the tracker's storage-size query;
+// finalization frees that allocation before invoking the terminal callback.
 iree_status_t iree_hal_amd_gpu_host_wait_begin(
     iree_async_semaphore_wait_context_t* context,
     iree_hal_memory_maintenance_t* service, iree_hal_semaphore_list_t waits,

@@ -234,6 +234,27 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
   return iree_ok_status();
 }
 
+iree_byte_span_t iree_hal_amd_gpu_pm4_submission_tail_storage(
+    iree_hal_amd_gpu_pm4_submission_t* submission) {
+  if (!submission->block) {
+    return iree_byte_span_empty();
+  }
+  // Constants are the final region of the captured layout, including when
+  // empty. No later publication step grows or repacks the capture.
+  const iree_host_size_t used_size =
+      (iree_host_size_t)(submission->constants.data -
+                         (const uint8_t*)submission) +
+      submission->constants.data_length;
+  const iree_host_size_t aligned_size =
+      iree_host_align(used_size, iree_max_align_t);
+  if (aligned_size >= submission->pool->usable_block_size) {
+    return iree_byte_span_empty();
+  }
+  return iree_make_byte_span(
+      (uint8_t*)submission + aligned_size,
+      submission->pool->usable_block_size - aligned_size);
+}
+
 void iree_hal_amd_gpu_pm4_submission_retain(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
   if (submission) {

@@ -768,9 +768,9 @@ iree_allocator_inline_arena_ctl(void* self, iree_allocator_command_t command,
                                 const void* params, void** inout_ptr);
 
 // Allocates with arena semantics within the given fixed-size |storage|.
-// Frees are ignored and all allocations will fail once the allocated length
-// exceeds the capacity. A special case for reallocations of the entire
-// outstanding memory is supported to allow the arena to be implicitly reset.
+// Freeing the sole allocation resets the arena; other frees are ignored.
+// Allocations fail when the allocated length would exceed capacity.
+// Reallocation of the entire outstanding memory is also supported.
 static inline iree_allocator_t iree_allocator_inline_arena(
     iree_allocator_inline_storage_t* storage) {
   iree_allocator_t v = {storage, iree_allocator_inline_arena_ctl};

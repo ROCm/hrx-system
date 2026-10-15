@@ -35,7 +35,7 @@ typedef struct iree_hal_amd_gpu_pm4_argument_storage_t {
 } iree_hal_amd_gpu_pm4_argument_storage_t;
 
 typedef struct iree_hal_amd_gpu_pm4_signal_storage_t {
-  // Next cold backing, retained until all device queues have joined.
+  // Next backing, retained while active or referenced by native readers.
   struct iree_hal_amd_gpu_pm4_signal_storage_t* next;
   // Native cells and coherent CPU mapping.
   iree_hal_amd_fabric_memory_t memory;
@@ -46,8 +46,8 @@ typedef struct iree_hal_amd_gpu_pm4_signal_storage_t {
 typedef struct iree_hal_amd_gpu_pm4_umq_queue_t
     iree_hal_amd_gpu_pm4_umq_queue_t;
 
-// Cold sidecar. Its list links and tracker acceptance are owned by service,
-// while tracker callbacks only enqueue finalization onto that same service.
+// Reusable admission sidecar. Its list links and tracker acceptance are owned
+// by service, while tracker callbacks only enqueue finalization there.
 typedef struct iree_hal_amd_gpu_pm4_pending_t {
   // Entry used to begin admission on service before tracker registration.
   iree_hal_memory_maintenance_entry_t entry;
@@ -55,6 +55,12 @@ typedef struct iree_hal_amd_gpu_pm4_pending_t {
   iree_hal_amd_gpu_pm4_umq_queue_t* queue;
   // Owned captured operation awaiting admission.
   iree_hal_amd_gpu_pm4_submission_t* submission;
+  // Additional block when the capture's own tail cannot hold this sidecar.
+  // Returned after the final tracker has joined callbacks; otherwise NULL.
+  iree_arena_block_t* block;
+  // Single tracker allocation in this block's trailing storage. Finalization
+  // frees the entire allocation, resetting the arena for the next registration.
+  iree_allocator_inline_storage_t tracker_storage;
   // Next registered wait, accessed only by service.
   struct iree_hal_amd_gpu_pm4_pending_t* next;
   // Previous registered wait, or NULL at the head.
@@ -87,6 +93,8 @@ struct iree_hal_amd_gpu_pm4_umq_queue_t {
   iree_alignas(64) iree_hal_amd_gpu_publisher_t publisher;
   // Reusable host captures, independent of native ring capacity.
   iree_arena_block_pool_t captures;
+  // Required sidecar bytes, including one tracker, computed at construction.
+  iree_host_size_t pending_size;
   // Deferred turns on the existing device service worker.
   iree_hal_amd_gpu_continuation_t continuation;
   // Accepted operations awaiting execution retirement or abandonment. The
@@ -626,6 +634,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_admit(
   return status;
 }
 
+static void iree_hal_amd_gpu_pm4_umq_pending_release(
+    iree_hal_amd_gpu_pm4_pending_t* pending) {
+  if (pending->block) {
+    iree_arena_block_pool_release(&pending->queue->captures, pending->block,
+                                  pending->block);
+  }
+}
+
 // The sidecar registration continuation is recursive through the service
 // queue: immediate semaphore completion never recursively admits more work.
 static void iree_hal_amd_gpu_pm4_umq_pending_resume(void* user_data,
@@ -668,7 +684,8 @@ static void iree_hal_amd_gpu_pm4_umq_pending_begin(
           &queue->wait_context, queue->options.service,
           (iree_hal_semaphore_list_t){1, &pending->semaphore, &pending->value},
           iree_hal_amd_gpu_pm4_umq_pending_resume, pending,
-          queue->host_allocator, &pending->wait);
+          iree_allocator_inline_arena(&pending->tracker_storage),
+          &pending->wait);
       if (iree_status_is_ok(status)) {
         return;
       }
@@ -679,7 +696,7 @@ static void iree_hal_amd_gpu_pm4_umq_pending_begin(
     }
     iree_hal_semaphore_release(pending->semaphore);
   }
-  iree_allocator_free(queue->host_allocator, pending);
+  iree_hal_amd_gpu_pm4_umq_pending_release(pending);
   if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_pm4_umq_enqueue_ready(queue, submission);
   } else {
@@ -705,9 +722,39 @@ static void iree_hal_amd_gpu_pm4_umq_pending_resume(void* user_data,
     iree_hal_amd_gpu_pm4_umq_pending_begin(&pending->entry);
   } else {
     iree_hal_amd_gpu_pm4_submission_t* submission = pending->submission;
-    iree_allocator_free(queue->host_allocator, pending);
+    iree_hal_amd_gpu_pm4_umq_pending_release(pending);
     iree_hal_amd_gpu_pm4_umq_abandon(queue, submission, status);
   }
+}
+
+static iree_status_t iree_hal_amd_gpu_pm4_umq_pending_allocate(
+    iree_hal_amd_gpu_pm4_umq_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission,
+    iree_hal_amd_gpu_pm4_pending_t** out_pending) {
+  iree_byte_span_t storage =
+      iree_hal_amd_gpu_pm4_submission_tail_storage(submission);
+  iree_arena_block_t* block = NULL;
+  if (storage.data_length < queue->pending_size) {
+    IREE_RETURN_IF_ERROR(iree_arena_block_pool_acquire(&queue->captures, &block,
+                                                       (void**)&storage.data));
+    storage.data_length = queue->captures.usable_block_size;
+  }
+  iree_hal_amd_gpu_pm4_pending_t* pending = (void*)storage.data;
+  const iree_host_size_t prefix_size =
+      iree_host_align(sizeof(*pending), iree_max_align_t);
+  *pending = (iree_hal_amd_gpu_pm4_pending_t){
+      .entry = {.fn = iree_hal_amd_gpu_pm4_umq_pending_begin},
+      .queue = queue,
+      .submission = submission,
+      .block = block,
+      .tracker_storage =
+          {
+              .capacity = storage.data_length - prefix_size,
+              .buffer = storage.data + prefix_size,
+          },
+  };
+  *out_pending = pending;
+  return iree_ok_status();
 }
 
 // Returns synchronous capture/admission failures before acceptance. Once linked
@@ -721,8 +768,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_submit(
       iree_hal_amd_gpu_pm4_umq_admit(queue, submission, &wait_index, &kind);
   iree_hal_amd_gpu_pm4_pending_t* pending = NULL;
   if (iree_status_is_ok(status) && kind != IREE_HAL_AMD_GPU_PM4_WAIT_READY) {
-    status = iree_allocator_malloc(queue->host_allocator, sizeof(*pending),
-                                   (void**)&pending);
+    status =
+        iree_hal_amd_gpu_pm4_umq_pending_allocate(queue, submission, &pending);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_pm4_submission_release(submission);
@@ -730,9 +777,6 @@ static iree_status_t iree_hal_amd_gpu_pm4_umq_submit(
   }
   iree_atomic_fetch_add(&queue->outstanding, 1, iree_memory_order_relaxed);
   if (pending) {
-    pending->queue = queue;
-    pending->submission = submission;
-    pending->entry.fn = iree_hal_amd_gpu_pm4_umq_pending_begin;
     iree_hal_memory_maintenance_enqueue(queue->options.service,
                                         &pending->entry);
   } else {
@@ -1193,17 +1237,31 @@ iree_status_t iree_hal_amd_gpu_pm4_umq_queue_create(
         IREE_STATUS_UNIMPLEMENTED,
         "PM4 USER completion requires a qualified native event producer");
   }
+  iree_host_size_t tracker_size = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_async_semaphore_wait_tracker_storage_size(1, &tracker_size));
+  const iree_host_size_t pending_size =
+      iree_host_align(sizeof(iree_hal_amd_gpu_pm4_pending_t),
+                      iree_max_align_t) +
+      tracker_size;
+  const iree_host_size_t minimum_capture_size =
+      iree_max(pending_size, sizeof(iree_hal_amd_gpu_pm4_submission_t)) +
+      sizeof(iree_arena_block_t);
   if (!options->retirement_capacity ||
       (options->retirement_capacity & (options->retirement_capacity - 1)) ||
       !options->argument_capacity ||
       (options->argument_capacity & (options->argument_capacity - 1)) ||
       options->native.ring_byte_length < 2048 ||
       options->native.producer_mode != AMDF_QUEUE_PRODUCER_MODE_SINGLE ||
-      !iree_arena_block_pool_is_valid_total_size(options->capture_block_size) ||
-      options->capture_block_size < sizeof(iree_hal_amd_gpu_pm4_submission_t) +
-                                        sizeof(iree_arena_block_t)) {
+      !iree_arena_block_pool_is_valid_total_size(options->capture_block_size)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid PM4 queue capacity or producer options");
+  }
+  if (options->capture_block_size < minimum_capture_size) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "PM4 capture blocks require at least %" PRIhsz
+                            " bytes for submission and wait metadata",
+                            minimum_capture_size);
   }
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_pm4_umq_queue_t);
   if (!iree_host_size_checked_mul_add(
@@ -1222,6 +1280,7 @@ iree_status_t iree_hal_amd_gpu_pm4_umq_queue_create(
   queue->context = context;
   queue->storage.context = context;
   queue->options = *options;
+  queue->pending_size = pending_size;
   queue->issued = (iree_hal_amd_gpu_pm4_submission_t**)(queue + 1);
   iree_hal_queue_params_t achieved = *params;
   iree_hal_queue_execution_resource_ordinal_t* ordinals =

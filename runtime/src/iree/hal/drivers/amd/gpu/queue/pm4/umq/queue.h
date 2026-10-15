@@ -34,7 +34,8 @@ typedef struct iree_hal_amd_gpu_pm4_umq_queue_options_t {
   // Initial GPU-readable argument ring capacity in bytes, a power of two.
   // Oversized operations grow it on service before publication.
   uint32_t argument_capacity;
-  // Fixed CPU capture block size; larger captures use the host allocator.
+  // Fixed CPU block size for captures and deferred wait records. Construction
+  // rejects sizes unable to hold either header; oversized captures allocate.
   iree_host_size_t capture_block_size;
   // Number of CPU capture blocks to allocate during construction.
   iree_host_size_t capture_block_count;

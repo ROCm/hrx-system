@@ -32,7 +32,8 @@ typedef struct iree_hal_amd_gpu_device_options_t {
     uint32_t retirement_capacity;
     // Power-of-two initial native argument-byte capacity.
     uint32_t argument_capacity;
-    // Fixed CPU capture-block size; oversized calls use the host allocator.
+    // Fixed CPU block size for captures and deferred wait records. Construction
+    // rejects sizes unable to hold either header; oversized calls allocate.
     iree_host_size_t capture_block_size;
     // Number of blocks preallocated for each queue.
     iree_host_size_t capture_block_count;

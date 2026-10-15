@@ -110,6 +110,13 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
     const iree_hal_queue_barriers_t* barriers, iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_pm4_submission_t** out_submission);
 
+// Borrows the unused, naturally aligned tail of a reusable capture block.
+// Oversized captures have no spare storage. Admission may place sidecars here
+// without another allocation; their users must join before the capture's final
+// release. The capture owns these bytes and this query transfers no ownership.
+iree_byte_span_t iree_hal_amd_gpu_pm4_submission_tail_storage(
+    iree_hal_amd_gpu_pm4_submission_t* submission);
+
 // Pins publication bookkeeping independently of a possibly earlier GPU
 // completion. Existing ownership is required to acquire a reference.
 void iree_hal_amd_gpu_pm4_submission_retain(

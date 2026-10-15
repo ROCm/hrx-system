@@ -186,6 +186,10 @@ TEST_F(SubmissionTest, CallerAndGpuOwnershipJoinBeforeReturningCapture) {
       iree_make_const_byte_span(&constant, sizeof(constant)), {1, &reference},
       &profile_, nullptr, 0, &capture));
   ASSERT_NE(capture->block, nullptr);
+  const auto tail = iree_hal_amd_gpu_pm4_submission_tail_storage(capture);
+  ASSERT_GT(tail.data_length, 0u);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(tail.data) % iree_max_align_t, 0u);
+  std::memset(tail.data, 0xA5, tail.data_length);
   constant = 0;
   reference = {};
   wait_value = signal_value = 99;
@@ -231,6 +235,8 @@ TEST_F(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
       &profile_, &barriers, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
       &capture));
   EXPECT_EQ(capture->block, nullptr);
+  EXPECT_EQ(iree_hal_amd_gpu_pm4_submission_tail_storage(capture).data_length,
+            0u);
   EXPECT_EQ(capture->before.cache_control, 0u);
   EXPECT_EQ(capture->after.cache_control, 0u);
   constants.assign(constants.size(), 0xAB);
@@ -239,6 +245,42 @@ TEST_F(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
   }
   iree_hal_executable_release(&executable.base);
   iree_hal_amd_gpu_pm4_submission_release(capture);
+  EXPECT_TRUE(executable.destroyed);
+}
+
+TEST_F(SubmissionTest, TailStoragePreservesArgumentsAtBlockBoundaries) {
+  const iree_hal_queue_family_t family = {};
+  const iree_hal_executable_vtable_t vtable = {.destroy = Executable::Destroy};
+  Executable executable;
+  iree_hal_executable_initialize(&family, &vtable, &executable.base);
+  const iree_host_size_t capacity =
+      pool_.usable_block_size - sizeof(iree_hal_amd_gpu_pm4_submission_t);
+  const std::array<iree_host_size_t, 8> sizes = {
+      0, 1, 15, 16, 17, capacity - 1, capacity, capacity + 1};
+  for (iree_host_size_t size : sizes) {
+    layout_.byte_length = layout_.native_byte_length = size;
+    std::vector<uint8_t> constants(size, 0x35);
+    iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
+        &pool_, {}, {}, &executable.base, &function_, {},
+        iree_make_const_byte_span(constants.data(), constants.size()), {},
+        &profile_, nullptr, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
+        &capture));
+    const auto tail = iree_hal_amd_gpu_pm4_submission_tail_storage(capture);
+    if (size >= capacity - 1) {
+      EXPECT_EQ(tail.data_length, 0u);
+    } else {
+      ASSERT_GT(tail.data_length, 0u);
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(tail.data) % iree_max_align_t, 0u);
+      std::memset(tail.data, 0xA5, tail.data_length);
+    }
+    for (iree_host_size_t i = 0; i < size; ++i) {
+      EXPECT_EQ(capture->constants.data[i], 0x35);
+    }
+    EXPECT_EQ(capture->block != nullptr, size <= capacity);
+    iree_hal_amd_gpu_pm4_submission_release(capture);
+  }
+  iree_hal_executable_release(&executable.base);
   EXPECT_TRUE(executable.destroyed);
 }
 

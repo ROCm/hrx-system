@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <barrier>
+#include <cstddef>
 #include <semaphore>
 #include <thread>
 #include <vector>
@@ -88,6 +89,30 @@ struct Allocator {
   }
 };
 
+// Supplies exactly the queried allocation capacity, with normal allocator
+// alignment. Reuse depends on tracker finalization freeing its sole allocation.
+class TrackerStorage {
+ public:
+  explicit TrackerStorage(iree_host_size_t count) {
+    IREE_CHECK_OK(iree_async_semaphore_wait_tracker_storage_size(
+        count, &storage_.capacity));
+    bytes_.resize((storage_.capacity + sizeof(std::max_align_t) - 1) /
+                  sizeof(std::max_align_t));
+    storage_.buffer = reinterpret_cast<uint8_t*>(bytes_.data());
+  }
+
+  iree_allocator_t allocator() {
+    return iree_allocator_inline_arena(&storage_);
+  }
+  iree_host_size_t length() const { return storage_.length; }
+
+ private:
+  // Aligned backing, stable through every callback using the tracker.
+  std::vector<std::max_align_t> bytes_;
+  // Actual allocator passed to the production wait path.
+  iree_allocator_inline_storage_t storage_ = {};
+};
+
 class HostWaitTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -120,10 +145,11 @@ class HostWaitTest : public ::testing::Test {
     return semaphore;
   }
   iree_status_t Begin(iree_hal_semaphore_list_t waits, Completion& completion,
-                      Wait& wait) {
+                      Wait& wait,
+                      iree_allocator_t allocator = iree_allocator_system()) {
     return iree_hal_amd_gpu_host_wait_begin(&context_, service_, waits,
                                             Completion::Run, &completion,
-                                            iree_allocator_system(), &wait);
+                                            allocator, &wait);
   }
   void Check(Completion& completion, iree_status_code_t code = IREE_STATUS_OK) {
     completion.done.acquire();
@@ -150,6 +176,36 @@ TEST_F(HostWaitTest, AlreadyReachedWaitRunsOnService) {
   Wait wait;
   IREE_ASSERT_OK(Begin({1, &semaphore, &value}, completion, wait));
   Check(completion);
+}
+
+TEST_F(HostWaitTest, InlineTrackerReusesExactStorageAfterFinalization) {
+  std::array<iree_hal_semaphore_t*, 4> semaphores = {
+      Semaphore(128), Semaphore(128), Semaphore(128), Semaphore(128)};
+  for (iree_host_size_t count : {1u, 4u}) {
+    TrackerStorage storage(count);
+    for (uint64_t value = 1; value <= 128; ++value) {
+      std::array<uint64_t, 4> values;
+      values.fill(value);
+      Completion completion;
+      Wait wait;
+      IREE_ASSERT_OK(Begin({count, semaphores.data(), values.data()},
+                           completion, wait, storage.allocator()));
+      Check(completion);
+      EXPECT_EQ(storage.length(), 0u);
+      EXPECT_EQ(wait.operation.base.next, nullptr);
+    }
+  }
+}
+
+TEST_F(HostWaitTest, TrackerStorageRejectsUnrepresentableCount) {
+  for (iree_host_size_t count :
+       {iree_host_size_t{INT32_MAX} + 1, IREE_HOST_SIZE_MAX}) {
+    iree_host_size_t size = 123;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_async_semaphore_wait_tracker_storage_size(count, &size));
+    EXPECT_EQ(size, 0u);
+  }
 }
 
 TEST_F(HostWaitTest, AllWaitsResolveBeforeContinuation) {
@@ -266,6 +322,8 @@ TEST_F(HostWaitTest, TerminalCallbackCanFreeCaptureImmediately) {
     uint64_t value;
     // Independent test result, live after capture destruction.
     Completion* completion;
+    // Tracker backing destroyed with the enclosing capture in its callback.
+    TrackerStorage storage{1};
   };
   auto* semaphore = Semaphore(1024);
   for (uint64_t value = 1; value <= 1024; ++value) {
@@ -279,7 +337,7 @@ TEST_F(HostWaitTest, TerminalCallbackCanFreeCaptureImmediately) {
           delete capture;
           Completion::Run(completion, status);
         },
-        capture, iree_allocator_system(), &capture->wait));
+        capture, capture->storage.allocator(), &capture->wait));
     Check(completion);
   }
 }
@@ -288,6 +346,7 @@ TEST_F(HostWaitTest, ConcurrentRegistrationAndSignalsReturnEveryBorrow) {
   std::array<iree_hal_semaphore_t*, 4> semaphores = {Semaphore(), Semaphore(),
                                                      Semaphore(), Semaphore()};
   std::array<uint64_t, 4> values;
+  TrackerStorage storage(semaphores.size());
   std::barrier<> start(5);
   std::barrier<> finish(5);
   std::array<std::thread, 4> producers;
@@ -306,8 +365,9 @@ TEST_F(HostWaitTest, ConcurrentRegistrationAndSignalsReturnEveryBorrow) {
     Wait wait;
     start.arrive_and_wait();
     IREE_CHECK_OK(Begin({semaphores.size(), semaphores.data(), values.data()},
-                        completion, wait));
+                        completion, wait, storage.allocator()));
     Check(completion);
+    EXPECT_EQ(storage.length(), 0u);
     finish.arrive_and_wait();
   }
   for (auto& producer : producers) {
@@ -317,6 +377,7 @@ TEST_F(HostWaitTest, ConcurrentRegistrationAndSignalsReturnEveryBorrow) {
 
 TEST_F(HostWaitTest, ConcurrentCancellationAndSignalHaveOneTerminalOwner) {
   auto* semaphore = Semaphore();
+  TrackerStorage storage(1);
   std::barrier<> start(2);
   std::barrier<> finish(2);
   std::thread producer([&] {
@@ -329,7 +390,8 @@ TEST_F(HostWaitTest, ConcurrentCancellationAndSignalHaveOneTerminalOwner) {
   for (uint64_t value = 1; value <= 1024; ++value) {
     Completion completion;
     Wait wait;
-    IREE_CHECK_OK(Begin({1, &semaphore, &value}, completion, wait));
+    IREE_CHECK_OK(
+        Begin({1, &semaphore, &value}, completion, wait, storage.allocator()));
     start.arrive_and_wait();
     iree_hal_amd_gpu_host_wait_cancel(&wait);
     completion.done.acquire();
@@ -337,6 +399,7 @@ TEST_F(HostWaitTest, ConcurrentCancellationAndSignalHaveOneTerminalOwner) {
     EXPECT_TRUE(code == IREE_STATUS_OK || code == IREE_STATUS_CANCELLED);
     EXPECT_EQ(completion.calls.load(), 1u);
     EXPECT_EQ(completion.thread, service_thread_);
+    EXPECT_EQ(storage.length(), 0u);
     finish.arrive_and_wait();
   }
   producer.join();

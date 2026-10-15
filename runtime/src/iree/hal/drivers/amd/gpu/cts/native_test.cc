@@ -319,6 +319,35 @@ TEST_F(GpuNativeTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
   iree_hal_pool_release(pool);
 }
 
+TEST_F(GpuNativeTest, ManyFutureDependenciesUseOwnedWaitStorage) {
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  // The copied edge array exceeds the ordinary capture block, so admission
+  // owns a separate wait record until the future producers have all arrived.
+  std::array<iree_hal_semaphore_t*, 64> gates = {};
+  for (auto& gate : gates) {
+    CreateSemaphore(&gate);
+  }
+  std::array<uint64_t, 64> values;
+  values.fill(1);
+  iree_hal_semaphore_t* done = nullptr;
+  CreateSemaphore(&done);
+  uint64_t done_value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[0], {gates.size(), gates.data(), values.data()},
+      {1, &done, &done_value}, nullptr, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+  values.fill(99);
+  for (auto* gate : gates) {
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
+    iree_hal_semaphore_release(gate);
+  }
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      done, done_value, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_semaphore_release(done);
+}
+
 TEST_F(GpuNativeTest, LastReleaseFromCallerWithAcceptedWork) {
   Create();
   if (HasFatalFailure()) {
