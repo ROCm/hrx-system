@@ -29,9 +29,9 @@ typedef struct iree_hal_amd_gpu_pm4_signal_t {
     struct {
       // Independent uses; new references require an existing live borrow.
       iree_atomic_ref_count_t ref_count;
-      // Producer payload uses have ended on the host, independently of the
-      // GPU-written cell. Retained readers keep this fact alive after cleanup.
-      iree_atomic_int32_t retired;
+      // Zero until producer payloads and public completion have joined, then
+      // one plus the terminal status code. Independent of the GPU-written cell.
+      iree_atomic_int32_t retirement;
     } live;
     // Link accessed only under the pool mutex after the last use has joined.
     struct iree_hal_amd_gpu_pm4_signal_t* next;
@@ -110,23 +110,31 @@ iree_hal_amd_gpu_pm4_signal_t* iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
 // signal racing its last release and reuse. NULL is ignored.
 void iree_hal_amd_gpu_pm4_signal_retain(iree_hal_amd_gpu_pm4_signal_t* signal);
 
-// Publishes that all producer-owned payload references and host effects have
-// retired. Native execution alone does not establish this fact. Idempotent for
-// a producer's separate retirement and final publication-bookkeeping release.
+// Publishes the terminal outcome after all producer payload references and
+// public completion effects have joined. Native execution alone does not
+// establish this fact. Only the producer's completion owner calls this, once;
+// final publication-bookkeeping release cannot overwrite the outcome.
 static inline void iree_hal_amd_gpu_pm4_signal_retire(
-    iree_hal_amd_gpu_pm4_signal_t* signal) {
+    iree_hal_amd_gpu_pm4_signal_t* signal, iree_status_code_t status_code) {
   if (signal) {
-    iree_atomic_store(&signal->state.live.retired, 1,
+    iree_atomic_store(&signal->state.live.retirement, (int32_t)status_code + 1,
                       iree_memory_order_release);
   }
 }
 
 // Queries a retained native dependency without visiting its original queue,
-// capture, semaphore, or global frontier tracker.
-static inline bool iree_hal_amd_gpu_pm4_signal_is_retired(
-    const iree_hal_amd_gpu_pm4_signal_t* signal) {
-  return iree_atomic_load(&signal->state.live.retired,
-                          iree_memory_order_acquire) != 0;
+// capture, semaphore, or global frontier tracker. A true result publishes the
+// terminal status code; false leaves out_status_code unchanged.
+static inline bool iree_hal_amd_gpu_pm4_signal_query_retirement(
+    const iree_hal_amd_gpu_pm4_signal_t* signal,
+    iree_status_code_t* out_status_code) {
+  const int32_t retirement = iree_atomic_load(&signal->state.live.retirement,
+                                              iree_memory_order_acquire);
+  if (!retirement) {
+    return false;
+  }
+  *out_status_code = (iree_status_code_t)(retirement - 1);
+  return true;
 }
 
 // Returns one use, making the cell reusable only after the last use joins.

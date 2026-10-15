@@ -46,7 +46,7 @@ iree_hal_amd_gpu_pm4_signal_t* iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
     pool->free_head = signal->state.next;
     ++pool->live_count;
     iree_atomic_ref_count_init(&signal->state.live.ref_count);
-    iree_atomic_store(&signal->state.live.retired, 0,
+    iree_atomic_store(&signal->state.live.retirement, 0,
                       iree_memory_order_relaxed);
   }
   iree_slim_mutex_unlock(&pool->mutex);

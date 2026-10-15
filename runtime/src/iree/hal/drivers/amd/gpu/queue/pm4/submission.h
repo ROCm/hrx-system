@@ -152,15 +152,21 @@ void iree_hal_amd_gpu_pm4_submission_retain(
 // Native execution may complete before the fixed-order completion observer
 // retires a producer's payload. All signals here belong to the same device
 // completion owner; a producer's progress prompts another source round.
+// A true result publishes the first failed dependency's status code, or OK.
+// A failed dependency never substitutes for joining the other native users.
+// out_status_code is unspecified while any dependency remains unretired.
 bool iree_hal_amd_gpu_pm4_submission_retirement_ready(
-    const iree_hal_amd_gpu_pm4_submission_t* submission);
+    const iree_hal_amd_gpu_pm4_submission_t* submission,
+    iree_status_code_t* out_status_code);
 
 // Releases payload resources after terminal native completion, before public
 // completion signals. Publication may still retain the capture for its signal
 // bookkeeping, but never accesses the payload after publishing the final piece.
-// Publishes the producer's host-retirement fact after its payload uses end.
-// Only terminal retirement calls this while another capture reference exists.
-void iree_hal_amd_gpu_pm4_submission_retire(
+// Does not publish signal retirement: the completion owner must first finish
+// its public signal effects and then publish their outcome. Idempotent for
+// terminal retirement and final capture release; only terminal retirement
+// calls this while another capture reference exists.
+void iree_hal_amd_gpu_pm4_submission_release_payload(
     iree_hal_amd_gpu_pm4_submission_t* submission);
 
 // Releases captured resources and storage on the last reference. Native uses

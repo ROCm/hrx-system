@@ -114,6 +114,8 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::device
     iree::hal::drivers::amd::gpu::image::hip_images
+    iree::hal::drivers::amd::gpu::queue::pm4::semaphore
+    iree::hal::drivers::amd::gpu::queue::pm4::signal
     iree::hal::drivers::amd::registration
     iree::hal::drivers::amd::status
     iree::hal::memory::fixed_block_pool

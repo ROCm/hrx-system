@@ -211,19 +211,28 @@ void iree_hal_amd_gpu_pm4_submission_retain(
 }
 
 bool iree_hal_amd_gpu_pm4_submission_retirement_ready(
-    const iree_hal_amd_gpu_pm4_submission_t* submission) {
+    const iree_hal_amd_gpu_pm4_submission_t* submission,
+    iree_status_code_t* out_status_code) {
+  *out_status_code = IREE_STATUS_OK;
   if (submission->native_wait_count) {
     for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
       const iree_hal_amd_gpu_pm4_signal_t* signal = submission->waits[i].signal;
-      if (signal && !iree_hal_amd_gpu_pm4_signal_is_retired(signal)) {
-        return false;
+      if (signal) {
+        iree_status_code_t status_code;
+        if (!iree_hal_amd_gpu_pm4_signal_query_retirement(signal,
+                                                          &status_code)) {
+          return false;
+        }
+        if (*out_status_code == IREE_STATUS_OK) {
+          *out_status_code = status_code;
+        }
       }
     }
   }
   return true;
 }
 
-void iree_hal_amd_gpu_pm4_submission_retire(
+void iree_hal_amd_gpu_pm4_submission_release_payload(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
   if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH) {
     const iree_host_size_t reference_count =
@@ -239,13 +248,12 @@ void iree_hal_amd_gpu_pm4_submission_retire(
     iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&submission->execute);
   }
   submission->kind = IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER;
-  iree_hal_amd_gpu_pm4_signal_retire(submission->signal);
 }
 
 static void iree_hal_amd_gpu_pm4_submission_destroy(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
   iree_hal_amd_gpu_capture_pool_t* pool = submission->pool;
-  iree_hal_amd_gpu_pm4_submission_retire(submission);
+  iree_hal_amd_gpu_pm4_submission_release_payload(submission);
   for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
     iree_hal_amd_gpu_pm4_signal_release(submission->waits[i].signal);
     iree_hal_semaphore_release(submission->waits[i].semaphore);

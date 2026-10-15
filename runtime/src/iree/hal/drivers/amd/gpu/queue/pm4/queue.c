@@ -1295,8 +1295,9 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
       break;
     }
     iree_hal_amd_gpu_pm4_submission_t* submission = action->submission;
-    if (action->terminal &&
-        !iree_hal_amd_gpu_pm4_submission_retirement_ready(submission)) {
+    iree_status_code_t completion_code = IREE_STATUS_OK;
+    if (action->terminal && !iree_hal_amd_gpu_pm4_submission_retirement_ready(
+                                submission, &completion_code)) {
       break;
     }
     const uint64_t consumed_words = action->consumed_words;
@@ -1306,7 +1307,7 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
              action->download.length);
     }
     if (action->terminal) {
-      iree_hal_amd_gpu_pm4_submission_retire(submission);
+      iree_hal_amd_gpu_pm4_submission_release_payload(submission);
     }
     iree_async_single_frontier_t completed_frontier;
     const iree_async_frontier_t* frontier = NULL;
@@ -1318,7 +1319,11 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
       iree_async_frontier_tracker_advance(queue->frontier.tracker,
                                           queue->frontier.axis, position + 1);
     }
-    iree_status_t status = iree_ok_status();
+    iree_status_t status =
+        completion_code == IREE_STATUS_OK
+            ? iree_ok_status()
+            : iree_make_status(completion_code,
+                               "native queue dependency failed");
     for (iree_host_size_t i = 0;
          action->terminal && i < submission->signals.count &&
          iree_status_is_ok(status);
@@ -1330,8 +1335,12 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
                          semaphore, value, frontier)
                    : iree_hal_semaphore_signal(semaphore, value, frontier);
     }
+    completion_code = iree_status_code(status);
     if (!iree_status_is_ok(status)) {
       iree_hal_amd_gpu_pm4_fail_signals(queue, submission->signals, status);
+    }
+    if (action->terminal) {
+      iree_hal_amd_gpu_pm4_signal_retire(submission->signal, completion_code);
     }
     iree_hal_amd_gpu_pm4_complete(queue, submission);
     iree_atomic_store(&queue->completed.words, consumed_words,

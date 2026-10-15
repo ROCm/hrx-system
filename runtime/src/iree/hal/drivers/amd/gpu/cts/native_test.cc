@@ -19,6 +19,8 @@
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/signal.h"
 #include "iree/hal/drivers/amd/registration/driver_module.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/memory/fixed_block_pool.h"
@@ -1006,6 +1008,86 @@ TEST_F(GpuNativeTest, FailedQueueConstructionReleasesWorkersAndKeepsContext) {
       iree_async_primitive_is_none(context_->kernel_event.wait_primitive));
   options_.pm4.argument_capacity = 256;
   Create();
+}
+
+TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  using iree::hal::cts::Ref;
+  Ref<iree_hal_semaphore_t> paused, producer, consumer;
+  CreateSemaphore(paused.out());
+  CreateSemaphore(producer.out());
+  CreateSemaphore(consumer.out());
+  iree_hal_semaphore_t* paused_handle = paused;
+  iree_hal_semaphore_t* producer_handle = producer;
+  iree_hal_semaphore_t* consumer_handle = consumer;
+  uint64_t one = 1;
+
+  // A public completion callback holds the device's single completion owner.
+  // Native submission remains live, so both operations below can reach the
+  // hardware before any host observer retires the producer.
+  struct CompletionPause {
+    // Borrowed timeline owning timepoint enrollment.
+    iree_async_semaphore_t* semaphore;
+    // Stack callback storage, joined before leaving this scope.
+    iree_async_semaphore_timepoint_t timepoint = {};
+    // Callback entry, observed before submitting the native dependency chain.
+    std::binary_semaphore entered{0};
+    // Releases the callback after the producer's public timeline fails.
+    std::binary_semaphore proceed{0};
+    // Joins the callback's final stack access.
+    std::binary_semaphore finished{0};
+    // Successful enrollment still requiring cancellation or callback joining.
+    bool enrolled = false;
+    void Join() {
+      if (enrolled &&
+          !iree_async_semaphore_cancel_timepoint(semaphore, &timepoint)) {
+        proceed.release();
+        finished.acquire();
+      }
+      enrolled = false;
+    }
+    ~CompletionPause() { Join(); }
+  } pause{reinterpret_cast<iree_async_semaphore_t*>(paused_handle)};
+  pause.timepoint = {
+      .callback =
+          [](void* user_data, iree_async_semaphore_timepoint_t*,
+             iree_status_t status) {
+            auto* pause = static_cast<CompletionPause*>(user_data);
+            IREE_EXPECT_OK(status);
+            pause->entered.release();
+            pause->proceed.acquire();
+            pause->finished.release();
+          },
+      .user_data = &pause,
+  };
+  IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(pause.semaphore, one,
+                                                        &pause.timepoint));
+  pause.enrolled = true;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {},
+                                        {1, &paused_handle, &one}, nullptr, 0));
+  pause.entered.acquire();
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[1], {}, {1, &producer_handle, &one}, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {1, &producer_handle, &one},
+                                        {1, &consumer_handle, &one}, nullptr,
+                                        0));
+  // A published native consumer proves the dependency was admitted without
+  // waiting on the producer's host timeline, which is still held above.
+  iree_hal_amd_gpu_pm4_semaphore_wait_t published = {};
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_pm4_semaphore_acquire_wait(consumer, one, &published));
+  EXPECT_EQ(published.state, IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_NATIVE);
+  iree_hal_amd_gpu_pm4_signal_release(published.signal);
+  iree_hal_semaphore_fail(
+      producer, iree_make_status(IREE_STATUS_ABORTED, "producer failed"));
+  pause.Join();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_semaphore_wait(consumer, one, iree_infinite_timeout(), 0));
+  // Fixture teardown joins device ownership and checks complete reclamation.
 }
 
 TEST_F(GpuNativeTest, LastReleaseFromCompletionCallback) {
