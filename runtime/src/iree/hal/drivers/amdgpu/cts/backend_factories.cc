@@ -83,6 +83,7 @@ static iree_status_t CreateAmdgpuCtsDevice(
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
   iree_hal_amdgpu_driver_options_t options;
   iree_hal_amdgpu_driver_options_initialize(&options);
+  options.default_gpu_agent_queue_count = 2;
   InitializeAmdgpuCtsDeviceOptions(mode, &options.default_device_options);
 
   iree_hal_driver_t* driver = nullptr;
