@@ -63,6 +63,7 @@ loom_test(
         "q5_q8": {"case": "@ggml_linear_q5k_q8_1_x4_m4_differential_case"},
         "q6_f32": {"case": "@ggml_linear_q6k_f32_decode_m4_nonzero_tail_case"},
         "q6_q8": {"case": "@ggml_linear_q6k_q8_1_x4_m4_wave64_block4_differential_case"},
+        "q6_q8_single": {"case": "@ggml_linear_q6k_q8_1_x4_wave64_block4_nonzero_tail_case"},
     },
 )
 
