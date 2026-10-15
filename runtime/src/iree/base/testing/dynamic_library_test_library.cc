@@ -31,6 +31,13 @@ int IREE_SYM_EXPORT next_value() {
   return ++value;
 }
 
+// Preserve a DLL frame while the executable captures an error through a
+// callback. The arithmetic after the call prevents tail-call elimination.
+int IREE_SYM_EXPORT IREE_SYM_NOINLINE invoke_callback(int (*callback)(void*),
+                                                      void* context) {
+  return callback(context) + 1;
+}
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

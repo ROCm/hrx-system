@@ -111,6 +111,41 @@ TEST_F(DynamicLibraryTest, LoadLibraryFromMemory) {
 }
 
 #if defined(IREE_PLATFORM_WINDOWS)
+static int CaptureStatusFromLibrary(void* context) {
+  *static_cast<iree_status_t*>(context) =
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "late-loaded module witness");
+  return 41;
+}
+
+TEST_F(DynamicLibraryTest, StatusFromLateLoadedModule) {
+  const iree_symbol_resolver_t* resolver = nullptr;
+  ASSERT_EQ(ERROR_SUCCESS, iree_symbol_resolver_get(&resolver));
+  const auto* file = dynamic_library_test_library_create();
+  iree_dynamic_library_t* library = nullptr;
+  IREE_ASSERT_OK(iree_dynamic_library_load_from_memory(
+      IREE_SV("late_loaded_module"),
+      iree_make_const_byte_span(file->data, file->size),
+      IREE_DYNAMIC_LIBRARY_FLAG_NONE, iree_allocator_system(), &library));
+  std::unique_ptr<iree_dynamic_library_t,
+                  decltype(&iree_dynamic_library_release)>
+      owned_library(library, iree_dynamic_library_release);
+  int (*invoke_callback)(int (*)(void*), void*) = nullptr;
+  IREE_ASSERT_OK(iree_dynamic_library_lookup_symbol(
+      library, "invoke_callback", reinterpret_cast<void**>(&invoke_callback)));
+  iree_status_t status = iree_ok_status();
+  EXPECT_EQ(42, invoke_callback(CaptureStatusFromLibrary, &status));
+  EXPECT_EQ(IREE_STATUS_UNAVAILABLE, iree_status_code(status));
+  char text[16384];
+  iree_host_size_t text_length = 0;
+  bool formatted = iree_status_format(status, sizeof(text), text, &text_length);
+  iree_status_free(status);
+  ASSERT_TRUE(formatted);
+#if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_STACK_TRACE) != 0
+  EXPECT_THAT(std::string(text, text_length),
+              ::testing::HasSubstr("<invoke_callback"));
+#endif  // has IREE_STATUS_FEATURE_STACK_TRACE
+}
+
 static BOOL CALLBACK PdbDiagnosticCallback(HANDLE process, ULONG action,
                                            ULONG64 data, ULONG64 context) {
   if (action != CBA_DEBUG_INFO) {
