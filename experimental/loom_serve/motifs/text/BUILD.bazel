@@ -4,13 +4,19 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
 
 filegroup(
     name = "sources",
+    srcs = glob(["*.loom"]),
+    visibility = ["//visibility:public"],
+)
+
+loom_library(
+    name = "library",
     srcs = glob(["*.loom"]),
     visibility = ["//visibility:public"],
 )

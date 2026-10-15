@@ -43,9 +43,9 @@ loom_module(
     "${_GLOB_KERNELS_X_LOOM}"
     "${_GLOB_PROGRAMS_X_LOOM}"
     "config.loom"
-    "iree::experimental::loom_serve::models::qwen::speculation_kernels"
-    "iree::experimental::loom_serve::motifs::ggml::sources"
-    "iree::experimental::loom_serve::motifs::tensor::sources"
+    "iree::experimental::loom_serve::models::qwen::speculation_library"
+    "iree::experimental::loom_serve::motifs::ggml::library"
+    "iree::experimental::loom_serve::motifs::tensor::library"
   MODE merge
   OUTPUT_FORMAT bc
   STRICT_DEPS
