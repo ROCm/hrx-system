@@ -1,0 +1,19 @@
+check.case @missing_target {
+  check.requires<hal.amdgpu.target> {}
+  check.return
+}
+
+check.case @wrong_target_type {
+  check.requires<hal.amdgpu.target> {target = 11}
+  check.return
+}
+
+check.case @unknown_target {
+  check.requires<hal.amdgpu.target> {target = "gfx-unknown"}
+  check.return
+}
+
+check.case @invalid_feature {
+  check.requires<hal.amdgpu.target> {target = "gfx942:xnack?"}
+  check.return
+}

@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "executes compatible targets and skips incompatible targets before compilation",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/check_target_requirements.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"case_count\":8",
+          "\"sample_count\":1",
+          "\"skipped_case_count\":7",
+          "\"failure_count\":0",
+          "\"provider_code\":\"target_mismatch\""
+        ]
+      }
+    },
+    {
+      "name": "benchmarks only the compatible target",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/check_target_requirements.loom",
+          "--device=amdgpu",
+          "--iterations=1",
+          "--warmup-iterations=0",
+          "--min-time-ms=0",
+          "--warmup-time-ms=0",
+          "--output-format=jsonl"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"state\":\"skipped\"",
+          "\"selected_benchmark_count\":8",
+          "\"failed_benchmark_count\":0",
+          "\"correctness\":{\"sample_count\":1,\"failed_sample_count\":0}"
+        ]
+      }
+    }
+  ]
+}

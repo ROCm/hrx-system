@@ -19,7 +19,13 @@ typedef struct loom_run_hal_testbench_context_t
     loom_run_hal_testbench_context_t;
 
 // Initializes the hal.amdgpu.descriptor_set requirement provider.
-void loom_amdgpu_hal_testbench_requirement_provider_initialize(
+void loom_amdgpu_hal_descriptor_set_testbench_requirement_provider_initialize(
+    loom_run_hal_testbench_context_t* context,
+    loom_testbench_requirement_provider_t* out_provider);
+
+// Initializes the hal.amdgpu.target requirement provider. Its target selector
+// accepts exact processors, generic processors, and target-ID feature suffixes.
+void loom_amdgpu_hal_target_testbench_requirement_provider_initialize(
     loom_run_hal_testbench_context_t* context,
     loom_testbench_requirement_provider_t* out_provider);
 

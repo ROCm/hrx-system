@@ -23,6 +23,7 @@ loom_cc_library(
         "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/amdgpu:profile",
+        "//loom/src/loom/target/arch/amdgpu:target_identity",
         "//loom/src/loom/target/arch/amdgpu:target_info_defs",
         "//loom/src/loom/tooling/execution/hal:testbench_actual",
         "//loom/src/loom/tooling/testbench:requirements",

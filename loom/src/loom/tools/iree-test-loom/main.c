@@ -1167,6 +1167,21 @@ int iree_test_loom_main(int argc, char** argv,
         0};
     loom_testbench_scenario_execution_options_initialize(
         &scenario_execution_options);
+    // Requirement providers may initialize the device while inspecting it.
+    // Install capture before admission so all device users share one sink.
+    if (iree_status_is_ok(status)) {
+      status = loom_testbench_device_event_capture_initialize(
+          LOOM_TESTBENCH_DEVICE_EVENT_DEFAULT_CAPACITY, allocator,
+          &device_event_capture);
+      if (iree_status_is_ok(status)) {
+        device_event_capture_initialized = true;
+        execution_options.device_event_capture = &device_event_capture;
+        scenario_execution_options.device_event_capture = &device_event_capture;
+        loom_run_hal_testbench_context_set_device_event_sink(
+            &hal_context,
+            loom_testbench_device_event_capture_sink(&device_event_capture));
+      }
+    }
     const loom_testbench_case_plan_t** selected_cases = NULL;
     iree_host_size_t selected_case_count = 0;
     loom_testbench_requirement_result_t* requirement_results = NULL;
@@ -1351,19 +1366,6 @@ int iree_test_loom_main(int argc, char** argv,
       status = iree_test_loom_create_host_pool(allocator, &case_host_pool);
       if (iree_status_is_ok(status)) {
         execution_options.materializer.target_pool = case_host_pool;
-      }
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_testbench_device_event_capture_initialize(
-          LOOM_TESTBENCH_DEVICE_EVENT_DEFAULT_CAPACITY, allocator,
-          &device_event_capture);
-      if (iree_status_is_ok(status)) {
-        device_event_capture_initialized = true;
-        execution_options.device_event_capture = &device_event_capture;
-        scenario_execution_options.device_event_capture = &device_event_capture;
-        loom_run_hal_testbench_context_set_device_event_sink(
-            &hal_context,
-            loom_testbench_device_event_capture_sink(&device_event_capture));
       }
     }
 

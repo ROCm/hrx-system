@@ -11,12 +11,14 @@
       },
       "stdout": {
         "contains": [
-          "\"case_count\":2",
+          "\"case_count\":3",
           "\"sample_count\":1",
-          "\"skipped_case_count\":1",
+          "\"skipped_case_count\":2",
           "\"case\":\"scalar_case\"",
           "\"failure_count\":0",
-          "\"code\":\"provider_unavailable\""
+          "\"code\":\"provider_unavailable\"",
+          "\"provider\":\"hal.amdgpu.target\"",
+          "\"provider_code\":\"hal_driver_mismatch\""
         ]
       }
     },
@@ -35,6 +37,70 @@
         "contains": [
           "\"state\":\"skipped\"",
           "\"failed_benchmark_count\":0"
+        ]
+      }
+    },
+    {
+      "name": "missing target",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/check_requirements_invalid.loom",
+          "--case=@missing_target"
+        ]
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": [
+          "requirement attr 'target' is required"
+        ]
+      }
+    },
+    {
+      "name": "wrong target type",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/check_requirements_invalid.loom",
+          "--case=@wrong_target_type"
+        ]
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": [
+          "requirement attr 'target' must be string"
+        ]
+      }
+    },
+    {
+      "name": "unknown target",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/check_requirements_invalid.loom",
+          "--case=@unknown_target"
+        ]
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": [
+          "AMDGPU target 'gfx-unknown' is not supported"
+        ]
+      }
+    },
+    {
+      "name": "invalid feature",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/check_requirements_invalid.loom",
+          "--case=@invalid_feature"
+        ]
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": [
+          "xnack?"
         ]
       }
     }
