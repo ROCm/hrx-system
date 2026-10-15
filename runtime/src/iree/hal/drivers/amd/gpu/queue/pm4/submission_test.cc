@@ -324,7 +324,14 @@ TEST_F(SubmissionTest, PreparedAddressChecksDomainUsageAndCommitment) {
   };
   iree_hal_buffer_native_binding_t binding = {.device_address = 0x1000};
   iree_hal_buffer_t buffer = {};
-  const iree_hal_buffer_vtable_t vtable = {};
+  const iree_hal_buffer_vtable_t vtable = {
+      .query_memory =
+          [](const iree_hal_buffer_t* buffer) {
+            ADD_FAILURE()
+                << "GPU address resolution must not query cold backing";
+            return buffer->memory;
+          },
+  };
   iree_hal_buffer_initialize({}, &buffer, 64, 0, 64,
                              IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
                              IREE_HAL_MEMORY_ACCESS_READ,

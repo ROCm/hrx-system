@@ -346,9 +346,8 @@ void iree_hal_amd_gpu_pm4_submission_release(
 iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
     const iree_hal_queue_family_t* family, iree_hal_buffer_ref_t reference,
     iree_hal_memory_access_t access, uint64_t* out_address) {
-  const iree_hal_buffer_memory_view_t view =
-      iree_hal_buffer_memory_view(reference.buffer);
-  const iree_hal_memory_contract_t* contract = view.contract;
+  const iree_hal_memory_contract_t* contract =
+      reference.buffer->memory.contract;
   const uint64_t scope_id = (uint64_t)family->memory.queue_scope_id + 1;
   if (!contract || !family->memory.domain ||
       family->memory.domain != contract->domain ||
@@ -375,9 +374,9 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_resolve_address(
       IREE_HAL_BUFFER_USAGE_STORAGE |
           IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ));
   const uint64_t base =
-      iree_hal_buffer_memory_native_binding(
-          &view, (iree_hal_buffer_native_binding_slot_t){.index = index,
-                                                         .type = interface})
+      iree_hal_buffer_native_binding(reference.buffer,
+                                     (iree_hal_buffer_native_binding_slot_t){
+                                         .index = index, .type = interface})
           .device_address;
   if (!base) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,

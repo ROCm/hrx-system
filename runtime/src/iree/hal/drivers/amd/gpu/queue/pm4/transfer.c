@@ -60,8 +60,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_transfer_qualify(
     const iree_hal_queue_family_t* family, iree_hal_buffer_t* buffer,
     iree_device_size_t offset,
     iree_hal_amd_gpu_pm4_transfer_address_t* out_address) {
-  const iree_hal_memory_contract_t* contract =
-      iree_hal_buffer_memory_view(buffer).contract;
+  const iree_hal_memory_contract_t* contract = buffer->memory.contract;
   // Family/domain membership is established by public transfer validation.
   // Legacy buffers can satisfy that check without a native binding contract.
   if (!contract) {
@@ -182,11 +181,9 @@ void iree_hal_amd_gpu_pm4_transfer_deinitialize(
 static iree_status_t iree_hal_amd_gpu_pm4_transfer_resolve(
     const iree_hal_amd_gpu_pm4_transfer_address_t* address,
     iree_device_size_t offset, uint64_t* out_address) {
-  const iree_hal_buffer_memory_view_t view =
-      iree_hal_buffer_memory_view(address->device.buffer);
-  const uint64_t base =
-      iree_hal_buffer_memory_native_binding(&view, address->device.slot)
-          .device_address;
+  const uint64_t base = iree_hal_buffer_native_binding(address->device.buffer,
+                                                       address->device.slot)
+                            .device_address;
   if (!base) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "transfer buffer has no committed GPU address");
