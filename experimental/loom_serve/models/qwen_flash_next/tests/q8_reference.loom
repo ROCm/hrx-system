@@ -1,0 +1,85 @@
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+// Random codes receive distinct finite block scales. Inactive rows contain
+// NaNs so accidental participation contaminates the output instead of hiding.
+func.def public @flash_next_q8_fixture(%count_value: index, %inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %scale_period = index.constant 13 : index
+  %tokens = config.get @flash_next.token_count : index
+  %count = index.assume %count_value [range(%count_value, 0, %tokens)] : index
+  %block_size = index.constant 32 : index
+  %block_bytes = index.constant 34 : offset
+  %blocks = index.div %inputs, %block_size : index
+  %block_count = index.mul %outputs, %blocks : index
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = index.cast %count : index to i32
+  view.store %count_word, %header[0] : i32, view<3xi32>
+  %unit = scalar.constant 0.00125 : f64
+  scf.for %block = [%c0 to %block_count step %c1] {
+    %position = index.scale %block, %block_bytes : index, offset -> offset
+    %scale_view = buffer.view %weight[%position] : buffer -> view<1xf16>
+    %remainder = index.rem %block, %scale_period : index
+    %word = index.cast %remainder : index to i32
+    %value = scalar.uitofp %word : i32 to f64
+    %scaled = scalar.mulf %value, %unit : f64
+    %packed = scalar.fptrunc %scaled : f64 to f16
+    view.store %packed, %scale_view[0] : f16, view<1xf16>
+  }
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%inputs]xbf16>
+  %nan_word = scalar.constant 32705 : i16
+  %nan = scalar.bitcast %nan_word : i16 to bf16
+  scf.for %row = [%count to %tokens step %c1] {
+    scf.for %column = [%c0 to %inputs step %c1] {
+      view.store %nan, %input_view[%row, %column] : bf16, view<[%tokens]x[%inputs]xbf16>
+    }
+  }
+  func.return
+}
+
+// Decode each original Q8 value independently and accumulate in F64. The
+// reference has no matrix fragments, lane partitioning, or subgroup reduction.
+func.def public @flash_next_q8_reference(%inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %block_size = index.constant 32 : index
+  %block_bytes = index.constant 34 : offset
+  %scale_bytes = index.constant 2 : offset
+  %blocks = index.div %inputs, %block_size : index
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %tokens = config.get @flash_next.token_count : index
+  %count = index.assume %count_value [range(%count_value, 0, %tokens)] : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x[%inputs]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%outputs]xbf16>
+  %initial = scalar.constant 0.0 : f64
+  scf.for %token = [%c0 to %count step %c1] {
+    scf.for %row = [%c0 to %outputs step %c1] {
+      %result = scf.for %column = [%c0 to %inputs step %c1](%sum = %initial : f64) -> (f64) {
+        %block = index.div %column, %block_size : index
+        %element = index.rem %column, %block_size : index
+        %block_index = index.madd %row, %blocks, %block : index
+        %position = index.scale %block_index, %block_bytes : index, offset -> offset
+        %code_origin = index.add %position, %scale_bytes : offset
+        %scales = buffer.view %weight[%position] : buffer -> view<1xf16>
+        %codes = buffer.view %weight[%code_origin] : buffer -> view<32xi8>
+        %scale_packed = view.load %scales[0] : view<1xf16> -> f16
+        %code = view.load %codes[%element] : view<32xi8> -> i8
+        %input_packed = view.load %input_view[%token, %column] : view<[%tokens]x[%inputs]xbf16> -> bf16
+        %scale = scalar.extf %scale_packed : f16 to f64
+        %value = scalar.sitofp %code : i8 to f64
+        %x = scalar.extf %input_packed : bf16 to f64
+        %w = scalar.mulf %value, %scale : f64
+        %product = scalar.mulf %w, %x : f64
+        %next = scalar.addf %sum, %product : f64
+        scf.yield %next : f64
+      }
+      %packed = scalar.fptrunc %result : f64 to bf16
+      view.store %packed, %output_view[%token, %row] : bf16, view<[%tokens]x[%outputs]xbf16>
+    }
+  }
+  func.return
+}

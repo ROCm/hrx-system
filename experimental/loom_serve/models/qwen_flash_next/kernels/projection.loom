@@ -6,6 +6,8 @@ func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
 command.program.decl @flash_next_gdn_state(%layer: index, %state_origin: offset) launch(%parameters: buffer, %span: buffer, %rows: buffer, %qkv: buffer, %z: buffer, %alpha: buffer, %beta: buffer, %arena: buffer, %output: buffer, %capture: buffer)
 
+kernel.decl @flash_next_project_qkv(%configured_output_width: index) launch(%output_width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
 func.decl @flash_next_q8_batch_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
 
 // A subgroup contracts one output column for four packed tokens. Reusing the
@@ -118,7 +120,8 @@ kernel.def target(@flash_next_projection_wave32) @gdn_project_alpha_beta() {
   kernel.return
 }
 
-// Original checkpoint projections surround the packed state command. Input
+// QKV uses the prepared code/scale planes; other projections keep GGUF order.
+// These projections surround the packed state command. Input
 // and output have the model's hidden width; state/history advance only through
 // the active span. Scratch activation publications remain BF16 except for the
 // small per-head alpha/beta vectors and Q/K inverse norms.
@@ -143,7 +146,7 @@ command.program.def public @flash_next_gdn_attention(%layer: index, %state_origi
   %alpha_weight = command.parameter %parameters, "blk.{}.ssm_alpha.weight"[%layer] : view<48x2560xf32>
   %beta_weight = command.parameter %parameters, "blk.{}.ssm_beta.weight"[%layer] : view<48x2560xf32>
   %output_weight = command.parameter %parameters, "blk.{}.ssm_out.weight"[%layer] : view<2560x192x34xi8>
-  kernel.launch @flash_next_linear_q8[%conv_width](%hidden, %conv_width, %span, %input, %qkv_weight, %qkv) : [index](index, index, buffer, buffer, view<10240x80x34xi8>, buffer)
+  kernel.launch @flash_next_project_qkv[%conv_width](%conv_width, %span, %input, %qkv_weight, %qkv) : [index](index, buffer, buffer, view<10240x80x34xi8>, buffer)
   kernel.launch @flash_next_linear_q8[%value_width](%hidden, %value_width, %span, %input, %z_weight, %z) : [index](index, index, buffer, buffer, view<6144x80x34xi8>, buffer)
   kernel.launch @gdn_project_alpha_beta(%span, %input, %alpha_weight, %beta_weight, %alpha, %beta) : (buffer, buffer, view<48x2560xf32>, view<48x2560xf32>, buffer, buffer)
   command.program.launch @flash_next_gdn_state[%layer, %state_origin](%parameters, %span, %rows, %qkv, %z, %alpha, %beta, %arena, %gated, %capture) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
