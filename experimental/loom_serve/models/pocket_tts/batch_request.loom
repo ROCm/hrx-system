@@ -1,0 +1,156 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.voice_count : %value: index where [range(%value, 1, 256)]
+
+config.decl @pocket.voice_frame_capacity : %value: index where [range(%value, 1, 65535)]
+
+template.decl @pocket.element() -> (index)
+
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.decl @pocket.batch.work_record(%work: buffer, %packed: index) -> (view<8xi32>)
+
+template.decl pure @pocket.request_state_size(%capacity: index) -> (offset)
+
+template.decl @pocket.batch.prefill.step(%membership: buffer, %request_stride: offset, %state_stride: offset, %phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %state: buffer)
+
+template.decl @pocket.batch.voice.step(%membership: buffer, %request_stride: offset, %state_stride: offset, %phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %state: buffer)
+
+template.decl @pocket.batch.decode.step(%membership: buffer, %request_stride: offset, %state_stride: offset, %output_stride: offset, %phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %state: buffer, %output: buffer)
+
+kernel.decl @pocket.batch.sample_noise() launch(%membership: buffer, %request: buffer, %state: buffer, %output: buffer, %request_stride: offset, %state_stride: offset, %output_stride: offset)
+
+// The immutable offer owns the selected text token, or -1 for BOS. Whole text
+// remains in request-owned CPU packets; only compatible next tokens are packed.
+kernel.def target(@pocket) @pocket.batch.pack_token() {
+  %one = index.constant 1 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%one, %one, %batch) workgroup_size(%one, %one, %one) : index
+} launch(%work: buffer, %output: buffer) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%work) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %record = template.apply<@pocket.batch.work_record>(%work, %packed) : (buffer, index) -> (view<8xi32>)
+    %token = view.load %record[6] : view<8xi32> -> i32
+    %stride = index.constant 4 : offset
+    %origin = index.scale %packed, %stride : index, offset -> offset
+    %target = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %token, %target[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+// Device request rows hold the full 64-bit seed, padded to 16 bytes. The seed
+// survives row membership changes; the sampling phase uses packed copies.
+kernel.def target(@pocket) @pocket.batch.pack_seed() {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %batch = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%one, %one, %batch) workgroup_size(%two, %one, %one) : index
+} launch(%work: buffer, %requests: buffer, %output: buffer) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%work) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %element_value = kernel.workitem.id<x> : index
+    %element = index.assume %element_value [range(%element_value, 0, 1)] : index
+    %input_stride = index.constant 16 : offset
+    %input_origin = index.scale %resident, %input_stride : index, offset -> offset
+    %output_stride = index.constant 8 : offset
+    %output_origin = index.scale %packed, %output_stride : index, offset -> offset
+    %source = buffer.view %requests[%input_origin] : buffer -> view<2xi32>
+    %target = buffer.view %output[%output_origin] : buffer -> view<2xi32>
+    %value = view.load %source[%element] : view<2xi32> -> i32
+    view.store %value, %target[%element] : i32, view<2xi32>
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.pack_voice() {
+  %elements = index.constant 1920 : index
+  %threads = config.get @pocket.threads : index
+  %batch = config.get @pocket.batch_capacity : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %voices: buffer, %output: buffer) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%work) : (buffer) -> (i1, index, index)
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %elements = index.constant 1920 : index
+  %live = index.cmp ult, %element, %elements : index
+  %enabled = scalar.andi %active, %live : i1
+  scf.if %enabled {
+    %record = template.apply<@pocket.batch.work_record>(%work, %packed) : (buffer, index) -> (view<8xi32>)
+    %voice_count = config.get @pocket.voice_count : index
+    %frame_capacity = config.get @pocket.voice_frame_capacity : index
+    %voice32 = view.load %record[1] : view<8xi32> -> i32
+    %frame32 = view.load %record[2] : view<8xi32> -> i32
+    %voice_value = index.cast %voice32 : i32 to index
+    %frame_value = index.cast %frame32 : i32 to index
+    %voice = index.assume %voice_value [ge(%voice_value, 0), lt(%voice_value, %voice_count)] : index
+    %frame = index.assume %frame_value [ge(%frame_value, 0), lt(%frame_value, %frame_capacity)] : index
+    %origin = index.constant 0 : offset
+    %source = buffer.view %voices[%origin] : buffer -> view<[%voice_count]x[%frame_capacity]x1920xf32>
+    %stride = index.constant 7680 : offset
+    %output_origin = index.scale %packed, %stride : index, offset -> offset
+    %target = buffer.view %output[%output_origin] : buffer -> view<1920xf32>
+    %sample = view.load %source[%voice, %frame, %element] : view<[%voice_count]x[%frame_capacity]x1920xf32> -> f32
+    view.store %sample, %target[%element] : f32, view<1920xf32>
+  }
+  kernel.return
+}
+
+command.program.def public @batch_prefill_text() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %work: buffer, %requests: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %batch = config.get @pocket.batch_capacity : index
+  %context = config.get @pocket.context_capacity : index
+  %state_stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+  %token_stride = index.constant 4 : offset
+  %token_bytes = index.scale %batch, %token_stride : index, offset -> offset
+  %tokens = buffer.alloca<global> align(16) %token_bytes : buffer
+  kernel.launch @pocket.batch.pack_token(%work, %tokens) : (buffer, buffer)
+  template.apply<@pocket.batch.prefill.step>(%work, %token_stride, %state_stride, %phase, %backbone, %rotary, %tokens, %state) : (buffer, offset, offset, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @batch_encode_voice() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %registered: buffer, %work: buffer, %requests: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %voice_count = config.get @pocket.voice_count : index
+  %frame_capacity = config.get @pocket.voice_frame_capacity : index
+  %waveforms = command.parameter %registered, "waveforms" : view<[%voice_count]x[%frame_capacity]x1920xf32>
+  %batch = config.get @pocket.batch_capacity : index
+  %context = config.get @pocket.context_capacity : index
+  %state_stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+  %block_stride = index.constant 7680 : offset
+  %block_bytes = index.scale %batch, %block_stride : index, offset -> offset
+  %blocks = buffer.alloca<global> align(16) %block_bytes : buffer
+  kernel.launch @pocket.batch.pack_voice(%work, %waveforms, %blocks) : (buffer, view<[%voice_count]x[%frame_capacity]x1920xf32>, buffer)
+  template.apply<@pocket.batch.voice.step>(%work, %block_stride, %state_stride, %phase, %backbone, %rotary, %blocks, %state) : (buffer, offset, offset, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @batch_generate_audio() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %work: buffer, %requests: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %batch = config.get @pocket.batch_capacity : index
+  %context = config.get @pocket.context_capacity : index
+  %state_stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+  %seed_stride = index.constant 8 : offset
+  %seed_bytes = index.scale %batch, %seed_stride : index, offset -> offset
+  %seeds = buffer.alloca<global> align(16) %seed_bytes : buffer
+  kernel.launch @pocket.batch.pack_seed(%work, %requests, %seeds) : (buffer, buffer, buffer)
+  %noise_stride = index.constant 136 : offset
+  %noise_bytes = index.scale %batch, %noise_stride : index, offset -> offset
+  %noise = buffer.alloca<global> align(16) %noise_bytes : buffer
+  kernel.launch @pocket.batch.sample_noise(%work, %seeds, %state, %noise, %seed_stride, %state_stride, %noise_stride) : (buffer, buffer, buffer, buffer, offset, offset, offset)
+  %output_stride = index.constant 7684 : offset
+  template.apply<@pocket.batch.decode.step>(%work, %noise_stride, %state_stride, %output_stride, %phase, %backbone, %rotary, %noise, %state, %output) : (buffer, offset, offset, offset, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
