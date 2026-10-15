@@ -14,6 +14,7 @@ add_custom_command(OUTPUT text_control.stamp
     COMMAND ${CMAKE_COMMAND} -E touch text_control.stamp
   DEPENDS
     "control.loom"
+    "epoch_control.loom"
 )
 
 add_custom_target(${_FILEGROUP_TARGET}
@@ -59,7 +60,7 @@ loom_test_module(
   NAME
     epoch_encoding_test_module
   SRCS
-    "control.loom"
+    "epoch_control.loom"
     "tests/epoch_encoding.loom"
 )
 
@@ -79,22 +80,26 @@ loom_execution_test(
 )
 endif()
 
-file(GLOB _GLOB_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
-file(GLOB _GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/qwen38/*.loom)
-file(GLOB _GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS programs/qwen38/*.loom)
-file(GLOB _GLOB_CONTROL_LOOM_EA9AE811 LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS control.loom)
-list(REMOVE_ITEM _GLOB_X_LOOM_EA9AE811 ${_GLOB_CONTROL_LOOM_EA9AE811})
-list(REMOVE_ITEM _GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811 ${_GLOB_CONTROL_LOOM_EA9AE811})
-list(REMOVE_ITEM _GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811 ${_GLOB_CONTROL_LOOM_EA9AE811})
+file(GLOB _GLOB_X_LOOM_2F0D0BCA LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
+file(GLOB _GLOB_KERNELS_QWEN38_X_LOOM_2F0D0BCA LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/qwen38/*.loom)
+file(GLOB _GLOB_PROGRAMS_QWEN38_X_LOOM_2F0D0BCA LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS programs/qwen38/*.loom)
+file(GLOB _GLOB_CONTROL_LOOM_2F0D0BCA LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS control.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_2F0D0BCA ${_GLOB_CONTROL_LOOM_2F0D0BCA})
+list(REMOVE_ITEM _GLOB_KERNELS_QWEN38_X_LOOM_2F0D0BCA ${_GLOB_CONTROL_LOOM_2F0D0BCA})
+list(REMOVE_ITEM _GLOB_PROGRAMS_QWEN38_X_LOOM_2F0D0BCA ${_GLOB_CONTROL_LOOM_2F0D0BCA})
+file(GLOB _GLOB_EPOCH_CONTROL_LOOM_2F0D0BCA LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS epoch_control.loom)
+list(REMOVE_ITEM _GLOB_X_LOOM_2F0D0BCA ${_GLOB_EPOCH_CONTROL_LOOM_2F0D0BCA})
+list(REMOVE_ITEM _GLOB_KERNELS_QWEN38_X_LOOM_2F0D0BCA ${_GLOB_EPOCH_CONTROL_LOOM_2F0D0BCA})
+list(REMOVE_ITEM _GLOB_PROGRAMS_QWEN38_X_LOOM_2F0D0BCA ${_GLOB_EPOCH_CONTROL_LOOM_2F0D0BCA})
 iree_package_target_name(_FILEGROUP_TARGET "::sources")
 add_custom_command(OUTPUT sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch sources.stamp
   DEPENDS
     "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/ggml/sources.stamp"
     "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/tensor/sources.stamp"
-    "${_GLOB_KERNELS_QWEN38_X_LOOM_EA9AE811}"
-    "${_GLOB_PROGRAMS_QWEN38_X_LOOM_EA9AE811}"
-    "${_GLOB_X_LOOM_EA9AE811}"
+    "${_GLOB_KERNELS_QWEN38_X_LOOM_2F0D0BCA}"
+    "${_GLOB_PROGRAMS_QWEN38_X_LOOM_2F0D0BCA}"
+    "${_GLOB_X_LOOM_2F0D0BCA}"
     "model.json"
     "text_control.stamp"
 )
@@ -1270,6 +1275,30 @@ loom_execution_test(
     "loom-executor=hardware"
   RESOURCE_GROUP
     "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    epoch_control_test_module
+  SRCS
+    "epoch_control.loom"
+    "tests/epoch_control.loom"
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    epoch_control_test_execute_vm_reference_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::epoch_control_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
 )
 endif()
 

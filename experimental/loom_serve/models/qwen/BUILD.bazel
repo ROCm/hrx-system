@@ -20,7 +20,10 @@ package(
 # Shared chat, sampling, and packed-epoch policy for Qwen model families.
 filegroup(
     name = "text_control",
-    srcs = ["control.loom"],
+    srcs = [
+        "control.loom",
+        "epoch_control.loom",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -47,7 +50,7 @@ loom_library(
 loom_test(
     name = "epoch_encoding_test",
     srcs = [
-        "control.loom",
+        "epoch_control.loom",
         "tests/epoch_encoding.loom",
     ],
     benchmark_smoke = False,
@@ -67,7 +70,10 @@ filegroup(
             "kernels/qwen38/*.loom",
             "programs/qwen38/*.loom",
         ],
-        exclude = ["control.loom"],
+        exclude = [
+            "control.loom",
+            "epoch_control.loom",
+        ],
     ),
     visibility = ["//visibility:public"],
 )
@@ -375,6 +381,16 @@ py_test(
     size = "small",
     srcs = ["benchmark_cohort_test.py"],
     deps = [":benchmark_cohort_lib"],
+)
+
+loom_test(
+    name = "epoch_control_test",
+    srcs = [
+        "epoch_control.loom",
+        "tests/epoch_control.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
 )
 
 py_test(
