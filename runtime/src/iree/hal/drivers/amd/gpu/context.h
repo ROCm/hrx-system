@@ -84,6 +84,13 @@ iree_status_t iree_hal_amd_gpu_context_prepare_completion(
     iree_hal_amd_gpu_context_t* context,
     amdf_queue_publication_modes_t publication_mode);
 
+// Releases completion resources after all native queues and host users join.
+// Device construction rollback uses this before returning the context so a
+// later construction can select a different publication mode. Failure preserves
+// the remaining owner and forbids freeing the borrowed context.
+amdf_status_t iree_hal_amd_gpu_context_deinitialize_completion(
+    iree_hal_amd_gpu_context_t* context);
+
 // Signals the shared completion observer without allocating or advancing any
 // completion frontier. The caller retains context through the final access.
 amdf_status_t iree_hal_amd_gpu_context_signal(

@@ -77,21 +77,6 @@ class NativeQueue {
     const uint32_t gfx_major = context_->target_info.gfx_ip.major;
     iree_hal_amd_gpu_device_options_t options;
     iree_hal_amd_gpu_device_options_initialize(&options);
-    options.queue_family_ordinal = UINT32_MAX;
-    for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
-      const auto& family = context_->families[i];
-      if (family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
-          (family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_USER) &&
-          (family.user_queue_capabilities &
-           AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER)) {
-        options.queue_family_ordinal = i;
-        break;
-      }
-    }
-    if (options.queue_family_ordinal == UINT32_MAX) {
-      return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "no PM4 USER host-producer family");
-    }
     IREE_RETURN_IF_ERROR(iree_async_proactor_pool_create(
         1, nullptr, iree_async_proactor_pool_options_default(),
         iree_allocator_system(), &proactors_));

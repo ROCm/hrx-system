@@ -7,7 +7,7 @@
 #include <array>
 
 #include "benchmark/benchmark.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/umq/ring.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/ring.h"
 
 namespace {
 

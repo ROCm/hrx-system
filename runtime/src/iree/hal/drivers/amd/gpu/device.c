@@ -16,8 +16,8 @@
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/umq/queue.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/memory/maintenance_thread.h"
 #include "iree/hal/utils/device_spec_builder.h"
@@ -93,6 +93,7 @@ static const iree_hal_device_vtable_t iree_hal_amd_gpu_device_vtable;
 void iree_hal_amd_gpu_device_options_initialize(
     iree_hal_amd_gpu_device_options_t* out_options) {
   *out_options = (iree_hal_amd_gpu_device_options_t){
+      .queue_family_ordinal = UINT32_MAX,
       .queue_count = 1,
       .host_numa_node = UINT32_MAX,
       .pm4 = {.ring_byte_length = 65536,
@@ -318,7 +319,7 @@ static bool iree_hal_amd_gpu_device_is_closing(void* user_data) {
 
 static bool iree_hal_amd_gpu_device_is_idle(iree_hal_amd_gpu_device_t* device) {
   for (uint32_t i = 0; i < device->queue_count; ++i) {
-    if (!iree_hal_amd_gpu_pm4_umq_queue_is_idle(device->queues[i])) {
+    if (!iree_hal_amd_gpu_pm4_queue_is_idle(device->queues[i])) {
       return false;
     }
   }
@@ -339,7 +340,7 @@ static bool iree_hal_amd_gpu_device_release_children(
       continue;
     }
     amdf_status_t status =
-        iree_hal_amd_gpu_pm4_umq_queue_shutdown(device->queues[i]);
+        iree_hal_amd_gpu_pm4_queue_shutdown(device->queues[i]);
     if (!amdf_status_is_ok(status)) {
       iree_hal_amd_gpu_context_report(device->context, status,
                                       "PM4 queue native ownership join");
@@ -347,6 +348,14 @@ static bool iree_hal_amd_gpu_device_release_children(
     }
     iree_hal_queue_release(device->queues[i]);
     device->queues[i] = NULL;
+  }
+  amdf_status_t completion_status =
+      iree_hal_amd_gpu_context_deinitialize_completion(device->context);
+  if (!amdf_status_is_ok(completion_status)) {
+    device->context->cleanup_blocked = true;
+    iree_hal_amd_gpu_context_report(device->context, completion_status,
+                                    "completion cleanup");
+    return false;
   }
   if (device->memory.service) {
     iree_hal_amd_gpu_allocation_context_deinitialize(
@@ -416,7 +425,7 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
   }
   iree_slim_mutex_lock(&device->shutdown.mutex);
   for (uint32_t i = 0; i < device->queue_count; ++i) {
-    iree_hal_amd_gpu_pm4_umq_queue_close(device->queues[i]);
+    iree_hal_amd_gpu_pm4_queue_close(device->queues[i]);
   }
   iree_atomic_store(&device->shutdown.closing, 1, iree_memory_order_release);
   iree_notification_post(&device->shutdown.notification, IREE_ALL_WAITERS);
@@ -429,6 +438,18 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
   iree_slim_mutex_unlock(&device->shutdown.mutex);
 }
 
+// Queue protocol and publication are native family properties, independent of
+// the executable target. Prefer direct publication when this family exposes it.
+static amdf_queue_publication_modes_t
+iree_hal_amd_gpu_device_family_publication(
+    const amdf_queue_family_info_t* family) {
+  const amdf_queue_publication_modes_t modes =
+      iree_hal_amd_gpu_pm4_queue_publication_modes(family);
+  return (modes & AMDF_QUEUE_PUBLICATION_MODE_USER)
+             ? AMDF_QUEUE_PUBLICATION_MODE_USER
+             : modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
+}
+
 iree_status_t iree_hal_amd_gpu_device_create(
     iree_hal_amd_gpu_context_t* context, iree_string_view_t display_name,
     const iree_hal_amd_gpu_device_options_t* options,
@@ -437,12 +458,31 @@ iree_status_t iree_hal_amd_gpu_device_create(
   *out_device = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_device_create_params_verify_runtime_features(
       create_params, IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_NONE));
-  if (options->queue_family_ordinal >=
-          context->endpoint_info.queue_family_count ||
+  uint32_t family_ordinal = options->queue_family_ordinal;
+  if (family_ordinal == UINT32_MAX) {
+    for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
+      if (iree_hal_amd_gpu_device_family_publication(&context->families[i])) {
+        family_ordinal = i;
+        break;
+      }
+    }
+    if (family_ordinal == UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "GPU has no supported PM4 family");
+    }
+  }
+  if (family_ordinal >= context->endpoint_info.queue_family_count ||
       !options->queue_count || options->queue_count > 256) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "GPU provisioning requires an advertised family "
                             "and 1 to 256 queues");
+  }
+  const amdf_queue_publication_modes_t publication_mode =
+      iree_hal_amd_gpu_device_family_publication(
+          &context->families[family_ordinal]);
+  if (!publication_mode) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "GPU family has no supported PM4 publication");
   }
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_device_t);
   if (!iree_host_size_checked_mul_add(total_size, options->queue_count,
@@ -486,8 +526,8 @@ iree_status_t iree_hal_amd_gpu_device_create(
                                                 options->queue_count);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_context_prepare_completion(
-        context, AMDF_QUEUE_PUBLICATION_MODE_USER);
+    status =
+        iree_hal_amd_gpu_context_prepare_completion(context, publication_mode);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_device_prepare_control(device);
@@ -515,15 +555,10 @@ iree_status_t iree_hal_amd_gpu_device_create(
           host_allocator, &device->memory.allocations);
     }
   }
-  iree_hal_amd_gpu_pm4_umq_queue_options_t queue_options = {
-      .native = {.type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
-                 .structure_size = sizeof(amdf_gpu_user_queue_create_info_t),
-                 .queue_family_ordinal = options->queue_family_ordinal,
-                 .priority = AMDF_QUEUE_PRIORITY_NORMAL,
-                 .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
-                 .required_capabilities =
-                     AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
-                 .ring_byte_length = options->pm4.ring_byte_length},
+  iree_hal_amd_gpu_pm4_queue_options_t queue_options = {
+      .family_ordinal = family_ordinal,
+      .publication_mode = publication_mode,
+      .command_byte_capacity = options->pm4.ring_byte_length,
       .memory = &device->memory.control,
       .service = device->memory.service,
       .allocations = &device->memory.allocations,
@@ -546,18 +581,17 @@ iree_status_t iree_hal_amd_gpu_device_create(
   iree_hal_queue_params_initialize(&queue_params);
   for (uint32_t i = 0; i < options->queue_count && iree_status_is_ok(status);
        ++i) {
-    status = iree_hal_amd_gpu_pm4_umq_queue_create(
+    status = iree_hal_amd_gpu_pm4_queue_create(
         &device->family, context, &queue_options, &queue_params, host_allocator,
         &device->queues[i]);
     if (iree_status_is_ok(status)) {
       device->queue_count = i + 1;
       device->sources[i] =
-          iree_hal_amd_gpu_pm4_umq_queue_completion_source(device->queues[i]);
+          iree_hal_amd_gpu_pm4_queue_completion_source(device->queues[i]);
     }
   }
   if (iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_device_initialize_memory(device,
-                                              options->queue_family_ordinal);
+    iree_hal_amd_gpu_device_initialize_memory(device, family_ordinal);
     device->sources[device->queue_count] =
         (iree_hal_amd_gpu_completion_source_t){
             iree_hal_amd_gpu_device_poll_shutdown, device};
@@ -594,7 +628,7 @@ static void iree_hal_amd_gpu_device_trim_caches(void* user_data) {
   iree_hal_amd_gpu_device_t* device = user_data;
   iree_arena_block_pool_trim(&device->memory.allocations.blocks);
   for (uint32_t i = 0; i < device->queue_count; ++i) {
-    iree_hal_amd_gpu_pm4_umq_queue_trim(device->queues[i]);
+    iree_hal_amd_gpu_pm4_queue_trim(device->queues[i]);
   }
 }
 
@@ -646,7 +680,7 @@ static iree_status_t iree_hal_amd_gpu_device_assign_topology_info(
   uint32_t assigned_count = 0;
   for (uint32_t i = 0; i < device->queue_count && iree_status_is_ok(status);
        ++i) {
-    status = iree_hal_amd_gpu_pm4_umq_queue_assign_frontier(
+    status = iree_hal_amd_gpu_pm4_queue_assign_frontier(
         device->queues[i], topology ? topology->frontier.tracker : NULL,
         topology ? topology->frontier.base_axis | ((uint64_t)i << 24) : 0);
     if (iree_status_is_ok(status)) {
@@ -658,9 +692,9 @@ static iree_status_t iree_hal_amd_gpu_device_assign_topology_info(
         topology ? *topology : (iree_hal_device_topology_info_t){0};
   } else {
     for (uint32_t i = 0; i < assigned_count; ++i) {
-      status = iree_status_join(status,
-                                iree_hal_amd_gpu_pm4_umq_queue_assign_frontier(
-                                    device->queues[i], NULL, 0));
+      status =
+          iree_status_join(status, iree_hal_amd_gpu_pm4_queue_assign_frontier(
+                                       device->queues[i], NULL, 0));
     }
   }
   return status;

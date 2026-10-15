@@ -317,6 +317,29 @@ TEST_F(ContextTest, EndpointOpeningDoesNotRequireUserPublication) {
   iree_hal_amd_gpu_context_free(context);
 }
 
+TEST_F(ContextTest, CompletionRollbackAllowsDifferentPublication) {
+  iree_hal_amd_gpu_context_t* context = nullptr;
+  IREE_ASSERT_OK(Allocate(&context));
+  EXPECT_TRUE(native_.event_live);
+  EXPECT_EQ(iree_hal_amd_gpu_context_deinitialize_completion(context),
+            AMDF_STATUS_OK);
+  EXPECT_FALSE(native_.event_live);
+  EXPECT_EQ(context->event, nullptr);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+      context, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
+  EXPECT_FALSE(
+      iree_async_primitive_is_none(context->kernel_event.wait_primitive));
+  EXPECT_EQ(iree_hal_amd_gpu_context_deinitialize_completion(context),
+            AMDF_STATUS_OK);
+  EXPECT_TRUE(
+      iree_async_primitive_is_none(context->kernel_event.wait_primitive));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+      context, AMDF_QUEUE_PUBLICATION_MODE_USER));
+  EXPECT_TRUE(native_.event_live);
+  iree_hal_amd_gpu_context_free(context);
+  EXPECT_FALSE(native_.event_live);
+}
+
 TEST_F(ContextTest, CapturesFamiliesIndependentlyOfIsa) {
   for (uint32_t gfx_major : {9u, 11u, 12u}) {
     native_.gfx_major = gfx_major;

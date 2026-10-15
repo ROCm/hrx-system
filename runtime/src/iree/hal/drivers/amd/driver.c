@@ -211,7 +211,6 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
   iree_hal_amd_gpu_device_options_t options;
   iree_hal_amd_gpu_device_options_initialize(&options);
-  options.queue_family_ordinal = UINT32_MAX;
   for (iree_host_size_t i = 0; i < param_count; ++i) {
     uint32_t* value = NULL;
     if (iree_string_view_equal(params[i].key, IREE_SV("queue_count"))) {
@@ -234,25 +233,9 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_context_allocate(
       fabric, &endpoint->id, create_params->event_sink, host_allocator,
       &context));
-  if (options.queue_family_ordinal == UINT32_MAX) {
-    for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
-      const amdf_queue_family_info_t* family = &context->families[i];
-      if (family->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
-          (family->publication_modes & AMDF_QUEUE_PUBLICATION_MODE_USER) &&
-          (family->user_queue_capabilities &
-           AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER)) {
-        options.queue_family_ordinal = i;
-        break;
-      }
-    }
-  }
-  iree_status_t status =
-      options.queue_family_ordinal == UINT32_MAX
-          ? iree_make_status(IREE_STATUS_UNAVAILABLE,
-                             "GPU has no PM4 USER host-producer family")
-          : iree_hal_amd_gpu_device_create(
-                context, iree_make_cstring_view(endpoint->name), &options,
-                create_params, host_allocator, out_device);
+  iree_status_t status = iree_hal_amd_gpu_device_create(
+      context, iree_make_cstring_view(endpoint->name), &options, create_params,
+      host_allocator, out_device);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_context_free(context);
   }

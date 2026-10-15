@@ -21,53 +21,8 @@ iree_cc_library(
     amdf::headers
     iree::base
     iree::hal::drivers::amd::gpu::context
-    iree::hal::drivers::amd::gpu::queue::pm4::commands
+    iree::hal::drivers::amd::gpu::queue::pm4::ring
     iree::hal::drivers::amd::status
-  PUBLIC
-)
-endif()
-
-if(AMDF_BUILD)
-iree_cc_library(
-  NAME
-    queue
-  HDRS
-    "queue.h"
-  SRCS
-    "queue.c"
-  DEPS
-    ::ring
-    amdf::headers
-    iree::async
-    iree::async::util::semaphore_wait
-    iree::base
-    iree::base::cpu_data
-    iree::base::internal
-    iree::base::threading
-    iree::hal
-    iree::hal::drivers::amd::fabric::memory
-    iree::hal::drivers::amd::gpu::completion
-    iree::hal::drivers::amd::gpu::context
-    iree::hal::drivers::amd::gpu::executable
-    iree::hal::drivers::amd::gpu::queue::allocation
-    iree::hal::drivers::amd::gpu::queue::capture_pool
-    iree::hal::drivers::amd::gpu::queue::continuation
-    iree::hal::drivers::amd::gpu::queue::host_call
-    iree::hal::drivers::amd::gpu::queue::host_wait
-    iree::hal::drivers::amd::gpu::queue::pm4::barrier
-    iree::hal::drivers::amd::gpu::queue::pm4::command_buffer
-    iree::hal::drivers::amd::gpu::queue::pm4::commands
-    iree::hal::drivers::amd::gpu::queue::pm4::dispatch
-    iree::hal::drivers::amd::gpu::queue::pm4::file_transfer
-    iree::hal::drivers::amd::gpu::queue::pm4::launch
-    iree::hal::drivers::amd::gpu::queue::pm4::retirement
-    iree::hal::drivers::amd::gpu::queue::pm4::semaphore
-    iree::hal::drivers::amd::gpu::queue::pm4::signal
-    iree::hal::drivers::amd::gpu::queue::pm4::submission
-    iree::hal::drivers::amd::gpu::queue::pm4::transfer
-    iree::hal::drivers::amd::gpu::queue::publisher
-    iree::hal::drivers::amd::status
-    iree::hal::memory::maintenance
   PUBLIC
 )
 endif()
@@ -80,25 +35,9 @@ iree_cc_test(
     "ring_test.cc"
   DEPS
     ::ring
-    iree::hal::drivers::amd::gpu::queue::pm4::commands
+    iree::hal::drivers::amd::gpu::queue::pm4::ring
     iree::testing::gtest
     iree::testing::gtest_main
-  LABELS
-    "iree-build-requirement=libamdf"
-)
-endif()
-
-if(AMDF_BUILD)
-iree_cc_binary_benchmark(
-  NAME
-    ring_benchmark
-  SRCS
-    "ring_benchmark.cc"
-  DEPS
-    ::ring
-    iree::testing::benchmark_main
-    iree::third_party::google_benchmark
-  TESTONLY
   LABELS
     "iree-build-requirement=libamdf"
 )

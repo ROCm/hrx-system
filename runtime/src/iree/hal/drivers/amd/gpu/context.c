@@ -38,19 +38,31 @@ void iree_hal_amd_gpu_context_report(const iree_hal_amd_gpu_context_t* context,
                               operation);
 }
 
+amdf_status_t iree_hal_amd_gpu_context_deinitialize_completion(
+    iree_hal_amd_gpu_context_t* context) {
+  if (context->event) {
+    amdf_status_t status = context->gpu->event_destroy(context->event);
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    context->event = NULL;
+  }
+  context->event_info = (amdf_gpu_event_info_t){0};
+  iree_async_event_native_deinitialize(&context->kernel_event);
+  context->kernel_notification = (amdf_native_event_t){0};
+  return AMDF_STATUS_OK;
+}
+
 void iree_hal_amd_gpu_context_free(iree_hal_amd_gpu_context_t* context) {
   if (!context || context->cleanup_blocked) {
     return;
   }
-  if (context->event) {
-    amdf_status_t status = context->gpu->event_destroy(context->event);
-    if (!amdf_status_is_ok(status)) {
-      iree_hal_amd_gpu_context_report(context, status, "gpu.event_destroy");
-      return;
-    }
-    context->event = NULL;
+  amdf_status_t event_status =
+      iree_hal_amd_gpu_context_deinitialize_completion(context);
+  if (!amdf_status_is_ok(event_status)) {
+    iree_hal_amd_gpu_context_report(context, event_status, "gpu.event_destroy");
+    return;
   }
-  iree_async_event_native_deinitialize(&context->kernel_event);
   if (context->device) {
     amdf_status_t status = context->api->device_destroy(context->device);
     if (!amdf_status_is_ok(status)) {

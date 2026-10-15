@@ -14,10 +14,12 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Cold provisioning of an explicitly selected PM4 USER family. Native protocol
-// and publication capability determine admission, independently of RDNA/CDNA.
+// Cold provisioning of a PM4 family with USER or KERNEL publication. Native
+// protocol and publication capability determine admission, independently of
+// RDNA/CDNA.
 typedef struct iree_hal_amd_gpu_device_options_t {
-  // Exact native family ordinal. No implicit SDMA or alternate family is used.
+  // Exact native family ordinal, or UINT32_MAX to select the first supported
+  // PM4 family. No implicit SDMA queue is provisioned.
   uint32_t queue_family_ordinal;
   // Number of provisioned queues in this family, between 1 and 256.
   uint32_t queue_count;
@@ -26,7 +28,7 @@ typedef struct iree_hal_amd_gpu_device_options_t {
   uint32_t host_numa_node;
   // Initial per-queue storage. Growth is placed on the shared service worker.
   struct {
-    // Native primary-ring capacity in bytes.
+    // Native command storage capacity in bytes.
     uint64_t ring_byte_length;
     // Power-of-two number of live native completion records.
     uint32_t retirement_capacity;
@@ -40,8 +42,8 @@ typedef struct iree_hal_amd_gpu_device_options_t {
   } pm4;
 } iree_hal_amd_gpu_device_options_t;
 
-// Initializes ordinary provisioning sizes. The caller selects a native family
-// from the captured context and may supply an explicit host NUMA placement.
+// Initializes ordinary provisioning sizes and automatic PM4 family selection.
+// The caller may select an exact native family or explicit host NUMA placement.
 void iree_hal_amd_gpu_device_options_initialize(
     iree_hal_amd_gpu_device_options_t* out_options);
 

@@ -617,4 +617,122 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    backing
+  HDRS
+    "backing.h"
+  SRCS
+    "backing.c"
+  DEPS
+    ::signal
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue
+  HDRS
+    "queue.h"
+  SRCS
+    "queue.c"
+  DEPS
+    ::backing
+    ::barrier
+    ::command_buffer
+    ::commands
+    ::dispatch
+    ::file_transfer
+    ::launch
+    ::retirement
+    ::ring
+    ::semaphore
+    ::signal
+    ::submission
+    ::transfer
+    amdf::headers
+    iree::async
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::base::cpu_data
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::gpu::completion
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::queue::allocation
+    iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::continuation
+    iree::hal::drivers::amd::gpu::queue::host_call
+    iree::hal::drivers::amd::gpu::queue::host_wait
+    iree::hal::drivers::amd::gpu::queue::pm4::kmq::storage
+    iree::hal::drivers::amd::gpu::queue::pm4::umq::ring
+    iree::hal::drivers::amd::gpu::queue::publisher
+    iree::hal::drivers::amd::status
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+endif()
+
+iree_cc_library(
+  NAME
+    ring
+  HDRS
+    "ring.h"
+  SRCS
+    "ring.c"
+  DEPS
+    ::commands
+    iree::base
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    ring_test
+  SRCS
+    "ring_test.cc"
+  DEPS
+    ::commands
+    ::ring
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_binary_benchmark(
+  NAME
+    ring_benchmark
+  SRCS
+    "ring_benchmark.cc"
+  DEPS
+    ::ring
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+  TESTONLY
+)
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    queue_test
+  SRCS
+    "queue_test.cc"
+  DEPS
+    ::queue
+    amdf::headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

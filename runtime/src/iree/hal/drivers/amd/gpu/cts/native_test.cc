@@ -1001,6 +1001,9 @@ TEST_F(GpuNativeTest, FailedQueueConstructionReleasesWorkersAndKeepsContext) {
   EXPECT_EQ(device_, nullptr);
   EXPECT_EQ(allocator_.live_count.load(), 0u);
   EXPECT_FALSE(context_->cleanup_blocked);
+  EXPECT_EQ(context_->event, nullptr);
+  EXPECT_TRUE(
+      iree_async_primitive_is_none(context_->kernel_event.wait_primitive));
   options_.pm4.argument_capacity = 256;
   Create();
 }

@@ -1081,13 +1081,15 @@ TEST_P(GpuNativePacketTest, ShaderObservesCompleteInvocationOwnedPacket) {
                 {references.size(), references.data()}, 0));
           }
           const iree_hal_memory_barrier_t memory = {
-              .source_scope = copy ? IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE
-                                   : IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+              .source_scope = static_cast<iree_hal_access_scope_t>(
+                  copy ? IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE
+                       : IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE),
               .target_scope = IREE_HAL_ACCESS_SCOPE_INDIRECT_COMMAND_READ,
           };
           const iree_hal_barrier_t dependency = {
-              .source_stage_mask = copy ? IREE_HAL_EXECUTION_STAGE_TRANSFER
-                                        : IREE_HAL_EXECUTION_STAGE_DISPATCH,
+              .source_stage_mask = static_cast<iree_hal_execution_stage_t>(
+                  copy ? IREE_HAL_EXECUTION_STAGE_TRANSFER
+                       : IREE_HAL_EXECUTION_STAGE_DISPATCH),
               .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS,
               .memory_barrier_count = 1,
               .memory_barriers = &memory,

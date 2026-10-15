@@ -61,21 +61,7 @@ void GpuNativeTest::SetUp() {
     GTEST_SKIP() << "No native AMD GPU endpoint";
   }
   iree_hal_amd_gpu_device_options_initialize(&options_);
-  options_.queue_family_ordinal = UINT32_MAX;
   options_.queue_count = 2;
-  for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
-    const auto& family = context_->families[i];
-    if (family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
-        (family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_USER) &&
-        (family.user_queue_capabilities &
-         AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER)) {
-      options_.queue_family_ordinal = i;
-      break;
-    }
-  }
-  if (options_.queue_family_ordinal == UINT32_MAX) {
-    GTEST_SKIP() << "No PM4 USER host-producer family";
-  }
   IREE_ASSERT_OK(iree_async_proactor_pool_create(
       1, nullptr, iree_async_proactor_pool_options_default(),
       iree_allocator_system(), &proactors_));
