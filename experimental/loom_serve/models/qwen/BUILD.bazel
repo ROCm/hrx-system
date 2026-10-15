@@ -159,6 +159,16 @@ loom_library(
 )
 
 loom_test(
+    name = "vision_control_test",
+    srcs = [
+        "tests/vision_control.loom",
+        "vision_control.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
+)
+
+loom_test(
     name = "vision_execution_test",
     srcs = ["tests/vision_projector.loom"],
     benchmark_smoke = False,
