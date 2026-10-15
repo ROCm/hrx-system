@@ -5,9 +5,9 @@ func.decl @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %block: index
 
 template.decl @ggml.q5k.chunk(%weight: buffer, %row_byte_base: offset, %block: index, %group: index, %half: index) -> (vector<16xi8>, f32, f32)
 
-func.def inline @flash_next_affine_dot16(%codes: vector<16xi8>, %values: vector<16xbf16>, %scale: f32, %minimum: f32) -> (f32) {
-  %c0 = scalar.constant 0.0 : f32
-  %c0v = vector.constant 0.0 : vector<8xf32>
+// Unsigned code expansion is independent of the activation row. Consumers can
+// retain these exact values while contracting several rows with one chunk.
+func.def inline @flash_next_affine_codes(%codes: vector<16xi8>) -> (vector<16xbf16>) {
   %code_values = vector.uitofp %codes : vector<16xi8> to vector<16xf32>
   // Every unsigned byte is exact in BF16. Its F32 representation has zero
   // low halfwords, so packing the upper halfwords preserves every code.
@@ -16,6 +16,14 @@ func.def inline @flash_next_affine_dot16(%codes: vector<16xi8>, %values: vector<
   %code_upper = vector.shrui %code_bits, %code_shift : vector<16xi32>
   %code_words = vector.trunci %code_upper : vector<16xi32> to vector<16xi16>
   %exact_codes = vector.bitcast %code_words : vector<16xi16> to vector<16xbf16>
+  func.return %exact_codes : vector<16xbf16>
+}
+
+// Apply the affine scale and signed minimum after the complete chunk dot.
+// Sharing this tree keeps row grouping independent of numerical semantics.
+func.def inline @flash_next_affine_dot16(%exact_codes: vector<16xbf16>, %values: vector<16xbf16>, %scale: f32, %minimum: f32) -> (f32) {
+  %c0 = scalar.constant 0.0 : f32
+  %c0v = vector.constant 0.0 : vector<8xf32>
   %pairs = vector.dot2f %exact_codes, %values, %c0v : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %dot = vector.reduce<addf> %pairs, %c0 : vector<8xf32>, f32
   %expanded = vector.extf %values : vector<16xbf16> to vector<16xf32>
@@ -23,6 +31,21 @@ func.def inline @flash_next_affine_dot16(%codes: vector<16xi8>, %values: vector<
   %correction = scalar.mulf %sum, %minimum : f32
   %result = scalar.fmaf %dot, %scale, %correction : f32
   func.return %result : f32
+}
+
+// QK formats subtract their stored minimum magnitude. The selected decoder
+// supplies exact integer codes; the returned minimum already carries its sign.
+func.def inline @flash_next_qk_codes(%q5_encoding: i1, %weight: buffer, %origin: offset, %block: index, %group: index, %half: index) -> (vector<16xbf16>, f32, f32) {
+  %codes, %scale, %minimum_magnitude = scf.if %q5_encoding -> (vector<16xi8>, f32, f32) {
+    %codes, %scale, %minimum = template.apply<@ggml.q5k.chunk>(%weight, %origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+    scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
+  } else {
+    %codes, %scale, %minimum = func.call @ggml_q4k_chunk(%weight, %origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+    scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
+  }
+  %exact_codes = func.call @flash_next_affine_codes(%codes) : (vector<16xi8>) -> (vector<16xbf16>)
+  %minimum = scalar.negf %minimum_magnitude : f32
+  func.return %exact_codes, %scale, %minimum : vector<16xbf16>, f32, f32
 }
 
 // Gate and up share the activation load and affine input sum while retaining
@@ -58,15 +81,8 @@ func.def public inline @flash_next_qk_pair_partial(%q5_encoding: i1, %width: ind
     %next_sums = scf.for %projection = [%c0 to %c2 step %c1](%current = %sums : vector<2xf32>) -> (vector<2xf32>) unroll schedule(linear) {
       %is_gate = index.cmp eq, %projection, %c0 : index
       %weight = scf.select %is_gate, %gate_weight, %up_weight : buffer
-      %codes, %scale, %minimum_magnitude = scf.if %q5_encoding -> (vector<16xi8>, f32, f32) {
-        %codes, %scale, %minimum = template.apply<@ggml.q5k.chunk>(%weight, %weight_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
-        scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
-      } else {
-        %codes, %scale, %minimum = func.call @ggml_q4k_chunk(%weight, %weight_origin, %block, %group, %half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
-        scf.yield %codes, %scale, %minimum : vector<16xi8>, f32, f32
-      }
-      %minimum = scalar.negf %minimum_magnitude : f32
-      %contribution = func.call @flash_next_affine_dot16(%codes, %values, %scale, %minimum) : (vector<16xi8>, vector<16xbf16>, f32, f32) -> (f32)
+      %codes, %scale, %minimum = func.call @flash_next_qk_codes(%q5_encoding, %weight, %weight_origin, %block, %group, %half) : (i1, buffer, offset, index, index, index) -> (vector<16xbf16>, f32, f32)
+      %contribution = func.call @flash_next_affine_dot16(%codes, %values, %scale, %minimum) : (vector<16xbf16>, vector<16xbf16>, f32, f32) -> (f32)
       %prior = vector.extract %current[%projection] : vector<2xf32> -> f32
       %sum = scalar.addf %prior, %contribution : f32
       %next = vector.insert %sum into %current[%projection] : f32, vector<2xf32>
@@ -77,6 +93,57 @@ func.def public inline @flash_next_qk_pair_partial(%q5_encoding: i1, %width: ind
   %gate = vector.extract %result[0] : vector<2xf32> -> f32
   %up = vector.extract %result[1] : vector<2xf32> -> f32
   func.return %gate, %up : f32, f32
+}
+
+// Decode the shared Q5_1 block header once before visiting its two halves.
+func.def inline @flash_next_q51_load_block(%weight: buffer, %block_origin: offset) -> (vector<16xi8>, vector<4xi32>, f32, f32) {
+  %high_add = index.constant 4 : offset
+  %code_add = index.constant 8 : offset
+  %high_origin = index.add %block_origin, %high_add : offset
+  %code_origin = index.add %block_origin, %code_add : offset
+  %header = buffer.view %weight[%block_origin] : buffer -> view<2xf16>
+  %high_view = buffer.view %weight[%high_origin] : buffer -> view<1xi32>
+  %code_view = buffer.view %weight[%code_origin] : buffer -> view<16xi8>
+  %scale_half = view.load %header[0] : view<2xf16> -> f16
+  %minimum_half = view.load %header[1] : view<2xf16> -> f16
+  %scale = scalar.extf %scale_half : f16 to f32
+  %minimum = scalar.extf %minimum_half : f16 to f32
+  %high_word = view.load %high_view[0] : view<1xi32> -> i32
+  %high_words = vector.splat %high_word : vector<4xi32>
+  %packed = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  func.return %packed, %high_words, %scale, %minimum : vector<16xi8>, vector<4xi32>, f32, f32
+}
+
+// Expand either nibble/high-bit half to unsigned integer codes. The half
+// argument is constant at each unrolled callsite, so all shifts specialize.
+func.def inline @flash_next_q51_codes(%packed: vector<16xi8>, %high_words: vector<4xi32>, %half: index) -> (vector<16xi8>) {
+  %c4_i32 = scalar.constant 4 : i32
+  %c16_i32 = scalar.constant 16 : i32
+  %mask15 = vector.constant 15 : vector<16xi8>
+  %high_mask = vector.constant 15 : vector<4xi32>
+  %spread = vector.constant 2113665 : vector<4xi32>
+  %byte_bits = vector.constant 16843009 : vector<4xi32>
+  %shift4 = vector.constant 4 : vector<4xi32>
+  %half_i32 = index.cast %half : index to i32
+  %nibble_shift = scalar.muli %half_i32, %c4_i32 : i32
+  %nibble_shift_i8 = scalar.trunci %nibble_shift : i32 to i8
+  %nibble_shifts = vector.splat %nibble_shift_i8 : vector<16xi8>
+  %shifted = vector.shrui %packed, %nibble_shifts : vector<16xi8>
+  %low_codes = vector.andi %shifted, %mask15 : vector<16xi8>
+  %first_bit = scalar.muli %half_i32, %c16_i32 : i32
+  // Multiplication by 0x00204081 places four copies of each nibble seven
+  // bits apart without overlap. Masking with 0x01010101 selects one bit
+  // per byte; shifting by four places each original high bit over its
+  // low nibble. The four words bitcast directly to sixteen code bytes.
+  %bit_positions = vector.iota %first_bit step %c4_i32 : vector<4xi32>
+  %high_shifted = vector.shrui %high_words, %bit_positions : vector<4xi32>
+  %high_nibbles = vector.andi %high_shifted, %high_mask : vector<4xi32>
+  %spread_bits = vector.muli %high_nibbles, %spread : vector<4xi32>
+  %high_bits = vector.andi %spread_bits, %byte_bits : vector<4xi32>
+  %high_values = vector.shli %high_bits, %shift4 : vector<4xi32>
+  %high_codes = vector.bitcast %high_values : vector<4xi32> to vector<16xi8>
+  %codes = vector.ori %low_codes, %high_codes : vector<16xi8>
+  func.return %codes : vector<16xi8>
 }
 
 // Q5_1 stores two half scales, one high-bit word, and sixteen nibble pairs per
@@ -90,8 +157,6 @@ func.def public inline @flash_next_q51_partial(%width: index, %token: index, %ro
   %c16 = index.constant 16 : index
   %c32 = index.constant 32 : index
   %block_bytes = index.constant 24 : offset
-  %high_add = index.constant 4 : offset
-  %code_add = index.constant 8 : offset
   %element_bytes = index.constant 2 : offset
   %block_count = index.div %width, %c32 : index
   %row_bytes = index.scale %block_count, %block_bytes : index, offset -> offset
@@ -100,51 +165,16 @@ func.def public inline @flash_next_q51_partial(%width: index, %token: index, %ro
   %input_origin = index.scale %token, %input_row_bytes : index, offset -> offset
   %input_view = buffer.view %input[%input_origin] : buffer -> view<[%block_count]x32xbf16>
   %c0_f32 = scalar.constant 0.0 : f32
-  %c4_i32 = scalar.constant 4 : i32
-  %c16_i32 = scalar.constant 16 : i32
-  %mask15 = vector.constant 15 : vector<16xi8>
-  %high_mask = vector.constant 15 : vector<4xi32>
-  %spread = vector.constant 2113665 : vector<4xi32>
-  %byte_bits = vector.constant 16843009 : vector<4xi32>
-  %shift4 = vector.constant 4 : vector<4xi32>
   %result = scf.for %block = [%lane to %block_count step %stride](%accumulator = %c0_f32 : f32) -> (f32) {
     %block_add = index.scale %block, %block_bytes : index, offset -> offset
     %block_origin = index.add %weight_origin, %block_add : offset
-    %high_origin = index.add %block_origin, %high_add : offset
-    %code_origin = index.add %block_origin, %code_add : offset
-    %header = buffer.view %weight[%block_origin] : buffer -> view<2xf16>
-    %high_view = buffer.view %weight[%high_origin] : buffer -> view<1xi32>
-    %code_view = buffer.view %weight[%code_origin] : buffer -> view<16xi8>
-    %scale_half = view.load %header[0] : view<2xf16> -> f16
-    %minimum_half = view.load %header[1] : view<2xf16> -> f16
-    %scale = scalar.extf %scale_half : f16 to f32
-    %minimum = scalar.extf %minimum_half : f16 to f32
-    %high_word = view.load %high_view[0] : view<1xi32> -> i32
-    %high_words = vector.splat %high_word : vector<4xi32>
-    %packed = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+    %packed, %high_words, %scale, %minimum = func.call @flash_next_q51_load_block(%weight, %block_origin) : (buffer, offset) -> (vector<16xi8>, vector<4xi32>, f32, f32)
     %next = scf.for %half = [%c0 to %c2 step %c1](%partial = %accumulator : f32) -> (f32) unroll schedule(linear) {
-      %half_i32 = index.cast %half : index to i32
-      %nibble_shift = scalar.muli %half_i32, %c4_i32 : i32
-      %nibble_shift_i8 = scalar.trunci %nibble_shift : i32 to i8
-      %nibble_shifts = vector.splat %nibble_shift_i8 : vector<16xi8>
-      %shifted = vector.shrui %packed, %nibble_shifts : vector<16xi8>
-      %low_codes = vector.andi %shifted, %mask15 : vector<16xi8>
-      %first_bit = scalar.muli %half_i32, %c16_i32 : i32
-      // Multiplication by 0x00204081 places four copies of each nibble seven
-      // bits apart without overlap. Masking with 0x01010101 selects one bit
-      // per byte; shifting by four places each original high bit over its
-      // low nibble. The four words bitcast directly to sixteen code bytes.
-      %bit_positions = vector.iota %first_bit step %c4_i32 : vector<4xi32>
-      %high_shifted = vector.shrui %high_words, %bit_positions : vector<4xi32>
-      %high_nibbles = vector.andi %high_shifted, %high_mask : vector<4xi32>
-      %spread_bits = vector.muli %high_nibbles, %spread : vector<4xi32>
-      %high_bits = vector.andi %spread_bits, %byte_bits : vector<4xi32>
-      %high_values = vector.shli %high_bits, %shift4 : vector<4xi32>
-      %high_codes = vector.bitcast %high_values : vector<4xi32> to vector<16xi8>
-      %codes = vector.ori %low_codes, %high_codes : vector<16xi8>
+      %codes = func.call @flash_next_q51_codes(%packed, %high_words, %half) : (vector<16xi8>, vector<4xi32>, index) -> (vector<16xi8>)
       %begin = index.mul %half, %c16 : index
       %values = vector.load %input_view[%block, %begin] : view<[%block_count]x32xbf16> -> vector<16xbf16>
-      %contribution = func.call @flash_next_affine_dot16(%codes, %values, %scale, %minimum) : (vector<16xi8>, vector<16xbf16>, f32, f32) -> (f32)
+      %exact_codes = func.call @flash_next_affine_codes(%codes) : (vector<16xi8>) -> (vector<16xbf16>)
+      %contribution = func.call @flash_next_affine_dot16(%exact_codes, %values, %scale, %minimum) : (vector<16xbf16>, vector<16xbf16>, f32, f32) -> (f32)
       %sum = scalar.addf %partial, %contribution : f32
       scf.yield %sum : f32
     }
