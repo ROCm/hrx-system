@@ -13,6 +13,7 @@ kernel.decl @qwen38_output_projection_q6k_m32() launch(%input: buffer, %weight: 
 // half-precision superblock scales finite. The reference uses independent
 // one-row contractions; the candidate retains weights across activation rows.
 check.case public @output_projection_m8_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(8) : index
   %hidden = check.literal value(5120) : index
   %vocabulary = check.literal value(248320) : index
@@ -30,6 +31,7 @@ check.case public @output_projection_m8_case {
 }
 
 check.case public @output_projection_live_prefix_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(8) : index
   %hidden = check.literal value(5120) : index
   %vocabulary = check.literal value(248320) : index
@@ -58,6 +60,7 @@ check.case public @output_projection_live_prefix_case {
 }
 
 check.case public @output_projection_m32_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(32) : index
   %hidden = check.literal value(5120) : index
   %vocabulary = check.literal value(248320) : index

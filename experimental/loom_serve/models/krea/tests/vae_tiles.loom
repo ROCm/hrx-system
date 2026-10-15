@@ -221,6 +221,7 @@ check.case public @vae_tile_axis_shifted_tail {
 }
 
 check.case public @vae_extract_tile_values {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %origin_y = check.literal value(4) : index
   %origin_x = check.literal value(6) : index
   %input = check.generate.iota offset(-32.0) step(0.125) period(257) : tensor<384x36x40xf32>
@@ -233,6 +234,7 @@ check.case public @vae_extract_tile_values {
 }
 
 check.case public @vae_stitch_tile_values {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %origin_y = check.literal value(4) : index
   %origin_x = check.literal value(6) : index
   %crop_y_begin = check.literal value(18) : index

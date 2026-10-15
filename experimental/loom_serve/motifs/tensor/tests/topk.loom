@@ -88,6 +88,7 @@ func.def @vocabulary_reference(%input: buffer, %input_ids: buffer, %output_value
 }
 
 check.scenario public @vocabulary_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%seed) range(-2.0 to 2.0) : tensor<1x248320xf32>
@@ -129,6 +130,7 @@ func.def @short_tail_reference(%input: buffer, %input_ids: buffer, %output_value
 }
 
 check.scenario public @short_tail_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %input = check.generate.iota offset(0.0) step(1.0) period(17) : tensor<2x8201xf32>
@@ -170,6 +172,7 @@ func.def @ties_reference(%input: buffer, %input_ids: buffer, %output_values: buf
 }
 
 check.scenario public @ties_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %input = check.generate.iota offset(0.0) step(1.0) period(17) : tensor<2x256xf32>
@@ -211,6 +214,7 @@ func.def @merge_reference(%input: buffer, %input_ids: buffer, %output_values: bu
 }
 
 check.scenario public @merge_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%seed) range(-2.0 to 2.0) : tensor<3x976xf32>
@@ -252,6 +256,7 @@ func.def @merge_ties_reference(%input: buffer, %input_ids: buffer, %output_value
 }
 
 check.scenario public @merge_ties_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
     %input = check.generate.iota offset(0.0) step(1.0) period(17) : tensor<2x24xf32>
@@ -281,6 +286,7 @@ kernel.def target(@wave32) @merge_vocabulary() {
 // Equal winners in sixty separate vocabulary tiles must merge by token ID.
 // This exercises the actual two-dispatch path, including the short last tile.
 check.case public @vocabulary_merge_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.iota offset(0.0) step(1.0) period(4096) : tensor<1x248320xf32>
   %partial_values = check.generate.fill value(-99.0) : tensor<1x61x16xf32>
   %partial_ids = check.generate.fill value(-99) : tensor<1x61x16xi32>
