@@ -965,17 +965,21 @@ void loom_value_facts_rotri(const loom_value_facts_t* lhs,
                             const loom_value_facts_t* rhs, int32_t bit_count,
                             loom_value_facts_t* out);
 
-// Bitwise.
+// Bitwise AND retains the strongest power-of-two divisor from either input
+// and rounds its upper bound down to that divisor.
 void loom_value_facts_andi(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
                            loom_value_facts_t* out);
 
-// Retains the maximum operand lower bound and a finite bit-width upper bound
-// when both operands are nonnegative. Either operand's nonzero proof survives,
-// including predicate-derived proofs whose ranges span zero.
+// Bitwise OR retains the common power-of-two divisor and, for nonnegative
+// operands, the maximum lower bound and a bit-width upper bound rounded down
+// to that divisor. Either operand's nonzero proof survives, including
+// predicate-derived proofs whose ranges span zero.
 void loom_value_facts_ori(const loom_value_facts_t* lhs,
                           const loom_value_facts_t* rhs,
                           loom_value_facts_t* out);
+// Bitwise XOR retains the common power-of-two divisor and, for nonnegative
+// operands, a bit-width upper bound rounded down to that divisor.
 void loom_value_facts_xori(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
                            loom_value_facts_t* out);

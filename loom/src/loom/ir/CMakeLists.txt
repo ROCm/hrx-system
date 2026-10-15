@@ -17,6 +17,7 @@ loom_cc_library(
     "float_facts.h"
   SRCS
     "facts.c"
+    "facts_bitwise.c"
     "facts_division.c"
     "float_facts.c"
   DEPS

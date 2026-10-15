@@ -1,0 +1,76 @@
+// RUN: pass vector-memory-footprint,canonicalize
+
+// The logical view is larger than the allocation. Only the retained bound on
+// the permuted packet start proves that the load fits the exact storage root.
+func.def @xor_packet_root(%raw: index) -> (i64, i64) {
+  %packet = index.assume %raw [range(%raw, 0, 255)] : index
+  %packet_words = index.constant 4 : index
+  %bank_shift = index.constant 5 : index
+  %bank_mask = index.constant 7 : index
+  %word_shift = index.constant 2 : index
+  %position = index.mul %packet, %packet_words : index
+  %group = index.shrui %position, %bank_shift : index
+  %bank = index.andi %group, %bank_mask : index
+  %bank_words = index.shli %bank, %word_shift : index
+  %permuted = index.xori %position, %bank_words : index
+  %length = index.constant 4096 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> align(16) %length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<2048xi32>
+  %loaded = vector.load %view[%permuted] : view<2048xi32> -> vector<4xi32>
+  %upper = test.fact_range_hi %permuted : index -> i64
+  %divisor = test.fact_divisor %permuted : index -> i64
+  func.return %upper, %divisor : i64, i64
+}
+
+// ----
+func.def @xor_packet_root(%raw: index) -> (i64, i64) {
+  %upper = scalar.constant 1020 : i64
+  %divisor = scalar.constant 4 : i64
+  func.return %upper, %divisor : i64, i64
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Alignment cannot prove that the same packet fits a root one word shorter.
+func.def @xor_packet_short_root(%raw: index) {
+  %packet = index.assume %raw [range(%raw, 0, 255)] : index
+  %packet_words = index.constant 4 : index
+  %bank_shift = index.constant 5 : index
+  %bank_mask = index.constant 7 : index
+  %word_shift = index.constant 2 : index
+  %position = index.mul %packet, %packet_words : index
+  %group = index.shrui %position, %bank_shift : index
+  %bank = index.andi %group, %bank_mask : index
+  %bank_words = index.shli %bank, %word_shift : index
+  %permuted = index.xori %position, %bank_words : index
+  %length = index.constant 4092 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> align(16) %length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<2048xi32>
+  // ERROR@+1: SUBRANGE/026 {op_name="vector.load", maximum_access_byte_end="4096", root_byte_extent="4092"}
+  %loaded = vector.load %view[%permuted] : view<2048xi32> -> vector<4xi32>
+  test.use %loaded : vector<4xi32>
+  func.return
+}
+
+// ====
+
+// OR with an unaligned operand does not retain the packet's alignment.
+func.def @or_unaligned_operand_root(%raw: index, %bits: index) {
+  %packet = index.assume %raw [range(%raw, 0, 255)] : index
+  %low = index.assume %bits [range(%bits, 0, 3)] : index
+  %packet_words = index.constant 4 : index
+  %position = index.mul %packet, %packet_words : index
+  %combined = index.ori %position, %low : index
+  %length = index.constant 4096 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> align(16) %length : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<2048xi32>
+  // ERROR@+1: SUBRANGE/026 {op_name="vector.load", maximum_access_byte_end="4108", root_byte_extent="4096"}
+  %loaded = vector.load %view[%combined] : view<2048xi32> -> vector<4xi32>
+  test.use %loaded : vector<4xi32>
+  func.return
+}

@@ -266,3 +266,27 @@ func.def @left_shift_nsw_sign(%input: vector<4xi8>) -> (i1) {
   %nonnegative = scalar.constant true : i1
   func.return %nonnegative : i1
 }
+
+// ====
+
+// Lanewise OR/XOR retain the common alignment of independent runtime operands.
+func.def @bitwise_common_divisor(%lhs: vector<32xi16>, %rhs: vector<32xi16>) -> (i64, i64) {
+  %left_mask = vector.constant -8 : vector<32xi16>
+  %right_mask = vector.constant -4 : vector<32xi16>
+  %left = vector.andi %lhs, %left_mask : vector<32xi16>
+  %right = vector.andi %rhs, %right_mask : vector<32xi16>
+  %or = vector.ori %left, %right : vector<32xi16>
+  %xor = vector.xori %left, %right : vector<32xi16>
+  %or_lane = vector.extract %or[3] : vector<32xi16> -> i16
+  %xor_lane = vector.extract %xor[19] : vector<32xi16> -> i16
+  %or_divisor = test.fact_divisor %or_lane : i16 -> i64
+  %xor_divisor = test.fact_divisor %xor_lane : i16 -> i64
+  func.return %or_divisor, %xor_divisor : i64, i64
+}
+
+// ----
+func.def @bitwise_common_divisor(%lhs: vector<32xi16>, %rhs: vector<32xi16>) -> (i64, i64) {
+  %or_divisor = scalar.constant 4 : i64
+  %xor_divisor = scalar.constant 4 : i64
+  func.return %or_divisor, %xor_divisor : i64, i64
+}

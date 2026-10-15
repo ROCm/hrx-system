@@ -16,6 +16,7 @@ loom_cc_library(
     name = "facts",
     srcs = [
         "facts.c",
+        "facts_bitwise.c",
         "facts_division.c",
         "float_facts.c",
     ],

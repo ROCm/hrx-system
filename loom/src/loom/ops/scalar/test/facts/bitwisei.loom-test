@@ -390,3 +390,58 @@ func.def @logical_shift_i64_bounds(%input: i64) -> (i64, i64) {
   %hi = scalar.constant 15 : i64
   func.return %lo, %hi : i64, i64
 }
+
+// ====
+
+// RUN: pass canonicalize
+
+// Word-coordinate bank permutation preserves aligned vector-packet starts.
+func.def @aligned_packet_bitwise_bounds(%input: i32) -> (i64, i64, i64, i64) {
+  %packet = scalar.assume %input [range(%input, 0, 255)] : i32
+  %word_shift = scalar.constant 2 : i32
+  %bank_shift = scalar.constant 5 : i32
+  %bank_mask = scalar.constant 7 : i32
+  %position = scalar.shli %packet, %word_shift : i32
+  %group = scalar.shrui %position, %bank_shift : i32
+  %bank = scalar.andi %group, %bank_mask : i32
+  %bank_words = scalar.shli %bank, %word_shift : i32
+  %permuted = scalar.xori %position, %bank_words : i32
+  %combined = scalar.ori %position, %bank_words : i32
+  %xor_hi = test.fact_range_hi %permuted : i32 -> i64
+  %xor_divisor = test.fact_divisor %permuted : i32 -> i64
+  %or_hi = test.fact_range_hi %combined : i32 -> i64
+  %or_divisor = test.fact_divisor %combined : i32 -> i64
+  func.return %xor_hi, %xor_divisor, %or_hi, %or_divisor : i64, i64, i64, i64
+}
+
+// ----
+func.def @aligned_packet_bitwise_bounds(%input: i32) -> (i64, i64, i64, i64) {
+  %xor_hi = scalar.constant 1020 : i64
+  %xor_divisor = scalar.constant 4 : i64
+  %or_hi = scalar.constant 1020 : i64
+  %or_divisor = scalar.constant 4 : i64
+  func.return %xor_hi, %xor_divisor, %or_hi, %or_divisor : i64, i64, i64, i64
+}
+
+// ====
+
+// Signed small-width operands retain common low zero bits without a sign proof.
+func.def @signed_bitwise_divisibility(%lhs: i8, %rhs: i8) -> (i64, i64, i64) {
+  %left = scalar.assume %lhs [multiple_of(%lhs, 24)] : i8
+  %right = scalar.assume %rhs [multiple_of(%rhs, 12)] : i8
+  %and = scalar.andi %left, %right : i8
+  %or = scalar.ori %left, %right : i8
+  %xor = scalar.xori %left, %right : i8
+  %and_divisor = test.fact_divisor %and : i8 -> i64
+  %or_divisor = test.fact_divisor %or : i8 -> i64
+  %xor_divisor = test.fact_divisor %xor : i8 -> i64
+  func.return %and_divisor, %or_divisor, %xor_divisor : i64, i64, i64
+}
+
+// ----
+func.def @signed_bitwise_divisibility(%lhs: i8, %rhs: i8) -> (i64, i64, i64) {
+  %and_divisor = scalar.constant 8 : i64
+  %or_divisor = scalar.constant 4 : i64
+  %xor_divisor = scalar.constant 4 : i64
+  func.return %and_divisor, %or_divisor, %xor_divisor : i64, i64, i64
+}
