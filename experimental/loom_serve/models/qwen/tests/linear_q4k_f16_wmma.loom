@@ -132,6 +132,7 @@ func.def @q4_matrix_reference(%control: buffer, %inputs: index, %outputs: index,
 }
 
 check.scenario public @q4_matrix_x64 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %capacity = check.literal value(16) : index
     %inputs = check.literal value(512) : index
@@ -151,6 +152,7 @@ check.scenario public @q4_matrix_x64 {
 }
 
 check.scenario public @q4_matrix_x128 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %capacity = check.literal value(256) : index
     %inputs = check.literal value(256) : index

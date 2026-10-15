@@ -58,6 +58,7 @@ kernel.def target(@pocket) @batched_project_f32() {
 }
 
 check.case public @project_f32_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -135,6 +136,7 @@ kernel.def target(@pocket) @batched_project_bias_f32() {
 }
 
 check.case public @project_bias_f32_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -212,6 +214,7 @@ kernel.def target(@pocket) @batched_project_f64() {
 }
 
 check.case public @project_f64_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
@@ -289,6 +292,7 @@ kernel.def target(@pocket) @batched_project_bias_f64() {
 }
 
 check.case public @project_bias_f64_row_ownership {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %membership = check.generate.fill value(-1) : tensor<5xi32>
   %unused = check.literal value(-1) : i32
   %word_0 = check.literal value(0) : i32
