@@ -9,7 +9,13 @@ func.def inline @flash_next_affine_dot16(%codes: vector<16xi8>, %values: vector<
   %c0 = scalar.constant 0.0 : f32
   %c0v = vector.constant 0.0 : vector<8xf32>
   %code_values = vector.uitofp %codes : vector<16xi8> to vector<16xf32>
-  %exact_codes = vector.fptrunc %code_values : vector<16xf32> to vector<16xbf16>
+  // Every unsigned byte is exact in BF16. Its F32 representation has zero
+  // low halfwords, so packing the upper halfwords preserves every code.
+  %code_bits = vector.bitcast %code_values : vector<16xf32> to vector<16xi32>
+  %code_shift = vector.constant 16 : vector<16xi32>
+  %code_upper = vector.shrui %code_bits, %code_shift : vector<16xi32>
+  %code_words = vector.trunci %code_upper : vector<16xi32> to vector<16xi16>
+  %exact_codes = vector.bitcast %code_words : vector<16xi16> to vector<16xbf16>
   %pairs = vector.dot2f %exact_codes, %values, %c0v : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %dot = vector.reduce<addf> %pairs, %c0 : vector<8xf32>, f32
   %expanded = vector.extf %values : vector<16xbf16> to vector<16xf32>
