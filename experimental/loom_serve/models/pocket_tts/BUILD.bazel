@@ -111,6 +111,111 @@ loom_test(
 )
 
 loom_test(
+    name = "batch_projection_test",
+    srcs = [
+        "batch_projection.loom",
+        "batching.loom",
+        "dispatch.loom",
+        "projection.loom",
+        "tests/batch_projection.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.batch_capacity": "4",
+        "pocket.request_capacity": "6",
+        "pocket.threads": "128",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "batch_normalization_test",
+    srcs = [
+        "batch_normalization.loom",
+        "batching.loom",
+        "dispatch.loom",
+        "normalization.loom",
+        "tests/batch_normalization.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.batch_capacity": "4",
+        "pocket.request_capacity": "6",
+        "pocket.threads": "128",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "batch_pointwise_test",
+    srcs = [
+        "batch_pointwise.loom",
+        "batching.loom",
+        "dispatch.loom",
+        "pointwise.loom",
+        "tests/batch_pointwise.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.batch_capacity": "4",
+        "pocket.request_capacity": "6",
+        "pocket.threads": "128",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "batch_convolution_test",
+    srcs = [
+        "batch_convolution.loom",
+        "batching.loom",
+        "convolution.loom",
+        "dispatch.loom",
+        "tests/batch_convolution.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.batch_capacity": "4",
+        "pocket.request_capacity": "6",
+        "pocket.threads": "128",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "batch_flow_state_test",
+    srcs = [
+        "batch_flow_state.loom",
+        "batching.loom",
+        "dispatch.loom",
+        "flow_state.loom",
+        "tests/batch_flow_state.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "pocket.batch_capacity": "4",
+        "pocket.request_capacity": "6",
+        "pocket.threads": "128",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "batch_attention_test",
     srcs = [
         "attention.loom",
