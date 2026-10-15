@@ -29,6 +29,8 @@ kernel.decl @expert_bucket_down_q51() launch(%input: buffer, %tasks: buffer, %we
 
 kernel.decl @expert_bucket_down_q8() launch(%input: buffer, %tasks: buffer, %weight: buffer, %output: buffer)
 
+kernel.decl @expert_matrix() launch(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
+
 func.def public inline @expert_swiglu(%gate: f32, %up: f32) -> (bf16) {
   %c1 = scalar.constant 1.0 : f32
   %negative = scalar.negf %gate : f32
@@ -294,6 +296,13 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %c4 = index.constant 4 : index
   %c30 = index.constant 30 : index
   %c46 = index.constant 46 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %matrix_threshold = index.constant 16384 : index
+  %matrix_rows = index.constant 128 : index
+  %matrix = index.cmp uge, %tokens, %matrix_threshold : index
+  %record_rows = scf.select %matrix, %matrix_rows, %c4 : index
   // Capacity specialization keeps small epochs on the direct route path.
   // Larger epochs build one expert-major table and reuse it in both passes.
   // Rank scratch dies after production; records live through the down pass.
@@ -301,10 +310,10 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %routing = scf.if %bucketed -> (buffer) {
     %rank_row_bytes = index.constant 40 : offset
     %rank_bytes = index.scale %tokens, %rank_row_bytes : index, offset -> offset
-    %record_capacity, %record_fields, %task_bytes = func.call pure @expert_record_extent(%tokens, %c4) : (index, index) -> (index, index, offset)
+    %record_capacity, %record_fields, %task_bytes = func.call pure @expert_record_extent(%tokens, %record_rows) : (index, index) -> (index, index, offset)
     %ranks = buffer.alloca<global> align(16) %rank_bytes : buffer
     %tasks = buffer.alloca<global> align(16) %task_bytes : buffer
-    kernel.launch @expert_routes(%c4, %span, %ids, %ranks, %tasks) : (index, buffer, buffer, buffer, buffer)
+    kernel.launch @expert_routes(%record_rows, %span, %ids, %ranks, %tasks) : (index, buffer, buffer, buffer, buffer)
     scf.yield %tasks : buffer
   } else {
     scf.yield %ids : buffer
@@ -322,7 +331,11 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
     %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x80x34xi8>
     %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x80x34xi8>
     scf.if %bucketed {
-      kernel.launch @expert_bucket_gate_up_q8(%input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, view<512x640x80x34xi8>, view<512x640x80x34xi8>, buffer)
+      scf.if %matrix {
+        kernel.launch @expert_matrix(%c0, %c0, %record_rows, %input, %routing, %gate_weight, %up_weight, %hidden) : (index, index, index, buffer, buffer, view<512x640x80x34xi8>, view<512x640x80x34xi8>, buffer)
+      } else {
+        kernel.launch @expert_bucket_gate_up_q8(%input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, view<512x640x80x34xi8>, view<512x640x80x34xi8>, buffer)
+      }
     } else {
       kernel.launch @expert_gate_up_q8(%span, %input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x80x34xi8>, view<512x640x80x34xi8>, buffer)
     }
@@ -331,7 +344,11 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
       %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x10x176xi8>
       %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x176xi8>
       scf.if %bucketed {
-        kernel.launch @expert_bucket_gate_up_q5k(%input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
+        scf.if %matrix {
+          kernel.launch @expert_matrix(%c0, %c3, %record_rows, %input, %routing, %gate_weight, %up_weight, %hidden) : (index, index, index, buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
+        } else {
+          kernel.launch @expert_bucket_gate_up_q5k(%input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
+        }
       } else {
         kernel.launch @expert_gate_up_q5k(%span, %input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
       }
@@ -339,7 +356,11 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
       %gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_exps.weight"[%layer] : view<512x640x10x144xi8>
       %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x144xi8>
       scf.if %bucketed {
-        kernel.launch @expert_bucket_gate_up_q4k(%input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
+        scf.if %matrix {
+          kernel.launch @expert_matrix(%c0, %c2, %record_rows, %input, %routing, %gate_weight, %up_weight, %hidden) : (index, index, index, buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
+        } else {
+          kernel.launch @expert_bucket_gate_up_q4k(%input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
+        }
       } else {
         kernel.launch @expert_gate_up_q4k(%span, %input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
       }
@@ -348,14 +369,22 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   scf.if %q8_down {
     %down_weight = command.parameter %parameters, "blk.{}.ffn_down_exps.weight"[%layer] : view<512x2560x20x34xi8>
     scf.if %bucketed {
-      kernel.launch @expert_bucket_down_q8(%hidden, %routing, %down_weight, %down) : (buffer, buffer, view<512x2560x20x34xi8>, buffer)
+      scf.if %matrix {
+        kernel.launch @expert_matrix(%c1, %c0, %record_rows, %hidden, %routing, %down_weight, %down_weight, %down) : (index, index, index, buffer, buffer, view<512x2560x20x34xi8>, view<512x2560x20x34xi8>, buffer)
+      } else {
+        kernel.launch @expert_bucket_down_q8(%hidden, %routing, %down_weight, %down) : (buffer, buffer, view<512x2560x20x34xi8>, buffer)
+      }
     } else {
       kernel.launch @expert_down_q8(%span, %hidden, %routing, %down_weight, %down) : (buffer, buffer, buffer, view<512x2560x20x34xi8>, buffer)
     }
   } else {
     %down_weight = command.parameter %parameters, "blk.{}.ffn_down_exps.weight"[%layer] : view<512x2560x20x24xi8>
     scf.if %bucketed {
-      kernel.launch @expert_bucket_down_q51(%hidden, %routing, %down_weight, %down) : (buffer, buffer, view<512x2560x20x24xi8>, buffer)
+      scf.if %matrix {
+        kernel.launch @expert_matrix(%c1, %c1, %record_rows, %hidden, %routing, %down_weight, %down_weight, %down) : (index, index, index, buffer, buffer, view<512x2560x20x24xi8>, view<512x2560x20x24xi8>, buffer)
+      } else {
+        kernel.launch @expert_bucket_down_q51(%hidden, %routing, %down_weight, %down) : (buffer, buffer, view<512x2560x20x24xi8>, buffer)
+      }
     } else {
       kernel.launch @expert_down_q51(%span, %hidden, %routing, %down_weight, %down) : (buffer, buffer, buffer, view<512x2560x20x24xi8>, buffer)
     }
