@@ -5,6 +5,7 @@
     "prepare": "prepare.loom",
     "control": "../qwen/control.loom",
     "sources": [
+      "../qwen/epoch_control.loom",
       "config.loom",
       "epoch.loom",
       "kernels/embedding.loom",
