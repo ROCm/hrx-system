@@ -29,7 +29,7 @@ low.func.def target<amd.xdna.aie2p.core> @identical_nonnext(%condition: reg<aie2
 }
 
 // ----
-code: 98 31 04 08 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+code: 3a 21 00 00 00 00 00 30 86 00 00 00 00 00 00 00 00 00 00 00
 
 // ====
 
@@ -49,7 +49,7 @@ low.func.def target<amd.xdna.aie2p.core> @neither_next(%condition: reg<aie2p.er>
 }
 
 // ----
-code: 84 01 40 00 00 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00 00 00 98 31 04 08 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 98 51 04 08 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+code: 84 01 40 00 00 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00 00 00 3a 21 00 00 00 00 00 30 86 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3a 21 00 00 00 00 00 30 8a 00 00 00 00 00 00 00 00 00 00 00
 
 // ====
 
@@ -71,13 +71,13 @@ low.func.def target<amd.xdna.aie2p.core> @targeted_empty_chain(%condition: reg<a
 }
 
 // ----
-code: 84 01 40 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00 00 00 98 31 04 08 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+code: 84 01 40 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00 00 00 3a 21 00 00 00 00 00 30 86 00 00 00 00 00 00 00 00 00 00 00
 
 // ====
 
-// The conditional branch's five delay packets lead directly into the
-// fallthrough backedge jump. Exit alignment follows that jump's delay window.
-// RUN: with-checks emit aie2p-leaf @countdown_store report=code
+// The conditional branch shares the store packet and retains five delay
+// cycles before the fallthrough backedge jump. Exit alignment follows it.
+// RUN: emit aie2p-leaf @countdown_store report=code
 
 low.func.def target<amd.xdna.aie2p.core> @countdown_store(%output: reg<aie2p.ep>, %count: reg<aie2p.er>) asm {
   low.br ^loop(%count: reg<aie2p.er>)
@@ -92,4 +92,53 @@ low.func.def target<amd.xdna.aie2p.core> @countdown_store(%output: reg<aie2p.ep>
 }
 
 // ----
-CHECK: code: * 84 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 *
+code: 18 ff 01 10 3a 61 00 00 00 00 00 30 82 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// The independent condition allows the branch to share useful tail work.
+// Both paths observe the preceding vector store after its effects retire.
+// RUN: emit aie2p-leaf @shared_tail report=code
+
+low.func.def target<amd.xdna.aie2p.core> @shared_tail(%condition: reg<aie2p.er>, %input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  %loaded = vlda.512.i32x16 %input, 0
+  %doubled = vadd.32 %loaded, %loaded
+  vst.512.i32x16 %doubled, %output, 0
+  low.cond_br %condition, ^taken, ^fallthrough : reg<aie2p.er>
+^fallthrough:
+  %one = mov.i32 1
+  st %one, %output, 16
+  return
+^taken:
+  %two = mov.i32 2
+  st %two, %output, 16
+  return
+}
+
+// ----
+code: 98 1b 04 00 00 00 00 00 00 00 00 00 00 00 00 00 78 2d 00 18 84 01 40 00 00 00 18 13 04 09 00 00 00 00 00 00 00 00 44 02 20 00 00 00 5c 00 50 30 82 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 44 04 20 00 00 00 5c 00 50 30 82 28 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// A load-produced condition retains its read latency even when tail slots
+// are otherwise free. The condition register remains part of the bundle.
+// RUN: emit aie2p-leaf @loaded_condition report=code
+
+low.func.def target<amd.xdna.aie2p.core> @loaded_condition(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  %zero = mov.i32 0
+  %index = mov.address-index %zero
+  %condition = lda.i32.index %input, %index
+  st %zero, %output, 0
+  low.cond_br %condition, ^fallthrough, ^taken : reg<aie2p.er>
+^fallthrough:
+  %one = mov.i32 1
+  st %one, %output, 4
+  return
+^taken:
+  %two = mov.i32 2
+  st %two, %output, 4
+  return
+}
+
+// ----
+code: 44 00 20 00 00 00 18 0b 20 08 98 36 00 00 98 11 04 09 00 00 00 00 00 00 00 00 00 00 84 01 00 00 00 08 00 00 00 00 00 00 00 00 00 00 44 02 20 00 00 00 5c 00 50 30 82 22 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 44 04 20 00 00 00 5c 00 50 30 82 22 00 00 00 00 00 00 00 00 00 00

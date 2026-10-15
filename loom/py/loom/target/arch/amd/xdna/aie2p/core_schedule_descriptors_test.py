@@ -59,25 +59,48 @@ from loom.target.low_descriptors import (
 )
 
 
-def test_control_timing_requires_issue_stage_only_return_resources() -> None:
+@pytest.mark.parametrize(
+    "suffix", ["return", "branch.direct", "branch.zero", "branch.nonzero"]
+)
+def test_control_timing_requires_issue_stage_only_resources(suffix: str) -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
-    returned = next(
-        row for row in descriptor_set.descriptors if row.key.endswith(".return")
+    control = next(
+        row for row in descriptor_set.descriptors if row.key.endswith("." + suffix)
     )
     changed = tuple(
         replace(
             row, issue_uses=(replace(row.issue_uses[0], stage=1), *row.issue_uses[1:])
         )
-        if row.name == returned.schedule_class
+        if row.name == control.schedule_class
         else row
         for row in descriptor_set.schedule_classes
     )
     with pytest.raises(
-        ValueError, match="RET sharing requires issue-stage-only resources"
+        ValueError, match="control sharing requires issue-stage-only resources"
     ):
         _validate_control_issue_timing(
             replace(descriptor_set, schedule_classes=changed)
         )
+
+
+@pytest.mark.parametrize("suffix", ["return", "branch.zero", "branch.nonzero"])
+def test_control_tail_placement_requires_read_only_registers(suffix: str) -> None:
+    descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
+    changed = tuple(
+        replace(
+            row,
+            operands=(
+                replace(row.operands[0], write_event=row.operands[0].read_event),
+            ),
+        )
+        if row.key.endswith("." + suffix)
+        else row
+        for row in descriptor_set.descriptors
+    )
+    with pytest.raises(
+        ValueError, match="control tail placement requires read-only registers"
+    ):
+        _validate_control_issue_timing(replace(descriptor_set, descriptors=changed))
 
 
 def test_control_window_covers_its_outgoing_register_events() -> None:

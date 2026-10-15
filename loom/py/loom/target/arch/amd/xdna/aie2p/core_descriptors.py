@@ -1978,8 +1978,11 @@ def _validate_control_issue_timing(descriptor_set: DescriptorSet) -> None:
             maximum_separations.get(separation.producer_event, 0),
             separation.minimum_issue_separation_cycles,
         )
-    for suffix in ("return", "branch.direct", "branch.zero", "branch.nonzero"):
-        descriptor = descriptors[f"{descriptor_specs._TARGET_KEY}.{suffix}"]
+    controls = tuple(
+        descriptors[f"{descriptor_specs._TARGET_KEY}.{suffix}"]
+        for suffix in ("return", "branch.direct", "branch.zero", "branch.nonzero")
+    )
+    for descriptor in controls:
         control_cycles = encodings[descriptor.encoding_id].delay_slot_count + 1
         schedule = classes[descriptor.schedule_class]
         events = [
@@ -2000,32 +2003,32 @@ def _validate_control_issue_timing(descriptor_set: DescriptorSet) -> None:
             raise ValueError(
                 f"{descriptor.key}: control window does not cover its resource stages"
             )
-    returned = descriptors[f"{descriptor_specs._TARGET_KEY}.return"]
-    return_resources = {
-        use.resource for use in classes[returned.schedule_class].issue_uses
+        if any(
+            effect.kind is not EffectKind.CONTROL for effect in descriptor.effects
+        ) or any(operand.write_event is not None for operand in descriptor.operands):
+            raise ValueError(
+                f"{descriptor.key}: control tail placement requires read-only "
+                "registers and control effects"
+            )
+    control_resources = {
+        use.resource
+        for descriptor in controls
+        for use in classes[descriptor.schedule_class].issue_uses
     }
     resources = {row.name: row for row in descriptor_set.resources}
-    return_groups = {
-        resources[name].contention_group_id for name in return_resources
+    control_groups = {
+        resources[name].contention_group_id for name in control_resources
     } - {0}
     for schedule in descriptor_set.schedule_classes:
         for use in schedule.issue_uses:
             if (
-                use.resource in return_resources
-                or resources[use.resource].contention_group_id in return_groups
+                use.resource in control_resources
+                or resources[use.resource].contention_group_id in control_groups
             ) and (use.stage != 0 or use.cycles != 1):
                 raise ValueError(
-                    f"{schedule.name}: RET sharing requires issue-stage-only resources"
+                    f"{schedule.name}: control sharing requires "
+                    "issue-stage-only resources"
                 )
-    if any(effect.kind is not EffectKind.CONTROL for effect in returned.effects) or any(
-        operand.write_event is not None
-        or any(
-            alternative.reg_class != "aie2p.state.lr"
-            for alternative in operand.reg_alts
-        )
-        for operand in returned.operands
-    ):
-        raise ValueError("RET tail placement requires only a link-register read")
     nop = encodings[descriptors[f"{descriptor_specs._TARGET_KEY}.nop"].encoding_id]
     nop_format = next(
         row for row in CORE_ENCODING_TABLE.bundle_formats if row.name == "I16_NOP"

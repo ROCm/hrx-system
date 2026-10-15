@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstring>
+#include <tuple>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -95,13 +96,53 @@ TEST(Aie2pTileLinkTest, PlacesExecutableContribution) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
-TEST(Aie2pTileLinkTest, AppliesBranchFixupAfterContributionPlacement) {
+class Aie2pBranchLinkTest
+    : public ::testing::TestWithParam<std::tuple<const char*, bool>> {};
+
+TEST_P(Aie2pBranchLinkTest, AppliesFixupAfterContributionPlacement) {
+  const auto [instruction_name, bundled] = GetParam();
+  const loom_aie2p_instruction_id_t instruction =
+      loom_aie2p_encoding_find_instruction(
+          iree_make_cstring_view(instruction_name));
+  ASSERT_NE(instruction, LOOM_AIE2P_INSTRUCTION_ID_INVALID);
+  const loom_aie2p_encoding_field_id_t immediate =
+      loom_aie2p_encoding_find_field(IREE_SV("i"));
+  loom_aie2p_encoding_field_value_t fields[] = {
+      {immediate, 0},
+      {loom_aie2p_encoding_find_field(IREE_SV("s0")), 23},
+  };
+  const iree_host_size_t field_count =
+      std::strcmp(instruction_name, "J_lng") == 0 ? 1 : 2;
+  uint64_t branch_value = 0;
+  IREE_ASSERT_OK(loom_aie2p_encoding_pack_instruction(
+      instruction, fields, field_count, &branch_value));
+  const loom_aie2p_instruction_id_t load =
+      loom_aie2p_encoding_find_instruction(IREE_SV("VLDA_dmx_lda_x_idx_imm"));
+  const loom_aie2p_encoding_field_value_t load_fields[] = {
+      {loom_aie2p_encoding_find_field(IREE_SV("dst")), 1},
+      {loom_aie2p_encoding_find_field(IREE_SV("imm")), 0},
+      {loom_aie2p_encoding_find_field(IREE_SV("ptr")), 2},
+  };
+  uint64_t load_value = 0;
+  IREE_ASSERT_OK(loom_aie2p_encoding_pack_instruction(
+      load, load_fields, IREE_ARRAYSIZE(load_fields), &load_value));
+  loom_aie2p_encoded_slot_t slots[] = {
+      {LOOM_AIE2P_SLOT_LNG, branch_value},
+      {LOOM_AIE2P_SLOT_LDA, load_value},
+  };
+  const loom_aie2p_bundle_format_id_t format =
+      loom_aie2p_encoding_find_bundle_format(bundled ? IREE_SV("I80_LDA_LNG")
+                                                     : IREE_SV("I48_LNG"));
+  loom_aie2p_encoding_packet_t packet;
+  IREE_ASSERT_OK(
+      loom_aie2p_encoding_pack_bundle(format, slots, bundled ? 2 : 1, &packet));
   const std::array<uint8_t, 16> prefix_code = {
       0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
       0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
   };
   std::array<uint8_t, 32> function_code = {};
-  function_code[0] = 0x84;
+  std::memcpy(function_code.data(), packet.data, packet.data_length);
+  const auto original_function = function_code;
   const loom_native_section_contribution_t sections[] = {
       {
           .section_name = IREE_SV(".text.kernel"),
@@ -175,19 +216,28 @@ TEST(Aie2pTileLinkTest, AppliesBranchFixupAfterContributionPlacement) {
   const uint8_t* linked_code = linked_tile.assembly.sections[0].contents.data;
   EXPECT_EQ(0,
             std::memcmp(linked_code, prefix_code.data(), prefix_code.size()));
-  constexpr std::array<uint8_t, 6> kBranchToAddress32 = {
-      0x84, 0x00, 0x00, 0x10, 0x00, 0x00,
-  };
-  EXPECT_EQ(0, std::memcmp(linked_code + 16, kBranchToAddress32.data(),
-                           kBranchToAddress32.size()));
-  EXPECT_EQ(function_code[0], 0x84u);
-  for (size_t i = 1; i < 6; ++i) {
-    EXPECT_EQ(function_code[i], 0u);
-  }
+  // Native cpmaddr carries the aligned byte address after placement.
+  fields[0].value = 32;
+  IREE_ASSERT_OK(loom_aie2p_encoding_pack_instruction(
+      instruction, fields, field_count, &slots[0].value));
+  loom_aie2p_encoding_packet_t expected_packet;
+  IREE_ASSERT_OK(loom_aie2p_encoding_pack_bundle(format, slots, bundled ? 2 : 1,
+                                                 &expected_packet));
+  auto expected_function = original_function;
+  std::memcpy(expected_function.data(), expected_packet.data,
+              expected_packet.data_length);
+  EXPECT_EQ(0, std::memcmp(linked_code + prefix_code.size(),
+                           expected_function.data(), expected_function.size()));
+  EXPECT_EQ(function_code, original_function);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
+
+INSTANTIATE_TEST_SUITE_P(StructuralBranches, Aie2pBranchLinkTest,
+                         ::testing::Combine(::testing::Values("J_lng", "JZ",
+                                                              "JNZ"),
+                                            ::testing::Bool()));
 
 TEST(Aie2pTileLinkTest, RelocatesMovxmInsideAMultiSlotBundle) {
   const loom_aie2p_instruction_id_t movxm =

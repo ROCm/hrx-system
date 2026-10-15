@@ -113,35 +113,32 @@ static bool loom_aie2p_native_relocation_is_core_branch(
 static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
     uint64_t target_address, uint64_t fixup_offset,
     loom_native_section_t* section) {
-  const loom_aie2p_slot_t branch_slot = LOOM_AIE2P_SLOT_LNG;
-  const loom_aie2p_bundle_format_id_t branch_format =
-      loom_aie2p_encoding_find_bundle_format_for_slots(&branch_slot, 1);
-  IREE_ASSERT(branch_format != LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID &&
-              "generated AIE2P tables must contain the LNG bundle");
-  loom_aie2p_bundle_format_info_t branch_format_info;
-  const bool found = loom_aie2p_encoding_query_bundle_format_info(
-      branch_format, &branch_format_info);
-  IREE_ASSERT(found && branch_format_info.bit_count % 8 == 0);
-  const iree_host_size_t packet_length = branch_format_info.bit_count / 8u;
   if (fixup_offset > IREE_HOST_SIZE_MAX ||
-      (iree_host_size_t)fixup_offset > section->contents.data_length ||
-      packet_length >
-          section->contents.data_length - (iree_host_size_t)fixup_offset) {
+      (iree_host_size_t)fixup_offset >= section->contents.data_length) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AIE2P branch fixup lies outside its section");
   }
-
   uint8_t* packet_bytes =
       (uint8_t*)section->contents.data + (iree_host_size_t)fixup_offset;
+  const iree_host_size_t remaining_length =
+      section->contents.data_length - (iree_host_size_t)fixup_offset;
+  const iree_host_size_t decode_length = iree_min(
+      remaining_length, (iree_host_size_t)LOOM_AIE2P_ENCODING_MAX_PACKET_SIZE);
   loom_aie2p_decoded_bundle_t decoded_bundle;
-  IREE_RETURN_IF_ERROR(loom_aie2p_encoding_decode_bundle(
-      iree_make_const_byte_span(packet_bytes, packet_length), &decoded_bundle));
-  if (decoded_bundle.format != branch_format ||
-      decoded_bundle.slot_count != 1 ||
-      decoded_bundle.slots[0].slot != branch_slot) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AIE2P core branch relocation requires one standalone LNG bundle");
+  iree_host_size_t packet_length = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_encoding_decode_bundle_prefix(
+      iree_make_const_byte_span(packet_bytes, decode_length), &decoded_bundle,
+      &packet_length));
+  loom_aie2p_encoded_slot_t* branch_slot = NULL;
+  for (uint8_t i = 0; i < decoded_bundle.slot_count; ++i) {
+    if (decoded_bundle.slots[i].slot == LOOM_AIE2P_SLOT_LNG) {
+      branch_slot = &decoded_bundle.slots[i];
+      break;
+    }
+  }
+  if (branch_slot == NULL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "AIE2P core branch relocation requires a LNG slot");
   }
 
   const iree_host_size_t instruction_count =
@@ -151,7 +148,7 @@ static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
           instruction_count * sizeof(*instruction_candidates));
   const iree_host_size_t candidate_count =
       loom_aie2p_encoding_query_instruction_candidates(
-          branch_slot, decoded_bundle.slots[0].value, instruction_count,
+          branch_slot->slot, branch_slot->value, instruction_count,
           instruction_candidates);
   IREE_ASSERT_LE(candidate_count, instruction_count);
   loom_aie2p_instruction_id_t branch_instruction =
@@ -182,8 +179,8 @@ static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
                                                       sizeof(*field_values));
   iree_host_size_t field_count = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_encoding_unpack_instruction(
-      branch_instruction, decoded_bundle.slots[0].value, field_capacity,
-      field_values, &field_count));
+      branch_instruction, branch_slot->value, field_capacity, field_values,
+      &field_count));
   if (target_address > INT64_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AIE2P core branch target exceeds signed range");
@@ -202,8 +199,7 @@ static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
   IREE_ASSERT(target_field_found &&
               "generated branch form must encode cpmaddr");
   IREE_RETURN_IF_ERROR(loom_aie2p_encoding_pack_instruction(
-      branch_instruction, field_values, field_count,
-      &decoded_bundle.slots[0].value));
+      branch_instruction, field_values, field_count, &branch_slot->value));
 
   loom_aie2p_encoding_packet_t encoded_bundle;
   IREE_RETURN_IF_ERROR(loom_aie2p_encoding_pack_bundle(
