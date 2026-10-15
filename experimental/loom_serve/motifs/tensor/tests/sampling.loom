@@ -114,6 +114,7 @@ func.def @reference(%columns: index, %logits: buffer, %temperature: f32, %top_p:
 }
 
 check.scenario public @sampling_greedy {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[12](%trial: index, %entropy: check.entropy) {
     %columns = check.literal value(67) : index
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
@@ -131,6 +132,7 @@ check.scenario public @sampling_greedy {
 }
 
 check.scenario public @sampling_full {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[12](%trial: index, %entropy: check.entropy) {
     %columns = check.literal value(67) : index
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
@@ -148,6 +150,7 @@ check.scenario public @sampling_full {
 }
 
 check.scenario public @sampling_nucleus {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[12](%trial: index, %entropy: check.entropy) {
     %columns = check.literal value(67) : index
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
@@ -165,6 +168,7 @@ check.scenario public @sampling_nucleus {
 }
 
 check.scenario public @sampling_single {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[12](%trial: index, %entropy: check.entropy) {
     %columns = check.literal value(67) : index
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
@@ -182,6 +186,7 @@ check.scenario public @sampling_single {
 }
 
 check.scenario public @sampling_small {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[12](%trial: index, %entropy: check.entropy) {
     %columns = check.literal value(67) : index
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
@@ -199,6 +204,7 @@ check.scenario public @sampling_small {
 }
 
 check.scenario public @sampling_large {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[12](%trial: index, %entropy: check.entropy) {
     %columns = check.literal value(67) : index
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
@@ -216,6 +222,7 @@ check.scenario public @sampling_large {
 }
 
 check.scenario public @sampling_beyond {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[12](%trial: index, %entropy: check.entropy) {
     %columns = check.literal value(67) : index
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
@@ -260,6 +267,7 @@ func.def @vocabulary_reference(%columns: index, %logits: buffer, %temperature_ar
 }
 
 check.scenario public @sampling_vocabulary {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %columns = check.literal value(248320) : index
     %seed = check.literal value(1234567890123) : i64

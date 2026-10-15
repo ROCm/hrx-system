@@ -582,6 +582,7 @@ kernel.def export("qwen38_attention_decode_split_reduce") @qwen38_attention_deco
 // Differentially exercises all six queries in each GQA group across ten
 // single-token context splits.
 check.case public @qwen38_attention_decode_split_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(1) : index
   %token_ordinal = check.literal value(0) : index
   %control_position_index = check.literal value(0) : index
@@ -609,6 +610,7 @@ check.case public @qwen38_attention_decode_split_differential_case {
 // arithmetic schedule while concurrent launches write disjoint partial and
 // output slices.
 check.case public @qwen38_attention_decode_split_m4_differential_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(4) : index
   %token_ordinal0 = check.literal value(0) : index
   %token_ordinal1 = check.literal value(1) : index
@@ -669,6 +671,7 @@ check.case public @qwen38_attention_decode_10k_split_case {
 }
 
 check.case public @qwen38_attention_decode_10k_split_wmma_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(1) : index
   %token_ordinal = check.literal value(0) : index
   %control_position_index = check.literal value(0) : index

@@ -102,6 +102,7 @@ kernel.def @reference() {
 // The 33-row backing allocations also retain canaries beyond smaller compiled
 // capacities; the fixture limits the active count to the configured capacity.
 check.case public @prepared_q8_projection {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %requested = check.param.choice values([0, 1, 3, 4, 17, 33]) name("active") : index
   %outputs = check.param.choice values([4, 68]) name("channels") : index
   %tokens = check.literal value(33) : index

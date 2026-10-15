@@ -60,6 +60,7 @@ kernel.def target(@temporal_check_wave32) @temporal_read_ahead() {
 }
 
 check.case public @exact_temporal_tails {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input_seed = check.literal value(74111) : i64
   %weight_seed = check.literal value(31937) : i64
   %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<528x256xbf16>
