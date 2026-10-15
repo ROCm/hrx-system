@@ -190,7 +190,7 @@ loom_test(
     name = "expert_buckets_test",
     srcs = ["tests/expert_buckets.loom"],
     benchmark_smoke = False,
-    configs = {"flash_next.token_count": "64"},
+    configs = {"flash_next.token_count": "131"},
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,

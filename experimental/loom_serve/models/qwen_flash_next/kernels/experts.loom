@@ -15,7 +15,9 @@ func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lan
 
 template.decl @flash_next.project_dense_q8(%inputs: index, %outputs: index, %blocks: index, %span: buffer, %input: buffer, %weight: view<[%outputs]x[%blocks]x34xi8>, %output: buffer)
 
-kernel.decl @expert_bucket_routes() launch(%epoch: buffer, %ids: buffer, %ranks: buffer, %tasks: buffer)
+func.decl pure @expert_record_extent(%capacity: index, %record_rows: index) -> (index, index, offset)
+
+kernel.decl @expert_routes() launch(%record_rows: index, %epoch: buffer, %ids: buffer, %ranks: buffer, %tasks: buffer)
 
 kernel.decl @expert_bucket_gate_up_q4k() launch(%input: buffer, %tasks: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
 
@@ -298,14 +300,11 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %bucketed = index.cmp ugt, %tokens, %c4 : index
   %routing = scf.if %bucketed -> (buffer) {
     %rank_row_bytes = index.constant 40 : offset
-    %task_row_bytes = index.constant 240 : offset
-    %count_bytes = index.constant 4 : offset
     %rank_bytes = index.scale %tokens, %rank_row_bytes : index, offset -> offset
-    %record_bytes = index.scale %tokens, %task_row_bytes : index, offset -> offset
-    %task_bytes = index.add %record_bytes, %count_bytes : offset
+    %record_capacity, %record_fields, %task_bytes = func.call pure @expert_record_extent(%tokens, %c4) : (index, index) -> (index, index, offset)
     %ranks = buffer.alloca<global> align(16) %rank_bytes : buffer
     %tasks = buffer.alloca<global> align(16) %task_bytes : buffer
-    kernel.launch @expert_bucket_routes(%span, %ids, %ranks, %tasks) : (buffer, buffer, buffer, buffer)
+    kernel.launch @expert_routes(%c4, %span, %ids, %ranks, %tasks) : (index, buffer, buffer, buffer, buffer)
     scf.yield %tasks : buffer
   } else {
     scf.yield %ids : buffer
