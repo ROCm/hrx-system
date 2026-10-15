@@ -16,8 +16,8 @@
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
 
 enum {
-  IREE_HAL_AMDGPU_COMPLETION_CARRIER_PACKET_CAPACITY = 32768,
-  IREE_HAL_AMDGPU_COMPLETION_CARRIER_PM4_CAPACITY = 8192,
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_PACKET_CAPACITY = 131072,
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_PM4_CAPACITY = 32768,
 };
 
 typedef struct iree_hal_amdgpu_completion_carrier_slot_t {
