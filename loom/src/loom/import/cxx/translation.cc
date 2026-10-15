@@ -1975,6 +1975,12 @@ class Translator final : private Initialization::Evaluation {
       if (cxx::ast_cast<cxx::EmptyDeclarationAST>(declaration->declaration)) {
         return;
       }
+      // The frontend checks assertions, including dependent conditions after
+      // instantiation. Successful assertions have no runtime semantics.
+      if (cxx::ast_cast<cxx::StaticAssertDeclarationAST>(
+              declaration->declaration)) {
+        return;
+      }
       if (auto* alias = cxx::ast_cast<cxx::AliasDeclarationAST>(
               declaration->declaration)) {
         reject_misplaced_binding_attributes(unit_, diagnostics_,

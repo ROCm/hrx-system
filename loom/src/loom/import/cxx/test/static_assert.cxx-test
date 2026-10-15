@@ -1,0 +1,113 @@
+// RUN: roundtrip
+// Assertions in ordinary nested blocks contribute no runtime operations.
+static_assert(sizeof(unsigned) == 4);
+unsigned entry(unsigned value) {
+  static_assert(sizeof(unsigned) == 4, "word width");
+  {
+    constexpr unsigned radix = 5;
+    static_assert(400 % radix == 0);
+  }
+  return value;
+}
+
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %radix = scalar.constant 5 : i32
+  func.return %value : i32
+}
+
+// ====
+// RUN: roundtrip
+// Instantiation checks dependent conditions before importing the selected body.
+template <unsigned Length, unsigned Radix>
+static unsigned stage(unsigned value) {
+  static_assert(Length % Radix == 0, "factorization");
+  if constexpr (Radix == 5) {
+    static_assert(Length >= 5);
+    return value + 5;
+  } else {
+    static_assert(Radix == 2);
+    return value + 2;
+  }
+}
+unsigned entry(unsigned value) {
+  return stage<400, 5>(value) + stage<1024, 2>(value);
+}
+
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = func.call @stage_400_5(%value) : (i32) -> (i32)
+  %3 = func.call @stage_1024_2(%value) : (i32) -> (i32)
+  %4 = scalar.addi %2, %3 : i32
+  func.return %4 : i32
+}
+
+func.def @stage_400_5(%value: i32) -> (i32) {
+  %7 = scalar.constant 5 : i32
+  %8 = scalar.addi %value, %7 : i32
+  func.return %8 : i32
+}
+
+func.def @stage_1024_2(%value: i32) -> (i32) {
+  %11 = scalar.constant 2 : i32
+  %12 = scalar.addi %value, %11 : i32
+  func.return %12 : i32
+}
+
+// ====
+// RUN: verify
+unsigned entry(unsigned value) {
+  // ERROR@+1: PARSE/036 "static assert failed"
+  static_assert(false);
+  return value;
+}
+
+// ====
+// RUN: verify
+unsigned entry(unsigned value) {
+  // ERROR@+1: PARSE/036 "a source assertion"
+  static_assert(false, "a source assertion");
+  return value;
+}
+
+// ====
+// RUN: verify
+unsigned entry(unsigned value) {
+  // ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+  static_assert(value != 0);
+  return value;
+}
+
+// ====
+// RUN: verify
+template <unsigned Length, unsigned Radix>
+static unsigned stage(unsigned value) {
+  // ERROR@+1: PARSE/036 "factorization"
+  static_assert(Length % Radix == 0, "factorization");
+  return value;
+}
+unsigned entry(unsigned value) { return stage<400, 3>(value); }
+
+// ====
+// RUN: roundtrip
+// A dependent assertion in a discarded arm is never instantiated.
+template <unsigned Radix>
+static unsigned stage(unsigned value) {
+  if constexpr (Radix == 5) {
+    return value;
+  } else {
+    static_assert(Radix == 2, "supported factorization");
+    return value + 2;
+  }
+}
+unsigned entry(unsigned value) { return stage<5>(value); }
+
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = func.call @stage_5(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @stage_5(%value: i32) -> (i32) {
+  func.return %value : i32
+}
