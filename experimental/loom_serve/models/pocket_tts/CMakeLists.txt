@@ -380,6 +380,80 @@ endif()
 
 loom_test_module(
   NAME
+    batch_attention_test_module
+  SRCS
+    "attention.loom"
+    "batch_attention.loom"
+    "batching.loom"
+    "dispatch.loom"
+    "normalization.loom"
+    "tests/batch_attention.loom"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    batch_attention_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::batch_attention_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=pocket.batch_capacity=4"
+    "--config=pocket.context_capacity=320"
+    "--config=pocket.request_capacity=4"
+    "--config=pocket.rotary_capacity=4096"
+    "--config=pocket.threads=128"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    batch_attention_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::batch_attention_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=pocket.batch_capacity=4"
+    "--config=pocket.context_capacity=320"
+    "--config=pocket.request_capacity=4"
+    "--config=pocket.rotary_capacity=4096"
+    "--config=pocket.threads=128"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
     attention_test_module
   SRCS
     "attention.loom"
