@@ -274,6 +274,40 @@ func.def @softplus_fast_observations_oracle(%input: buffer, %output: buffer) {
   func.return
 }
 
+func.def inline @activation_bits_observations(%scalar_bits: i32, %input: buffer, %output: buffer) {
+  %scalar_input = scalar.bitcast %scalar_bits : i32 to f32
+  func.call @activation_observations(%scalar_input, %input, %output) : (f32, buffer, buffer)
+  func.return
+}
+
+func.def inline @activation_bits_observations_oracle(%scalar_bits: i32, %input: buffer, %output: buffer) {
+  %scalar_input = scalar.bitcast %scalar_bits : i32 to f32
+  func.call @activation_observations_oracle(%scalar_input, %input, %output) : (f32, buffer, buffer)
+  func.return
+}
+
+// The core activation family is independently selectable by targets whose
+// current math basis does not yet implement softplus.
+check.scenario @activation_core_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %scalar_bits = check.literal value(1056964608) : i32
+    %input = check.generate.iota offset(-8.0) step(1.0) : tensor<16xf32>
+    %output = check.generate.fill value(0.0) : tensor<85xf32>
+    check.compare<@activation_bits_observations, @activation_bits_observations_oracle>(%scalar_bits, %input, %output) : (i32, tensor<16xf32>, tensor<85xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.02) rtol(0.01) nan(same) : tensor<85xf32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %scalar_bits = check.literal value(-1090519040) : i32
+    %input = check.generate.iota offset(-3.75) step(0.5) : tensor<16xf32>
+    %output = check.generate.fill value(0.0) : tensor<85xf32>
+    check.compare<@activation_bits_observations, @activation_bits_observations_oracle>(%scalar_bits, %input, %output) : (i32, tensor<16xf32>, tensor<85xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.02) rtol(0.01) nan(same) : tensor<85xf32>
+    }
+  }
+  check.return
+}
+
 check.scenario @activation_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %scalar_input = check.literal value(0.5) : f32

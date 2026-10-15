@@ -119,5 +119,8 @@ iree_executable_test(
         ("float_approximate_roots", "//loom/src/loom/tooling/target/cpu:test/x86_approximate_roots.loom", "x86_root_approximate_values"),
         ("float64_roots", "//loom/src/loom/test/corpus/numeric:float/roots.loom", "root_f64_values"),
         ("float64_approximate_roots", "//loom/src/loom/tooling/target/cpu:test/x86_approximate_roots.loom", "x86_root_f64_approximate_values"),
+        ("float_exponential", "//loom/src/loom/test/corpus/numeric:float/exponential.loom", "exponential_values"),
+        ("float_turns", "//loom/src/loom/test/corpus/numeric:float/turns.loom", "turn_approximate_values"),
+        ("float_activations", "//loom/src/loom/test/corpus/numeric:float/activations.loom", "activation_core_values"),
     ]
 ]
