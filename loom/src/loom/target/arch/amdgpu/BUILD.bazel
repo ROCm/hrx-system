@@ -587,6 +587,10 @@ loom_check_test_suite(
             "//loom/target/amdgpu:" + target
             for target in LOOM_AMDGPU_SUPPORTED_TARGETS
         ],
+        "test/source_low/memory_mixed_wide_offsets.loom-test": [
+            "//loom/target/amdgpu:" + target
+            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+        ],
         "test/source_low/narrow_float_arguments.loom-test": [
             "//loom/target/amdgpu:gfx942",
             "//loom/target/amdgpu:gfx950",

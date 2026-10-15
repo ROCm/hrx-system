@@ -1,0 +1,245 @@
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+// Scaling an unsigned word produces a wide uniform byte offset. The lane
+// residual remains narrow, including both loads' instruction immediates.
+kernel.def @wide_uniform_word() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer, %word: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %tile = scalar.extui %word : i32 to i64
+  %scale = scalar.constant 4 : i64
+  %tile_product = scalar.muli %tile, %scale : i64
+  %tile_bytes = index.cast %tile_product : i64 to offset
+  %c4 = index.constant 4 : offset
+  %lane_bytes = index.scale %lane, %c4 : index, offset -> offset
+  %origin = index.add %tile_bytes, %lane_bytes : offset
+  %storage = buffer.assume.memory_space<constant> %input : buffer
+  %source = buffer.view %storage[%origin] : buffer -> view<129xi32>
+  %first = view.load %source[0] : view<129xi32> -> i32
+  %second = view.load %source[128] : view<129xi32> -> i32
+  %sum = scalar.addi %first, %second : i32
+  %c0 = index.constant 0 : offset
+  %destination = buffer.view %output[%c0] : buffer -> view<64xi32>
+  view.store %sum, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "word"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_uniform_word(%word: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %26 = s_mov_b32 0
+  %tile = concat(%word, %26) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %52 = v_lshlrev_b32_src0_inline %lane, 2
+  %53 = s_mov_b32 2
+  %54 = s_lshl_b64 %tile, %53
+  %55 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57 = slice %54[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %58 = slice %54[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %59, %60 = s_add_co_u32 %55, %57
+  %61, %62 = s_addc_u32 %56, %58, %60
+  %63 = concat(%59, %61) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %first = global_load_b32_saddr %52, %63
+  %67 = s_lshl_b64 %tile, %53
+  %70 = slice %67[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %71 = slice %67[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %72, %73 = s_add_co_u32 %55, %70
+  %74, %75 = s_addc_u32 %56, %71, %73
+  %76 = concat(%72, %74) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %second = global_load_b32_saddr %52, %76 {offset = 512}
+  %sum = v_add_u32 %first, %second
+  global_store_b32_saddr %52, %sum, %destination
+  return
+}
+
+// ====
+
+// Runtime scaling and an independent 64-bit origin both contribute to the
+// scalar base. Neither term can be truncated to the packet's vector offset.
+kernel.def @wide_uniform_product() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer, %origin: offset, %row_word: i32, %stride_word: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %row = scalar.extui %row_word : i32 to i64
+  %bounded_stride = scalar.assume %stride_word [range(%stride_word, 1, 2147483647)] : i32
+  %stride = scalar.extui %bounded_stride : i32 to i64
+  %row_product = scalar.muli %row, %stride : i64
+  %row_bytes = index.cast %row_product : i64 to offset
+  %bounded_origin = index.assume %origin [range(%origin, 0, 4294967295)] : offset
+  %tile_bytes = index.add %bounded_origin, %row_bytes : offset
+  %c4 = index.constant 4 : offset
+  %lane_bytes = index.scale %lane, %c4 : index, offset -> offset
+  %position = index.add %tile_bytes, %lane_bytes : offset
+  %source = buffer.view %input[%position] : buffer -> view<1xi32>
+  %value = view.load %source[0] : view<1xi32> -> i32
+  %c0 = index.constant 0 : offset
+  %destination = buffer.view %output[%c0] : buffer -> view<64xi32>
+  view.store %value, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 4, direct_arg_count = 3, direct_arg_names = {arg0 = "origin", arg1 = "row_word", arg2 = "stride_word"}, direct_arg_offsets = [16, 24, 28], direct_arg_parameter_indices = [2, 3, 4], direct_arg_sizes = [8, 4, 4], parameter_count = 5, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_uniform_product(%bounded_origin: reg<amdgpu.sgpr x2>, %row_word: reg<amdgpu.sgpr>, %bounded_stride: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %34 = s_mul_i32 %row_word, %bounded_stride
+  %35 = s_mul_hi_u32 %row_word, %bounded_stride
+  %65 = v_lshlrev_b32_src0_inline %lane, 2
+  %66 = slice %bounded_origin[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %67 = slice %bounded_origin[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %70, %71 = s_add_co_u32 %66, %34
+  %72, %73 = s_addc_u32 %67, %35, %71
+  %75 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %76 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %79, %80 = s_add_co_u32 %75, %70
+  %81, %82 = s_addc_u32 %76, %72, %80
+  %83 = concat(%79, %81) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %65, %83
+  global_store_b32_saddr %65, %value, %destination
+  return
+}
+
+// ====
+
+// Signed coordinates retain sign extension and non-power-of-two scaling.
+kernel.def @signed_uniform_coordinate() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer, %raw_row: index) {
+  %lane = kernel.workitem.id<x> : index
+  %row = index.assume %raw_row [range(%raw_row, -64, 64)] : index
+  %c64 = index.constant 64 : index
+  %biased_row = index.add %row, %c64 : index
+  %position = index.add %biased_row, %lane : index
+  %c0 = index.constant 0 : offset
+  %layout = encoding.layout.strided [3] : encoding<layout>
+  %source = buffer.view %input[%c0] : buffer -> view<1024xi32, %layout>
+  %value = view.load %source[%position] : view<1024xi32, %layout> -> i32
+  %destination = buffer.view %output[%c0] : buffer -> view<64xi32>
+  view.store %value, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "raw_row"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @signed_uniform_coordinate(%row: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 12280, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = v_mov_b32 12
+  %20 = v_mul_lo_u32 %lane, %19
+  %21 = s_ashr_i32_rhs_inline %row, 31
+  %23 = s_mov_b32 12
+  %26 = s_mul_i32 %row, %23
+  %27 = s_mul_hi_u32 %row, %23
+  %28 = s_mul_i32 %21, %23
+  %29 = s_add_u32 %27, %28
+  %31 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35, %36 = s_add_co_u32 %31, %26
+  %37, %38 = s_addc_u32 %32, %29, %36
+  %39 = concat(%35, %37) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %20, %39 {offset = 768}
+  %41 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %41, %value, %destination
+  return
+}
+
+// ====
+
+// A genuinely wide varying offset still requires full-width vector addressing.
+kernel.def @wide_varying_coordinate() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %positions: buffer, %output: buffer, %origin: offset) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : offset
+  %coordinates = buffer.view %positions[%c0] : buffer -> view<64xi64>
+  %word = view.load %coordinates[%lane] : view<64xi64> -> i64
+  %nonnegative_word = scalar.assume %word [range(%word, 0, 9223372036854775807)] : i64
+  %coordinate = index.cast %nonnegative_word : i64 to offset
+  %position = index.add %origin, %coordinate : offset
+  %source = buffer.view %input[%position] : buffer -> view<1xi32>
+  %value = view.load %source[0] : view<1xi32> -> i32
+  %destination = buffer.view %output[%c0] : buffer -> view<64xi32>
+  view.store %value, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "origin"}, direct_arg_offsets = [24], direct_arg_parameter_indices = [3], direct_arg_sizes = [8], parameter_count = 4, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_varying_coordinate(%origin: reg<amdgpu.sgpr x2>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %coordinates = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_lshlrev_b32_src0_inline %lane, 3
+  %coordinate = global_load_b64_saddr %21, %coordinates
+  %23 = slice %origin[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = v_mov_b32_copy %23
+  %25 = slice %origin[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %25
+  %30 = slice %coordinate[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %31 = slice %coordinate[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %32, %33 = v_add_co_u32 %24, %30
+  %34, %35 = v_add_co_ci_u32 %26, %31, %33
+  %39 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41, %42 = v_add_co_u32 %39, %32
+  %43 = v_mov_b32_copy %40
+  %44, %45 = v_add_co_ci_u32 %43, %34, %42
+  %46 = concat(%41, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_b32_vaddr %46
+  %48 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %48, %value, %destination
+  return
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+// A native wide byte origin uses the same scalar/vector partition on CDNA.
+// The origin leaves room for the lane residual without wrapping the sum.
+kernel.def @wide_uniform_byte_origin() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer, %origin: offset) {
+  %lane = kernel.workitem.id<x> : index
+  %bounded_origin = index.assume %origin [range(%origin, 0, 9223372036854775552)] : offset
+  %c4 = index.constant 4 : offset
+  %lane_bytes = index.scale %lane, %c4 : index, offset -> offset
+  %position = index.add %bounded_origin, %lane_bytes : offset
+  %source = buffer.view %input[%position] : buffer -> view<1xi32>
+  %value = view.load %source[0] : view<1xi32> -> i32
+  %c0 = index.constant 0 : offset
+  %destination = buffer.view %output[%c0] : buffer -> view<64xi32>
+  view.store %value, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "origin"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_uniform_byte_origin(%bounded_origin: reg<amdgpu.sgpr x2>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %37 = v_lshlrev_b32_src0_inline %lane, 2
+  %38 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = slice %bounded_origin[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = slice %bounded_origin[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %42, %43 = s_add_co_u32 %38, %40
+  %44, %45 = s_addc_u32 %39, %41, %43
+  %46 = concat(%42, %44) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_dword_saddr %37, %46 : reg<amdgpu.vgpr>
+  global_store_dword_saddr %37, %value, %destination
+  return
+}

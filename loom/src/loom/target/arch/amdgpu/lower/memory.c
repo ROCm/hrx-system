@@ -545,8 +545,13 @@ static bool loom_amdgpu_memory_access_select_dynamic_term_kinds_from_plan(
         materialization_plan->terms[term_index].can_materialize_vaddr &&
         !materialization_plan->terms[term_index].can_materialize_soffset;
   }
+  // Grouping narrow terms can retain a cheaper whole-address realization.
+  // A wide uniform contribution instead belongs in the scalar base; routing
+  // it through VADDR would force full-width vector address construction.
   const bool route_value_terms_through_vaddr =
-      has_vaddr_only_term && !has_workgroup_coordinate;
+      has_vaddr_only_term && !has_workgroup_coordinate &&
+      loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
+          access->source, 0, 32);
 
   for (uint8_t term_index = 0; term_index < access->source->dynamic_term_count;
        ++term_index) {

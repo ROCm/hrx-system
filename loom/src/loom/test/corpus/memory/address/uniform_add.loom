@@ -175,3 +175,80 @@ check.scenario @offset_uniform_add_values {
   }
   check.return
 }
+
+// Runtime word offsets widen before byte scaling. Both striped loads share
+// the resulting wide uniform contribution and a bounded per-lane residual.
+kernel.def @uniform_origin_loads() {
+  %c1 = index.constant 1 : index
+  %c128 = index.constant 128 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c128, %c1, %c1) : index
+} launch(%word: i32, %origin_bytes: i32, %input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %wide_word = scalar.extui %word : i32 to i64
+  %c4_i64 = scalar.constant 4 : i64
+  %wide_bytes = scalar.muli %wide_word, %c4_i64 : i64
+  %word_bytes = index.cast %wide_bytes : i64 to offset
+  %byte_origin = index.cast %origin_bytes : i32 to offset
+  %tile_bytes = index.add %byte_origin, %word_bytes : offset
+  %c4 = index.constant 4 : offset
+  %lane_bytes = index.scale %lane, %c4 : index, offset -> offset
+  %position = index.add %tile_bytes, %lane_bytes : offset
+  %storage = buffer.assume.memory_space<constant> %input : buffer
+  %source = buffer.view %storage[%position] : buffer -> view<129xi32>
+  %first = view.load %source[0] : view<129xi32> -> i32
+  %second = view.load %source[128] : view<129xi32> -> i32
+  %c0 = index.constant 0 : offset
+  %destination = buffer.view %output[%c0] : buffer -> view<2x128xi32>
+  view.store %first, %destination[0, %lane] : i32, view<2x128xi32>
+  view.store %second, %destination[1, %lane] : i32, view<2x128xi32>
+  kernel.return
+}
+
+// The reference walks contiguous element positions instead of constructing
+// each lane's byte address. Bounds describe the scenario's runtime inputs.
+func.def @uniform_origin_loads_oracle(%word: i32, %origin_bytes: i32, %input: buffer, %output: buffer) {
+  %bounded_word = scalar.assume %word [range(%word, 0, 1792)] : i32
+  %word_index = index.cast %bounded_word : i32 to index
+  %bounded_origin = scalar.assume %origin_bytes [range(%origin_bytes, 0, 28)] : i32
+  %origin_index = index.cast %bounded_origin : i32 to index
+  %c4 = index.constant 4 : index
+  %origin_bytess = index.div %origin_index, %c4 : index
+  %begin = index.add %word_index, %origin_bytess : index
+  %c0 = index.constant 0 : offset
+  %source = buffer.view %input[%c0] : buffer -> view<4096xi32>
+  %destination = buffer.view %output[%c0] : buffer -> view<256xi32>
+  %start = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  scf.for %ordinal = [%start to %end step %step] {
+    %position = index.add %begin, %ordinal : index
+    %value = view.load %source[%position] : view<4096xi32> -> i32
+    view.store %value, %destination[%ordinal] : i32, view<256xi32>
+  }
+  func.return
+}
+
+func.def @uniform_origin_inputs(%trial: index) -> (i32, i32) {
+  %c256 = index.constant 256 : index
+  %word_index = index.mul %trial, %c256 : index
+  %word = index.cast %word_index : index to i32
+  %c4 = index.constant 4 : index
+  %origin_index = index.mul %trial, %c4 : index
+  %origin_bytes = index.cast %origin_index : index to i32
+  func.return %word, %origin_bytes : i32, i32
+}
+
+check.scenario @uniform_origin_load_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %word, %origin_bytes = check.generate<@uniform_origin_inputs>(%trial) : (index) -> (i32, i32)
+    %input_storage = check.generate.iota offset(17) step(3) : tensor<4104xi32>
+    %output_storage = check.generate.fill value(-123) : tensor<264xi32>
+    %input = check.tensor.view %input_storage offset(16) : tensor<4104xi32> -> tensor<4096xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<264xi32> -> tensor<256xi32>
+    check.compare<@uniform_origin_loads, @uniform_origin_loads_oracle>(%word, %origin_bytes, %input, %output) : (i32, i32, tensor<4096xi32>, tensor<256xi32>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<4104xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<264xi32>
+    }
+  }
+  check.return
+}
