@@ -53,11 +53,11 @@ loom_test(
     name = "epoch_encoding_test",
     srcs = [
         "epoch_control.loom",
-        "epoch_media.loom",
         "tests/epoch_encoding.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
+    deps = [":epoch_media"],
 )
 
 filegroup(
@@ -82,10 +82,20 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Keep cross-file helpers as library providers, matching the serving catalog.
+loom_library(
+    name = "input_records",
+    srcs = ["kernels/qwen38/inputs.loom"],
+)
+
+loom_library(
+    name = "epoch_media",
+    srcs = ["epoch_media.loom"],
+)
+
 loom_test(
     name = "input_embedding_test",
     srcs = [
-        "kernels/qwen38/inputs.loom",
         "kernels/qwen38/token_embedding.loom",
         "tests/input_embedding.loom",
         "//experimental/loom_serve/motifs/ggml:sources",
@@ -99,6 +109,7 @@ loom_test(
         "mixed": {"case": "@mixed_embedding_uses_device_rows"},
         "ordinary": {"case": "@qwen38_token_embedding_q5k_f32_differential_case"},
     },
+    deps = [":input_records"],
 )
 
 loom_test(
@@ -248,7 +259,6 @@ loom_test(
     name = "dflash_proposal_test",
     srcs = [
         "kernels/qwen38/dflash_proposal.loom",
-        "kernels/qwen38/inputs.loom",
         "kernels/qwen38/spans.loom",
         "tests/dflash_proposal.loom",
     ],
@@ -257,6 +267,7 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
+    deps = [":input_records"],
 )
 
 loom_test(
@@ -325,7 +336,6 @@ loom_test(
     srcs = [
         "kernels/qwen38/accept.loom",
         "kernels/qwen38/continuation.loom",
-        "kernels/qwen38/inputs.loom",
         "kernels/qwen38/mtp_prepare.loom",
         "kernels/qwen38/mtp_proposal.loom",
         "kernels/qwen38/spans.loom",
@@ -340,6 +350,7 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
+    deps = [":input_records"],
 )
 
 loom_test(
@@ -349,7 +360,6 @@ loom_test(
         "kernels/qwen38/attention_prefill.loom",
         "kernels/qwen38/attention_prefill_wmma.loom",
         "kernels/qwen38/attention_spans.loom",
-        "kernels/qwen38/inputs.loom",
         "kernels/qwen38/spans.loom",
         "tests/attention_media.loom",
         "tests/attention_pages.loom",
@@ -383,6 +393,7 @@ loom_test(
             },
         },
     },
+    deps = [":input_records"],
 )
 
 py_binary(
@@ -422,14 +433,16 @@ loom_test(
     name = "epoch_control_test",
     srcs = [
         "epoch_control.loom",
-        "epoch_media.loom",
         "kernels/qwen38/continuation.loom",
-        "kernels/qwen38/inputs.loom",
         "kernels/qwen38/spans.loom",
         "tests/epoch_control.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
+    deps = [
+        ":epoch_media",
+        ":input_records",
+    ],
 )
 
 py_test(
