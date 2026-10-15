@@ -213,6 +213,7 @@ func.def @window_reference(%capacity: index, %epoch: buffer, %rows: buffer, %lay
 }
 
 check.scenario public @query_rotary {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %capacity = check.literal value(16) : index
     %spans = check.literal value(2) : index
@@ -232,6 +233,7 @@ check.scenario public @query_rotary {
 }
 
 check.scenario public @accepted_context {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %capacity = check.literal value(16) : index
     %spans = check.literal value(2) : index
@@ -353,6 +355,7 @@ func.def @attention_reference(%capacity: index, %epoch: buffer, %rows: buffer, %
 }
 
 check.scenario public @scattered_attention {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %capacity = check.literal value(16) : index
     %spans = check.literal value(2) : index
@@ -380,6 +383,7 @@ func.def @window_position(%trial: index) -> (index) {
 }
 
 check.scenario public @window_attention {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[3](%trial: index, %entropy: check.entropy) {
     %capacity = check.literal value(16) : index
     %spans = check.literal value(2) : index

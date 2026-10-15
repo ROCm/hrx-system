@@ -110,6 +110,7 @@ func.def @expected_convolution_f32_bias(%input: buffer, %weight: buffer, %output
 }
 
 check.scenario public @convolution_f32_bias {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-1.0) step(0.25) : tensor<3x11xf32>
     %weight = check.generate.iota offset(0.5) step(0.125) : tensor<3x3x3xbf16>
@@ -129,6 +130,7 @@ func.def @expected_convolution_f64_bias(%input: buffer, %weight: buffer, %output
 }
 
 check.scenario public @convolution_f64_bias {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-1.0) step(0.25) : tensor<3x11xf32>
     %weight = check.generate.iota offset(0.5) step(0.125) : tensor<3x3x3xbf16>
@@ -148,6 +150,7 @@ func.def @expected_convolution_f64(%input: buffer, %weight: buffer, %output: buf
 }
 
 check.scenario public @convolution_f64 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-1.0) step(0.25) : tensor<3x11xf32>
     %weight = check.generate.iota offset(0.5) step(0.125) : tensor<3x3x3xbf16>

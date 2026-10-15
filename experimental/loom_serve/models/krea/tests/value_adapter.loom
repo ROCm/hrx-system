@@ -9,6 +9,7 @@
 kernel.decl @block_adapter_add_1536_column_major() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
 
 check.case public @value_adapter_16 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.fill value(0.125) : tensor<16x32xbf16>
   %weight = check.generate.fill value(0.25) : tensor<1536x32xf32>
   %zero_strength = check.generate.fill value(0.0) : tensor<1xf32>
@@ -35,6 +36,7 @@ check.case public @value_adapter_16 {
 }
 
 check.case public @value_adapter_80 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.fill value(0.125) : tensor<80x32xbf16>
   %weight = check.generate.fill value(0.25) : tensor<1536x32xf32>
   %zero_strength = check.generate.fill value(0.0) : tensor<1xf32>

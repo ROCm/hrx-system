@@ -474,6 +474,7 @@ kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attenti
 // tail. Constant V isolates causal coverage, GQA addressing, softmax, and all
 // four output-channel tiles without requiring a separate mask allocation.
 check.case public @qwen38_attention_prefill_f16_wmma_known_case {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %token_count = check.literal value(17) : index
   %control = check.generate.iota offset(17) step(47) : tensor<2xi32>
   %query = check.generate.fill value(0.0) : tensor<17x6144xf32>

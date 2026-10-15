@@ -73,6 +73,7 @@ kernel.def target(@observer_wave32) @observe_routes() {
 // Ten experts each receive 130 routes. Storage covers the maximum possible
 // record count at capacity 131, independently of this particular population.
 check.case public @four_route_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(4) : index
   %epoch = check.generate.fill value(130) : tensor<3xi32>
   %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
@@ -106,6 +107,7 @@ check.case public @four_route_tail {
 // Ten experts each receive 130 routes. Storage covers the maximum possible
 // record count at capacity 131, independently of this particular population.
 check.case public @sixteen_route_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(16) : index
   %epoch = check.generate.fill value(130) : tensor<3xi32>
   %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
@@ -139,6 +141,7 @@ check.case public @sixteen_route_tail {
 // Ten experts each receive 130 routes. Storage covers the maximum possible
 // record count at capacity 131, independently of this particular population.
 check.case public @non_power_of_two_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(31) : index
   %epoch = check.generate.fill value(130) : tensor<3xi32>
   %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
@@ -172,6 +175,7 @@ check.case public @non_power_of_two_tail {
 // Ten experts each receive 130 routes. Storage covers the maximum possible
 // record count at capacity 131, independently of this particular population.
 check.case public @wide_route_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(128) : index
   %epoch = check.generate.fill value(130) : tensor<3xi32>
   %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
@@ -205,6 +209,7 @@ check.case public @wide_route_tail {
 // Ten experts each receive 130 routes. Storage covers the maximum possible
 // record count at capacity 131, independently of this particular population.
 check.case public @largest_route_tail {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(256) : index
   %epoch = check.generate.fill value(130) : tensor<3xi32>
   %ids = check.generate.iota offset(0) step(1) period(10) : tensor<1310xi32>
@@ -238,6 +243,7 @@ check.case public @largest_route_tail {
 // Every expert has a partial record. A subsequent empty epoch must hide all
 // records in the same allocation without clearing the table first.
 check.case public @distributed_then_empty {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %rows = check.literal value(128) : index
   %epoch = check.generate.fill value(131) : tensor<3xi32>
   %ids = check.generate.iota offset(0) step(1) period(512) : tensor<1310xi32>

@@ -19,6 +19,7 @@ kernel.decl @pocket.rotary_cache_512x16_c265_p249() launch(%input: buffer, %quer
 // mean is last_position/2 - 1 + c/1024. Unpopulated future slots are finite
 // but nonzero, making an omitted causal mask observable.
 check.case public @causal_prefix {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %query = check.generate.fill value(0.0) : tensor<1024x1xf32>
   %keys = check.generate.fill value(0.0) : tensor<320x1024xf32>
   %values = check.generate.iota offset(-1.0) step(0.0009765625) : tensor<320x1024xf32>
@@ -37,6 +38,7 @@ check.case public @causal_prefix {
 // FlowLM retains every earlier position when the context extends beyond 256.
 // A 256-position sliding window would raise this mean by 32.
 check.case public @full_context_beyond_256 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %query = check.generate.fill value(0.0) : tensor<1024x1xf32>
   %keys = check.generate.fill value(0.0) : tensor<320x1024xf32>
   %values = check.generate.iota offset(-1.0) step(0.0009765625) : tensor<320x1024xf32>
@@ -89,6 +91,7 @@ func.def @rotary_expected(%input: buffer, %query: buffer, %keys: buffer, %values
 }
 
 check.scenario public @absolute_rotary_extent {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.fill value(1.0) : tensor<1536x16xf32>
     %query = check.generate.fill value(-123.0) : tensor<512x16xf32>
