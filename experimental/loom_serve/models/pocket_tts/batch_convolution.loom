@@ -150,3 +150,789 @@ template.def<@pocket.batch.convolution_f64> device @pocket_batch_convolution_f64
   }
   template.return
 }
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+// Dispatch entry points specialize source geometry. Membership remains a
+// runtime packet; changing request progress never changes the compiled shape.
+target.decl @pocket
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.def target(@pocket) @pocket.batch.transpose_convolution_512x512_t1_g1x1_s16_kernel() {
+  %elements = index.constant 16384 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 16384 : index
+  %inputs = index.constant 512 : index
+  %times = index.constant 1 : index
+  %outputs = index.constant 512 : index
+  %raw_times = index.constant 32 : index
+  %group_outputs = index.constant 1 : index
+  %extent = index.constant 32 : index
+  %stride = index.constant 16 : index
+  %group_inputs = index.constant 1 : index
+  template.apply<@pocket.batch.transpose_convolution>(%membership, %elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride) : (buffer, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.overlap_512x16_h16_kernel() {
+  %elements = index.constant 512 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 512 : index
+  %outputs = index.constant 512 : index
+  %raw_times = index.constant 32 : index
+  %length = index.constant 16 : index
+  %overlap = index.constant 16 : index
+  template.apply<@pocket.batch.overlap>(%membership, %elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %x_offset, %x_stride, %history_offset, %history_stride, %y_offset, %y_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_512x16_h6_kernel() {
+  %elements = index.constant 512 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 512 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 16 : index
+  %history_length = index.constant 6 : index
+  %padded_times = index.constant 22 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_256x96_h2_kernel() {
+  %elements = index.constant 256 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 256 : index
+  %channels = index.constant 256 : index
+  %times = index.constant 96 : index
+  %history_length = index.constant 2 : index
+  %padded_times = index.constant 98 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_128x480_h2_kernel() {
+  %elements = index.constant 128 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 128 : index
+  %channels = index.constant 128 : index
+  %times = index.constant 480 : index
+  %history_length = index.constant 2 : index
+  %padded_times = index.constant 482 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_64x1920_h2_kernel() {
+  %elements = index.constant 64 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 64 : index
+  %channels = index.constant 64 : index
+  %times = index.constant 1920 : index
+  %history_length = index.constant 2 : index
+  %padded_times = index.constant 1922 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_1x1920_h6_kernel() {
+  %elements = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 1 : index
+  %channels = index.constant 1 : index
+  %times = index.constant 1920 : index
+  %history_length = index.constant 6 : index
+  %padded_times = index.constant 1926 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_64x1920_h4_kernel() {
+  %elements = index.constant 64 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 64 : index
+  %channels = index.constant 64 : index
+  %times = index.constant 1920 : index
+  %history_length = index.constant 4 : index
+  %padded_times = index.constant 1924 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_128x480_h5_kernel() {
+  %elements = index.constant 128 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 128 : index
+  %channels = index.constant 128 : index
+  %times = index.constant 480 : index
+  %history_length = index.constant 5 : index
+  %padded_times = index.constant 485 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_256x96_h6_kernel() {
+  %elements = index.constant 256 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 256 : index
+  %channels = index.constant 256 : index
+  %times = index.constant 96 : index
+  %history_length = index.constant 6 : index
+  %padded_times = index.constant 102 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_512x16_h2_kernel() {
+  %elements = index.constant 512 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset) {
+  %elements = index.constant 512 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 16 : index
+  %history_length = index.constant 2 : index
+  %padded_times = index.constant 18 : index
+  template.apply<@pocket.batch.history>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f32_bias_512x512_t16_k7_s1_kernel() {
+  %elements = index.constant 8192 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 8192 : index
+  %inputs = index.constant 512 : index
+  %padded_times = index.constant 22 : index
+  %outputs = index.constant 512 : index
+  %times = index.constant 16 : index
+  %extent = index.constant 7 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f32_bias_256x128_t96_k3_s1_kernel() {
+  %elements = index.constant 12288 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 12288 : index
+  %inputs = index.constant 256 : index
+  %padded_times = index.constant 98 : index
+  %outputs = index.constant 128 : index
+  %times = index.constant 96 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f32_bias_128x256_t96_k1_s1_kernel() {
+  %elements = index.constant 24576 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 24576 : index
+  %inputs = index.constant 128 : index
+  %padded_times = index.constant 96 : index
+  %outputs = index.constant 256 : index
+  %times = index.constant 96 : index
+  %extent = index.constant 1 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f32_bias_128x64_t480_k3_s1_kernel() {
+  %elements = index.constant 30720 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 30720 : index
+  %inputs = index.constant 128 : index
+  %padded_times = index.constant 482 : index
+  %outputs = index.constant 64 : index
+  %times = index.constant 480 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f32_bias_64x128_t480_k1_s1_kernel() {
+  %elements = index.constant 61440 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 61440 : index
+  %inputs = index.constant 64 : index
+  %padded_times = index.constant 480 : index
+  %outputs = index.constant 128 : index
+  %times = index.constant 480 : index
+  %extent = index.constant 1 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f32_bias_64x32_t1920_k3_s1_kernel() {
+  %elements = index.constant 61440 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 61440 : index
+  %inputs = index.constant 64 : index
+  %padded_times = index.constant 1922 : index
+  %outputs = index.constant 32 : index
+  %times = index.constant 1920 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f32_bias_32x64_t1920_k1_s1_kernel() {
+  %elements = index.constant 122880 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 122880 : index
+  %inputs = index.constant 32 : index
+  %padded_times = index.constant 1920 : index
+  %outputs = index.constant 64 : index
+  %times = index.constant 1920 : index
+  %extent = index.constant 1 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f32_bias_64x1_t1920_k3_s1_kernel() {
+  %elements = index.constant 1920 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 1920 : index
+  %inputs = index.constant 64 : index
+  %padded_times = index.constant 1922 : index
+  %outputs = index.constant 1 : index
+  %times = index.constant 1920 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f32_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.transpose_convolution_bias_512x256_t16_g512x256_s6_kernel() {
+  %elements = index.constant 26112 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 26112 : index
+  %inputs = index.constant 512 : index
+  %times = index.constant 16 : index
+  %outputs = index.constant 256 : index
+  %raw_times = index.constant 102 : index
+  %group_outputs = index.constant 256 : index
+  %extent = index.constant 12 : index
+  %stride = index.constant 6 : index
+  %group_inputs = index.constant 512 : index
+  template.apply<@pocket.batch.transpose_convolution_bias>(%membership, %elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.transpose_convolution_bias_256x128_t96_g256x128_s5_kernel() {
+  %elements = index.constant 62080 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 62080 : index
+  %inputs = index.constant 256 : index
+  %times = index.constant 96 : index
+  %outputs = index.constant 128 : index
+  %raw_times = index.constant 485 : index
+  %group_outputs = index.constant 128 : index
+  %extent = index.constant 10 : index
+  %stride = index.constant 5 : index
+  %group_inputs = index.constant 256 : index
+  template.apply<@pocket.batch.transpose_convolution_bias>(%membership, %elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.transpose_convolution_bias_128x64_t480_g128x64_s4_kernel() {
+  %elements = index.constant 123136 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 123136 : index
+  %inputs = index.constant 128 : index
+  %times = index.constant 480 : index
+  %outputs = index.constant 64 : index
+  %raw_times = index.constant 1924 : index
+  %group_outputs = index.constant 64 : index
+  %extent = index.constant 8 : index
+  %stride = index.constant 4 : index
+  %group_inputs = index.constant 128 : index
+  template.apply<@pocket.batch.transpose_convolution_bias>(%membership, %elements, %inputs, %times, %outputs, %raw_times, %group_outputs, %extent, %stride, %group_inputs, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.overlap_bias_256x96_h6_kernel() {
+  %elements = index.constant 256 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 256 : index
+  %outputs = index.constant 256 : index
+  %raw_times = index.constant 102 : index
+  %length = index.constant 96 : index
+  %overlap = index.constant 6 : index
+  template.apply<@pocket.batch.overlap_bias>(%membership, %elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %x_offset, %x_stride, %history_offset, %history_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.overlap_bias_128x480_h5_kernel() {
+  %elements = index.constant 128 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 128 : index
+  %outputs = index.constant 128 : index
+  %raw_times = index.constant 485 : index
+  %length = index.constant 480 : index
+  %overlap = index.constant 5 : index
+  template.apply<@pocket.batch.overlap_bias>(%membership, %elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %x_offset, %x_stride, %history_offset, %history_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.overlap_bias_64x1920_h4_kernel() {
+  %elements = index.constant 64 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 64 : index
+  %outputs = index.constant 64 : index
+  %raw_times = index.constant 1924 : index
+  %length = index.constant 1920 : index
+  %overlap = index.constant 4 : index
+  template.apply<@pocket.batch.overlap_bias>(%membership, %elements, %outputs, %raw_times, %length, %overlap, %x_storage, %history_storage, %y_storage, %b_storage, %x_offset, %x_stride, %history_offset, %history_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_1x64_t1920_k7_s1_kernel() {
+  %elements = index.constant 122880 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 122880 : index
+  %inputs = index.constant 1 : index
+  %padded_times = index.constant 1926 : index
+  %outputs = index.constant 64 : index
+  %times = index.constant 1920 : index
+  %extent = index.constant 7 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_64x32_t1920_k3_s1_kernel() {
+  %elements = index.constant 61440 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 61440 : index
+  %inputs = index.constant 64 : index
+  %padded_times = index.constant 1922 : index
+  %outputs = index.constant 32 : index
+  %times = index.constant 1920 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_32x64_t1920_k1_s1_kernel() {
+  %elements = index.constant 122880 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 122880 : index
+  %inputs = index.constant 32 : index
+  %padded_times = index.constant 1920 : index
+  %outputs = index.constant 64 : index
+  %times = index.constant 1920 : index
+  %extent = index.constant 1 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_64x128_t480_k8_s4_kernel() {
+  %elements = index.constant 61440 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 61440 : index
+  %inputs = index.constant 64 : index
+  %padded_times = index.constant 1924 : index
+  %outputs = index.constant 128 : index
+  %times = index.constant 480 : index
+  %extent = index.constant 8 : index
+  %stride = index.constant 4 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_128x64_t480_k3_s1_kernel() {
+  %elements = index.constant 30720 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 30720 : index
+  %inputs = index.constant 128 : index
+  %padded_times = index.constant 482 : index
+  %outputs = index.constant 64 : index
+  %times = index.constant 480 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_64x128_t480_k1_s1_kernel() {
+  %elements = index.constant 61440 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 61440 : index
+  %inputs = index.constant 64 : index
+  %padded_times = index.constant 480 : index
+  %outputs = index.constant 128 : index
+  %times = index.constant 480 : index
+  %extent = index.constant 1 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_128x256_t96_k10_s5_kernel() {
+  %elements = index.constant 24576 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 24576 : index
+  %inputs = index.constant 128 : index
+  %padded_times = index.constant 485 : index
+  %outputs = index.constant 256 : index
+  %times = index.constant 96 : index
+  %extent = index.constant 10 : index
+  %stride = index.constant 5 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_256x128_t96_k3_s1_kernel() {
+  %elements = index.constant 12288 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 12288 : index
+  %inputs = index.constant 256 : index
+  %padded_times = index.constant 98 : index
+  %outputs = index.constant 128 : index
+  %times = index.constant 96 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_128x256_t96_k1_s1_kernel() {
+  %elements = index.constant 24576 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 24576 : index
+  %inputs = index.constant 128 : index
+  %padded_times = index.constant 96 : index
+  %outputs = index.constant 256 : index
+  %times = index.constant 96 : index
+  %extent = index.constant 1 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_256x512_t16_k12_s6_kernel() {
+  %elements = index.constant 8192 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 8192 : index
+  %inputs = index.constant 256 : index
+  %padded_times = index.constant 102 : index
+  %outputs = index.constant 512 : index
+  %times = index.constant 16 : index
+  %extent = index.constant 12 : index
+  %stride = index.constant 6 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_bias_512x512_t16_k3_s1_kernel() {
+  %elements = index.constant 8192 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %b_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset, %b_offset: offset, %b_stride: offset) {
+  %elements = index.constant 8192 : index
+  %inputs = index.constant 512 : index
+  %padded_times = index.constant 18 : index
+  %outputs = index.constant 512 : index
+  %times = index.constant 16 : index
+  %extent = index.constant 3 : index
+  %stride = index.constant 1 : index
+  template.apply<@pocket.batch.convolution_f64_bias>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %b_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride, %b_offset, %b_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.history_replicate_512x16_h16_kernel() {
+  %elements = index.constant 512 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %history_storage: buffer, %padded_storage: buffer, %position_storage: buffer, %x_offset: offset, %x_stride: offset, %history_offset: offset, %history_stride: offset, %padded_offset: offset, %padded_stride: offset, %position_offset: offset, %position_stride: offset) {
+  %elements = index.constant 512 : index
+  %channels = index.constant 512 : index
+  %times = index.constant 16 : index
+  %history_length = index.constant 16 : index
+  %padded_times = index.constant 32 : index
+  template.apply<@pocket.batch.history_replicate>(%membership, %elements, %channels, %times, %history_length, %padded_times, %x_storage, %history_storage, %padded_storage, %position_storage, %x_offset, %x_stride, %history_offset, %history_stride, %padded_offset, %padded_stride, %position_offset, %position_stride) : (buffer, index, index, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.convolution_f64_512x32_t1_k32_s16_kernel() {
+  %elements = index.constant 32 : index
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %one, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %x_storage: buffer, %w_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %w_offset: offset, %w_stride: offset, %y_offset: offset, %y_stride: offset) {
+  %elements = index.constant 32 : index
+  %inputs = index.constant 512 : index
+  %padded_times = index.constant 32 : index
+  %outputs = index.constant 32 : index
+  %times = index.constant 1 : index
+  %extent = index.constant 32 : index
+  %stride = index.constant 16 : index
+  template.apply<@pocket.batch.convolution_f64>(%membership, %elements, %inputs, %padded_times, %outputs, %times, %extent, %stride, %x_storage, %w_storage, %y_storage, %x_offset, %x_stride, %w_offset, %w_stride, %y_offset, %y_stride) : (buffer, index, index, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}

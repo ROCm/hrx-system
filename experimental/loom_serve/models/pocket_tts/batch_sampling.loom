@@ -1,0 +1,46 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.decl pure @pocket.state_size(%capacity: index) -> (offset)
+
+template.decl @pocket.sample_noise.body(%request: buffer, %state: buffer, %output: buffer, %seed_origin: offset, %position_origin: offset, %chunk_origin: offset, %output_origin: offset)
+
+// The packed seed belongs to the selected resident request. Its decoder
+// position and chunk cursor determine the counters; output uses packed rows.
+kernel.def target(@pocket) @pocket.batch.sample_noise() {
+  %one = index.constant 1 : index
+  %pairs = index.constant 16 : index
+  %threads = config.get @pocket.threads : index
+  %batch = config.get @pocket.batch_capacity : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %pairs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %request: buffer, %state: buffer, %output: buffer, %request_stride: offset, %state_stride: offset, %output_stride: offset) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %seed_origin = index.scale %packed, %request_stride : index, offset -> offset
+    %state_origin = index.scale %resident, %state_stride : index, offset -> offset
+    %position_offset = index.constant 4 : offset
+    %position_origin = index.add %state_origin, %position_offset : offset
+    %capacity = config.get @pocket.context_capacity : index
+    %chunk_offset = template.apply<@pocket.state_size>(%capacity) pure : (index) -> (offset)
+    %chunk_origin = index.add %state_origin, %chunk_offset : offset
+    %output_origin = index.scale %packed, %output_stride : index, offset -> offset
+    template.apply<@pocket.sample_noise.body>(%request, %state, %output, %seed_origin, %position_origin, %chunk_origin, %output_origin) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  }
+  kernel.return
+}

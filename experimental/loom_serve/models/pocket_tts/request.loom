@@ -28,11 +28,9 @@ template.decl @pocket.prefill.step(%phase: buffer, %backbone: buffer, %rotary: b
 
 template.decl @pocket.voice.step(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer)
 
+kernel.decl @pocket.sample_noise() launch(%request: buffer, %state: buffer, %output: buffer)
+
 template.decl @pocket.decode.step(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer)
-
-template.decl @random.philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32)
-
-template.decl @random.normal_pair(%radius_word: i32, %angle_word: i32) -> (f32, f32)
 
 // Immutable upload: seed at byte 0, voice frame count at byte 8, and chunk
 // count at byte 12. Each packet has four I32 header words (token count,
@@ -260,66 +258,6 @@ command.program.def public @prefill_text() launch(%phase: buffer, %backbone: buf
   kernel.launch @pocket.text_token(%request, %state, %token) : (buffer, buffer, buffer)
   template.apply<@pocket.prefill.step>(%phase, %backbone, %rotary, %token, %conditioning, %state, %output) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
-}
-
-// Counter words partition normal quadruple, generation step, text chunk, and
-// zero. The full 64-bit request seed is the key. Workgroup order cannot alter
-// the noise stream, and resetting request state exactly replays it.
-kernel.def target(@pocket) @pocket.sample_noise() {
-  %one = index.constant 1 : index
-  %threads = config.get @pocket.threads : index
-  %pairs = index.constant 16 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %pairs, %tail : index
-  %groups = index.div %rounded, %threads : index
-  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%request: buffer, %state: buffer, %output: buffer) {
-  %element = template.apply<@pocket.element>() : () -> (index)
-  %pairs = index.constant 16 : index
-  %live = index.cmp ult, %element, %pairs : index
-  scf.if %live {
-    %origin = index.constant 0 : offset
-    %seed = buffer.view %request[%origin] : buffer -> view<2xi32>
-    %seed0 = view.load %seed[0] : view<2xi32> -> i32
-    %seed1 = view.load %seed[1] : view<2xi32> -> i32
-    %position_offset = index.constant 4 : offset
-    %position = buffer.view %state[%position_offset] : buffer -> view<1xi32>
-    %absolute = view.load %position[0] : view<1xi32> -> i32
-    %sixteen = scalar.constant 16 : i32
-    %frame = scalar.divui %absolute, %sixteen : i32
-    %capacity = config.get @pocket.context_capacity : index
-    %state_bytes = template.apply<@pocket.state_size>(%capacity) pure : (index) -> (offset)
-    %control = buffer.view %state[%state_bytes] : buffer -> view<2xi32>
-    %chunk = view.load %control[0] : view<2xi32> -> i32
-    %two = index.constant 2 : index
-    %quadruple = index.div %element, %two : index
-    %quadruple32 = index.cast %quadruple : index to i32
-    %zero = scalar.constant 0 : i32
-    %a, %b, %c, %d = template.apply<@random.philox4x32>(%quadruple32, %frame, %chunk, %zero, %seed0, %seed1) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
-    %parity = index.rem %element, %two : index
-    %zero_index = index.constant 0 : index
-    %even = index.cmp eq, %parity, %zero_index : index
-    %radial = scf.select %even, %a, %c : i32
-    %angular = scf.select %even, %b, %d : i32
-    %normal0, %normal1 = template.apply<@random.normal_pair>(%radial, %angular) : (i32, i32) -> (f32, f32)
-    %deviation = scalar.constant 0.54772255750516607 : f32
-    %noise0 = scalar.mulf %normal0, %deviation : f32
-    %noise1 = scalar.mulf %normal1, %deviation : f32
-    %noise = buffer.view %output[%origin] : buffer -> view<34xf32>
-    %first = index.mul %element, %two : index
-    %one = index.constant 1 : index
-    %second = index.add %first, %one : index
-    view.store %noise0, %noise[%first] : f32, view<34xf32>
-    view.store %noise1, %noise[%second] : f32, view<34xf32>
-    %first_pair = index.cmp eq, %element, %zero_index : index
-    scf.if %first_pair {
-      %start = scalar.constant 0.0 : f32
-      %end = scalar.constant 1.0 : f32
-      view.store %start, %noise[32] : f32, view<34xf32>
-      view.store %end, %noise[33] : f32, view<34xf32>
-    }
-  }
-  kernel.return
 }
 
 command.program.def public @generate_audio() launch(%phase: buffer, %backbone: buffer, %rotary: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {

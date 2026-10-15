@@ -1,0 +1,144 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Packed activations use source tensor extents; persistent histories retain
+// their independently supplied resident stride across every compatible cohort.
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.rotary_capacity : %value: index where [range(%value, 16, 1048576)]
+
+kernel.decl @pocket.batch.attention_scores_flow_kernel() launch(%membership: buffer, %q_storage: buffer, %keys_storage: buffer, %position_storage: buffer, %scores_storage: buffer, %q_offset: offset, %q_stride: offset, %keys_offset: offset, %keys_stride: offset, %position_offset: offset, %position_stride: offset, %scores_offset: offset, %scores_stride: offset)
+
+kernel.decl @pocket.batch.attention_values_flow_kernel() launch(%membership: buffer, %values_storage: buffer, %probabilities_storage: buffer, %position_storage: buffer, %y_storage: buffer, %values_offset: offset, %values_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset, %position_offset: offset, %position_stride: offset, %y_offset: offset, %y_stride: offset)
+
+kernel.decl @pocket.batch.gated_residual_kernel() launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %modulation_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %modulation_offset: offset, %modulation_stride: offset, %y_offset: offset, %y_stride: offset)
+
+kernel.decl @pocket.batch.gelu_4096_kernel() launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+kernel.decl @pocket.batch.modulation_kernel() launch(%membership: buffer, %x_storage: buffer, %modulation_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %modulation_offset: offset, %modulation_stride: offset, %y_offset: offset, %y_stride: offset)
+
+kernel.decl @pocket.batch.normalization_affine_1024x1_e1em05_kernel() launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset)
+
+kernel.decl @pocket.batch.normalization_affine_512x1_e1em06_kernel() launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %scale_storage: buffer, %bias_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset, %scale_offset: offset, %scale_stride: offset, %bias_offset: offset, %bias_stride: offset)
+
+kernel.decl @pocket.batch.project_bias_f64_kernel(%dispatch_outputs: index, %dispatch_times: index) launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset)
+
+kernel.decl @pocket.batch.project_f64_kernel(%dispatch_outputs: index, %dispatch_times: index) launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset)
+
+kernel.decl @pocket.batch.residual_1024x1_kernel() launch(%membership: buffer, %x_storage: buffer, %update_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %update_offset: offset, %update_stride: offset, %y_offset: offset, %y_stride: offset)
+
+kernel.decl @pocket.batch.rotary_cache_flow_kernel() launch(%membership: buffer, %x_storage: buffer, %q_storage: buffer, %keys_storage: buffer, %values_storage: buffer, %position_storage: buffer, %cosine_storage: buffer, %sine_storage: buffer, %x_offset: offset, %x_stride: offset, %q_offset: offset, %q_stride: offset, %keys_offset: offset, %keys_stride: offset, %values_offset: offset, %values_stride: offset, %position_offset: offset, %position_stride: offset, %cosine_offset: offset, %cosine_stride: offset, %sine_offset: offset, %sine_stride: offset)
+
+kernel.decl @pocket.batch.silu_512_kernel() launch(%membership: buffer, %x_storage: buffer, %y_storage: buffer, %x_offset: offset, %x_stride: offset, %y_offset: offset, %y_stride: offset)
+
+kernel.decl @pocket.batch.softmax_flow_kernel() launch(%membership: buffer, %scores_storage: buffer, %probabilities_storage: buffer, %scores_offset: offset, %scores_stride: offset, %probabilities_offset: offset, %probabilities_stride: offset)
+
+template.decl @pocket.batch.flow_layer(%membership: buffer, %state_stride: offset, %layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer)
+
+template.decl @pocket.batch.flow_residual(%membership: buffer, %layer: index, %phase: buffer, %condition: buffer, %input: buffer) -> (buffer)
+
+template.def<@pocket.batch.flow_layer> @pocket_batch_flow_layer(%membership: buffer, %state_stride: offset, %layer: index, %cache_origin: offset, %backbone: buffer, %rotary: buffer, %state: buffer, %input: buffer) -> (buffer) {
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  %batch_zero = index.constant 0 : offset
+  %batch_stride_1 = index.constant 4096 : offset
+  %capacity = config.get @pocket.context_capacity : index
+  %rotary_capacity = config.get @pocket.rotary_capacity : index
+  %tensor_offset = index.constant 0 : offset
+  %normalization_storage_bytes = index.constant 4096 : offset
+  %batch_bytes_2 = index.scale %batch_capacity, %normalization_storage_bytes : index, offset -> offset
+  %normalization_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %normalization_parameter = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm1.weight"[%layer] : view<1024xbf16>
+  %normalization_parameter_2 = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm1.bias"[%layer] : view<1024xbf16>
+  kernel.launch @pocket.batch.normalization_affine_1024x1_e1em05_kernel(%membership, %input, %normalization_storage, %normalization_parameter, %normalization_parameter_2, %batch_zero, %batch_stride_1, %tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, view<1024xbf16>, view<1024xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_tensor_offset_relative = index.constant 0 : offset
+  %attention_tensor_offset = index.add %cache_origin, %attention_tensor_offset_relative : offset
+  %key_position_bytes = index.constant 4096 : offset
+  %attention_tensor_2_offset_relative = index.scale %capacity, %key_position_bytes : index, offset -> offset
+  %attention_tensor_2_offset = index.add %cache_origin, %attention_tensor_2_offset_relative : offset
+  %attention_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %projection_parameter = command.parameter %backbone, "flow_lm.transformer.layers.{}.self_attn.in_proj.weight"[%layer] : view<3072x1024xbf16>
+  %projection_storage_bytes = index.constant 12288 : offset
+  %batch_bytes_3 = index.scale %batch_capacity, %projection_storage_bytes : index, offset -> offset
+  %projection_storage = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  %projection_inputs = index.constant 1024 : index
+  %projection_outputs = index.constant 3072 : index
+  %projection_times = index.constant 1 : index
+  kernel.launch @pocket.batch.project_f64_kernel[%projection_outputs, %projection_times](%membership, %projection_inputs, %projection_outputs, %projection_times, %normalization_storage, %projection_parameter, %projection_parameter, %projection_storage, %tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %tensor_offset, %projection_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<3072x1024xbf16>, view<3072x1024xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_parameter = command.parameter %rotary, "rotary.cosine" : view<[%rotary_capacity]x32xf32>
+  %attention_parameter_2 = command.parameter %rotary, "rotary.sine" : view<[%rotary_capacity]x32xf32>
+  kernel.launch @pocket.batch.rotary_cache_flow_kernel(%membership, %projection_storage, %attention_storage, %state, %state, %state, %attention_parameter, %attention_parameter_2, %tensor_offset, %projection_storage_bytes, %tensor_offset, %normalization_storage_bytes, %attention_tensor_offset, %state_stride, %attention_tensor_2_offset, %state_stride, %tensor_offset, %state_stride, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, buffer, buffer, buffer, view<[%rotary_capacity]x32xf32>, view<[%rotary_capacity]x32xf32>, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset, offset)
+  %score_position_bytes = index.constant 64 : offset
+  %attention_storage_2_bytes = index.scale %capacity, %score_position_bytes : index, offset -> offset
+  %batch_bytes_4 = index.scale %batch_capacity, %attention_storage_2_bytes : index, offset -> offset
+  %attention_storage_2 = buffer.alloca<global> align(16) %batch_bytes_4 : buffer
+  kernel.launch @pocket.batch.attention_scores_flow_kernel(%membership, %attention_storage, %state, %state, %attention_storage_2, %tensor_offset, %normalization_storage_bytes, %attention_tensor_offset, %state_stride, %tensor_offset, %state_stride, %tensor_offset, %attention_storage_2_bytes) : (buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %attention_storage_3 = buffer.alloca<global> align(16) %batch_bytes_4 : buffer
+  kernel.launch @pocket.batch.softmax_flow_kernel(%membership, %attention_storage_2, %attention_storage_3, %tensor_offset, %attention_storage_2_bytes, %tensor_offset, %attention_storage_2_bytes) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  %attention_storage_4 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.attention_values_flow_kernel(%membership, %state, %attention_storage_3, %state, %attention_storage_4, %attention_tensor_2_offset, %state_stride, %tensor_offset, %attention_storage_2_bytes, %tensor_offset, %state_stride, %tensor_offset, %normalization_storage_bytes) : (buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %projection_parameter_2 = command.parameter %backbone, "flow_lm.transformer.layers.{}.self_attn.out_proj.weight"[%layer] : view<1024x1024xbf16>
+  %projection_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.project_f64_kernel[%projection_inputs, %projection_times](%membership, %projection_inputs, %projection_inputs, %projection_times, %attention_storage_4, %projection_parameter_2, %projection_parameter_2, %projection_storage_2, %tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %tensor_offset, %normalization_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<1024x1024xbf16>, view<1024x1024xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %residual_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.residual_1024x1_kernel(%membership, %input, %projection_storage_2, %residual_storage, %batch_zero, %batch_stride_1, %tensor_offset, %normalization_storage_bytes, %tensor_offset, %normalization_storage_bytes) : (buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  %normalization_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %normalization_parameter_3 = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm2.weight"[%layer] : view<1024xbf16>
+  %normalization_parameter_4 = command.parameter %backbone, "flow_lm.transformer.layers.{}.norm2.bias"[%layer] : view<1024xbf16>
+  kernel.launch @pocket.batch.normalization_affine_1024x1_e1em05_kernel(%membership, %residual_storage, %normalization_storage_2, %normalization_parameter_3, %normalization_parameter_4, %tensor_offset, %normalization_storage_bytes, %tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, view<1024xbf16>, view<1024xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %projection_parameter_3 = command.parameter %backbone, "flow_lm.transformer.layers.{}.linear1.weight"[%layer] : view<4096x1024xbf16>
+  %feed_forward_bytes = index.constant 16384 : offset
+  %batch_bytes_5 = index.scale %batch_capacity, %feed_forward_bytes : index, offset -> offset
+  %projection_storage_3 = buffer.alloca<global> align(16) %batch_bytes_5 : buffer
+  %projection_outputs_3 = index.constant 4096 : index
+  kernel.launch @pocket.batch.project_f64_kernel[%projection_outputs_3, %projection_times](%membership, %projection_inputs, %projection_outputs_3, %projection_times, %normalization_storage_2, %projection_parameter_3, %projection_parameter_3, %projection_storage_3, %tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %tensor_offset, %feed_forward_bytes) : [index, index](buffer, index, index, index, buffer, view<4096x1024xbf16>, view<4096x1024xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %activation_storage = buffer.alloca<global> align(16) %batch_bytes_5 : buffer
+  kernel.launch @pocket.batch.gelu_4096_kernel(%membership, %projection_storage_3, %activation_storage, %tensor_offset, %feed_forward_bytes, %tensor_offset, %feed_forward_bytes) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  %projection_parameter_4 = command.parameter %backbone, "flow_lm.transformer.layers.{}.linear2.weight"[%layer] : view<1024x4096xbf16>
+  %projection_storage_4 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.project_f64_kernel[%projection_inputs, %projection_times](%membership, %projection_outputs_3, %projection_inputs, %projection_times, %activation_storage, %projection_parameter_4, %projection_parameter_4, %projection_storage_4, %tensor_offset, %feed_forward_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %tensor_offset, %normalization_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<1024x4096xbf16>, view<1024x4096xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %residual_storage_2 = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  kernel.launch @pocket.batch.residual_1024x1_kernel(%membership, %residual_storage, %projection_storage_4, %residual_storage_2, %tensor_offset, %normalization_storage_bytes, %tensor_offset, %normalization_storage_bytes, %tensor_offset, %normalization_storage_bytes) : (buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  template.return %residual_storage_2 : buffer
+}
+
+template.def<@pocket.batch.flow_residual> @pocket_batch_flow_residual(%membership: buffer, %layer: index, %phase: buffer, %condition: buffer, %input: buffer) -> (buffer) {
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  %batch_zero = index.constant 0 : offset
+  %batch_stride_1 = index.constant 2048 : offset
+  %projection_parameter = command.parameter %phase, "flow_lm.flow_net.res_blocks.{}.adaLN_modulation.1.weight"[%layer] : view<1536x512xbf16>
+  %projection_storage_bytes = index.constant 6144 : offset
+  %batch_bytes_2 = index.scale %batch_capacity, %projection_storage_bytes : index, offset -> offset
+  %projection_storage = buffer.alloca<global> align(16) %batch_bytes_2 : buffer
+  %projection_tensor_offset = index.constant 0 : offset
+  %projection_parameter_2 = command.parameter %phase, "flow_lm.flow_net.res_blocks.{}.adaLN_modulation.1.bias"[%layer] : view<1536xbf16>
+  %projection_inputs = index.constant 512 : index
+  %projection_outputs = index.constant 1536 : index
+  %projection_times = index.constant 1 : index
+  kernel.launch @pocket.batch.project_bias_f64_kernel[%projection_outputs, %projection_times](%membership, %projection_inputs, %projection_outputs, %projection_times, %condition, %projection_parameter, %projection_parameter_2, %projection_storage, %batch_zero, %batch_stride_1, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %projection_tensor_offset, %projection_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<1536x512xbf16>, view<1536xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %normalization_storage_bytes = index.constant 2048 : offset
+  %batch_bytes_3 = index.scale %batch_capacity, %normalization_storage_bytes : index, offset -> offset
+  %normalization_storage = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  %normalization_parameter = command.parameter %phase, "flow_lm.flow_net.res_blocks.{}.in_ln.weight"[%layer] : view<512xbf16>
+  %normalization_parameter_2 = command.parameter %phase, "flow_lm.flow_net.res_blocks.{}.in_ln.bias"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.normalization_affine_512x1_e1em06_kernel(%membership, %input, %normalization_storage, %normalization_parameter, %normalization_parameter_2, %batch_zero, %batch_stride_1, %projection_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero) : (buffer, buffer, buffer, view<512xbf16>, view<512xbf16>, offset, offset, offset, offset, offset, offset, offset, offset)
+  %modulate_storage = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  kernel.launch @pocket.batch.modulation_kernel(%membership, %normalization_storage, %projection_storage, %modulate_storage, %projection_tensor_offset, %normalization_storage_bytes, %projection_tensor_offset, %projection_storage_bytes, %projection_tensor_offset, %normalization_storage_bytes) : (buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset)
+  %projection_parameter_3 = command.parameter %phase, "flow_lm.flow_net.res_blocks.{}.mlp.0.weight"[%layer] : view<512x512xbf16>
+  %projection_storage_2 = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  %projection_parameter_4 = command.parameter %phase, "flow_lm.flow_net.res_blocks.{}.mlp.0.bias"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.project_bias_f64_kernel[%projection_inputs, %projection_times](%membership, %projection_inputs, %projection_inputs, %projection_times, %modulate_storage, %projection_parameter_3, %projection_parameter_4, %projection_storage_2, %projection_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %projection_tensor_offset, %normalization_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<512x512xbf16>, view<512xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %activation_storage = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  kernel.launch @pocket.batch.silu_512_kernel(%membership, %projection_storage_2, %activation_storage, %projection_tensor_offset, %normalization_storage_bytes, %projection_tensor_offset, %normalization_storage_bytes) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  %projection_parameter_5 = command.parameter %phase, "flow_lm.flow_net.res_blocks.{}.mlp.2.weight"[%layer] : view<512x512xbf16>
+  %projection_storage_3 = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  %projection_parameter_6 = command.parameter %phase, "flow_lm.flow_net.res_blocks.{}.mlp.2.bias"[%layer] : view<512xbf16>
+  kernel.launch @pocket.batch.project_bias_f64_kernel[%projection_inputs, %projection_times](%membership, %projection_inputs, %projection_inputs, %projection_times, %activation_storage, %projection_parameter_5, %projection_parameter_6, %projection_storage_3, %projection_tensor_offset, %normalization_storage_bytes, %batch_zero, %batch_zero, %batch_zero, %batch_zero, %projection_tensor_offset, %normalization_storage_bytes) : [index, index](buffer, index, index, index, buffer, view<512x512xbf16>, view<512xbf16>, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  %gated_residual_storage = buffer.alloca<global> align(16) %batch_bytes_3 : buffer
+  kernel.launch @pocket.batch.gated_residual_kernel(%membership, %input, %projection_storage_3, %projection_storage, %gated_residual_storage, %batch_zero, %batch_stride_1, %projection_tensor_offset, %normalization_storage_bytes, %projection_tensor_offset, %projection_storage_bytes, %projection_tensor_offset, %normalization_storage_bytes) : (buffer, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  template.return %gated_residual_storage : buffer
+}

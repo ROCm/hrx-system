@@ -18,6 +18,8 @@ kernel.decl @pocket.voice_block() launch(%samples: buffer, %state: buffer, %outp
 
 kernel.decl @pocket.sample_noise() launch(%request: buffer, %state: buffer, %output: buffer)
 
+kernel.decl @pocket.batch.sample_noise() launch(%membership: buffer, %request: buffer, %state: buffer, %output: buffer, %request_stride: offset, %state_stride: offset, %output_stride: offset)
+
 template.decl pure @pocket.flow_state_words(%capacity: index) -> (index)
 
 template.decl pure @pocket.state_words(%capacity: index) -> (index)
@@ -306,5 +308,67 @@ check.case public @seeded_noise_counter_and_replay {
   check.expect.close actual(%first) expected(%expected_first) atol(9.9999999999999995e-07) rtol(0.0) nan(different) : tensor<34xf32>
   check.expect.close actual(%second) expected(%expected_second) atol(9.9999999999999995e-07) rtol(0.0) nan(different) : tensor<34xf32>
   check.expect.bitwise actual(%replay) expected(%first) : tensor<34xf32>
+  check.return
+}
+
+// The resident rows have unequal frame and chunk positions. Removing the first
+// packed member moves the survivor's seed and output without moving its state.
+kernel.def target(@pocket) @sampling_membership() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%membership: buffer, %count: i32, %first: i32, %second: i32) {
+  %origin = index.constant 0 : offset
+  %map = buffer.view %membership[%origin] : buffer -> view<3xi32>
+  view.store %count, %map[0] : i32, view<3xi32>
+  view.store %first, %map[1] : i32, view<3xi32>
+  view.store %second, %map[2] : i32, view<3xi32>
+  kernel.return
+}
+
+check.case public @batch_noise_uses_request_identity {
+  %state = check.generate.fill value(0) : tensor<3375108xi32>
+  %expected_state = check.generate.fill value(0) : tensor<3375108xi32>
+  %row0 = check.tensor.view %state offset(0) : tensor<3375108xi32> -> tensor<1125036xi32>
+  %row2 = check.tensor.view %state offset(9000288) : tensor<3375108xi32> -> tensor<1125036xi32>
+  %expected_row0 = check.tensor.view %expected_state offset(0) : tensor<3375108xi32> -> tensor<1125036xi32>
+  %expected_row2 = check.tensor.view %expected_state offset(9000288) : tensor<3375108xi32> -> tensor<1125036xi32>
+  %zero = check.literal value(0) : i32
+  %one = check.literal value(1) : i32
+  %two = check.literal value(2) : i32
+  %unused = check.literal value(-1) : i32
+  %chunk = check.literal value(3) : i32
+  %position7 = check.literal value(112) : i32
+  %position8 = check.literal value(128) : i32
+  kernel.launch @set_positions(%row0, %chunk, %zero, %position7) : (tensor<1125036xi32>, i32, i32, i32)
+  kernel.launch @set_positions(%row2, %one, %zero, %position8) : (tensor<1125036xi32>, i32, i32, i32)
+  kernel.launch @set_positions(%expected_row0, %chunk, %zero, %position7) : (tensor<1125036xi32>, i32, i32, i32)
+  kernel.launch @set_positions(%expected_row2, %one, %zero, %position8) : (tensor<1125036xi32>, i32, i32, i32)
+  %membership = check.generate.fill value(-1) : tensor<3xi32>
+  %requests = check.generate.iota offset(1311768467750121217) step(1) : tensor<2xi64>
+  %seed0 = check.tensor.view %requests offset(0) : tensor<2xi64> -> tensor<1xi64>
+  %seed1 = check.tensor.view %requests offset(8) : tensor<2xi64> -> tensor<1xi64>
+  %actual = check.generate.fill value(-99.0) : tensor<72xf32>
+  %expected = check.generate.fill value(-99.0) : tensor<72xf32>
+  %expected0 = check.tensor.view %expected offset(0) : tensor<72xf32> -> tensor<34xf32>
+  %expected1 = check.tensor.view %expected offset(144) : tensor<72xf32> -> tensor<34xf32>
+  %request_stride = check.literal value(8) : offset
+  %state_stride = check.literal value(4500144) : offset
+  %output_stride = check.literal value(144) : offset
+  kernel.launch @sampling_membership(%membership, %two, %two, %zero) : (tensor<3xi32>, i32, i32, i32)
+  kernel.launch @pocket.batch.sample_noise(%membership, %requests, %state, %actual, %request_stride, %state_stride, %output_stride) : (tensor<3xi32>, tensor<2xi64>, tensor<3375108xi32>, tensor<72xf32>, offset, offset, offset)
+  kernel.launch @pocket.sample_noise(%seed0, %row2, %expected0) : (tensor<1xi64>, tensor<1125036xi32>, tensor<34xf32>)
+  kernel.launch @pocket.sample_noise(%seed1, %row0, %expected1) : (tensor<1xi64>, tensor<1125036xi32>, tensor<34xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<72xf32>
+  %survivor = check.generate.fill value(1311768467750121218) : tensor<2xi64>
+  kernel.launch @sampling_membership(%membership, %one, %zero, %unused) : (tensor<3xi32>, i32, i32, i32)
+  kernel.launch @pocket.batch.sample_noise(%membership, %survivor, %state, %actual, %request_stride, %state_stride, %output_stride) : (tensor<3xi32>, tensor<2xi64>, tensor<3375108xi32>, tensor<72xf32>, offset, offset, offset)
+  kernel.launch @pocket.sample_noise(%seed1, %row0, %expected0) : (tensor<1xi64>, tensor<1125036xi32>, tensor<34xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<72xf32>
+  kernel.launch @sampling_membership(%membership, %zero, %unused, %unused) : (tensor<3xi32>, i32, i32, i32)
+  kernel.launch @pocket.batch.sample_noise(%membership, %survivor, %state, %actual, %request_stride, %state_stride, %output_stride) : (tensor<3xi32>, tensor<2xi64>, tensor<3375108xi32>, tensor<72xf32>, offset, offset, offset)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<72xf32>
+  check.expect.bitwise actual(%state) expected(%expected_state) : tensor<3375108xi32>
+  %expected_requests = check.generate.iota offset(1311768467750121217) step(1) : tensor<2xi64>
+  check.expect.bitwise actual(%requests) expected(%expected_requests) : tensor<2xi64>
   check.return
 }

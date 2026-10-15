@@ -36,3 +36,71 @@ template.def<@pocket.batch.project> device @pocket_batch_project(%membership: bu
   }
   template.return
 }
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+// Dispatch entry points specialize source geometry. Membership remains a
+// runtime packet; changing request progress never changes the compiled shape.
+target.decl @pocket
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+kernel.def target(@pocket) @pocket.batch.project_f32_kernel(%outputs: index, %times: index) {
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %outputs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
+  %wide = scalar.constant false : i1
+  %biased = scalar.constant false : i1
+  template.apply<@pocket.batch.project>(%membership, %wide, %biased, %inputs, %outputs, %times, %input, %weight, %bias, %output, %input_offset, %input_stride, %weight_offset, %weight_stride, %bias_offset, %bias_stride, %output_offset, %output_stride) : (buffer, i1, i1, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.project_bias_f32_kernel(%outputs: index, %times: index) {
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %outputs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
+  %wide = scalar.constant false : i1
+  %biased = scalar.constant true : i1
+  template.apply<@pocket.batch.project>(%membership, %wide, %biased, %inputs, %outputs, %times, %input, %weight, %bias, %output, %input_offset, %input_stride, %weight_offset, %weight_stride, %bias_offset, %bias_stride, %output_offset, %output_stride) : (buffer, i1, i1, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.project_f64_kernel(%outputs: index, %times: index) {
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %outputs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
+  %wide = scalar.constant true : i1
+  %biased = scalar.constant false : i1
+  template.apply<@pocket.batch.project>(%membership, %wide, %biased, %inputs, %outputs, %times, %input, %weight, %bias, %output, %input_offset, %input_stride, %weight_offset, %weight_stride, %bias_offset, %bias_stride, %output_offset, %output_stride) : (buffer, i1, i1, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}
+
+kernel.def target(@pocket) @pocket.batch.project_bias_f64_kernel(%outputs: index, %times: index) {
+  %threads = config.get @pocket.threads : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %outputs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %batch_capacity = config.get @pocket.batch_capacity : index
+  kernel.launch.config workgroups(%groups, %times, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+} launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
+  %wide = scalar.constant true : i1
+  %biased = scalar.constant true : i1
+  template.apply<@pocket.batch.project>(%membership, %wide, %biased, %inputs, %outputs, %times, %input, %weight, %bias, %output, %input_offset, %input_stride, %weight_offset, %weight_stride, %bias_offset, %bias_stride, %output_offset, %output_stride) : (buffer, i1, i1, index, index, index, buffer, buffer, buffer, buffer, offset, offset, offset, offset, offset, offset, offset, offset)
+  kernel.return
+}

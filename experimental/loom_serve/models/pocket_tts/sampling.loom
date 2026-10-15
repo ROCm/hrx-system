@@ -1,0 +1,86 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+template.decl @pocket.element() -> (index)
+
+template.decl pure @pocket.state_size(%capacity: index) -> (offset)
+
+template.decl @random.philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32)
+
+template.decl @random.normal_pair(%radius_word: i32, %angle_word: i32) -> (f32, f32)
+
+template.decl @pocket.sample_noise.body(%request: buffer, %state: buffer, %output: buffer, %seed_origin: offset, %position_origin: offset, %chunk_origin: offset, %output_origin: offset)
+
+// Counter words partition normal quadruple, generation step, text chunk, and
+// zero. The full 64-bit request seed is the key. Row placement and neighboring
+// requests cannot change the random stream; only this request advances it.
+template.def<@pocket.sample_noise.body> device @pocket_sample_noise_body(%request: buffer, %state: buffer, %output: buffer, %seed_origin: offset, %position_origin: offset, %chunk_origin: offset, %output_origin: offset) {
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %pairs = index.constant 16 : index
+  %live = index.cmp ult, %element, %pairs : index
+  scf.if %live {
+    %seed = buffer.view %request[%seed_origin] : buffer -> view<2xi32>
+    %seed0 = view.load %seed[0] : view<2xi32> -> i32
+    %seed1 = view.load %seed[1] : view<2xi32> -> i32
+    %position = buffer.view %state[%position_origin] : buffer -> view<1xi32>
+    %absolute = view.load %position[0] : view<1xi32> -> i32
+    %sixteen = scalar.constant 16 : i32
+    %frame = scalar.divui %absolute, %sixteen : i32
+    %control = buffer.view %state[%chunk_origin] : buffer -> view<2xi32>
+    %chunk = view.load %control[0] : view<2xi32> -> i32
+    %two = index.constant 2 : index
+    %quadruple = index.div %element, %two : index
+    %quadruple32 = index.cast %quadruple : index to i32
+    %zero = scalar.constant 0 : i32
+    %a, %b, %c, %d = template.apply<@random.philox4x32>(%quadruple32, %frame, %chunk, %zero, %seed0, %seed1) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+    %parity = index.rem %element, %two : index
+    %zero_index = index.constant 0 : index
+    %even = index.cmp eq, %parity, %zero_index : index
+    %radial = scf.select %even, %a, %c : i32
+    %angular = scf.select %even, %b, %d : i32
+    %normal0, %normal1 = template.apply<@random.normal_pair>(%radial, %angular) : (i32, i32) -> (f32, f32)
+    %deviation = scalar.constant 0.54772255750516607 : f32
+    %noise0 = scalar.mulf %normal0, %deviation : f32
+    %noise1 = scalar.mulf %normal1, %deviation : f32
+    %noise = buffer.view %output[%output_origin] : buffer -> view<34xf32>
+    %first = index.mul %element, %two : index
+    %one = index.constant 1 : index
+    %second = index.add %first, %one : index
+    view.store %noise0, %noise[%first] : f32, view<34xf32>
+    view.store %noise1, %noise[%second] : f32, view<34xf32>
+    %first_pair = index.cmp eq, %element, %zero_index : index
+    scf.if %first_pair {
+      %start = scalar.constant 0.0 : f32
+      %end = scalar.constant 1.0 : f32
+      view.store %start, %noise[32] : f32, view<34xf32>
+      view.store %end, %noise[33] : f32, view<34xf32>
+    }
+  }
+  template.return
+}
+
+kernel.def target(@pocket) @pocket.sample_noise() {
+  %one = index.constant 1 : index
+  %threads = config.get @pocket.threads : index
+  %pairs = index.constant 16 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %pairs, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%request: buffer, %state: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %position_origin = index.constant 4 : offset
+  %capacity = config.get @pocket.context_capacity : index
+  %chunk_origin = template.apply<@pocket.state_size>(%capacity) pure : (index) -> (offset)
+  template.apply<@pocket.sample_noise.body>(%request, %state, %output, %origin, %position_origin, %chunk_origin, %origin) : (buffer, buffer, buffer, offset, offset, offset, offset)
+  kernel.return
+}

@@ -45,8 +45,10 @@ loom_execution_test(
     "::request_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
+    "--config=pocket.batch_capacity=2"
     "--config=pocket.chunk_tokens=4"
     "--config=pocket.context_capacity=1"
+    "--config=pocket.request_capacity=3"
     "--config=pocket.rotary_capacity=16"
     "--config=pocket.threads=128"
     "--config=pocket.voice_frames=2"
@@ -77,8 +79,10 @@ loom_execution_test(
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
+    "--config=pocket.batch_capacity=2"
     "--config=pocket.chunk_tokens=4"
     "--config=pocket.context_capacity=1"
+    "--config=pocket.request_capacity=3"
     "--config=pocket.rotary_capacity=16"
     "--config=pocket.threads=128"
     "--config=pocket.voice_frames=2"
