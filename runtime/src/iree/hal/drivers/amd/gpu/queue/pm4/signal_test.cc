@@ -25,9 +25,9 @@ struct Storage {
   explicit Storage(
       iree_hal_amd_gpu_pm4_signal_pool_notification_t notification = {}) {
     values.fill(UINT64_MAX);
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(values.data(), 0x1234fffffff8,
-                                                signals.data(), Capacity,
-                                                notification, &pool);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize(this, values.data(),
+                                                0x1234fffffff8, signals.data(),
+                                                Capacity, notification, &pool);
   }
   ~Storage() { iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool); }
 

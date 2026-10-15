@@ -41,10 +41,13 @@ class PublisherTest : public ::testing::Test {
 
 TEST_F(PublisherTest, IdleCallerPublishesBeforeServiceTurn) {
   Entry first;
+  EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
   EXPECT_TRUE(Enqueue(&first));
+  EXPECT_FALSE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
   EXPECT_EQ(Take().head, nullptr);
   EXPECT_FALSE(Handoff());
   EXPECT_EQ(Take().head, nullptr);
+  EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&publisher_));
 }
 
 TEST_F(PublisherTest, FinalEnqueueBeforeHandoffTransfersToService) {

@@ -62,6 +62,9 @@ typedef struct iree_hal_amd_gpu_pm4_signal_pool_t {
   uint32_t live_count;
   // Available metadata slots, protected by mutex.
   iree_hal_amd_gpu_pm4_signal_t* free_head;
+  // Borrowed qualified address/visibility/atomic domain. Matching identities
+  // permit native reads of these exact addresses; NULL permits only host waits.
+  const void* domain;
   // Immutable wake target for capacity recovery, invoked outside mutex.
   iree_hal_amd_gpu_pm4_signal_pool_notification_t notification;
 } iree_hal_amd_gpu_pm4_signal_pool_t;
@@ -73,7 +76,7 @@ typedef struct iree_hal_amd_gpu_pm4_signal_pool_t {
 // width. The DWORD form uses the low word and leaves its high word zero.
 // Metadata and values do not overlap. A zero capacity produces an empty pool.
 void iree_hal_amd_gpu_pm4_signal_pool_initialize(
-    uint64_t* values, uint64_t device_address,
+    const void* domain, uint64_t* values, uint64_t device_address,
     iree_hal_amd_gpu_pm4_signal_t* signals, uint32_t capacity,
     iree_hal_amd_gpu_pm4_signal_pool_notification_t notification,
     iree_hal_amd_gpu_pm4_signal_pool_t* out_pool);

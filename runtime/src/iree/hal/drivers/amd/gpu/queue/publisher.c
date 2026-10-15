@@ -79,3 +79,11 @@ iree_hal_amd_gpu_publication_list_t iree_hal_amd_gpu_publisher_take(
   iree_slim_mutex_unlock(&publisher->mutex);
   return work;
 }
+
+bool iree_hal_amd_gpu_publisher_is_idle(
+    iree_hal_amd_gpu_publisher_t* publisher) {
+  iree_slim_mutex_lock(&publisher->mutex);
+  const bool idle = publisher->owner == IREE_HAL_AMD_GPU_PUBLISHER_IDLE;
+  iree_slim_mutex_unlock(&publisher->mutex);
+  return idle;
+}

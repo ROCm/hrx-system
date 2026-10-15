@@ -10,12 +10,13 @@ static_assert(sizeof(iree_hal_amd_gpu_pm4_signal_t) <= 32,
               "two signal owners must fit in one cache line");
 
 void iree_hal_amd_gpu_pm4_signal_pool_initialize(
-    uint64_t* values, uint64_t device_address,
+    const void* domain, uint64_t* values, uint64_t device_address,
     iree_hal_amd_gpu_pm4_signal_t* signals, uint32_t capacity,
     iree_hal_amd_gpu_pm4_signal_pool_notification_t notification,
     iree_hal_amd_gpu_pm4_signal_pool_t* out_pool) {
   *out_pool = (iree_hal_amd_gpu_pm4_signal_pool_t){
       .free_head = capacity ? signals : NULL,
+      .domain = domain,
       .notification = notification,
   };
   iree_slim_mutex_initialize(&out_pool->mutex);

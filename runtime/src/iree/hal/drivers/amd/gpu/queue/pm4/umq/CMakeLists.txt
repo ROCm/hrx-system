@@ -25,6 +25,43 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    queue
+  HDRS
+    "queue.h"
+  SRCS
+    "queue.c"
+  DEPS
+    ::ring
+    amdf::headers
+    iree::async
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::base::cpu_data
+    iree::base::internal
+    iree::base::internal::arena
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::gpu::completion
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::queue::continuation
+    iree::hal::drivers::amd::gpu::queue::host_wait
+    iree::hal::drivers::amd::gpu::queue::pm4::barrier
+    iree::hal::drivers::amd::gpu::queue::pm4::commands
+    iree::hal::drivers::amd::gpu::queue::pm4::launch
+    iree::hal::drivers::amd::gpu::queue::pm4::retirement
+    iree::hal::drivers::amd::gpu::queue::pm4::semaphore
+    iree::hal::drivers::amd::gpu::queue::pm4::signal
+    iree::hal::drivers::amd::gpu::queue::pm4::submission
+    iree::hal::drivers::amd::gpu::queue::publisher
+    iree::hal::drivers::amd::status
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     ring_test

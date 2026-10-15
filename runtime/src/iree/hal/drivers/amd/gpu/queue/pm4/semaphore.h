@@ -50,9 +50,12 @@ typedef struct iree_hal_amd_gpu_pm4_semaphore_wait_t {
 } iree_hal_amd_gpu_pm4_semaphore_wait_t;
 
 // Resolves a wait and pins its native reader under the cache replacement lock.
-// The caller has established the semaphore type and native compatibility of
-// every producer eligible to signal it: addressing, atomic width, visibility,
-// and forward progress. Otherwise it uses the ordinary completed HAL timeline.
+// The caller has established the semaphore type. A native result is a pinned
+// producer candidate: the consumer must also match its qualified domain to
+// signal->pool->domain before using the address. An incompatible candidate is
+// released and waited on through the ordinary completed HAL timeline, never
+// through submission availability. Domain identity includes addressing,
+// atomic width, visibility, and forward progress.
 // A native result permits waiting for signal value one, or eliding that wait
 // when an already established causal frontier dominates a nonzero producer
 // epoch. The owning capture keeps the semaphore live through this call. Failure

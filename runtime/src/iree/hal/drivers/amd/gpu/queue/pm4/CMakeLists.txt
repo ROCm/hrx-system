@@ -81,6 +81,27 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    submission
+  HDRS
+    "submission.h"
+  SRCS
+    "submission.c"
+  DEPS
+    ::barrier
+    ::semaphore
+    ::signal
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    iree::hal
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::drivers::amd::gpu::queue::publisher
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     semaphore
   HDRS
     "semaphore.h"
@@ -95,6 +116,27 @@ iree_cc_library(
     iree::hal
     iree::hal::utils::host_semaphore
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    submission_test
+  SRCS
+    "submission_test.cc"
+  DEPS
+    ::barrier
+    ::semaphore
+    ::submission
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+    iree::hal::drivers::amd::gpu::executable
+    iree::hal::drivers::amd::gpu::image::metadata
+    iree::hal::drivers::amd::gpu::kernarg
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

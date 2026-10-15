@@ -14,7 +14,7 @@ namespace {
 struct Storage {
   Storage() {
     iree_hal_amd_gpu_pm4_signal_pool_initialize(
-        values.data(), 0x1000, signals.data(), signals.size(), {}, &pool);
+        this, values.data(), 0x1000, signals.data(), signals.size(), {}, &pool);
   }
   ~Storage() { iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool); }
 

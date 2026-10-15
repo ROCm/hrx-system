@@ -90,6 +90,11 @@ bool iree_hal_amd_gpu_publisher_handoff(
 iree_hal_amd_gpu_publication_list_t iree_hal_amd_gpu_publisher_take(
     iree_hal_amd_gpu_publisher_t* publisher);
 
+// Cold shutdown query after external producers have joined. Serializes with
+// the final caller/service handoff; no ready entry or native owner remains.
+bool iree_hal_amd_gpu_publisher_is_idle(
+    iree_hal_amd_gpu_publisher_t* publisher);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

@@ -20,7 +20,7 @@ struct Storage {
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_create(
         proactor, 0, 16, iree_allocator_system(), &semaphore));
     iree_hal_amd_gpu_pm4_signal_pool_initialize(
-        values.data(), 0x1000, signals.data(), signals.size(), {}, &pool);
+        this, values.data(), 0x1000, signals.data(), signals.size(), {}, &pool);
   }
   ~Storage() {
     iree_hal_semaphore_release(semaphore);

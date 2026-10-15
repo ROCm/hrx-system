@@ -74,8 +74,9 @@ class SemaphoreTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(
-        values_.data(), 0x1000, signals_.data(), signals_.size(), {}, &pool_);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize(this, values_.data(), 0x1000,
+                                                signals_.data(),
+                                                signals_.size(), {}, &pool_);
   }
   void TearDown() override {
     for (auto* semaphore : semaphores_) {
