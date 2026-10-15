@@ -1587,7 +1587,7 @@ loom_module(
 
 loom_test_module(
   NAME
-    expert_matrix_test_module
+    expert_matrix_64_test_module
   SRCS
     "tests/expert_matrix.loom"
     "tests/expert_matrix_reference.loom"
@@ -1599,13 +1599,14 @@ loom_test_module(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    expert_matrix_test_execute_amdgpu_hardware_test
+    expert_matrix_64_test_execute_amdgpu_hardware_test
   CORRECTNESS_ONLY
   MODULE
-    "::expert_matrix_test_module"
+    "::expert_matrix_64_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
-    "--config=flash_next.token_count=19"
+    "--config=expert_test.tile_rows=64"
+    "--config=flash_next.token_count=67"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -1625,14 +1626,15 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    expert_matrix_test_execute_amdgpu_access_test
+    expert_matrix_64_test_execute_amdgpu_access_test
   CORRECTNESS_ONLY
   MODULE
-    "::expert_matrix_test_module"
+    "::expert_matrix_64_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
-    "--config=flash_next.token_count=19"
+    "--config=expert_test.tile_rows=64"
+    "--config=flash_next.token_count=67"
   LABELS
     "notsan"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1653,17 +1655,19 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    expert_matrix_test_execute_amdgpu_tsan_test
+    expert_matrix_64_test_execute_amdgpu_tsan_byte_granule_test
   CORRECTNESS_ONLY
   MODULE
-    "::expert_matrix_test_module"
+    "::expert_matrix_64_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
     "--amdgpu_tsan=true"
     "--amdgpu_tsan_report_policy=report-only"
-    "--config=flash_next.token_count=19"
+    "--amdgpu_tsan_memory_granule_shift=0"
+    "--config=expert_test.tile_rows=64"
+    "--config=flash_next.token_count=67"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -1671,7 +1675,106 @@ loom_execution_test(
     "iree-build-requirement=runtime.hal.amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
-    "loom-execution-profile=amdgpu_tsan"
+    "loom-execution-profile=amdgpu_tsan_byte_granule"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    expert_matrix_128_test_module
+  SRCS
+    "tests/expert_matrix.loom"
+    "tests/expert_matrix_reference.loom"
+  LIBRARIES
+    "::quantized_reference"
+    "::residual_programs"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    expert_matrix_128_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::expert_matrix_128_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=expert_test.tile_rows=128"
+    "--config=flash_next.token_count=131"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    expert_matrix_128_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::expert_matrix_128_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=expert_test.tile_rows=128"
+    "--config=flash_next.token_count=131"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    expert_matrix_128_test_execute_amdgpu_tsan_byte_granule_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::expert_matrix_128_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--amdgpu_tsan_memory_granule_shift=0"
+    "--config=expert_test.tile_rows=128"
+    "--config=flash_next.token_count=131"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan_byte_granule"
     "loom-target-family=amdgpu"
     "loom-target-class=gpu"
     "loom-executor=hardware"
