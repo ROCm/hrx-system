@@ -6,16 +6,10 @@ func.decl @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, %block: index
 template.decl @ggml.q5k.chunk(%weight: buffer, %row_byte_base: offset, %block: index, %group: index, %half: index) -> (vector<16xi8>, f32, f32)
 
 // Unsigned code expansion is independent of the activation row. Consumers can
-// retain these exact values while contracting several rows with one chunk.
+// retain these exact BF16 values while contracting several rows with one chunk.
 func.def inline @flash_next_affine_codes(%codes: vector<16xi8>) -> (vector<16xbf16>) {
   %code_values = vector.uitofp %codes : vector<16xi8> to vector<16xf32>
-  // Every unsigned byte is exact in BF16. Its F32 representation has zero
-  // low halfwords, so packing the upper halfwords preserves every code.
-  %code_bits = vector.bitcast %code_values : vector<16xf32> to vector<16xi32>
-  %code_shift = vector.constant 16 : vector<16xi32>
-  %code_upper = vector.shrui %code_bits, %code_shift : vector<16xi32>
-  %code_words = vector.trunci %code_upper : vector<16xi32> to vector<16xi16>
-  %exact_codes = vector.bitcast %code_words : vector<16xi16> to vector<16xbf16>
+  %exact_codes = vector.fptrunc %code_values : vector<16xf32> to vector<16xbf16>
   func.return %exact_codes : vector<16xbf16>
 }
 

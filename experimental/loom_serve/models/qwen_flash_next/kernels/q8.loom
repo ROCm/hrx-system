@@ -1,7 +1,7 @@
 // A Q8 block has one half scale and 32 signed byte codes. Their independently
 // supplied origins permit interleaved blocks or separate scale/code planes.
-// Every code is exact in BF16: its F32 representation has zero low halfwords.
-// Packing those halfwords preserves the code before multiplication by scale.
+// Every signed byte is exactly representable in BF16. The conversion preserves
+// each integer code before the consumer applies its block scale in F32.
 func.def inline @flash_next_q8_load_block(%scale_origin: offset, %code_origin: offset, %weight: buffer) -> (vector<32xbf16>, f32) {
   %c0 = index.constant 0 : index
   %scale_view = buffer.view %weight[%scale_origin] : buffer -> view<1xf16>
@@ -10,11 +10,7 @@ func.def inline @flash_next_q8_load_block(%scale_origin: offset, %code_origin: o
   %scale = scalar.extf %packed_scale : f16 to f32
   %packed_codes = vector.load %code_view[%c0] : view<32xi8> -> vector<32xi8>
   %wide_codes = vector.sitofp %packed_codes : vector<32xi8> to vector<32xf32>
-  %code_bits = vector.bitcast %wide_codes : vector<32xf32> to vector<32xi32>
-  %code_shift = vector.constant 16 : vector<32xi32>
-  %code_upper = vector.shrui %code_bits, %code_shift : vector<32xi32>
-  %code_words = vector.trunci %code_upper : vector<32xi32> to vector<32xi16>
-  %codes = vector.bitcast %code_words : vector<32xi16> to vector<32xbf16>
+  %codes = vector.fptrunc %wide_codes : vector<32xf32> to vector<32xbf16>
   func.return %codes, %scale : vector<32xbf16>, f32
 }
 
