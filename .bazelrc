@@ -21,6 +21,10 @@ common --check_direct_dependencies=error
 common --http_connector_attempts=12
 common --http_connector_retry_max_timeout=5s
 
+# Try alternate archive endpoints after the declared source URL fails, including
+# dependencies whose URLs and patches are owned by the Bazel Central Registry.
+common --downloader_config=build_tools/bazel/downloader.cfg
+
 # Bazel's default lockfile mode is "update", which lets ordinary read-only
 # commands such as "bazel mod graph" silently rewrite MODULE.bazel.lock when
 # module extension facts change. Normal development, CI, and agent workflows
