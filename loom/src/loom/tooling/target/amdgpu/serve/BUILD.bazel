@@ -530,7 +530,11 @@ loom_cc_test(
 
 loom_cc_test(
     name = "jit_test",
-    srcs = ["//loom/src/loom/serve/runtime/program:jit_test.cc"],
+    srcs = [
+        "//loom/src/loom/serve/runtime/program:jit_module_test.cc",
+        "//loom/src/loom/serve/runtime/program:jit_test.cc",
+        "//loom/src/loom/serve/runtime/program:jit_workspace_test.cc",
+    ],
     args = [
         "--jit_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/jit/config.loom)",
         "--invalid_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/compilation/invalid.loom)",
@@ -557,18 +561,19 @@ loom_cc_test(
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/program:jit",
         "//loom/src/loom/serve/runtime/program:module",
-        "//loom/src/loom/serve/testing:compiler",
-        "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/serve/testing:jit",
+        "//loom/src/loom/serve/testing:jit_module",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/module/hal:types",
-        "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
-        "//runtime/src/iree/vm/bytecode:module",
-    ],
+    ] + select({
+        "@platforms//os:linux": ["//loom/src/loom/serve/testing:stalled_stderr"],
+        "//conditions:default": [],
+    }),
 )
 
 loom_cc_test(

@@ -15,7 +15,9 @@ package(
 exports_files(
     [
         "control_test.cc",
+        "jit_module_test.cc",
         "jit_test.cc",
+        "jit_workspace_test.cc",
         "testdata/compilation/invalid.loom",
         "testdata/control/control.loom",
         "testdata/control/kernels.loom",

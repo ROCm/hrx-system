@@ -44,6 +44,53 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    jit
+  HDRS
+    "jit.h"
+  SRCS
+    "jit.cc"
+  DEPS
+    ::compiler
+    ::device
+    iree::base
+    iree::base::tooling::flags
+    iree::hal
+    iree::task
+    iree::testing::gtest
+    loom::binding::c::loomc
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::host
+    loom::serve::runtime::program::jit
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    jit_module
+  HDRS
+    "jit_module.h"
+  SRCS
+    "jit_module.cc"
+  DEPS
+    ::jit
+    iree::base
+    iree::hal
+    iree::module::hal::types
+    iree::vm
+    iree::vm::bytecode::module
+    loom::serve::runtime::device
+    loom::serve::runtime::execution
+    loom::serve::runtime::host
+    loom::serve::runtime::program::jit
+    loom::serve::runtime::program::module
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     service_application
   HDRS
     "service_application.h"

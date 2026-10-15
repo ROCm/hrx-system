@@ -43,6 +43,49 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "jit",
+    testonly = True,
+    srcs = ["jit.cc"],
+    hdrs = ["jit.h"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        ":compiler",
+        ":device",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/program:jit",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_library(
+    name = "jit_module",
+    testonly = True,
+    srcs = ["jit_module.cc"],
+    hdrs = ["jit_module.h"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        ":jit",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/program:jit",
+        "//loom/src/loom/serve/runtime/program:module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+loom_cc_library(
     name = "service_application",
     testonly = True,
     srcs = ["service_application.cc"],

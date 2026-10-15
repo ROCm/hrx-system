@@ -675,11 +675,17 @@ loom_cc_test(
 endif()
 
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+set(_jit_test_platform_deps "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  list(APPEND _jit_test_platform_deps loom::serve::testing::stalled_stderr)
+endif()
 loom_cc_test(
   NAME
     jit_test
   SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/jit_module_test.cc"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/jit_test.cc"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/jit_workspace_test.cc"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/compilation/invalid.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/jit/config.loom"
@@ -694,18 +700,17 @@ loom_cc_test(
     iree::base::tooling::flags
     iree::hal
     iree::module::hal::types
-    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
-    iree::vm::bytecode::module
     loom::binding::c::loomc
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::program::jit
     loom::serve::runtime::program::module
-    loom::serve::testing::compiler
-    loom::serve::testing::device
+    loom::serve::testing::jit
+    loom::serve::testing::jit_module
+    ${_jit_test_platform_deps}
   ARGS
     "--jit_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/jit/config.loom}}"
     "--invalid_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/compilation/invalid.loom}}"
