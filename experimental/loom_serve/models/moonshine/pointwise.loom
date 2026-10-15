@@ -1,0 +1,203 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Elementwise residuals and activations preserve independent packed rows.
+target.decl @moonshine
+
+config.decl @moonshine.threads : index
+
+kernel.def target(@moonshine) @moonshine.pointwise.encoder_residual() {
+  %items = index.constant 320 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%x: view<4x320x1xf32>, %update: view<4x320x1xf32>, %y: view<4x320x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 320 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+      %width = index.constant 1 : index
+      %row = index.div %element, %width : index
+      %column = index.rem %element, %width : index
+      %base = view.load %x[%packed, %row, %column] : view<4x320x1xf32> -> f32
+      %delta = view.load %update[%packed, %row, %column] : view<4x320x1xf32> -> f32
+
+      %combined = scalar.addf %base, %delta : f32
+      view.store %combined, %y[%packed, %row, %column] : f32, view<4x320x1xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.pointwise.gelu() {
+  %items = index.constant 1280 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%x: view<4x1280x1xf32>, %y: view<4x1280x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 1280 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+    %row_gate_stride = index.constant 40320208 : offset
+    %row_gate_row = index.scale %resident, %row_gate_stride : index, offset -> offset
+    %row_gate_offset = index.add %row_gate_row, %row_gate_base : offset
+    %row_gate = buffer.view %state_storage[%row_gate_offset] : buffer -> view<6xi32>
+    %gate32 = view.load %row_gate[3] : view<6xi32> -> i32
+    %zero32 = scalar.constant 0 : i32
+    %enabled = scalar.cmpi ne, %gate32, %zero32 : i32
+    scf.if %enabled {
+      %width = index.constant 1 : index
+      %row = index.div %element, %width : index
+      %column = index.rem %element, %width : index
+      %value = view.load %x[%packed, %row, %column] : view<4x1280x1xf32> -> f32
+      %activated = scalar.geluf<erf, afn> %value : f32
+      view.store %activated, %y[%packed, %row, %column] : f32, view<4x1280x1xf32>
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.pointwise.decoder_residual() {
+  %items = index.constant 320 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%x: view<4x320x1xf32>, %update: view<4x320x1xf32>, %y: view<4x320x1xf32>, %cohort: view<5xi32>) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 320 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+
+    %width = index.constant 1 : index
+    %row = index.div %element, %width : index
+    %column = index.rem %element, %width : index
+    %base = view.load %x[%packed, %row, %column] : view<4x320x1xf32> -> f32
+    %delta = view.load %update[%packed, %row, %column] : view<4x320x1xf32> -> f32
+
+    %combined = scalar.addf %base, %delta : f32
+    view.store %combined, %y[%packed, %row, %column] : f32, view<4x320x1xf32>
+  }
+  kernel.return
+}
+
+kernel.def target(@moonshine) @moonshine.pointwise.decoder_gate() {
+  %items = index.constant 1280 : index
+  %threads = config.get @moonshine.threads : index
+  %c1 = index.constant 1 : index
+  %tail = index.sub %threads, %c1 : index
+  %rounded = index.add %items, %tail : index
+  %groups = index.div %rounded, %threads : index
+  %capacity = index.constant 4 : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%x: view<4x2560x1xf32>, %y: view<4x1280x1xf32>, %cohort: view<5xi32>) {
+  %group = kernel.workgroup.id<x> : index
+  %packed_value = kernel.workgroup.id<y> : index
+  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %count32 = view.load %cohort[0] : view<5xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %active = index.cmp ult, %packed, %count : index
+  %threads = config.get @moonshine.threads : index
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %element = index.madd %group, %threads, %lane : index
+  %limit = index.constant 1280 : index
+  %live = index.cmp ult, %element, %limit : index
+  %participating = scalar.andi %active, %live : i1
+  %f0 = scalar.constant 0.0 : f32
+  scf.if %participating {
+    %member = index.add %packed, %c1 : index
+    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
+    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
+    %resident = index.cast %bounded_resident : i32 to index
+
+    %width = index.constant 1280 : index
+    %gate_row = index.add %element, %width : index
+    %base = view.load %x[%packed, %element, 0] : view<4x2560x1xf32> -> f32
+    %gate = view.load %x[%packed, %gate_row, 0] : view<4x2560x1xf32> -> f32
+    %negative = scalar.negf %gate : f32
+    %exponential = scalar.expf<afn> %negative : f32
+    %one = scalar.constant 1.0 : f32
+    %denominator = scalar.addf %one, %exponential : f32
+    %silu = scalar.divf %gate, %denominator : f32
+    %output = scalar.mulf %base, %silu : f32
+    view.store %output, %y[%packed, %element, 0] : f32, view<4x1280x1xf32>
+  }
+  kernel.return
+}
