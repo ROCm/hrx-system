@@ -1,0 +1,80 @@
+// Every declared schedule runs this same independent original-byte oracle.
+// Three K32 blocks expose staging reuse. Two workgroups on each output axis
+// exercise full fragments, partial fragments, inactive groups, and untouched
+// rows. Inactive input rows contain NaNs, and output rows retain a sentinel.
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @q8_test.tile_rows : %value: index where [range(%value, 16, 128), multiple_of(%value, 16)]
+
+config.decl @q8_test.tile_columns : %value: index where [range(%value, 16, 128), multiple_of(%value, 16)]
+
+config.decl @q8_test.wave_rows : %value: index where [range(%value, 1, 4)]
+
+config.decl @q8_test.wave_columns : %value: index where [range(%value, 1, 4)]
+
+amdgpu.target<gfx11-generic> @q8_matrix_test_wave32 {subgroup_size = 32}
+
+template.decl @flash_next.q8_schedule(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl @flash_next_q8_fixture(%count: index, %inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer)
+
+func.decl @flash_next_q8_reference(%inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.def target(@q8_matrix_test_wave32) @matrix() {
+  %two = index.constant 2 : index
+  %one = index.constant 1 : index
+  %wave_size = index.constant 32 : index
+  %wave_rows = config.get @q8_test.wave_rows : index
+  %wave_columns = config.get @q8_test.wave_columns : index
+  %waves = index.mul %wave_rows, %wave_columns : index
+  %threads = index.mul %waves, %wave_size : index
+  kernel.launch.config workgroups(%two, %two, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %tile_rows = config.get @q8_test.tile_rows : index
+  %tile_columns = config.get @q8_test.tile_columns : index
+  %wave_rows = config.get @q8_test.wave_rows : index
+  %wave_columns = config.get @q8_test.wave_columns : index
+  %depth = index.constant 1 : index
+  template.apply<@flash_next.q8_schedule>(%capacity, %inputs, %outputs, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %depth, %epoch, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+func.def @geometry(%trial: index) -> (index, index, index, index) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %inputs = index.constant 96 : index
+  %capacity = config.get @flash_next.token_count : index
+  %tile_rows = config.get @q8_test.tile_rows : index
+  %tile_columns = config.get @q8_test.tile_columns : index
+  %outputs = index.add %tile_columns, %four : index
+  %ragged = index.sub %capacity, %one : index
+  %empty = index.cmp eq, %trial, %zero : index
+  %single = index.cmp eq, %trial, %one : index
+  %aligned = index.cmp eq, %trial, %two : index
+  %full_count = scf.select %aligned, %tile_rows, %ragged : index
+  %nonempty_count = scf.select %single, %one, %full_count : index
+  %count = scf.select %empty, %zero, %nonempty_count : index
+  func.return %capacity, %count, %inputs, %outputs : index, index, index, index
+}
+
+check.scenario public @original_q8_matrix {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %capacity, %count, %inputs, %outputs = check.generate<@geometry>(%trial) : (index) -> (index, index, index, index)
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<[%capacity]x[%inputs]xbf16>
+    %weight = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<[%outputs]x3x34xi8>
+    check.generate<@flash_next_q8_fixture>(%count, %inputs, %outputs, %epoch, %input, %weight) : (index, index, index, tensor<3xi32>, tensor<[%capacity]x[%inputs]xbf16>, tensor<[%outputs]x3x34xi8>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<[%capacity]x[%outputs]xbf16>
+    check.compare<@matrix, @flash_next_q8_reference>(%inputs, %outputs, %epoch, %input, %weight, %output) : (index, index, tensor<3xi32>, tensor<[%capacity]x[%inputs]xbf16>, tensor<[%outputs]x3x34xi8>, tensor<[%capacity]x[%outputs]xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%capacity]x[%outputs]xbf16>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%capacity]x[%inputs]xbf16>
+      check.expect.bitwise actual(%weight) expected(%weight) : tensor<[%outputs]x3x34xi8>
+      check.expect.bitwise actual(%epoch) expected(%epoch) : tensor<3xi32>
+    }
+  }
+  check.return
+}

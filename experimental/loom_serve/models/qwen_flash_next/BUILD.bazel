@@ -93,6 +93,43 @@ loom_library(
     srcs = ["tests/q8_reference.loom"],
 )
 
+loom_library(
+    name = "q8_matrix",
+    srcs = ["kernels/q8_matrix.loom"],
+)
+
+[
+    loom_test(
+        name = "q8_matrix_{}x{}_waves_{}x{}_test".format(rows, columns, wave_rows, wave_columns),
+        srcs = ["tests/q8_matrix.loom"],
+        benchmark_smoke = False,
+        configs = {
+            "flash_next.token_count": str(rows + 3),
+            "q8_test.tile_columns": str(columns),
+            "q8_test.tile_rows": str(rows),
+            "q8_test.wave_columns": str(wave_columns),
+            "q8_test.wave_rows": str(wave_rows),
+        },
+        execution_profiles = [
+            AMDGPU_HARDWARE_PROFILE,
+            AMDGPU_ACCESS_PROFILE,
+            AMDGPU_TSAN_PROFILE,
+        ],
+        deps = [
+            ":q8_matrix",
+            ":q8_reference",
+        ],
+    )
+    for rows, columns, wave_rows, wave_columns in [
+        (16, 64, 1, 4),
+        (32, 64, 2, 2),
+        (32, 32, 2, 2),
+        (64, 64, 2, 2),
+        (64, 64, 4, 2),
+        (128, 128, 4, 2),
+    ]
+]
+
 [
     loom_test(
         name = "hyperconnection_{}_test".format(capacity),

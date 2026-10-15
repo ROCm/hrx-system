@@ -393,6 +393,652 @@ loom_module(
   STRICT_DEPS
 )
 
+loom_module(
+  NAME
+    q8_matrix
+  SRCS
+    "kernels/q8_matrix.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
+loom_test_module(
+  NAME
+    q8_matrix_16x64_waves_1x4_test_module
+  SRCS
+    "tests/q8_matrix.loom"
+  LIBRARIES
+    "::q8_matrix"
+    "::q8_reference"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_16x64_waves_1x4_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_16x64_waves_1x4_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=flash_next.token_count=19"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=16"
+    "--config=q8_test.wave_columns=4"
+    "--config=q8_test.wave_rows=1"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_16x64_waves_1x4_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_16x64_waves_1x4_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=19"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=16"
+    "--config=q8_test.wave_columns=4"
+    "--config=q8_test.wave_rows=1"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_16x64_waves_1x4_test_execute_amdgpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_16x64_waves_1x4_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--config=flash_next.token_count=19"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=16"
+    "--config=q8_test.wave_columns=4"
+    "--config=q8_test.wave_rows=1"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    q8_matrix_32x64_waves_2x2_test_module
+  SRCS
+    "tests/q8_matrix.loom"
+  LIBRARIES
+    "::q8_matrix"
+    "::q8_reference"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_32x64_waves_2x2_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_32x64_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=flash_next.token_count=35"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=32"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_32x64_waves_2x2_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_32x64_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=35"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=32"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_32x64_waves_2x2_test_execute_amdgpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_32x64_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--config=flash_next.token_count=35"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=32"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    q8_matrix_32x32_waves_2x2_test_module
+  SRCS
+    "tests/q8_matrix.loom"
+  LIBRARIES
+    "::q8_matrix"
+    "::q8_reference"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_32x32_waves_2x2_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_32x32_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=flash_next.token_count=35"
+    "--config=q8_test.tile_columns=32"
+    "--config=q8_test.tile_rows=32"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_32x32_waves_2x2_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_32x32_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=35"
+    "--config=q8_test.tile_columns=32"
+    "--config=q8_test.tile_rows=32"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_32x32_waves_2x2_test_execute_amdgpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_32x32_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--config=flash_next.token_count=35"
+    "--config=q8_test.tile_columns=32"
+    "--config=q8_test.tile_rows=32"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    q8_matrix_64x64_waves_2x2_test_module
+  SRCS
+    "tests/q8_matrix.loom"
+  LIBRARIES
+    "::q8_matrix"
+    "::q8_reference"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_64x64_waves_2x2_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_64x64_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=flash_next.token_count=67"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=64"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_64x64_waves_2x2_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_64x64_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=67"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=64"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_64x64_waves_2x2_test_execute_amdgpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_64x64_waves_2x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--config=flash_next.token_count=67"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=64"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=2"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    q8_matrix_64x64_waves_4x2_test_module
+  SRCS
+    "tests/q8_matrix.loom"
+  LIBRARIES
+    "::q8_matrix"
+    "::q8_reference"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_64x64_waves_4x2_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_64x64_waves_4x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=flash_next.token_count=67"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=64"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_64x64_waves_4x2_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_64x64_waves_4x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=67"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=64"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_64x64_waves_4x2_test_execute_amdgpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_64x64_waves_4x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--config=flash_next.token_count=67"
+    "--config=q8_test.tile_columns=64"
+    "--config=q8_test.tile_rows=64"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    q8_matrix_128x128_waves_4x2_test_module
+  SRCS
+    "tests/q8_matrix.loom"
+  LIBRARIES
+    "::q8_matrix"
+    "::q8_reference"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_128x128_waves_4x2_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_128x128_waves_4x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=flash_next.token_count=131"
+    "--config=q8_test.tile_columns=128"
+    "--config=q8_test.tile_rows=128"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_128x128_waves_4x2_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_128x128_waves_4x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=131"
+    "--config=q8_test.tile_columns=128"
+    "--config=q8_test.tile_rows=128"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    q8_matrix_128x128_waves_4x2_test_execute_amdgpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_128x128_waves_4x2_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--config=flash_next.token_count=131"
+    "--config=q8_test.tile_columns=128"
+    "--config=q8_test.tile_rows=128"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
 loom_test_module(
   NAME
     hyperconnection_1_test_module
