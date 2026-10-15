@@ -26,6 +26,17 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
 )
 
 file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
+loom_module(
+  NAME
+    library
+  SRCS
+    "${_GLOB_X_LOOM}"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
+file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 loom_test_module(
   NAME
     unicode_test_module

@@ -27,7 +27,7 @@ loom_test(
         "block_projections.loom",
         "tests/adapter_down_traversal.loom",
         "tests/adapter_traversal.loom",
-        "//experimental/loom_serve/motifs/tensor:sources",
+        "//experimental/loom_serve/motifs/tensor:library",
     ],
     benchmark_smoke = False,
     configs = {"krea2.block_tokens": "80"},
@@ -44,7 +44,7 @@ loom_test(
         "block_int8.loom",
         "block_projections.loom",
         "tests/value_adapter.loom",
-        "//experimental/loom_serve/motifs/tensor:sources",
+        "//experimental/loom_serve/motifs/tensor:library",
     ],
     benchmark_smoke = False,
     execution_profiles = [
@@ -68,7 +68,7 @@ loom_test(
     srcs = [
         "block_attention.loom",
         "tests/attention_shared_k32.loom",
-        "//experimental/loom_serve/motifs/tensor:sources",
+        "//experimental/loom_serve/motifs/tensor:library",
     ],
     benchmark_smoke = False,
     configs = {"krea2.block_tokens": "64"},
