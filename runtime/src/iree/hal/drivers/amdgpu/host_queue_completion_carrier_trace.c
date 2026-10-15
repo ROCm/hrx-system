@@ -107,6 +107,54 @@ typedef struct iree_hal_amdgpu_completion_carrier_pm4_t {
   uint32_t dwords[IREE_HAL_AMDGPU_PM4_IB_SLOT_DWORD_CAPACITY];
 } iree_hal_amdgpu_completion_carrier_pm4_t;
 
+typedef enum iree_hal_amdgpu_completion_carrier_position_phase_e {
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_INITIAL = 0,
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_RESERVE = 1,
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_BEFORE_DOORBELL = 2,
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_AFTER_DOORBELL = 3,
+  IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_EXPORT = 4,
+} iree_hal_amdgpu_completion_carrier_position_phase_t;
+
+typedef struct iree_hal_amdgpu_completion_carrier_position_sample_t {
+  // Hardware-reported next AQL packet position.
+  uint64_t read_dispatch_id;
+  // Read position from the immediately preceding recorder sample.
+  uint64_t previous_read_dispatch_id;
+  // Producer-reserved next AQL packet position.
+  uint64_t write_dispatch_id;
+  // Write position from the immediately preceding recorder sample.
+  uint64_t previous_write_dispatch_id;
+  // Doorbell sequence active when the positions were sampled.
+  uint64_t doorbell_sequence;
+  // Recorder boundary at which the positions were sampled.
+  iree_hal_amdgpu_completion_carrier_position_phase_t phase;
+} iree_hal_amdgpu_completion_carrier_position_sample_t;
+
+typedef struct iree_hal_amdgpu_completion_carrier_position_history_t {
+  // Queue positions observed before recorder callbacks are installed.
+  iree_hal_amdgpu_completion_carrier_position_sample_t initial;
+  // Most recent queue positions observed by the recorder.
+  iree_hal_amdgpu_completion_carrier_position_sample_t last;
+  // First observation whose read position regressed from the prior sample.
+  iree_hal_amdgpu_completion_carrier_position_sample_t first_read_regression;
+  // First observation whose write position regressed from the prior sample.
+  iree_hal_amdgpu_completion_carrier_position_sample_t first_write_regression;
+  // First observation whose read position exceeded the producer write position.
+  iree_hal_amdgpu_completion_carrier_position_sample_t first_read_ahead;
+  // Greatest read position observed across all samples.
+  uint64_t max_read_dispatch_id;
+  // Greatest write position observed across all samples.
+  uint64_t max_write_dispatch_id;
+  // Number of queue-position samples taken.
+  uint64_t sample_count;
+  // Number of samples whose read position regressed from the prior sample.
+  uint64_t read_regression_count;
+  // Number of samples whose write position regressed from the prior sample.
+  uint64_t write_regression_count;
+  // Number of samples whose read position exceeded the producer write position.
+  uint64_t read_ahead_count;
+} iree_hal_amdgpu_completion_carrier_position_history_t;
+
 typedef struct iree_hal_amdgpu_completion_carrier_trace_t {
   // Queue whose reservation and doorbell boundaries are observed.
   iree_hal_amdgpu_host_queue_t* queue;
@@ -140,6 +188,8 @@ typedef struct iree_hal_amdgpu_completion_carrier_trace_t {
   int kfd_stop_error;
   // True when early KFD event bytes were displaced by newer events.
   bool kfd_event_overflow;
+  // Hardware and host AQL queue-position history.
+  iree_hal_amdgpu_completion_carrier_position_history_t positions;
   // Per-physical-slot reservation and reuse identity.
   iree_hal_amdgpu_completion_carrier_slot_t* slots;
   // Bounded chronological packet ledger.
@@ -481,10 +531,67 @@ static uint64_t iree_hal_amdgpu_completion_carrier_load_signal(
   return signal;
 }
 
+static iree_hal_amdgpu_completion_carrier_position_sample_t
+iree_hal_amdgpu_completion_carrier_trace_sample_positions(
+    iree_hal_amdgpu_completion_carrier_trace_t* trace,
+    iree_hal_amdgpu_completion_carrier_position_phase_t phase) {
+  iree_hal_amdgpu_completion_carrier_position_history_t* history =
+      &trace->positions;
+  iree_hal_amdgpu_completion_carrier_position_sample_t sample = {
+      .doorbell_sequence = trace->doorbell_count,
+      .phase = phase,
+  };
+  // Sample read before write. Producers can advance both positions while this
+  // diagnostic is active, but write is monotonic. A read position that exceeds
+  // the subsequently sampled write position therefore cannot be an artifact of
+  // sampling a newly consumed packet before its concurrent reservation.
+  sample.read_dispatch_id = (uint64_t)iree_atomic_load(
+      (iree_atomic_int64_t*)trace->queue->aql_ring.read_dispatch_id,
+      iree_memory_order_acquire);
+  sample.write_dispatch_id = (uint64_t)iree_atomic_load(
+      trace->queue->aql_ring.write_dispatch_id, iree_memory_order_acquire);
+  sample.previous_read_dispatch_id = history->sample_count == 0
+                                         ? sample.read_dispatch_id
+                                         : history->last.read_dispatch_id;
+  sample.previous_write_dispatch_id = history->sample_count == 0
+                                          ? sample.write_dispatch_id
+                                          : history->last.write_dispatch_id;
+  if (history->sample_count == 0) {
+    history->initial = sample;
+  } else if (sample.read_dispatch_id < history->last.read_dispatch_id) {
+    if (history->read_regression_count == 0) {
+      history->first_read_regression = sample;
+    }
+    ++history->read_regression_count;
+  }
+  if (sample.read_dispatch_id > sample.write_dispatch_id) {
+    if (history->read_ahead_count == 0) {
+      history->first_read_ahead = sample;
+    }
+    ++history->read_ahead_count;
+  }
+  if (history->sample_count != 0 &&
+      sample.write_dispatch_id < history->last.write_dispatch_id) {
+    if (history->write_regression_count == 0) {
+      history->first_write_regression = sample;
+    }
+    ++history->write_regression_count;
+  }
+  history->max_read_dispatch_id =
+      iree_max(history->max_read_dispatch_id, sample.read_dispatch_id);
+  history->max_write_dispatch_id =
+      iree_max(history->max_write_dispatch_id, sample.write_dispatch_id);
+  history->last = sample;
+  ++history->sample_count;
+  return sample;
+}
+
 static void iree_hal_amdgpu_completion_carrier_trace_reserve(
     void* user_data, uint64_t first_packet_id, uint32_t count) {
   iree_hal_amdgpu_completion_carrier_trace_t* trace =
       (iree_hal_amdgpu_completion_carrier_trace_t*)user_data;
+  iree_hal_amdgpu_completion_carrier_trace_sample_positions(
+      trace, IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_RESERVE);
   const uint64_t reservation_id = ++trace->reservation_count;
   if (!trace->has_reservation_position) {
     trace->next_reservation_packet_id = first_packet_id;
@@ -517,6 +624,8 @@ static void iree_hal_amdgpu_completion_carrier_trace_before_doorbell(
   iree_hal_amdgpu_completion_carrier_trace_t* trace =
       (iree_hal_amdgpu_completion_carrier_trace_t*)user_data;
   ++trace->doorbell_count;
+  iree_hal_amdgpu_completion_carrier_trace_sample_positions(
+      trace, IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_BEFORE_DOORBELL);
   trace->active_record_begin = trace->packet_count;
   trace->active_record_count = 0;
   trace->active_packet_count = 0;
@@ -646,6 +755,8 @@ static void iree_hal_amdgpu_completion_carrier_trace_after_doorbell(
   if (trace->active_packet_count != 0) {
     trace->next_doorbell_packet_id = final_packet_id + 1;
   }
+  iree_hal_amdgpu_completion_carrier_trace_sample_positions(
+      trace, IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_AFTER_DOORBELL);
   trace->active_record_count = 0;
   trace->active_packet_count = 0;
 }
@@ -684,6 +795,77 @@ static void iree_hal_amdgpu_completion_carrier_trace_write_kfd_events(
   }
 }
 
+static const char* iree_hal_amdgpu_completion_carrier_position_phase_name(
+    iree_hal_amdgpu_completion_carrier_position_phase_t phase) {
+  switch (phase) {
+    case IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_INITIAL:
+      return "initial";
+    case IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_RESERVE:
+      return "reserve";
+    case IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_BEFORE_DOORBELL:
+      return "before_doorbell";
+    case IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_AFTER_DOORBELL:
+      return "after_doorbell";
+    case IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_EXPORT:
+      return "export";
+  }
+  return "unknown";
+}
+
+static void iree_hal_amdgpu_completion_carrier_trace_write_position_sample(
+    FILE* file,
+    const iree_hal_amdgpu_completion_carrier_position_sample_t* sample) {
+  fprintf(
+      file,
+      "{\"read\":%" PRIu64 ",\"previous_read\":%" PRIu64 ",\"write\":%" PRIu64
+      ",\"previous_write\":%" PRIu64 ",\"doorbell\":%" PRIu64
+      ",\"phase\":\"%s\"}",
+      sample->read_dispatch_id, sample->previous_read_dispatch_id,
+      sample->write_dispatch_id, sample->previous_write_dispatch_id,
+      sample->doorbell_sequence,
+      iree_hal_amdgpu_completion_carrier_position_phase_name(sample->phase));
+}
+
+static void iree_hal_amdgpu_completion_carrier_trace_write_position_history(
+    FILE* file,
+    const iree_hal_amdgpu_completion_carrier_position_history_t* history) {
+  fprintf(file,
+          "{\"kind\":\"queue_positions\",\"samples\":%" PRIu64
+          ",\"max_read\":%" PRIu64 ",\"max_write\":%" PRIu64
+          ",\"read_regressions\":%" PRIu64 ",\"write_regressions\":%" PRIu64
+          ",\"read_ahead\":%" PRIu64 ",\"initial\":",
+          history->sample_count, history->max_read_dispatch_id,
+          history->max_write_dispatch_id, history->read_regression_count,
+          history->write_regression_count, history->read_ahead_count);
+  iree_hal_amdgpu_completion_carrier_trace_write_position_sample(
+      file, &history->initial);
+  fputs(",\"final\":", file);
+  iree_hal_amdgpu_completion_carrier_trace_write_position_sample(
+      file, &history->last);
+  fputs(",\"first_read_regression\":", file);
+  if (history->read_regression_count != 0) {
+    iree_hal_amdgpu_completion_carrier_trace_write_position_sample(
+        file, &history->first_read_regression);
+  } else {
+    fputs("null", file);
+  }
+  fputs(",\"first_write_regression\":", file);
+  if (history->write_regression_count != 0) {
+    iree_hal_amdgpu_completion_carrier_trace_write_position_sample(
+        file, &history->first_write_regression);
+  } else {
+    fputs("null", file);
+  }
+  fputs(",\"first_read_ahead\":", file);
+  if (history->read_ahead_count != 0) {
+    iree_hal_amdgpu_completion_carrier_trace_write_position_sample(
+        file, &history->first_read_ahead);
+  } else {
+    fputs("null", file);
+  }
+  fputs("}\n", file);
+}
+
 static void iree_hal_amdgpu_completion_carrier_trace_export(
     iree_hal_amdgpu_completion_carrier_trace_t* trace, const char* reason,
     uint64_t completed_epoch, uint64_t published_epoch,
@@ -691,6 +873,8 @@ static void iree_hal_amdgpu_completion_carrier_trace_export(
   if (trace->has_exported) {
     return;
   }
+  iree_hal_amdgpu_completion_carrier_trace_sample_positions(
+      trace, IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_EXPORT);
   iree_hal_amdgpu_completion_carrier_trace_stop_kfd_events(trace);
   trace->has_exported = true;
 
@@ -721,6 +905,9 @@ static void iree_hal_amdgpu_completion_carrier_trace_export(
           trace->has_unowned_packet ? "true" : "false",
           trace->packet_overflow ? "true" : "false",
           trace->pm4_overflow ? "true" : "false");
+
+  iree_hal_amdgpu_completion_carrier_trace_write_position_history(
+      file, &trace->positions);
 
   fprintf(
       file,
@@ -819,6 +1006,8 @@ iree_status_t iree_hal_amdgpu_host_queue_completion_carrier_trace_initialize(
   trace->allocator = queue->host_allocator;
   trace->kfd_event_fd = -1;
   trace->kfd_stop_fd = -1;
+  iree_hal_amdgpu_completion_carrier_trace_sample_positions(
+      trace, IREE_HAL_AMDGPU_COMPLETION_CARRIER_POSITION_PHASE_INITIAL);
 
   iree_status_t status =
       iree_allocator_malloc_array(trace->allocator, queue->aql_ring.mask + 1,
