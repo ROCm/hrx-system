@@ -225,7 +225,7 @@ amdf_status_t AMDF_CALL QueryExtension(amdf_extension_id_t id,
                                        const void** out_api) {
   static const amdf_gpu_api_t gpu = {
       .structure_size = sizeof(gpu),
-      .extension_version = AMDF_GPU_EXTENSION_VERSION_2,
+      .extension_version = AMDF_GPU_EXTENSION_VERSION_3,
       .endpoint_query_info = QueryTarget,
       .device_create = CreateDevice,
       .device_query_info = QueryDevice,
@@ -234,7 +234,7 @@ amdf_status_t AMDF_CALL QueryExtension(amdf_extension_id_t id,
       .event_destroy = DestroyEvent,
   };
   EXPECT_EQ(id, AMDF_EXTENSION_GPU);
-  EXPECT_EQ(minimum_version, AMDF_GPU_EXTENSION_VERSION_2);
+  EXPECT_EQ(minimum_version, AMDF_GPU_EXTENSION_VERSION_3);
   EXPECT_GE(maximum_version, minimum_version);
   *out_api = &gpu;
   return AMDF_STATUS_OK;

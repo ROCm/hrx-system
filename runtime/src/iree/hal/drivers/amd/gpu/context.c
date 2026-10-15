@@ -149,7 +149,7 @@ iree_status_t iree_hal_amd_gpu_context_allocate(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, IREE_HAL_AMD_STATUS_FROM_AMDF(
               fabric->api->query_extension(
-                  AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_2,
+                  AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_3,
                   AMDF_GPU_EXTENSION_VERSION_LATEST, &extension),
               "query_extension(GPU)"));
   iree_hal_amd_gpu_context_t* context = NULL;
