@@ -95,6 +95,28 @@ loom_library(
 
 [
     loom_test(
+        name = "hyperconnection_{}_test".format(capacity),
+        srcs = ["tests/hyperconnection.loom"],
+        benchmark_smoke = False,
+        configs = {"flash_next.token_count": str(capacity)},
+        execution_profiles = [
+            AMDGPU_HARDWARE_PROFILE,
+            AMDGPU_ACCESS_PROFILE,
+            AMDGPU_TSAN_PROFILE,
+        ],
+        deps = [
+            ":q8_reference",
+            ":residual_programs",
+        ],
+    )
+    for capacity in [
+        1,
+        5,
+    ]
+]
+
+[
+    loom_test(
         name = "prepared_q8_{}_test".format(capacity),
         srcs = ["tests/prepared_q8.loom"],
         benchmark_smoke = False,
