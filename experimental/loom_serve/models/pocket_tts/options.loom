@@ -1,0 +1,391 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+
+func.decl import("json") @parse_i64(%source: buffer, %offset: i64, %length: i64) -> (i64)
+
+func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
+
+// Each 32-byte numeric option record contains its padded 16-byte spelling,
+// spelling length, minimum, maximum, and default. Record order is model header
+// order: context, rotary, chunk tokens, input tokens, request rows, batch rows,
+// and threads. These ranges match the source configuration families.
+global.rodata.def @pocket.numeric_options = bytes("636f6e746578745f636170616369747910000000010000000000010000020000726f746172795f6361706163697479000f0000001000000000001000001000006368756e6b5f746f6b656e73000000000c000000010000000002000032000000696e7075745f746f6b656e73000000000c000000010000000000010000100000726571756573745f63617061636974791000000001000000000001000400000062617463685f636170616369747900000e0000000100000000000100040000007468726561647300000000000000000007000000010000000001000080000000")
+
+// voices, id, frames
+global.rodata.def @pocket.voices_key = bytes("766f69636573")
+
+global.rodata.def @pocket.id_key = bytes("6964")
+
+global.rodata.def @pocket.frames_key = bytes("6672616d6573")
+
+global.rodata.def @pocket.empty = bytes("")
+
+// expected unique Pocket geometry options and a nonempty voices array
+global.rodata.def @pocket.options_error = bytes("657870656374656420756e6971756520506f636b65742067656f6d65747279206f7074696f6e7320616e642061206e6f6e656d70747920766f69636573206172726179")
+
+// expected 1..256 unique voices with nonempty IDs up to 64 UTF-8 bytes and 1..65535 frames
+global.rodata.def @pocket.voices_error = bytes("657870656374656420312e2e32353620756e6971756520766f696365732077697468206e6f6e656d7074792049447320757020746f203634205554462d3820627974657320616e6420312e2e3635353335206672616d6573")
+
+// Pocket geometry must cover voice, text, generation, and rotary positions, with batch capacity <= request capacity
+global.rodata.def @pocket.geometry_error = bytes("506f636b65742067656f6d65747279206d75737420636f76657220766f6963652c20746578742c2067656e65726174696f6e2c20616e6420726f7461727920706f736974696f6e732c2077697468206261746368206361706163697479203c3d2072657175657374206361706163697479")
+
+func.def public @pocket.check(%valid: i1, %message: buffer) {
+  %condition = scalar.extui %valid : i1 to i32
+  func.call @require(%condition, %message) : (i32, buffer)
+  func.return
+}
+
+func.def @pocket.option_slice(%source: buffer, %begin: i64, %length: i64) -> (buffer) {
+  %begin_value = scalar.assume %begin [range(%begin, 0, 9223372036854775807)] : i64
+  %length_value = scalar.assume %length [range(%length, 0, 9223372036854775807)] : i64
+  %offset = index.cast %begin_value : i64 to offset
+  %bytes = index.cast %length_value : i64 to offset
+  %origin = index.constant 0 : offset
+  %result = buffer.alloca<private> align(8) %bytes : buffer
+  buffer.copy %source[%offset], %result[%origin], %bytes
+  func.return %result : buffer
+}
+
+func.def @pocket.option_equal(%decoded: buffer, %length: i64, %expected: buffer) -> (i1) {
+  %bytes = buffer.length %expected
+  %expected_length = index.cast %bytes : offset to i64
+  %same_length = scalar.cmpi eq, %length, %expected_length : i64
+  %matches = scf.if %same_length -> (i1) {
+    %origin = index.constant 0 : offset
+    %order = buffer.compare %decoded[%origin], %expected[%origin], %bytes
+    %zero = scalar.constant 0 : i32
+    %same = scalar.cmpi eq, %order, %zero : i32
+    scf.yield %same : i1
+  } else {
+    %false = scalar.constant false : i1
+    scf.yield %false : i1
+  }
+  func.return %matches : i1
+}
+
+// Voice records own ID byte length, waveform frame count, published readiness,
+// a reserved word, and 64 ID bytes. Cold preparation rejects duplicate IDs;
+// readiness is changed only by completion of the accepted conditioning copy.
+func.def public @pocket.voice_record(%model: buffer, %voice: i32) -> (view<4xi32>) {
+  %ordinal = index.cast %voice : i32 to index
+  %stride = index.constant 80 : offset
+  %header = index.constant 48 : offset
+  %relative = index.scale %ordinal, %stride : index, offset -> offset
+  %origin = index.add %header, %relative : offset
+  %record = buffer.view %model[%origin] : buffer -> view<4xi32>
+  func.return %record : view<4xi32>
+}
+
+func.def @pocket.parse_voices(%source: buffer) -> (buffer, i32, i32) {
+  %fields, %type, %count64 = func.call @members(%source) : (buffer) -> (buffer, i32, i64)
+  %zero32 = scalar.constant 0 : i32
+  %array_type = scalar.constant 3 : i32
+  %zero64 = scalar.constant 0 : i64
+  %limit = scalar.constant 256 : i64
+  %is_array = scalar.cmpi eq, %type, %array_type : i32
+  %nonempty = scalar.cmpi ugt, %count64, %zero64 : i64
+  %bounded = scalar.cmpi ule, %count64, %limit : i64
+  %valid_count = scalar.andi %nonempty, %bounded : i1
+  %valid = scalar.andi %is_array, %valid_count : i1
+  %error = global.load @pocket.voices_error : buffer
+  func.call @pocket.check(%valid, %error) : (i1, buffer)
+  %count_value = scalar.assume %count64 [range(%count64, 1, 256)] : i64
+  %count = index.cast %count_value : i64 to index
+  %origin = index.constant 0 : offset
+  %records = buffer.view %fields[%origin] : buffer -> view<[%count]x5xi64>
+  %stride = index.constant 80 : offset
+  %bytes = index.scale %count, %stride : index, offset -> offset
+  %voices = buffer.alloca<private> align(8) %bytes : buffer
+  buffer.fill %zero32, %voices[%origin], %bytes : i32
+  %begin = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %two64 = scalar.constant 2 : i64
+  %one64 = scalar.constant 1 : i64
+  %id_key = global.load @pocket.id_key : buffer
+  %frames_key = global.load @pocket.frames_key : buffer
+  %maximum = scf.for %i = [%begin to %count step %one](%maximum = %zero32 : i32) -> (i32) {
+    %value_type = view.load %records[%i, 4] : view<[%count]x5xi64> -> i64
+    %is_object = scalar.cmpi eq, %value_type, %two64 : i64
+    func.call @pocket.check(%is_object, %error) : (i1, buffer)
+    %value_begin = view.load %records[%i, 2] : view<[%count]x5xi64> -> i64
+    %value_length = view.load %records[%i, 3] : view<[%count]x5xi64> -> i64
+    %entry = func.call @pocket.option_slice(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (buffer)
+    %entry_fields, %entry_type, %field_count = func.call @members(%entry) : (buffer) -> (buffer, i32, i64)
+    %two_fields = scalar.cmpi eq, %field_count, %two64 : i64
+    func.call @pocket.check(%two_fields, %error) : (i1, buffer)
+    %entry_records = buffer.view %entry_fields[%origin] : buffer -> view<2x5xi64>
+    %entry_bytes = buffer.length %entry
+    %decoded = buffer.alloca<private> align(1) %entry_bytes : buffer
+    %record_origin = index.scale %i, %stride : index, offset -> offset
+    %record = buffer.view %voices[%record_origin] : buffer -> view<4xi32>
+    %id_header = index.constant 16 : offset
+    %id_origin = index.add %record_origin, %id_header : offset
+    %seen = scf.for %j = [%begin to %two step %one](%seen = %zero32 : i32) -> (i32) {
+      %key_begin = view.load %entry_records[%j, 0] : view<2x5xi64> -> i64
+      %key_length = view.load %entry_records[%j, 1] : view<2x5xi64> -> i64
+      %item_begin = view.load %entry_records[%j, 2] : view<2x5xi64> -> i64
+      %item_length = view.load %entry_records[%j, 3] : view<2x5xi64> -> i64
+      %item_type = view.load %entry_records[%j, 4] : view<2x5xi64> -> i64
+      %key_bytes = func.call @unescape(%entry, %key_begin, %key_length, %decoded, %zero64) : (buffer, i64, i64, buffer, i64) -> (i64)
+      %is_id = func.call @pocket.option_equal(%decoded, %key_bytes, %id_key) : (buffer, i64, buffer) -> (i1)
+      %is_frames = func.call @pocket.option_equal(%decoded, %key_bytes, %frames_key) : (buffer, i64, buffer) -> (i1)
+      %known = scalar.ori %is_id, %is_frames : i1
+      func.call @pocket.check(%known, %error) : (i1, buffer)
+      %one32 = scalar.constant 1 : i32
+      %two32 = scalar.constant 2 : i32
+      %bit = scf.select %is_id, %one32, %two32 : i32
+      %present = scalar.andi %seen, %bit : i32
+      %unique = scalar.cmpi eq, %present, %zero32 : i32
+      func.call @pocket.check(%unique, %error) : (i1, buffer)
+      scf.if %is_id {
+        %is_string = scalar.cmpi eq, %item_type, %zero64 : i64
+        func.call @pocket.check(%is_string, %error) : (i1, buffer)
+        %id_length = func.call @unescape(%entry, %item_begin, %item_length, %decoded, %zero64) : (buffer, i64, i64, buffer, i64) -> (i64)
+        %maximum_id = scalar.constant 64 : i64
+        %nonempty_id = scalar.cmpi ugt, %id_length, %zero64 : i64
+        %bounded_id = scalar.cmpi ule, %id_length, %maximum_id : i64
+        %valid_id = scalar.andi %nonempty_id, %bounded_id : i1
+        func.call @pocket.check(%valid_id, %error) : (i1, buffer)
+        %length32 = scalar.trunci %id_length : i64 to i32
+        view.store %length32, %record[0] : i32, view<4xi32>
+        %id_length_value = scalar.assume %id_length [range(%id_length, 1, 64)] : i64
+        %id_bytes = index.cast %id_length_value : i64 to offset
+        buffer.copy %decoded[%origin], %voices[%id_origin], %id_bytes
+      } else {
+        %is_number = scalar.cmpi eq, %item_type, %one64 : i64
+        func.call @pocket.check(%is_number, %error) : (i1, buffer)
+        %frames = func.call @parse_i64(%entry, %item_begin, %item_length) : (buffer, i64, i64) -> (i64)
+        %maximum_frames = scalar.constant 65535 : i64
+        %positive = scalar.cmpi sgt, %frames, %zero64 : i64
+        %bounded_frames = scalar.cmpi sle, %frames, %maximum_frames : i64
+        %valid_frames = scalar.andi %positive, %bounded_frames : i1
+        func.call @pocket.check(%valid_frames, %error) : (i1, buffer)
+        %frames32 = scalar.trunci %frames : i64 to i32
+        view.store %frames32, %record[1] : i32, view<4xi32>
+      }
+      %next_seen = scalar.ori %seen, %bit : i32
+      scf.yield %next_seen : i32
+    }
+    %id_length32 = view.load %record[0] : view<4xi32> -> i32
+    %id_length_value = scalar.assume %id_length32 [range(%id_length32, 1, 64)] : i32
+    %id_bytes = index.cast %id_length_value : i32 to offset
+    scf.for %j = [%begin to %i step %one] {
+      %previous_origin = index.scale %j, %stride : index, offset -> offset
+      %previous = buffer.view %voices[%previous_origin] : buffer -> view<4xi32>
+      %previous_length = view.load %previous[0] : view<4xi32> -> i32
+      %same_length = scalar.cmpi eq, %id_length32, %previous_length : i32
+      scf.if %same_length {
+        %previous_id = index.add %previous_origin, %id_header : offset
+        %order = buffer.compare %voices[%id_origin], %voices[%previous_id], %id_bytes
+        %distinct = scalar.cmpi ne, %order, %zero32 : i32
+        func.call @pocket.check(%distinct, %error) : (i1, buffer)
+      }
+    }
+    %frames = view.load %record[1] : view<4xi32> -> i32
+    %next_maximum = scalar.maxui %maximum, %frames : i32
+    scf.yield %next_maximum : i32
+  }
+  %count32 = scalar.trunci %count64 : i64 to i32
+  func.return %voices, %count32, %maximum : buffer, i32, i32
+}
+
+// Model metadata is twelve I32 header words followed by voice records. The
+// first seven fields follow numeric_options; voice count and maximum frames
+// follow, then three reserved words. Only voice readiness is mutable.
+func.def public @pocket.parse_options(%source: buffer) -> (buffer) {
+  %fields, %type, %count64 = func.call @members(%source) : (buffer) -> (buffer, i32, i64)
+  %object_type = scalar.constant 2 : i32
+  %maximum_fields = scalar.constant 8 : i64
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %bounded = scalar.cmpi ule, %count64, %maximum_fields : i64
+  %valid = scalar.andi %object, %bounded : i1
+  %error = global.load @pocket.options_error : buffer
+  func.call @pocket.check(%valid, %error) : (i1, buffer)
+  %count_value = scalar.assume %count64 [range(%count64, 0, 8)] : i64
+  %count = index.cast %count_value : i64 to index
+  %origin = index.constant 0 : offset
+  %records = buffer.view %fields[%origin] : buffer -> view<[%count]x5xi64>
+  %table = global.load @pocket.numeric_options : buffer
+  %schema = buffer.view %table[%origin] : buffer -> view<7x8xi32>
+  %header_bytes = index.constant 48 : offset
+  %values = buffer.alloca<private> align(8) %header_bytes : buffer
+  %zero32 = scalar.constant 0 : i32
+  buffer.fill %zero32, %values[%origin], %header_bytes : i32
+  %header = buffer.view %values[%origin] : buffer -> view<12xi32>
+  %begin = index.constant 0 : index
+  %one = index.constant 1 : index
+  %seven = index.constant 7 : index
+  scf.for %i = [%begin to %seven step %one] {
+    %default = view.load %schema[%i, 7] : view<7x8xi32> -> i32
+    view.store %default, %header[%i] : i32, view<12xi32>
+  }
+  %source_bytes = buffer.length %source
+  %decoded = buffer.alloca<private> align(1) %source_bytes : buffer
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %one32 = scalar.constant 1 : i32
+  %empty = global.load @pocket.empty : buffer
+  %voices_key = global.load @pocket.voices_key : buffer
+  %voices, %seen = scf.for %i = [%begin to %count step %one](%voices = %empty : buffer, %seen = %zero32 : i32) -> (buffer, i32) {
+    %key_begin = view.load %records[%i, 0] : view<[%count]x5xi64> -> i64
+    %key_length = view.load %records[%i, 1] : view<[%count]x5xi64> -> i64
+    %value_begin = view.load %records[%i, 2] : view<[%count]x5xi64> -> i64
+    %value_length = view.load %records[%i, 3] : view<[%count]x5xi64> -> i64
+    %value_type = view.load %records[%i, 4] : view<[%count]x5xi64> -> i64
+    %key_bytes = func.call @unescape(%source, %key_begin, %key_length, %decoded, %zero64) : (buffer, i64, i64, buffer, i64) -> (i64)
+    %is_voices = func.call @pocket.option_equal(%decoded, %key_bytes, %voices_key) : (buffer, i64, buffer) -> (i1)
+    %missing = scalar.constant -1 : i32
+    %voice_index = scalar.constant 7 : i32
+    %initial = scf.select %is_voices, %voice_index, %missing : i32
+    %selected = scf.for %j = [%begin to %seven step %one](%selected = %initial : i32) -> (i32) {
+      %length32 = view.load %schema[%j, 4] : view<7x8xi32> -> i32
+      %length64 = scalar.extui %length32 : i32 to i64
+      %same_length = scalar.cmpi eq, %key_bytes, %length64 : i64
+      %equal = scf.if %same_length -> (i1) {
+        %stride = index.constant 32 : offset
+        %key_origin = index.scale %j, %stride : index, offset -> offset
+        %length_value = scalar.assume %length32 [range(%length32, 1, 16)] : i32
+        %bytes = index.cast %length_value : i32 to offset
+        %order = buffer.compare %decoded[%origin], %table[%key_origin], %bytes
+        %matches = scalar.cmpi eq, %order, %zero32 : i32
+        scf.yield %matches : i1
+      } else {
+        %false = scalar.constant false : i1
+        scf.yield %false : i1
+      }
+      %index32 = index.cast %j : index to i32
+      %next = scf.select %equal, %index32, %selected : i32
+      scf.yield %next : i32
+    }
+    %known = scalar.cmpi ne, %selected, %missing : i32
+    func.call @pocket.check(%known, %error) : (i1, buffer)
+    %bit = scalar.shli %one32, %selected : i32
+    %previous = scalar.andi %seen, %bit : i32
+    %unique = scalar.cmpi eq, %previous, %zero32 : i32
+    func.call @pocket.check(%unique, %error) : (i1, buffer)
+    %next_voices = scf.if %is_voices -> (buffer) {
+      %array = scalar.constant 3 : i64
+      %is_array = scalar.cmpi eq, %value_type, %array : i64
+      func.call @pocket.check(%is_array, %error) : (i1, buffer)
+      %voice_source = func.call @pocket.option_slice(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (buffer)
+      %parsed, %voice_count, %voice_frames = func.call @pocket.parse_voices(%voice_source) : (buffer) -> (buffer, i32, i32)
+      view.store %voice_count, %header[7] : i32, view<12xi32>
+      view.store %voice_frames, %header[8] : i32, view<12xi32>
+      scf.yield %parsed : buffer
+    } else {
+      %number = scalar.cmpi eq, %value_type, %one64 : i64
+      func.call @pocket.check(%number, %error) : (i1, buffer)
+      %value = func.call @parse_i64(%source, %value_begin, %value_length) : (buffer, i64, i64) -> (i64)
+      %selected_value = scalar.assume %selected [range(%selected, 0, 6)] : i32
+      %index = index.cast %selected_value : i32 to index
+      %minimum32 = view.load %schema[%index, 5] : view<7x8xi32> -> i32
+      %maximum32 = view.load %schema[%index, 6] : view<7x8xi32> -> i32
+      %minimum = scalar.extui %minimum32 : i32 to i64
+      %maximum = scalar.extui %maximum32 : i32 to i64
+      %above = scalar.cmpi sge, %value, %minimum : i64
+      %below = scalar.cmpi sle, %value, %maximum : i64
+      %in_range = scalar.andi %above, %below : i1
+      func.call @pocket.check(%in_range, %error) : (i1, buffer)
+      %value32 = scalar.trunci %value : i64 to i32
+      view.store %value32, %header[%index] : i32, view<12xi32>
+      scf.yield %voices : buffer
+    }
+    %next_seen = scalar.ori %seen, %bit : i32
+    scf.yield %next_voices, %next_seen : buffer, i32
+  }
+  %voice_bit = scalar.constant 128 : i32
+  %present = scalar.andi %seen, %voice_bit : i32
+  %has_voices = scalar.cmpi ne, %present, %zero32 : i32
+  func.call @pocket.check(%has_voices, %error) : (i1, buffer)
+  %context = view.load %header[0] : view<12xi32> -> i32
+  %rotary = view.load %header[1] : view<12xi32> -> i32
+  %chunk = view.load %header[2] : view<12xi32> -> i32
+  %requests = view.load %header[4] : view<12xi32> -> i32
+  %batch = view.load %header[5] : view<12xi32> -> i32
+  %frames = view.load %header[8] : view<12xi32> -> i32
+  %c25 = scalar.constant 25 : i32
+  %c5 = scalar.constant 5 : i32
+  %c6 = scalar.constant 6 : i32
+  %c16 = scalar.constant 16 : i32
+  %scaled = scalar.muli %chunk, %c25 : i32
+  %rounded = scalar.addi %scaled, %c5 : i32
+  %base = scalar.divui %rounded, %c6 : i32
+  %generation = scalar.addi %base, %c25 : i32
+  %prefix = scalar.addi %frames, %one32 : i32
+  %text_prefix = scalar.addi %prefix, %chunk : i32
+  %extent = scalar.addi %text_prefix, %generation : i32
+  %fits_context = scalar.cmpi ule, %extent, %context : i32
+  %codec_frames = scalar.maxui %frames, %generation : i32
+  %codec_positions = scalar.muli %codec_frames, %c16 : i32
+  %positions = scalar.maxui %codec_positions, %context : i32
+  %fits_rotary = scalar.cmpi ule, %positions, %rotary : i32
+  %fits_rows = scalar.cmpi ule, %batch, %requests : i32
+  %fits_positions = scalar.andi %fits_context, %fits_rotary : i1
+  %geometry_valid = scalar.andi %fits_positions, %fits_rows : i1
+  %geometry_error = global.load @pocket.geometry_error : buffer
+  func.call @pocket.check(%geometry_valid, %geometry_error) : (i1, buffer)
+  %voice_bytes = buffer.length %voices
+  %model_bytes = index.add %header_bytes, %voice_bytes : offset
+  %model = buffer.alloca<private> align(8) %model_bytes : buffer
+  buffer.copy %values[%origin], %model[%origin], %header_bytes
+  buffer.copy %voices[%origin], %model[%header_bytes], %voice_bytes
+  func.return %model : buffer
+}
+
+global.rodata.def @pocket.config_prefix = bytes("706f636b65742e")
+
+global.rodata.def @pocket.voice_count_key = bytes("706f636b65742e766f6963655f636f756e74")
+
+global.rodata.def @pocket.voice_frame_capacity_key = bytes("706f636b65742e766f6963655f6672616d655f6361706163697479")
+
+func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
+
+func.def public @pocket.configure(%stage: i32, %model: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %model[%origin] : buffer -> view<12xi32>
+  %table = global.load @pocket.numeric_options : buffer
+  %schema = buffer.view %table[%origin] : buffer -> view<7x8xi32>
+  %begin = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %seven = index.constant 7 : index
+  %prefix = global.load @pocket.config_prefix : buffer
+  %prefix_bytes = index.constant 7 : offset
+  %record_stride = index.constant 32 : offset
+  scf.for %i = [%begin to %seven step %one] {
+    %position_config = index.cmp ult, %i, %two : index
+    %execution_config = index.cmp uge, %i, %four : index
+    %device_config = scalar.ori %position_config, %execution_config : i1
+    scf.if %device_config {
+      %length32 = view.load %schema[%i, 4] : view<7x8xi32> -> i32
+      %length_value = scalar.assume %length32 [range(%length32, 1, 16)] : i32
+      %length = index.cast %length_value : i32 to offset
+      %bytes = index.add %prefix_bytes, %length : offset
+      %key = buffer.alloca<private> align(1) %bytes : buffer
+      %record_origin = index.scale %i, %record_stride : index, offset -> offset
+      buffer.copy %prefix[%origin], %key[%origin], %prefix_bytes
+      buffer.copy %table[%record_origin], %key[%prefix_bytes], %length
+      %value32 = view.load %header[%i] : view<12xi32> -> i32
+      %value = scalar.extui %value32 : i32 to i64
+      func.call @config_i64(%stage, %key, %value) : (i32, buffer, i64)
+    }
+  }
+  %voice_count32 = view.load %header[7] : view<12xi32> -> i32
+  %voice_frames32 = view.load %header[8] : view<12xi32> -> i32
+  %voice_count = scalar.extui %voice_count32 : i32 to i64
+  %voice_frames = scalar.extui %voice_frames32 : i32 to i64
+  %voice_count_key = global.load @pocket.voice_count_key : buffer
+  %voice_frames_key = global.load @pocket.voice_frame_capacity_key : buffer
+  func.call @config_i64(%stage, %voice_count_key, %voice_count) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %voice_frames_key, %voice_frames) : (i32, buffer, i64)
+  func.return
+}
