@@ -6,7 +6,7 @@
 
 load("@rules_python//python:defs.bzl", "py_binary")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "AMDGPU_TSAN_PROFILE")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "AMDGPU_TSAN_BYTE_GRANULE_PROFILE", "AMDGPU_TSAN_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -204,24 +204,33 @@ loom_library(
     srcs = ["tests/quantized_reference.loom"],
 )
 
-loom_test(
-    name = "expert_matrix_test",
-    srcs = [
-        "tests/expert_matrix.loom",
-        "tests/expert_matrix_reference.loom",
-    ],
-    benchmark_smoke = False,
-    configs = {"flash_next.token_count": "19"},
-    execution_profiles = [
-        AMDGPU_HARDWARE_PROFILE,
-        AMDGPU_ACCESS_PROFILE,
-        AMDGPU_TSAN_PROFILE,
-    ],
-    deps = [
-        ":quantized_reference",
-        ":residual_programs",
-    ],
-)
+[
+    loom_test(
+        name = "expert_matrix_{}_test".format(rows),
+        srcs = [
+            "tests/expert_matrix.loom",
+            "tests/expert_matrix_reference.loom",
+        ],
+        benchmark_smoke = False,
+        configs = {
+            "expert_test.tile_rows": str(rows),
+            "flash_next.token_count": str(rows + 3),
+        },
+        execution_profiles = [
+            AMDGPU_HARDWARE_PROFILE,
+            AMDGPU_ACCESS_PROFILE,
+            AMDGPU_TSAN_BYTE_GRANULE_PROFILE,
+        ],
+        deps = [
+            ":quantized_reference",
+            ":residual_programs",
+        ],
+    )
+    for rows in [
+        64,
+        128,
+    ]
+]
 
 loom_test(
     name = "quantized_test",
