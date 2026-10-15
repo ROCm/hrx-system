@@ -14,6 +14,8 @@ global.rodata.def @height_key = bytes("7177656e33382e766973696f6e2e696d6167655f6
 
 global.rodata.def @width_key = bytes("7177656e33382e766973696f6e2e696d6167655f7769647468")
 
+global.rodata.def @image_count_key = bytes("7177656e33382e766973696f6e2e696d6167655f636f756e74")
+
 global.rodata.def @checkpoint = bytes("6d6d70726f6a2d4631362e67677566")
 
 global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
@@ -36,20 +38,27 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   func.call @require(%valid32, %diagnostic) : (i32, buffer)
 
   %root = global.load @root : buffer
-  %stage = func.call @stage(%root, %zero64) : (buffer, i64) -> (i32)
   %geometry = scalar.constant 256 : i64
   %height_key = global.load @height_key : buffer
-  func.call @config_i64(%stage, %height_key, %geometry) : (i32, buffer, i64)
   %width_key = global.load @width_key : buffer
-  func.call @config_i64(%stage, %width_key, %geometry) : (i32, buffer, i64)
+  %image_count_key = global.load @image_count_key : buffer
   %binding = scalar.constant 0 : i32
   %checkpoint = global.load @checkpoint : buffer
   %policy = global.load @policy : buffer
-  func.call @parameter(%stage, %binding, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  %c1 = index.constant 1 : index
+  %c5 = index.constant 5 : index
+  scf.for %image_count = [%c1 to %c5 step %c1] {
+    %count64 = index.cast %image_count : index to i64
+    %stage = func.call @stage(%root, %count64) : (buffer, i64) -> (i32)
+    func.call @config_i64(%stage, %height_key, %geometry) : (i32, buffer, i64)
+    func.call @config_i64(%stage, %width_key, %geometry) : (i32, buffer, i64)
+    func.call @config_i64(%stage, %image_count_key, %count64) : (i32, buffer, i64)
+    func.call @parameter(%stage, %binding, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  }
 
-  %batch_units = scalar.constant 1 : i64
-  %upload_bytes = scalar.constant 196672 : i64
-  %output_bytes = scalar.constant 1310720 : i64
+  %batch_units = scalar.constant 4 : i64
+  %upload_bytes = scalar.constant 786688 : i64
+  %output_bytes = scalar.constant 5242880 : i64
   %state_bytes = index.constant 1 : offset
   %state = buffer.alloca<private> align(1) %state_bytes : buffer
   %origin = index.constant 0 : offset
