@@ -26,7 +26,7 @@ kernel.decl @qsa_score_blocks() launch(%query_begin_arg: index, %index_origin: o
 
 kernel.decl @qsa_select_blocks() launch(%query_begin_arg: index, %span: buffer, %mapping: buffer, %scores: buffer, %selected: buffer)
 
-kernel.decl @flash_next_linear_q8(%output_capacity: index) launch(%input_width: index, %output_width: index, %span_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer)
+template.decl @flash_next.project_dense_q8(%inputs: index, %outputs: index, %blocks: index, %span: buffer, %input: buffer, %weight: view<[%outputs]x[%blocks]x34xi8>, %output: buffer)
 
 kernel.decl @gdn_project_alpha_beta() launch(%span_arg: buffer, %input_arg: buffer, %alpha_weight_arg: buffer, %beta_weight_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer)
 
@@ -61,8 +61,14 @@ command.program.def public @flash_next_qsa_append(%layer: index, %key_origin: of
   kernel.launch @qsa_pool_blocks(%tail_origin, %span, %mapping, %rows, %index_key_raw, %arena, %pooled) : (offset, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qsa_prepare_blocks(%index_origin, %span, %mapping, %rows, %pooled, %index_key_norm, %arena) : (offset, buffer, buffer, buffer, buffer, view<128xf32>, buffer)
   kernel.launch @qsa_publish_tail(%tail_origin, %span, %rows, %index_key_raw, %arena) : (offset, buffer, buffer, buffer, buffer)
-  kernel.launch @flash_next_linear_q8[%small_width](%hidden_width, %small_width, %span, %input, %key_weight, %keys) : [index](index, index, buffer, buffer, view<512x80x34xi8>, buffer)
-  kernel.launch @flash_next_linear_q8[%small_width](%hidden_width, %small_width, %span, %input, %value_weight, %values) : [index](index, index, buffer, buffer, view<512x80x34xi8>, buffer)
+  %key_weight_block_size = index.constant 32 : index
+  %key_weight_blocks = index.div %hidden_width, %key_weight_block_size : index
+  %key_weight_shaped = view.refine %key_weight : view<512x80x34xi8> -> view<[%small_width]x[%key_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%hidden_width, %small_width, %key_weight_blocks, %span, %input, %key_weight_shaped, %keys) : (index, index, index, buffer, buffer, view<[%small_width]x[%key_weight_blocks]x34xi8>, buffer)
+  %value_weight_block_size = index.constant 32 : index
+  %value_weight_blocks = index.div %hidden_width, %value_weight_block_size : index
+  %value_weight_shaped = view.refine %value_weight : view<512x80x34xi8> -> view<[%small_width]x[%value_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%hidden_width, %small_width, %value_weight_blocks, %span, %input, %value_weight_shaped, %values) : (index, index, index, buffer, buffer, view<[%small_width]x[%value_weight_blocks]x34xi8>, buffer)
   kernel.launch @qsa_append_kv(%key_origin, %value_origin, %span, %mapping, %rows, %keys, %values, %key_norm, %arena) : (offset, offset, buffer, buffer, buffer, buffer, buffer, view<256xf32>, buffer)
   command.return
 }
@@ -108,7 +114,10 @@ command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin:
   command.program.launch @flash_next_qsa_append[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %span, %mapping, %rows, %input, %arena, %capture) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qsa_linear_bf16[%small_width](%small_width, %span, %input, %index_query_weight, %index_query_raw) : [index](index, buffer, buffer, view<512x2560xbf16>, buffer)
   kernel.launch @qsa_prepare_queries[%c4](%index_width, %c4, %index_width, %span, %mapping, %index_query_raw, %index_query_norm, %index_query) : [index](index, index, index, buffer, buffer, buffer, view<128xf32>, buffer)
-  kernel.launch @flash_next_linear_q8[%query_gate_width](%hidden_width, %query_gate_width, %span, %input, %query_weight, %query_gate) : [index](index, index, buffer, buffer, view<12288x80x34xi8>, buffer)
+  %query_weight_block_size = index.constant 32 : index
+  %query_weight_blocks = index.div %hidden_width, %query_weight_block_size : index
+  %query_weight_shaped = view.refine %query_weight : view<12288x80x34xi8> -> view<[%query_gate_width]x[%query_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%hidden_width, %query_gate_width, %query_weight_blocks, %span, %input, %query_weight_shaped, %query_gate) : (index, index, index, buffer, buffer, view<[%query_gate_width]x[%query_weight_blocks]x34xi8>, buffer)
   kernel.launch @qsa_prepare_queries[%c24](%head_width, %c24, %small_width, %span, %mapping, %query_gate, %query_norm, %query) : [index](index, index, index, buffer, buffer, buffer, view<256xf32>, buffer)
   %query_zero = index.constant 0 : index
   scf.for %query_begin = [%query_zero to %tokens step %query_capacity] unroll {
@@ -116,6 +125,9 @@ command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin:
     kernel.launch @qsa_select_blocks(%query_begin, %span, %mapping, %scores, %selected) : (index, buffer, buffer, buffer, buffer)
   }
   kernel.launch @qsa_selected_attention(%key_origin, %value_origin, %span, %mapping, %rows, %query, %query_gate, %arena, %selected, %attended) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-  kernel.launch @flash_next_linear_q8[%hidden_width](%output_width, %hidden_width, %span, %attended, %output_weight, %output) : [index](index, index, buffer, buffer, view<2560x192x34xi8>, buffer)
+  %output_weight_block_size = index.constant 32 : index
+  %output_weight_blocks = index.div %output_width, %output_weight_block_size : index
+  %output_weight_shaped = view.refine %output_weight : view<2560x192x34xi8> -> view<[%hidden_width]x[%output_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%output_width, %hidden_width, %output_weight_blocks, %span, %attended, %output_weight_shaped, %output) : (index, index, index, buffer, buffer, view<[%hidden_width]x[%output_weight_blocks]x34xi8>, buffer)
   command.return
 }
