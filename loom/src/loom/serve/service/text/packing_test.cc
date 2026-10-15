@@ -46,23 +46,38 @@ TEST(PackingTest, PromptChunksFillAroundDecodeAndShortTails) {
 }
 
 TEST(PackingTest, CapacityPressureRotatesWithoutStarvation) {
-  const loom_serve_ready_span_t ready[] = {{100, 1}, {1, 1}, {100, 1}, {1, 1},
-                                           {100, 1}, {1, 1}, {100, 1}, {1, 1}};
-  for (iree_host_size_t span_capacity : {2u, 8u}) {
-    loom_serve_packed_span_t spans[8];
-    iree_host_size_t cursor = 0;
-    iree_host_size_t visits[8] = {};
-    for (int epoch = 0; epoch < 4; ++epoch) {
-      ASSERT_EQ(
-          loom_serve_pack_spans(8, ready, 2, span_capacity, 32, &cursor, spans),
-          2);
-      for (const auto& span : {spans[0], spans[1]}) {
-        EXPECT_EQ(span.token_count, 1);
-        ++visits[span.row_index];
+  const loom_serve_packing_shape_t shapes[] = {{2, 8}, {8, 2}};
+  for (uint32_t mask = 1; mask < 256; ++mask) {
+    SCOPED_TRACE(mask);
+    loom_serve_ready_span_t ready[8] = {};
+    iree_host_size_t ready_count = 0;
+    for (iree_host_size_t row = 0; row < 8; ++row) {
+      if (mask & (1u << row)) {
+        ready[row] = {100, 1};
+        ++ready_count;
       }
     }
-    for (auto count : visits) {
-      EXPECT_EQ(count, 1);
+    for (const auto& shape : shapes) {
+      SCOPED_TRACE(shape.token_capacity);
+      for (iree_host_size_t start = 0; start < 8; ++start) {
+        SCOPED_TRACE(start);
+        loom_serve_packed_span_t spans[8];
+        iree_host_size_t cursor = start;
+        iree_host_size_t visits[8] = {};
+        const iree_host_size_t expected_count = iree_min(ready_count, 2);
+        for (iree_host_size_t epoch = 0; epoch < ready_count; ++epoch) {
+          ASSERT_EQ(
+              loom_serve_pack_spans(8, ready, shape.token_capacity,
+                                    shape.span_capacity, 8, &cursor, spans),
+              expected_count);
+          for (iree_host_size_t i = 0; i < expected_count; ++i) {
+            ++visits[spans[i].row_index];
+          }
+        }
+        for (iree_host_size_t row = 0; row < 8; ++row) {
+          EXPECT_EQ(visits[row], (mask & (1u << row)) ? expected_count : 0);
+        }
+      }
     }
   }
 }
@@ -77,6 +92,67 @@ TEST(PackingTest, PromptExpansionRotatesWhenAllRowsFit) {
     EXPECT_EQ(spans[0].token_count, 6);
     EXPECT_EQ(spans[1].token_count, 1);
     EXPECT_EQ(spans[2].token_count, 1);
+  }
+}
+
+TEST(PackingTest, PromptExpansionRotatesAcrossEveryReadyRowLayout) {
+  for (uint32_t mask = 1; mask < 256; ++mask) {
+    SCOPED_TRACE(mask);
+    loom_serve_ready_span_t ready[8] = {};
+    iree_host_size_t ready_count = 0;
+    for (iree_host_size_t row = 0; row < 8; ++row) {
+      if (mask & (1u << row)) {
+        ready[row] = {64, 1};
+        ++ready_count;
+      }
+    }
+    for (iree_host_size_t start = 0; start < 8; ++start) {
+      SCOPED_TRACE(start);
+      iree_host_size_t cursor = start;
+      iree_host_size_t expanded[8] = {};
+      loom_serve_packed_span_t spans[8];
+      for (iree_host_size_t epoch = 0; epoch < ready_count; ++epoch) {
+        ASSERT_EQ(loom_serve_pack_spans(8, ready, 16, ready_count, 16, &cursor,
+                                        spans),
+                  ready_count);
+        for (iree_host_size_t i = 0; i < ready_count; ++i) {
+          expanded[spans[i].row_index] += spans[i].token_count > 1;
+        }
+      }
+      for (iree_host_size_t row = 0; row < 8; ++row) {
+        EXPECT_EQ(expanded[row], (mask & (1u << row)) ? 1 : 0);
+      }
+    }
+  }
+}
+
+TEST(PackingTest, DeferredVerifierGetsNextPriorityAcrossInactiveRows) {
+  const loom_serve_ready_span_t ready[] = {{4, 4}, {4, 4}, {30, 1}, {0, 0}};
+  loom_serve_packed_span_t spans[4];
+  iree_host_size_t cursor = 0;
+  iree_host_size_t visits[4] = {};
+  for (iree_host_size_t epoch = 0; epoch < 2; ++epoch) {
+    ASSERT_EQ(loom_serve_pack_spans(4, ready, 5, 4, 5, &cursor, spans), 2);
+    for (iree_host_size_t i = 0; i < 2; ++i) {
+      EXPECT_EQ(spans[i].token_count, ready[spans[i].row_index].minimum_count);
+      ++visits[spans[i].row_index];
+    }
+  }
+  EXPECT_EQ(visits[0], 1);
+  EXPECT_EQ(visits[1], 1);
+  EXPECT_EQ(visits[2], 2);
+  EXPECT_EQ(visits[3], 0);
+}
+
+TEST(PackingTest, IneligibleMinimumDoesNotPinExpansionPriority) {
+  const loom_serve_ready_span_t ready[] = {{16, 16}, {32, 1}, {32, 1}, {0, 0}};
+  loom_serve_packed_span_t spans[4];
+  iree_host_size_t cursor = 0;
+  for (iree_host_size_t row : {1u, 2u}) {
+    ASSERT_EQ(loom_serve_pack_spans(4, ready, 8, 2, 8, &cursor, spans), 2);
+    EXPECT_EQ(spans[0].row_index, row);
+    EXPECT_EQ(spans[0].token_count, 7);
+    EXPECT_EQ(spans[1].token_count, 1);
   }
 }
 
@@ -171,12 +247,12 @@ TEST(PackingTest, ShapePlanningKeepsTokenAndSpanConstraintsIndependent) {
                                    scratch, &shape),
             4);
   EXPECT_EQ(shape, 2);
-  EXPECT_EQ(cursor, 4);
+  const iree_host_size_t saved_cursor = cursor;
   const loom_serve_ready_span_t empty[8] = {};
   EXPECT_EQ(loom_serve_pack_shapes(8, empty, 3, shapes, 512, &cursor, spans,
                                    scratch, &shape),
             0);
-  EXPECT_EQ(cursor, 4);
+  EXPECT_EQ(cursor, saved_cursor);
 }
 
 TEST(PackingTest, ShapePlanningHonorsChunkLimitBeforeSizing) {

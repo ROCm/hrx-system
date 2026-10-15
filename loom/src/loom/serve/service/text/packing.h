@@ -46,10 +46,12 @@ typedef struct loom_serve_packing_shape_t {
 // the gap. This preserves complete verifiers while allowing prompt tails to
 // share work.
 //
-// row_count, token_capacity, span_capacity and chunk_size are positive. cursor
+// row_count, token_capacity, span_capacity, and chunk_size are positive. cursor
 // is below row_count. spans has room for min(row_count, span_capacity) entries.
-// Rotation bounds starvation when the shape cannot admit every ready row and
-// distributes large prompt chunks when it can. Only the caller commits model
+// The first deferred row whose minimum fits this shape gets next priority.
+// When every eligible row fits, priority advances past the first admitted row
+// so prompt expansion rotates across ready rows, including around idle gaps.
+// Empty readiness leaves cursor unchanged. Only the caller commits model
 // progress, after execution succeeds; output credit determines readiness.
 iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
                                        const loom_serve_ready_span_t* ready,

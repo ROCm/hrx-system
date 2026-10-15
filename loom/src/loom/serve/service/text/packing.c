@@ -17,13 +17,19 @@ iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
                                        loom_serve_packed_span_t* spans) {
   iree_host_size_t count = 0;
   iree_host_size_t remaining = token_capacity;
-  iree_host_size_t visited = 0;
-  for (; visited < row_count && count < span_capacity && remaining; ++visited) {
+  iree_host_size_t deferred_row = row_count;
+  for (iree_host_size_t visited = 0; visited < row_count; ++visited) {
     const iree_host_size_t row = (*cursor + visited) % row_count;
-    if (ready[row].token_count && ready[row].minimum_count <= remaining) {
+    if (!ready[row].token_count || ready[row].minimum_count > token_capacity) {
+      continue;
+    }
+    if (count < span_capacity && ready[row].minimum_count <= remaining) {
       spans[count++] =
           (loom_serve_packed_span_t){row, ready[row].minimum_count};
       remaining -= ready[row].minimum_count;
+    } else if (deferred_row == row_count) {
+      // Filling a later gap must not lose the first deferred row's priority.
+      deferred_row = row;
     }
   }
   for (iree_host_size_t i = 0; i < count && remaining; ++i) {
@@ -37,7 +43,8 @@ iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
     remaining -= extra;
   }
   if (count) {
-    *cursor = (*cursor + (visited < row_count ? visited : 1)) % row_count;
+    *cursor = deferred_row < row_count ? deferred_row
+                                       : (spans[0].row_index + 1) % row_count;
   }
   return count;
 }
