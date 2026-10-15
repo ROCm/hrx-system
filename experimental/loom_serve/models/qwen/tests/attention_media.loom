@@ -1,0 +1,88 @@
+kernel.decl @qwen38_attention_query_prepare_spans(%token_capacity: index, %span_capacity: index) launch(%mixed_inputs: index, %epoch: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer, %input_tokens: buffer)
+
+kernel.decl @attention_query_prepare_reference(%token_count: index) launch(%control: buffer, %source_position: i32, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer)
+
+kernel.def @media_attention_header() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<8xi32>
+  %one = scalar.constant 1 : i32
+  view.store %one, %header[0] : i32, view<8xi32>
+  view.store %one, %header[1] : i32, view<8xi32>
+  view.store %one, %header[2] : i32, view<8xi32>
+  view.store %one, %header[3] : i32, view<8xi32>
+  kernel.return
+}
+
+// Assemble an independent reference from three ordinary text rotations.
+// Explicit bit sets encode the height and width frequency-pair positions;
+// temporal pairs and the unrotated head suffix come from the first result.
+kernel.def @interleave_reference_axes() {
+  %one = index.constant 1 : index
+  %heads = index.constant 24 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%heads, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%temporal: buffer, %height: buffer, %width: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %head = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c256 = index.constant 256 : index
+  %pair = index.rem %lane, %c32 : index
+  %pair_word = index.cast %pair : index to i32
+  %one = scalar.constant 1 : i32
+  %bit = scalar.shli %one, %pair_word : i32
+  %height_mask = scalar.constant -1840700270 : i32
+  %width_mask = scalar.constant 613566756 : i32
+  %zero = scalar.constant 0 : i32
+  %height_bit = scalar.andi %bit, %height_mask : i32
+  %width_bit = scalar.andi %bit, %width_mask : i32
+  %height_pair = scalar.cmpi ne, %height_bit, %zero : i32
+  %width_pair = scalar.cmpi ne, %width_bit, %zero : i32
+  %rotated = index.cmp ult, %lane, %c64 : index
+  %height_lane = scalar.andi %rotated, %height_pair : i1
+  %width_lane = scalar.andi %rotated, %width_pair : i1
+  %temporal_or_height = scf.select %height_lane, %height, %temporal : buffer
+  %source = scf.select %width_lane, %width, %temporal_or_height : buffer
+  %base = index.mul %head, %c256 : index
+  %element_value = index.add %base, %lane : index
+  %element = index.assume %element_value [range(%element_value, 0, 6143)] : index
+  %input = buffer.view %source[%origin] : buffer -> view<6144xf32>
+  %result = buffer.view %output[%origin] : buffer -> view<6144xf32>
+  %value = view.load %input[%element] : view<6144xf32> -> f32
+  view.store %value, %result[%element] : f32, view<6144xf32>
+  kernel.return
+}
+
+check.case public @media_query_uses_three_rotary_axes {
+  %one = check.literal value(1) : index
+  %epsilon = check.literal value(9.9999999999999995e-07) : f32
+  %temporal_position = check.literal value(7) : i32
+  %height_position = check.literal value(13) : i32
+  %width_position = check.literal value(19) : i32
+  %epoch = check.generate.fill value(0) : tensor<8xi32>
+  %control = check.generate.iota offset(1) step(-1) : tensor<2xi32>
+  // Record fields two through four carry distinct temporal/height/width values.
+  %inputs = check.generate.iota offset(-5) step(6) : tensor<8xi32>
+  %projection = check.generate.iota offset(-0.5) step(0.000125) period(4051) : tensor<12288xf32>
+  %weight = check.generate.iota offset(0.75) step(0.0009765625) : tensor<256xf32>
+  %temporal = check.generate.fill value(0.0) : tensor<6144xf32>
+  %height = check.generate.fill value(0.0) : tensor<6144xf32>
+  %width = check.generate.fill value(0.0) : tensor<6144xf32>
+  %expected = check.generate.fill value(0.0) : tensor<6144xf32>
+  %expected_gate = check.generate.fill value(0.0) : tensor<6144xf32>
+  %actual = check.generate.fill value(0.0) : tensor<6144xf32>
+  %actual_gate = check.generate.fill value(0.0) : tensor<6144xf32>
+  kernel.launch @media_attention_header(%epoch) : (tensor<8xi32>)
+  kernel.launch @attention_query_prepare_reference[%one](%control, %temporal_position, %epsilon, %projection, %weight, %temporal, %expected_gate) : [index](tensor<2xi32>, i32, f32, tensor<12288xf32>, tensor<256xf32>, tensor<6144xf32>, tensor<6144xf32>)
+  kernel.launch @attention_query_prepare_reference[%one](%control, %height_position, %epsilon, %projection, %weight, %height, %expected_gate) : [index](tensor<2xi32>, i32, f32, tensor<12288xf32>, tensor<256xf32>, tensor<6144xf32>, tensor<6144xf32>)
+  kernel.launch @attention_query_prepare_reference[%one](%control, %width_position, %epsilon, %projection, %weight, %width, %expected_gate) : [index](tensor<2xi32>, i32, f32, tensor<12288xf32>, tensor<256xf32>, tensor<6144xf32>, tensor<6144xf32>)
+  kernel.launch @interleave_reference_axes(%temporal, %height, %width, %expected) : (tensor<6144xf32>, tensor<6144xf32>, tensor<6144xf32>, tensor<6144xf32>)
+  kernel.launch @qwen38_attention_query_prepare_spans[%one, %one](%one, %epoch, %epsilon, %projection, %weight, %actual, %actual_gate, %inputs) : [index, index](index, tensor<8xi32>, f32, tensor<12288xf32>, tensor<256xf32>, tensor<6144xf32>, tensor<6144xf32>, tensor<8xi32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<6144xf32>
+  check.expect.bitwise actual(%actual_gate) expected(%expected_gate) : tensor<6144xf32>
+  check.return
+}
