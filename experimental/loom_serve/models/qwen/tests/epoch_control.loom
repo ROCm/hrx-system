@@ -1,3 +1,5 @@
+func.decl @qwen38_continue_spans(%mixed_inputs: index, %context: index, %capacity: index, %epoch: buffer, %tokens: buffer, %results: buffer)
+
 func.decl @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32)
 
 func.decl @publish_epoch(%plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative_mask: i32, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer)
@@ -157,5 +159,189 @@ check.case public @publish_known_and_speculative_frontiers {
   check.expect.equal actual(%verified1) expected(%two) : i32
   check.expect.equal actual(%source1) expected(%expected_source1) : i32
   check.expect.equal actual(%last_token) expected(%expected_token) : i32
+  check.return
+}
+
+// One ordinary input, a complete image, and one ordinary input have 66 causal
+// positions but ten source positions. Exercise every split through that stream
+// with differently sized and padded first/continuation packet banks.
+func.def @mixed_split_observation(%split: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %plan_bytes = index.constant 1152 : offset
+  %state_bytes = index.constant 416 : offset
+  %input_bytes = index.constant 264 : offset
+  %metadata_bytes = index.constant 6128 : offset
+  %token_bytes = index.constant 2368 : offset
+  %media_bytes = index.constant 1792 : offset
+  %result_bytes = index.constant 1344 : offset
+  %progress_bytes = index.constant 1344 : offset
+  %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
+  %state = buffer.alloca<private> align(4) %state_bytes : buffer
+  %inputs = buffer.alloca<private> align(4) %input_bytes : buffer
+  %metadata = buffer.alloca<private> align(4) %metadata_bytes : buffer
+  %tokens = buffer.alloca<private> align(4) %token_bytes : buffer
+  %media_plan = buffer.alloca<private> align(4) %media_bytes : buffer
+  %first_results = buffer.alloca<private> align(4) %result_bytes : buffer
+  %next_results = buffer.alloca<private> align(4) %result_bytes : buffer
+  %progress = buffer.alloca<private> align(4) %progress_bytes : buffer
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %three = scalar.constant 3 : i32
+  %five = scalar.constant 5 : i32
+  %eight = scalar.constant 8 : i32
+  %nine = scalar.constant 9 : i32
+  %ten = scalar.constant 10 : i32
+  %sixteen = scalar.constant 16 : i32
+  %sixty_four = scalar.constant 64 : i32
+  %total = scalar.constant 66 : i32
+  %id = scalar.constant 900 : i32
+  %none = scalar.constant -1 : i32
+  buffer.fill %zero, %plan[%origin], %plan_bytes : i32
+  buffer.fill %zero, %state[%origin], %state_bytes : i32
+  buffer.fill %zero, %metadata[%origin], %metadata_bytes : i32
+  buffer.fill %zero, %media_plan[%origin], %media_bytes : i32
+  buffer.fill %id, %inputs[%origin], %input_bytes : i32
+  buffer.fill %zero, %first_results[%origin], %result_bytes : i32
+  buffer.fill %zero, %next_results[%origin], %result_bytes : i32
+  %requests = buffer.view %plan[%origin] : buffer -> view<32x9xi32>
+  %remaining = scalar.subi %total, %split : i32
+  view.store %split, %requests[0, 0] : i32, view<32x9xi32>
+  view.store %split, %requests[0, 5] : i32, view<32x9xi32>
+  view.store %remaining, %requests[16, 0] : i32, view<32x9xi32>
+  view.store %split, %requests[16, 4] : i32, view<32x9xi32>
+  view.store %remaining, %requests[16, 5] : i32, view<32x9xi32>
+  %first_capacity = scalar.addi %split, %three : i32
+  %next_capacity = scalar.addi %remaining, %five : i32
+  %first_media = scalar.subi %split, %one : i32
+  %next_media = scalar.subi %sixty_four, %first_media : i32
+  %media = buffer.view %media_plan[%origin] : buffer -> view<64x7xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %c66 = index.constant 66 : index
+  %features_origin = scalar.constant 2368 : i32
+  %feature_bytes = scalar.constant 20480 : i32
+  scf.for %i = [%c0 to %c64 step %c1] {
+    %row = index.cast %i : index to i32
+    %input = scalar.addi %row, %one : i32
+    %primary = scalar.cmpi ult, %input, %split : i32
+    %owner = scf.select %primary, %zero, %sixteen : i32
+    %next_offset = scalar.subi %input, %split : i32
+    %offset = scf.select %primary, %input, %next_offset : i32
+    %feature_begin = scalar.muli %row, %feature_bytes : i32
+    %feature_offset = scalar.addi %features_origin, %feature_begin : i32
+    view.store %owner, %media[%i, 0] : i32, view<64x7xi32>
+    view.store %offset, %media[%i, 1] : i32, view<64x7xi32>
+    view.store %feature_offset, %media[%i, 2] : i32, view<64x7xi32>
+    view.store %feature_bytes, %media[%i, 3] : i32, view<64x7xi32>
+    view.store %row, %media[%i, 6] : i32, view<64x7xi32>
+  }
+  %outputs = func.call @encode_epoch(%state, %plan, %inputs, %media_plan, %one, %one, %total, %first_media, %next_media, %first_capacity, %next_capacity, %none, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32)
+  %records = buffer.view %tokens[%origin] : buffer -> view<74x8xi32>
+  %failures = scf.for %i = [%c0 to %c66 step %c1](%failures = %zero : i32) -> (i32) {
+    %input = index.cast %i : index to i32
+    %primary = scalar.cmpi ult, %input, %split : i32
+    %queued_index = scalar.addi %input, %three : i32
+    %record_word = scf.select %primary, %input, %queued_index : i32
+    %record_value = index.cast %record_word : i32 to index
+    %record = index.assume %record_value [range(%record_value, 0, 73)] : index
+    %after_start = scalar.cmpi ugt, %input, %zero : i32
+    %before_end = scalar.cmpi ule, %input, %sixty_four : i32
+    %image = scalar.andi %after_start, %before_end : i1
+    %feature_offset, %temporal, %height, %width, %frontier = scf.if %image -> (i32, i32, i32, i32, i32) {
+      %row = scalar.subi %input, %one : i32
+      %offset = scalar.muli %row, %feature_bytes : i32
+      %feature_offset = scalar.addi %features_origin, %offset : i32
+      %y = scalar.divui %row, %eight : i32
+      %x = scalar.remui %row, %eight : i32
+      %height = scalar.addi %one, %y : i32
+      %width = scalar.addi %one, %x : i32
+      %early = scalar.cmpi ult, %input, %eight : i32
+      %extent = scf.select %early, %input, %eight : i32
+      %frontier = scalar.addi %one, %extent : i32
+      scf.yield %feature_offset, %one, %height, %width, %frontier : i32, i32, i32, i32, i32
+    } else {
+      %position = scf.select %after_start, %nine, %zero : i32
+      %frontier = scalar.addi %position, %one : i32
+      scf.yield %zero, %position, %position, %position, %frontier : i32, i32, i32, i32, i32
+    }
+    %actual_id = view.load %records[%record, 0] : view<74x8xi32> -> i32
+    %actual_offset = view.load %records[%record, 1] : view<74x8xi32> -> i32
+    %actual_temporal = view.load %records[%record, 2] : view<74x8xi32> -> i32
+    %actual_height = view.load %records[%record, 3] : view<74x8xi32> -> i32
+    %actual_width = view.load %records[%record, 4] : view<74x8xi32> -> i32
+    %actual_frontier = view.load %records[%record, 5] : view<74x8xi32> -> i32
+    %id_ok = scalar.cmpi eq, %actual_id, %id : i32
+    %offset_ok = scalar.cmpi eq, %actual_offset, %feature_offset : i32
+    %temporal_ok = scalar.cmpi eq, %actual_temporal, %temporal : i32
+    %height_ok = scalar.cmpi eq, %actual_height, %height : i32
+    %width_ok = scalar.cmpi eq, %actual_width, %width : i32
+    %frontier_ok = scalar.cmpi eq, %actual_frontier, %frontier : i32
+    %identity_ok = scalar.andi %id_ok, %offset_ok : i1
+    %axes_ok = scalar.andi %temporal_ok, %height_ok : i1
+    %position_ok = scalar.andi %width_ok, %frontier_ok : i1
+    %first_ok = scalar.andi %identity_ok, %axes_ok : i1
+    %all_ok = scalar.andi %first_ok, %position_ok : i1
+    %failure = scf.select %all_ok, %zero, %one : i32
+    %next = scalar.addi %failures, %failure : i32
+    scf.yield %next : i32
+  }
+  %first = buffer.view %first_results[%origin] : buffer -> view<16x10xi32>
+  %next = buffer.view %next_results[%origin] : buffer -> view<16x10xi32>
+  view.store %split, %first[0, 0] : i32, view<16x10xi32>
+  view.store %remaining, %next[0, 0] : i32, view<16x10xi32>
+  %tag_origin = index.constant 640 : offset
+  %tag_bytes = index.constant 64 : offset
+  buffer.fill %none, %next_results[%tag_origin], %tag_bytes : i32
+  %tags = buffer.view %next_results[%tag_origin] : buffer -> view<16xi32>
+  view.store %zero, %tags[0] : i32, view<16xi32>
+  func.call @publish_epoch(%plan, %media_plan, %one, %first_media, %next_media, %one, %one, %zero, %first_results, %first_results, %next_results, %progress) : (buffer, buffer, i32, i32, i32, i32, i32, i32, buffer, buffer, buffer, buffer)
+  %published = buffer.view %progress[%origin] : buffer -> view<16x21xi32>
+  %consumed = view.load %published[0, 0] : view<16x21xi32> -> i32
+  %source = view.load %published[0, 4] : view<16x21xi32> -> i32
+  %consumed_ok = scalar.cmpi eq, %consumed, %total : i32
+  %source_ok = scalar.cmpi eq, %source, %ten : i32
+  %published_ok = scalar.andi %consumed_ok, %source_ok : i1
+  %failure = scf.select %published_ok, %zero, %one : i32
+  %published_failures = scalar.addi %failures, %failure : i32
+  // The production continuation compacts queued records in place. For small
+  // first banks the destination overlaps the source, so retain the exact
+  // expected records before calling it.
+  %expected = buffer.alloca<private> align(4) %token_bytes : buffer
+  buffer.fill %zero, %expected[%origin], %token_bytes : i32
+  %first_capacity_index = index.cast %first_capacity : i32 to index
+  %next_capacity_index = index.cast %next_capacity : i32 to index
+  %remaining_index = index.cast %remaining : i32 to index
+  %record_bytes = index.constant 32 : offset
+  %queued_origin = index.scale %first_capacity_index, %record_bytes : index, offset -> offset
+  %queued_bytes = index.scale %remaining_index, %record_bytes : index, offset -> offset
+  %active_bytes = index.scale %next_capacity_index, %record_bytes : index, offset -> offset
+  buffer.copy %tokens[%queued_origin], %expected[%origin], %queued_bytes
+  %context = index.constant 512 : index
+  func.call @qwen38_continue_spans(%c1, %context, %next_capacity_index, %metadata, %tokens, %first_results) : (index, index, index, buffer, buffer, buffer)
+  %difference = buffer.compare %tokens[%origin], %expected[%origin], %active_bytes
+  %records_ok = scalar.cmpi eq, %difference, %zero : i32
+  %record_failure = scf.select %records_ok, %zero, %one : i32
+  %all_failures = scalar.addi %published_failures, %record_failure : i32
+  func.return %all_failures : i32
+}
+
+func.def @all_mixed_splits() -> (i32) {
+  %c1 = index.constant 1 : index
+  %c66 = index.constant 66 : index
+  %zero = scalar.constant 0 : i32
+  %failures = scf.for %split = [%c1 to %c66 step %c1](%prior = %zero : i32) -> (i32) {
+    %split_word = index.cast %split : index to i32
+    %current = func.call @mixed_split_observation(%split_word) : (i32) -> (i32)
+    %next = scalar.addi %prior, %current : i32
+    scf.yield %next : i32
+  }
+  func.return %failures : i32
+}
+
+check.case public @mixed_image_frontier_across_every_epoch_split {
+  %failures = func.call @all_mixed_splits() : () -> (i32)
+  %zero = check.literal value(0) : i32
+  check.expect.equal actual(%failures) expected(%zero) : i32
   check.return
 }
