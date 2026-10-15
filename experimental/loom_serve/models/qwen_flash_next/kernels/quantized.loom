@@ -186,31 +186,31 @@ func.def public inline @flash_next_q51_partial(%width: index, %token: index, %ro
 // Up to four routed activation rows share each paired QK weight chunk. Only
 // the live prefix is read; each result retains the single-row reduction tree.
 func.def public inline @flash_next_qk_pair_rows_partial(%q5: i1, %width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %gate_weight: buffer, %up_weight: buffer) -> (vector<4xf32>, vector<4xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
-  %eight = index.constant 8 : index
-  %sixteen = index.constant 16 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
   %block_width = index.constant 256 : index
   %q4_bytes = index.constant 144 : offset
   %q5_bytes = index.constant 176 : offset
   %element_bytes = index.constant 2 : offset
   %block_bytes = scf.select %q5, %q5_bytes, %q4_bytes : offset
   %blocks = index.div %width, %block_width : index
-  %chunks = index.div %width, %sixteen : index
+  %chunks = index.div %width, %c16 : index
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
   %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
   %initial = vector.constant 0.0 : vector<4xf32>
   %gate, %up = scf.for %chunk = [%lane to %chunks step %stride](%gate_sums = %initial : vector<4xf32>, %up_sums = %initial : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
-    %block = index.div %chunk, %sixteen : index
-    %group_index = index.div %chunk, %two : index
-    %group = index.rem %group_index, %eight : index
-    %half = index.rem %chunk, %two : index
+    %block = index.div %chunk, %c16 : index
+    %group_index = index.div %chunk, %c2 : index
+    %group = index.rem %group_index, %c8 : index
+    %half = index.rem %chunk, %c2 : index
     %gate_codes, %gate_scale, %gate_minimum = func.call @flash_next_qk_codes(%q5, %gate_weight, %weight_origin, %block, %group, %half) : (i1, buffer, offset, index, index, index) -> (vector<16xbf16>, f32, f32)
     %up_codes, %up_scale, %up_minimum = func.call @flash_next_qk_codes(%q5, %up_weight, %weight_origin, %block, %group, %half) : (i1, buffer, offset, index, index, index) -> (vector<16xbf16>, f32, f32)
-    %next_gate, %next_up = scf.for %ordinal = [%zero to %four step %one](%current_gate = %gate_sums : vector<4xf32>, %current_up = %up_sums : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) unroll schedule(linear) {
+    %next_gate, %next_up = scf.for %ordinal = [%c0 to %c4 step %c1](%current_gate = %gate_sums : vector<4xf32>, %current_up = %up_sums : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) unroll schedule(linear) {
       %active = index.cmp ult, %ordinal, %live : index
       %updated_gate, %updated_up = scf.if %active -> (vector<4xf32>, vector<4xf32>) {
         %row_word = vector.extract %rows[%ordinal] : vector<4xi32> -> i32
@@ -253,7 +253,7 @@ func.def public inline @flash_next_q51_rows_partial(%width: index, %rows: vector
   %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
   %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
   %c0_f32 = vector.constant 0.0 : vector<4xf32>
-  %four = index.constant 4 : index
+  %c4 = index.constant 4 : index
   %result = scf.for %block = [%lane to %block_count step %stride](%accumulator = %c0_f32 : vector<4xf32>) -> (vector<4xf32>) {
     %block_add = index.scale %block, %block_bytes : index, offset -> offset
     %block_origin = index.add %weight_origin, %block_add : offset
@@ -262,7 +262,7 @@ func.def public inline @flash_next_q51_rows_partial(%width: index, %rows: vector
       %codes = func.call @flash_next_q51_codes(%packed, %high_words, %half) : (vector<16xi8>, vector<4xi32>, index) -> (vector<16xi8>)
       %begin = index.mul %half, %c16 : index
       %exact_codes = func.call @flash_next_affine_codes(%codes) : (vector<16xi8>) -> (vector<16xbf16>)
-      %sums = scf.for %ordinal = [%c0 to %four step %c1](%current = %partial : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+      %sums = scf.for %ordinal = [%c0 to %c4 step %c1](%current = %partial : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
         %active = index.cmp ult, %ordinal, %live : index
         %updated = scf.if %active -> (vector<4xf32>) {
           %row_word = vector.extract %rows[%ordinal] : vector<4xi32> -> i32
