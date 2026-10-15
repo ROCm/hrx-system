@@ -109,6 +109,25 @@ TEST_F(CommandsTest, DmaCompletionDoesNotTouchMemoryOrPfpOnlyFields) {
          {0xc0055000, 0, 0, 0, 0, 0, 0});
 }
 
+TEST_F(CommandsTest, DmaCopyPreservesByteRangesAndFullCount) {
+  auto* end = iree_hal_amd_gpu_pm4_emit_dma_copy(
+      words(), UINT64_C(0x1234fffffffd), UINT64_C(0x567800000003), 1);
+  end = iree_hal_amd_gpu_pm4_emit_dma_copy(
+      end, UINT64_C(0x123400000000), UINT64_C(0x567801000000), 0x03ffffff);
+  Expect(end,
+         {0xc0055000, 0x60300000, 0xfffffffd, 0x1234, 3, 0x5678, 1, 0xc0055000,
+          0x60300000, 0, 0x1234, 0x01000000, 0x5678, 0x03ffffff});
+}
+
+TEST_F(CommandsTest, DmaFillCarriesImmediatePatternAndConfirmedWrites) {
+  auto* end = iree_hal_amd_gpu_pm4_emit_dma_fill(
+      words(), UINT64_C(0x1234fffffffc), 4, 0xdeadbeef);
+  end = iree_hal_amd_gpu_pm4_emit_dma_fill(end, UINT64_C(0x567800000000),
+                                           0x03fffffc, 0);
+  Expect(end, {0xc0055000, 0x40300000, 0xdeadbeef, 0, 0xfffffffc, 0x1234, 4,
+               0xc0055000, 0x40300000, 0, 0, 0, 0x5678, 0x03fffffc});
+}
+
 TEST_F(CommandsTest, WaitsPreserveEveryComparisonWidthAndMask) {
   struct Comparison {
     // Native semantic selected by admission.

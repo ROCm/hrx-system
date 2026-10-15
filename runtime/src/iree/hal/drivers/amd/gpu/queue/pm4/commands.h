@@ -57,6 +57,23 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_compute_flush(uint32_t* words);
 // Shader completion and cache visibility require their own operations.
 uint32_t* iree_hal_amd_gpu_pm4_emit_dma_flush(uint32_t* words);
 
+// Emits seven DWORDs of asynchronous MEC DMA_DATA through the native L2 route.
+// The nonoverlapping ranges cover byte_length bytes, between 1 and 0x03ffffff.
+// Byte alignment is sufficient. Write confirmation remains enabled; the owner
+// joins DMA before retiring either range or publishing a dependent operation.
+uint32_t* iree_hal_amd_gpu_pm4_emit_dma_copy(uint32_t* words,
+                                             uint64_t source_address,
+                                             uint64_t target_address,
+                                             uint32_t byte_length);
+
+// Emits the seven-DWORD immediate-pattern form. The target and byte_length are
+// DWORD aligned, with byte_length between 4 and 0x03fffffc. Repeats the
+// supplied DWORD with the same asynchronous completion contract as dma_copy.
+uint32_t* iree_hal_amd_gpu_pm4_emit_dma_fill(uint32_t* words,
+                                             uint64_t target_address,
+                                             uint32_t byte_length,
+                                             uint32_t pattern);
+
 // Emits eight DWORDs of whole-address-space ACQUIRE_MEM with the prepared
 // target-specific GCR word. This performs cache work and does not by itself
 // wait for prior shader execution or establish an external producer dependency.

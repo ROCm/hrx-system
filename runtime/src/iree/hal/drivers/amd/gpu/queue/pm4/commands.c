@@ -56,6 +56,34 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_dma_flush(uint32_t* words) {
   return words + 7;
 }
 
+uint32_t* iree_hal_amd_gpu_pm4_emit_dma_copy(uint32_t* words,
+                                             uint64_t source_address,
+                                             uint64_t target_address,
+                                             uint32_t byte_length) {
+  words[0] = UINT32_C(0xc0055000);
+  words[1] = (3u << 29) | (3u << 20);
+  words[2] = (uint32_t)source_address;
+  words[3] = (uint32_t)(source_address >> 32);
+  words[4] = (uint32_t)target_address;
+  words[5] = (uint32_t)(target_address >> 32);
+  words[6] = byte_length;
+  return words + 7;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_dma_fill(uint32_t* words,
+                                             uint64_t target_address,
+                                             uint32_t byte_length,
+                                             uint32_t pattern) {
+  words[0] = UINT32_C(0xc0055000);
+  words[1] = (2u << 29) | (3u << 20);
+  words[2] = pattern;
+  words[3] = 0;
+  words[4] = (uint32_t)target_address;
+  words[5] = (uint32_t)(target_address >> 32);
+  words[6] = byte_length;
+  return words + 7;
+}
+
 uint32_t* iree_hal_amd_gpu_pm4_emit_acquire(uint32_t* words,
                                             uint32_t cache_control) {
   words[0] = UINT32_C(0xc0065800);

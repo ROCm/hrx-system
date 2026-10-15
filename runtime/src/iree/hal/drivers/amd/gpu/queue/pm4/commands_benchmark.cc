@@ -60,6 +60,24 @@ static void BM_IndirectDispatch(benchmark::State& state) {
 }
 BENCHMARK(BM_IndirectDispatch);
 
+static void BM_DmaTransfer(benchmark::State& state) {
+  alignas(64) std::array<uint32_t, 16> words;
+  uint64_t source = UINT64_C(0x123400000000);
+  uint64_t target = UINT64_C(0x567800000000);
+  benchmark::DoNotOptimize(source);
+  benchmark::DoNotOptimize(target);
+  for (auto _ : state) {
+    auto* end =
+        iree_hal_amd_gpu_pm4_emit_dma_copy(words.data(), source, target, 32736);
+    end = iree_hal_amd_gpu_pm4_emit_dma_fill(end, target + 32768, 32736, 0);
+    benchmark::DoNotOptimize(end);
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations() * 2);
+  state.SetBytesProcessed(state.iterations() * 14 * sizeof(uint32_t));
+}
+BENCHMARK(BM_DmaTransfer);
+
 static void BM_RegisterInterval(benchmark::State& state) {
   alignas(64) std::array<uint32_t, 32> words;
   std::array<uint32_t, 16> values = {};
