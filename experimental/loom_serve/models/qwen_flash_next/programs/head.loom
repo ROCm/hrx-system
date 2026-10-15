@@ -8,6 +8,8 @@ func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
 func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
 
+func.decl @flash_next_q8_batch_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+
 kernel.decl @hc_normalize() launch(%span: buffer, %residual: buffer, %gamma: buffer, %normalized: buffer)
 
 kernel.decl @hc_up_mix() launch(%span: buffer, %normalized: buffer, %lowrank: buffer, %weight: buffer, %mixed: buffer)
@@ -100,35 +102,50 @@ kernel.def target(@flash_next_head_wave32) @flash_next_head_down() {
   kernel.return
 }
 
+// Selected output rows share original vocabulary codes in groups of four.
+// Sampling still observes the checkpoint's BF16 logit publication boundary.
 kernel.def target(@flash_next_head_wave32) @flash_next_vocabulary() {
   %groups = index.constant 62080 : index
   %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %padded = index.add %rows, %c3 : index
+  %batches = index.div %padded, %c4 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
+  kernel.launch.config workgroups(%groups, %batches, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %rows = func.call pure @flash_next_output_capacity() : () -> (index)
-  %token = kernel.workgroup.id<y> : index
+  %batch = kernel.workgroup.id<y> : index
+  %c4 = index.constant 4 : index
+  %first = index.mul %batch, %c4 : index
   %count = func.call @flash_next_token_count(%epoch, %rows) : (buffer, index) -> (index)
-  %active = index.cmp ult, %token, %count : index
+  %active = index.cmp ult, %first, %count : index
   scf.if %active {
     %group = kernel.workgroup.id<x> : index
     %wave = kernel.subgroup.id : index
     %lane = kernel.subgroup.lane.id : index
-    %c4 = index.constant 4 : index
+    %c1 = index.constant 1 : index
     %row = index.madd %group, %c4, %wave : index
     %width = index.constant 2560 : index
     %stride = index.constant 32 : index
-    %part = func.call @flash_next_q8_partial(%width, %token, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
-    %sum = kernel.subgroup.reduce<addf> %part : f32
+    %part = func.call @flash_next_q8_batch_partial(%width, %first, %count, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+    %sums = kernel.subgroup.reduce<addf> %part : vector<4xf32>
     %c0 = index.constant 0 : index
     %leader = index.cmp eq, %lane, %c0 : index
     scf.if %leader {
-      %packed = scalar.fptrunc %sum : f32 to bf16
-      %logit = scalar.extf %packed : bf16 to f32
       %origin = index.constant 0 : offset
       %view = buffer.view %output[%origin] : buffer -> view<[%rows]x248320xf32>
-      view.store %logit, %view[%token, %row] : f32, view<[%rows]x248320xf32>
+      scf.for %ordinal = [%c0 to %c4 step %c1] unroll schedule(linear) {
+        %token = index.add %first, %ordinal : index
+        %live = index.cmp ult, %token, %count : index
+        scf.if %live {
+          %sum = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
+          %packed = scalar.fptrunc %sum : f32 to bf16
+          %logit = scalar.extf %packed : bf16 to f32
+          view.store %logit, %view[%token, %row] : f32, view<[%rows]x248320xf32>
+        }
+      }
     }
   }
   kernel.return
