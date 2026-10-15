@@ -13,6 +13,8 @@ are no per-model C implementations or compiler-internal dependencies here.
   and a separately loaded LoRA with request-time strength.
 - [Pocket TTS](models/pocket_tts/README.md): streaming speech, registered
   reference voices, retained conditioning, and independent request batching.
+- [Moonshine Streaming Tiny](models/moonshine/README.md): incremental speech
+  recognition, revisable transcripts, independent histories, and batched dictation.
 - [Shared motifs](motifs/README.md): reusable arithmetic receiving SSA operands
   and template arguments, independent of a model's configuration namespace.
 

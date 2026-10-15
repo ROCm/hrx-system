@@ -1,0 +1,899 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @moonshine.frontend.frames() launch(%work_storage: buffer, %y: view<4x80x4xf32>, %cohort: view<5xi32>, %row_x_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.frontend.normalize_frames() launch(%x: view<4x80x4xf32>, %y: view<4x80x4xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.frontend.compress() launch(%x: view<4x80x4xf32>, %k: view<1xf32>, %y: view<4x80x4xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.frontend.project() launch(%x: view<4x80x4xf32>, %w: view<320x80xf32>, %y: view<4x320x4xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.frontend.activate_embedding() launch(%x: view<4x320x4xf32>, %y: view<4x320x4xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.convolution.first() launch(%x: view<4x320x4xf32>, %state_storage: buffer, %w: view<640x320x5xf32>, %b: view<640xf32>, %y: view<4x640x2xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_history_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.convolution.retain_first() launch(%x: view<4x320x4xf32>, %state_storage: buffer, %y: view<4x320x4xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_history_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.convolution.store_first() launch(%x: view<4x320x4xf32>, %state_storage: buffer, %work_storage: buffer, %cohort: view<5xi32>, %row_y_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.convolution.activate_first() launch(%x: view<4x640x2xf32>, %y: view<4x640x2xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.convolution.second() launch(%x: view<4x640x2xf32>, %state_storage: buffer, %w: view<320x640x5xf32>, %b: view<320xf32>, %y: view<4x320x1xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_history_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.convolution.retain_second() launch(%x: view<4x640x2xf32>, %state_storage: buffer, %y: view<4x640x4xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_history_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.convolution.store_second() launch(%x: view<4x640x4xf32>, %state_storage: buffer, %work_storage: buffer, %cohort: view<5xi32>, %row_y_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.normalization.input() launch(%x: view<4x320x1xf32>, %y: view<4x320x1xf32>, %scale: view<320xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.projection.input() launch(%x: view<4x320x1xf32>, %w: view<320x320xf32>, %y: view<4x320x1xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_state.append_input() launch(%state_storage: buffer, %q: view<4x320x1xf32>, %k: view<4x320x1xf32>, %v: view<4x320x1xf32>, %x: view<4x320x1xf32>, %work_storage: buffer, %cohort: view<5xi32>, %row_control_base: offset, %row_queries_base: offset, %row_keys_base: offset, %row_values_base: offset, %row_residuals_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_state.input_readiness() launch(%state_storage: buffer, %work_storage: buffer, %cohort: view<5xi32>, %row_control_base: offset, %row_valid_base: offset, %row_final_base: offset)
+
+kernel.decl @moonshine.encoder_state.pending_query() launch(%state_storage: buffer, %q: view<4x320x1xf32>, %x: view<4x320x1xf32>, %cohort: view<5xi32>, %row_control_base: offset, %row_queries_base: offset, %row_residuals_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_attention.window19() launch(%state_storage: buffer, %k: view<4x320x19xf32>, %v: view<4x320x19xf32>, %cohort: view<5xi32>, %row_control_base: offset, %row_keys_base: offset, %row_values_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_attention.scores19() launch(%q: view<4x320x1xf32>, %k: view<4x320x19xf32>, %y: view<4x8x19xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_length_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_attention.softmax19() launch(%x: view<4x8x19xf32>, %y: view<4x8x19xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_attention.values19() launch(%v: view<4x320x19xf32>, %p: view<4x8x19xf32>, %y: view<4x320x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_length_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.projection.encoder() launch(%x: view<4x320x1xf32>, %w: view<320x320xf32>, %y: view<4x320x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.pointwise.encoder_residual() launch(%x: view<4x320x1xf32>, %update: view<4x320x1xf32>, %y: view<4x320x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.normalization.encoder() launch(%x: view<4x320x1xf32>, %y: view<4x320x1xf32>, %scale: view<320xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.projection.encoder_up() launch(%x: view<4x320x1xf32>, %w: view<1280x320xf32>, %y: view<4x1280x1xf32>, %b: view<1280xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.pointwise.gelu() launch(%x: view<4x1280x1xf32>, %y: view<4x1280x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.projection.encoder_down() launch(%x: view<4x1280x1xf32>, %w: view<320x1280xf32>, %y: view<4x320x1xf32>, %b: view<320xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_state.retire_input() launch(%state_storage: buffer, %work_storage: buffer, %cohort: view<5xi32>, %row_control_base: offset, %row_final_base: offset)
+
+kernel.decl @moonshine.encoder_state.append() launch(%state_storage: buffer, %q: view<4x320x1xf32>, %k: view<4x320x1xf32>, %v: view<4x320x1xf32>, %x: view<4x320x1xf32>, %cohort: view<5xi32>, %row_control_base: offset, %row_queries_base: offset, %row_keys_base: offset, %row_values_base: offset, %row_residuals_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_state.lookahead_readiness() launch(%state_storage: buffer, %cohort: view<5xi32>, %row_control_base: offset, %row_valid_base: offset, %row_final_base: offset)
+
+kernel.decl @moonshine.encoder_state.retire() launch(%state_storage: buffer, %cohort: view<5xi32>, %row_control_base: offset, %row_final_base: offset)
+
+kernel.decl @moonshine.encoder_state.causal_readiness() launch(%state_storage: buffer, %cohort: view<5xi32>, %row_control_base: offset, %row_valid_base: offset, %row_final_base: offset)
+
+kernel.decl @moonshine.encoder_attention.window16() launch(%state_storage: buffer, %k: view<4x320x16xf32>, %v: view<4x320x16xf32>, %cohort: view<5xi32>, %row_control_base: offset, %row_keys_base: offset, %row_values_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_attention.scores16() launch(%q: view<4x320x1xf32>, %k: view<4x320x16xf32>, %y: view<4x8x16xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_length_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_attention.softmax16() launch(%x: view<4x8x16xf32>, %y: view<4x8x16xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_attention.values16() launch(%v: view<4x320x16xf32>, %p: view<4x8x16xf32>, %y: view<4x320x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_length_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_state.adapt() launch(%x: view<4x320x1xf32>, %p: view<4096x320xf32>, %state_storage: buffer, %y: view<4x320x1xf32>, %cohort: view<5xi32>, %row_control_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_state.publish() launch(%x: view<4x320x1xf32>, %state_storage: buffer, %cohort: view<5xi32>, %row_y_base: offset, %row_control_base: offset, %row_gate_base: offset)
+
+kernel.decl @moonshine.encoder_state.status() launch(%state_storage: buffer, %output_storage: buffer, %cohort: view<5xi32>, %row_control_base: offset, %row_status_base: offset)
+
+// One incremental encoder quantum. Every layer independently decides whether
+// its next position has enough right context, or is being flushed at EOF.
+command.program.def public @encode() launch(%weights: buffer, %work: buffer, %requests: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  %tensor_1_offset = index.constant 0 : offset
+  %tensor_1 = buffer.view %work[%tensor_1_offset] : buffer -> view<5xi32>
+  %storage_4_bytes = index.constant 5120 : offset
+  %storage_4 = buffer.alloca<global> align(16) %storage_4_bytes : buffer
+  %tensor_5_offset = index.constant 0 : offset
+  %tensor_5 = buffer.view %storage_4[%tensor_5_offset] : buffer -> view<4x80x4xf32>
+  %state_origin_0 = index.constant 64 : offset
+  %state_origin_1 = index.constant 32 : offset
+  kernel.launch @moonshine.frontend.frames(%work, %tensor_5, %tensor_1, %state_origin_0, %state_origin_1) : (buffer, view<4x80x4xf32>, view<5xi32>, offset, offset)
+  %storage_7_bytes = index.constant 5120 : offset
+  %storage_7 = buffer.alloca<global> align(16) %storage_7_bytes : buffer
+  %tensor_8_offset = index.constant 0 : offset
+  %tensor_8 = buffer.view %storage_7[%tensor_8_offset] : buffer -> view<4x80x4xf32>
+  kernel.launch @moonshine.frontend.normalize_frames(%tensor_5, %tensor_8, %work, %tensor_1, %state_origin_1) : (view<4x80x4xf32>, view<4x80x4xf32>, buffer, view<5xi32>, offset)
+  %storage_10_bytes = index.constant 5120 : offset
+  %storage_10 = buffer.alloca<global> align(16) %storage_10_bytes : buffer
+  %tensor_11_offset = index.constant 0 : offset
+  %tensor_11 = buffer.view %storage_10[%tensor_11_offset] : buffer -> view<4x80x4xf32>
+  %parameter_12 = command.parameter %weights, "model.encoder.embedder.comp.log_k" : view<1xf32>
+  kernel.launch @moonshine.frontend.compress(%tensor_8, %parameter_12, %tensor_11, %work, %tensor_1, %state_origin_1) : (view<4x80x4xf32>, view<1xf32>, view<4x80x4xf32>, buffer, view<5xi32>, offset)
+  %parameter_14 = command.parameter %weights, "model.encoder.embedder.linear.weight" : view<320x80xf32>
+  %storage_15_bytes = index.constant 20480 : offset
+  %storage_15 = buffer.alloca<global> align(16) %storage_15_bytes : buffer
+  %tensor_16_offset = index.constant 0 : offset
+  %tensor_16 = buffer.view %storage_15[%tensor_16_offset] : buffer -> view<4x320x4xf32>
+  kernel.launch @moonshine.frontend.project(%tensor_11, %parameter_14, %tensor_16, %work, %tensor_1, %state_origin_1) : (view<4x80x4xf32>, view<320x80xf32>, view<4x320x4xf32>, buffer, view<5xi32>, offset)
+  %storage_18_bytes = index.constant 20480 : offset
+  %storage_18 = buffer.alloca<global> align(16) %storage_18_bytes : buffer
+  %tensor_19_offset = index.constant 0 : offset
+  %tensor_19 = buffer.view %storage_18[%tensor_19_offset] : buffer -> view<4x320x4xf32>
+  kernel.launch @moonshine.frontend.activate_embedding(%tensor_16, %tensor_19, %work, %tensor_1, %state_origin_1) : (view<4x320x4xf32>, view<4x320x4xf32>, buffer, view<5xi32>, offset)
+  %parameter_21 = command.parameter %weights, "model.encoder.embedder.conv1.weight" : view<640x320x5xf32>
+  %parameter_22 = command.parameter %weights, "model.encoder.embedder.conv1.bias" : view<640xf32>
+  %storage_24_bytes = index.constant 20480 : offset
+  %storage_24 = buffer.alloca<global> align(16) %storage_24_bytes : buffer
+  %tensor_25_offset = index.constant 0 : offset
+  %tensor_25 = buffer.view %storage_24[%tensor_25_offset] : buffer -> view<4x640x2xf32>
+  %state_origin_2 = index.constant 16 : offset
+  kernel.launch @moonshine.convolution.first(%tensor_19, %state, %parameter_21, %parameter_22, %tensor_25, %work, %tensor_1, %state_origin_2, %state_origin_1) : (view<4x320x4xf32>, buffer, view<640x320x5xf32>, view<640xf32>, view<4x640x2xf32>, buffer, view<5xi32>, offset, offset)
+  %storage_27_bytes = index.constant 20480 : offset
+  %storage_27 = buffer.alloca<global> align(16) %storage_27_bytes : buffer
+  %tensor_28_offset = index.constant 0 : offset
+  %tensor_28 = buffer.view %storage_27[%tensor_28_offset] : buffer -> view<4x320x4xf32>
+  kernel.launch @moonshine.convolution.retain_first(%tensor_19, %state, %tensor_28, %work, %tensor_1, %state_origin_2, %state_origin_1) : (view<4x320x4xf32>, buffer, view<4x320x4xf32>, buffer, view<5xi32>, offset, offset)
+  kernel.launch @moonshine.convolution.store_first(%tensor_28, %state, %work, %tensor_1, %state_origin_2, %state_origin_1) : (view<4x320x4xf32>, buffer, buffer, view<5xi32>, offset, offset)
+  %storage_31_bytes = index.constant 20480 : offset
+  %storage_31 = buffer.alloca<global> align(16) %storage_31_bytes : buffer
+  %tensor_32_offset = index.constant 0 : offset
+  %tensor_32 = buffer.view %storage_31[%tensor_32_offset] : buffer -> view<4x640x2xf32>
+  kernel.launch @moonshine.convolution.activate_first(%tensor_25, %tensor_32, %work, %tensor_1, %state_origin_1) : (view<4x640x2xf32>, view<4x640x2xf32>, buffer, view<5xi32>, offset)
+  %parameter_34 = command.parameter %weights, "model.encoder.embedder.conv2.weight" : view<320x640x5xf32>
+  %parameter_35 = command.parameter %weights, "model.encoder.embedder.conv2.bias" : view<320xf32>
+  %storage_37_bytes = index.constant 5120 : offset
+  %storage_37 = buffer.alloca<global> align(16) %storage_37_bytes : buffer
+  %tensor_38_offset = index.constant 0 : offset
+  %tensor_38 = buffer.view %storage_37[%tensor_38_offset] : buffer -> view<4x320x1xf32>
+  %state_origin_3 = index.constant 5136 : offset
+  kernel.launch @moonshine.convolution.second(%tensor_32, %state, %parameter_34, %parameter_35, %tensor_38, %work, %tensor_1, %state_origin_3, %state_origin_1) : (view<4x640x2xf32>, buffer, view<320x640x5xf32>, view<320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset, offset)
+  %storage_40_bytes = index.constant 40960 : offset
+  %storage_40 = buffer.alloca<global> align(16) %storage_40_bytes : buffer
+  %tensor_41_offset = index.constant 0 : offset
+  %tensor_41 = buffer.view %storage_40[%tensor_41_offset] : buffer -> view<4x640x4xf32>
+  kernel.launch @moonshine.convolution.retain_second(%tensor_32, %state, %tensor_41, %work, %tensor_1, %state_origin_3, %state_origin_1) : (view<4x640x2xf32>, buffer, view<4x640x4xf32>, buffer, view<5xi32>, offset, offset)
+  kernel.launch @moonshine.convolution.store_second(%tensor_41, %state, %work, %tensor_1, %state_origin_3, %state_origin_1) : (view<4x640x4xf32>, buffer, buffer, view<5xi32>, offset, offset)
+  %storage_49_bytes = index.constant 5120 : offset
+  %storage_49 = buffer.alloca<global> align(16) %storage_49_bytes : buffer
+  %tensor_50_offset = index.constant 0 : offset
+  %tensor_50 = buffer.view %storage_49[%tensor_50_offset] : buffer -> view<4x320x1xf32>
+  %parameter_51 = command.parameter %weights, "model.encoder.layers.0.input_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.input(%tensor_38, %tensor_50, %parameter_51, %work, %tensor_1, %state_origin_1) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_53 = command.parameter %weights, "model.encoder.layers.0.self_attn.q_proj.weight" : view<320x320xf32>
+  %storage_54_bytes = index.constant 5120 : offset
+  %storage_54 = buffer.alloca<global> align(16) %storage_54_bytes : buffer
+  %tensor_55_offset = index.constant 0 : offset
+  %tensor_55 = buffer.view %storage_54[%tensor_55_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.input(%tensor_50, %parameter_53, %tensor_55, %work, %tensor_1, %state_origin_1) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_57 = command.parameter %weights, "model.encoder.layers.0.self_attn.k_proj.weight" : view<320x320xf32>
+  %storage_58_bytes = index.constant 5120 : offset
+  %storage_58 = buffer.alloca<global> align(16) %storage_58_bytes : buffer
+  %tensor_59_offset = index.constant 0 : offset
+  %tensor_59 = buffer.view %storage_58[%tensor_59_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.input(%tensor_50, %parameter_57, %tensor_59, %work, %tensor_1, %state_origin_1) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_61 = command.parameter %weights, "model.encoder.layers.0.self_attn.v_proj.weight" : view<320x320xf32>
+  %storage_62_bytes = index.constant 5120 : offset
+  %storage_62 = buffer.alloca<global> align(16) %storage_62_bytes : buffer
+  %tensor_63_offset = index.constant 0 : offset
+  %tensor_63 = buffer.view %storage_62[%tensor_63_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.input(%tensor_50, %parameter_61, %tensor_63, %work, %tensor_1, %state_origin_1) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_4 = index.constant 15376 : offset
+  %state_origin_5 = index.constant 97328 : offset
+  %state_origin_6 = index.constant 15408 : offset
+  %state_origin_7 = index.constant 56368 : offset
+  %state_origin_8 = index.constant 138288 : offset
+  kernel.launch @moonshine.encoder_state.append_input(%state, %tensor_55, %tensor_59, %tensor_63, %tensor_38, %work, %tensor_1, %state_origin_4, %state_origin_5, %state_origin_6, %state_origin_7, %state_origin_8, %state_origin_1) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset, offset, offset, offset)
+  kernel.launch @moonshine.encoder_state.input_readiness(%state, %work, %tensor_1, %state_origin_4, %state_origin_1, %state_origin_1) : (buffer, buffer, view<5xi32>, offset, offset, offset)
+  %storage_67_bytes = index.constant 5120 : offset
+  %storage_67 = buffer.alloca<global> align(16) %storage_67_bytes : buffer
+  %tensor_68_offset = index.constant 0 : offset
+  %tensor_68 = buffer.view %storage_67[%tensor_68_offset] : buffer -> view<4x320x1xf32>
+  %storage_69_bytes = index.constant 5120 : offset
+  %storage_69 = buffer.alloca<global> align(16) %storage_69_bytes : buffer
+  %tensor_70_offset = index.constant 0 : offset
+  %tensor_70 = buffer.view %storage_69[%tensor_70_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_state.pending_query(%state, %tensor_68, %tensor_70, %tensor_1, %state_origin_4, %state_origin_5, %state_origin_8, %state_origin_4) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_72_bytes = index.constant 97280 : offset
+  %storage_72 = buffer.alloca<global> align(16) %storage_72_bytes : buffer
+  %tensor_73_offset = index.constant 0 : offset
+  %tensor_73 = buffer.view %storage_72[%tensor_73_offset] : buffer -> view<4x320x19xf32>
+  %storage_74_bytes = index.constant 97280 : offset
+  %storage_74 = buffer.alloca<global> align(16) %storage_74_bytes : buffer
+  %tensor_75_offset = index.constant 0 : offset
+  %tensor_75 = buffer.view %storage_74[%tensor_75_offset] : buffer -> view<4x320x19xf32>
+  kernel.launch @moonshine.encoder_attention.window19(%state, %tensor_73, %tensor_75, %tensor_1, %state_origin_4, %state_origin_6, %state_origin_7, %state_origin_4) : (buffer, view<4x320x19xf32>, view<4x320x19xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_77_bytes = index.constant 2432 : offset
+  %storage_77 = buffer.alloca<global> align(16) %storage_77_bytes : buffer
+  %tensor_78_offset = index.constant 0 : offset
+  %tensor_78 = buffer.view %storage_77[%tensor_78_offset] : buffer -> view<4x8x19xf32>
+  kernel.launch @moonshine.encoder_attention.scores19(%tensor_68, %tensor_73, %tensor_78, %state, %tensor_1, %state_origin_4, %state_origin_4) : (view<4x320x1xf32>, view<4x320x19xf32>, view<4x8x19xf32>, buffer, view<5xi32>, offset, offset)
+  %storage_80_bytes = index.constant 2432 : offset
+  %storage_80 = buffer.alloca<global> align(16) %storage_80_bytes : buffer
+  %tensor_81_offset = index.constant 0 : offset
+  %tensor_81 = buffer.view %storage_80[%tensor_81_offset] : buffer -> view<4x8x19xf32>
+  kernel.launch @moonshine.encoder_attention.softmax19(%tensor_78, %tensor_81, %state, %tensor_1, %state_origin_4) : (view<4x8x19xf32>, view<4x8x19xf32>, buffer, view<5xi32>, offset)
+  %storage_83_bytes = index.constant 5120 : offset
+  %storage_83 = buffer.alloca<global> align(16) %storage_83_bytes : buffer
+  %tensor_84_offset = index.constant 0 : offset
+  %tensor_84 = buffer.view %storage_83[%tensor_84_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_attention.values19(%tensor_75, %tensor_81, %tensor_84, %state, %tensor_1, %state_origin_4, %state_origin_4) : (view<4x320x19xf32>, view<4x8x19xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset, offset)
+  %parameter_86 = command.parameter %weights, "model.encoder.layers.0.self_attn.o_proj.weight" : view<320x320xf32>
+  %storage_87_bytes = index.constant 5120 : offset
+  %storage_87 = buffer.alloca<global> align(16) %storage_87_bytes : buffer
+  %tensor_88_offset = index.constant 0 : offset
+  %tensor_88 = buffer.view %storage_87[%tensor_88_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_84, %parameter_86, %tensor_88, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_90_bytes = index.constant 5120 : offset
+  %storage_90 = buffer.alloca<global> align(16) %storage_90_bytes : buffer
+  %tensor_91_offset = index.constant 0 : offset
+  %tensor_91 = buffer.view %storage_90[%tensor_91_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_70, %tensor_88, %tensor_91, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_93_bytes = index.constant 5120 : offset
+  %storage_93 = buffer.alloca<global> align(16) %storage_93_bytes : buffer
+  %tensor_94_offset = index.constant 0 : offset
+  %tensor_94 = buffer.view %storage_93[%tensor_94_offset] : buffer -> view<4x320x1xf32>
+  %parameter_95 = command.parameter %weights, "model.encoder.layers.0.post_attention_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_91, %tensor_94, %parameter_95, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_97 = command.parameter %weights, "model.encoder.layers.0.mlp.fc1.weight" : view<1280x320xf32>
+  %storage_98_bytes = index.constant 20480 : offset
+  %storage_98 = buffer.alloca<global> align(16) %storage_98_bytes : buffer
+  %tensor_99_offset = index.constant 0 : offset
+  %tensor_99 = buffer.view %storage_98[%tensor_99_offset] : buffer -> view<4x1280x1xf32>
+  %parameter_100 = command.parameter %weights, "model.encoder.layers.0.mlp.fc1.bias" : view<1280xf32>
+  kernel.launch @moonshine.projection.encoder_up(%tensor_94, %parameter_97, %tensor_99, %parameter_100, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<1280x320xf32>, view<4x1280x1xf32>, view<1280xf32>, buffer, view<5xi32>, offset)
+  %storage_102_bytes = index.constant 20480 : offset
+  %storage_102 = buffer.alloca<global> align(16) %storage_102_bytes : buffer
+  %tensor_103_offset = index.constant 0 : offset
+  %tensor_103 = buffer.view %storage_102[%tensor_103_offset] : buffer -> view<4x1280x1xf32>
+  kernel.launch @moonshine.pointwise.gelu(%tensor_99, %tensor_103, %state, %tensor_1, %state_origin_4) : (view<4x1280x1xf32>, view<4x1280x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_105 = command.parameter %weights, "model.encoder.layers.0.mlp.fc2.weight" : view<320x1280xf32>
+  %storage_106_bytes = index.constant 5120 : offset
+  %storage_106 = buffer.alloca<global> align(16) %storage_106_bytes : buffer
+  %tensor_107_offset = index.constant 0 : offset
+  %tensor_107 = buffer.view %storage_106[%tensor_107_offset] : buffer -> view<4x320x1xf32>
+  %parameter_108 = command.parameter %weights, "model.encoder.layers.0.mlp.fc2.bias" : view<320xf32>
+  kernel.launch @moonshine.projection.encoder_down(%tensor_103, %parameter_105, %tensor_107, %parameter_108, %state, %tensor_1, %state_origin_4) : (view<4x1280x1xf32>, view<320x1280xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %storage_110_bytes = index.constant 5120 : offset
+  %storage_110 = buffer.alloca<global> align(16) %storage_110_bytes : buffer
+  %tensor_111_offset = index.constant 0 : offset
+  %tensor_111 = buffer.view %storage_110[%tensor_111_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_91, %tensor_107, %tensor_111, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  kernel.launch @moonshine.encoder_state.retire_input(%state, %work, %tensor_1, %state_origin_4, %state_origin_1) : (buffer, buffer, view<5xi32>, offset, offset)
+  %storage_119_bytes = index.constant 5120 : offset
+  %storage_119 = buffer.alloca<global> align(16) %storage_119_bytes : buffer
+  %tensor_120_offset = index.constant 0 : offset
+  %tensor_120 = buffer.view %storage_119[%tensor_120_offset] : buffer -> view<4x320x1xf32>
+  %parameter_121 = command.parameter %weights, "model.encoder.layers.1.input_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_111, %tensor_120, %parameter_121, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_123 = command.parameter %weights, "model.encoder.layers.1.self_attn.q_proj.weight" : view<320x320xf32>
+  %storage_124_bytes = index.constant 5120 : offset
+  %storage_124 = buffer.alloca<global> align(16) %storage_124_bytes : buffer
+  %tensor_125_offset = index.constant 0 : offset
+  %tensor_125 = buffer.view %storage_124[%tensor_125_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_120, %parameter_123, %tensor_125, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_127 = command.parameter %weights, "model.encoder.layers.1.self_attn.k_proj.weight" : view<320x320xf32>
+  %storage_128_bytes = index.constant 5120 : offset
+  %storage_128 = buffer.alloca<global> align(16) %storage_128_bytes : buffer
+  %tensor_129_offset = index.constant 0 : offset
+  %tensor_129 = buffer.view %storage_128[%tensor_129_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_120, %parameter_127, %tensor_129, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_131 = command.parameter %weights, "model.encoder.layers.1.self_attn.v_proj.weight" : view<320x320xf32>
+  %storage_132_bytes = index.constant 5120 : offset
+  %storage_132 = buffer.alloca<global> align(16) %storage_132_bytes : buffer
+  %tensor_133_offset = index.constant 0 : offset
+  %tensor_133 = buffer.view %storage_132[%tensor_133_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_120, %parameter_131, %tensor_133, %state, %tensor_1, %state_origin_4) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_9 = index.constant 179248 : offset
+  %state_origin_10 = index.constant 261200 : offset
+  %state_origin_11 = index.constant 179280 : offset
+  %state_origin_12 = index.constant 220240 : offset
+  %state_origin_13 = index.constant 302160 : offset
+  kernel.launch @moonshine.encoder_state.append(%state, %tensor_125, %tensor_129, %tensor_133, %tensor_111, %tensor_1, %state_origin_9, %state_origin_10, %state_origin_11, %state_origin_12, %state_origin_13, %state_origin_4) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset, offset, offset)
+  kernel.launch @moonshine.encoder_state.lookahead_readiness(%state, %tensor_1, %state_origin_9, %state_origin_4, %state_origin_4) : (buffer, view<5xi32>, offset, offset, offset)
+  %storage_137_bytes = index.constant 5120 : offset
+  %storage_137 = buffer.alloca<global> align(16) %storage_137_bytes : buffer
+  %tensor_138_offset = index.constant 0 : offset
+  %tensor_138 = buffer.view %storage_137[%tensor_138_offset] : buffer -> view<4x320x1xf32>
+  %storage_139_bytes = index.constant 5120 : offset
+  %storage_139 = buffer.alloca<global> align(16) %storage_139_bytes : buffer
+  %tensor_140_offset = index.constant 0 : offset
+  %tensor_140 = buffer.view %storage_139[%tensor_140_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_state.pending_query(%state, %tensor_138, %tensor_140, %tensor_1, %state_origin_9, %state_origin_10, %state_origin_13, %state_origin_9) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_142_bytes = index.constant 97280 : offset
+  %storage_142 = buffer.alloca<global> align(16) %storage_142_bytes : buffer
+  %tensor_143_offset = index.constant 0 : offset
+  %tensor_143 = buffer.view %storage_142[%tensor_143_offset] : buffer -> view<4x320x19xf32>
+  %storage_144_bytes = index.constant 97280 : offset
+  %storage_144 = buffer.alloca<global> align(16) %storage_144_bytes : buffer
+  %tensor_145_offset = index.constant 0 : offset
+  %tensor_145 = buffer.view %storage_144[%tensor_145_offset] : buffer -> view<4x320x19xf32>
+  kernel.launch @moonshine.encoder_attention.window19(%state, %tensor_143, %tensor_145, %tensor_1, %state_origin_9, %state_origin_11, %state_origin_12, %state_origin_9) : (buffer, view<4x320x19xf32>, view<4x320x19xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_147_bytes = index.constant 2432 : offset
+  %storage_147 = buffer.alloca<global> align(16) %storage_147_bytes : buffer
+  %tensor_148_offset = index.constant 0 : offset
+  %tensor_148 = buffer.view %storage_147[%tensor_148_offset] : buffer -> view<4x8x19xf32>
+  kernel.launch @moonshine.encoder_attention.scores19(%tensor_138, %tensor_143, %tensor_148, %state, %tensor_1, %state_origin_9, %state_origin_9) : (view<4x320x1xf32>, view<4x320x19xf32>, view<4x8x19xf32>, buffer, view<5xi32>, offset, offset)
+  %storage_150_bytes = index.constant 2432 : offset
+  %storage_150 = buffer.alloca<global> align(16) %storage_150_bytes : buffer
+  %tensor_151_offset = index.constant 0 : offset
+  %tensor_151 = buffer.view %storage_150[%tensor_151_offset] : buffer -> view<4x8x19xf32>
+  kernel.launch @moonshine.encoder_attention.softmax19(%tensor_148, %tensor_151, %state, %tensor_1, %state_origin_9) : (view<4x8x19xf32>, view<4x8x19xf32>, buffer, view<5xi32>, offset)
+  %storage_153_bytes = index.constant 5120 : offset
+  %storage_153 = buffer.alloca<global> align(16) %storage_153_bytes : buffer
+  %tensor_154_offset = index.constant 0 : offset
+  %tensor_154 = buffer.view %storage_153[%tensor_154_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_attention.values19(%tensor_145, %tensor_151, %tensor_154, %state, %tensor_1, %state_origin_9, %state_origin_9) : (view<4x320x19xf32>, view<4x8x19xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset, offset)
+  %parameter_156 = command.parameter %weights, "model.encoder.layers.1.self_attn.o_proj.weight" : view<320x320xf32>
+  %storage_157_bytes = index.constant 5120 : offset
+  %storage_157 = buffer.alloca<global> align(16) %storage_157_bytes : buffer
+  %tensor_158_offset = index.constant 0 : offset
+  %tensor_158 = buffer.view %storage_157[%tensor_158_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_154, %parameter_156, %tensor_158, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_160_bytes = index.constant 5120 : offset
+  %storage_160 = buffer.alloca<global> align(16) %storage_160_bytes : buffer
+  %tensor_161_offset = index.constant 0 : offset
+  %tensor_161 = buffer.view %storage_160[%tensor_161_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_140, %tensor_158, %tensor_161, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_163_bytes = index.constant 5120 : offset
+  %storage_163 = buffer.alloca<global> align(16) %storage_163_bytes : buffer
+  %tensor_164_offset = index.constant 0 : offset
+  %tensor_164 = buffer.view %storage_163[%tensor_164_offset] : buffer -> view<4x320x1xf32>
+  %parameter_165 = command.parameter %weights, "model.encoder.layers.1.post_attention_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_161, %tensor_164, %parameter_165, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_167 = command.parameter %weights, "model.encoder.layers.1.mlp.fc1.weight" : view<1280x320xf32>
+  %storage_168_bytes = index.constant 20480 : offset
+  %storage_168 = buffer.alloca<global> align(16) %storage_168_bytes : buffer
+  %tensor_169_offset = index.constant 0 : offset
+  %tensor_169 = buffer.view %storage_168[%tensor_169_offset] : buffer -> view<4x1280x1xf32>
+  %parameter_170 = command.parameter %weights, "model.encoder.layers.1.mlp.fc1.bias" : view<1280xf32>
+  kernel.launch @moonshine.projection.encoder_up(%tensor_164, %parameter_167, %tensor_169, %parameter_170, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<1280x320xf32>, view<4x1280x1xf32>, view<1280xf32>, buffer, view<5xi32>, offset)
+  %storage_172_bytes = index.constant 20480 : offset
+  %storage_172 = buffer.alloca<global> align(16) %storage_172_bytes : buffer
+  %tensor_173_offset = index.constant 0 : offset
+  %tensor_173 = buffer.view %storage_172[%tensor_173_offset] : buffer -> view<4x1280x1xf32>
+  kernel.launch @moonshine.pointwise.gelu(%tensor_169, %tensor_173, %state, %tensor_1, %state_origin_9) : (view<4x1280x1xf32>, view<4x1280x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_175 = command.parameter %weights, "model.encoder.layers.1.mlp.fc2.weight" : view<320x1280xf32>
+  %storage_176_bytes = index.constant 5120 : offset
+  %storage_176 = buffer.alloca<global> align(16) %storage_176_bytes : buffer
+  %tensor_177_offset = index.constant 0 : offset
+  %tensor_177 = buffer.view %storage_176[%tensor_177_offset] : buffer -> view<4x320x1xf32>
+  %parameter_178 = command.parameter %weights, "model.encoder.layers.1.mlp.fc2.bias" : view<320xf32>
+  kernel.launch @moonshine.projection.encoder_down(%tensor_173, %parameter_175, %tensor_177, %parameter_178, %state, %tensor_1, %state_origin_9) : (view<4x1280x1xf32>, view<320x1280xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %storage_180_bytes = index.constant 5120 : offset
+  %storage_180 = buffer.alloca<global> align(16) %storage_180_bytes : buffer
+  %tensor_181_offset = index.constant 0 : offset
+  %tensor_181 = buffer.view %storage_180[%tensor_181_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_161, %tensor_177, %tensor_181, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  kernel.launch @moonshine.encoder_state.retire(%state, %tensor_1, %state_origin_9, %state_origin_4) : (buffer, view<5xi32>, offset, offset)
+  %storage_189_bytes = index.constant 5120 : offset
+  %storage_189 = buffer.alloca<global> align(16) %storage_189_bytes : buffer
+  %tensor_190_offset = index.constant 0 : offset
+  %tensor_190 = buffer.view %storage_189[%tensor_190_offset] : buffer -> view<4x320x1xf32>
+  %parameter_191 = command.parameter %weights, "model.encoder.layers.2.input_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_181, %tensor_190, %parameter_191, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_193 = command.parameter %weights, "model.encoder.layers.2.self_attn.q_proj.weight" : view<320x320xf32>
+  %storage_194_bytes = index.constant 5120 : offset
+  %storage_194 = buffer.alloca<global> align(16) %storage_194_bytes : buffer
+  %tensor_195_offset = index.constant 0 : offset
+  %tensor_195 = buffer.view %storage_194[%tensor_195_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_190, %parameter_193, %tensor_195, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_197 = command.parameter %weights, "model.encoder.layers.2.self_attn.k_proj.weight" : view<320x320xf32>
+  %storage_198_bytes = index.constant 5120 : offset
+  %storage_198 = buffer.alloca<global> align(16) %storage_198_bytes : buffer
+  %tensor_199_offset = index.constant 0 : offset
+  %tensor_199 = buffer.view %storage_198[%tensor_199_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_190, %parameter_197, %tensor_199, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_201 = command.parameter %weights, "model.encoder.layers.2.self_attn.v_proj.weight" : view<320x320xf32>
+  %storage_202_bytes = index.constant 5120 : offset
+  %storage_202 = buffer.alloca<global> align(16) %storage_202_bytes : buffer
+  %tensor_203_offset = index.constant 0 : offset
+  %tensor_203 = buffer.view %storage_202[%tensor_203_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_190, %parameter_201, %tensor_203, %state, %tensor_1, %state_origin_9) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_14 = index.constant 343120 : offset
+  %state_origin_15 = index.constant 425072 : offset
+  %state_origin_16 = index.constant 343152 : offset
+  %state_origin_17 = index.constant 384112 : offset
+  %state_origin_18 = index.constant 466032 : offset
+  kernel.launch @moonshine.encoder_state.append(%state, %tensor_195, %tensor_199, %tensor_203, %tensor_181, %tensor_1, %state_origin_14, %state_origin_15, %state_origin_16, %state_origin_17, %state_origin_18, %state_origin_9) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset, offset, offset)
+  kernel.launch @moonshine.encoder_state.causal_readiness(%state, %tensor_1, %state_origin_14, %state_origin_9, %state_origin_9) : (buffer, view<5xi32>, offset, offset, offset)
+  %storage_207_bytes = index.constant 5120 : offset
+  %storage_207 = buffer.alloca<global> align(16) %storage_207_bytes : buffer
+  %tensor_208_offset = index.constant 0 : offset
+  %tensor_208 = buffer.view %storage_207[%tensor_208_offset] : buffer -> view<4x320x1xf32>
+  %storage_209_bytes = index.constant 5120 : offset
+  %storage_209 = buffer.alloca<global> align(16) %storage_209_bytes : buffer
+  %tensor_210_offset = index.constant 0 : offset
+  %tensor_210 = buffer.view %storage_209[%tensor_210_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_state.pending_query(%state, %tensor_208, %tensor_210, %tensor_1, %state_origin_14, %state_origin_15, %state_origin_18, %state_origin_14) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_212_bytes = index.constant 81920 : offset
+  %storage_212 = buffer.alloca<global> align(16) %storage_212_bytes : buffer
+  %tensor_213_offset = index.constant 0 : offset
+  %tensor_213 = buffer.view %storage_212[%tensor_213_offset] : buffer -> view<4x320x16xf32>
+  %storage_214_bytes = index.constant 81920 : offset
+  %storage_214 = buffer.alloca<global> align(16) %storage_214_bytes : buffer
+  %tensor_215_offset = index.constant 0 : offset
+  %tensor_215 = buffer.view %storage_214[%tensor_215_offset] : buffer -> view<4x320x16xf32>
+  kernel.launch @moonshine.encoder_attention.window16(%state, %tensor_213, %tensor_215, %tensor_1, %state_origin_14, %state_origin_16, %state_origin_17, %state_origin_14) : (buffer, view<4x320x16xf32>, view<4x320x16xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_217_bytes = index.constant 2048 : offset
+  %storage_217 = buffer.alloca<global> align(16) %storage_217_bytes : buffer
+  %tensor_218_offset = index.constant 0 : offset
+  %tensor_218 = buffer.view %storage_217[%tensor_218_offset] : buffer -> view<4x8x16xf32>
+  kernel.launch @moonshine.encoder_attention.scores16(%tensor_208, %tensor_213, %tensor_218, %state, %tensor_1, %state_origin_14, %state_origin_14) : (view<4x320x1xf32>, view<4x320x16xf32>, view<4x8x16xf32>, buffer, view<5xi32>, offset, offset)
+  %storage_220_bytes = index.constant 2048 : offset
+  %storage_220 = buffer.alloca<global> align(16) %storage_220_bytes : buffer
+  %tensor_221_offset = index.constant 0 : offset
+  %tensor_221 = buffer.view %storage_220[%tensor_221_offset] : buffer -> view<4x8x16xf32>
+  kernel.launch @moonshine.encoder_attention.softmax16(%tensor_218, %tensor_221, %state, %tensor_1, %state_origin_14) : (view<4x8x16xf32>, view<4x8x16xf32>, buffer, view<5xi32>, offset)
+  %storage_223_bytes = index.constant 5120 : offset
+  %storage_223 = buffer.alloca<global> align(16) %storage_223_bytes : buffer
+  %tensor_224_offset = index.constant 0 : offset
+  %tensor_224 = buffer.view %storage_223[%tensor_224_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_attention.values16(%tensor_215, %tensor_221, %tensor_224, %state, %tensor_1, %state_origin_14, %state_origin_14) : (view<4x320x16xf32>, view<4x8x16xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset, offset)
+  %parameter_226 = command.parameter %weights, "model.encoder.layers.2.self_attn.o_proj.weight" : view<320x320xf32>
+  %storage_227_bytes = index.constant 5120 : offset
+  %storage_227 = buffer.alloca<global> align(16) %storage_227_bytes : buffer
+  %tensor_228_offset = index.constant 0 : offset
+  %tensor_228 = buffer.view %storage_227[%tensor_228_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_224, %parameter_226, %tensor_228, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_230_bytes = index.constant 5120 : offset
+  %storage_230 = buffer.alloca<global> align(16) %storage_230_bytes : buffer
+  %tensor_231_offset = index.constant 0 : offset
+  %tensor_231 = buffer.view %storage_230[%tensor_231_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_210, %tensor_228, %tensor_231, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_233_bytes = index.constant 5120 : offset
+  %storage_233 = buffer.alloca<global> align(16) %storage_233_bytes : buffer
+  %tensor_234_offset = index.constant 0 : offset
+  %tensor_234 = buffer.view %storage_233[%tensor_234_offset] : buffer -> view<4x320x1xf32>
+  %parameter_235 = command.parameter %weights, "model.encoder.layers.2.post_attention_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_231, %tensor_234, %parameter_235, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_237 = command.parameter %weights, "model.encoder.layers.2.mlp.fc1.weight" : view<1280x320xf32>
+  %storage_238_bytes = index.constant 20480 : offset
+  %storage_238 = buffer.alloca<global> align(16) %storage_238_bytes : buffer
+  %tensor_239_offset = index.constant 0 : offset
+  %tensor_239 = buffer.view %storage_238[%tensor_239_offset] : buffer -> view<4x1280x1xf32>
+  %parameter_240 = command.parameter %weights, "model.encoder.layers.2.mlp.fc1.bias" : view<1280xf32>
+  kernel.launch @moonshine.projection.encoder_up(%tensor_234, %parameter_237, %tensor_239, %parameter_240, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<1280x320xf32>, view<4x1280x1xf32>, view<1280xf32>, buffer, view<5xi32>, offset)
+  %storage_242_bytes = index.constant 20480 : offset
+  %storage_242 = buffer.alloca<global> align(16) %storage_242_bytes : buffer
+  %tensor_243_offset = index.constant 0 : offset
+  %tensor_243 = buffer.view %storage_242[%tensor_243_offset] : buffer -> view<4x1280x1xf32>
+  kernel.launch @moonshine.pointwise.gelu(%tensor_239, %tensor_243, %state, %tensor_1, %state_origin_14) : (view<4x1280x1xf32>, view<4x1280x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_245 = command.parameter %weights, "model.encoder.layers.2.mlp.fc2.weight" : view<320x1280xf32>
+  %storage_246_bytes = index.constant 5120 : offset
+  %storage_246 = buffer.alloca<global> align(16) %storage_246_bytes : buffer
+  %tensor_247_offset = index.constant 0 : offset
+  %tensor_247 = buffer.view %storage_246[%tensor_247_offset] : buffer -> view<4x320x1xf32>
+  %parameter_248 = command.parameter %weights, "model.encoder.layers.2.mlp.fc2.bias" : view<320xf32>
+  kernel.launch @moonshine.projection.encoder_down(%tensor_243, %parameter_245, %tensor_247, %parameter_248, %state, %tensor_1, %state_origin_14) : (view<4x1280x1xf32>, view<320x1280xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %storage_250_bytes = index.constant 5120 : offset
+  %storage_250 = buffer.alloca<global> align(16) %storage_250_bytes : buffer
+  %tensor_251_offset = index.constant 0 : offset
+  %tensor_251 = buffer.view %storage_250[%tensor_251_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_231, %tensor_247, %tensor_251, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  kernel.launch @moonshine.encoder_state.retire(%state, %tensor_1, %state_origin_14, %state_origin_9) : (buffer, view<5xi32>, offset, offset)
+  %storage_259_bytes = index.constant 5120 : offset
+  %storage_259 = buffer.alloca<global> align(16) %storage_259_bytes : buffer
+  %tensor_260_offset = index.constant 0 : offset
+  %tensor_260 = buffer.view %storage_259[%tensor_260_offset] : buffer -> view<4x320x1xf32>
+  %parameter_261 = command.parameter %weights, "model.encoder.layers.3.input_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_251, %tensor_260, %parameter_261, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_263 = command.parameter %weights, "model.encoder.layers.3.self_attn.q_proj.weight" : view<320x320xf32>
+  %storage_264_bytes = index.constant 5120 : offset
+  %storage_264 = buffer.alloca<global> align(16) %storage_264_bytes : buffer
+  %tensor_265_offset = index.constant 0 : offset
+  %tensor_265 = buffer.view %storage_264[%tensor_265_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_260, %parameter_263, %tensor_265, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_267 = command.parameter %weights, "model.encoder.layers.3.self_attn.k_proj.weight" : view<320x320xf32>
+  %storage_268_bytes = index.constant 5120 : offset
+  %storage_268 = buffer.alloca<global> align(16) %storage_268_bytes : buffer
+  %tensor_269_offset = index.constant 0 : offset
+  %tensor_269 = buffer.view %storage_268[%tensor_269_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_260, %parameter_267, %tensor_269, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_271 = command.parameter %weights, "model.encoder.layers.3.self_attn.v_proj.weight" : view<320x320xf32>
+  %storage_272_bytes = index.constant 5120 : offset
+  %storage_272 = buffer.alloca<global> align(16) %storage_272_bytes : buffer
+  %tensor_273_offset = index.constant 0 : offset
+  %tensor_273 = buffer.view %storage_272[%tensor_273_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_260, %parameter_271, %tensor_273, %state, %tensor_1, %state_origin_14) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_19 = index.constant 506992 : offset
+  %state_origin_20 = index.constant 588944 : offset
+  %state_origin_21 = index.constant 507024 : offset
+  %state_origin_22 = index.constant 547984 : offset
+  %state_origin_23 = index.constant 629904 : offset
+  kernel.launch @moonshine.encoder_state.append(%state, %tensor_265, %tensor_269, %tensor_273, %tensor_251, %tensor_1, %state_origin_19, %state_origin_20, %state_origin_21, %state_origin_22, %state_origin_23, %state_origin_14) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset, offset, offset)
+  kernel.launch @moonshine.encoder_state.causal_readiness(%state, %tensor_1, %state_origin_19, %state_origin_14, %state_origin_14) : (buffer, view<5xi32>, offset, offset, offset)
+  %storage_277_bytes = index.constant 5120 : offset
+  %storage_277 = buffer.alloca<global> align(16) %storage_277_bytes : buffer
+  %tensor_278_offset = index.constant 0 : offset
+  %tensor_278 = buffer.view %storage_277[%tensor_278_offset] : buffer -> view<4x320x1xf32>
+  %storage_279_bytes = index.constant 5120 : offset
+  %storage_279 = buffer.alloca<global> align(16) %storage_279_bytes : buffer
+  %tensor_280_offset = index.constant 0 : offset
+  %tensor_280 = buffer.view %storage_279[%tensor_280_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_state.pending_query(%state, %tensor_278, %tensor_280, %tensor_1, %state_origin_19, %state_origin_20, %state_origin_23, %state_origin_19) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_282_bytes = index.constant 81920 : offset
+  %storage_282 = buffer.alloca<global> align(16) %storage_282_bytes : buffer
+  %tensor_283_offset = index.constant 0 : offset
+  %tensor_283 = buffer.view %storage_282[%tensor_283_offset] : buffer -> view<4x320x16xf32>
+  %storage_284_bytes = index.constant 81920 : offset
+  %storage_284 = buffer.alloca<global> align(16) %storage_284_bytes : buffer
+  %tensor_285_offset = index.constant 0 : offset
+  %tensor_285 = buffer.view %storage_284[%tensor_285_offset] : buffer -> view<4x320x16xf32>
+  kernel.launch @moonshine.encoder_attention.window16(%state, %tensor_283, %tensor_285, %tensor_1, %state_origin_19, %state_origin_21, %state_origin_22, %state_origin_19) : (buffer, view<4x320x16xf32>, view<4x320x16xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_287_bytes = index.constant 2048 : offset
+  %storage_287 = buffer.alloca<global> align(16) %storage_287_bytes : buffer
+  %tensor_288_offset = index.constant 0 : offset
+  %tensor_288 = buffer.view %storage_287[%tensor_288_offset] : buffer -> view<4x8x16xf32>
+  kernel.launch @moonshine.encoder_attention.scores16(%tensor_278, %tensor_283, %tensor_288, %state, %tensor_1, %state_origin_19, %state_origin_19) : (view<4x320x1xf32>, view<4x320x16xf32>, view<4x8x16xf32>, buffer, view<5xi32>, offset, offset)
+  %storage_290_bytes = index.constant 2048 : offset
+  %storage_290 = buffer.alloca<global> align(16) %storage_290_bytes : buffer
+  %tensor_291_offset = index.constant 0 : offset
+  %tensor_291 = buffer.view %storage_290[%tensor_291_offset] : buffer -> view<4x8x16xf32>
+  kernel.launch @moonshine.encoder_attention.softmax16(%tensor_288, %tensor_291, %state, %tensor_1, %state_origin_19) : (view<4x8x16xf32>, view<4x8x16xf32>, buffer, view<5xi32>, offset)
+  %storage_293_bytes = index.constant 5120 : offset
+  %storage_293 = buffer.alloca<global> align(16) %storage_293_bytes : buffer
+  %tensor_294_offset = index.constant 0 : offset
+  %tensor_294 = buffer.view %storage_293[%tensor_294_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_attention.values16(%tensor_285, %tensor_291, %tensor_294, %state, %tensor_1, %state_origin_19, %state_origin_19) : (view<4x320x16xf32>, view<4x8x16xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset, offset)
+  %parameter_296 = command.parameter %weights, "model.encoder.layers.3.self_attn.o_proj.weight" : view<320x320xf32>
+  %storage_297_bytes = index.constant 5120 : offset
+  %storage_297 = buffer.alloca<global> align(16) %storage_297_bytes : buffer
+  %tensor_298_offset = index.constant 0 : offset
+  %tensor_298 = buffer.view %storage_297[%tensor_298_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_294, %parameter_296, %tensor_298, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_300_bytes = index.constant 5120 : offset
+  %storage_300 = buffer.alloca<global> align(16) %storage_300_bytes : buffer
+  %tensor_301_offset = index.constant 0 : offset
+  %tensor_301 = buffer.view %storage_300[%tensor_301_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_280, %tensor_298, %tensor_301, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_303_bytes = index.constant 5120 : offset
+  %storage_303 = buffer.alloca<global> align(16) %storage_303_bytes : buffer
+  %tensor_304_offset = index.constant 0 : offset
+  %tensor_304 = buffer.view %storage_303[%tensor_304_offset] : buffer -> view<4x320x1xf32>
+  %parameter_305 = command.parameter %weights, "model.encoder.layers.3.post_attention_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_301, %tensor_304, %parameter_305, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_307 = command.parameter %weights, "model.encoder.layers.3.mlp.fc1.weight" : view<1280x320xf32>
+  %storage_308_bytes = index.constant 20480 : offset
+  %storage_308 = buffer.alloca<global> align(16) %storage_308_bytes : buffer
+  %tensor_309_offset = index.constant 0 : offset
+  %tensor_309 = buffer.view %storage_308[%tensor_309_offset] : buffer -> view<4x1280x1xf32>
+  %parameter_310 = command.parameter %weights, "model.encoder.layers.3.mlp.fc1.bias" : view<1280xf32>
+  kernel.launch @moonshine.projection.encoder_up(%tensor_304, %parameter_307, %tensor_309, %parameter_310, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<1280x320xf32>, view<4x1280x1xf32>, view<1280xf32>, buffer, view<5xi32>, offset)
+  %storage_312_bytes = index.constant 20480 : offset
+  %storage_312 = buffer.alloca<global> align(16) %storage_312_bytes : buffer
+  %tensor_313_offset = index.constant 0 : offset
+  %tensor_313 = buffer.view %storage_312[%tensor_313_offset] : buffer -> view<4x1280x1xf32>
+  kernel.launch @moonshine.pointwise.gelu(%tensor_309, %tensor_313, %state, %tensor_1, %state_origin_19) : (view<4x1280x1xf32>, view<4x1280x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_315 = command.parameter %weights, "model.encoder.layers.3.mlp.fc2.weight" : view<320x1280xf32>
+  %storage_316_bytes = index.constant 5120 : offset
+  %storage_316 = buffer.alloca<global> align(16) %storage_316_bytes : buffer
+  %tensor_317_offset = index.constant 0 : offset
+  %tensor_317 = buffer.view %storage_316[%tensor_317_offset] : buffer -> view<4x320x1xf32>
+  %parameter_318 = command.parameter %weights, "model.encoder.layers.3.mlp.fc2.bias" : view<320xf32>
+  kernel.launch @moonshine.projection.encoder_down(%tensor_313, %parameter_315, %tensor_317, %parameter_318, %state, %tensor_1, %state_origin_19) : (view<4x1280x1xf32>, view<320x1280xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %storage_320_bytes = index.constant 5120 : offset
+  %storage_320 = buffer.alloca<global> align(16) %storage_320_bytes : buffer
+  %tensor_321_offset = index.constant 0 : offset
+  %tensor_321 = buffer.view %storage_320[%tensor_321_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_301, %tensor_317, %tensor_321, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  kernel.launch @moonshine.encoder_state.retire(%state, %tensor_1, %state_origin_19, %state_origin_14) : (buffer, view<5xi32>, offset, offset)
+  %storage_329_bytes = index.constant 5120 : offset
+  %storage_329 = buffer.alloca<global> align(16) %storage_329_bytes : buffer
+  %tensor_330_offset = index.constant 0 : offset
+  %tensor_330 = buffer.view %storage_329[%tensor_330_offset] : buffer -> view<4x320x1xf32>
+  %parameter_331 = command.parameter %weights, "model.encoder.layers.4.input_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_321, %tensor_330, %parameter_331, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_333 = command.parameter %weights, "model.encoder.layers.4.self_attn.q_proj.weight" : view<320x320xf32>
+  %storage_334_bytes = index.constant 5120 : offset
+  %storage_334 = buffer.alloca<global> align(16) %storage_334_bytes : buffer
+  %tensor_335_offset = index.constant 0 : offset
+  %tensor_335 = buffer.view %storage_334[%tensor_335_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_330, %parameter_333, %tensor_335, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_337 = command.parameter %weights, "model.encoder.layers.4.self_attn.k_proj.weight" : view<320x320xf32>
+  %storage_338_bytes = index.constant 5120 : offset
+  %storage_338 = buffer.alloca<global> align(16) %storage_338_bytes : buffer
+  %tensor_339_offset = index.constant 0 : offset
+  %tensor_339 = buffer.view %storage_338[%tensor_339_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_330, %parameter_337, %tensor_339, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_341 = command.parameter %weights, "model.encoder.layers.4.self_attn.v_proj.weight" : view<320x320xf32>
+  %storage_342_bytes = index.constant 5120 : offset
+  %storage_342 = buffer.alloca<global> align(16) %storage_342_bytes : buffer
+  %tensor_343_offset = index.constant 0 : offset
+  %tensor_343 = buffer.view %storage_342[%tensor_343_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_330, %parameter_341, %tensor_343, %state, %tensor_1, %state_origin_19) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_24 = index.constant 670864 : offset
+  %state_origin_25 = index.constant 752816 : offset
+  %state_origin_26 = index.constant 670896 : offset
+  %state_origin_27 = index.constant 711856 : offset
+  %state_origin_28 = index.constant 793776 : offset
+  kernel.launch @moonshine.encoder_state.append(%state, %tensor_335, %tensor_339, %tensor_343, %tensor_321, %tensor_1, %state_origin_24, %state_origin_25, %state_origin_26, %state_origin_27, %state_origin_28, %state_origin_19) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset, offset, offset)
+  kernel.launch @moonshine.encoder_state.lookahead_readiness(%state, %tensor_1, %state_origin_24, %state_origin_19, %state_origin_19) : (buffer, view<5xi32>, offset, offset, offset)
+  %storage_347_bytes = index.constant 5120 : offset
+  %storage_347 = buffer.alloca<global> align(16) %storage_347_bytes : buffer
+  %tensor_348_offset = index.constant 0 : offset
+  %tensor_348 = buffer.view %storage_347[%tensor_348_offset] : buffer -> view<4x320x1xf32>
+  %storage_349_bytes = index.constant 5120 : offset
+  %storage_349 = buffer.alloca<global> align(16) %storage_349_bytes : buffer
+  %tensor_350_offset = index.constant 0 : offset
+  %tensor_350 = buffer.view %storage_349[%tensor_350_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_state.pending_query(%state, %tensor_348, %tensor_350, %tensor_1, %state_origin_24, %state_origin_25, %state_origin_28, %state_origin_24) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_352_bytes = index.constant 97280 : offset
+  %storage_352 = buffer.alloca<global> align(16) %storage_352_bytes : buffer
+  %tensor_353_offset = index.constant 0 : offset
+  %tensor_353 = buffer.view %storage_352[%tensor_353_offset] : buffer -> view<4x320x19xf32>
+  %storage_354_bytes = index.constant 97280 : offset
+  %storage_354 = buffer.alloca<global> align(16) %storage_354_bytes : buffer
+  %tensor_355_offset = index.constant 0 : offset
+  %tensor_355 = buffer.view %storage_354[%tensor_355_offset] : buffer -> view<4x320x19xf32>
+  kernel.launch @moonshine.encoder_attention.window19(%state, %tensor_353, %tensor_355, %tensor_1, %state_origin_24, %state_origin_26, %state_origin_27, %state_origin_24) : (buffer, view<4x320x19xf32>, view<4x320x19xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_357_bytes = index.constant 2432 : offset
+  %storage_357 = buffer.alloca<global> align(16) %storage_357_bytes : buffer
+  %tensor_358_offset = index.constant 0 : offset
+  %tensor_358 = buffer.view %storage_357[%tensor_358_offset] : buffer -> view<4x8x19xf32>
+  kernel.launch @moonshine.encoder_attention.scores19(%tensor_348, %tensor_353, %tensor_358, %state, %tensor_1, %state_origin_24, %state_origin_24) : (view<4x320x1xf32>, view<4x320x19xf32>, view<4x8x19xf32>, buffer, view<5xi32>, offset, offset)
+  %storage_360_bytes = index.constant 2432 : offset
+  %storage_360 = buffer.alloca<global> align(16) %storage_360_bytes : buffer
+  %tensor_361_offset = index.constant 0 : offset
+  %tensor_361 = buffer.view %storage_360[%tensor_361_offset] : buffer -> view<4x8x19xf32>
+  kernel.launch @moonshine.encoder_attention.softmax19(%tensor_358, %tensor_361, %state, %tensor_1, %state_origin_24) : (view<4x8x19xf32>, view<4x8x19xf32>, buffer, view<5xi32>, offset)
+  %storage_363_bytes = index.constant 5120 : offset
+  %storage_363 = buffer.alloca<global> align(16) %storage_363_bytes : buffer
+  %tensor_364_offset = index.constant 0 : offset
+  %tensor_364 = buffer.view %storage_363[%tensor_364_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_attention.values19(%tensor_355, %tensor_361, %tensor_364, %state, %tensor_1, %state_origin_24, %state_origin_24) : (view<4x320x19xf32>, view<4x8x19xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset, offset)
+  %parameter_366 = command.parameter %weights, "model.encoder.layers.4.self_attn.o_proj.weight" : view<320x320xf32>
+  %storage_367_bytes = index.constant 5120 : offset
+  %storage_367 = buffer.alloca<global> align(16) %storage_367_bytes : buffer
+  %tensor_368_offset = index.constant 0 : offset
+  %tensor_368 = buffer.view %storage_367[%tensor_368_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_364, %parameter_366, %tensor_368, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_370_bytes = index.constant 5120 : offset
+  %storage_370 = buffer.alloca<global> align(16) %storage_370_bytes : buffer
+  %tensor_371_offset = index.constant 0 : offset
+  %tensor_371 = buffer.view %storage_370[%tensor_371_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_350, %tensor_368, %tensor_371, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_373_bytes = index.constant 5120 : offset
+  %storage_373 = buffer.alloca<global> align(16) %storage_373_bytes : buffer
+  %tensor_374_offset = index.constant 0 : offset
+  %tensor_374 = buffer.view %storage_373[%tensor_374_offset] : buffer -> view<4x320x1xf32>
+  %parameter_375 = command.parameter %weights, "model.encoder.layers.4.post_attention_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_371, %tensor_374, %parameter_375, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_377 = command.parameter %weights, "model.encoder.layers.4.mlp.fc1.weight" : view<1280x320xf32>
+  %storage_378_bytes = index.constant 20480 : offset
+  %storage_378 = buffer.alloca<global> align(16) %storage_378_bytes : buffer
+  %tensor_379_offset = index.constant 0 : offset
+  %tensor_379 = buffer.view %storage_378[%tensor_379_offset] : buffer -> view<4x1280x1xf32>
+  %parameter_380 = command.parameter %weights, "model.encoder.layers.4.mlp.fc1.bias" : view<1280xf32>
+  kernel.launch @moonshine.projection.encoder_up(%tensor_374, %parameter_377, %tensor_379, %parameter_380, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<1280x320xf32>, view<4x1280x1xf32>, view<1280xf32>, buffer, view<5xi32>, offset)
+  %storage_382_bytes = index.constant 20480 : offset
+  %storage_382 = buffer.alloca<global> align(16) %storage_382_bytes : buffer
+  %tensor_383_offset = index.constant 0 : offset
+  %tensor_383 = buffer.view %storage_382[%tensor_383_offset] : buffer -> view<4x1280x1xf32>
+  kernel.launch @moonshine.pointwise.gelu(%tensor_379, %tensor_383, %state, %tensor_1, %state_origin_24) : (view<4x1280x1xf32>, view<4x1280x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_385 = command.parameter %weights, "model.encoder.layers.4.mlp.fc2.weight" : view<320x1280xf32>
+  %storage_386_bytes = index.constant 5120 : offset
+  %storage_386 = buffer.alloca<global> align(16) %storage_386_bytes : buffer
+  %tensor_387_offset = index.constant 0 : offset
+  %tensor_387 = buffer.view %storage_386[%tensor_387_offset] : buffer -> view<4x320x1xf32>
+  %parameter_388 = command.parameter %weights, "model.encoder.layers.4.mlp.fc2.bias" : view<320xf32>
+  kernel.launch @moonshine.projection.encoder_down(%tensor_383, %parameter_385, %tensor_387, %parameter_388, %state, %tensor_1, %state_origin_24) : (view<4x1280x1xf32>, view<320x1280xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %storage_390_bytes = index.constant 5120 : offset
+  %storage_390 = buffer.alloca<global> align(16) %storage_390_bytes : buffer
+  %tensor_391_offset = index.constant 0 : offset
+  %tensor_391 = buffer.view %storage_390[%tensor_391_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_371, %tensor_387, %tensor_391, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  kernel.launch @moonshine.encoder_state.retire(%state, %tensor_1, %state_origin_24, %state_origin_19) : (buffer, view<5xi32>, offset, offset)
+  %storage_399_bytes = index.constant 5120 : offset
+  %storage_399 = buffer.alloca<global> align(16) %storage_399_bytes : buffer
+  %tensor_400_offset = index.constant 0 : offset
+  %tensor_400 = buffer.view %storage_399[%tensor_400_offset] : buffer -> view<4x320x1xf32>
+  %parameter_401 = command.parameter %weights, "model.encoder.layers.5.input_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_391, %tensor_400, %parameter_401, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_403 = command.parameter %weights, "model.encoder.layers.5.self_attn.q_proj.weight" : view<320x320xf32>
+  %storage_404_bytes = index.constant 5120 : offset
+  %storage_404 = buffer.alloca<global> align(16) %storage_404_bytes : buffer
+  %tensor_405_offset = index.constant 0 : offset
+  %tensor_405 = buffer.view %storage_404[%tensor_405_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_400, %parameter_403, %tensor_405, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_407 = command.parameter %weights, "model.encoder.layers.5.self_attn.k_proj.weight" : view<320x320xf32>
+  %storage_408_bytes = index.constant 5120 : offset
+  %storage_408 = buffer.alloca<global> align(16) %storage_408_bytes : buffer
+  %tensor_409_offset = index.constant 0 : offset
+  %tensor_409 = buffer.view %storage_408[%tensor_409_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_400, %parameter_407, %tensor_409, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_411 = command.parameter %weights, "model.encoder.layers.5.self_attn.v_proj.weight" : view<320x320xf32>
+  %storage_412_bytes = index.constant 5120 : offset
+  %storage_412 = buffer.alloca<global> align(16) %storage_412_bytes : buffer
+  %tensor_413_offset = index.constant 0 : offset
+  %tensor_413 = buffer.view %storage_412[%tensor_413_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_400, %parameter_411, %tensor_413, %state, %tensor_1, %state_origin_24) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_29 = index.constant 834736 : offset
+  %state_origin_30 = index.constant 916688 : offset
+  %state_origin_31 = index.constant 834768 : offset
+  %state_origin_32 = index.constant 875728 : offset
+  %state_origin_33 = index.constant 957648 : offset
+  kernel.launch @moonshine.encoder_state.append(%state, %tensor_405, %tensor_409, %tensor_413, %tensor_391, %tensor_1, %state_origin_29, %state_origin_30, %state_origin_31, %state_origin_32, %state_origin_33, %state_origin_24) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset, offset, offset)
+  kernel.launch @moonshine.encoder_state.lookahead_readiness(%state, %tensor_1, %state_origin_29, %state_origin_24, %state_origin_24) : (buffer, view<5xi32>, offset, offset, offset)
+  %storage_417_bytes = index.constant 5120 : offset
+  %storage_417 = buffer.alloca<global> align(16) %storage_417_bytes : buffer
+  %tensor_418_offset = index.constant 0 : offset
+  %tensor_418 = buffer.view %storage_417[%tensor_418_offset] : buffer -> view<4x320x1xf32>
+  %storage_419_bytes = index.constant 5120 : offset
+  %storage_419 = buffer.alloca<global> align(16) %storage_419_bytes : buffer
+  %tensor_420_offset = index.constant 0 : offset
+  %tensor_420 = buffer.view %storage_419[%tensor_420_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_state.pending_query(%state, %tensor_418, %tensor_420, %tensor_1, %state_origin_29, %state_origin_30, %state_origin_33, %state_origin_29) : (buffer, view<4x320x1xf32>, view<4x320x1xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_422_bytes = index.constant 97280 : offset
+  %storage_422 = buffer.alloca<global> align(16) %storage_422_bytes : buffer
+  %tensor_423_offset = index.constant 0 : offset
+  %tensor_423 = buffer.view %storage_422[%tensor_423_offset] : buffer -> view<4x320x19xf32>
+  %storage_424_bytes = index.constant 97280 : offset
+  %storage_424 = buffer.alloca<global> align(16) %storage_424_bytes : buffer
+  %tensor_425_offset = index.constant 0 : offset
+  %tensor_425 = buffer.view %storage_424[%tensor_425_offset] : buffer -> view<4x320x19xf32>
+  kernel.launch @moonshine.encoder_attention.window19(%state, %tensor_423, %tensor_425, %tensor_1, %state_origin_29, %state_origin_31, %state_origin_32, %state_origin_29) : (buffer, view<4x320x19xf32>, view<4x320x19xf32>, view<5xi32>, offset, offset, offset, offset)
+  %storage_427_bytes = index.constant 2432 : offset
+  %storage_427 = buffer.alloca<global> align(16) %storage_427_bytes : buffer
+  %tensor_428_offset = index.constant 0 : offset
+  %tensor_428 = buffer.view %storage_427[%tensor_428_offset] : buffer -> view<4x8x19xf32>
+  kernel.launch @moonshine.encoder_attention.scores19(%tensor_418, %tensor_423, %tensor_428, %state, %tensor_1, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, view<4x320x19xf32>, view<4x8x19xf32>, buffer, view<5xi32>, offset, offset)
+  %storage_430_bytes = index.constant 2432 : offset
+  %storage_430 = buffer.alloca<global> align(16) %storage_430_bytes : buffer
+  %tensor_431_offset = index.constant 0 : offset
+  %tensor_431 = buffer.view %storage_430[%tensor_431_offset] : buffer -> view<4x8x19xf32>
+  kernel.launch @moonshine.encoder_attention.softmax19(%tensor_428, %tensor_431, %state, %tensor_1, %state_origin_29) : (view<4x8x19xf32>, view<4x8x19xf32>, buffer, view<5xi32>, offset)
+  %storage_433_bytes = index.constant 5120 : offset
+  %storage_433 = buffer.alloca<global> align(16) %storage_433_bytes : buffer
+  %tensor_434_offset = index.constant 0 : offset
+  %tensor_434 = buffer.view %storage_433[%tensor_434_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_attention.values19(%tensor_425, %tensor_431, %tensor_434, %state, %tensor_1, %state_origin_29, %state_origin_29) : (view<4x320x19xf32>, view<4x8x19xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset, offset)
+  %parameter_436 = command.parameter %weights, "model.encoder.layers.5.self_attn.o_proj.weight" : view<320x320xf32>
+  %storage_437_bytes = index.constant 5120 : offset
+  %storage_437 = buffer.alloca<global> align(16) %storage_437_bytes : buffer
+  %tensor_438_offset = index.constant 0 : offset
+  %tensor_438 = buffer.view %storage_437[%tensor_438_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_434, %parameter_436, %tensor_438, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_440_bytes = index.constant 5120 : offset
+  %storage_440 = buffer.alloca<global> align(16) %storage_440_bytes : buffer
+  %tensor_441_offset = index.constant 0 : offset
+  %tensor_441 = buffer.view %storage_440[%tensor_441_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_420, %tensor_438, %tensor_441, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %storage_443_bytes = index.constant 5120 : offset
+  %storage_443 = buffer.alloca<global> align(16) %storage_443_bytes : buffer
+  %tensor_444_offset = index.constant 0 : offset
+  %tensor_444 = buffer.view %storage_443[%tensor_444_offset] : buffer -> view<4x320x1xf32>
+  %parameter_445 = command.parameter %weights, "model.encoder.layers.5.post_attention_layernorm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_441, %tensor_444, %parameter_445, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_447 = command.parameter %weights, "model.encoder.layers.5.mlp.fc1.weight" : view<1280x320xf32>
+  %storage_448_bytes = index.constant 20480 : offset
+  %storage_448 = buffer.alloca<global> align(16) %storage_448_bytes : buffer
+  %tensor_449_offset = index.constant 0 : offset
+  %tensor_449 = buffer.view %storage_448[%tensor_449_offset] : buffer -> view<4x1280x1xf32>
+  %parameter_450 = command.parameter %weights, "model.encoder.layers.5.mlp.fc1.bias" : view<1280xf32>
+  kernel.launch @moonshine.projection.encoder_up(%tensor_444, %parameter_447, %tensor_449, %parameter_450, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<1280x320xf32>, view<4x1280x1xf32>, view<1280xf32>, buffer, view<5xi32>, offset)
+  %storage_452_bytes = index.constant 20480 : offset
+  %storage_452 = buffer.alloca<global> align(16) %storage_452_bytes : buffer
+  %tensor_453_offset = index.constant 0 : offset
+  %tensor_453 = buffer.view %storage_452[%tensor_453_offset] : buffer -> view<4x1280x1xf32>
+  kernel.launch @moonshine.pointwise.gelu(%tensor_449, %tensor_453, %state, %tensor_1, %state_origin_29) : (view<4x1280x1xf32>, view<4x1280x1xf32>, buffer, view<5xi32>, offset)
+  %parameter_455 = command.parameter %weights, "model.encoder.layers.5.mlp.fc2.weight" : view<320x1280xf32>
+  %storage_456_bytes = index.constant 5120 : offset
+  %storage_456 = buffer.alloca<global> align(16) %storage_456_bytes : buffer
+  %tensor_457_offset = index.constant 0 : offset
+  %tensor_457 = buffer.view %storage_456[%tensor_457_offset] : buffer -> view<4x320x1xf32>
+  %parameter_458 = command.parameter %weights, "model.encoder.layers.5.mlp.fc2.bias" : view<320xf32>
+  kernel.launch @moonshine.projection.encoder_down(%tensor_453, %parameter_455, %tensor_457, %parameter_458, %state, %tensor_1, %state_origin_29) : (view<4x1280x1xf32>, view<320x1280xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %storage_460_bytes = index.constant 5120 : offset
+  %storage_460 = buffer.alloca<global> align(16) %storage_460_bytes : buffer
+  %tensor_461_offset = index.constant 0 : offset
+  %tensor_461 = buffer.view %storage_460[%tensor_461_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.pointwise.encoder_residual(%tensor_441, %tensor_457, %tensor_461, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<4x320x1xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  kernel.launch @moonshine.encoder_state.retire(%state, %tensor_1, %state_origin_29, %state_origin_24) : (buffer, view<5xi32>, offset, offset)
+  %storage_464_bytes = index.constant 5120 : offset
+  %storage_464 = buffer.alloca<global> align(16) %storage_464_bytes : buffer
+  %tensor_465_offset = index.constant 0 : offset
+  %tensor_465 = buffer.view %storage_464[%tensor_465_offset] : buffer -> view<4x320x1xf32>
+  %parameter_466 = command.parameter %weights, "model.encoder.final_norm.gamma" : view<320xf32>
+  kernel.launch @moonshine.normalization.encoder(%tensor_461, %tensor_465, %parameter_466, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<4x320x1xf32>, view<320xf32>, buffer, view<5xi32>, offset)
+  %parameter_468 = command.parameter %weights, "model.decoder.pos_emb.weight" : view<4096x320xf32>
+  %storage_469_bytes = index.constant 5120 : offset
+  %storage_469 = buffer.alloca<global> align(16) %storage_469_bytes : buffer
+  %tensor_470_offset = index.constant 0 : offset
+  %tensor_470 = buffer.view %storage_469[%tensor_470_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.encoder_state.adapt(%tensor_465, %parameter_468, %state, %tensor_470, %tensor_1, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, view<4096x320xf32>, buffer, view<4x320x1xf32>, view<5xi32>, offset, offset)
+  %parameter_472 = command.parameter %weights, "model.decoder.layers.0.encoder_attn.k_proj.weight" : view<320x320xf32>
+  %storage_473_bytes = index.constant 5120 : offset
+  %storage_473 = buffer.alloca<global> align(16) %storage_473_bytes : buffer
+  %tensor_474_offset = index.constant 0 : offset
+  %tensor_474 = buffer.view %storage_473[%tensor_474_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_472, %tensor_474, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_34 = index.constant 998608 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_474, %state, %tensor_1, %state_origin_34, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_478 = command.parameter %weights, "model.decoder.layers.0.encoder_attn.v_proj.weight" : view<320x320xf32>
+  %storage_479_bytes = index.constant 5120 : offset
+  %storage_479 = buffer.alloca<global> align(16) %storage_479_bytes : buffer
+  %tensor_480_offset = index.constant 0 : offset
+  %tensor_480 = buffer.view %storage_479[%tensor_480_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_478, %tensor_480, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_35 = index.constant 3620048 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_480, %state, %tensor_1, %state_origin_35, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_484 = command.parameter %weights, "model.decoder.layers.1.encoder_attn.k_proj.weight" : view<320x320xf32>
+  %storage_485_bytes = index.constant 5120 : offset
+  %storage_485 = buffer.alloca<global> align(16) %storage_485_bytes : buffer
+  %tensor_486_offset = index.constant 0 : offset
+  %tensor_486 = buffer.view %storage_485[%tensor_486_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_484, %tensor_486, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_36 = index.constant 6241488 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_486, %state, %tensor_1, %state_origin_36, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_490 = command.parameter %weights, "model.decoder.layers.1.encoder_attn.v_proj.weight" : view<320x320xf32>
+  %storage_491_bytes = index.constant 5120 : offset
+  %storage_491 = buffer.alloca<global> align(16) %storage_491_bytes : buffer
+  %tensor_492_offset = index.constant 0 : offset
+  %tensor_492 = buffer.view %storage_491[%tensor_492_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_490, %tensor_492, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_37 = index.constant 8862928 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_492, %state, %tensor_1, %state_origin_37, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_496 = command.parameter %weights, "model.decoder.layers.2.encoder_attn.k_proj.weight" : view<320x320xf32>
+  %storage_497_bytes = index.constant 5120 : offset
+  %storage_497 = buffer.alloca<global> align(16) %storage_497_bytes : buffer
+  %tensor_498_offset = index.constant 0 : offset
+  %tensor_498 = buffer.view %storage_497[%tensor_498_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_496, %tensor_498, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_38 = index.constant 11484368 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_498, %state, %tensor_1, %state_origin_38, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_502 = command.parameter %weights, "model.decoder.layers.2.encoder_attn.v_proj.weight" : view<320x320xf32>
+  %storage_503_bytes = index.constant 5120 : offset
+  %storage_503 = buffer.alloca<global> align(16) %storage_503_bytes : buffer
+  %tensor_504_offset = index.constant 0 : offset
+  %tensor_504 = buffer.view %storage_503[%tensor_504_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_502, %tensor_504, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_39 = index.constant 14105808 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_504, %state, %tensor_1, %state_origin_39, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_508 = command.parameter %weights, "model.decoder.layers.3.encoder_attn.k_proj.weight" : view<320x320xf32>
+  %storage_509_bytes = index.constant 5120 : offset
+  %storage_509 = buffer.alloca<global> align(16) %storage_509_bytes : buffer
+  %tensor_510_offset = index.constant 0 : offset
+  %tensor_510 = buffer.view %storage_509[%tensor_510_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_508, %tensor_510, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_40 = index.constant 16727248 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_510, %state, %tensor_1, %state_origin_40, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_514 = command.parameter %weights, "model.decoder.layers.3.encoder_attn.v_proj.weight" : view<320x320xf32>
+  %storage_515_bytes = index.constant 5120 : offset
+  %storage_515 = buffer.alloca<global> align(16) %storage_515_bytes : buffer
+  %tensor_516_offset = index.constant 0 : offset
+  %tensor_516 = buffer.view %storage_515[%tensor_516_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_514, %tensor_516, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_41 = index.constant 19348688 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_516, %state, %tensor_1, %state_origin_41, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_520 = command.parameter %weights, "model.decoder.layers.4.encoder_attn.k_proj.weight" : view<320x320xf32>
+  %storage_521_bytes = index.constant 5120 : offset
+  %storage_521 = buffer.alloca<global> align(16) %storage_521_bytes : buffer
+  %tensor_522_offset = index.constant 0 : offset
+  %tensor_522 = buffer.view %storage_521[%tensor_522_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_520, %tensor_522, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_42 = index.constant 21970128 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_522, %state, %tensor_1, %state_origin_42, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_526 = command.parameter %weights, "model.decoder.layers.4.encoder_attn.v_proj.weight" : view<320x320xf32>
+  %storage_527_bytes = index.constant 5120 : offset
+  %storage_527 = buffer.alloca<global> align(16) %storage_527_bytes : buffer
+  %tensor_528_offset = index.constant 0 : offset
+  %tensor_528 = buffer.view %storage_527[%tensor_528_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_526, %tensor_528, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_43 = index.constant 24591568 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_528, %state, %tensor_1, %state_origin_43, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_532 = command.parameter %weights, "model.decoder.layers.5.encoder_attn.k_proj.weight" : view<320x320xf32>
+  %storage_533_bytes = index.constant 5120 : offset
+  %storage_533 = buffer.alloca<global> align(16) %storage_533_bytes : buffer
+  %tensor_534_offset = index.constant 0 : offset
+  %tensor_534 = buffer.view %storage_533[%tensor_534_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_532, %tensor_534, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_44 = index.constant 27213008 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_534, %state, %tensor_1, %state_origin_44, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %parameter_538 = command.parameter %weights, "model.decoder.layers.5.encoder_attn.v_proj.weight" : view<320x320xf32>
+  %storage_539_bytes = index.constant 5120 : offset
+  %storage_539 = buffer.alloca<global> align(16) %storage_539_bytes : buffer
+  %tensor_540_offset = index.constant 0 : offset
+  %tensor_540 = buffer.view %storage_539[%tensor_540_offset] : buffer -> view<4x320x1xf32>
+  kernel.launch @moonshine.projection.encoder(%tensor_470, %parameter_538, %tensor_540, %state, %tensor_1, %state_origin_29) : (view<4x320x1xf32>, view<320x320xf32>, view<4x320x1xf32>, buffer, view<5xi32>, offset)
+  %state_origin_45 = index.constant 29834448 : offset
+  kernel.launch @moonshine.encoder_state.publish(%tensor_540, %state, %tensor_1, %state_origin_45, %state_origin_29, %state_origin_29) : (view<4x320x1xf32>, buffer, view<5xi32>, offset, offset, offset)
+  %state_origin_46 = index.constant 0 : offset
+  kernel.launch @moonshine.encoder_state.status(%state, %output, %tensor_1, %state_origin_29, %state_origin_46) : (buffer, buffer, view<5xi32>, offset, offset)
+  command.return
+}
