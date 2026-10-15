@@ -66,6 +66,7 @@ loom_library(
         deps = [":residual_programs"],
     )
     for name in [
+        "attention",
         "iq4",
         "retained",
         "selection",

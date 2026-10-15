@@ -58,23 +58,34 @@ kernel.def target(@qsa_attention_wave32) @qsa_append_kv() {
   kernel.return
 }
 
-// Online softmax consumes selected logical positions without an attention
-// matrix. Main heads are grouped twelve-to-one over two packed KV heads.
+// Sixteen waves partition each head's selected logical positions. Each wave
+// publishes its online-softmax numerator, denominator, and maximum to
+// workgroup memory; one wave merges them before the BF16 rounding boundary
+// and output gate. No attention matrix or global reduction buffer is created.
+// Main heads are grouped twelve-to-one over two packed KV heads.
 kernel.def target(@qsa_attention_wave32) @qsa_selected_attention() {
   %heads = index.constant 24 : index
   %tokens = config.get @flash_next.token_count : index
-  %threads = index.constant 32 : index
+  %waves = index.constant 16 : index
+  %wave_size = index.constant 32 : index
+  %threads = index.mul %waves, %wave_size : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%heads, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%key_origin: offset, %value_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %capacity = config.get @flash_next.context_capacity : index
-  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %header_origin = index.constant 0 : offset
+  %header = buffer.view %span[%header_origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %end = index.assume %count_value [range(%count_value, 0, %tokens)] : index
   %token = kernel.workgroup.id<y> : index
   %active = index.cmp ult, %token, %end : index
   scf.if %active {
     %head = kernel.workgroup.id<x> : index
     %lane = kernel.subgroup.lane.id : index
+    %wave = kernel.subgroup.id : index
+    %partitions = index.constant 16 : index
     %c0_index = index.constant 0 : index
     %c1 = index.constant 1 : index
     %c4 = index.constant 4 : index
@@ -106,12 +117,14 @@ kernel.def target(@qsa_attention_wave32) @qsa_selected_attention() {
     %tail_tokens = index.rem %visible, %c4 : index
     %selected_tokens = index.add %selected_block_tokens, %tail_tokens : index
     %tail_origin = index.mul %complete, %c4 : index
+    %few_tokens = index.cmp ult, %selected_tokens, %partitions : index
+    %live_partitions = scf.select %few_tokens, %selected_tokens, %partitions : index
     %c0 = scalar.constant 0.0 : f32
     %initial_maximum = scalar.constant -3.4028234660000002e+38 : f32
     %c0v = vector.constant 0.0 : vector<8xf32>
     %dot_zeros = vector.constant 0.0 : vector<4xf32>
     %scale = scalar.constant 0.0625 : f32
-    %maximum, %denominator, %accumulated = scf.for %slot = [%c0_index to %selected_tokens step %c1](%old_maximum = %initial_maximum : f32, %old_denominator = %c0 : f32, %old_accumulated = %c0v : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
+    %maximum, %denominator, %accumulated = scf.for %slot = [%wave to %selected_tokens step %partitions](%old_maximum = %initial_maximum : f32, %old_denominator = %c0 : f32, %old_accumulated = %c0v : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
       %from_block = index.cmp ult, %slot, %selected_block_tokens : index
       %key_position = scf.if %from_block -> (index) {
         %block_slot = index.div %slot, %c4 : index
@@ -146,19 +159,54 @@ kernel.def target(@qsa_attention_wave32) @qsa_selected_attention() {
       %new_accumulated = vector.fmaf %values, %weight_vector, %previous : vector<8xf32>
       scf.yield %new_maximum, %new_denominator, %new_accumulated : f32, f32, vector<8xf32>
     }
-    %denominators = vector.splat %denominator : vector<8xf32>
-    %weighted = vector.divf %accumulated, %denominators : vector<8xf32>
-    %attention_bf16 = vector.fptrunc %weighted : vector<8xf32> to vector<8xbf16>
-    %attention = vector.extf %attention_bf16 : vector<8xbf16> to vector<8xf32>
-    %gate_packed = vector.load %gate_view[%token, %head, %gate_channel] : view<[%tokens]x24x512xbf16> -> vector<8xbf16>
-    %gate = vector.extf %gate_packed : vector<8xbf16> to vector<8xf32>
-    %negative = vector.negf %gate : vector<8xf32>
-    %exponential = vector.expf<afn> %negative : vector<8xf32>
-    %c1v = vector.constant 1.0 : vector<8xf32>
-    %gate_denominator = vector.addf %c1v, %exponential : vector<8xf32>
-    %gated = vector.divf %attention, %gate_denominator : vector<8xf32>
-    %output_packed = vector.fptrunc %gated : vector<8xf32> to vector<8xbf16>
-    vector.store %output_packed, %output_view[%token, %head, %channel] : vector<8xbf16>, view<[%tokens]x24x256xbf16>
+    %partial_row_bytes = index.constant 1024 : offset
+    %statistics_row_bytes = index.constant 8 : offset
+    %partial_bytes = index.scale %partitions, %partial_row_bytes : index, offset -> offset
+    %statistics_bytes = index.scale %partitions, %statistics_row_bytes : index, offset -> offset
+    %scratch_bytes = index.add %partial_bytes, %statistics_bytes : offset
+    %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+    %partials = buffer.view %scratch[%origin] : buffer -> view<[%partitions]x256xf32>
+    %statistics = buffer.view %scratch[%partial_bytes] : buffer -> view<[%partitions]x2xf32>
+    vector.store %accumulated, %partials[%wave, %channel] : vector<8xf32>, view<[%partitions]x256xf32>
+    %leader = index.cmp eq, %lane, %c0_index : index
+    scf.if %leader {
+      view.store %maximum, %statistics[%wave, 0] : f32, view<[%partitions]x2xf32>
+      view.store %denominator, %statistics[%wave, 1] : f32, view<[%partitions]x2xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %writer = index.cmp eq, %wave, %c0_index : index
+    scf.if %writer {
+      %merged_maximum, %merged_denominator, %merged_accumulated = scf.for %part = [%c0_index to %live_partitions step %c1](%old_maximum = %initial_maximum : f32, %old_denominator = %c0 : f32, %old_accumulated = %c0v : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
+        %part_maximum = view.load %statistics[%part, 0] : view<[%partitions]x2xf32> -> f32
+        %part_denominator = view.load %statistics[%part, 1] : view<[%partitions]x2xf32> -> f32
+        %part_accumulated = vector.load %partials[%part, %channel] : view<[%partitions]x256xf32> -> vector<8xf32>
+        %next_maximum = scalar.maxnumf %old_maximum, %part_maximum : f32
+        %old_delta = scalar.subf %old_maximum, %next_maximum : f32
+        %part_delta = scalar.subf %part_maximum, %next_maximum : f32
+        %old_scale = scalar.expf<afn> %old_delta : f32
+        %part_scale = scalar.expf<afn> %part_delta : f32
+        %old_weight = scalar.mulf %old_denominator, %old_scale : f32
+        %next_denominator = scalar.fmaf %part_denominator, %part_scale, %old_weight : f32
+        %old_scale_vector = vector.splat %old_scale : vector<8xf32>
+        %part_scale_vector = vector.splat %part_scale : vector<8xf32>
+        %previous = vector.mulf %old_accumulated, %old_scale_vector : vector<8xf32>
+        %next_accumulated = vector.fmaf %part_accumulated, %part_scale_vector, %previous : vector<8xf32>
+        scf.yield %next_maximum, %next_denominator, %next_accumulated : f32, f32, vector<8xf32>
+      }
+      %merged_denominators = vector.splat %merged_denominator : vector<8xf32>
+      %weighted = vector.divf %merged_accumulated, %merged_denominators : vector<8xf32>
+      %attention_bf16 = vector.fptrunc %weighted : vector<8xf32> to vector<8xbf16>
+      %attention = vector.extf %attention_bf16 : vector<8xbf16> to vector<8xf32>
+      %gate_packed = vector.load %gate_view[%token, %head, %gate_channel] : view<[%tokens]x24x512xbf16> -> vector<8xbf16>
+      %gate = vector.extf %gate_packed : vector<8xbf16> to vector<8xf32>
+      %negative = vector.negf %gate : vector<8xf32>
+      %exponential = vector.expf<afn> %negative : vector<8xf32>
+      %c1v = vector.constant 1.0 : vector<8xf32>
+      %gate_denominator = vector.addf %c1v, %exponential : vector<8xf32>
+      %gated = vector.divf %attention, %gate_denominator : vector<8xf32>
+      %output_packed = vector.fptrunc %gated : vector<8xf32> to vector<8xbf16>
+      vector.store %output_packed, %output_view[%token, %head, %channel] : vector<8xbf16>, view<[%tokens]x24x256xbf16>
+    }
   }
   kernel.return
 }
