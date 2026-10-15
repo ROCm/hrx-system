@@ -16,7 +16,7 @@ kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%token_count: index) launch(
 
 kernel.decl @qwen38_output_normalize_spans(%output_capacity: index) launch(%epoch: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 
-kernel.decl @qwen38_accept_spans() launch(%width: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
+kernel.decl @qwen38_accept_spans() launch(%width: index, %token_capacity: index, %epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
 
 // Mixed known and speculative spans share the ordinary target token shape.
 // GDN publishes known spans and captures speculative transitions. Attention
@@ -51,7 +51,7 @@ command.program.def public @qwen38_verify() launch(%parameters: buffer, %residua
   kernel.launch @qwen38_output_normalize_spans[%outputs](%epoch, %epsilon, %residual, %norm_weight, %normalized) : [index](buffer, f32, buffer, view<5120xf32>, buffer)
   %origin = index.constant 0 : offset
   command.program.launch @qwen38_output_projection_sampled[%outputs](%parameters, %epoch, %normalized, %predictions) : [index](buffer, buffer, buffer, buffer)
-  kernel.launch @qwen38_accept_spans(%width, %epoch, %input_tokens, %predictions, %committed, %replay, %results) : (index, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_accept_spans(%width, %tokens, %epoch, %input_tokens, %predictions, %committed, %replay, %results) : (index, index, buffer, buffer, buffer, buffer, buffer, buffer)
   command.program.launch @qwen38_gdn_commit[%spans, %width](%parameters, %capture, %replay, %rows, %state) : [index, index](buffer, buffer, buffer, buffer, buffer)
   command.return
 }

@@ -1,0 +1,102 @@
+func.decl @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %first_count: i32, %next_count: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32)
+
+// A nearly full first epoch and a short second epoch share one contiguous host
+// input stream. The expected device image uses two independent tensor rows,
+// including the untouched padding between each epoch and the next plane.
+func.def @encoding_fixture(%capacity_value: index, %plan: buffer, %inputs: buffer, %expected: buffer) {
+  %capacity = index.assume %capacity_value [range(%capacity_value, 8, 32768)] : index
+  %origin = index.constant 0 : offset
+  %requests = buffer.view %plan[%origin] : buffer -> view<32x8xi32>
+  %input = buffer.view %inputs[%origin] : buffer -> view<[%capacity]xi32>
+  %output = buffer.view %expected[%origin] : buffer -> view<2x[%capacity]xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %three = scalar.constant 3 : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c5 = index.constant 5 : index
+  %first_length = index.sub %capacity, %c5 : index
+  %first_word = index.cast %first_length : index to i32
+  view.store %first_word, %requests[0, 0] : i32, view<32x8xi32>
+  view.store %first_word, %requests[0, 4] : i32, view<32x8xi32>
+  view.store %three, %requests[16, 0] : i32, view<32x8xi32>
+  view.store %first_word, %requests[16, 1] : i32, view<32x8xi32>
+  view.store %first_word, %requests[16, 3] : i32, view<32x8xi32>
+  view.store %three, %requests[16, 4] : i32, view<32x8xi32>
+  view.store %one, %requests[16, 5] : i32, view<32x8xi32>
+  %first_base = scalar.constant 1000 : i32
+  %next_base = scalar.constant 9000 : i32
+  scf.for %token = [%c0 to %capacity step %c1] {
+    %word = index.cast %token : index to i32
+    %first_id = scalar.addi %first_base, %word : i32
+    view.store %first_id, %input[%token] : i32, view<[%capacity]xi32>
+    %first_live = index.cmp ult, %token, %first_length : index
+    %first = scf.select %first_live, %first_id, %zero : i32
+    view.store %first, %output[0, %token] : i32, view<2x[%capacity]xi32>
+    %next_id = scalar.addi %next_base, %word : i32
+    %next_live = index.cmp ult, %token, %c3 : index
+    %next = scf.select %next_live, %next_id, %zero : i32
+    view.store %next, %output[1, %token] : i32, view<2x[%capacity]xi32>
+  }
+  scf.for %token = [%c0 to %c3 step %c1] {
+    %destination = index.add %first_length, %token : index
+    %word = index.cast %token : index to i32
+    %id = scalar.addi %next_base, %word : i32
+    view.store %id, %input[%destination] : i32, view<[%capacity]xi32>
+  }
+  func.return
+}
+
+// Exercise the real VM entry point and compare both complete planes with the
+// independently constructed image. The output buffer begins with a sentinel.
+func.def @encode_token_planes(%capacity: index) -> (i1) {
+  %origin = index.constant 0 : offset
+  %policy_bytes = index.constant 416 : offset
+  %plan_bytes = index.constant 1024 : offset
+  %metadata_bytes = index.constant 6112 : offset
+  %word_bytes = index.constant 4 : offset
+  %input_bytes = index.scale %capacity, %word_bytes : index, offset -> offset
+  %token_bytes = index.add %input_bytes, %input_bytes : offset
+  %policy = buffer.alloca<private> align(4) %policy_bytes : buffer
+  %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
+  %inputs = buffer.alloca<private> align(4) %input_bytes : buffer
+  %metadata = buffer.alloca<private> align(4) %metadata_bytes : buffer
+  %tokens = buffer.alloca<private> align(4) %token_bytes : buffer
+  %expected = buffer.alloca<private> align(4) %token_bytes : buffer
+  %zero = scalar.constant 0 : i32
+  %sentinel = scalar.constant -99 : i32
+  buffer.fill %zero, %policy[%origin], %policy_bytes : i32
+  buffer.fill %zero, %plan[%origin], %plan_bytes : i32
+  buffer.fill %sentinel, %metadata[%origin], %metadata_bytes : i32
+  buffer.fill %sentinel, %tokens[%origin], %token_bytes : i32
+  func.call @encoding_fixture(%capacity, %plan, %inputs, %expected) : (index, buffer, buffer, buffer)
+  %one = scalar.constant 1 : i32
+  %eos = scalar.constant 42 : i32
+  %outputs = func.call @encode_epoch(%policy, %plan, %inputs, %one, %one, %eos, %metadata, %tokens) : (buffer, buffer, buffer, i32, i32, i32, buffer, buffer) -> (i32)
+  %no_outputs = scalar.cmpi eq, %outputs, %zero : i32
+  %actual_view = buffer.view %tokens[%origin] : buffer -> view<2x[%capacity]xi32>
+  %expected_view = buffer.view %expected[%origin] : buffer -> view<2x[%capacity]xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %correct = scf.for %plane = [%c0 to %c2 step %c1](%planes_equal = %no_outputs : i1) -> (i1) {
+    %equal = scf.for %token = [%c0 to %capacity step %c1](%tokens_equal = %planes_equal : i1) -> (i1) {
+      %actual = view.load %actual_view[%plane, %token] : view<2x[%capacity]xi32> -> i32
+      %expected = view.load %expected_view[%plane, %token] : view<2x[%capacity]xi32> -> i32
+      %same = scalar.cmpi eq, %actual, %expected : i32
+      %equal = scalar.andi %tokens_equal, %same : i1
+      scf.yield %equal : i1
+    }
+    scf.yield %equal : i1
+  }
+  func.return %correct : i1
+}
+
+check.case public @queued_epoch_token_planes {
+  %capacity = check.param.choice values([8, 513, 16384]) : index
+  %expected = check.literal value(true) : i1
+  %actual = func.call @encode_token_planes(%capacity) : (index) -> (i1)
+  check.expect.equal actual(%actual) expected(%expected) : i1
+  check.return
+}

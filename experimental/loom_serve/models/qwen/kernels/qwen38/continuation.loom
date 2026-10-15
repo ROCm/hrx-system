@@ -8,7 +8,8 @@ func.decl @qwen38_descriptor_source_position(%word: i32) -> (i32)
 
 func.decl @qwen38_descriptor_pack(%source_position: i32, %selection: i32) -> (i32)
 
-func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer) {
+func.def public @qwen38_continue_spans(%context: index, %capacity_value: index, %epoch: buffer, %tokens: buffer, %results: buffer) {
+  %capacity = index.assume %capacity_value [range(%capacity_value, 1, 2147483647)] : index
   %origin = index.constant 0 : offset
   %descriptor_origin = index.constant 12 : offset
   %selection_origin = index.constant 1292 : offset
@@ -19,7 +20,10 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
   %plan_options = index.constant 4124 : offset
   %indices_origin = index.constant 4640 : offset
   %identity_origin = index.constant 5088 : offset
-  %queued_origin = index.constant 2048 : offset
+  // Preparation supplies the allocation's plane capacity, independently of
+  // the smaller execution shapes selected for either queued epoch.
+  %word_bytes = index.constant 4 : offset
+  %queued_origin = index.scale %capacity, %word_bytes : index, offset -> offset
   %next_origin = index.constant 640 : offset
   %tags_origin = index.constant 1280 : offset
   %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
@@ -32,8 +36,8 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
   %credits = buffer.view %epoch[%plan_options] : buffer -> view<64x2xi32>
   %indices = buffer.view %epoch[%indices_origin] : buffer -> view<16xi32>
   %identities = buffer.view %epoch[%identity_origin] : buffer -> view<128x2xi32>
-  %inputs = buffer.view %tokens[%origin] : buffer -> view<512xi32>
-  %queued = buffer.view %tokens[%queued_origin] : buffer -> view<512xi32>
+  %inputs = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
+  %queued = buffer.view %tokens[%queued_origin] : buffer -> view<[%capacity]xi32>
   %prior = buffer.view %results[%origin] : buffer -> view<16x10xi32>
   %next = buffer.view %results[%next_origin] : buffer -> view<160xi32>
   %tags = buffer.view %results[%tags_origin] : buffer -> view<16xi32>
@@ -42,14 +46,19 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
   %c4 = index.constant 4 : index
   %c16 = index.constant 16 : index
   %result_words = index.constant 160 : index
-  %capacity = index.constant 512 : index
   %c0_2 = scalar.constant 0 : i32
   %c1_2 = scalar.constant 1 : i32
   %none = scalar.constant -1 : i32
   %true = scalar.constant true : i1
   %c0_3 = vector.constant 0 : vector<4xi32>
-  scf.for %i = [%c0 to %capacity step %c4] {
-    vector.store %c0_3, %inputs[%i] : vector<4xi32>, view<512xi32>
+  %packet_count = index.div %capacity, %c4 : index
+  %packet_end = index.mul %packet_count, %c4 : index
+  %input_packets = buffer.view %tokens[%origin] : buffer -> view<[%packet_count]x4xi32>
+  scf.for %packet = [%c0 to %packet_count step %c1] {
+    vector.store %c0_3, %input_packets[%packet, 0] : vector<4xi32>, view<[%packet_count]x4xi32>
+  }
+  scf.for %i = [%packet_end to %capacity step %c1] {
+    view.store %c0_2, %inputs[%i] : i32, view<[%capacity]xi32>
   }
   scf.for %i = [%c0 to %result_words step %c4] {
     vector.store %c0_3, %next[%i] : vector<4xi32>, view<160xi32>
@@ -106,7 +115,7 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
       %output = scf.select %has_output, %selected_word, %none : i32
       %packed_descriptor = func.call @qwen38_descriptor_pack(%advanced_source, %output) : (i32, i32) -> (i32)
       %length_value = index.cast %length_word : i32 to index
-      %length = index.assume %length_value [range(%length_value, 1, 512)] : index
+      %length = index.assume %length_value [range(%length_value, 1, %capacity)] : index
       view.store %length_word, %spans[%slot, 0] : i32, view<64x5xi32>
       view.store %advanced, %spans[%slot, 1] : i32, view<64x5xi32>
       view.store %begin_word, %spans[%slot, 2] : i32, view<64x5xi32>
@@ -116,17 +125,17 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
       view.store %remaining, %options[%slot, 1] : i32, view<64x2xi32>
       view.store %tag, %tags[%slot] : i32, view<16xi32>
       scf.if %speculative {
-        %anchor = index.assume %begin [range(%begin, 0, 511)] : index
-        view.store %prediction, %inputs[%anchor] : i32, view<512xi32>
+        %anchor = index.assume %begin [ge(%begin, 0), lt(%begin, %capacity)] : index
+        view.store %prediction, %inputs[%anchor] : i32, view<[%capacity]xi32>
       } else {
         %source = index.cast %source_word : i32 to index
         scf.for %token = [%c0 to %length step %c1] {
           %source_value = index.add %source, %token : index
-          %source_index = index.assume %source_value [range(%source_value, 0, 511)] : index
+          %source_index = index.assume %source_value [ge(%source_value, 0), lt(%source_value, %capacity)] : index
           %target_value = index.add %begin, %token : index
-          %target = index.assume %target_value [range(%target_value, 0, 511)] : index
-          %id = view.load %queued[%source_index] : view<512xi32> -> i32
-          view.store %id, %inputs[%target] : i32, view<512xi32>
+          %target = index.assume %target_value [ge(%target_value, 0), lt(%target_value, %capacity)] : index
+          %id = view.load %queued[%source_index] : view<[%capacity]xi32> -> i32
+          view.store %id, %inputs[%target] : i32, view<[%capacity]xi32>
         }
       }
       %selection_count = scf.if %has_output -> (index) {
@@ -171,7 +180,7 @@ func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens:
 kernel.def @qwen38_continue_dispatch() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer) {
-  func.call @qwen38_continue_spans(%context, %epoch, %tokens, %results) : (index, buffer, buffer, buffer)
+} launch(%context: index, %capacity: index, %epoch: buffer, %tokens: buffer, %results: buffer) {
+  func.call @qwen38_continue_spans(%context, %capacity, %epoch, %tokens, %results) : (index, index, buffer, buffer, buffer)
   kernel.return
 }
