@@ -163,6 +163,34 @@ counters from the selected resident rows. Its packed output can feed the decode
 phase directly. Reordering, removing, or temporarily withholding another request
 does not advance a surviving request's random stream.
 
+`request_layout.loom` defines resident state and compact batch work geometry.
+The work header retains the membership map and selected stage. Each packed
+record carries phase, registered voice ordinal, phase cursor, chunk identity,
+voice length, and a unique-writer bit. Progress belongs to the record rather
+than the executable shape.
+
+`batch_conditioning.loom` retains a separate FlowLM prefix for each registered
+voice. The bank stores twelve key/value planes with room for BOS and the longest
+registered waveform, independently of the larger text-context capacity. Four
+voices of at most 154 blocks occupy 30,474,240 bytes. `pocket.voice_count` and
+`pocket.voice_frame_capacity` declare that geometry. Codec histories, generated
+latents, and text remain private to requests.
+
+| Command | Effect |
+| --- | --- |
+| `batch_initialize_request` | Clear every selected resident allocation |
+| `batch_save_conditioning` | Copy each unpublished voice prefix through one selected writer |
+| `batch_restore_conditioning` | Restore selected voice prefixes, reset all other request state, and install each chunk's sampling identity |
+
+All three commands use the five speech bindings: work, immutable requests,
+conditioning, resident state, and packed output. The controller selects one
+writer per voice in a save cohort and publishes readiness after that command
+retires. Published entries remain immutable for the model lifetime. Requests
+may build a missing prefix independently, then reuse another request's completed
+entry at a retired boundary. No shared pending owner can strand a voice when a
+reader disconnects. Restore never reads unused cache padding, and overwrites the
+entire request row before a new chunk or request uses it.
+
 The checkpoint-free tests use closed-form projection, strided-convolution,
 normalization, and attention oracles. Attention checks retain positions beyond
 256, mask future slots, and reach the last configured absolute rotary row.
@@ -174,7 +202,9 @@ nonzero origins expose accidental writes outside each tensor, and different
 packed and resident capacities expose identity/addressing confusion. An empty
 cohort leaves every cache and output unchanged. Sampling compares reordered and
 shrinking cohorts with isolated calls, preserves state and padding, and retains
-the independent Philox/Box-Muller oracle. Both hardware and
+the independent Philox/Box-Muller oracle. Conditioning checks compare entire
+banks with an independent rectangle-copy oracle across unequal prefix lengths,
+duplicate voices, reused request rows, and empty cohorts. Both hardware and
 memory-access-checking profiles run with:
 
 ```sh

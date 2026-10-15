@@ -1,0 +1,77 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @pocket.voice_count : %value: index where [range(%value, 1, 256)]
+
+config.decl @pocket.voice_frame_capacity : %value: index where [range(%value, 1, 65535)]
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+template.decl pure @pocket.state_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.request_state_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.batch_work_header_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.batch_work_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.conditioning_size(%voice_frames: index) -> (offset)
+
+template.decl @pocket.batch.work_record(%work: buffer, %packed: index) -> (view<8xi32>)
+
+// The two request cursors follow numerical state. This extent is already a
+// multiple of 16 for every supported context capacity.
+template.def<@pocket.request_state_size> pure @pocket_request_state_size(%capacity: index) -> (offset) {
+  %numerical = template.apply<@pocket.state_size>(%capacity) pure : (index) -> (offset)
+  %cursors = index.constant 8 : offset
+  %bytes = index.add %numerical, %cursors : offset
+  template.return %bytes : offset
+}
+
+// Membership is count plus capacity resident IDs. A stage ordinal follows;
+// eight-word work records begin at the next 16-byte boundary. Each record is
+// phase, voice ordinal, phase cursor, chunk, voice frames, unique-writer bit,
+// and two reserved words. Membership owns identity; records own next work.
+template.def<@pocket.batch_work_header_size> pure @pocket_batch_work_header_size(%capacity: index) -> (offset) {
+  %two = index.constant 2 : index
+  %words = index.add %capacity, %two : index
+  %four = index.constant 4 : index
+  %tail = index.constant 3 : index
+  %alignment = index.constant 16 : offset
+  %rounded = index.add %words, %tail : index
+  %units = index.div %rounded, %four : index
+  %aligned = index.scale %units, %alignment : index, offset -> offset
+  template.return %aligned : offset
+}
+
+template.def<@pocket.batch_work_size> pure @pocket_batch_work_size(%capacity: index) -> (offset) {
+  %header = template.apply<@pocket.batch_work_header_size>(%capacity) pure : (index) -> (offset)
+  %record = index.constant 32 : offset
+  %records = index.scale %capacity, %record : index, offset -> offset
+  %bytes = index.add %header, %records : offset
+  template.return %bytes : offset
+}
+
+template.def<@pocket.batch.work_record> device @pocket_batch_work_record(%work: buffer, %packed: index) -> (view<8xi32>) {
+  %capacity = config.get @pocket.batch_capacity : index
+  %header = template.apply<@pocket.batch_work_header_size>(%capacity) pure : (index) -> (offset)
+  %stride = index.constant 32 : offset
+  %relative = index.scale %packed, %stride : index, offset -> offset
+  %origin = index.add %header, %relative : offset
+  %record = buffer.view %work[%origin] : buffer -> view<8xi32>
+  template.return %record : view<8xi32>
+}
+
+// Retained conditioning contains only twelve FlowLM key/value planes, with
+// room for BOS and the longest registered voice. It contains no codec state,
+// latent, text, or unused text-context positions.
+template.def<@pocket.conditioning_size> pure @pocket_conditioning_size(%voice_frames: index) -> (offset) {
+  %one = index.constant 1 : index
+  %positions = index.add %voice_frames, %one : index
+  %position_bytes = index.constant 49152 : offset
+  %bytes = index.scale %positions, %position_bytes : index, offset -> offset
+  template.return %bytes : offset
+}

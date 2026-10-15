@@ -1,0 +1,194 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx11-generic> @pocket {subgroup_size = 32}
+
+kernel.decl @pocket.batch.initialize_request() launch(%work: buffer, %state: buffer)
+
+kernel.decl @pocket.batch.save_conditioning() launch(%work: buffer, %state: buffer, %conditioning: buffer)
+
+kernel.decl @pocket.batch.restore_conditioning() launch(%work: buffer, %conditioning: buffer, %state: buffer)
+
+kernel.decl @pocket.initialize_request() launch(%state: buffer)
+
+// Three packed rows select residents 5, 0, and 3. The last two share a
+// voice; only the earlier one publishes it. Unequal voice prefixes occupy two and
+// three positions in a four-position request context.
+kernel.def target(@pocket) @conditioning_work() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%work: buffer, %count: i32, %first: i32, %chunk: i32) {
+  %origin = index.constant 0 : offset
+  %words = buffer.view %work[%origin] : buffer -> view<32xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %six = scalar.constant 6 : i32
+  view.store %count, %words[0] : i32, view<32xi32>
+  view.store %first, %words[1] : i32, view<32xi32>
+  view.store %zero, %words[2] : i32, view<32xi32>
+  view.store %three, %words[3] : i32, view<32xi32>
+  view.store %three, %words[4] : i32, view<32xi32>
+  view.store %three, %words[8] : i32, view<32xi32>
+  view.store %one, %words[9] : i32, view<32xi32>
+  view.store %zero, %words[10] : i32, view<32xi32>
+  view.store %chunk, %words[11] : i32, view<32xi32>
+  view.store %one, %words[12] : i32, view<32xi32>
+  view.store %one, %words[13] : i32, view<32xi32>
+  view.store %three, %words[16] : i32, view<32xi32>
+  view.store %zero, %words[17] : i32, view<32xi32>
+  view.store %zero, %words[18] : i32, view<32xi32>
+  view.store %four, %words[19] : i32, view<32xi32>
+  view.store %two, %words[20] : i32, view<32xi32>
+  view.store %one, %words[21] : i32, view<32xi32>
+  view.store %three, %words[24] : i32, view<32xi32>
+  view.store %zero, %words[25] : i32, view<32xi32>
+  view.store %zero, %words[26] : i32, view<32xi32>
+  view.store %six, %words[27] : i32, view<32xi32>
+  view.store %two, %words[28] : i32, view<32xi32>
+  view.store %zero, %words[29] : i32, view<32xi32>
+  kernel.return
+}
+
+// Independent scalar rectangle copy: no cohort map, packed indexing, or
+// flattened cache addressing. The test supplies explicit isolated row views.
+kernel.def target(@pocket) @copy_prefix() {
+  %one = index.constant 1 : index
+  %planes = index.constant 12 : index
+  %channels = index.constant 1024 : index
+  kernel.launch.config workgroups(%planes, %one, %one) workgroup_size(%channels, %one, %one) : index
+} launch(%source_storage: buffer, %target_storage: buffer, %positions: index) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %source_storage[%origin] : buffer -> view<12x4x1024xi32>
+  %target = buffer.view %target_storage[%origin] : buffer -> view<12x3x1024xi32>
+  %plane_value = kernel.workgroup.id<x> : index
+  %plane = index.assume %plane_value [range(%plane_value, 0, 11)] : index
+  %channel_value = kernel.workitem.id<x> : index
+  %channel = index.assume %channel_value [range(%channel_value, 0, 1023)] : index
+  %count = index.assume %positions [range(%positions, 1, 3)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %position = [%zero to %count step %one] {
+    %value = view.load %source[%plane, %position, %channel] : view<12x4x1024xi32> -> i32
+    view.store %value, %target[%plane, %position, %channel] : i32, view<12x3x1024xi32>
+  }
+  kernel.return
+}
+
+kernel.def target(@pocket) @restore_prefix() {
+  %one = index.constant 1 : index
+  %planes = index.constant 12 : index
+  %channels = index.constant 1024 : index
+  kernel.launch.config workgroups(%planes, %one, %one) workgroup_size(%channels, %one, %one) : index
+} launch(%source_storage: buffer, %target: buffer, %positions: index, %chunk: i32) {
+  %source_origin = index.constant 0 : offset
+  %source = buffer.view %source_storage[%source_origin] : buffer -> view<12x3x1024xi32>
+  %plane_value = kernel.workgroup.id<x> : index
+  %plane = index.assume %plane_value [range(%plane_value, 0, 11)] : index
+  %channel_value = kernel.workitem.id<x> : index
+  %channel = index.assume %channel_value [range(%channel_value, 0, 1023)] : index
+  %count = index.assume %positions [range(%positions, 1, 3)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %cache_origin = index.constant 144 : offset
+  %cache = buffer.view %target[%cache_origin] : buffer -> view<12x4x1024xi32>
+  scf.for %position = [%zero to %count step %one] {
+    %value = view.load %source[%plane, %position, %channel] : view<12x3x1024xi32> -> i32
+    view.store %value, %cache[%plane, %position, %channel] : i32, view<12x4x1024xi32>
+  }
+  %first_plane = index.cmp eq, %plane, %zero : index
+  %first_channel = index.cmp eq, %channel, %zero : index
+  %first = scalar.andi %first_plane, %first_channel : i1
+  scf.if %first {
+    %origin = index.constant 0 : offset
+    %header = buffer.view %target[%origin] : buffer -> view<4xi32>
+    %count32 = index.cast %count : index to i32
+    view.store %count32, %header[0] : i32, view<4xi32>
+    %cursor_origin = index.constant 4647592 : offset
+    %cursor = buffer.view %target[%cursor_origin] : buffer -> view<2xi32>
+    view.store %chunk, %cursor[0] : i32, view<2xi32>
+  }
+  kernel.return
+}
+
+// Entire banks are compared, including the unused third voice, cache padding,
+// inactive residents, codec histories, and request cursors.
+check.case public @retained_voices_and_reused_request_rows {
+  %work = check.generate.fill value(-1) : tensor<32xi32>
+  %zero = check.literal value(0) : i32
+  %one = check.literal value(1) : i32
+  %two = check.literal value(2) : i32
+  %three = check.literal value(3) : i32
+  %four = check.literal value(4) : i32
+  %five = check.literal value(5) : i32
+  %six = check.literal value(6) : i32
+  %seven = check.literal value(7) : i32
+  %two_positions = check.literal value(2) : index
+  %three_positions = check.literal value(3) : index
+  kernel.launch @conditioning_work(%work, %three, %five, %two) : (tensor<32xi32>, i32, i32, i32)
+  %source = check.generate.iota offset(100) step(1) : tensor<6971400xi32>
+  %source_expected = check.generate.iota offset(100) step(1) : tensor<6971400xi32>
+  %actual_cache = check.generate.fill value(-7) : tensor<110592xi32>
+  %expected_cache = check.generate.fill value(-7) : tensor<110592xi32>
+  %source0 = check.tensor.view %source offset(144) : tensor<6971400xi32> -> tensor<12x4x1024xi32>
+  %source5 = check.tensor.view %source offset(23238144) : tensor<6971400xi32> -> tensor<12x4x1024xi32>
+  %cache0 = check.tensor.view %expected_cache offset(0) : tensor<110592xi32> -> tensor<12x3x1024xi32>
+  %cache1 = check.tensor.view %expected_cache offset(147456) : tensor<110592xi32> -> tensor<12x3x1024xi32>
+  kernel.launch @copy_prefix(%source0, %cache0, %three_positions) : (tensor<12x4x1024xi32>, tensor<12x3x1024xi32>, index)
+  kernel.launch @copy_prefix(%source5, %cache1, %two_positions) : (tensor<12x4x1024xi32>, tensor<12x3x1024xi32>, index)
+  kernel.launch @pocket.batch.save_conditioning(%work, %source, %actual_cache) : (tensor<32xi32>, tensor<6971400xi32>, tensor<110592xi32>)
+  check.expect.bitwise actual(%source) expected(%source_expected) : tensor<6971400xi32>
+  %actual = check.generate.fill value(37) : tensor<6971400xi32>
+  %expected = check.generate.fill value(37) : tensor<6971400xi32>
+  %row0 = check.tensor.view %expected offset(0) : tensor<6971400xi32> -> tensor<1161900xi32>
+  %row3 = check.tensor.view %expected offset(13942800) : tensor<6971400xi32> -> tensor<1161900xi32>
+  %row5 = check.tensor.view %expected offset(23238000) : tensor<6971400xi32> -> tensor<1161900xi32>
+  kernel.launch @pocket.initialize_request(%row0) : (tensor<1161900xi32>)
+  kernel.launch @pocket.initialize_request(%row3) : (tensor<1161900xi32>)
+  kernel.launch @pocket.initialize_request(%row5) : (tensor<1161900xi32>)
+  kernel.launch @restore_prefix(%cache0, %row0, %three_positions, %four) : (tensor<12x3x1024xi32>, tensor<1161900xi32>, index, i32)
+  kernel.launch @restore_prefix(%cache0, %row3, %three_positions, %six) : (tensor<12x3x1024xi32>, tensor<1161900xi32>, index, i32)
+  kernel.launch @restore_prefix(%cache1, %row5, %two_positions, %two) : (tensor<12x3x1024xi32>, tensor<1161900xi32>, index, i32)
+  kernel.launch @pocket.batch.restore_conditioning(%work, %actual_cache, %actual) : (tensor<32xi32>, tensor<110592xi32>, tensor<6971400xi32>)
+  kernel.launch @conditioning_work(%work, %one, %zero, %seven) : (tensor<32xi32>, i32, i32, i32)
+  kernel.launch @pocket.initialize_request(%row0) : (tensor<1161900xi32>)
+  kernel.launch @restore_prefix(%cache1, %row0, %two_positions, %seven) : (tensor<12x3x1024xi32>, tensor<1161900xi32>, index, i32)
+  kernel.launch @pocket.batch.restore_conditioning(%work, %actual_cache, %actual) : (tensor<32xi32>, tensor<110592xi32>, tensor<6971400xi32>)
+  kernel.launch @conditioning_work(%work, %zero, %five, %two) : (tensor<32xi32>, i32, i32, i32)
+  kernel.launch @pocket.batch.initialize_request(%work, %actual) : (tensor<32xi32>, tensor<6971400xi32>)
+  kernel.launch @pocket.batch.save_conditioning(%work, %actual, %actual_cache) : (tensor<32xi32>, tensor<6971400xi32>, tensor<110592xi32>)
+  kernel.launch @pocket.batch.restore_conditioning(%work, %actual_cache, %actual) : (tensor<32xi32>, tensor<110592xi32>, tensor<6971400xi32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<6971400xi32>
+  check.expect.bitwise actual(%actual_cache) expected(%expected_cache) : tensor<110592xi32>
+  check.return
+}
+
+check.case public @initialization_clears_only_selected_residents {
+  %work = check.generate.fill value(-1) : tensor<32xi32>
+  %count = check.literal value(3) : i32
+  %first = check.literal value(5) : i32
+  %chunk = check.literal value(2) : i32
+  kernel.launch @conditioning_work(%work, %count, %first, %chunk) : (tensor<32xi32>, i32, i32, i32)
+  %source = check.generate.iota offset(100) step(1) : tensor<6971400xi32>
+  %source_expected = check.generate.iota offset(100) step(1) : tensor<6971400xi32>
+  kernel.launch @pocket.batch.initialize_request(%work, %source) : (tensor<32xi32>, tensor<6971400xi32>)
+  %cleared = check.generate.fill value(0) : tensor<1161900xi32>
+  %initialized0 = check.tensor.view %source offset(0) : tensor<6971400xi32> -> tensor<1161900xi32>
+  %initialized3 = check.tensor.view %source offset(13942800) : tensor<6971400xi32> -> tensor<1161900xi32>
+  %initialized5 = check.tensor.view %source offset(23238000) : tensor<6971400xi32> -> tensor<1161900xi32>
+  check.expect.bitwise actual(%initialized0) expected(%cleared) : tensor<1161900xi32>
+  check.expect.bitwise actual(%initialized3) expected(%cleared) : tensor<1161900xi32>
+  check.expect.bitwise actual(%initialized5) expected(%cleared) : tensor<1161900xi32>
+  %untouched12 = check.tensor.view %source offset(4647600) : tensor<6971400xi32> -> tensor<2323800xi32>
+  %original12 = check.tensor.view %source_expected offset(4647600) : tensor<6971400xi32> -> tensor<2323800xi32>
+  %untouched4 = check.tensor.view %source offset(18590400) : tensor<6971400xi32> -> tensor<1161900xi32>
+  %original4 = check.tensor.view %source_expected offset(18590400) : tensor<6971400xi32> -> tensor<1161900xi32>
+  check.expect.bitwise actual(%untouched12) expected(%original12) : tensor<2323800xi32>
+  check.expect.bitwise actual(%untouched4) expected(%original4) : tensor<1161900xi32>
+  check.return
+}

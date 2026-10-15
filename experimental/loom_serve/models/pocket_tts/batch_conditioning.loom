@@ -1,0 +1,222 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+target.decl @pocket
+
+config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
+
+config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.context_capacity : %value: index where [range(%value, 1, 65536)]
+
+config.decl @pocket.voice_count : %value: index where [range(%value, 1, 256)]
+
+config.decl @pocket.voice_frame_capacity : %value: index where [range(%value, 1, 65535)]
+
+template.decl @pocket.element() -> (index)
+
+template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
+
+template.decl pure @pocket.state_words(%capacity: index) -> (index)
+
+template.decl pure @pocket.flow_state_words(%capacity: index) -> (index)
+
+template.decl pure @pocket.request_state_size(%capacity: index) -> (offset)
+
+template.decl pure @pocket.conditioning_size(%voice_frames: index) -> (offset)
+
+template.decl @pocket.batch.work_record(%work: buffer, %packed: index) -> (view<8xi32>)
+
+kernel.def target(@pocket) @pocket.batch.initialize_request() {
+  %capacity = config.get @pocket.context_capacity : index
+  %words = template.apply<@pocket.state_words>(%capacity) pure : (index) -> (index)
+  %two = index.constant 2 : index
+  %elements = index.add %words, %two : index
+  %threads = config.get @pocket.threads : index
+  %batch = config.get @pocket.batch_capacity : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %state: buffer) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%work) : (buffer) -> (i1, index, index)
+  %capacity = config.get @pocket.context_capacity : index
+  %words = template.apply<@pocket.state_words>(%capacity) pure : (index) -> (index)
+  %two = index.constant 2 : index
+  %elements = index.add %words, %two : index
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  %enabled = scalar.andi %active, %live : i1
+  scf.if %enabled {
+    %stride = template.apply<@pocket.request_state_size>(%capacity) pure : (index) -> (offset)
+    %origin = index.scale %resident, %stride : index, offset -> offset
+    %row = buffer.view %state[%origin] : buffer -> view<[%elements]xi32>
+    %zero = scalar.constant 0 : i32
+    view.store %zero, %row[%element] : i32, view<[%elements]xi32>
+  }
+  kernel.return
+}
+
+// A cohort has one writer for each unpublished voice. Publication is a CPU
+// completion action after this command retires; duplicate readers never write
+// the same cache row. Only populated prefix positions enter retained storage.
+kernel.def target(@pocket) @pocket.batch.save_conditioning() {
+  %frames = config.get @pocket.voice_frame_capacity : index
+  %one = index.constant 1 : index
+  %positions = index.add %frames, %one : index
+  %position_words = index.constant 12288 : index
+  %elements = index.mul %positions, %position_words : index
+  %threads = config.get @pocket.threads : index
+  %batch = config.get @pocket.batch_capacity : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %state: buffer, %conditioning: buffer) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%work) : (buffer) -> (i1, index, index)
+  scf.if %active {
+    %record = template.apply<@pocket.batch.work_record>(%work, %packed) : (buffer, index) -> (view<8xi32>)
+    %writer = view.load %record[5] : view<8xi32> -> i32
+    %zero = scalar.constant 0 : i32
+    %writes = scalar.cmpi ne, %writer, %zero : i32
+    %frames = config.get @pocket.voice_frame_capacity : index
+    %one = index.constant 1 : index
+    %positions = index.add %frames, %one : index
+    %position_words = index.constant 12288 : index
+    %elements = index.mul %positions, %position_words : index
+    %element = template.apply<@pocket.element>() : () -> (index)
+    %live = index.cmp ult, %element, %elements : index
+    %enabled = scalar.andi %writes, %live : i1
+    scf.if %enabled {
+      %context = config.get @pocket.context_capacity : index
+      %channels = index.constant 1024 : index
+      %plane_words = index.mul %positions, %channels : index
+      %plane = index.div %element, %plane_words : index
+      %in_plane = index.rem %element, %plane_words : index
+      %position = index.div %in_plane, %channels : index
+      %channel = index.rem %in_plane, %channels : index
+      %frames32 = view.load %record[4] : view<8xi32> -> i32
+      %actual_frames = index.cast %frames32 : i32 to index
+      %prefix_value = index.add %actual_frames, %one : index
+      %prefix = index.assume %prefix_value [ge(%prefix_value, 1), le(%prefix_value, %positions), le(%prefix_value, %context)] : index
+      %populated = index.cmp ult, %position, %prefix : index
+      scf.if %populated {
+        %voice_count = config.get @pocket.voice_count : index
+        %voice32 = view.load %record[1] : view<8xi32> -> i32
+        %voice_value = index.cast %voice32 : i32 to index
+        %voice = index.assume %voice_value [ge(%voice_value, 0), lt(%voice_value, %voice_count)] : index
+        %state_stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+        %state_row = index.scale %resident, %state_stride : index, offset -> offset
+        %header = index.constant 144 : offset
+        %state_origin = index.add %state_row, %header : offset
+        %cache_stride = template.apply<@pocket.conditioning_size>(%frames) pure : (index) -> (offset)
+        %cache_origin = index.scale %voice, %cache_stride : index, offset -> offset
+        %source = buffer.view %state[%state_origin] : buffer -> view<12x[%context]x1024xi32>
+        %target = buffer.view %conditioning[%cache_origin] : buffer -> view<12x[%positions]x1024xi32>
+        %value = view.load %source[%plane, %position, %channel] : view<12x[%context]x1024xi32> -> i32
+        view.store %value, %target[%plane, %position, %channel] : i32, view<12x[%positions]x1024xi32>
+      }
+    }
+  }
+  kernel.return
+}
+
+// Restore overwrites all request bytes. Each chunk starts with the selected
+// voice's K/V prefix and zero codec/latent history, independently of whichever
+// request previously occupied this resident row. Unpopulated cache slots are
+// never read. The work record supplies the request's sampling chunk identity.
+kernel.def target(@pocket) @pocket.batch.restore_conditioning() {
+  %capacity = config.get @pocket.context_capacity : index
+  %words = template.apply<@pocket.state_words>(%capacity) pure : (index) -> (index)
+  %two = index.constant 2 : index
+  %elements = index.add %words, %two : index
+  %threads = config.get @pocket.threads : index
+  %batch = config.get @pocket.batch_capacity : index
+  %one = index.constant 1 : index
+  %tail = index.sub %threads, %one : index
+  %rounded = index.add %elements, %tail : index
+  %groups = index.div %rounded, %threads : index
+  kernel.launch.config workgroups(%groups, %one, %batch) workgroup_size(%threads, %one, %one) : index
+} launch(%work: buffer, %conditioning: buffer, %state: buffer) {
+  %active, %packed, %resident = template.apply<@pocket.batch.member>(%work) : (buffer) -> (i1, index, index)
+  %context = config.get @pocket.context_capacity : index
+  %words = template.apply<@pocket.state_words>(%context) pure : (index) -> (index)
+  %two = index.constant 2 : index
+  %elements = index.add %words, %two : index
+  %element = template.apply<@pocket.element>() : () -> (index)
+  %live = index.cmp ult, %element, %elements : index
+  %enabled = scalar.andi %active, %live : i1
+  scf.if %enabled {
+    %record = template.apply<@pocket.batch.work_record>(%work, %packed) : (buffer, index) -> (view<8xi32>)
+    %frames32 = view.load %record[4] : view<8xi32> -> i32
+    %actual_frames = index.cast %frames32 : i32 to index
+    %one = index.constant 1 : index
+    %frames = config.get @pocket.voice_frame_capacity : index
+    %positions = index.add %frames, %one : index
+    %prefix_value = index.add %actual_frames, %one : index
+    %prefix = index.assume %prefix_value [ge(%prefix_value, 1), le(%prefix_value, %positions), le(%prefix_value, %context)] : index
+    %flow_words = template.apply<@pocket.flow_state_words>(%context) pure : (index) -> (index)
+    %header_words = index.constant 36 : index
+    %after_header = index.cmp uge, %element, %header_words : index
+    %before_codec = index.cmp ult, %element, %flow_words : index
+    %in_cache = scalar.andi %after_header, %before_codec : i1
+    %zero = scalar.constant 0 : i32
+    %value = scf.if %in_cache -> (i32) {
+      %channels = index.constant 1024 : index
+      %relative = index.sub %element, %header_words : index
+      %plane_words = index.mul %context, %channels : index
+      %plane = index.div %relative, %plane_words : index
+      %in_plane = index.rem %relative, %plane_words : index
+      %position = index.div %in_plane, %channels : index
+      %channel = index.rem %in_plane, %channels : index
+      %populated = index.cmp ult, %position, %prefix : index
+      %cached = scf.if %populated -> (i32) {
+        %voice_count = config.get @pocket.voice_count : index
+        %voice32 = view.load %record[1] : view<8xi32> -> i32
+        %voice_value = index.cast %voice32 : i32 to index
+        %voice = index.assume %voice_value [ge(%voice_value, 0), lt(%voice_value, %voice_count)] : index
+        %stride = template.apply<@pocket.conditioning_size>(%frames) pure : (index) -> (offset)
+        %origin = index.scale %voice, %stride : index, offset -> offset
+        %source = buffer.view %conditioning[%origin] : buffer -> view<12x[%positions]x1024xi32>
+        %word = view.load %source[%plane, %position, %channel] : view<12x[%positions]x1024xi32> -> i32
+        scf.yield %word : i32
+      } else {
+        scf.yield %zero : i32
+      }
+      scf.yield %cached : i32
+    } else {
+      %origin = index.constant 0 : index
+      %flow_position = index.cmp eq, %element, %origin : index
+      %prefix32 = index.cast %prefix : index to i32
+      %header = scf.select %flow_position, %prefix32, %zero : i32
+      %chunk_position = index.cmp eq, %element, %words : index
+      %chunk = view.load %record[3] : view<8xi32> -> i32
+      %word = scf.select %chunk_position, %chunk, %header : i32
+      scf.yield %word : i32
+    }
+    %stride = template.apply<@pocket.request_state_size>(%context) pure : (index) -> (offset)
+    %origin = index.scale %resident, %stride : index, offset -> offset
+    %target = buffer.view %state[%origin] : buffer -> view<[%elements]xi32>
+    view.store %value, %target[%element] : i32, view<[%elements]xi32>
+  }
+  kernel.return
+}
+
+command.program.def public @batch_initialize_request() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  kernel.launch @pocket.batch.initialize_request(%work, %state) : (buffer, buffer)
+  command.return
+}
+
+command.program.def public @batch_save_conditioning() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  kernel.launch @pocket.batch.save_conditioning(%work, %state, %conditioning) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @batch_restore_conditioning() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+  kernel.launch @pocket.batch.restore_conditioning(%work, %conditioning, %state) : (buffer, buffer, buffer)
+  command.return
+}
