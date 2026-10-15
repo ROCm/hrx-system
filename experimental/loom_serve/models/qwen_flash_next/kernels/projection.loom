@@ -1,3 +1,5 @@
+template.decl @flash_next.project_dense_q8(%inputs: index, %outputs: index, %blocks: index, %span: buffer, %input: buffer, %weight: view<[%outputs]x[%blocks]x34xi8>, %output: buffer)
+
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 amdgpu.target<gfx11-generic> @flash_next_projection_wave32 {subgroup_size = 32}
@@ -147,9 +149,15 @@ command.program.def public @flash_next_gdn_attention(%layer: index, %state_origi
   %beta_weight = command.parameter %parameters, "blk.{}.ssm_beta.weight"[%layer] : view<48x2560xf32>
   %output_weight = command.parameter %parameters, "blk.{}.ssm_out.weight"[%layer] : view<2560x192x34xi8>
   kernel.launch @flash_next_project_qkv[%conv_width](%conv_width, %span, %input, %qkv_weight, %qkv) : [index](index, buffer, buffer, view<10240x80x34xi8>, buffer)
-  kernel.launch @flash_next_linear_q8[%value_width](%hidden, %value_width, %span, %input, %z_weight, %z) : [index](index, index, buffer, buffer, view<6144x80x34xi8>, buffer)
+  %z_weight_block_size = index.constant 32 : index
+  %z_weight_blocks = index.div %hidden, %z_weight_block_size : index
+  %z_weight_shaped = view.refine %z_weight : view<6144x80x34xi8> -> view<[%value_width]x[%z_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%hidden, %value_width, %z_weight_blocks, %span, %input, %z_weight_shaped, %z) : (index, index, index, buffer, buffer, view<[%value_width]x[%z_weight_blocks]x34xi8>, buffer)
   kernel.launch @gdn_project_alpha_beta(%span, %input, %alpha_weight, %beta_weight, %alpha, %beta) : (buffer, buffer, view<48x2560xf32>, view<48x2560xf32>, buffer, buffer)
   command.program.launch @flash_next_gdn_state[%layer, %state_origin](%parameters, %span, %rows, %qkv, %z, %alpha, %beta, %arena, %gated, %capture) : [index, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-  kernel.launch @flash_next_linear_q8[%hidden](%value_width, %hidden, %span, %gated, %output_weight, %output) : [index](index, index, buffer, buffer, view<2560x192x34xi8>, buffer)
+  %output_weight_block_size = index.constant 32 : index
+  %output_weight_blocks = index.div %value_width, %output_weight_block_size : index
+  %output_weight_shaped = view.refine %output_weight : view<2560x192x34xi8> -> view<[%hidden]x[%output_weight_blocks]x34xi8>
+  template.apply<@flash_next.project_dense_q8>(%value_width, %hidden, %output_weight_blocks, %span, %gated, %output_weight_shaped, %output) : (index, index, index, buffer, buffer, view<[%hidden]x[%output_weight_blocks]x34xi8>, buffer)
   command.return
 }
