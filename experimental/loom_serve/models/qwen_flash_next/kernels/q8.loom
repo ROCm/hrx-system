@@ -67,14 +67,14 @@ func.def public inline @flash_next_q8_partial(%width: index, %token: index, %row
   func.return %result : f32
 }
 
-// Four consecutive tokens share weight loads and code conversion. Each vector
-// element keeps its own block-stride accumulator, and inactive rows never read
-// activations. Scale/code byte strides describe storage independently of the
-// lane stride over quantization blocks. The caller reduces and publishes.
-func.def inline @flash_next_q8_batch_dot(%width: index, %first: index, %end: index, %lane: index, %stride: index, %scale_origin: offset, %code_origin: offset, %scale_stride: offset, %code_stride: offset, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
+// Up to four consecutive tokens share weight loads and code conversion. The
+// constant batch size bounds the unrolled loop; unused result elements remain
+// zero. Each live element keeps its own block-stride accumulator, and inactive
+// rows never read activations. Scale/code byte strides describe storage
+// independently of the lane stride. The caller reduces and publishes.
+func.def inline @flash_next_q8_batch_dot(%width: index, %batch_size: index, %first: index, %end: index, %lane: index, %stride: index, %scale_origin: offset, %code_origin: offset, %scale_stride: offset, %code_stride: offset, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %batch_size = index.constant 4 : index
   %block_size = index.constant 32 : index
   %input_block_bytes = index.constant 64 : offset
   %element_bytes = index.constant 2 : offset
@@ -111,7 +111,7 @@ func.def inline @flash_next_q8_batch_dot(%width: index, %first: index, %end: ind
 }
 
 // Original GGUF rows interleave a two-byte scale and 32 codes in each block.
-func.def public inline @flash_next_q8_batch_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
+func.def public inline @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
   %block_size = index.constant 32 : index
   %block_bytes = index.constant 34 : offset
   %scale_bytes = index.constant 2 : offset
@@ -119,7 +119,7 @@ func.def public inline @flash_next_q8_batch_partial(%width: index, %first: index
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %scale_origin = index.scale %row, %row_bytes : index, offset -> offset
   %code_origin = index.add %scale_origin, %scale_bytes : offset
-  %result = func.call @flash_next_q8_batch_dot(%width, %first, %end, %lane, %stride, %scale_origin, %code_origin, %block_bytes, %block_bytes, %input, %weight) : (index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<4xf32>)
+  %result = func.call @flash_next_q8_batch_dot(%width, %batch_size, %first, %end, %lane, %stride, %scale_origin, %code_origin, %block_bytes, %block_bytes, %input, %weight) : (index, index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<4xf32>)
   func.return %result : vector<4xf32>
 }
 
@@ -145,7 +145,8 @@ func.def public inline @flash_next_q8_channel4_partial(%width: index, %first: in
   %code_plane = index.add %group_origin, %scale_plane_bytes : offset
   %code_delta = index.scale %channel, %code_bytes : index, offset -> offset
   %code_origin = index.add %code_plane, %code_delta : offset
-  %result = func.call @flash_next_q8_batch_dot(%width, %first, %end, %lane, %stride, %scale_origin, %code_origin, %scale_stride, %code_stride, %input, %weight) : (index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<4xf32>)
+  %batch_size = index.constant 4 : index
+  %result = func.call @flash_next_q8_batch_dot(%width, %batch_size, %first, %end, %lane, %stride, %scale_origin, %code_origin, %scale_stride, %code_stride, %input, %weight) : (index, index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<4xf32>)
   func.return %result : vector<4xf32>
 }
 

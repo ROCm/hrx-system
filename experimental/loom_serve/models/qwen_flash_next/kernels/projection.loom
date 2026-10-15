@@ -8,7 +8,7 @@ command.program.decl @flash_next_gdn_state(%layer: index, %state_origin: offset)
 
 kernel.decl @flash_next_project_qkv(%configured_output_width: index) launch(%output_width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
-func.decl @flash_next_q8_batch_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+func.decl @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
 
 // A subgroup contracts one output column for four packed tokens. Reusing the
 // original Q8 codes reduces weight traffic without repacking, extra activation
@@ -44,7 +44,7 @@ kernel.def target(@flash_next_projection_wave32) @flash_next_linear_q8(%output_w
     %row = index.madd %group, %c4, %wave : index
     %valid = index.cmp ult, %row, %outputs : index
     scf.if %valid {
-      %partial = func.call @flash_next_q8_batch_partial(%inputs, %first, %end, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+      %partial = func.call @flash_next_q8_batch_partial(%inputs, %c4, %first, %end, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
       %sums = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
       %leader = index.cmp eq, %lane, %c0 : index
       scf.if %leader {

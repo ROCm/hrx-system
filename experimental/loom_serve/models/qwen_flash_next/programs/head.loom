@@ -8,7 +8,7 @@ func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
 func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
 
-func.decl @flash_next_q8_batch_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+func.decl @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
 
 kernel.decl @hc_normalize() launch(%span: buffer, %residual: buffer, %gamma: buffer, %normalized: buffer)
 
@@ -129,7 +129,7 @@ kernel.def target(@flash_next_head_wave32) @flash_next_vocabulary() {
     %row = index.madd %group, %c4, %wave : index
     %width = index.constant 2560 : index
     %stride = index.constant 32 : index
-    %part = func.call @flash_next_q8_batch_partial(%width, %first, %count, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+    %part = func.call @flash_next_q8_batch_partial(%width, %c4, %first, %count, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
     %sums = kernel.subgroup.reduce<addf> %part : vector<4xf32>
     %c0 = index.constant 0 : index
     %leader = index.cmp eq, %lane, %c0 : index
