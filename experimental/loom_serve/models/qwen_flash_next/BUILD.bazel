@@ -6,7 +6,7 @@
 
 load("@rules_python//python:defs.bzl", "py_binary")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "AMDGPU_TSAN_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -123,6 +123,19 @@ loom_test(
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
+    name = "expert_buckets_test",
+    srcs = ["tests/expert_buckets.loom"],
+    benchmark_smoke = False,
+    configs = {"flash_next.token_count": "64"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_PROFILE,
     ],
     deps = [":residual_programs"],
 )
