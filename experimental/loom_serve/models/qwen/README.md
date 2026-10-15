@@ -5,6 +5,11 @@ This package runs the Qwen3.8-27B UD-Q5_K_XL GGUF through the supported
 numerical kernels are Loom source. One prepared model and weight bank serve many
 sessions; sessions own pooled state, not separate VM processes.
 
+The deployment accepts text input. Vision numerical sources and their kernel
+checks are included, but the deployment does not register a vision component
+or accept images. Image input requires the separately developed batched media
+service and its corresponding source-policy and device-packet integration.
+
 ## Assets and deployment
 
 Supply `Qwen3.8-27B-UD-Q5_K_XL.gguf` and its matching `tokenizer.json`.
@@ -51,6 +56,9 @@ reasoning in `reasoning_content`, independently of answer `content` and tool cal
 Include that reasoning field in subsequent assistant history to retain the exact
 conversation. A generation truncated inside its reasoning block remains valid
 output but requires replay instead of reusing a falsely closed device prefix.
+Completion also compares the canonical generated suffix with the original
+decoded response. Whitespace trimming or tool-call normalization that changes
+that suffix requires replay; byte-identical history remains reusable.
 Tool definitions and tool-result turns use the chat endpoint;
 the source policy formats and parses the model's XML tool-call protocol.
 
