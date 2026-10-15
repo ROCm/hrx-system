@@ -2843,6 +2843,12 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_prepare_transfer_ref(
   *out_alignment = 0;
 
   if (!buffer_ref.buffer) {
+    if (buffer_ref.length == IREE_HAL_WHOLE_BUFFER) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "PM4 recorded transfers require an explicit length for indirect "
+          "bindings");
+    }
     if (IREE_UNLIKELY(buffer_ref.buffer_slot >=
                       command_buffer->base.binding_capacity)) {
       return iree_make_status(
@@ -2918,7 +2924,8 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_fill_buffer(
                             "unsupported fill flags: 0x%" PRIx64, flags);
   }
   if (IREE_UNLIKELY((target_ref.offset % pattern_length) != 0 ||
-                    (target_ref.length % pattern_length) != 0)) {
+                    (target_ref.length != IREE_HAL_WHOLE_BUFFER &&
+                     (target_ref.length % pattern_length) != 0))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "fill target offset and length must be aligned to the pattern length");

@@ -479,9 +479,10 @@ iree_status_t iree_hal_cmd_block_builder_append_cmd(
   const iree_host_size_t total_needed = cmd_bytes + fixup_bytes;
 
   // Region-local work command indices and barrier dispatch counts are 8-bit.
-  // Split before appending the 256th command so the encoded count cannot wrap
-  // while the tile count continues accumulating.
-  if (builder->region_dispatch_count >= UINT8_MAX) {
+  // Split before either the command count or known tile total can wrap.
+  // Invocation-dependent tile totals are checked before activating a region.
+  if (builder->region_dispatch_count >= UINT8_MAX ||
+      tile_count > UINT32_MAX - builder->current_region_tiles) {
     IREE_RETURN_IF_ERROR(iree_hal_cmd_block_builder_split_block(builder));
   }
 

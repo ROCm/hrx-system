@@ -31,6 +31,9 @@ typedef struct iree_hal_buffer_binding_requirements_t {
   iree_device_size_t min_byte_length;
   // Minimum required alignment by at least one command.
   iree_device_size_t min_byte_alignment;
+  // Required length alignment for remaining-range fills. Fixed ranges impose
+  // no alignment requirement on the unused remainder of a binding.
+  iree_device_size_t min_byte_length_alignment;
   // Minimum alignment requested by commands that classify only target
   // mismatches as IREE_STATUS_INCOMPATIBLE.
   iree_device_size_t incompatible_min_byte_alignment;

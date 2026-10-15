@@ -701,10 +701,9 @@ iree_hal_amdgpu_aql_block_processor_replay_fill_packet_body(
       fill_command->target_offset, fill_command->length,
       IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET, IREE_HAL_MEMORY_ACCESS_WRITE,
       &target_ref, &target_ptr));
-  (void)target_ref;
   if (IREE_UNLIKELY(!iree_hal_amdgpu_device_buffer_fill_emplace(
           processor->transfer_context, &packet->dispatch, target_ptr,
-          fill_command->length, fill_command->pattern,
+          target_ref.length, fill_command->pattern,
           fill_command->pattern_length, kernarg_block->data, out_setup))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported command-buffer fill dispatch shape");
@@ -737,6 +736,11 @@ iree_hal_amdgpu_aql_block_processor_replay_copy_packet_body(
       IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET, IREE_HAL_MEMORY_ACCESS_WRITE,
       &target_ref, &target_ptr));
 
+  if (IREE_UNLIKELY(copy_command->length == IREE_HAL_WHOLE_BUFFER &&
+                    source_ref.length != target_ref.length)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "recorded copy remaining ranges differ");
+  }
   if (IREE_UNLIKELY(
           iree_hal_buffer_test_overlap(source_ref.buffer, source_ref.offset,
                                        source_ref.length, target_ref.buffer,
@@ -748,7 +752,7 @@ iree_hal_amdgpu_aql_block_processor_replay_copy_packet_body(
   }
   if (IREE_UNLIKELY(!iree_hal_amdgpu_device_buffer_copy_emplace(
           processor->transfer_context, &packet->dispatch, source_ptr,
-          target_ptr, copy_command->length, kernarg_block->data, out_setup))) {
+          target_ptr, target_ref.length, kernarg_block->data, out_setup))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported command-buffer copy dispatch shape");
   }

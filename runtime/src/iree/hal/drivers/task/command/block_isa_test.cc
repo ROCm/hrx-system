@@ -626,4 +626,20 @@ TEST(BlockISATest, InitialRemainingTilesAtEnd) {
                 4 * sizeof(iree_hal_cmd_region_summary_t));
 }
 
+TEST(BlockISATest, DispatchTileCountRepresentation) {
+  const uint32_t grids[][3] = {
+      {UINT32_MAX, 1, 1},          {65535, 65537, 1},
+      {0, UINT32_MAX, UINT32_MAX}, {UINT32_MAX, 0, UINT32_MAX},
+      {UINT32_MAX, UINT32_MAX, 0}, {65536, 65536, 1},
+      {1, 65536, 65536},           {UINT32_MAX, UINT32_MAX, UINT32_MAX},
+  };
+  for (size_t i = 0; i < IREE_ARRAYSIZE(grids); ++i) {
+    SCOPED_TRACE(i);
+    uint32_t count = 1;
+    EXPECT_EQ(iree_hal_cmd_dispatch_calculate_tile_count(grids[i], &count),
+              i < 5);
+    EXPECT_EQ(count, i < 2 ? UINT32_MAX : 0u);
+  }
+}
+
 }  // namespace

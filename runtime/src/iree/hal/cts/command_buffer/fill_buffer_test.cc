@@ -385,6 +385,99 @@ TEST_P(CommandBufferFillBufferTest, FillSizeAlignmentAndPatternClasses) {
   }
 }
 
+TEST_P(CommandBufferFillBufferTest, RemainingRangePatterns) {
+  const uint32_t pattern = 0xA15BC72Du;
+  for (iree_host_size_t pattern_length : {1, 2, 4}) {
+    for (iree_device_size_t length : {0, 12, 2 * 65536 + 12}) {
+      SCOPED_TRACE(::testing::Message() << "pattern_length=" << pattern_length
+                                        << " length=" << length);
+      const iree_device_size_t offset = 8;
+      std::vector<uint8_t> actual;
+      RunFillBufferTest(offset + length, offset, IREE_HAL_WHOLE_BUFFER,
+                        &pattern, pattern_length, actual);
+      EXPECT_THAT(actual,
+                  ContainerEq(MakeFilledBytes(offset + length, offset, length,
+                                              pattern, pattern_length)));
+    }
+  }
+}
+
+TEST_P(CommandBufferFillBufferTest, ReuseRemainingRangeBindings) {
+  if (recording_mode() != RecordingMode::kIndirect) {
+    GTEST_SKIP() << "requires invocation binding tables";
+  }
+  const uint32_t pattern = 0xD34165A7u;
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      /*mode=*/0, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+      /*binding_capacity=*/1, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      command_buffer,
+      iree_hal_make_indirect_buffer_ref(0, 8, IREE_HAL_WHOLE_BUFFER), &pattern,
+      sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  const iree_device_size_t buffer_length = 2 * 65536 + 64;
+  for (iree_device_size_t length : {0, 12, 65536 + 12, 2 * 65536 + 12}) {
+    SCOPED_TRACE(length);
+    Ref<iree_hal_buffer_t> buffer;
+    IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_length, buffer.out()));
+    const iree_device_size_t table_offset = length % 16;
+    const iree_hal_buffer_binding_t binding = {buffer, table_offset,
+                                               8 + length};
+    IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer, {1, &binding}));
+    EXPECT_THAT(ReadBufferBytes(buffer, 0, buffer_length),
+                ContainerEq(MakeFilledBytes(buffer_length, table_offset + 8,
+                                            length, pattern, sizeof(pattern))));
+  }
+}
+
+TEST_P(CommandBufferFillBufferTest, RemainingRangeLengthAlignment) {
+  if (!iree_hal_command_buffer_validation_state_size(
+          /*mode=*/0, 1)) {
+    GTEST_SKIP() << "requires command buffer validation";
+  }
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(17, buffer.out()));
+  const uint32_t pattern = 0xDA19FE27u;
+  const bool indirect = recording_mode() == RecordingMode::kIndirect;
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(CreateCommandBuffer(/*mode=*/0,
+                                     IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+                                     indirect ? 1 : 0, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  if (indirect) {
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        command_buffer,
+        iree_hal_make_indirect_buffer_ref(0, 4, IREE_HAL_WHOLE_BUFFER),
+        &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+    const iree_hal_buffer_binding_t invalid = {buffer, 0, 17};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          iree_hal_command_buffer_validate_submission(
+                              command_buffer, {1, &invalid}));
+    const iree_hal_buffer_binding_t valid = {buffer, 0, 16};
+    IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer, {1, &valid}));
+  } else {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_command_buffer_fill_buffer(
+            command_buffer,
+            iree_hal_make_buffer_ref(buffer, 4, IREE_HAL_WHOLE_BUFFER),
+            &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+    // A fixed, aligned range may leave an unaligned unused buffer tail.
+    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+        command_buffer, iree_hal_make_buffer_ref(buffer, 4, 12), &pattern,
+        sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+    IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer));
+  }
+  EXPECT_THAT(
+      ReadBufferBytes(buffer, 0, 17),
+      ContainerEq(MakeFilledBytes(17, 4, 12, pattern, sizeof(pattern))));
+}
+
 CTS_REGISTER_COMMAND_BUFFER_TEST_SUITE(CommandBufferFillBufferTest);
 
 }  // namespace iree::hal::cts

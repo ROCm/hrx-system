@@ -444,8 +444,9 @@ TEST_P(AsyncTransientBufferTest, StaticRefRecordedBeforeAllocaCommitExecutes) {
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   uint32_t pattern = 0xA55A1337u;
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
-      command_buffer, iree_hal_make_buffer_ref(transient, 0, buffer_size),
-      &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+      command_buffer,
+      iree_hal_make_buffer_ref(transient, 0, IREE_HAL_WHOLE_BUFFER), &pattern,
+      sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
   SemaphoreList execute_signal(device_, {0}, {1});
@@ -470,17 +471,37 @@ TEST_P(AsyncTransientBufferTest, StaticRefRecordedBeforeAllocaCommitExecutes) {
 // the alloca dependency has made their backing available.
 TEST_P(AsyncTransientBufferTest, IndirectRefResolvedAfterAllocaCommit) {
   const iree_device_size_t buffer_size = 256;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, output.out()));
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(CreateCommandBuffer(
       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
-      /*binding_capacity=*/1, command_buffer.out()));
+      /*binding_capacity=*/2, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   uint32_t pattern = 0x5AA5C0DEu;
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
       command_buffer,
-      iree_hal_make_indirect_buffer_ref(/*binding=*/0, 0, buffer_size),
+      iree_hal_make_indirect_buffer_ref(/*binding=*/0, 0,
+                                        IREE_HAL_WHOLE_BUFFER),
       &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
+  const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  const iree_hal_barrier_t barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory_barrier,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &barrier));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      command_buffer,
+      iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER),
+      iree_hal_make_indirect_buffer_ref(1, 0, IREE_HAL_WHOLE_BUFFER),
+      IREE_HAL_COPY_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
   SemaphoreList alloca_wait(device_, {0}, {1});
@@ -493,6 +514,7 @@ TEST_P(AsyncTransientBufferTest, IndirectRefResolvedAfterAllocaCommit) {
 
   const iree_hal_buffer_binding_t bindings[] = {
       {transient, 0, IREE_HAL_WHOLE_BUFFER},
+      {output, 0, IREE_HAL_WHOLE_BUFFER},
   };
   SemaphoreList execute_signal(device_, {0}, {1});
   IREE_ASSERT_OK(iree_hal_queue_execute(
@@ -507,6 +529,7 @@ TEST_P(AsyncTransientBufferTest, IndirectRefResolvedAfterAllocaCommit) {
 
   auto data = ReadBufferData<uint32_t>(transient);
   EXPECT_THAT(data, Each(pattern));
+  EXPECT_THAT(ReadBufferData<uint32_t>(output), Each(pattern));
 
   IREE_ASSERT_OK(DeallocateTransient(transient));
 }

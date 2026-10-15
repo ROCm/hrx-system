@@ -455,6 +455,40 @@ TEST_F(BlockBuilderTest, BlockSplitOnCapacity) {
   iree_hal_cmd_block_builder_deinitialize(&builder);
 }
 
+TEST_F(BlockBuilderTest, BlockSplitOnRegionTileCountLimit) {
+  iree_hal_cmd_block_builder_t builder;
+  iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
+  const uint8_t pattern = 0;
+  const iree_device_size_t maximum_length =
+      (iree_device_size_t)UINT32_MAX * IREE_HAL_CMD_TRANSFER_TILE_LENGTH_BYTES;
+  for (iree_device_size_t length : {maximum_length, (iree_device_size_t)1}) {
+    iree_hal_cmd_fixup_t* fixups = nullptr;
+    iree_hal_cmd_build_token_t token;
+    IREE_ASSERT_OK(iree_hal_cmd_build_fill(&builder, length, &pattern, 1,
+                                           &fixups, &token));
+  }
+  iree_hal_cmd_fixup_t* fixups = nullptr;
+  iree_hal_cmd_build_token_t token;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_cmd_build_fill(&builder, maximum_length + 1,
+                                                &pattern, 1, &fixups, &token));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_cmd_build_copy(&builder, maximum_length + 1, &fixups, &token));
+  iree_hal_cmd_block_recording_t recording;
+  IREE_ASSERT_OK(iree_hal_cmd_block_builder_end(&builder, &recording));
+  ASSERT_EQ(recording.block_count, 2);
+  EXPECT_EQ(
+      iree_hal_cmd_block_initial_remaining_tiles(recording.first_block)[0],
+      UINT32_MAX);
+  EXPECT_EQ(iree_hal_cmd_block_initial_remaining_tiles(
+                recording.first_block->next_block)[0],
+            1u);
+  iree_hal_cmd_block_recording_release(&recording);
+  iree_hal_cmd_block_builder_deinitialize(&builder);
+}
+
 TEST_F(BlockBuilderTest, BlockSplitOnRegionDispatchCountLimit) {
   static constexpr iree_host_size_t kLargeBlockSize = 32768;
   static constexpr uint16_t kMaxRegionDispatchCount = 255;

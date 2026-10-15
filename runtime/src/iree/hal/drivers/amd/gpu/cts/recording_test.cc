@@ -527,7 +527,8 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
     const uint32_t zero = 0, initial = 10, increment = 17;
     IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
-        recording, reference(0, 32), &zero, sizeof(zero), 0));
+        recording, reference(0, IREE_HAL_WHOLE_BUFFER), &zero, sizeof(zero),
+        0));
     const iree_hal_barrier_t transfer_dependency = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
         .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,

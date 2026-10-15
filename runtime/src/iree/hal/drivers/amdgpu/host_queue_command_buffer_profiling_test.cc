@@ -2034,8 +2034,9 @@ TEST_F(HostQueueCommandBufferProfilingTest,
     expected[i] = 0xBD3A0000u | i;
     IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
         command_buffer,
-        iree_hal_make_indirect_buffer_ref(/*binding=*/0, i * sizeof(uint32_t),
-                                          sizeof(uint32_t)),
+        iree_hal_make_indirect_buffer_ref(
+            /*binding=*/0, i * sizeof(uint32_t),
+            i + 1 == kFillCount ? IREE_HAL_WHOLE_BUFFER : sizeof(uint32_t)),
         &expected[i], sizeof(expected[i]), IREE_HAL_FILL_FLAG_NONE));
   }
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));

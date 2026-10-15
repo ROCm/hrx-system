@@ -1363,6 +1363,22 @@ TEST_F(HostQueueCommandBufferTest,
       IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_TRANSFER,
       /*binding_capacity=*/2, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  // PM4 templates capture their transfer dimensions during recording. An
+  // invocation-dependent length needs a different record representation.
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_command_buffer_fill_buffer(
+          command_buffer,
+          iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER),
+          &static_fill_pattern, sizeof(static_fill_pattern),
+          IREE_HAL_FILL_FLAG_NONE));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_command_buffer_copy_buffer(
+          command_buffer,
+          iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER),
+          iree_hal_make_indirect_buffer_ref(1, 0, IREE_HAL_WHOLE_BUFFER),
+          IREE_HAL_COPY_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
       command_buffer,
       iree_hal_make_indirect_buffer_ref(
@@ -1378,7 +1394,8 @@ TEST_F(HostQueueCommandBufferTest,
       IREE_HAL_FILL_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
       command_buffer,
-      iree_hal_make_buffer_ref(static_source, /*offset=*/0, kBufferLength),
+      iree_hal_make_buffer_ref(static_source, /*offset=*/0,
+                               IREE_HAL_WHOLE_BUFFER),
       &static_fill_pattern, sizeof(static_fill_pattern),
       IREE_HAL_FILL_FLAG_NONE));
 

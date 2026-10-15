@@ -214,6 +214,64 @@ TEST_P(CommandBufferCopyBufferTest, CopySizeAndAlignmentClasses) {
   RunCopyBufferTest(/*source_offset=*/0, /*target_offset=*/0, 1024 * 1024);
 }
 
+TEST_P(CommandBufferCopyBufferTest, RemainingRanges) {
+  const bool indirect = recording_mode() == RecordingMode::kIndirect;
+  Ref<iree_hal_command_buffer_t> reusable_command_buffer;
+  if (indirect) {
+    IREE_ASSERT_OK(CreateCommandBuffer(
+        /*mode=*/0, IREE_HAL_COMMAND_CATEGORY_TRANSFER, binding_capacity(),
+        reusable_command_buffer.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(reusable_command_buffer));
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+        reusable_command_buffer,
+        MakeRef(nullptr, kSourceBufferSlot, 7, IREE_HAL_WHOLE_BUFFER),
+        MakeRef(nullptr, kTargetBufferSlot, 11, IREE_HAL_WHOLE_BUFFER),
+        IREE_HAL_COPY_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(reusable_command_buffer));
+  }
+
+  for (iree_device_size_t length : {0, 13, 65536 + 13, 2 * 65536 + 13}) {
+    SCOPED_TRACE(length);
+    const iree_device_size_t table_offset = indirect ? length % 8 : 0;
+    const iree_device_size_t source_offset = table_offset + 7;
+    const iree_device_size_t target_offset = table_offset + 11;
+    const iree_device_size_t padding = indirect ? 16 : 0;
+    auto source_data = MakeDeterministicBytes(source_offset + length + padding);
+    Ref<iree_hal_buffer_t> source;
+    IREE_ASSERT_OK(CreateDeviceBufferWithData(
+        source_data.data(), source_data.size(), source.out()));
+    Ref<iree_hal_buffer_t> target;
+    IREE_ASSERT_OK(CreateZeroedDeviceBuffer(target_offset + length + padding,
+                                            target.out()));
+    if (indirect) {
+      const iree_hal_buffer_binding_t bindings[] = {
+          {source, table_offset, 7 + length},
+          {target, table_offset, 11 + length},
+      };
+      IREE_ASSERT_OK(
+          SubmitCommandBufferAndWait(reusable_command_buffer, {2, bindings}));
+    } else {
+      Ref<iree_hal_command_buffer_t> command_buffer;
+      IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+                                         IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0,
+                                         command_buffer.out()));
+      IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+      IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+          command_buffer,
+          MakeRef(source, kSourceBufferSlot, 7, IREE_HAL_WHOLE_BUFFER),
+          MakeRef(target, kTargetBufferSlot, 11, IREE_HAL_WHOLE_BUFFER),
+          IREE_HAL_COPY_FLAG_NONE));
+      IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+      IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer));
+    }
+    std::vector<uint8_t> expected(target_offset + length + padding, 0);
+    std::memcpy(expected.data() + target_offset,
+                source_data.data() + source_offset, length);
+    EXPECT_THAT(ReadBufferBytes(target, 0, expected.size()),
+                ContainerEq(expected));
+  }
+}
+
 CTS_REGISTER_COMMAND_BUFFER_TEST_SUITE(CommandBufferCopyBufferTest);
 
 }  // namespace iree::hal::cts
