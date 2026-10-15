@@ -284,7 +284,7 @@ without silently replacing the destination's continuation.
 ```
 
 The response streams signed little-endian PCM16 at 24 kHz, mono, with
-`Content-Type: application/octet-stream`. Completion closes the response.
+`Content-Type: audio/pcm;rate=24000;channels=1`. Completion closes the response.
 Network reads need not coincide with waveform blocks; consumers retain any
 partial sample between reads. Disconnection suppresses further generation
 while already accepted work retires.

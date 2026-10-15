@@ -2,8 +2,9 @@
 
 A `speech` deployment serves `POST /v1/audio/speech` from a source model package.
 An explicit `response_format: "pcm"` produces signed little-endian PCM16 at
-24 kHz, mono. Audio is delivered incrementally; request completion closes the
-response. TCP read boundaries need not coincide with waveform blocks.
+24 kHz, mono, declared as `Content-Type: audio/pcm;rate=24000;channels=1`.
+Audio is delivered incrementally; request completion closes the response.
+TCP read boundaries need not coincide with waveform blocks.
 
 ```json
 {

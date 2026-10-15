@@ -247,6 +247,9 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
     ASSERT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u) << response;
     const size_t header_end = response.find("\r\n\r\n");
     ASSERT_NE(header_end, std::string::npos);
+    EXPECT_NE(response.substr(0, header_end)
+                  .find("\r\nContent-Type: audio/pcm;rate=24000;channels=1"),
+              std::string::npos);
     const auto body = response.substr(header_end + 4);
     ASSERT_EQ(body.size(), frames * 2);
     for (size_t i = 0; i < frames; ++i) {

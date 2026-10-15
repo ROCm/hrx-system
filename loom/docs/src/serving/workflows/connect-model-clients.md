@@ -236,10 +236,30 @@ belong to the selected package.
 
 Open WebUI's [ordinary TTS adapter](https://github.com/open-webui/open-webui/blob/f8ae8a6c328946dc62cd0712961a0632574581bf/backend/open_webui/routers/audio/__init__.py#L431)
 awaits the complete provider response before returning a cached audio file.
-Its full installation can transcode declared `audio/pcm` to MP3, while Loom's
-current raw-PCM profile returns `application/octet-stream` and requires an
-explicit format. That integration needs an agreed media type and request format;
-incremental server output alone does not start this adapter's playback early.
+Its full installation transcodes Loom's
+`audio/pcm;rate=24000;channels=1` response to browser-playable MP3 using FFmpeg.
+For a prepared speech deployment named `speaker` with a voice named `alba`,
+set these values under **Admin Settings → Audio → Text-to-Speech**:
+
+| Setting | Value |
+| --- | --- |
+| Engine | OpenAI |
+| API Base URL | Your server URL followed by `/v1` |
+| API Key | `local`, or the key required by your deployment proxy |
+| Model | `speaker` |
+| Voice | `alba` |
+| Additional Parameters | `{"response_format":"pcm"}` |
+
+The voice field accepts a package's voice ID directly. Choose a voice the
+selected deployment accepts; OpenAI's built-in voice names are not aliases for
+package voices. The additional format parameter is required because the speech
+endpoint accepts explicit PCM requests.
+
+This path requires the full Open WebUI installation with FFmpeg available and
+`BYPASS_PYDUB_PREPROCESSING=false`. Slim installations reject raw PCM, and
+bypassing preprocessing leaves a headerless file that browsers cannot play.
+The adapter buffers each complete provider response before playback, so
+incremental server output does not start playback within that request.
 
 Its [realtime voice path](https://github.com/open-webui/open-webui/blob/f8ae8a6c328946dc62cd0712961a0632574581bf/backend/open_webui/routers/audio/realtime.py#L403)
 additionally needs session events, microphone input, transcription, turn

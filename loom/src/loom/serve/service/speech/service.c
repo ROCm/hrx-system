@@ -352,7 +352,7 @@ static iree_status_t loom_serve_speech_cpu_run(
         (block.frame_count || block.complete)) {
       status = iree_string_builder_append_cstring(
           &row->response,
-          "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+          "HTTP/1.1 200 OK\r\nContent-Type: audio/pcm;rate=24000;channels=1\r\n"
           "Cache-Control: no-store\r\nConnection: close\r\n\r\n");
     }
     if (iree_status_is_ok(status)) {
