@@ -166,6 +166,7 @@ synthesize empty state instead of depending on cleared recurrent storage.
 | `kernels/qsa_*.loom`, `kernels/pages.loom` | Paged K/V, four-token compression, exact top-512 block selection, and causal attention. |
 | `kernels/ple_*.loom`, `kernels/iq4.loom` | EOS-aware bigram/trigram hashes, IQ4_NL reads, and dilated convolution history. |
 | `kernels/quantized.loom`, `kernels/q8.loom`, `kernels/experts.loom` | Q4_K, Q5_K, Q5_1, and Q8_0 expert projections in the checkpoint's actual encodings. |
+| `kernels/q8_matrix.loom`, `kernels/hyperconnection_matrix.loom` | Shared original-Q8 matrix contraction and fused hyperconnection publication. |
 | `kernels/expert_buckets.loom` | Device-owned expert grouping and finite workers that reuse weights across routed rows. |
 
 The text model uses 36 GDN layers and 12 sparse-attention layers, with 512
@@ -200,6 +201,15 @@ entries. The selection specializes during command compilation; no CPU decision
 or parameter repacking is added to an epoch. The immutable epoch header bounds
 active rows, so partial tiles preserve inactive storage and cannot mix padding
 into valid results.
+
+Hyperconnections use the same contraction at capacities of at least 128 tokens.
+Each 128-by-128 tile reuses original Q8 coefficients across its token panel.
+Down projection applies quarter-scaled SiLU to the F32 fragments before storing
+BF16. Up projection stages all four streams of a feature panel into the same
+wave, applies sigmoid, and combines the four normalized values in F32 before
+the final BF16 store. No global gate tensor or decoded weight bank is allocated.
+The separate four-row injection retains its original F32 or Q8 arithmetic;
+smaller epochs and selected output-head rows retain packed dot products.
 
 Expert projections group routes by their selected expert. One GPU workgroup
 builds a histogram, scans record offsets, and scatters original

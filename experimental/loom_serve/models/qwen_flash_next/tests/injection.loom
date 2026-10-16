@@ -2,6 +2,10 @@ kernel.decl @hc_down_inject() launch(%epoch: buffer, %input: buffer, %down: buff
 
 kernel.decl @hc_down_inject_q8() launch(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
 
+kernel.decl @hc_inject_only() launch(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
+
+kernel.decl @hc_inject_only_q8() launch(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer)
+
 // Each format encodes the same signed row-dependent coefficients. Every Q8
 // block has its own scale header; the reference derives coefficients directly
 // and accumulates scalar F64 products instead of decoding the packed tensor.
@@ -52,7 +56,7 @@ func.def @fixture(%q8: i1, %weight: buffer) {
   func.return
 }
 
-func.def @reference(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer) {
+func.def @reference_body(%projection: i1, %input: buffer, %lowrank: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %inputs = buffer.view %input[%origin] : buffer -> view<3x10240xbf16>
   %outputs = buffer.view %output[%origin] : buffer -> view<3x4xf32>
@@ -93,10 +97,24 @@ func.def @reference(%epoch: buffer, %input: buffer, %down: buffer, %weight: buff
       %gate = scalar.divf %c2_f32, %denominator : f32
       view.store %gate, %outputs[%token, %row] : f32, view<3x4xf32>
     }
-    scf.for %column = [%c0 to %rank step %c1] {
-      view.store %c0_bf16, %ranks[%token, %column] : bf16, view<3x320xbf16>
+    scf.if %projection {
+      scf.for %column = [%c0 to %rank step %c1] {
+        view.store %c0_bf16, %ranks[%token, %column] : bf16, view<3x320xbf16>
+      }
     }
   }
+  func.return
+}
+
+func.def @reference(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer) {
+  %projection = scalar.constant true : i1
+  func.call @reference_body(%projection, %input, %lowrank, %output) : (i1, buffer, buffer, buffer)
+  func.return
+}
+
+func.def @injection_reference(%epoch: buffer, %input: buffer, %down: buffer, %weight: buffer, %lowrank: buffer, %output: buffer) {
+  %projection = scalar.constant false : i1
+  func.call @reference_body(%projection, %input, %lowrank, %output) : (i1, buffer, buffer, buffer)
   func.return
 }
 
@@ -116,6 +134,21 @@ check.scenario public @f32_injection {
       check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : tensor<3x4xf32>
     }
   }
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %q8 = check.literal value(false) : i1
+    %epoch = check.generate.fill value(2) : tensor<1xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<3x10240xbf16>
+    %down = check.generate.fill value(0) : tensor<3481600xi8>
+    %weight = check.generate.fill value(0) : tensor<163840xi8>
+    check.generate<@fixture>(%q8, %weight) : (i1, tensor<163840xi8>) -> ()
+    %lowrank = check.generate.fill value(-17.0) : tensor<3x320xbf16>
+    %output = check.generate.fill value(-17.0) : tensor<3x4xf32>
+    check.compare<@hc_inject_only, @injection_reference>(%epoch, %input, %down, %weight, %lowrank, %output) : (tensor<1xi32>, tensor<3x10240xbf16>, tensor<3481600xi8>, tensor<163840xi8>, tensor<3x320xbf16>, tensor<3x4xf32>) -> () {
+      check.expect.bitwise actual(%lowrank) expected(%lowrank) : tensor<3x320xbf16>
+      check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : tensor<3x4xf32>
+    }
+  }
   check.return
 }
 
@@ -131,6 +164,21 @@ check.scenario public @q8_injection {
     %lowrank = check.generate.fill value(-17.0) : tensor<3x320xbf16>
     %output = check.generate.fill value(-17.0) : tensor<3x4xf32>
     check.compare<@hc_down_inject_q8, @reference>(%epoch, %input, %down, %weight, %lowrank, %output) : (tensor<1xi32>, tensor<3x10240xbf16>, tensor<3481600xi8>, tensor<43520xi8>, tensor<3x320xbf16>, tensor<3x4xf32>) -> () {
+      check.expect.bitwise actual(%lowrank) expected(%lowrank) : tensor<3x320xbf16>
+      check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : tensor<3x4xf32>
+    }
+  }
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %q8 = check.literal value(true) : i1
+    %epoch = check.generate.fill value(2) : tensor<1xi32>
+    %input = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<3x10240xbf16>
+    %down = check.generate.fill value(0) : tensor<3481600xi8>
+    %weight = check.generate.fill value(0) : tensor<43520xi8>
+    check.generate<@fixture>(%q8, %weight) : (i1, tensor<43520xi8>) -> ()
+    %lowrank = check.generate.fill value(-17.0) : tensor<3x320xbf16>
+    %output = check.generate.fill value(-17.0) : tensor<3x4xf32>
+    check.compare<@hc_inject_only_q8, @injection_reference>(%epoch, %input, %down, %weight, %lowrank, %output) : (tensor<1xi32>, tensor<3x10240xbf16>, tensor<3481600xi8>, tensor<43520xi8>, tensor<3x320xbf16>, tensor<3x4xf32>) -> () {
       check.expect.bitwise actual(%lowrank) expected(%lowrank) : tensor<3x320xbf16>
       check.expect.close actual(%output) expected(%output) atol(1.9999999999999999e-06) rtol(1.9999999999999999e-06) nan(different) : tensor<3x4xf32>
     }
