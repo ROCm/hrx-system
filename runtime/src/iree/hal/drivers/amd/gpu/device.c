@@ -541,12 +541,8 @@ static void iree_hal_amd_gpu_device_prepare_feedback(void* user_data) {
   if (iree_status_is_ok(prepare->status) && prepare->asan_enabled) {
     amdf_memory_scope_t* scope = device->context->fabric->system_scope;
     if (options->asan.shadow_backing ==
-        IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL) {
-      if (!device->context->memory_scope_count) {
-        prepare->status = iree_make_status(
-            IREE_STATUS_UNAVAILABLE, "ASAN requires local shadow backing");
-        return;
-      }
+            IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL &&
+        device->context->memory_scope_count) {
       scope = device->context->memory_scopes[0];
     }
     prepare->status = iree_allocator_malloc(device->host_allocator,

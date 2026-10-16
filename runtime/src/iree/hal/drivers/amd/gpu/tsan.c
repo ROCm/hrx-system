@@ -126,10 +126,6 @@ static iree_status_t iree_hal_amd_gpu_tsan_select_memory(
     const iree_hal_amd_gpu_context_t* context,
     amdf_memory_device_access_t* access,
     iree_hal_amd_fabric_memory_options_t* out_options) {
-  if (!context->memory_scope_count) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "GPU TSAN requires device-local shadow storage");
-  }
   *access = (amdf_memory_device_access_t){
       .device = context->device,
       .requirements =
@@ -139,7 +135,10 @@ static iree_status_t iree_hal_amd_gpu_tsan_select_memory(
               .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
           },
   };
-  amdf_memory_scope_t* scope = context->memory_scopes[0];
+  // Unified-memory devices may expose system storage without a local heap.
+  amdf_memory_scope_t* scope = context->memory_scope_count
+                                   ? context->memory_scopes[0]
+                                   : context->fabric->system_scope;
   amdf_memory_scope_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
       .structure_size = sizeof(info),
@@ -188,9 +187,8 @@ static iree_status_t iree_hal_amd_gpu_tsan_select_memory(
     }
   }
   if (iree_status_is_ok(status) && !found) {
-    status =
-        iree_make_status(IREE_STATUS_UNAVAILABLE,
-                         "GPU TSAN local shadow has no host-visible profile");
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "GPU TSAN shadow has no host-visible profile");
   }
   return status;
 }

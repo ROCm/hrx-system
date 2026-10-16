@@ -18,7 +18,7 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef enum iree_hal_amd_gpu_asan_shadow_backing_e {
-  // Local VRAM/HBM keeps instrumented reads on the device's memory interface.
+  // Prefer local VRAM/HBM; devices without a local heap use system storage.
   IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL = 0,
   // Pinned system backing, with host publication before instrumented uses.
   IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_HOST_LOCAL = 1,
