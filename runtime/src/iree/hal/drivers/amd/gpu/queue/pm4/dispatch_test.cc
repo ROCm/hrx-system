@@ -329,6 +329,52 @@ TEST_F(DispatchTest, IndirectGeometryIgnoresHostCountsAndRejectsExactItems) {
   }
 }
 
+TEST_F(DispatchTest, DirectBindingRangesAcceptRemainingExtents) {
+  std::array<uint32_t, 4> storage = {};
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      {}, IREE_HAL_MEMORY_TYPE_HOST_LOCAL, IREE_HAL_MEMORY_ACCESS_READ,
+      IREE_HAL_BUFFER_USAGE_STORAGE, sizeof(storage),
+      iree_make_byte_span(storage.data(), sizeof(storage)), {},
+      iree_allocator_system(), &buffer));
+  layout_.byte_length = 8;
+  for (iree_hal_dispatch_flags_t flags : {
+           IREE_HAL_DISPATCH_FLAG_NONE,
+           IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_ARGUMENTS,
+           IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_ARGUMENTS,
+       }) {
+    const auto validate = [&](iree_hal_buffer_ref_t reference) {
+      return iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
+          &layout_, {}, {1, &reference}, flags);
+    };
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, validate({}));
+    for (iree_device_size_t offset : {0u, 8u}) {
+      IREE_EXPECT_OK(validate(iree_hal_make_buffer_ref(buffer, offset, 8)));
+      IREE_EXPECT_OK(validate(
+          iree_hal_make_buffer_ref(buffer, offset, IREE_HAL_WHOLE_BUFFER)));
+    }
+    for (auto reference : {
+             iree_hal_make_buffer_ref(buffer, 16, 1),
+             iree_hal_make_buffer_ref(buffer, 17, 0),
+             iree_hal_make_buffer_ref(buffer, 17, IREE_HAL_WHOLE_BUFFER),
+             iree_hal_make_buffer_ref(buffer, UINT64_MAX, 0),
+             iree_hal_make_buffer_ref(buffer, 8, UINT64_MAX - 1),
+         }) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, validate(reference));
+    }
+    for (auto reference : {
+             iree_hal_make_buffer_ref(buffer, 12, 4),
+             iree_hal_make_buffer_ref(buffer, 12, IREE_HAL_WHOLE_BUFFER),
+             iree_hal_make_buffer_ref(buffer, 16, 0),
+             iree_hal_make_buffer_ref(buffer, 16, IREE_HAL_WHOLE_BUFFER),
+         }) {
+      IREE_EXPECT_STATUS_IS(flags ? IREE_STATUS_OUT_OF_RANGE : IREE_STATUS_OK,
+                            validate(reference));
+    }
+  }
+  iree_hal_buffer_release(buffer);
+}
+
 TEST_F(DispatchTest, IndirectParameterReferencesCoverThreeAlignedCounts) {
   std::array<uint32_t, 4> storage = {};
   iree_hal_buffer_t* buffer = nullptr;

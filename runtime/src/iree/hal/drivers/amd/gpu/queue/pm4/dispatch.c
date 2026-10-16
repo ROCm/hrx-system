@@ -274,13 +274,16 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_validate_direct_bindings(
   const bool indirect_arguments =
       iree_hal_dispatch_uses_indirect_arguments(flags);
   for (iree_host_size_t i = 0; i < bindings.count; ++i) {
-    if (!bindings.values[i].buffer) {
+    const iree_hal_buffer_ref_t reference = bindings.values[i];
+    if (!reference.buffer) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "direct dispatch binding %" PRIhsz " is null", i);
     }
+    // The remaining range is valid whenever its starting offset is valid.
+    // Native arguments consume only the address, so no length is materialized.
     IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(
-        bindings.values[i].buffer, bindings.values[i].offset,
-        bindings.values[i].length));
+        reference.buffer, reference.offset,
+        reference.length == IREE_HAL_WHOLE_BUFFER ? 0 : reference.length));
   }
   if (indirect_arguments) {
     const iree_hal_buffer_ref_t reference = bindings.values[0];
