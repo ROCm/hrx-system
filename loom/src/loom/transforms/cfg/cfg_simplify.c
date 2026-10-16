@@ -1652,8 +1652,9 @@ static iree_status_t loom_cfg_simplify_remove_redundant_block_args_from_block(
 }
 
 static iree_status_t loom_cfg_simplify_remove_redundant_block_args(
-    loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    bool* out_changed) {
+    loom_cfg_simplify_state_t* state,
+    const loom_value_fact_cfg_region_t* structure, bool* out_changed) {
+  const loom_cfg_graph_t* graph = &structure->graph;
   if (graph->malformed) {
     return iree_ok_status();
   }
@@ -1661,9 +1662,13 @@ static iree_status_t loom_cfg_simplify_remove_redundant_block_args(
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(state->analysis_arena->block_pool, &scratch_arena);
   iree_status_t status = iree_ok_status();
-  for (uint16_t block_index = 1;
-       iree_status_is_ok(status) && block_index < graph->block_count;
-       ++block_index) {
+  // Consume identities before editing their dominating representatives. The
+  // retained identity table is immutable during this walk; replacing a
+  // representative later updates every use introduced in its descendants.
+  const loom_cfg_block_index_span_t order = structure->dominance.preorder;
+  for (iree_host_size_t position = order.count;
+       iree_status_is_ok(status) && position > 1; --position) {
+    const uint16_t block_index = order.values[position - 1];
     iree_arena_reset(&scratch_arena);
     bool block_changed = false;
     status = loom_cfg_simplify_remove_redundant_block_args_from_block(
@@ -1746,7 +1751,7 @@ static iree_status_t loom_cfg_simplify_process_cfg_region(
   if (*out_changed) {
     return iree_ok_status();
   }
-  return loom_cfg_simplify_remove_redundant_block_args(state, graph,
+  return loom_cfg_simplify_remove_redundant_block_args(state, structure,
                                                        out_changed);
 }
 

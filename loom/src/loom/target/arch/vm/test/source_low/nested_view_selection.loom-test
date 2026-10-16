@@ -75,11 +75,11 @@ func.def @selection_with_side_effects(%first: buffer, %second: buffer, %third: b
 low.func.def target<vm.core> abi(vm_function) @selection_with_side_effects(%first_view: reg<vm.ref : buffer>, %second_aligned: reg<vm.ref : buffer>, %third_view: reg<vm.ref : buffer>, %select_first: reg<vm.value : i1>, %select_pair: reg<vm.value : i1>, %enter: reg<vm.value : i1>, %side: reg<vm.value : i1>, %initial: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   low.cond_br %enter, ^producer, ^exit : reg<vm.value : i1>
 ^producer:
-  %40 = constant.i64 0
-  buffer.store %third_view, %40, %40, %initial, 0, "i32.x1"
+  %41 = constant.i64 0
+  buffer.store %third_view, %41, %41, %initial, 0, "i32.x1"
   low.cond_br %side, ^_bb2, ^_bb3 : reg<vm.value : i1>
 ^_bb2:
-  buffer.store %first_view, %40, %40, %initial, 0, "i32.x1"
+  buffer.store %first_view, %41, %41, %initial, 0, "i32.x1"
   low.br ^_bb3
 ^_bb3:
   low.cond_br %select_first, ^_bb4, ^_bb5 : reg<vm.value : i1>
@@ -94,7 +94,7 @@ low.func.def target<vm.core> abi(vm_function) @selection_with_side_effects(%firs
 ^_bb8:
   low.br ^_bb9(%third_view: reg<vm.ref : buffer>)
 ^_bb9(%selected: reg<vm.ref : buffer>):
-  %result = buffer.load %selected, %40, %40, 0, "i32.x1" : reg<vm.value : i32>
+  %result = buffer.load %selected, %41, %41, 0, "i32.x1" : reg<vm.value : i32>
   return %result
 ^exit:
   return %initial

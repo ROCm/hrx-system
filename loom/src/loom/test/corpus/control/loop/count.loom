@@ -220,3 +220,96 @@ check.scenario @explicit_loop_count_values {
   }
   check.return
 }
+
+// Forwarded payloads cross two inner loops and an optional bypass before the
+// outer backedge. Counters change independently of the payload, including when
+// either inner loop has zero iterations. The oracle computes the closed form.
+kernel.def @nested_loop_forwarded_state() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%ordinal: index, %seed_bits: i64, %output: buffer) {
+  func.call @compute_nested_loop_forwarded_state(%ordinal, %seed_bits, %output) : (index, i64, buffer)
+  kernel.return
+}
+
+func.def device inline @compute_nested_loop_forwarded_state(%ordinal: index, %seed_bits: i64, %output: buffer) {
+  %bounded_ordinal = index.assume %ordinal [range(%ordinal, 0, 71)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c12 = index.constant 12 : index
+  %c36 = index.constant 36 : index
+  %outer_limit = index.rem %bounded_ordinal, %c4 : index
+  %inner_selector = index.div %bounded_ordinal, %c4 : index
+  %inner_limit = index.rem %inner_selector, %c3 : index
+  %stage_selector = index.div %bounded_ordinal, %c12 : index
+  %stage_limit = index.rem %stage_selector, %c3 : index
+  %skip = index.cmp sge, %bounded_ordinal, %c36 : index
+  %seed = scalar.trunci %seed_bits : i64 to i32
+  cfg.br ^outer(%seed: i32, %c0: index)
+^outer(%outer_value: i32, %outer_index: index):
+  %outer_more = index.cmp slt, %outer_index, %outer_limit : index
+  cfg.cond_br %outer_more, ^inner_entry, ^exit
+^inner_entry:
+  cfg.br ^inner(%outer_value: i32, %c0: index)
+^inner(%inner_value: i32, %inner_index: index):
+  %inner_more = index.cmp slt, %inner_index, %inner_limit : index
+  cfg.cond_br %inner_more, ^inner_body, ^inner_exit
+^inner_body:
+  %next_inner = index.add %inner_index, %c1 : index
+  cfg.br ^inner(%inner_value: i32, %next_inner: index)
+^inner_exit:
+  cfg.cond_br %skip, ^bypass, ^stage_entry
+^bypass:
+  cfg.br ^latch(%inner_value: i32)
+^stage_entry:
+  cfg.br ^stage(%inner_value: i32, %c0: index)
+^stage(%stage_value: i32, %stage_index: index):
+  %stage_more = index.cmp slt, %stage_index, %stage_limit : index
+  cfg.cond_br %stage_more, ^stage_body, ^stage_exit
+^stage_body:
+  %next_stage = index.add %stage_index, %c1 : index
+  cfg.br ^stage(%stage_value: i32, %next_stage: index)
+^stage_exit:
+  %next_value = scalar.addi %stage_value, %seed : i32
+  cfg.br ^latch(%next_value: i32)
+^latch(%latch_value: i32):
+  %next_outer = index.add %outer_index, %c1 : index
+  cfg.br ^outer(%latch_value: i32, %next_outer: index)
+^exit:
+  %base = index.constant 0 : offset
+  %result = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %outer_value, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @nested_loop_forwarded_state_oracle(%ordinal: index, %seed_bits: i64, %output: buffer) {
+  %bounded_ordinal = index.assume %ordinal [range(%ordinal, 0, 71)] : index
+  %c4 = index.constant 4 : index
+  %c36 = index.constant 36 : index
+  %outer_limit = index.rem %bounded_ordinal, %c4 : index
+  %outer_count = index.cast %outer_limit : index to i32
+  %c1 = scalar.constant 1 : i32
+  %multiplier = scalar.addi %outer_count, %c1 : i32
+  %skip = index.cmp sge, %bounded_ordinal, %c36 : index
+  %seed = scalar.trunci %seed_bits : i64 to i32
+  %updated = scalar.muli %seed, %multiplier : i32
+  %value = scf.select %skip, %seed, %updated : i32
+  %base = index.constant 0 : offset
+  %result = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %value, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @nested_loop_forwarded_state_values {
+  check.trial[72](%trial: index, %entropy: check.entropy) {
+    %seed_bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.fill value(-889275714) : tensor<9xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<9xi32> -> tensor<1xi32>
+    check.compare<@nested_loop_forwarded_state, @nested_loop_forwarded_state_oracle>(%trial, %seed_bits, %output) : (index, i64, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<9xi32>
+    }
+  }
+  check.return
+}
