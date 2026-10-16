@@ -13,6 +13,7 @@
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/memory_packet.h"
 
 iree_string_view_t loom_amdgpu_memory_space_name(
     loom_value_fact_memory_space_t memory_space) {

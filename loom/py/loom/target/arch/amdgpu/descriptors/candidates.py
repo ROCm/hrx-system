@@ -193,6 +193,7 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_B, _BOZ, _ST, 16, _V, _G, 4, "BUFFER_STORE_DWORDX4_OFF_ZERO"),
     (_SM, _SMEM, _LD, 4, _S, _G, 1, "S_LOAD_DWORD"),
     (_SM, _SMEM, _LD, 8, _S, _G, 2, "S_LOAD_DWORDX2"),
+    (_SM, _SMEM, _LD, 12, _S, _G, 3, "S_LOAD_B96"),
     (_SM, _SMEM, _LD, 16, _S, _G, 4, "S_LOAD_DWORDX4"),
     (_GS, _SA, _LD, 1, _V, _G, 1, "GLOBAL_LOAD_I8_SADDR"),
     (_GS, _SA, _LD, 1, _V, _U8, 1, "GLOBAL_LOAD_U8_SADDR"),

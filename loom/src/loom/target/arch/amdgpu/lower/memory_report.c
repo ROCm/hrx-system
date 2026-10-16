@@ -14,6 +14,7 @@
 #include "loom/target/arch/amdgpu/lower/fragment_memory/packet.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/memory_bank_service.h"
+#include "loom/target/arch/amdgpu/lower/memory_packet.h"
 #include "loom/target/arch/amdgpu/lower/memory_subgroup_access.h"
 #include "loom/util/numeric_format.h"
 

@@ -46,3 +46,211 @@ check.scenario @packed_byte_origin_values {
   }
   check.return
 }
+
+// Every payload occupies twelve bytes. The unwritten word after each payload
+// makes store widening observable. Integer consumers keep the complete vector
+// and an extracted scalar live together.
+kernel.def @copy_uniform_word_payloads() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+  %byte_origin = index.constant 0 : offset
+  %e4m3_origin = index.constant 16 : offset
+  %e5m2_origin = index.constant 32 : offset
+  %halfword_origin = index.constant 48 : offset
+  %f16_origin = index.constant 64 : offset
+  %bf16_origin = index.constant 80 : offset
+  %word_origin = index.constant 96 : offset
+  %float_origin = index.constant 112 : offset
+  %bytes = buffer.view %source[%byte_origin] : buffer -> view<12xi8>
+  %e4m3 = buffer.view %source[%e4m3_origin] : buffer -> view<12xf8E4M3>
+  %e5m2 = buffer.view %source[%e5m2_origin] : buffer -> view<12xf8E5M2>
+  %halfwords = buffer.view %source[%halfword_origin] : buffer -> view<6xi16>
+  %halves = buffer.view %source[%f16_origin] : buffer -> view<6xf16>
+  %bhalves = buffer.view %source[%bf16_origin] : buffer -> view<6xbf16>
+  %words = buffer.view %source[%word_origin] : buffer -> view<3xi32>
+  %floats = buffer.view %source[%float_origin] : buffer -> view<3xf32>
+  %byte_values = vector.load %bytes[0] : view<12xi8> -> vector<12xi8>
+  %e4m3_values = vector.load %e4m3[0] : view<12xf8E4M3> -> vector<12xf8E4M3>
+  %e5m2_values = vector.load %e5m2[0] : view<12xf8E5M2> -> vector<12xf8E5M2>
+  %halfword_values = vector.load %halfwords[0] : view<6xi16> -> vector<6xi16>
+  %half_values = vector.load %halves[0] : view<6xf16> -> vector<6xf16>
+  %bhalf_values = vector.load %bhalves[0] : view<6xbf16> -> vector<6xbf16>
+  %word_values = vector.load %words[0] : view<3xi32> -> vector<3xi32>
+  %float_values = vector.load %floats[0] : view<3xf32> -> vector<3xf32>
+  %byte_output = buffer.view %destination[%byte_origin] : buffer -> view<12xi8>
+  %e4m3_output = buffer.view %destination[%e4m3_origin] : buffer -> view<12xf8E4M3>
+  %e5m2_output = buffer.view %destination[%e5m2_origin] : buffer -> view<12xf8E5M2>
+  %halfword_output = buffer.view %destination[%halfword_origin] : buffer -> view<6xi16>
+  %half_output = buffer.view %destination[%f16_origin] : buffer -> view<6xf16>
+  %bhalf_output = buffer.view %destination[%bf16_origin] : buffer -> view<6xbf16>
+  %word_output = buffer.view %destination[%word_origin] : buffer -> view<4xi32>
+  %float_output = buffer.view %destination[%float_origin] : buffer -> view<3xf32>
+  vector.store %byte_values, %byte_output[0] : vector<12xi8>, view<12xi8>
+  vector.store %e4m3_values, %e4m3_output[0] : vector<12xf8E4M3>, view<12xf8E4M3>
+  vector.store %e5m2_values, %e5m2_output[0] : vector<12xf8E5M2>, view<12xf8E5M2>
+  vector.store %halfword_values, %halfword_output[0] : vector<6xi16>, view<6xi16>
+  vector.store %half_values, %half_output[0] : vector<6xf16>, view<6xf16>
+  vector.store %bhalf_values, %bhalf_output[0] : vector<6xbf16>, view<6xbf16>
+  vector.store %word_values, %word_output[0] : vector<3xi32>, view<4xi32>
+  vector.store %float_values, %float_output[0] : vector<3xf32>, view<3xf32>
+  %word = vector.extract %word_values[0] : vector<3xi32> -> i32
+  %sum = scalar.addi %word, %word : i32
+  view.store %sum, %word_output[3] : i32, view<4xi32>
+  kernel.return
+}
+
+func.def @copy_uniform_word_payloads_oracle(%input: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %spacing = index.constant 16 : offset
+  %length = index.constant 12 : offset
+  scf.for %group = [%begin to %end step %step] {
+    %origin = index.scale %group, %spacing : index, offset -> offset
+    buffer.copy %input[%origin], %output[%origin], %length
+  }
+  %word_origin = index.constant 96 : offset
+  %words = buffer.view %input[%word_origin] : buffer -> view<3xi32>
+  %word = view.load %words[0] : view<3xi32> -> i32
+  %sum = scalar.addi %word, %word : i32
+  %result = buffer.view %output[%word_origin] : buffer -> view<4xi32>
+  view.store %sum, %result[3] : i32, view<4xi32>
+  func.return
+}
+
+// Subword values occupy distinct aligned words in the source. Their packed
+// destination is word sized, while each source read still covers one element.
+kernel.def @gather_uniform_word_payloads() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+  %byte_origin = index.constant 0 : offset
+  %e4m3_origin = index.constant 64 : offset
+  %e5m2_origin = index.constant 128 : offset
+  %halfword_origin = index.constant 192 : offset
+  %f16_origin = index.constant 256 : offset
+  %bf16_origin = index.constant 320 : offset
+  %word_origin = index.constant 384 : offset
+  %float_origin = index.constant 448 : offset
+  %byte_layout = encoding.layout.strided [4] : encoding<layout>
+  %wide_layout = encoding.layout.strided [2] : encoding<layout>
+  %bytes = buffer.view %source[%byte_origin] : buffer -> view<12xi8, %byte_layout>
+  %e4m3 = buffer.view %source[%e4m3_origin] : buffer -> view<12xf8E4M3, %byte_layout>
+  %e5m2 = buffer.view %source[%e5m2_origin] : buffer -> view<12xf8E5M2, %byte_layout>
+  %halfwords = buffer.view %source[%halfword_origin] : buffer -> view<6xi16, %wide_layout>
+  %halves = buffer.view %source[%f16_origin] : buffer -> view<6xf16, %wide_layout>
+  %bhalves = buffer.view %source[%bf16_origin] : buffer -> view<6xbf16, %wide_layout>
+  %words = buffer.view %source[%word_origin] : buffer -> view<3xi32, %wide_layout>
+  %floats = buffer.view %source[%float_origin] : buffer -> view<3xf32, %wide_layout>
+  %byte_values = vector.load %bytes[0] : view<12xi8, %byte_layout> -> vector<12xi8>
+  %e4m3_values = vector.load %e4m3[0] : view<12xf8E4M3, %byte_layout> -> vector<12xf8E4M3>
+  %e5m2_values = vector.load %e5m2[0] : view<12xf8E5M2, %byte_layout> -> vector<12xf8E5M2>
+  %halfword_values = vector.load %halfwords[0] : view<6xi16, %wide_layout> -> vector<6xi16>
+  %half_values = vector.load %halves[0] : view<6xf16, %wide_layout> -> vector<6xf16>
+  %bhalf_values = vector.load %bhalves[0] : view<6xbf16, %wide_layout> -> vector<6xbf16>
+  %word_values = vector.load %words[0] : view<3xi32, %wide_layout> -> vector<3xi32>
+  %float_values = vector.load %floats[0] : view<3xf32, %wide_layout> -> vector<3xf32>
+  %e4m3_output_origin = index.constant 16 : offset
+  %e5m2_output_origin = index.constant 32 : offset
+  %halfword_output_origin = index.constant 48 : offset
+  %f16_output_origin = index.constant 64 : offset
+  %bf16_output_origin = index.constant 80 : offset
+  %word_output_origin = index.constant 96 : offset
+  %float_output_origin = index.constant 112 : offset
+  %byte_output = buffer.view %destination[%byte_origin] : buffer -> view<12xi8>
+  %e4m3_output = buffer.view %destination[%e4m3_output_origin] : buffer -> view<12xf8E4M3>
+  %e5m2_output = buffer.view %destination[%e5m2_output_origin] : buffer -> view<12xf8E5M2>
+  %halfword_output = buffer.view %destination[%halfword_output_origin] : buffer -> view<6xi16>
+  %half_output = buffer.view %destination[%f16_output_origin] : buffer -> view<6xf16>
+  %bhalf_output = buffer.view %destination[%bf16_output_origin] : buffer -> view<6xbf16>
+  %word_output = buffer.view %destination[%word_output_origin] : buffer -> view<4xi32>
+  %float_output = buffer.view %destination[%float_output_origin] : buffer -> view<3xf32>
+  vector.store %byte_values, %byte_output[0] : vector<12xi8>, view<12xi8>
+  vector.store %e4m3_values, %e4m3_output[0] : vector<12xf8E4M3>, view<12xf8E4M3>
+  vector.store %e5m2_values, %e5m2_output[0] : vector<12xf8E5M2>, view<12xf8E5M2>
+  vector.store %halfword_values, %halfword_output[0] : vector<6xi16>, view<6xi16>
+  vector.store %half_values, %half_output[0] : vector<6xf16>, view<6xf16>
+  vector.store %bhalf_values, %bhalf_output[0] : vector<6xbf16>, view<6xbf16>
+  vector.store %word_values, %word_output[0] : vector<3xi32>, view<4xi32>
+  vector.store %float_values, %float_output[0] : vector<3xf32>, view<3xf32>
+  %word = vector.extract %word_values[0] : vector<3xi32> -> i32
+  %sum = scalar.addi %word, %word : i32
+  view.store %sum, %word_output[3] : i32, view<4xi32>
+  kernel.return
+}
+
+func.def @gather_uniform_word_payloads_oracle(%input: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %byte_groups = index.constant 3 : index
+  %halfword_groups = index.constant 6 : index
+  %byte_width = index.constant 1 : offset
+  %halfword_width = index.constant 2 : offset
+  %word_width = index.constant 4 : offset
+  %doubleword_width = index.constant 8 : offset
+  %input_spacing = index.constant 64 : offset
+  %output_spacing = index.constant 16 : offset
+  %byte_element_count = index.constant 12 : index
+  %halfword_element_count = index.constant 6 : index
+  %word_element_count = index.constant 3 : index
+  scf.for %group = [%begin to %end step %step] {
+    %is_byte = index.cmp ult, %group, %byte_groups : index
+    %is_narrow = index.cmp ult, %group, %halfword_groups : index
+    %narrow_width = scf.select %is_byte, %byte_width, %halfword_width : offset
+    %element_bytes = scf.select %is_narrow, %narrow_width, %word_width : offset
+    %source_step = scf.select %is_narrow, %word_width, %doubleword_width : offset
+    %input_origin = index.scale %group, %input_spacing : index, offset -> offset
+    %output_origin = index.scale %group, %output_spacing : index, offset -> offset
+    %narrow_element_count = scf.select %is_byte, %byte_element_count, %halfword_element_count : index
+    %element_count = scf.select %is_narrow, %narrow_element_count, %word_element_count : index
+    scf.for %element = [%begin to %element_count step %step] {
+      %input_delta = index.scale %element, %source_step : index, offset -> offset
+      %output_delta = index.scale %element, %element_bytes : index, offset -> offset
+      %input_offset = index.add %input_origin, %input_delta : offset
+      %output_offset = index.add %output_origin, %output_delta : offset
+      buffer.copy %input[%input_offset], %output[%output_offset], %element_bytes
+    }
+  }
+  %word_origin = index.constant 384 : offset
+  %result_origin = index.constant 96 : offset
+  %words = buffer.view %input[%word_origin] : buffer -> view<1xi32>
+  %word = view.load %words[0] : view<1xi32> -> i32
+  %sum = scalar.addi %word, %word : i32
+  %result = buffer.view %output[%result_origin] : buffer -> view<4xi32>
+  view.store %sum, %result[3] : i32, view<4xi32>
+  func.return
+}
+
+check.scenario @uniform_word_payload_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<128xi8>
+    %storage = check.generate.fill value(-37) : tensor<160xi8>
+    %output = check.tensor.view %storage offset(16) : tensor<160xi8> -> tensor<128xi8>
+    check.compare<@copy_uniform_word_payloads, @copy_uniform_word_payloads_oracle>(%input, %output) : (tensor<128xi8>, tensor<128xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<128xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi8>
+    }
+  }
+  check.return
+}
+
+check.scenario @uniform_strided_payload_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<512xi8>
+    %storage = check.generate.fill value(-37) : tensor<160xi8>
+    %output = check.tensor.view %storage offset(16) : tensor<160xi8> -> tensor<128xi8>
+    check.compare<@gather_uniform_word_payloads, @gather_uniform_word_payloads_oracle>(%input, %output) : (tensor<512xi8>, tensor<128xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<512xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi8>
+    }
+  }
+  check.return
+}

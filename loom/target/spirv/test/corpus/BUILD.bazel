@@ -298,6 +298,8 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "memory/atomic/add_f32_subnormals.loom:@workgroup_atomic_add_f32_subnormal": "TARGET/003",
     "memory/atomic/workgroup/observations.loom:@lds_observations_i64": "TARGET/003",
     "memory/packed/alignment.loom:@copy_byte_origins": "TARGET/003",
+    "memory/packed/alignment.loom:@copy_uniform_word_payloads": "TARGET/003",
+    "memory/packed/alignment.loom:@gather_uniform_word_payloads": "TARGET/003",
     "memory/packed/consumers.loom:@masked_byte_tail": "TARGET/003",
     "memory/packed/consumers.loom:@packed_byte_lookup": "TARGET/003",
     "memory/packed/consumers.loom:@packed_halfword_lookup": "TARGET/003",

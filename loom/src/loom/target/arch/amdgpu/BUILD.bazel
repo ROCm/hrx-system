@@ -591,6 +591,14 @@ loom_check_test_suite(
             "//loom/target/amdgpu:" + target
             for target in LOOM_AMDGPU_SUPPORTED_TARGETS
         ],
+        "test/source_low/memory_scalar_packets.loom-test": [
+            "//loom/target/amdgpu:" + target
+            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+        ],
+        "test/source_low/memory_strided_packed_packets.loom-test": [
+            "//loom/target/amdgpu:" + target
+            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+        ],
         "test/source_low/narrow_float_arguments.loom-test": [
             "//loom/target/amdgpu:gfx942",
             "//loom/target/amdgpu:gfx950",

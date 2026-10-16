@@ -351,6 +351,25 @@ def test_memory_generator_distinguishes_unsigned_byte_loads() -> None:
     }
 
 
+def test_memory_generator_covers_scalar_word_packets() -> None:
+    candidates = amdgpu_memory_candidates.amdgpu_memory_descriptor_candidates()
+    scalar_packets = {
+        (candidate.packet_byte_count, candidate.payload_register_count): candidate.descriptor_key
+        for candidate in candidates
+        if candidate.domain == amdgpu_memory_candidates.AmdgpuMemoryDescriptorDomain.GLOBAL_SMEM
+        and candidate.operation_kind == amdgpu_memory_candidates.AmdgpuMemoryOperationKind.LOAD
+        and candidate.payload_register_class == amdgpu_memory_candidates.AmdgpuMemoryPayloadRegisterClass.SGPR
+        and candidate.payload_format == amdgpu_memory_candidates.AmdgpuMemoryPayloadFormat.GENERIC
+    }
+
+    assert scalar_packets == {
+        (4, 1): "amdgpu.s_load_dword",
+        (8, 2): "amdgpu.s_load_dwordx2",
+        (12, 3): "amdgpu.s_load_b96",
+        (16, 4): "amdgpu.s_load_dwordx4",
+    }
+
+
 def test_memory_generator_covers_96_bit_source_memory_packets() -> None:
     memory_candidates = amdgpu_memory_candidates.amdgpu_memory_descriptor_candidates()
     candidates = amdgpu_memory_candidates._ordered_candidates(memory_candidates)
