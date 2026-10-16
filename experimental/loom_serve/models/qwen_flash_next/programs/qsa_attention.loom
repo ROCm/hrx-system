@@ -22,6 +22,8 @@ kernel.decl @qsa_append_kv() launch(%key_origin: offset, %value_origin: offset, 
 
 kernel.decl @qsa_selected_attention() launch(%key_origin: offset, %value_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer)
 
+kernel.decl @qsa_matrix_attention() launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer)
+
 kernel.decl @qsa_score_blocks() launch(%query_begin_arg: index, %index_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %arena: buffer, %scores: buffer)
 
 kernel.decl @qsa_select_blocks() launch(%query_begin_arg: index, %span: buffer, %mapping: buffer, %scores: buffer, %selected: buffer)
@@ -124,7 +126,16 @@ command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin:
     kernel.launch @qsa_score_blocks(%query_begin, %index_origin, %span, %mapping, %rows, %index_query, %arena, %scores) : (index, offset, buffer, buffer, buffer, buffer, buffer, buffer)
     kernel.launch @qsa_select_blocks(%query_begin, %span, %mapping, %scores, %selected) : (index, buffer, buffer, buffer, buffer)
   }
-  kernel.launch @qsa_selected_attention(%key_origin, %value_origin, %span, %mapping, %rows, %query, %query_gate, %arena, %selected, %attended) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  // Larger cohorts provide enough independent queries to share selected K/V
+  // across twelve heads. Tiny cohorts retain parallel key partitions instead.
+  // The configured capacity specializes this choice during command compilation.
+  %matrix_threshold = index.constant 32 : index
+  %matrix_attention = index.cmp uge, %tokens, %matrix_threshold : index
+  scf.if %matrix_attention {
+    kernel.launch @qsa_matrix_attention(%key_origin, %value_origin, %span, %mapping, %rows, %query, %query_gate, %arena, %selected, %attended) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  } else {
+    kernel.launch @qsa_selected_attention(%key_origin, %value_origin, %span, %mapping, %rows, %query, %query_gate, %arena, %selected, %attended) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
   %output_weight_block_size = index.constant 32 : index
   %output_weight_blocks = index.div %output_width, %output_weight_block_size : index
   %output_weight_shaped = view.refine %output_weight : view<2560x192x34xi8> -> view<[%hidden_width]x[%output_weight_blocks]x34xi8>
