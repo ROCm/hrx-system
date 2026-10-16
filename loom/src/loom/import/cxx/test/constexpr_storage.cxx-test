@@ -213,3 +213,53 @@ static constexpr unsigned mutate_references() {
   return identity(value);
 }
 static_assert(mutate_references() == 12);
+
+// ====
+// A persistent reference keeps a temporary subobject's address, but the
+// temporary was not declared constexpr and cannot be read later.
+struct Direct {
+  unsigned value = 7;
+};
+struct Nested {
+  Direct inner;
+  unsigned values[2] = {3, 5};
+};
+
+// Named objects, whole temporaries, and temporaries read by their owning
+// automatic evaluation remain constant expressions.
+constexpr Direct named{};
+constexpr const unsigned& named_member = named.value;
+constexpr const unsigned& scalar = 11u;
+constexpr const unsigned (&array)[2] = {13, 17};
+constexpr unsigned automatic_member() {
+  const unsigned& value = Direct{}.value;
+  return value;
+}
+static_assert(named_member == 7);
+static_assert(scalar == 11);
+static_assert(array[1] == 17);
+static_assert(automatic_member() == 7);
+
+constexpr const unsigned& member = Direct{}.value;
+constexpr const Direct& nested_record = Nested{}.inner;
+constexpr const unsigned& nested_member = Nested{}.inner.value;
+constexpr const unsigned& array_element = Nested{}.values[1];
+constexpr const unsigned* escaped_pointer = &member;
+static_assert(escaped_pointer == &member);
+
+struct Static {
+  inline static constexpr const unsigned& member = Direct{}.value;
+};
+
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(member == 7);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(nested_record.value == 7);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(nested_member == 7);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(array_element == 5);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(*escaped_pointer == 7);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(Static::member == 7);
