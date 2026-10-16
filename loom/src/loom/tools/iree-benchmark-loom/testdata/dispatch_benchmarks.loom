@@ -1,0 +1,32 @@
+kernel.def @write_value() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = scalar.constant 42 : i32
+  view.store %value, %view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @write_case {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  %expected = check.generate.fill value(42) : tensor<1xi32>
+  kernel.launch @write_value(%output) : (tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@write_case> @write_baseline
+
+check.benchmark<@write_case> @write_candidate
+
+check.scenario @write_trials {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    check.invoke<@write_value>(%output) : (tensor<1xi32>) -> ()
+  }
+  check.return
+}
+
+check.benchmark<@write_trials> @write_scenario

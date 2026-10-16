@@ -334,6 +334,7 @@ iree_execution_test_suite(
     name = "execution_test",
     data = [
         "testdata/device_events.loom",
+        "testdata/dispatch_benchmarks.loom",
         "testdata/scalar_benchmarks.loom",
         "//loom/src/loom/tooling/testbench:testdata/requirements.loom",
     ],

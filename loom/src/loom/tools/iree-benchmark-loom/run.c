@@ -682,10 +682,6 @@ iree_status_t iree_benchmark_loom_run_file(
         status = iree_benchmark_loom_event_sink_emit_plan(
             event_sink, &run_identity, module_plan.module, &selections[i],
             benchmark_options);
-        if (iree_status_is_ok(status) && benchmark_options->dry_run) {
-          status = iree_benchmark_loom_event_sink_emit_device(
-              event_sink, &run_identity, &hal_context);
-        }
       }
       if (iree_status_is_ok(status) && !benchmark_options->dry_run) {
         const iree_benchmark_loom_comparison_execution_options_t
@@ -717,12 +713,6 @@ iree_status_t iree_benchmark_loom_run_file(
       status = iree_benchmark_loom_event_sink_emit_plan(
           event_sink, &run_identity, module_plan.module, selection,
           benchmark_options);
-      if (iree_status_is_ok(status) && benchmark_options->dry_run &&
-          selection->policy.measure_kind ==
-              IREE_BENCHMARK_LOOM_MEASURE_DISPATCH_COMPLETE) {
-        status = iree_benchmark_loom_event_sink_emit_device(
-            event_sink, &run_identity, &hal_context);
-      }
     }
     if (iree_status_is_ok(status) && failure_count == 0 &&
         benchmark_options->dry_run) {

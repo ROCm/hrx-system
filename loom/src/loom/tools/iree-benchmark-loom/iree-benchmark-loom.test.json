@@ -44,6 +44,95 @@
       ]
     },
     {
+      "name": "plans dispatch work without a device",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/dispatch_benchmarks.loom",
+          "--benchmark=@write_baseline",
+          "--measure=dispatch_complete",
+          "--dry-run"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"dry_run\":true",
+            "\"selected_benchmark_count\":1",
+            "\"work_item_count\":1",
+            "\"measure\":\"dispatch_complete\""
+          ]
+        },
+        "not_contains": [
+          "\"device\":"
+        ]
+      }
+    },
+    {
+      "name": "plans dispatch comparison without a device",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/dispatch_benchmarks.loom",
+          "--compare=@write_baseline,@write_candidate",
+          "--measure=dispatch_complete",
+          "--dry-run",
+          "--output-format=jsonl"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"benchmark\":\"write_baseline\"",
+            "\"benchmark\":\"write_candidate\"",
+            "\"selected_benchmark_count\":2",
+            "\"dry_run\":true"
+          ]
+        },
+        "not_contains": [
+          "\"row\":\"device\""
+        ]
+      }
+    },
+    {
+      "name": "plans a scenario artifact bundle without a device",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/testdata/dispatch_benchmarks.loom",
+          "--benchmark=@write_scenario",
+          "--dry-run",
+          "--artifact-bundle-dir={tmp}/scenario-bundle"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/scenario-bundle/results.json",
+          "contains": {
+            "unordered": [
+              "\"scenario\":\"write_trials\"",
+              "\"logical_sample_count\":2",
+              "\"dry_run\":true"
+            ]
+          },
+          "not_contains": [
+            "\"device\":"
+          ]
+        },
+        {
+          "path": "{tmp}/scenario-bundle/manifest.json",
+          "contains": {
+            "unordered": [
+              "\"dry_run\":true"
+            ]
+          },
+          "not_contains": [
+            "\"device\":"
+          ]
+        }
+      ]
+    },
+    {
       "name": "prints agent documentation",
       "run": {
         "tool": "iree-benchmark-loom",
