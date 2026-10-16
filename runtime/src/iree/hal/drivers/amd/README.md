@@ -46,9 +46,10 @@ architectures and NPUs.
 GPU scheme filtering opens query-only endpoints and uses
 `amdf_gpu_endpoint_architecture`; it creates no device, address space, queue,
 or event. Queue admission then selects an advertised native protocol and
-publication mode. RDNA currently supports PM4 USER host-producer families with
-GFX11/GFX12 launch and cache encodings. Other native services fail explicitly at
-construction or operation admission.
+publication mode. RDNA supports PM4 USER host-producer and KERNEL submission
+families with GFX11/GFX12 launch and cache encodings. Both use the same bounded
+command recording, dependency, and retirement paths. Other native services fail
+explicitly at construction or operation admission.
 
 `rdna://0?queue_count=2` provisions two queues sharing the device's execution
 workers. `queue_family` selects an exact native family ordinal instead of the
@@ -58,6 +59,49 @@ and shared proactor; GPU-local memory node IDs are not CPU NUMA node IDs.
 Each materialized device retains the fabric independently. Releasing the
 registry and driver leaves those devices operational. The fabric owns the native
 instance and its discovery snapshot; engine contexts own their native children.
+
+## Shader diagnostics and sanitizers
+
+The generic URI parameters request runtime services at device creation:
+
+```text
+rdna://0?feedback
+rdna://0?asan&asan_report_policy=fail-device
+rdna://0?tsan&tsan_report_policy=report-only
+```
+
+Programmatic callers set the corresponding `runtime_features` in
+`iree_hal_device_create_params_t`. ASAN and TSAN also provision feedback.
+Executables use the existing compiler-generated configuration globals and report
+layouts; requesting a runtime service does not instrument an ordinary HSACO.
+Loading an executable requiring an unprovisioned service fails explicitly.
+
+Reports reach the supplied `event_sink`, with executable and source-site identity
+retained through delivery. The default sink discards events; applications can
+select `iree_hal_device_event_sink_stderr()` or provide their own callback. The
+existing completion worker drains the shared channel. There is no additional
+feedback thread. Assertion reports preserve the existing diagnostic behavior;
+they do not automatically fail submissions.
+
+ASAN defaults to `report-only`; TSAN defaults to `fail-device`. Both policies are
+selectable through the URI parameters above. A fail-device report propagates
+`ABORTED` for ASAN or `DATA_LOSS` for TSAN and rejects subsequent work. Failure
+notification does not cancel already-issued native work or certify its resource
+retirement. Pools and caller-owned backing must still outlive their users.
+
+ASAN maintains sparse address shadows, allocation redzones, and freed-backing
+quarantine. TSAN maintains per-queue workgroup shadows and immutable executable
+placements, including when a recorded command buffer runs on different queues.
+Shadow-slot reuse inserts execution joins before prior users can be overwritten.
+Sanitizer shadows use local storage when available and qualified system storage
+on devices without a separate local heap. Ordinary devices allocate none of this
+sanitizer state.
+
+The shared producer requires native shader-triggered events. The current Windows
+provider exposes submission completion but lacks that shader event producer, so
+feedback/ASAN/TSAN device creation is rejected there. Enabling those services
+requires implementing and qualifying the native shader producer; ordinary
+Windows PM4 execution does not depend on it.
 
 ## Memory construction
 

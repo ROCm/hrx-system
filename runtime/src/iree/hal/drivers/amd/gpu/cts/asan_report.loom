@@ -1,0 +1,19 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.def export("checked_write") @checked_write() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%target: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 1 : index
+  %value = scalar.constant 7 : i32
+  %global = buffer.assume.memory_space<global> %target : buffer
+  %view = buffer.view %global[%base] : buffer -> view<2xi32>
+  sanitizer.assert.access<write> %view[%index] : view<2xi32>
+  view.store %value, %view[%index] : i32, view<2xi32>
+  kernel.return
+}
