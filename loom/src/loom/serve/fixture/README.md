@@ -113,7 +113,7 @@ admission and drains accepted work before model and device destruction.
 | Ragged inputs to final embedding vectors | [Embedding package](embedding/README.md) | [Finite model](../service/finite/README.md), [embedding records](../service/finite/embedding/protocol.h) |
 | Structured questions to choice/score/noul probabilities | [Decision package](decision/README.md) | [Finite model](../service/finite/README.md), [SystemOne records](../service/finite/decision/protocol.h) |
 | Incremental waveform output | [Speech package](speech/README.md) | [Speech model](../service/speech/model.h), [stream lifecycle](../service/speech/README.md) |
-| Continuing audio input | [Recognition source](recognition/control.loom) | [Recognition model](../service/recognition/model.h), [transcription adapter](../service/recognition/http.h) |
+| Continuing audio input | [Recognition source](recognition/control.loom) | [Recognition model](../service/recognition/model.h), [transcription adapter](../service/recognition/service.h) |
 | Retained autoregressive sessions | [Tiny text package](text/README.md) | [Text model](../service/text/model.h), [source preparation](../service/text/source.h) |
 
 Copying a source package establishes its ABI skeleton, not its mathematics.

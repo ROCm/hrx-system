@@ -250,6 +250,16 @@ iree_status_t loom_serve_registry_try_open_speech(
     loom_serve_speech_request_t* request,
     loom_serve_speech_stream_t** out_stream);
 
+// Resolves the current recognition registration under the same admission
+// policy. A stream copies request options and accepts continuing normalized PCM
+// with bounded frame credit. The caller owns its result until close; graceful
+// removal waits for input completion/cancellation and physical retirement,
+// while finalized documents can outlive the registration and registry.
+iree_status_t loom_serve_registry_try_open_recognition(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    const loom_serve_recognition_request_t* request,
+    loom_serve_recognition_stream_t** out_stream);
+
 // Seals admission; callers resolve held claims before the next advance.
 // Repeated removal is idempotent, with abort escalation and explicit
 // release-failure retry.

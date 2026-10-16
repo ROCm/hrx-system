@@ -14,6 +14,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/serve/server/configuration.h"
+#include "loom/serve/service/recognition/request.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/request.h"
 
@@ -181,6 +182,39 @@ TEST(RegistryAdmissionTest, NativeSpeechRejectionsPreserveOwnedInput) {
     EXPECT_EQ(request.speed, 1.0f);
   }
   loom_serve_speech_request_deinitialize(&request);
+  IREE_EXPECT_OK(loom_serve_registry_free(registry));
+}
+
+TEST(RegistryAdmissionTest, NativeRecognitionUsesTypedAdmissionPolicy) {
+  const loom_serve_service_t services[] = {
+      {.name = IREE_SV("vectors"), .kind = "embedding"},
+      {.name = IREE_SV("http-recognition"), .kind = "recognition"},
+  };
+  loom_serve_registry_t* registry = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_registry_allocate(IREE_ARRAYSIZE(services), services, 0, {},
+                                   iree_allocator_system(), &registry));
+  const loom_serve_recognition_request_t request = {
+      .language = IREE_SV("en"),
+      .prompt = IREE_SV("Keep this context."),
+  };
+  const struct {
+    // Name resolved through the actual registry's borrowed service metadata.
+    const char* name;
+    // Failure at the lookup, modality, or native-capability boundary.
+    iree_status_code_t code;
+  } cases[] = {{"missing", IREE_STATUS_NOT_FOUND},
+               {"vectors", IREE_STATUS_INVALID_ARGUMENT},
+               {"http-recognition", IREE_STATUS_UNIMPLEMENTED}};
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.name);
+    loom_serve_recognition_stream_t* stream = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        test.code,
+        loom_serve_registry_try_open_recognition(
+            registry, iree_make_cstring_view(test.name), &request, &stream));
+    EXPECT_EQ(stream, nullptr);
+  }
   IREE_EXPECT_OK(loom_serve_registry_free(registry));
 }
 
