@@ -1,0 +1,58 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @narrow_partial(%input: vector<2xf32>) -> (vector<2xbf16>) {
+  %result = vector.fptrunc %input : vector<2xf32> to vector<2xbf16>
+  func.return %result : vector<2xbf16>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xf32>) -> (vector<2xbf16>)}) @narrow_partial(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %5 = avx2.vmovdqu.rodata.xmm @__low_rodata_584ef5ef
+  %6 = avx2.vmovdqu.rodata.xmm @__low_rodata_476c7367
+  %7 = avx2.vmovdqu.rodata.xmm @__low_rodata_233509ff
+  %8 = avx2.vmovdqu.rodata.xmm @__low_rodata_d04f526f
+  %9 = avx2.vmovdqu.rodata.xmm @__low_rodata_199e8f8f
+  %10 = vpsrld.xmm %input, 16
+  %11 = vpand.xmm %10, %5
+  %12 = vpaddd.xmm %11, %6
+  %13 = vpaddd.xmm %input, %12
+  %14 = vpsrld.xmm %13, 16
+  %15 = vpand.xmm %input, %7
+  %16 = vpcmpgtd.xmm %15, %8
+  %17 = vpor.xmm %10, %9
+  %18 = vpblendvb.xmm %14, %17, %16
+  %19 = avx2.vmovdqu.rodata.xmm @__low_rodata_aa06e16f
+  %result = vpshufb.xmm %18, %19
+  return %result
+}
+
+// ====
+
+func.def @narrow_ymm(%input: vector<8xf32>) -> (vector<8xbf16>) {
+  %result = vector.fptrunc %input : vector<8xf32> to vector<8xbf16>
+  func.return %result : vector<8xbf16>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xf32>) -> (vector<8xbf16>)}) @narrow_ymm(%input: reg<x86.ymm>) -> (reg<x86.xmm>) asm {
+  %5 = avx2.vmovdqu.rodata.ymm @__low_rodata_14250ebf
+  %6 = avx2.vmovdqu.rodata.ymm @__low_rodata_1d3ecfaf
+  %7 = avx2.vmovdqu.rodata.ymm @__low_rodata_ff2896df
+  %8 = avx2.vmovdqu.rodata.ymm @__low_rodata_281683bf
+  %9 = avx2.vmovdqu.rodata.ymm @__low_rodata_ebdc3aff
+  %10 = vpsrld.ymm %input, 16
+  %11 = vpand.ymm %10, %5
+  %12 = vpaddd.ymm %11, %6
+  %13 = vpaddd.ymm %input, %12
+  %14 = vpsrld.ymm %13, 16
+  %15 = vpand.ymm %input, %7
+  %16 = vpcmpgtd.ymm %15, %8
+  %17 = vpor.ymm %10, %9
+  %18 = vpblendvb.ymm %14, %17, %16
+  %19 = avx2.vmovdqu.rodata.ymm @__low_rodata_6e7103bf
+  %20 = vpshufb.ymm %18, %19
+  %21 = vextractf128.xmm %20, 0
+  %22 = vextractf128.xmm %20, 1
+  %result = vpunpcklqdq.xmm %21, %22
+  return %result
+}

@@ -132,7 +132,7 @@ def _temporary(prefix: str, name: str) -> ValueRef:
     return ValueRef.temporary(f"{prefix}_{name}" if prefix else name)
 
 
-def _avx2_integer_narrowing_emits(
+def avx2_integer_narrowing_emits(
     family: VectorIntegerNarrowingFamily,
     lane_count: int,
     descriptor_lookup: _DescriptorLookup,
@@ -142,6 +142,8 @@ def _avx2_integer_narrowing_emits(
     result_type: ResultTypeBinding | None,
     temporary_prefix: str,
 ) -> tuple[tuple[ContractEmit, ...], tuple[Descriptor, ...]]:
+    """Packs the low bits of each integer lane into one narrower carrier."""
+
     source_vector_bit_width = lane_count * family.source.bit_width
     physical_source_bit_width = max(128, source_vector_bit_width)
     source_suffix = _physical_register_suffix(source_vector_bit_width)
@@ -289,7 +291,7 @@ def avx2_signed_integer_conversion_emits(
         if family.source.bit_width == source_element_bit_width
         and family.result.bit_width == result_element_bit_width
     )
-    return _avx2_integer_narrowing_emits(
+    return avx2_integer_narrowing_emits(
         family,
         lane_count,
         descriptor_lookup,
@@ -365,7 +367,7 @@ def _avx2_vector_integer_narrowing_rule(
     lane_count = source_vector_bit_width // family.source.bit_width
     source_type = Vector(family.source.name, lanes=lane_count)
     result_type = Vector(family.result.name, lanes=lane_count)
-    emits, descriptors = _avx2_integer_narrowing_emits(
+    emits, descriptors = avx2_integer_narrowing_emits(
         family,
         lane_count,
         descriptor_lookup,

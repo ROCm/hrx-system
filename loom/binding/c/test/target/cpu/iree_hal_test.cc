@@ -730,6 +730,9 @@ TEST_P(LegacyHalfConversionTest,
             std::memcpy(&value, &bits, 4);
             expected_half[lane] = bfloat ? iree_math_f32_to_bf16(value)
                                          : iree_math_f32_to_f16(value);
+            if (bfloat && (bits & 0x7fffffffu) > 0x7f800000u) {
+              expected_half[lane] = (bits >> 16) | 0x0040u;
+            }
           } else {
             const uint16_t bits = kHalfBits[index];
             std::memcpy(input.data() + 16 + lane * 2, &bits, 2);
@@ -750,7 +753,7 @@ TEST_P(LegacyHalfConversionTest,
             uint16_t actual;
             std::memcpy(&actual, output.data() + 16 + lane * 2, 2);
             const uint16_t infinity = bfloat ? 0x7f80 : 0x7c00;
-            if ((expected_half[lane] & 0x7fff) > infinity) {
+            if (!bfloat && (expected_half[lane] & 0x7fff) > infinity) {
               ASSERT_GT(actual & 0x7fff, infinity);
             } else {
               ASSERT_EQ(actual, expected_half[lane]) << position + lane;

@@ -4,10 +4,14 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+from dataclasses import replace
+
 import pytest
 
 from loom.dialect.scalar import conversion
+from loom.dialect.vector import defs as vector
 from loom.target.arch.x86.contracts.float_narrowing import (
+    packed_bfloat_narrowing_rules,
     x86_float_narrowing_rules,
 )
 from loom.target.arch.x86.descriptors import (
@@ -19,6 +23,8 @@ from loom.target.contracts import (
     DescriptorRule,
     GuardKind,
     SourceValueKind,
+    ValueRef,
+    Vector,
     descriptor_by_key,
 )
 from loom.target.low_descriptors import DescriptorSet
@@ -137,3 +143,45 @@ def test_exact_bfloat_value_rule_uses_move_and_shift(
         "x86.scalar.shr.imm.gpr32",
     )
     assert rule.emit[-1].immediates == {"shift": 16}
+
+
+@pytest.mark.parametrize(
+    ("descriptor_set", "evex"),
+    [(X86_AVX2_DESCRIPTOR_SET, False), (X86_AVX512_CORE_DESCRIPTOR_SET, True)],
+)
+def test_exact_packed_bfloat_rules_cover_each_carrier_once(
+    descriptor_set: DescriptorSet, evex: bool
+) -> None:
+    rules = packed_bfloat_narrowing_rules(
+        lambda key: descriptor_by_key(descriptor_set, key), evex=evex
+    )
+    expected_inputs = [
+        Vector("f32", minimum_lanes=1, maximum_lanes=4),
+        Vector("f32", lanes=8),
+    ]
+    if evex:
+        expected_inputs.append(Vector("f32", lanes=16))
+    assert len(rules) == len(expected_inputs)
+    for rule, input_type in zip(rules, expected_inputs, strict=True):
+        assert rule.source_op is vector.vector_fptrunc
+        types = {
+            guard.field: guard.type_pattern
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_TYPE
+        }
+        assert types == {
+            "input": input_type,
+            "result": replace(input_type, element=None, elements=("bf16",)),
+        }
+        assert any(
+            guard.kind is GuardKind.VALUE_STATIC_ELEMENT_COUNT_EQ
+            and (guard.field, guard.other_field) == ("input", "result")
+            for guard in rule.guards
+        )
+        assert not any(
+            guard.kind is GuardKind.VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL
+            for guard in rule.guards
+        )
+        assert all("gpr" not in emit.descriptor.key for emit in rule.emit)
+        assert rule.emit[-1].results == {"dst": ValueRef.result("result")}
+        assert rule.priority == int(evex)

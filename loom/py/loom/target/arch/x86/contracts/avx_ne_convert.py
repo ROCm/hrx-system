@@ -192,6 +192,7 @@ def _narrow_rule(lane_count: int) -> DescriptorRule:
             ),
         ),
         report_key=f"native_f32x{lane_count}_to_bf16x{lane_count}",
+        priority=2,
     )
 
 

@@ -275,6 +275,7 @@ iree_py_test(
     deps = [
         ":contracts",
         "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/vector",
         "//loom/py/loom/target/arch/x86:descriptors",
         "//loom/py/loom/target/contracts",
     ],

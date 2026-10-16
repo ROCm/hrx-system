@@ -272,12 +272,31 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // ====
 
-// The authored lowering remains selected when no legal alternative exists so
-// Low verification can identify the exact missing ISA feature.
+// Core AVX-512 integer instructions preserve packed conversion when the
+// optional BF16 instruction is unavailable.
 x86.target<avx512_packed_dot> @target {contract_feature_bits = 2, contract_set_key = "x86.avx512_features.core"}
 
 func.def target(@target) @narrow_zmm_without_bf16(%input: vector<16xf32>) -> (vector<16xbf16>) {
-  // ERROR@+1: TARGET/046 {function_name="narrow_zmm_without_bf16", opcode="x86.avx512_bf16.vcvtneps2bf16.ymm.zmm", descriptor_set_key="x86.avx512_features.core", feature_word_index="0", missing_feature_bits="64"}
   %result = vector.fptrunc<daz> %input : vector<16xf32> to vector<16xbf16>
   func.return %result : vector<16xbf16>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<16xf32>) -> (vector<16xbf16>)}) @narrow_zmm_without_bf16(%input: reg<x86.zmm>) -> (reg<x86.ymm>) asm {
+  %5 = avx512.vmovdqu64.rodata.zmm @__low_rodata_a6f176df
+  %6 = avx512.vmovdqu64.rodata.zmm @__low_rodata_bc22b6bf
+  %7 = avx512.vmovdqu64.rodata.zmm @__low_rodata_6b4f2d1f
+  %8 = avx512.vmovdqu64.rodata.zmm @__low_rodata_dbb55edf
+  %9 = avx512.vmovdqu64.rodata.zmm @__low_rodata_a18eef5f
+  %10 = avx512.vpsrld.zmm %input, 16
+  %11 = vpandd %10, %5
+  %12 = vpaddd %11, %6
+  %13 = vpaddd %input, %12
+  %14 = avx512.vpsrld.zmm %13, 16
+  %15 = vpandd %input, %7
+  %16 = vpcmpd %15, %8, 6
+  %17 = vpord %10, %9
+  %18 = vpblendmd %16, %17, %14
+  %result = avx512.vpmovdw.ymm.zmm %18
+  return %result
 }

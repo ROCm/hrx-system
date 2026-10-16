@@ -329,6 +329,7 @@ iree_py_test(
   DEPS
     loom::py::loom::target::arch::x86::contracts::contracts
     loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::vector::vector
     loom::py::loom::target::arch::x86::descriptors
     loom::py::loom::target::contracts::contracts
   PACKAGE_DIRS

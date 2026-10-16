@@ -1,0 +1,53 @@
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @narrow_xmm(%input: vector<4xf32>) -> (vector<4xbf16>) {
+  %result = vector.fptrunc %input : vector<4xf32> to vector<4xbf16>
+  func.return %result : vector<4xbf16>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<4xf32>) -> (vector<4xbf16>)}) @narrow_xmm(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %5 = avx2.vmovdqu.rodata.xmm @__low_rodata_584ef5ef
+  %6 = avx2.vmovdqu.rodata.xmm @__low_rodata_476c7367
+  %7 = avx2.vmovdqu.rodata.xmm @__low_rodata_233509ff
+  %8 = avx2.vmovdqu.rodata.xmm @__low_rodata_d04f526f
+  %9 = avx2.vmovdqu.rodata.xmm @__low_rodata_199e8f8f
+  %10 = vpsrld.xmm %input, 16
+  %11 = vpand.xmm %10, %5
+  %12 = vpaddd.xmm %11, %6
+  %13 = vpaddd.xmm %input, %12
+  %14 = vpsrld.xmm %13, 16
+  %15 = vpand.xmm %input, %7
+  %16 = vpcmpd.xmm %15, %8, 6
+  %17 = vpor.xmm %10, %9
+  %18 = vpblendmd.xmm %16, %17, %14
+  %result = avx512.vpmovdw.xmm.xmm %18
+  return %result
+}
+
+// ====
+
+func.def @narrow_zmm(%input: vector<16xf32>) -> (vector<16xbf16>) {
+  %result = vector.fptrunc %input : vector<16xf32> to vector<16xbf16>
+  func.return %result : vector<16xbf16>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<16xf32>) -> (vector<16xbf16>)}) @narrow_zmm(%input: reg<x86.zmm>) -> (reg<x86.ymm>) asm {
+  %5 = avx512.vmovdqu64.rodata.zmm @__low_rodata_a6f176df
+  %6 = avx512.vmovdqu64.rodata.zmm @__low_rodata_bc22b6bf
+  %7 = avx512.vmovdqu64.rodata.zmm @__low_rodata_6b4f2d1f
+  %8 = avx512.vmovdqu64.rodata.zmm @__low_rodata_dbb55edf
+  %9 = avx512.vmovdqu64.rodata.zmm @__low_rodata_a18eef5f
+  %10 = avx512.vpsrld.zmm %input, 16
+  %11 = vpandd %10, %5
+  %12 = vpaddd %11, %6
+  %13 = vpaddd %input, %12
+  %14 = avx512.vpsrld.zmm %13, 16
+  %15 = vpandd %input, %7
+  %16 = vpcmpd %15, %8, 6
+  %17 = vpord %10, %9
+  %18 = vpblendmd %16, %17, %14
+  %result = avx512.vpmovdw.ymm.zmm %18
+  return %result
+}

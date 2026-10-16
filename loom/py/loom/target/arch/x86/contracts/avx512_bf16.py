@@ -180,7 +180,7 @@ def _register_unary_rules() -> tuple[DescriptorRule, ...]:
         lane_count = vector_bit_width // 32
         result_bit_width = vector_bit_width // 2
         for form in _result_forms(
-            (), parent="", lane_count=lane_count, base_priority=0
+            (), parent="", lane_count=lane_count, base_priority=2
         ):
             key_parts = (
                 "x86.avx512_bf16.vcvtneps2bf16",
@@ -256,7 +256,7 @@ def _register_binary_rules() -> tuple[DescriptorRule, ...]:
             source_nodes,
             parent="",
             lane_count=lane_count * 2,
-            base_priority=2,
+            base_priority=4,
         ):
             key_parts = (
                 "x86.avx512_bf16.vcvtne2ps2bf16",
@@ -382,7 +382,7 @@ def _memory_rules(
             source_nodes,
             parent=parent,
             lane_count=result_lane_count,
-            base_priority=source_count + int(source_count == 2),
+            base_priority=2 + source_count + int(source_count == 2),
         ):
             instruction_operands = dict(form.instruction_operands)
             if source_count == 2:
