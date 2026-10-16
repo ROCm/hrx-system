@@ -18,6 +18,7 @@
 #include "iree/hal/drivers/amdgpu/host_queue_blit.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer.h"
 #include "iree/hal/drivers/amdgpu/host_queue_command_buffer_scratch.h"
+#include "iree/hal/drivers/amdgpu/host_queue_completion_carrier_trace.h"
 #include "iree/hal/drivers/amdgpu/host_queue_dispatch.h"
 #include "iree/hal/drivers/amdgpu/host_queue_file.h"
 #include "iree/hal/drivers/amdgpu/host_queue_host_call.h"
@@ -502,6 +503,9 @@ static void iree_hal_amdgpu_host_queue_validate_completion_epoch(
 
   const uint64_t drained_epoch = (uint64_t)iree_atomic_load(
       &queue->notification_ring.epoch.last_drained, iree_memory_order_acquire);
+  iree_hal_amdgpu_host_queue_completion_carrier_trace_record_overrun(
+      queue, stable_snapshot.completed_epoch, stable_snapshot.published_epoch,
+      submitted_epoch, drained_epoch);
   iree_status_t error = iree_make_status(
       IREE_STATUS_INTERNAL,
       "AMDGPU physical queue %" PRIhsz ":%" PRIu32
@@ -1157,6 +1161,11 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
         &out_queue->notification_ring);
   }
 
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_host_queue_completion_carrier_trace_initialize(
+        out_queue);
+  }
+
   // Provisioned queues publish their epoch signals for device-side cross-queue
   // barriers. Independently releasable queues must not publish: an already
   // submitted peer packet can retain the raw signal beyond HAL queue release.
@@ -1273,6 +1282,8 @@ void iree_hal_amdgpu_host_queue_finish_deinitialize(
     iree_thread_release(queue->completion.thread);
     queue->completion.thread = NULL;
   }
+
+  iree_hal_amdgpu_host_queue_completion_carrier_trace_deinitialize(queue);
 
   // Destroy the hardware queue before the remaining host-side resources so the
   // HSA runtime cannot race a late error callback against signal teardown.

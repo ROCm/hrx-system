@@ -312,6 +312,8 @@ iree_cc_library(
     "host_queue_command_buffer_replay.c"
     "host_queue_command_buffer_replay.h"
     "host_queue_command_buffer_scratch.h"
+    "host_queue_completion_carrier_trace.c"
+    "host_queue_completion_carrier_trace.h"
     "host_queue_dispatch.c"
     "host_queue_dispatch.h"
     "host_queue_file.c"
