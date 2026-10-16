@@ -223,6 +223,22 @@ loom_library(
     srcs = ["tests/quantized_reference.loom"],
 )
 
+loom_test(
+    name = "shared_expert_test",
+    srcs = ["tests/shared_expert.loom"],
+    benchmark_smoke = False,
+    configs = {"flash_next.token_count": "67"},
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_BYTE_GRANULE_PROFILE,
+    ],
+    deps = [
+        ":quantized_reference",
+        ":residual_programs",
+    ],
+)
+
 [
     loom_test(
         name = "expert_matrix_{}_test".format(rows),
