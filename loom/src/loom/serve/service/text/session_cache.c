@@ -18,7 +18,7 @@ bool loom_serve_text_session_cache_inspect(
     const loom_serve_text_session_t* row = &rows[index];
     lifetime = &row->lifetime;
     out_snapshot->storage = "row";
-    if (row->request.connection) {
+    if (row->request.consumer.self) {
       out_snapshot->request = lifetime->serial;
       out_snapshot->reserved_tokens = row->request.reserved_tokens;
     }
@@ -146,7 +146,7 @@ bool loom_serve_text_session_cache_evict(
   loom_serve_text_session_t* oldest = NULL;
   for (iree_host_size_t i = 0; i < row_count; ++i) {
     loom_serve_text_session_t* row = &rows[i];
-    if (row != protected_row && !row->request.connection &&
+    if (row != protected_row && !row->request.consumer.self &&
         loom_serve_text_row_position(row->row) &&
         (!oldest || row->lifetime.serial < oldest->lifetime.serial)) {
       oldest = row;

@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "loom/serve/service/text/response.h"
+#include "loom/serve/service/text/http.h"
 
 iree_status_t loom_serve_text_checkpoint_request_parse(
     loom_serve_text_checkpoint_request_t* control,
@@ -51,9 +51,9 @@ static iree_status_t loom_serve_text_checkpoint_reject(
     iree_status_t failure, iree_allocator_t host_allocator) {
   const loom_serve_text_checkpoint_request_t request = *control;
   memset(control, 0, sizeof(*control));
-  return loom_serve_text_response_reject(telemetry, request.connection,
-                                         request.receipt, code, reason, failure,
-                                         host_allocator);
+  return loom_serve_text_http_reject(telemetry, request.connection,
+                                     request.receipt, code, reason, failure,
+                                     host_allocator);
 }
 
 static iree_status_t loom_serve_text_checkpoint_reply(
