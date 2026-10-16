@@ -292,6 +292,7 @@ loom_cc_library(
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
     loom::serve::service::finite::result
+    loom::util::json
   TESTONLY
   ALWAYSLINK
   PUBLIC

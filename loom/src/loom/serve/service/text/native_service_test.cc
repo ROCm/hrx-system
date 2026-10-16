@@ -7,6 +7,7 @@
 #include "iree/base/tooling/flags.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
+#include "loom/util/json.h"
 
 IREE_FLAG(string, native_text_model, "",
           "Optional learned model document for native text qualification.");
@@ -42,6 +43,17 @@ std::string Decode(iree_string_view_t value) {
                                            decoded.data(), &length));
   decoded.resize(length);
   return decoded;
+}
+
+std::string Quote(iree_string_view_t value) {
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t output;
+  loom_output_stream_for_builder(&builder, &output);
+  IREE_EXPECT_OK(loom_json_write_escaped_string(&output, value));
+  const std::string result = String(iree_string_builder_view(&builder));
+  iree_string_builder_deinitialize(&builder);
+  return result;
 }
 
 class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
@@ -230,10 +242,20 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     }
     EXPECT_EQ(String(result->response.model_name), name_);
     EXPECT_GT(result->response.usage.output_tokens, 0u);
+    RecordProperty("content", String(result->content));
+    RecordProperty("reasoning", String(result->reasoning));
+    RecordProperty("finish_reason", String(result->finish_reason));
+    RecordProperty("cached_tokens",
+                   std::to_string(result->response.usage.cached_tokens));
+    iree_string_builder_t calls;
+    iree_string_builder_initialize(host_allocator_, &calls);
+    IREE_EXPECT_OK(
+        loom_serve_text_tool_calls_write_json(result->calls, false, &calls));
+    RecordProperty("tool_calls", String(iree_string_builder_view(&calls)));
+    iree_string_builder_deinitialize(&calls);
   }
 
-  std::string CompleteRequest() {
-    std::string body = body_;
+  std::string CompleteRequest(std::string body) {
     iree_string_view_t options;
     IREE_EXPECT_OK(
         iree_json_try_lookup_object_value(iree_make_cstring_view(body.c_str()),
@@ -247,9 +269,10 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     return body;
   }
 
-  void StartHttp() {
-    const auto body = CompleteRequest();
-    const int client = Send(body, "X-Loom-Session: http\r\n");
+  void StartHttp(const std::string& request, const char* session = "http") {
+    const auto body = CompleteRequest(request);
+    const int client =
+        Send(body, std::string("X-Loom-Session: ") + session + "\r\n");
     loom_serve_http_connection_t* connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(client, Model()->service, &connection));
     reader_ = std::thread([this, client] {
@@ -283,6 +306,9 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
               std::to_string(result.response.usage.input_tokens));
     EXPECT_EQ(String(Field(usage, "completion_tokens")),
               std::to_string(result.response.usage.output_tokens));
+    EXPECT_EQ(
+        String(Field(Field(usage, "prompt_tokens_details"), "cached_tokens")),
+        std::to_string(result.response.usage.cached_tokens));
     if (result.calls->count) {
       const auto calls = Field(message, "tool_calls");
       iree_host_size_t count = 0;
@@ -299,6 +325,26 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
         EXPECT_NE(Decode(Field(call, "id")), String(native.id));
       }
     }
+  }
+
+  std::string ContinuedRequest(const loom_serve_text_stream_result_t& result) {
+    const auto messages =
+        Field(iree_make_cstring_view(body_.c_str()), "messages");
+    std::string continued(messages.data, messages.size - 1);
+    continued +=
+        ",{\"role\":\"assistant\",\"content\":" + Quote(result.content);
+    if (result.reasoning.size) {
+      continued += ",\"reasoning_content\":" + Quote(result.reasoning);
+    }
+    continued +=
+        "}," +
+        Message("user", FLAG_native_text_model[0]
+                            ? "Repeat your answer, with no extra words."
+                            : "b") +
+        "]";
+    std::string request = body_;
+    request.replace(messages.data - body_.data(), messages.size, continued);
+    return request;
   }
 
   // Factory borrows the process-wide physical group through model retirement.
@@ -333,7 +379,7 @@ TEST_F(NativeTextRegistryTest, StalledNativeAndHttpPeerRetainDetachedResult) {
   const auto held = loom_serve_text_stream_block_at(block, 0);
   const std::string held_text = String(held.text);
   ASSERT_EQ(loom_serve_text_stream_result(stream.get()), nullptr);
-  ASSERT_NO_FATAL_FAILURE(StartHttp());
+  ASSERT_NO_FATAL_FAILURE(StartHttp(body_));
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
     const auto* counters = Model()->service.telemetry.counters;
     return counters->completed || counters->failed || counters->rejected;
@@ -461,7 +507,7 @@ TEST_F(NativeTextRegistryTest,
 TEST_F(NativeTextRegistryTest, CompleteResponseNeedsOnlyFinalDeliveryCredit) {
   ASSERT_NO_FATAL_FAILURE(Prepare());
   NativeStream stream(nullptr, loom_serve_text_stream_close);
-  IREE_ASSERT_OK(Open(CompleteRequest(), "complete", &stream));
+  IREE_ASSERT_OK(Open(CompleteRequest(body_), "complete", &stream));
   ASSERT_NE(stream, nullptr);
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
     return loom_serve_text_stream_result(stream.get()) ||
@@ -479,6 +525,21 @@ TEST_F(NativeTextRegistryTest, CompleteResponseNeedsOnlyFinalDeliveryCredit) {
   if (!FLAG_native_text_model[0]) {
     EXPECT_EQ(String(result->content), Oracle::Complete("abxa", 4));
   }
+}
+
+TEST_F(NativeTextRegistryTest, NativeFinalOutputMatchesHttp) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream stream(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "native", &stream));
+  ASSERT_NE(stream, nullptr);
+  ASSERT_NO_FATAL_FAILURE(StartHttp(body_));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(stream));
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+  const auto* result = loom_serve_text_stream_result(stream.get());
+  ASSERT_NE(result, nullptr);
+  EXPECT_TRUE(result->content.size || result->reasoning.size ||
+              result->calls->count);
+  ASSERT_NO_FATAL_FAILURE(CheckHttp(*result));
 }
 
 TEST_F(NativeTextRegistryTest, StoppingSealsReadyServiceAdmission) {
@@ -501,21 +562,21 @@ TEST_F(NativeTextRegistryTest, StoppingSealsReadyServiceAdmission) {
 
 TEST_F(NativeTextRegistryTest,
        NativeCompletionPreservesPinnedCanonicalHistory) {
-  // The fixture's arithmetic oracle checks exact cache reuse. Learned requests
-  // have their own authored histories and are qualified by the mixed test.
-  if (FLAG_native_text_model[0]) {
-    GTEST_SKIP() << "This exact history uses the arithmetic fixture tokenizer";
+  if (!FLAG_native_text_model[0]) {
+    body_ = Request(Message("user", "abxa"), 2);
   }
   ASSERT_NO_FATAL_FAILURE(Prepare());
   NativeStream first(nullptr, loom_serve_text_stream_close);
-  IREE_ASSERT_OK(
-      Open(Request(Message("user", "abxa"), 2), "conversation", &first));
+  IREE_ASSERT_OK(Open(body_, "conversation", &first));
   ASSERT_NE(first, nullptr);
   ASSERT_NO_FATAL_FAILURE(ReadFinal(first));
   const auto* final = loom_serve_text_stream_result(first.get());
   ASSERT_NE(final, nullptr);
+  ASSERT_EQ(final->calls->count, 0u);
   const std::string answer = String(final->content);
-  EXPECT_EQ(answer, Oracle::Complete("abxa", 2));
+  if (!FLAG_native_text_model[0]) {
+    EXPECT_EQ(answer, Oracle::Complete("abxa", 2));
+  }
   const int pin =
       Send("", "X-Loom-Session: conversation\r\n", "/v1/checkpoints/retained");
   loom_serve_http_connection_t* connection = nullptr;
@@ -523,25 +584,22 @@ TEST_F(NativeTextRegistryTest,
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
   const auto pinned = Read(pin);
   EXPECT_EQ(pinned.find("HTTP/1.1 201"), 0u) << pinned;
-  const auto continuation =
-      Request(Message("user", "abxa") + "," + Message("assistant", answer) +
-                  "," + Message("user", "b"),
-              2);
+  const auto continuation = ContinuedRequest(*final);
   NativeStream branch(nullptr, loom_serve_text_stream_close);
   IREE_ASSERT_OK(Open(continuation, "branch", &branch, "retained"));
   ASSERT_NE(branch, nullptr);
   ASSERT_NO_FATAL_FAILURE(ReadFinal(branch));
   const auto* resumed = loom_serve_text_stream_result(branch.get());
   ASSERT_NE(resumed, nullptr);
-  EXPECT_EQ(resumed->response.usage.cached_tokens, 5u);
-  EXPECT_EQ(String(resumed->content),
-            Oracle::Complete("abxa" + answer + "#b", 2));
-  const int client = Send(continuation, "X-Loom-Session: conversation\r\n");
-  ASSERT_NO_FATAL_FAILURE(Accept(client, Model()->service, &connection));
+  EXPECT_GT(resumed->response.usage.cached_tokens, 0u);
+  if (!FLAG_native_text_model[0]) {
+    EXPECT_EQ(resumed->response.usage.cached_tokens, 5u);
+    EXPECT_EQ(String(resumed->content),
+              Oracle::Complete("abxa" + answer + "#b", 2));
+  }
+  ASSERT_NO_FATAL_FAILURE(StartHttp(continuation, "conversation"));
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
-  const auto response = Read(client);
-  EXPECT_EQ(Content(response), String(resumed->content));
-  EXPECT_NE(response.find(R"("cached_tokens":5)"), std::string::npos);
+  ASSERT_NO_FATAL_FAILURE(CheckHttp(*resumed));
   EXPECT_EQ(String(final->content), answer);
 }
 
