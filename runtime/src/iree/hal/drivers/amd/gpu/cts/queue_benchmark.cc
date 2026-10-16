@@ -617,13 +617,14 @@ BENCHMARK_CAPTURE(BM_Record, TransfersTable, BindingMode::kTable,
     ->Iterations(50)
     ->UseRealTime();
 
-// Submit timing covers one public invocation, including its bounded initial
-// publication. Completion rows additionally include resident execution and
-// retirement. Sampled rows isolate the API call from benchmark pause/resume
-// overhead, at the cost of two clock reads. No row measures calibrated time to
-// first workgroup.
+// Each iteration submits a fixed number of command buffers before one final
+// wait. Submit timing excludes that wait; completion timing includes it.
+// Sampled rows isolate each API call at the cost of two clock reads. Bursts
+// additionally separate the first call after a wait from subsequent calls, so
+// idle/wake costs cannot be mistaken for steady submission costs. No row
+// measures calibrated time to first workgroup.
 static void BM_Execute(benchmark::State& state, BindingMode bindings,
-                       Timing timing, Program program) {
+                       Timing timing, Program program, uint32_t burst_count) {
   NativeQueue queue;
   iree::Status status = queue.Initialize();
   if (!status.ok()) {
@@ -634,22 +635,36 @@ static void BM_Execute(benchmark::State& state, BindingMode bindings,
   iree_hal_command_buffer_t* recording = nullptr;
   IREE_CHECK_OK(queue.Record(count, bindings, program, &recording));
   for (uint32_t i = 0; i < 2; ++i) {
-    IREE_CHECK_OK(queue.Execute(recording, bindings));
+    for (uint32_t j = 0; j < burst_count; ++j) {
+      IREE_CHECK_OK(queue.Execute(recording, bindings));
+    }
     IREE_CHECK_OK(queue.Complete(0));
     IREE_CHECK_OK(queue.CheckOutput(0));
   }
   const uint64_t allocations_before = queue.allocation_count();
   std::vector<iree_duration_t> samples;
+  std::vector<iree_duration_t> first_samples;
+  std::vector<iree_duration_t> following_samples;
   if (timing == Timing::kSampledSubmit) {
-    samples.reserve(50);
+    samples.reserve(50 * burst_count);
+    if (burst_count > 1) {
+      first_samples.reserve(50);
+      following_samples.reserve(50 * (burst_count - 1));
+    }
   }
   for (auto _ : state) {
-    if (timing == Timing::kSampledSubmit) {
-      const iree_time_t begin = iree_time_now();
-      IREE_CHECK_OK(queue.Execute(recording, bindings));
-      samples.push_back(iree_time_now() - begin);
-    } else {
-      IREE_CHECK_OK(queue.Execute(recording, bindings));
+    for (uint32_t i = 0; i < burst_count; ++i) {
+      if (timing == Timing::kSampledSubmit) {
+        const iree_time_t begin = iree_time_now();
+        IREE_CHECK_OK(queue.Execute(recording, bindings));
+        const iree_duration_t duration = iree_time_now() - begin;
+        samples.push_back(duration);
+        if (burst_count > 1) {
+          (i ? following_samples : first_samples).push_back(duration);
+        }
+      } else {
+        IREE_CHECK_OK(queue.Execute(recording, bindings));
+      }
     }
     if (timing != Timing::kCompletion) {
       state.PauseTiming();
@@ -661,7 +676,8 @@ static void BM_Execute(benchmark::State& state, BindingMode bindings,
     IREE_CHECK_OK(queue.CheckOutput(0));
     state.ResumeTiming();
   }
-  state.SetItemsProcessed(state.iterations() * count);
+  state.SetItemsProcessed(state.iterations() * count * burst_count);
+  state.counters["invocations_per_iteration"] = burst_count;
   state.counters["host_allocations"] =
       queue.allocation_count() - allocations_before;
   if (!samples.empty()) {
@@ -670,11 +686,21 @@ static void BM_Execute(benchmark::State& state, BindingMode bindings,
     state.counters["call_p99_ns"] = samples[samples.size() * 99 / 100];
     state.counters["call_max_ns"] = samples.back();
   }
+  if (!first_samples.empty()) {
+    std::sort(first_samples.begin(), first_samples.end());
+    std::sort(following_samples.begin(), following_samples.end());
+    state.counters["burst_first_p50_ns"] =
+        first_samples[first_samples.size() / 2];
+    state.counters["burst_following_p50_ns"] =
+        following_samples[following_samples.size() / 2];
+    state.counters["burst_following_p99_ns"] =
+        following_samples[following_samples.size() * 99 / 100];
+  }
   iree_hal_command_buffer_release(recording);
 }
 #define EXECUTE_CASE(name, bindings, timing, program)                        \
   BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings, Timing::timing, \
-                    Program::program)                                        \
+                    Program::program, 1)                                     \
       ->Arg(1)                                                               \
       ->Arg(1000)                                                            \
       ->Arg(8000)                                                            \
@@ -693,6 +719,24 @@ EXECUTE_CASE(TransfersTableCompletion, kTable, kCompletion, kTransfers);
 EXECUTE_CASE(TransfersDirectLatency, kDirect, kSampledSubmit, kTransfers);
 EXECUTE_CASE(TransfersTableLatency, kTable, kSampledSubmit, kTransfers);
 #undef EXECUTE_CASE
+
+// Eight causally chained invocations exercise resident-instance reuse before
+// host retirement. Fixed ten-iteration windows bound the largest GPU workload.
+#define EXECUTE_BURST_CASE(name, bindings, timing)                           \
+  BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings, Timing::timing, \
+                    Program::kDispatch, 8)                                   \
+      ->Arg(1)                                                               \
+      ->Arg(1000)                                                            \
+      ->Arg(8000)                                                            \
+      ->Iterations(10)                                                       \
+      ->UseRealTime()
+EXECUTE_BURST_CASE(DirectBurstSubmit, kDirect, kSubmit);
+EXECUTE_BURST_CASE(TableBurstSubmit, kTable, kSubmit);
+EXECUTE_BURST_CASE(DirectBurstCompletion, kDirect, kCompletion);
+EXECUTE_BURST_CASE(TableBurstCompletion, kTable, kCompletion);
+EXECUTE_BURST_CASE(DirectBurstLatency, kDirect, kSampledSubmit);
+EXECUTE_BURST_CASE(TableBurstLatency, kTable, kSampledSubmit);
+#undef EXECUTE_BURST_CASE
 
 static void BM_Transfer(benchmark::State& state,
                         iree_hal_transfer_operation_type_t type,
