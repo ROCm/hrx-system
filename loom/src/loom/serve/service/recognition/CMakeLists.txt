@@ -326,6 +326,7 @@ loom_cc_library(
     loom::serve::runtime::parameter::residency
     loom::serve::testing::native_allocator
     loom::serve::testing::service_application
+    loom::serve::testing::worker_gate
   TESTONLY
   ALWAYSLINK
   PUBLIC
