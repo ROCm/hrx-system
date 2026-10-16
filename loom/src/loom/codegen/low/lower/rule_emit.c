@@ -15,6 +15,7 @@
 #include "loom/codegen/low/lower/control_plan.h"
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
+#include "loom/codegen/low/lower/rule_source_memory_plan.h"
 #include "loom/codegen/low/lower/rule_value.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -34,13 +35,6 @@ typedef struct loom_low_lower_rule_emit_state_t {
   // Number of source operations owned by the selected rule.
   uint8_t source_node_count;
 } loom_low_lower_rule_emit_state_t;
-
-typedef struct loom_low_lower_rule_source_memory_values_t {
-  // Lazily materialized dynamic byte offset for the current emit.
-  loom_value_id_t dynamic_byte_offset;
-  // Lazily materialized complete byte offset for the current emit.
-  loom_value_id_t complete_byte_offset;
-} loom_low_lower_rule_source_memory_values_t;
 
 static iree_status_t loom_low_lower_rule_emit_state_initialize(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -130,9 +124,7 @@ static iree_status_t loom_low_lower_rule_low_value(
     const loom_low_lower_source_memory_t* source_memory,
     const loom_low_source_memory_access_plan_t* source_memory_access,
     const loom_low_lower_resolved_emit_t* resolved_emit,
-    uint16_t operand_ordinal,
-    loom_low_lower_rule_source_memory_values_t* source_memory_values,
-    loom_value_id_t* out_low_value_id) {
+    uint16_t operand_ordinal, loom_value_id_t* out_low_value_id) {
   *out_low_value_id = LOOM_VALUE_ID_INVALID;
   const uint16_t value_ref_index =
       resolved_emit->emit->operand_ref_start + operand_ordinal;
@@ -191,30 +183,10 @@ static iree_status_t loom_low_lower_rule_low_value(
       return iree_ok_status();
     }
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
-      IREE_ASSERT(source_memory != NULL);
-      IREE_ASSERT_EQ(value_ref->materializer_index, 0);
-      // Repeated references in one emit denote the same address expression.
-      if (source_memory_values->dynamic_byte_offset == LOOM_VALUE_ID_INVALID) {
-        IREE_RETURN_IF_ERROR(
-            loom_low_lower_rule_materialize_source_memory_byte_offset(
-                context, rule_set, source_op, source_memory,
-                source_memory_access,
-                &source_memory_values->dynamic_byte_offset));
-      }
-      *out_low_value_id = source_memory_values->dynamic_byte_offset;
-      return iree_ok_status();
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET:
-      IREE_ASSERT(source_memory != NULL);
-      IREE_ASSERT_EQ(value_ref->materializer_index, 0);
-      if (source_memory_values->complete_byte_offset == LOOM_VALUE_ID_INVALID) {
-        IREE_RETURN_IF_ERROR(
-            loom_low_lower_rule_materialize_source_memory_complete_byte_offset(
-                context, rule_set, source_op, source_memory,
-                source_memory_access,
-                &source_memory_values->complete_byte_offset));
-      }
-      *out_low_value_id = source_memory_values->complete_byte_offset;
-      return iree_ok_status();
+      return loom_low_lower_rule_source_memory_emit_byte_offset(
+          context, rule_set, source_op, source_memory, source_memory_access,
+          resolved_emit, operand_ordinal, out_low_value_id);
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ADDRESS: {
       IREE_ASSERT(source_memory != NULL);
       IREE_ASSERT(source_memory_access != NULL);
@@ -266,15 +238,10 @@ static iree_status_t loom_low_lower_rule_build_low_operands(
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->operand_ref_count, sizeof(*low_operands),
       (void**)&low_operands));
-  loom_low_lower_rule_source_memory_values_t source_memory_values = {
-      .dynamic_byte_offset = LOOM_VALUE_ID_INVALID,
-      .complete_byte_offset = LOOM_VALUE_ID_INVALID,
-  };
   for (uint16_t i = 0; i < emit->operand_ref_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_low_value(
         context, rule_set, source_op, state, source_memory,
-        source_memory_access, resolved_emit, i, &source_memory_values,
-        &low_operands[i]));
+        source_memory_access, resolved_emit, i, &low_operands[i]));
   }
   *out_operands = low_operands;
   return iree_ok_status();
@@ -872,15 +839,11 @@ static iree_status_t loom_low_lower_rule_build_lane_operands(
     const loom_low_lower_resolved_emit_t* resolved_emit, uint32_t lane_index,
     loom_value_id_t* lane_operands) {
   const loom_low_lower_emit_t* emit = resolved_emit->emit;
-  loom_low_lower_rule_source_memory_values_t source_memory_values = {
-      .dynamic_byte_offset = LOOM_VALUE_ID_INVALID,
-      .complete_byte_offset = LOOM_VALUE_ID_INVALID,
-  };
   for (uint16_t i = 0; i < emit->operand_ref_count; ++i) {
     loom_value_id_t low_operand = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_low_lower_rule_low_value(
-        context, rule_set, source_op, state, NULL, NULL, resolved_emit, i,
-        &source_memory_values, &low_operand));
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_rule_low_value(context, rule_set, source_op, state, NULL,
+                                      NULL, resolved_emit, i, &low_operand));
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_slice_operand(
         context, source_op, resolved_emit, i, low_operand, lane_index,
         &lane_operands[i]));

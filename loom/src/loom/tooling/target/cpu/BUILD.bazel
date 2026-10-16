@@ -104,6 +104,7 @@ iree_executable_test(
 )
 
 # Exercises shared corpus programs through the task HAL and independent VM oracle.
+# Two workers retain concurrent scheduling without a machine-sized test pool.
 [
     iree_executable_test(
         name = name + "_scenario_test",
@@ -111,6 +112,7 @@ iree_executable_test(
         args = [
             "$(rootpath " + source + ")",
             "--device=task",
+            "--task_topology_max_group_count=2",
             "--case=@" + scenario,
         ],
         data = [source],
@@ -122,6 +124,7 @@ iree_executable_test(
         ]) + ["@platforms//cpu:x86_64"],
     )
     for name, source, scenario in [
+        ("ranked_exchange_packets", "//loom/src/loom/test/corpus/memory:view/scalar_exchange.loom", "ranked_exchange_packet_values"),
         ("scalar_loop", "//loom/src/loom/test/corpus/control:loop/scalar_state.loom", "scalar_loop_state_values"),
         ("scalar_arithmetic", "//loom/src/loom/test/corpus/numeric:integer/scalar_observations.loom", "scalar_i32_arithmetic_values"),
         ("portable_index_arithmetic", "//loom/src/loom/test/corpus/numeric:integer/scalar_observations.loom", "portable_index_arithmetic_values"),

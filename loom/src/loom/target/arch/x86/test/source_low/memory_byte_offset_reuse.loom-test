@@ -1,0 +1,167 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Scalar and packet accesses retain the same logical sum across roots and
+// term order. Each distinct arithmetic descriptor contract owns one definition.
+func.def @ranked_exchange(%input: buffer, %output: buffer, %row_input: index, %column_input: index, %replacement: i32, %origin_input: offset) -> (i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 4)] : index
+  %layout = encoding.layout.strided [19, 1] : encoding<layout>
+  %base = index.assume %origin_input [range(%origin_input, 0, 64), multiple_of(%origin_input, 4)] : offset
+  %bias = index.constant 16 : offset
+  %other_base = index.add %base, %bias : offset
+  %transposed = encoding.layout.strided [1, 19] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<4x8xi32, %layout>
+  %destination = buffer.view %output[%other_base] : buffer -> view<8x4xi32, %transposed>
+  %first = view.load<volatile> %source[%row, %column] : view<4x8xi32, %layout> -> i32
+  %packet = vector.load<volatile> %source[%row, %column] : view<4x8xi32, %layout> -> vector<4xi32>
+  vector.store<volatile> %packet, %source[%row, %column] : vector<4xi32>, view<4x8xi32, %layout>
+  view.store<volatile> %replacement, %destination[%column, %row] : i32, view<8x4xi32, %transposed>
+  func.return %first : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @ranked_exchange(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %row: reg<x86.gpr64>, %column: reg<x86.gpr64>, %replacement: reg<x86.gpr32>, %base: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %34 = mov.imm64 19
+  %35 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %36 = imul.gpr64 %35, %34
+  %37 = lea %36, %column
+  %38 = mov.imm64 4
+  %39 = copy %37 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %40 = imul.gpr64 %39, %38
+  %41 = copy %40 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %42 = add.gpr64 %41, %base
+  %first = mov.load.indexed.gpr32<volatile> %input, %42 {disp32 = 0, scale = 1}
+  %45 = copy %37 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %46 = imul.gpr64 %45, %38
+  %47 = copy %46 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %48 = add.gpr64 %47, %base
+  %packet = vmovdqu32.load.indexed.xmm<volatile> %input, %48 {disp32 = 0, scale = 1}
+  vmovdqu32.store.indexed.xmm<volatile> %packet, %input, %48 {disp32 = 0, scale = 1}
+  mov.store.indexed.gpr32<volatile> %replacement, %output, %42 {disp32 = 16, scale = 1}
+  return %first
+}
+
+// ====
+
+// Equal dynamic sums with different embedded view biases remain distinct.
+func.def @biased_views(%input: buffer, %output: buffer, %row_input: index, %column_input: index) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 64 : offset
+  %column_stride = index.constant 8 : offset
+  %first_bias = index.constant 32 : offset
+  %second_bias = index.constant 64 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %first_row_base = index.add %row_bytes, %first_bias : offset
+  %second_row_base = index.add %row_bytes, %second_bias : offset
+  %first_base = index.add %first_row_base, %column_bytes : offset
+  %second_base = index.add %second_row_base, %column_bytes : offset
+  %source = buffer.view %input[%first_base] : buffer -> view<2xi32>
+  %destination = buffer.view %output[%second_base] : buffer -> view<2xi32>
+  %value = view.load %source[0] : view<2xi32> -> i32
+  view.store %value, %destination[0] : i32, view<2xi32>
+  view.store %value, %destination[1] : i32, view<2xi32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @biased_views(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %row: reg<x86.gpr64>, %column: reg<x86.gpr64>) asm {
+  %row_bytes = imul.imm.gpr64 %row {imm32 = 64}
+  %column_bytes = lea.scale %column {disp32 = 0, scale = 8}
+  %first_row_base = lea.disp %row_bytes {disp32 = 32}
+  %second_row_base = lea.disp %row_bytes {disp32 = 64}
+  %first_base = lea %first_row_base, %column_bytes
+  %second_base = lea %second_row_base, %column_bytes
+  %value = mov.load.indexed.gpr32 %input, %first_base {disp32 = 0, scale = 1}
+  mov.store.indexed.gpr32 %value, %output, %second_base {disp32 = 0, scale = 1}
+  mov.store.indexed.gpr32 %value, %output, %second_base {disp32 = 4, scale = 1}
+  return
+}
+
+// ====
+
+// Definitions stay inside the executing branch, loop body, or join block.
+func.def @scoped_exchange(%storage: buffer, %row_input: index, %column_input: index, %count_input: index, %condition: i1, %replacement: i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %count = index.assume %count_input [range(%count_input, 0, 4)] : index
+  %layout = encoding.layout.strided [19, 3] : encoding<layout>
+  %base = index.constant 16 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<4x8xi32, %layout>
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  scf.if %condition {
+    %left = view.load<volatile> %view[%row, %column] : view<4x8xi32, %layout> -> i32
+    view.store<volatile> %left, %view[%row, %column] : i32, view<4x8xi32, %layout>
+  } else {
+    %right = view.load<volatile> %view[%row, %column] : view<4x8xi32, %layout> -> i32
+    view.store<volatile> %replacement, %view[%row, %column] : i32, view<4x8xi32, %layout>
+  }
+  scf.for %iteration = [%loop_begin to %count step %loop_step] {
+    %position = index.add %column, %iteration : index
+    %value = view.load<volatile> %view[%row, %position] : view<4x8xi32, %layout> -> i32
+    view.store<volatile> %value, %view[%row, %position] : i32, view<4x8xi32, %layout>
+  }
+  view.store<volatile> %replacement, %view[%row, %column] : i32, view<4x8xi32, %layout>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, index, index, index, i1, i32) -> ()}) @scoped_exchange(%storage: reg<x86.gpr64>, %row: reg<x86.gpr64>, %column: reg<x86.gpr64>, %count: reg<x86.gpr64>, %condition: reg<x86.gpr32>, %replacement: reg<x86.gpr32>) asm {
+  %loop_begin = mov.imm64 0
+  low.cond_br %condition, ^_bb1, ^_bb2 : reg<x86.gpr32>
+^_bb1:
+  %31 = mov.imm64 76
+  %32 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %33 = imul.gpr64 %32, %31
+  %34 = mov.imm64 12
+  %35 = copy %column : reg<x86.gpr64> -> reg<x86.gpr64>
+  %36 = imul.gpr64 %35, %34
+  %37 = copy %33 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %38 = add.gpr64 %37, %36
+  %left = mov.load.indexed.gpr32<volatile> %storage, %38 {disp32 = 16, scale = 1}
+  mov.store.indexed.gpr32<volatile> %left, %storage, %38 {disp32 = 16, scale = 1}
+  low.br ^_bb3
+^_bb2:
+  %40 = mov.imm64 76
+  %41 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %42 = imul.gpr64 %41, %40
+  %43 = mov.imm64 12
+  %44 = copy %column : reg<x86.gpr64> -> reg<x86.gpr64>
+  %45 = imul.gpr64 %44, %43
+  %46 = copy %42 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %47 = add.gpr64 %46, %45
+  %right = mov.load.indexed.gpr32<volatile> %storage, %47 {disp32 = 16, scale = 1}
+  mov.store.indexed.gpr32<volatile> %replacement, %storage, %47 {disp32 = 16, scale = 1}
+  low.br ^_bb3
+^_bb3:
+  low.br ^_bb4(%loop_begin: reg<x86.gpr64>)
+^_bb4(%iteration: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.gpr64>(%iteration, %count) {predicate = 12}, ^_bb5, ^_bb6 : (reg<x86.gpr64>, reg<x86.gpr64>)
+^_bb5:
+  %position = lea %column, %iteration
+  %50 = mov.imm64 12
+  %51 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %52 = imul.gpr64 %51, %50
+  %53 = mov.imm64 76
+  %54 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %55 = imul.gpr64 %54, %53
+  %56 = copy %52 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %57 = add.gpr64 %56, %55
+  %value = mov.load.indexed.gpr32<volatile> %storage, %57 {disp32 = 16, scale = 1}
+  mov.store.indexed.gpr32<volatile> %value, %storage, %57 {disp32 = 16, scale = 1}
+  %59 = lea.disp %iteration {disp32 = 1}
+  low.br ^_bb4(%59: reg<x86.gpr64>)
+^_bb6:
+  %60 = mov.imm64 76
+  %61 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %62 = imul.gpr64 %61, %60
+  %63 = mov.imm64 12
+  %64 = copy %column : reg<x86.gpr64> -> reg<x86.gpr64>
+  %65 = imul.gpr64 %64, %63
+  %66 = copy %62 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %67 = add.gpr64 %66, %65
+  mov.store.indexed.gpr32<volatile> %replacement, %storage, %67 {disp32 = 16, scale = 1}
+  return
+}

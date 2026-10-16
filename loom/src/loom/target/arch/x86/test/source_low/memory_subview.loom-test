@@ -51,15 +51,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
   %29 = copy %25 : reg<x86.gpr64> -> reg<x86.gpr64>
   %30 = add.gpr64 %29, %28
   %value = vmovsd.load.indexed.xmm %input, %30 {disp32 = 112, scale = 1}
-  %33 = copy %row_bounded : reg<x86.gpr64> -> reg<x86.gpr64>
-  %34 = imul.gpr64 %33, %21
-  %35 = copy %origin : reg<x86.gpr64> -> reg<x86.gpr64>
-  %36 = add.gpr64 %35, %34
-  %38 = copy %column_bounded : reg<x86.gpr64> -> reg<x86.gpr64>
-  %39 = imul.gpr64 %38, %26
-  %40 = copy %36 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %41 = add.gpr64 %40, %39
-  vmovsd.store.indexed.xmm %value, %output, %41 {disp32 = 112, scale = 1}
+  vmovsd.store.indexed.xmm %value, %output, %30 {disp32 = 112, scale = 1}
   return %value
 }
 
@@ -97,15 +89,7 @@ low.func.def target<x86.avx2.core> abi(object_function) @subview_nested_dynamic(
   %34 = copy %30 : reg<x86.gpr64> -> reg<x86.gpr64>
   %35 = add.gpr64 %34, %33
   %value = mov.load.indexed.gpr32 %input_aligned, %35 {disp32 = 76, scale = 1}
-  %38 = copy %row_bounded : reg<x86.gpr64> -> reg<x86.gpr64>
-  %39 = imul.gpr64 %38, %26
-  %40 = copy %origin : reg<x86.gpr64> -> reg<x86.gpr64>
-  %41 = add.gpr64 %40, %39
-  %43 = copy %column_bounded : reg<x86.gpr64> -> reg<x86.gpr64>
-  %44 = imul.gpr64 %43, %31
-  %45 = copy %41 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %46 = add.gpr64 %45, %44
-  mov.store.indexed.gpr32 %value, %output_aligned, %46 {disp32 = 68, scale = 1}
+  mov.store.indexed.gpr32 %value, %output_aligned, %35 {disp32 = 68, scale = 1}
   return %value
 }
 

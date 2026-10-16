@@ -15,6 +15,7 @@
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/codegen/low/lower/rule_match.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
+#include "loom/codegen/low/lower/rule_source_memory_plan.h"
 #include "loom/codegen/low/lower/rule_value.h"
 #include "loom/ir/context.h"
 #include "loom/ir/float_facts.h"
@@ -1052,8 +1053,11 @@ static loom_low_lower_rule_operand_masks_t loom_low_lower_rule_operand_masks(
     if (loom_low_lower_rule_value_ref_needs_facts(ref)) {
       masks.source_values |= (uint8_t)(1u << i);
     }
-    if (ref->materializer_index &&
-        loom_low_lower_rule_value_materializer(rule_set, ref)->prepare) {
+    if (ref->kind ==
+            LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET ||
+        ref->kind == LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET ||
+        (ref->materializer_index &&
+         loom_low_lower_rule_value_materializer(rule_set, ref)->prepare)) {
       masks.materializers |= (uint8_t)(1u << i);
     }
   }
@@ -1473,6 +1477,7 @@ static iree_status_t loom_low_lower_rule_plan_alias_types(
 
 iree_status_t loom_low_lower_rule_plan_finalize(
     loom_low_lower_context_t* context,
+    loom_low_lower_rule_source_memory_plan_builder_t* source_memory_builder,
     loom_low_lower_selected_plan_t* selected_plan) {
   const loom_low_lower_rule_set_t* rule_set = selected_plan->rule_set;
   const loom_low_lower_rule_t* rule = selected_plan->rule;
@@ -1608,14 +1613,22 @@ iree_status_t loom_low_lower_rule_plan_finalize(
       const uint16_t ordinal =
           (uint16_t)iree_math_count_trailing_zeros_u32(remaining_mask);
       remaining_mask &= (uint16_t)(remaining_mask - 1u);
-      const loom_low_lower_value_materializer_t* materializer =
-          loom_low_lower_rule_value_materializer(
-              rule_set,
-              &rule_set->value_refs[emit->operand_ref_start + ordinal]);
-      const loom_value_id_t value = loom_low_lower_rule_plan_operand_source(
-          context, rule_set, &source, resolved, ordinal);
-      IREE_RETURN_IF_ERROR(materializer->prepare(
-          context, value, &materializations[materializer_index++]));
+      const loom_low_lower_value_ref_t* ref =
+          &rule_set->value_refs[emit->operand_ref_start + ordinal];
+      if (ref->kind ==
+              LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET ||
+          ref->kind == LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET) {
+        IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_plan_byte_offset(
+            context, source_memory_builder, selected_plan, resolved, i, ordinal,
+            &materializations[materializer_index++]));
+      } else {
+        const loom_low_lower_value_materializer_t* materializer =
+            loom_low_lower_rule_value_materializer(rule_set, ref);
+        const loom_value_id_t value = loom_low_lower_rule_plan_operand_source(
+            context, rule_set, &source, resolved, ordinal);
+        IREE_RETURN_IF_ERROR(materializer->prepare(
+            context, value, &materializations[materializer_index++]));
+      }
     }
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_plan_carriers(
         context, rule_set, &source, resolved, temporary_types, copy_types,

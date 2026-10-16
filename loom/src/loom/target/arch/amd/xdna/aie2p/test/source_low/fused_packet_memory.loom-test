@@ -151,11 +151,11 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_enc
   %14 = lshl %element, %13
   %15 = mov.address-index %14
   %16 = vlda.convert.bf16x32.to.f32x32.index.volatile<volatile> %source_view, %15
-  %19 = add.address-index.immediate %14, 64
-  %20 = vlda.convert.bf16x32.to.f32x32.index.volatile<volatile> %source_view, %19
-  %21 = concat(%16, %20) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %17 = add.address-index.immediate %14, 64
+  %18 = vlda.convert.bf16x32.to.f32x32.index.volatile<volatile> %source_view, %17
+  %19 = concat(%16, %18) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
   set.rounding 12
-  %encoded = vconv.bfp16ebs8.fp32 %21
+  %encoded = vconv.bfp16ebs8.fp32 %19
   return %encoded
 }
 

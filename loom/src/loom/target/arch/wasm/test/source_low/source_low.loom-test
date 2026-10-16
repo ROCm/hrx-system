@@ -244,8 +244,8 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @i32x4_memory_indexed(
   %12 = i32.mul %bounded_i, %11
   %13 = i32.add %input, %12
   %loaded = v128.load %13
-  %17 = i32.add %output, %12
-  v128.store %17, %loaded
+  %15 = i32.add %output, %12
+  v128.store %15, %loaded
   return
 }
 
@@ -288,10 +288,10 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @f32x4_memory_indexed_
   %17 = i32.mul %bounded_i, %16
   %18 = i32.add %lhs, %17
   %lhs_v = v128.load %18
-  %22 = i32.add %rhs, %17
-  %rhs_v = v128.load %22
+  %20 = i32.add %rhs, %17
+  %rhs_v = v128.load %20
   %sum = f32x4.add %lhs_v, %rhs_v
-  %27 = i32.add %output, %17
-  v128.store %27, %sum
+  %23 = i32.add %output, %17
+  v128.store %23, %sum
   return
 }

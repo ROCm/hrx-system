@@ -83,15 +83,10 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_float8_index
   %18 = add.rr %base, %position
   %19 = mov.address-index %18
   %e4m3 = lda.i8.index %source_tail, %19
-  %21 = add.rr %base, %position
-  %22 = add.address-index.immediate %21, 16
-  %e5m2 = lda.i8.index %source_tail, %22
-  %24 = add.rr %base, %position
-  %25 = mov.address-index %24
-  st.i8.index %e4m3, %target_tail, %25
-  %26 = add.rr %base, %position
-  %27 = add.address-index.immediate %26, 16
-  st.i8.index %e5m2, %target_tail, %27
+  %21 = add.address-index.immediate %18, 16
+  %e5m2 = lda.i8.index %source_tail, %21
+  st.i8.index %e4m3, %target_tail, %19
+  st.i8.index %e5m2, %target_tail, %21
   return
 }
 

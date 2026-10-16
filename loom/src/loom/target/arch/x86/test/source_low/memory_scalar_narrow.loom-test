@@ -78,14 +78,8 @@ low.func.def target<x86.scalar.core> abi(object_function) @copy_narrow_origin(%i
   %24 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
   %25 = add.gpr64 %24, %23
   %word = movzx.load.indexed.u16.gpr32<volatile> %input, %25 {disp32 = 33, scale = 1}
-  %27 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %28 = add.gpr64 %27, %position
-  mov.store.indexed.u8.gpr32<volatile> %byte, %output, %28 {disp32 = 0, scale = 1}
-  %30 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
-  %31 = imul.gpr64 %30, %21
-  %32 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %33 = add.gpr64 %32, %31
-  mov.store.indexed.u16.gpr32<volatile> %word, %output, %33 {disp32 = 33, scale = 1}
+  mov.store.indexed.u8.gpr32<volatile> %byte, %output, %19 {disp32 = 0, scale = 1}
+  mov.store.indexed.u16.gpr32<volatile> %word, %output, %25 {disp32 = 33, scale = 1}
   return
 }
 
@@ -125,20 +119,8 @@ low.func.def target<x86.scalar.core> abi(object_function) @copy_narrow_stride(%i
   %34 = copy %30 : reg<x86.gpr64> -> reg<x86.gpr64>
   %35 = add.gpr64 %34, %33
   %word = movzx.load.indexed.u16.gpr32 %input, %35 {disp32 = 65, scale = 1}
-  %37 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
-  %38 = imul.gpr64 %37, %columns
-  %39 = copy %38 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %40 = add.gpr64 %39, %column
-  mov.store.indexed.u8.gpr32 %byte, %output, %40 {disp32 = 1, scale = 1}
-  %41 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
-  %42 = imul.gpr64 %41, %columns
-  %44 = copy %42 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %45 = imul.gpr64 %44, %28
-  %47 = copy %column : reg<x86.gpr64> -> reg<x86.gpr64>
-  %48 = imul.gpr64 %47, %28
-  %49 = copy %45 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %50 = add.gpr64 %49, %48
-  mov.store.indexed.u16.gpr32 %word, %output, %50 {disp32 = 65, scale = 1}
+  mov.store.indexed.u8.gpr32 %byte, %output, %24 {disp32 = 1, scale = 1}
+  mov.store.indexed.u16.gpr32 %word, %output, %35 {disp32 = 65, scale = 1}
   return
 }
 

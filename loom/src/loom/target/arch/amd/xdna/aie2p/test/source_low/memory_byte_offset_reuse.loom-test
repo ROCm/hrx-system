@@ -1,0 +1,93 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// Scalar and packet accesses share a byte sum across roots and term order.
+func.def @ranked_exchange(%input: buffer, %output: buffer, %row_input: index, %column_input: index, %replacement: i32, %origin_input: offset) -> (i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 4)] : index
+  %layout = encoding.layout.strided [19, 1] : encoding<layout>
+  %base = index.assume %origin_input [range(%origin_input, 0, 64), multiple_of(%origin_input, 4)] : offset
+  %bias = index.constant 16 : offset
+  %other_base = index.add %base, %bias : offset
+  %transposed = encoding.layout.strided [1, 19] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<4x8xi32, %layout>
+  %destination = buffer.view %output[%other_base] : buffer -> view<8x4xi32, %transposed>
+  %first = view.load<volatile> %source[%row, %column] : view<4x8xi32, %layout> -> i32
+  %packet = vector.load<volatile> %source[%row, %column] : view<4x8xi32, %layout> -> vector<4xi32>
+  vector.store<volatile> %packet, %source[%row, %column] : vector<4xi32>, view<4x8xi32, %layout>
+  view.store<volatile> %replacement, %destination[%column, %row] : i32, view<8x4xi32, %transposed>
+  func.return %first : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @ranked_exchange(%row: reg<aie2p.er>, %column: reg<aie2p.er>, %replacement: reg<aie2p.er>, %base: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %70 = mov.short 19
+  %71 = copy %column : reg<aie2p.er> -> reg<aie2p.er>
+  %72 = mac %71, %row, %70
+  %73 = mov.i32 2
+  %74 = lshl %72, %73
+  %75 = add.rr %74, %base
+  %76 = mov.address-index %75
+  %first = lda.i32.index.volatile<volatile> %source, %76
+  %79 = lda.i32.index.volatile<volatile> %source, %76
+  %80 = add.address-index.immediate %75, 4
+  %81 = lda.i32.index.volatile<volatile> %source, %80
+  %82 = add.address-index.immediate %75, 8
+  %83 = lda.i32.index.volatile<volatile> %source, %82
+  %84 = add.address-index.immediate %75, 12
+  %85 = lda.i32.index.volatile<volatile> %source, %84
+  st.i32.index.volatile<volatile> %79, %source, %76
+  st.i32.index.volatile<volatile> %81, %source, %80
+  st.i32.index.volatile<volatile> %83, %source, %82
+  st.i32.index.volatile<volatile> %85, %source, %84
+  %90 = add.address-index.immediate %75, 16
+  st.i32.index.volatile<volatile> %replacement, %destination, %90
+  return %first
+}
+
+// ====
+
+// Equal dynamic sums with different embedded view biases remain distinct.
+func.def @biased_views(%input: buffer, %output: buffer, %row_input: index, %column_input: index) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 64 : offset
+  %column_stride = index.constant 8 : offset
+  %first_bias = index.constant 32 : offset
+  %second_bias = index.constant 64 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %first_row_base = index.add %row_bytes, %first_bias : offset
+  %second_row_base = index.add %row_bytes, %second_bias : offset
+  %first_base = index.add %first_row_base, %column_bytes : offset
+  %second_base = index.add %second_row_base, %column_bytes : offset
+  %source = buffer.view %input[%first_base] : buffer -> view<2xi32>
+  %destination = buffer.view %output[%second_base] : buffer -> view<2xi32>
+  %value = view.load %source[0] : view<2xi32> -> i32
+  view.store %value, %destination[0] : i32, view<2xi32>
+  view.store %value, %destination[1] : i32, view<2xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @biased_views(%row: reg<aie2p.er>, %column: reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %row_stride = mov.short 64
+  %column_stride = mov.short 8
+  %first_bias = mov.short 32
+  %row_bytes = mul %row, %row_stride
+  %column_bytes = mul %column, %column_stride
+  %first_row_base = add.rr %row_bytes, %first_bias
+  %second_row_base = add.rr %row_bytes, %row_stride
+  %first_base = add.rr %first_row_base, %column_bytes
+  %second_base = add.rr %second_row_base, %column_bytes
+  %32 = mov.address-index %first_base
+  %value = lda.i32.index %source, %32
+  %34 = mov.address-index %second_base
+  st.i32.index %value, %destination, %34
+  %35 = add.address-index.immediate %second_base, 4
+  st.i32.index %value, %destination, %35
+  return
+}

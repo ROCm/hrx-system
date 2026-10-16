@@ -50,8 +50,8 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_narrow_index(%in
   %word = i32.load16_u %19 {offset = 33}
   %21 = i32.add %output, %position
   i32.store8 %21, %byte {offset = 1}
-  %24 = i32.add %output, %18
-  i32.store16 %24, %word {offset = 33}
+  %22 = i32.add %output, %18
+  i32.store16 %22, %word {offset = 33}
   return
 }
 
@@ -83,10 +83,10 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_narrow_origin(%i
   %23 = i32.add %base, %22
   %24 = i32.add %input, %23
   %word = i32.load16_u<volatile> %24 {offset = 33}
-  %27 = i32.add %output, %18
-  i32.store8<volatile> %27, %byte
-  %31 = i32.add %output, %23
-  i32.store16<volatile> %31, %word {offset = 33}
+  %26 = i32.add %output, %18
+  i32.store8<volatile> %26, %byte
+  %27 = i32.add %output, %23
+  i32.store16<volatile> %27, %word {offset = 33}
   return
 }
 
@@ -121,10 +121,10 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_narrow_stride(%i
   %30 = i32.add %27, %29
   %31 = i32.add %input, %30
   %word = i32.load16_u %31 {offset = 65}
-  %35 = i32.add %output, %22
-  i32.store8 %35, %byte {offset = 1}
-  %42 = i32.add %output, %30
-  i32.store16 %42, %word {offset = 65}
+  %33 = i32.add %output, %22
+  i32.store8 %33, %byte {offset = 1}
+  %34 = i32.add %output, %30
+  i32.store16 %34, %word {offset = 65}
   return
 }
 

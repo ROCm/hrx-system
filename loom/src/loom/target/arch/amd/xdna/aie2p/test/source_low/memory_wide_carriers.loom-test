@@ -19,10 +19,10 @@ func.def @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_wide_origin_vectors(%byte_offset: reg<aie2p.er x2>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %destination_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %destination_offset = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %22 = add.address-index.immediate %destination_offset, 64
+  %21 = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %22 = add.address-index.immediate %21, 64
   %value = vlda.512.i32x16.index %source_view, %22
-  %24 = mov.address-index %destination_offset
+  %24 = mov.address-index %21
   vst.512.i32x16.index %value, %destination_view, %24
   return
 }
@@ -48,10 +48,10 @@ func.def @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_wide_origin_scalar(%byte_offset: reg<aie2p.er x2>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %destination_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %destination_offset = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %22 = add.address-index.immediate %destination_offset, 64
+  %21 = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %22 = add.address-index.immediate %21, 64
   %value = lda.i32.index %source_view, %22
-  %24 = mov.address-index %destination_offset
+  %24 = mov.address-index %21
   st.i32.index %value, %destination_view, %24
   return
 }
@@ -80,9 +80,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_wide_ori
   %21 = add.rr %18, %20
   %22 = add.address-index.immediate %21, 16
   %previous = lda.i32.index %view, %22
-  %27 = add.rr %18, %20
-  %28 = add.address-index.immediate %27, 16
-  st.i32.index %value, %view, %28
+  st.i32.index %value, %view, %22
   return %previous
 }
 
@@ -111,8 +109,6 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_signed_c
   %22 = add.rr %base, %21
   %23 = add.address-index.immediate %22, 48
   %previous = lda.i32.index %view, %23
-  %27 = add.rr %base, %21
-  %28 = add.address-index.immediate %27, 48
-  st.i32.index %value, %view, %28
+  st.i32.index %value, %view, %23
   return %previous
 }

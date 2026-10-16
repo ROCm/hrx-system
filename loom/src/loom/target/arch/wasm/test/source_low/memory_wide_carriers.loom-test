@@ -17,17 +17,17 @@ func.def @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_wide_origin_vectors(%source: reg<wasm.i32>, %destination: reg<wasm.i32>, %byte_offset: reg<wasm.i64>) asm {
-  %destination_offset = i32.wrap_i64 %byte_offset
-  %26 = i32.add %source, %destination_offset
+  %25 = i32.wrap_i64 %byte_offset
+  %26 = i32.add %source, %25
   %27 = v128.load %26 {offset = 64}
-  %30 = v128.load %26 {offset = 80}
-  %33 = v128.load %26 {offset = 96}
-  %36 = v128.load %26 {offset = 112}
-  %37 = i32.add %destination, %destination_offset
-  v128.store %37, %27
-  v128.store %37, %30 {offset = 16}
-  v128.store %37, %33 {offset = 32}
-  v128.store %37, %36 {offset = 48}
+  %29 = v128.load %26 {offset = 80}
+  %31 = v128.load %26 {offset = 96}
+  %33 = v128.load %26 {offset = 112}
+  %34 = i32.add %destination, %25
+  v128.store %34, %27
+  v128.store %34, %29 {offset = 16}
+  v128.store %34, %31 {offset = 32}
+  v128.store %34, %33 {offset = 48}
   return
 }
 
@@ -50,10 +50,10 @@ func.def @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_wide_origin_scalar(%source: reg<wasm.i32>, %destination: reg<wasm.i32>, %byte_offset: reg<wasm.i64>) asm {
-  %destination_offset = i32.wrap_i64 %byte_offset
-  %22 = i32.add %source, %destination_offset
+  %21 = i32.wrap_i64 %byte_offset
+  %22 = i32.add %source, %21
   %value = i32.load %22 {offset = 64}
-  %24 = i32.add %destination, %destination_offset
+  %24 = i32.add %destination, %21
   i32.store %24, %value
   return
 }

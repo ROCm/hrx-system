@@ -126,9 +126,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_mixed_rank
   %32 = add.rr %31, %base_aligned
   %33 = mov.address-index %32
   %loaded = lda.i32.index %input_view, %33
-  %37 = add.rr %31, %base_aligned
-  %38 = mov.address-index %37
-  st.i32.index %loaded, %output_view, %38
+  st.i32.index %loaded, %output_view, %33
   return %loaded
 }
 
@@ -159,9 +157,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_dynamic_st
   %26 = add.rr %23, %25
   %27 = mov.address-index %26
   %loaded = lda.i32.index %input_view, %27
-  %34 = add.rr %23, %25
-  %35 = mov.address-index %34
-  st.i32.index %loaded, %output_view, %35
+  st.i32.index %loaded, %output_view, %27
   return %loaded
 }
 
@@ -192,9 +188,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_subview_dy
   %23 = add.rr %base_aligned, %22
   %24 = add.address-index.immediate %23, 4
   %loaded = lda.i32.index %input_refined, %24
-  %28 = add.rr %base_aligned, %22
-  %29 = add.address-index.immediate %28, 4
-  st.i32.index %loaded, %output_refined, %29
+  st.i32.index %loaded, %output_refined, %24
   return %loaded
 }
 

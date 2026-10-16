@@ -56,16 +56,16 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @shared_dynamic_predic
   %38 = i32x4.splat %37
   %39 = i32x4.ne %36, %38
   %first = i8x16.shuffle %39, %39, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-  %44 = v128.load %35 {offset = 16}
-  %45 = i32x4.ne %44, %38
-  %second = i8x16.shuffle %45, %45, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-  %47 = v128.const 72340172838076673, 72340172838076673
-  %first_bytes = v128.and %first, %47
-  %second_bytes = v128.and %second, %47
-  %51 = i32x4.extract_lane %first_bytes, 0
-  i32.store %output, %51
-  %52 = i32x4.extract_lane %second_bytes, 0
-  i32.store %output, %52 {offset = 4}
+  %42 = v128.load %35 {offset = 16}
+  %43 = i32x4.ne %42, %38
+  %second = i8x16.shuffle %43, %43, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  %45 = v128.const 72340172838076673, 72340172838076673
+  %first_bytes = v128.and %first, %45
+  %second_bytes = v128.and %second, %45
+  %49 = i32x4.extract_lane %first_bytes, 0
+  i32.store %output, %49
+  %50 = i32x4.extract_lane %second_bytes, 0
+  i32.store %output, %50 {offset = 4}
   return
 }
 
@@ -90,9 +90,9 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @dynamic_shaped_tail(%
   %39 = i32.mul %trial, %38
   %40 = i32.add %input, %39
   %41 = v128.load %40
-  %45 = i64.load %40 {offset = 16}
+  %43 = i64.load %40 {offset = 16}
   v128.store %output, %41
-  i64.store %output, %45 {offset = 16}
+  i64.store %output, %43 {offset = 16}
   return
 }
 

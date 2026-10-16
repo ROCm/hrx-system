@@ -103,15 +103,9 @@ low.func.def target<x86.avx2.core> abi(object_function) @copy_float8_index(%inpu
   %18 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
   %19 = add.gpr64 %18, %position
   %e4m3 = movzx.load.indexed.u8.gpr32 %input, %19 {disp32 = 0, scale = 1}
-  %21 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %22 = add.gpr64 %21, %position
-  %e5m2 = movzx.load.indexed.u8.gpr32 %input, %22 {disp32 = 16, scale = 1}
-  %24 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %25 = add.gpr64 %24, %position
-  mov.store.indexed.u8.gpr32 %e4m3, %output, %25 {disp32 = 0, scale = 1}
-  %26 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %27 = add.gpr64 %26, %position
-  mov.store.indexed.u8.gpr32 %e5m2, %output, %27 {disp32 = 16, scale = 1}
+  %e5m2 = movzx.load.indexed.u8.gpr32 %input, %19 {disp32 = 16, scale = 1}
+  mov.store.indexed.u8.gpr32 %e4m3, %output, %19 {disp32 = 0, scale = 1}
+  mov.store.indexed.u8.gpr32 %e5m2, %output, %19 {disp32 = 16, scale = 1}
   return
 }
 

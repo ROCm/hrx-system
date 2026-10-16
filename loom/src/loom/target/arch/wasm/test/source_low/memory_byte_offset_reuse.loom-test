@@ -1,0 +1,152 @@
+// RUN: emit source-low target=wasm:simd128 output=low control-flow=structured-low
+
+// Scalar and packet accesses share one modular byte sum across roots and
+// term order; each memory operation retains its unsigned immediate offset.
+func.def @ranked_exchange(%input: buffer, %output: buffer, %row_input: index, %column_input: index, %replacement: i32, %origin_input: offset) -> (i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 4)] : index
+  %layout = encoding.layout.strided [19, 1] : encoding<layout>
+  %base = index.assume %origin_input [range(%origin_input, 0, 64), multiple_of(%origin_input, 4)] : offset
+  %bias = index.constant 16 : offset
+  %other_base = index.add %base, %bias : offset
+  %transposed = encoding.layout.strided [1, 19] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<4x8xi32, %layout>
+  %destination = buffer.view %output[%other_base] : buffer -> view<8x4xi32, %transposed>
+  %first = view.load<volatile> %source[%row, %column] : view<4x8xi32, %layout> -> i32
+  %packet = vector.load<volatile> %source[%row, %column] : view<4x8xi32, %layout> -> vector<4xi32>
+  vector.store<volatile> %packet, %source[%row, %column] : vector<4xi32>, view<4x8xi32, %layout>
+  view.store<volatile> %replacement, %destination[%column, %row] : i32, view<8x4xi32, %transposed>
+  func.return %first : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @ranked_exchange(%input: reg<wasm.i32>, %output: reg<wasm.i32>, %row: reg<wasm.i32>, %column: reg<wasm.i32>, %replacement: reg<wasm.i32>, %base: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %34 = i32.const 19
+  %35 = i32.mul %row, %34
+  %36 = i32.add %35, %column
+  %37 = i32.const 4
+  %38 = i32.mul %36, %37
+  %39 = i32.add %38, %base
+  %40 = i32.add %input, %39
+  %first = i32.load<volatile> %40
+  %packet = v128.load<volatile> %40
+  v128.store<volatile> %40, %packet
+  %45 = i32.add %output, %39
+  i32.store<volatile> %45, %replacement {offset = 16}
+  return %first
+}
+
+// ====
+
+// Equal dynamic sums with different embedded view biases remain distinct.
+func.def @biased_views(%input: buffer, %output: buffer, %row_input: index, %column_input: index) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %row_stride = index.constant 64 : offset
+  %column_stride = index.constant 8 : offset
+  %first_bias = index.constant 32 : offset
+  %second_bias = index.constant 64 : offset
+  %row_bytes = index.scale %row, %row_stride : index, offset -> offset
+  %column_bytes = index.scale %column, %column_stride : index, offset -> offset
+  %first_row_base = index.add %row_bytes, %first_bias : offset
+  %second_row_base = index.add %row_bytes, %second_bias : offset
+  %first_base = index.add %first_row_base, %column_bytes : offset
+  %second_base = index.add %second_row_base, %column_bytes : offset
+  %source = buffer.view %input[%first_base] : buffer -> view<2xi32>
+  %destination = buffer.view %output[%second_base] : buffer -> view<2xi32>
+  %value = view.load %source[0] : view<2xi32> -> i32
+  view.store %value, %destination[0] : i32, view<2xi32>
+  view.store %value, %destination[1] : i32, view<2xi32>
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @biased_views(%input: reg<wasm.i32>, %output: reg<wasm.i32>, %row: reg<wasm.i32>, %column: reg<wasm.i32>) asm {
+  %row_stride = i32.const 64
+  %column_stride = i32.const 8
+  %first_bias = i32.const 32
+  %row_bytes = i32.mul %row, %row_stride
+  %column_bytes = i32.mul %column, %column_stride
+  %first_row_base = i32.add %row_bytes, %first_bias
+  %second_row_base = i32.add %row_bytes, %row_stride
+  %first_base = i32.add %first_row_base, %column_bytes
+  %second_base = i32.add %second_row_base, %column_bytes
+  %32 = i32.add %input, %first_base
+  %value = i32.load %32
+  %34 = i32.add %output, %second_base
+  i32.store %34, %value
+  i32.store %34, %value {offset = 4}
+  return
+}
+
+// ====
+
+// Definitions stay inside the executing branch, loop body, or join block.
+func.def @scoped_exchange(%storage: buffer, %row_input: index, %column_input: index, %count_input: index, %condition: i1, %replacement: i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 3)] : index
+  %count = index.assume %count_input [range(%count_input, 0, 4)] : index
+  %layout = encoding.layout.strided [19, 3] : encoding<layout>
+  %base = index.constant 16 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<4x8xi32, %layout>
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  scf.if %condition {
+    %left = view.load<volatile> %view[%row, %column] : view<4x8xi32, %layout> -> i32
+    view.store<volatile> %left, %view[%row, %column] : i32, view<4x8xi32, %layout>
+  } else {
+    %right = view.load<volatile> %view[%row, %column] : view<4x8xi32, %layout> -> i32
+    view.store<volatile> %replacement, %view[%row, %column] : i32, view<4x8xi32, %layout>
+  }
+  scf.for %iteration = [%loop_begin to %count step %loop_step] {
+    %position = index.add %column, %iteration : index
+    %value = view.load<volatile> %view[%row, %position] : view<4x8xi32, %layout> -> i32
+    view.store<volatile> %value, %view[%row, %position] : i32, view<4x8xi32, %layout>
+  }
+  view.store<volatile> %replacement, %view[%row, %column] : i32, view<4x8xi32, %layout>
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @scoped_exchange(%storage: reg<wasm.i32>, %row: reg<wasm.i32>, %column: reg<wasm.i32>, %count: reg<wasm.i32>, %condition: reg<wasm.i32>, %replacement: reg<wasm.i32>) asm {
+  %loop_begin = i32.const 0
+  %loop_step = i32.const 1
+  low.scf.if %condition {
+    %27 = i32.const 76
+    %28 = i32.mul %row, %27
+    %29 = i32.const 12
+    %30 = i32.mul %column, %29
+    %31 = i32.add %28, %30
+    %32 = i32.add %storage, %31
+    %left = i32.load<volatile> %32 {offset = 16}
+    i32.store<volatile> %32, %left {offset = 16}
+  } else {
+    %35 = i32.const 76
+    %36 = i32.mul %row, %35
+    %37 = i32.const 12
+    %38 = i32.mul %column, %37
+    %39 = i32.add %36, %38
+    %40 = i32.add %storage, %39
+    %right = i32.load<volatile> %40 {offset = 16}
+    i32.store<volatile> %40, %replacement {offset = 16}
+  }
+  low.scf.for signed [%loop_begin to %count step %loop_step] do(%iteration: reg<wasm.i32>) {
+    %position = i32.add %column, %iteration
+    %45 = i32.const 12
+    %46 = i32.mul %position, %45
+    %47 = i32.const 76
+    %48 = i32.mul %row, %47
+    %49 = i32.add %46, %48
+    %50 = i32.add %storage, %49
+    %value = i32.load<volatile> %50 {offset = 16}
+    i32.store<volatile> %50, %value {offset = 16}
+  }
+  %53 = i32.const 76
+  %54 = i32.mul %row, %53
+  %55 = i32.const 12
+  %56 = i32.mul %column, %55
+  %57 = i32.add %54, %56
+  %58 = i32.add %storage, %57
+  i32.store<volatile> %58, %replacement {offset = 16}
+  return
+}

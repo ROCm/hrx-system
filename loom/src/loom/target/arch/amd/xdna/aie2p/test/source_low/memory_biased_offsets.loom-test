@@ -68,16 +68,16 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_biased_vecto
   %47 = lshl %signed_position, %46
   %48 = add.address-index.immediate %47, 16
   %49 = lda.i32.index %source_view, %48
-  %52 = add.address-index.immediate %47, 20
+  %50 = add.address-index.immediate %47, 20
+  %51 = lda.i32.index %source_view, %50
+  %52 = add.address-index.immediate %47, 24
   %53 = lda.i32.index %source_view, %52
-  %56 = add.address-index.immediate %47, 24
-  %57 = lda.i32.index %source_view, %56
-  %60 = add.address-index.immediate %47, 28
-  %61 = lda.i32.index %source_view, %60
+  %54 = add.address-index.immediate %47, 28
+  %55 = lda.i32.index %source_view, %54
   st.i32.index %49, %destination_view, %48
+  st.i32.index %51, %destination_view, %50
   st.i32.index %53, %destination_view, %52
-  st.i32.index %57, %destination_view, %56
-  st.i32.index %61, %destination_view, %60
+  st.i32.index %55, %destination_view, %54
   return
 }
 

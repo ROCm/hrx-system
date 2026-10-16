@@ -59,16 +59,16 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_narrow_index
   %18 = lshl %position, %17
   %19 = add.address-index.immediate %18, 33
   %20 = lda.i8.index %source_words, %19
-  %23 = add.address-index.immediate %18, 34
-  %24 = lda.i8.index %source_words, %23
-  %25 = mov.short 8
-  %26 = lshl %24, %25
-  %word = or %20, %26
+  %21 = add.address-index.immediate %18, 34
+  %22 = lda.i8.index %source_words, %21
+  %23 = mov.short 8
+  %24 = lshl %22, %23
+  %word = or %20, %24
   st.i8.index %byte, %destination_words, %15
-  %29 = mov.short -8
+  %27 = mov.short -8
   st.i8.index %word, %destination_words, %19
-  %33 = lshl %word, %29
-  st.i8.index %33, %destination_words, %23
+  %29 = lshl %word, %27
+  st.i8.index %29, %destination_words, %21
   return
 }
 
@@ -102,23 +102,16 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_narrow_origi
   %23 = add.rr %base, %22
   %24 = add.address-index.immediate %23, 33
   %25 = lda.i8.index.volatile<volatile> %source_words, %24
-  %28 = add.rr %base, %22
-  %29 = add.address-index.immediate %28, 34
-  %30 = lda.i8.index.volatile<volatile> %source_words, %29
-  %31 = mov.short 8
-  %32 = lshl %30, %31
-  %word = or %25, %32
-  %34 = add.rr %base, %position
-  %35 = mov.address-index %34
-  st.i8.index.volatile<volatile> %byte, %destination_words, %35
-  %36 = mov.short -8
-  %39 = add.rr %base, %22
-  %40 = add.address-index.immediate %39, 33
-  st.i8.index.volatile<volatile> %word, %destination_words, %40
-  %41 = lshl %word, %36
-  %44 = add.rr %base, %22
-  %45 = add.address-index.immediate %44, 34
-  st.i8.index.volatile<volatile> %41, %destination_words, %45
+  %26 = add.address-index.immediate %23, 34
+  %27 = lda.i8.index.volatile<volatile> %source_words, %26
+  %28 = mov.short 8
+  %29 = lshl %27, %28
+  %word = or %25, %29
+  st.i8.index.volatile<volatile> %byte, %destination_words, %19
+  %32 = mov.short -8
+  st.i8.index.volatile<volatile> %word, %destination_words, %24
+  %34 = lshl %word, %32
+  st.i8.index.volatile<volatile> %34, %destination_words, %26
   return
 }
 
@@ -164,18 +157,11 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_narrow_strid
   %44 = mov.short 8
   %45 = lshl %43, %44
   %word = or %34, %45
-  %48 = add.rr %21, %column
-  %49 = add.address-index.immediate %48, 1
-  st.i8.index %byte, %destination_words, %49
-  %50 = mov.short -8
-  %57 = add.rr %28, %30
-  %58 = add.rr %57, %25
-  %59 = mov.address-index %58
-  st.i8.index %word, %destination_words, %59
-  %60 = lshl %word, %50
-  %67 = add.rr %28, %30
-  %68 = add.address-index %67, %35
-  st.i8.index %60, %destination_words, %68
+  st.i8.index %byte, %destination_words, %23
+  %48 = mov.short -8
+  st.i8.index %word, %destination_words, %33
+  %50 = lshl %word, %48
+  st.i8.index %50, %destination_words, %42
   return
 }
 

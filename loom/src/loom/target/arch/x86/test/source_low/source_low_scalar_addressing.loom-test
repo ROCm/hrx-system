@@ -419,9 +419,7 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_multi_te
   %18 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>
   %19 = imul.gpr64 %18, %17
   %loaded = mov.load.indexed.gpr32 %input, %19 {disp32 = 16, scale = 1}
-  %22 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>
-  %23 = imul.gpr64 %22, %17
-  mov.store.indexed.gpr32 %loaded, %output, %23 {disp32 = 16, scale = 1}
+  mov.store.indexed.gpr32 %loaded, %output, %19 {disp32 = 16, scale = 1}
   return
 }
 
@@ -449,9 +447,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_multi_te
   %18 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>
   %19 = imul.gpr64 %18, %17
   %loaded = vmovdqu32.load.indexed.xmm %input, %19 {disp32 = 16, scale = 1}
-  %22 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>
-  %23 = imul.gpr64 %22, %17
-  vmovdqu32.store.indexed.xmm %loaded, %output, %23 {disp32 = 16, scale = 1}
+  vmovdqu32.store.indexed.xmm %loaded, %output, %19 {disp32 = 16, scale = 1}
   return
 }
 
@@ -479,9 +475,7 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_multi
   %18 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>
   %19 = imul.gpr64 %18, %17
   %loaded = vmovdqu32.load.indexed %input, %19 {disp32 = 16, scale = 1}
-  %22 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>
-  %23 = imul.gpr64 %22, %17
-  vmovdqu32.store.indexed %loaded, %output, %23 {disp32 = 16, scale = 1}
+  vmovdqu32.store.indexed %loaded, %output, %19 {disp32 = 16, scale = 1}
   return
 }
 

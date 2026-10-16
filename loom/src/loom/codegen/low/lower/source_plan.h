@@ -80,6 +80,8 @@ typedef struct loom_low_lower_selected_source_memory_t {
   loom_low_source_memory_access_plan_t access;
   // Dynamic origin proof captured from the unadjusted source access.
   const loom_low_lower_memory_origin_t* origin;
+  // Canonical dynamic byte-sum identity retained from source observation.
+  iree_host_size_t dynamic_byte_offset_identity;
 } loom_low_lower_selected_source_memory_t;
 
 // One source operation's lowering decision retained between planning and

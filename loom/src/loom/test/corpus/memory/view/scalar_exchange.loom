@@ -104,3 +104,80 @@ check.scenario @scalar_exchange_values {
   }
   check.return
 }
+
+// A packet transfer and scalar scatter share ranked coordinates with different
+// static row offsets. Both branch arms and the zero-trip loop remain runtime
+// choices; the scalar VM oracle uses flat indices instead of ranked expansion.
+func.def @ranked_exchange_packets(%input: buffer, %output: buffer, %ordinal_input: index) {
+  %ordinal = index.assume %ordinal_input [range(%ordinal_input, 0, 9)] : index
+  %trial_period = index.constant 5 : index
+  %parity_period = index.constant 2 : index
+  %loop_begin = index.constant 0 : index
+  %count = index.rem %ordinal, %trial_period : index
+  %column = index.rem %ordinal, %trial_period : index
+  %parity = index.rem %ordinal, %parity_period : index
+  %condition = index.cmp eq, %parity, %loop_begin : index
+  %base = index.constant 16 : offset
+  %source = buffer.view %input[%base] : buffer -> view<4x8xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<8x8xi32>
+  %loop_step = index.constant 1 : index
+  %packet_width = index.constant 4 : index
+  scf.for %row = [%loop_begin to %count step %loop_step] {
+    %packet = vector.load %source[%row, %column] : view<4x8xi32> -> vector<4xi32>
+    vector.store %packet, %destination[%row, %column] : vector<4xi32>, view<8x8xi32>
+    %scatter_row = index.add %row, %packet_width : index
+    scf.if %condition {
+      %first = view.load %source[%row, %column] : view<4x8xi32> -> i32
+      view.store %first, %destination[%scatter_row, %column] : i32, view<8x8xi32>
+    } else {
+      %next_column = index.add %column, %loop_step : index
+      %second = view.load %source[%row, %next_column] : view<4x8xi32> -> i32
+      view.store %second, %destination[%scatter_row, %column] : i32, view<8x8xi32>
+    }
+  }
+  func.return
+}
+
+func.def @ranked_exchange_packets_oracle(%input: buffer, %output: buffer, %ordinal_input: index) {
+  %ordinal = index.assume %ordinal_input [range(%ordinal_input, 0, 9)] : index
+  %trial_period = index.constant 5 : index
+  %parity_period = index.constant 2 : index
+  %loop_begin = index.constant 0 : index
+  %count = index.rem %ordinal, %trial_period : index
+  %column = index.rem %ordinal, %trial_period : index
+  %parity = index.rem %ordinal, %parity_period : index
+  %condition = index.cmp eq, %parity, %loop_begin : index
+  %base = index.constant 16 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<64xi32>
+  %loop_step = index.constant 1 : index
+  %packet_width = index.constant 4 : index
+  %row_stride = index.constant 8 : index
+  %scatter_offset = index.constant 32 : index
+  scf.for %row = [%loop_begin to %count step %loop_step] {
+    %start = index.madd %row, %row_stride, %column : index
+    scf.for %lane = [%loop_begin to %packet_width step %loop_step] {
+      %position = index.add %start, %lane : index
+      %value = view.load %source[%position] : view<32xi32> -> i32
+      view.store %value, %destination[%position] : i32, view<64xi32>
+    }
+    %selected_lane = scf.select %condition, %loop_begin, %loop_step : index
+    %selected_position = index.add %start, %selected_lane : index
+    %scatter_position = index.add %start, %scatter_offset : index
+    %selected = view.load %source[%selected_position] : view<32xi32> -> i32
+    view.store %selected, %destination[%scatter_position] : i32, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario @ranked_exchange_packet_values {
+  check.trial[10](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-701) step(31) : tensor<40xi32>
+    %output = check.generate.fill value(-889275714) : tensor<72xi32>
+    check.compare<@ranked_exchange_packets, @ranked_exchange_packets_oracle>(%input, %output, %trial) : (tensor<40xi32>, tensor<72xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<40xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<72xi32>
+    }
+  }
+  check.return
+}

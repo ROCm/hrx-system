@@ -1,0 +1,31 @@
+// RUN: emit source-low target=vm:core output=low
+
+// Atomic and ordinary accesses use the same byte arithmetic, retaining each
+// memory operation's ordering and bounds operands.
+func.def @ranked_atomics(%storage: buffer, %row_input: index, %column_input: index) -> (i32) {
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %column = index.assume %column_input [range(%column_input, 0, 7)] : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<4x8xi32>
+  %increment = scalar.constant 1 : i32
+  %first = view.load<volatile> %view[%row, %column] : view<4x8xi32> -> i32
+  view.atomic.reduce<addi> %increment, %view[%row, %column] {ordering = relaxed, scope = device} : i32, view<4x8xi32>
+  %previous = view.atomic.rmw<addi> %increment, %view[%row, %column] {ordering = acquire, scope = device} : i32, view<4x8xi32> -> i32
+  %old = view.atomic.cmpxchg %first, %previous, %view[%row, %column] {failure_ordering = relaxed, scope = device, success_ordering = release} : i32, view<4x8xi32> -> i32
+  func.return %old : i32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @ranked_atomics(%view: reg<vm.ref : buffer>, %row: reg<vm.value : i64>, %column: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+  %increment = constant.i32 1
+  %21 = constant.i64 5 : reg<vm.value>
+  %22 = integer.shift.left.i64 %row, %21
+  %23 = constant.i64 2 : reg<vm.value>
+  %24 = integer.shift.left.i64 %column, %23
+  %25 = integer.add.i64 %22, %24
+  %first = buffer.load<volatile> %view, %25, %25, 0, "i32.x1" : reg<vm.value : i32>
+  buffer.atomic.reduce %view, %25, %increment, "i32", "add.integer", "relaxed", "device"
+  %previous = buffer.atomic.rmw %view, %25, %increment, "i32", "add.integer", "acquire", "device" : reg<vm.value : i32>
+  %old = buffer.atomic.cmpxchg %view, %25, %first, %previous, "release.relaxed", "i32", "device" : reg<vm.value : i32>
+  return %old
+}

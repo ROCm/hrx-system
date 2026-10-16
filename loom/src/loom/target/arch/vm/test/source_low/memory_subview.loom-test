@@ -31,8 +31,8 @@ low.func.def target<vm.core> abi(vm_function) @subview_nested_dynamic(%source_re
   %33 = integer.add.i64 %32, %26
   %value = buffer.load %source_refined, %33, %33, 0, "i32.x1" : reg<vm.value : i32>
   %35 = constant.i64 68
-  %42 = integer.add.i64 %32, %35
-  buffer.store %destination_inner, %42, %42, %value, 0, "i32.x1"
+  %36 = integer.add.i64 %32, %35
+  buffer.store %destination_inner, %36, %36, %value, 0, "i32.x1"
   return %value
 }
 

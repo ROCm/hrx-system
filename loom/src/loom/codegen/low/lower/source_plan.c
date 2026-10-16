@@ -18,6 +18,7 @@
 #include "loom/codegen/low/lower/rule_match.h"
 #include "loom/codegen/low/lower/rule_plan.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
+#include "loom/codegen/low/lower/rule_source_memory_plan.h"
 #include "loom/codegen/low/lower/rule_value.h"
 #include "loom/codegen/low/lower/source_call.h"
 #include "loom/codegen/low/lower/source_graph_nodes.h"
@@ -574,15 +575,23 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
     loom_low_lower_context_t* context) {
   const loom_low_lower_source_plan_t* source_plan =
       &context->lowering->source_plan;
-  for (iree_host_size_t i = 0; i < source_plan->selected_plan_count; ++i) {
+  iree_arena_allocator_t construction_arena;
+  iree_arena_initialize(context->module->arena.block_pool, &construction_arena);
+  loom_low_lower_rule_source_memory_plan_builder_t source_memory_builder = {
+      .arena = &construction_arena,
+  };
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < source_plan->selected_plan_count && iree_status_is_ok(status) &&
+       context->result->error_count == 0;
+       ++i) {
     loom_low_lower_selected_plan_t* selected_plan =
         &source_plan->selected_plans[i];
     if (selected_plan->rule != NULL) {
       loom_low_lower_planning_scope_begin(context);
-      iree_status_t status =
-          loom_low_lower_rule_plan_finalize(context, selected_plan);
+      status = loom_low_lower_rule_plan_finalize(
+          context, &source_memory_builder, selected_plan);
       loom_low_lower_planning_scope_end(context);
-      IREE_RETURN_IF_ERROR(status);
     } else if (selected_plan->kind ==
                    LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX &&
                !iree_any_bit_set(selected_plan->flags,
@@ -590,36 +599,33 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
       const loom_value_id_t result =
           loom_op_const_results(selected_plan->source_op)[0];
       loom_type_t result_type = loom_type_none();
-      IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
-          context, selected_plan->source_op, result, &result_type));
-      if (context->result->error_count != 0) {
-        return iree_ok_status();
+      status = loom_low_lower_map_value(context, selected_plan->source_op,
+                                        result, &result_type);
+      if (iree_status_is_ok(status) && context->result->error_count == 0) {
+        status = loom_low_lower_plan_value_type(context, result, result_type);
       }
-      IREE_RETURN_IF_ERROR(
-          loom_low_lower_plan_value_type(context, result, result_type));
     } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK &&
                !iree_any_bit_set(selected_plan->flags,
                                  LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED |
                                      LOOM_LOW_LOWER_SELECTED_PLAN_CLAIMED) &&
                context->policy->finalize_plan.fn != NULL) {
-      IREE_RETURN_IF_ERROR(context->policy->finalize_plan.fn(
+      status = context->policy->finalize_plan.fn(
           context->policy->finalize_plan.user_data, context,
-          selected_plan->source_op, selected_plan->data.target_plan));
+          selected_plan->source_op, selected_plan->data.target_plan);
     } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE) {
-      IREE_RETURN_IF_ERROR(loom_low_lower_source_invoke_finalize(
-          context, selected_plan->source_op, selected_plan->data.invoke));
+      status = loom_low_lower_source_invoke_finalize(
+          context, selected_plan->source_op, selected_plan->data.invoke);
     }
-    if (context->result->error_count != 0) {
-      return iree_ok_status();
-    }
-    if (!loom_low_lower_selected_plan_preserves_volatile_memory(
+    if (iree_status_is_ok(status) && context->result->error_count == 0 &&
+        !loom_low_lower_selected_plan_preserves_volatile_memory(
             context->module, selected_plan)) {
-      return loom_low_lower_emit_target_context_error(
+      status = loom_low_lower_emit_target_context_error(
           context, selected_plan->source_op, LOOM_ERR_TARGET_081,
           /*extra_params=*/NULL, /*extra_param_count=*/0);
     }
   }
-  return iree_ok_status();
+  iree_arena_deinitialize(&construction_arena);
+  return status;
 }
 
 static bool loom_low_lower_rule_selection_can_record_plan(
@@ -663,6 +669,8 @@ static iree_status_t loom_low_lower_record_selected_rule_plan(
     *retained_source_memory = (loom_low_lower_selected_source_memory_t){
         .access = *source_memory_state->access_plan,
         .origin = memory_record->origin,
+        .dynamic_byte_offset_identity =
+            memory_record->dynamic_byte_offset_identity,
     };
     source_memory = retained_source_memory;
   }
@@ -806,6 +814,8 @@ static iree_status_t loom_low_lower_source_candidate_add_rule(
       *retained_source_memory = (loom_low_lower_selected_source_memory_t){
           .access = *source_memory_state->access_plan,
           .origin = memory_record->origin,
+          .dynamic_byte_offset_identity =
+              memory_record->dynamic_byte_offset_identity,
       };
       candidate_node->matched_source_memory = retained_source_memory;
     }

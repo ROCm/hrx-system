@@ -22,6 +22,8 @@ extern "C" {
 #endif
 
 typedef struct loom_low_lower_selected_plan_t loom_low_lower_selected_plan_t;
+typedef struct loom_low_lower_rule_source_memory_plan_builder_t
+    loom_low_lower_rule_source_memory_plan_builder_t;
 
 // Present only for rows whose static emit has read-only data attributes.
 // Followed by attr_copy_count private data IDs, indexed by attribute ordinal.
@@ -246,6 +248,7 @@ loom_low_lower_resolved_emit_address_coordinate_type_id(
 // scratch.
 iree_status_t loom_low_lower_rule_plan_finalize(
     loom_low_lower_context_t* context,
+    loom_low_lower_rule_source_memory_plan_builder_t* source_memory_builder,
     loom_low_lower_selected_plan_t* selected_plan);
 
 #ifdef __cplusplus

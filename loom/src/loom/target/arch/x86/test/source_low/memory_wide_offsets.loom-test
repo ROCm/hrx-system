@@ -39,9 +39,7 @@ low.func.def target<x86.avx2.core> abi(object_function) @scalar_wide_scaled_inde
   %17 = copy %element : reg<x86.gpr64> -> reg<x86.gpr64>
   %18 = imul.gpr64 %17, %16
   %loaded = mov.load.indexed.gpr32 %input, %18 {disp32 = 0, scale = 1}
-  %21 = copy %element : reg<x86.gpr64> -> reg<x86.gpr64>
-  %22 = imul.gpr64 %21, %16
-  mov.store.indexed.gpr32 %loaded, %output, %22 {disp32 = 0, scale = 1}
+  mov.store.indexed.gpr32 %loaded, %output, %18 {disp32 = 0, scale = 1}
   return %loaded
 }
 
@@ -89,11 +87,7 @@ low.func.def target<x86.avx2.core> abi(object_function) @scalar_wide_dynamic_dim
   %21 = copy %19 : reg<x86.gpr64> -> reg<x86.gpr64>
   %22 = imul.gpr64 %21, %20
   %loaded = mov.load.indexed.gpr32 %input, %22 {disp32 = 0, scale = 1}
-  %24 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
-  %25 = imul.gpr64 %24, %columns
-  %27 = copy %25 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %28 = imul.gpr64 %27, %20
-  mov.store.indexed.gpr32 %loaded, %output, %28 {disp32 = 0, scale = 1}
+  mov.store.indexed.gpr32 %loaded, %output, %22 {disp32 = 0, scale = 1}
   return %loaded
 }
 
@@ -165,10 +159,6 @@ low.func.def target<x86.avx2.core> abi(object_function) @vector_wide_dynamic_dim
   %19 = copy %17 : reg<x86.gpr64> -> reg<x86.gpr64>
   %20 = imul.gpr64 %19, %18
   %loaded = vmovdqu32.load.indexed.xmm %input, %20 {disp32 = 0, scale = 1}
-  %22 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
-  %23 = imul.gpr64 %22, %columns
-  %25 = copy %23 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %26 = imul.gpr64 %25, %18
-  vmovdqu32.store.indexed.xmm %loaded, %output, %26 {disp32 = 0, scale = 1}
+  vmovdqu32.store.indexed.xmm %loaded, %output, %20 {disp32 = 0, scale = 1}
   return
 }

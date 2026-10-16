@@ -85,9 +85,7 @@ low.func.def target<x86.avx2.core> abi(object_function) @exchange_signed_positio
   %22 = copy %20 : reg<x86.gpr64> -> reg<x86.gpr64>
   %23 = imul.gpr64 %22, %21
   %previous = mov.load.indexed.gpr32 %buffer, %23 {disp32 = 16, scale = 1}
-  %27 = copy %20 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %28 = imul.gpr64 %27, %21
-  mov.store.indexed.gpr32 %replacement, %buffer, %28 {disp32 = 16, scale = 1}
+  mov.store.indexed.gpr32 %replacement, %buffer, %23 {disp32 = 16, scale = 1}
   return %previous
 }
 

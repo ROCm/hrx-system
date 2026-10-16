@@ -82,9 +82,7 @@ low.func.def target<x86.avx2.core> abi(object_function) @exchange_large_bias_wor
   %18 = add.gpr64 %14, %17
   %previous = mov.load.indexed.gpr32 %buffer, %18 {disp32 = 0, scale = 1}
   %20 = mov.imm64 4294967280
-  %22 = copy %signed_position : reg<x86.gpr64> -> reg<x86.gpr64>
-  %23 = imul.gpr64 %22, %15
-  %24 = add.gpr64 %20, %23
-  mov.store.indexed.gpr32 %replacement, %buffer, %24 {disp32 = 0, scale = 1}
+  %21 = add.gpr64 %20, %17
+  mov.store.indexed.gpr32 %replacement, %buffer, %21 {disp32 = 0, scale = 1}
   return %previous
 }

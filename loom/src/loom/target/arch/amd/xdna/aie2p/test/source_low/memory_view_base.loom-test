@@ -77,8 +77,6 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_chunks(%row:
   %41 = mov.address-index %40
   %42 = vlda.256.i32x8.index %source_view, %41
   vst.256.i32x8.index %34, %destination_view, %33
-  %48 = add.rr %base, %39
-  %49 = mov.address-index %48
-  vst.256.i32x8.index %42, %destination_view, %49
+  vst.256.i32x8.index %42, %destination_view, %41
   return
 }

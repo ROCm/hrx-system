@@ -103,28 +103,28 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_b
   %58 = lshl %record, %57
   %59 = mov.address-index %58
   %60 = vlda.convert.bf16x32.to.f32x32.index %lhs_view, %59
-  %63 = add.address-index.immediate %58, 64
-  %64 = vlda.convert.bf16x32.to.f32x32.index %lhs_view, %63
-  %65 = concat(%60, %64) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %61 = add.address-index.immediate %58, 64
+  %62 = vlda.convert.bf16x32.to.f32x32.index %lhs_view, %61
+  %63 = concat(%60, %62) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
   set.rounding 12
-  %lhs_fragment = vconv.bfp16ebs8.fp32 %65
-  %70 = vlda.convert.bf16x32.to.f32x32.index %rhs_view, %59
-  %74 = vlda.convert.bf16x32.to.f32x32.index %rhs_view, %63
-  %75 = concat(%70, %74) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
-  %rhs_fragment = vconv.bfp16ebs8.fp32 %75
-  %77 = mova.i32 780
-  %next = mma.bfp16ebs8.m8n8k8 %accumulator, %lhs_fragment, %rhs_fragment, %77
-  %79 = add.rr %record, %step
-  low.br ^_bb1(%79: reg<aie2p.er>, %next: reg<aie2p.mbms x4>)
+  %lhs_fragment = vconv.bfp16ebs8.fp32 %63
+  %66 = vlda.convert.bf16x32.to.f32x32.index %rhs_view, %59
+  %68 = vlda.convert.bf16x32.to.f32x32.index %rhs_view, %61
+  %69 = concat(%66, %68) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %rhs_fragment = vconv.bfp16ebs8.fp32 %69
+  %71 = mova.i32 780
+  %next = mma.bfp16ebs8.m8n8k8 %accumulator, %lhs_fragment, %rhs_fragment, %71
+  %73 = add.rr %record, %step
+  low.br ^_bb1(%73: reg<aie2p.er>, %next: reg<aie2p.mbms x4>)
 ^_bb3:
-  %80 = slice %accumulator[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %80, %output_view, 0
-  %81 = slice %accumulator[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %81, %output_view, 64
-  %82 = slice %accumulator[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %82, %output_view, 128
-  %83 = slice %accumulator[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %83, %output_view, 192
+  %74 = slice %accumulator[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %74, %output_view, 0
+  %75 = slice %accumulator[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %75, %output_view, 64
+  %76 = slice %accumulator[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %76, %output_view, 128
+  %77 = slice %accumulator[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %77, %output_view, 192
   return
 }
 

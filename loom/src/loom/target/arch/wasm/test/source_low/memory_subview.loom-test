@@ -29,8 +29,8 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @subview_nested_dynami
   %31 = i32.add %28, %30
   %32 = i32.add %input_aligned, %31
   %value = i32.load %32 {offset = 76}
-  %40 = i32.add %output_aligned, %31
-  i32.store %40, %value {offset = 68}
+  %34 = i32.add %output_aligned, %31
+  i32.store %34, %value {offset = 68}
   return %value
 }
 
