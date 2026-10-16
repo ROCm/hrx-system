@@ -38,7 +38,7 @@ The shared foundation consists of:
   connection claims and response credit over shared proactors. Independent
   TCP/Unix listeners feed the same connection owner. Stopping a listener does
   not stop the requests it admitted; this layer has no model dependencies.
-- [`service`](service/service.h): the named HTTP-facing model service contract,
+- [`service`](service/service.h): the named native and HTTP model service contract,
   including bounded task turns, asynchronous retirement, client capabilities
   and copied inspection state. It consumes transport claims without owning
   socket listeners or process lifetime.
@@ -53,11 +53,13 @@ The shared foundation consists of:
 - [`media/audio_decoder`](media/audio_decoder.h): optional in-memory WAV, MP3,
   and FLAC conversion with independent codec and resampler state. The caller
   owns workers, decoded-frame credit, and the encoded bytes' lifetime.
-- [`service/recognition`](service/recognition/model.h): continuing PCM input,
+- [`service/recognition`](service/recognition/README.md): continuing PCM input,
   source-defined numerical batches, and revisable transcript segments. Its
-  [HTTP adapter](service/recognition/http.h) schedules bounded conversion on
-  the shared CPU executor and retains upload/decoder storage through accepted
-  work retirement before returning final JSON or text.
+  [service](service/recognition/service.h) shares one request ledger between
+  native conversations and finite HTTP uploads. Bounded decoding runs on the
+  shared CPU executor. [Stream handles](service/recognition/stream.h) retain
+  final documents and failures independently of model removal; input rings and
+  numerical slots retire as soon as accepted work permits.
 - [`service/speech`](service/speech/README.md): incremental waveform output with
   separate conditioning and request state, bounded PCM delivery, and explicit
   work/feedback retirement on EOF, disconnect and shutdown.
