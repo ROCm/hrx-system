@@ -6,9 +6,13 @@
 
 kernel.decl @qsa_selected_attention() launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer)
 
-// Keys and queries have two nonzero channels. Values vary with physical token,
-// KV head, and channel; their exact BF16 channel offsets let the independent
-// scalar oracle compute one weighted value and reconstruct the other channels.
+kernel.decl @qsa_matrix_attention() launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer)
+
+// Keys repeat two values across alternating channels. Queries vary across all
+// channels, exercising every matrix panel and wave while letting the oracle
+// reduce even and odd query components before traversing the selected keys.
+// Values vary with physical token, KV head, and channel; their exact BF16
+// offsets let the oracle reconstruct every channel from one weighted value.
 // Page permutations and nonzero plane origins make logical/physical addressing
 // observable without making the oracle repeat the production address helpers.
 func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer) {
@@ -70,13 +74,15 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
     %value_centered = scalar.subf %value_unsigned, %c8_f64 : f64
     %value_scaled = scalar.mulf %value_centered, %sixteenth : f64
     scf.for %head = [%c0 to %c2 step %c1] {
-      view.store %key0, %key[%physical, %head, 0] : bf16, view<2112x2x256xbf16>
-      view.store %key1, %key[%physical, %head, 1] : bf16, view<2112x2x256xbf16>
       %head_word = index.cast %head : index to i32
       %head_float = scalar.uitofp %head_word : i32 to f64
       %head_offset = scalar.mulf %head_float, %eighth : f64
       %value_base = scalar.addf %value_scaled, %head_offset : f64
       scf.for %channel = [%c0 to %channels step %c1] {
+        %parity = index.rem %channel, %c2 : index
+        %even = index.cmp eq, %parity, %c0 : index
+        %key_component = scf.select %even, %key0, %key1 : bf16
+        view.store %key_component, %key[%physical, %head, %channel] : bf16, view<2112x2x256xbf16>
         %channel_remainder = index.rem %channel, %c9 : index
         %channel_word = index.cast %channel_remainder : index to i32
         %channel_float = scalar.uitofp %channel_word : i32 to f64
@@ -136,11 +142,18 @@ func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer
       %large = scalar.constant 64.0 : f64
       %query0 = scf.select %sharp, %large, %query_centered : f64
       %query1 = scalar.negf %query0 : f64
-      %packed0 = scalar.fptrunc %query0 : f64 to bf16
-      %packed1 = scalar.fptrunc %query1 : f64 to bf16
-      view.store %packed0, %query[%token, %head, 0] : bf16, view<8x24x256xbf16>
-      view.store %packed1, %query[%token, %head, 1] : bf16, view<8x24x256xbf16>
       scf.for %channel = [%c0 to %channels step %c1] {
+        %parity = index.rem %channel, %c2 : index
+        %even = index.cmp eq, %parity, %c0 : index
+        %component = scf.select %even, %query0, %query1 : f64
+        %pattern = index.rem %channel, %c5 : index
+        %factor = index.add %pattern, %c1 : index
+        %factor_word = index.cast %factor : index to i32
+        %factor_float = scalar.uitofp %factor_word : i32 to f64
+        %factor_scaled = scalar.mulf %factor_float, %sixteenth : f64
+        %query_value = scalar.mulf %component, %factor_scaled : f64
+        %query_packed = scalar.fptrunc %query_value : f64 to bf16
+        view.store %query_packed, %query[%token, %head, %channel] : bf16, view<8x24x256xbf16>
         %biased = index.add %head, %channel : index
         %remainder = index.rem %biased, %c17 : index
         %word = index.cast %remainder : index to i32
@@ -165,13 +178,14 @@ func.def @reference_exp(%value: f64) -> (f64) {
   func.return %wide : f64
 }
 
-// The oracle uses scalar softmax and reads the fixture's two nonzero key
-// channels. It shares no subgroup reductions, partition merge, or page helper
-// with the production kernel. Accumulation, normalization, and output gating
+// The oracle uses scalar softmax and the fixture's two repeating key values.
+// It shares no subgroup reductions, matrix layout, partition merge, or page
+// helper with the production kernel. Accumulation, normalization, and output gating
 // use F64, with explicit BF16 attention and output rounding boundaries.
 func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
   %c4 = index.constant 4 : index
   %c9 = index.constant 9 : index
@@ -181,8 +195,9 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
   %channels = index.constant 256 : index
   %budget = index.constant 512 : index
   %origin = index.constant 0 : offset
-  %key_base = index.constant 384 : offset
-  %value_base = index.constant 2163072 : offset
+  %row_base = index.constant 256 : offset
+  %key_base = index.add %row_base, %key_origin : offset
+  %value_base = index.add %row_base, %value_origin : offset
   %map_base = index.constant 2048 : offset
   %positions = buffer.view %mapping[%origin] : buffer -> view<8x4xi32>
   %maps = buffer.view %rows[%map_base] : buffer -> view<16x33xi32>
@@ -194,7 +209,7 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
   %result = buffer.view %output[%origin] : buffer -> view<8x24x256xbf16>
   %fzero = scalar.constant 0.0 : f64
   %fone = scalar.constant 1.0 : f64
-  %lowest = scalar.constant -1e30 : f64
+  %lowest = scalar.constant -1e+30 : f64
   %scale = scalar.constant 0.0625 : f64
   %channel_scale = scalar.constant 0.015625 : f64
   scf.for %token = [%c0 to %c3 step %c1] {
@@ -213,10 +228,16 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
     %length = index.add %selected_tokens, %tail : index
     scf.for %head = [%c0 to %heads step %c1] {
       %kv_head = index.div %head, %c12 : index
-      %q0_packed = view.load %query[%token, %head, 0] : view<8x24x256xbf16> -> bf16
-      %q1_packed = view.load %query[%token, %head, 1] : view<8x24x256xbf16> -> bf16
-      %q0 = scalar.extf %q0_packed : bf16 to f64
-      %q1 = scalar.extf %q1_packed : bf16 to f64
+      %q0, %q1 = scf.for %channel = [%c0 to %channels step %c2](%even_sum = %fzero : f64, %odd_sum = %fzero : f64) -> (f64, f64) {
+        %odd_channel = index.add %channel, %c1 : index
+        %q0_packed = view.load %query[%token, %head, %channel] : view<8x24x256xbf16> -> bf16
+        %q1_packed = view.load %query[%token, %head, %odd_channel] : view<8x24x256xbf16> -> bf16
+        %q0 = scalar.extf %q0_packed : bf16 to f64
+        %q1 = scalar.extf %q1_packed : bf16 to f64
+        %next_even = scalar.addf %even_sum, %q0 : f64
+        %next_odd = scalar.addf %odd_sum, %q1 : f64
+        scf.yield %next_even, %next_odd : f64, f64
+      }
       %maximum, %denominator, %accumulator = scf.for %slot = [%c0 to %length step %c1](%old_maximum = %lowest : f64, %old_denominator = %fzero : f64, %old_accumulator = %fzero : f64) -> (f64, f64, f64) {
         %in_block = index.cmp ult, %slot, %selected_tokens : index
         %logical_value = scf.if %in_block -> (index) {
@@ -287,9 +308,9 @@ func.def @reference(%key_origin: offset, %value_origin: offset, %epoch: buffer, 
 
 check.scenario public @paged_sparse_attention {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %key_origin = check.literal value(128) : offset
+  %value_origin = check.literal value(2162816) : offset
   check.trial[4](%trial: index, %entropy: check.entropy) {
-    %key_origin = check.literal value(128) : offset
-    %value_origin = check.literal value(2162816) : offset
     %epoch = check.generate.fill value(0) : tensor<3xi32>
     %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
     %rows = check.generate.fill value(0) : tensor<4160xi8>
@@ -300,7 +321,28 @@ check.scenario public @paged_sparse_attention {
     check.generate<@fixture>(%trial, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected) : (index, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>) -> ()
     %output = check.generate.fill value(-17.0) : tensor<8x24x256xbf16>
     check.compare<@qsa_selected_attention, @reference>(%key_origin, %value_origin, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (offset, offset, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>, tensor<8x24x256xbf16>) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.00006103515625) rtol(0.0078125) nan(different) : tensor<8x24x256xbf16>
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<8x24x256xbf16>
+    }
+  }
+  check.return
+}
+
+check.scenario public @paged_sparse_matrix_attention {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %key_origin = check.literal value(128) : offset
+  %value_origin = check.literal value(2162816) : offset
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    %mapping = check.generate.fill value(-99) : tensor<8x4xi32>
+    %rows = check.generate.fill value(0) : tensor<4160xi8>
+    %queries = check.generate.fill value(0.0) : tensor<8x24x256xbf16>
+    %gates = check.generate.fill value(0.0) : tensor<8x24x512xbf16>
+    %arena = check.generate.fill value(0) : tensor<4325760xi8>
+    %selected = check.generate.fill value(-99) : tensor<8x512xi32>
+    check.generate<@fixture>(%trial, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected) : (index, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<8x24x256xbf16>
+    check.compare<@qsa_matrix_attention, @reference>(%key_origin, %value_origin, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (offset, offset, tensor<3xi32>, tensor<8x4xi32>, tensor<4160xi8>, tensor<8x24x256xbf16>, tensor<8x24x512xbf16>, tensor<4325760xi8>, tensor<8x512xi32>, tensor<8x24x256xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<8x24x256xbf16>
     }
   }
   check.return
