@@ -626,12 +626,15 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
                                                        imports_offset),
       image->segment_count, mappings);
   iree_allocator_free(executable->host_allocator, storage);
+  const amdf_queue_format_features_t format_features =
+      executable->context->families[options->native_family_ordinal]
+          .format_features;
   if (variant->packet_program && iree_status_is_ok(status)) {
     memcpy(variant->memory.contents.data + packet_program_offset,
            packet_program.code.data, packet_program.code.data_length);
     packet_program.kernel.entry_offset = packet_program_offset;
     status = iree_hal_amd_gpu_pm4_launch_initialize(
-        options->target->version, &packet_program.kernel,
+        options->target->version, format_features, &packet_program.kernel,
         variant->bindings[1].device_address, variant->packet_program);
   }
   for (iree_host_size_t i = 0;
@@ -646,7 +649,7 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_amd_gpu_pm4_launch_initialize(
-          options->target->version, &image->kernels[i],
+          options->target->version, format_features, &image->kernels[i],
           variant->bindings[1].device_address, &function->launch);
       if (function->packet) {
         iree_hal_amd_gpu_pm4_dispatch_packet_info_t* packet =

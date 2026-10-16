@@ -62,7 +62,8 @@ class GpuProgramTest : public GpuNativeTest {
         Allocate(control_policy_, 65536, &control_, &control_address_));
     std::memset(control_.contents.data, 0, control_.contents.data_length);
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_program_pool_initialize(
-        context_, nullptr, 3, kernel_, iree_allocator_system(), &pool_));
+        context_, family, nullptr, 3, kernel_, iree_allocator_system(),
+        &pool_));
     for (auto& queue : queues_native_) {
       if (kernel_) {
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_kmq_storage_allocate(

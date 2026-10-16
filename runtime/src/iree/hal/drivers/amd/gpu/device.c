@@ -539,8 +539,9 @@ static void iree_hal_amd_gpu_device_prepare_programs(void* user_data) {
   iree_hal_amd_gpu_device_program_prepare_t* prepare = user_data;
   iree_hal_amd_gpu_device_t* device = prepare->device;
   prepare->status = iree_hal_amd_gpu_pm4_program_pool_initialize(
-      device->context, device->memory.service, prepare->queue_count,
-      prepare->chain, device->host_allocator, &device->programs);
+      device->context, device->memory.family.queue_family_ordinal,
+      device->memory.service, prepare->queue_count, prepare->chain,
+      device->host_allocator, &device->programs);
 }
 
 typedef struct iree_hal_amd_gpu_device_feedback_prepare_t {

@@ -51,9 +51,10 @@ typedef struct iree_hal_amd_gpu_pm4_program_pool_t {
   bool chain;
 } iree_hal_amd_gpu_pm4_program_pool_t;
 
-// Cold initialization; failure leaves a deinitializable partial owner.
+// Cold initialization for the selected native PM4 family; failure leaves a
+// deinitializable partial owner.
 iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
-    const iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
     iree_hal_memory_maintenance_t* service, uint32_t queue_count, bool chain,
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_program_pool_t* out_pool);

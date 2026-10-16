@@ -34,11 +34,11 @@ TEST_P(ProgramTest, NativeEntryPublishesItsActualProducers) {
   iree_hal_amd_gpu_image_kernel_t kernel;
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_pm4_fixup_program_query(version, &code, &kernel));
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(version, &kernel,
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(version, 0, &kernel,
                                                         0x100000, &pool.fixup));
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_pm4_blit_program_query(version, &code, &kernel));
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(version, &kernel,
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(version, 0, &kernel,
                                                         0x200000, &pool.blit));
 
   // Metadata admitted by the recorder and held under an exclusive invocation

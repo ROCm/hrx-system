@@ -67,7 +67,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_program_select_memory(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
-    const iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
     iree_hal_memory_maintenance_t* service, uint32_t queue_count, bool chain,
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_program_pool_t* out_pool) {
@@ -132,11 +132,13 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
       context->api->memory_query_address(out_pool->code.handle, 0,
                                          AMDF_MEMORY_ADDRESS_GPU, &address),
       "query program builtin address"));
+  const amdf_queue_format_features_t format_features =
+      context->families[native_family_ordinal].format_features;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_launch_initialize(
-      gfxip, &fixup_kernel, address, &out_pool->fixup));
+      gfxip, format_features, &fixup_kernel, address, &out_pool->fixup));
   blit_kernel.entry_offset = blit_offset;
-  return iree_hal_amd_gpu_pm4_launch_initialize(gfxip, &blit_kernel, address,
-                                                &out_pool->blit);
+  return iree_hal_amd_gpu_pm4_launch_initialize(
+      gfxip, format_features, &blit_kernel, address, &out_pool->blit);
 }
 
 void iree_hal_amd_gpu_pm4_program_pool_trim(

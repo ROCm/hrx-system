@@ -31,7 +31,7 @@ static void BM_PrepareLaunch(benchmark::State& state) {
   for (auto _ : state) {
     iree_hal_amd_gpu_pm4_launch_t launch;
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_launch_initialize(
-        {11, 0, 0}, &kernel, UINT64_C(0x1234000000), &launch));
+        {11, 0, 0}, 0, &kernel, UINT64_C(0x1234000000), &launch));
     benchmark::DoNotOptimize(launch);
   }
   state.SetItemsProcessed(state.iterations());
@@ -43,7 +43,7 @@ static void BM_EmitLaunch(benchmark::State& state) {
   auto kernel = Kernel(state.range(0), state.range(1));
   alignas(64) iree_hal_amd_gpu_pm4_launch_t launch;
   IREE_CHECK_OK(iree_hal_amd_gpu_pm4_launch_initialize(
-      {11, 0, 0}, &kernel, UINT64_C(0x1234000000), &launch));
+      {11, 0, 0}, 0, &kernel, UINT64_C(0x1234000000), &launch));
   uint32_t workgroup_size[] = {128, 1, 1};
   uint32_t partial_size[] = {0, 0, 0};
   uint32_t dimensions[] = {256, 1, 1};

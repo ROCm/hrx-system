@@ -45,6 +45,7 @@ iree_cc_library(
     "launch.c"
   DEPS
     ::commands
+    amdf::headers
     iree::base
     iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::target::identity
@@ -866,6 +867,7 @@ iree_cc_test(
   DEPS
     ::commands
     ::launch
+    amdf::headers
     iree::base
     iree::base::core_headers
     iree::hal::drivers::amd::gpu::image

@@ -36,6 +36,7 @@ static uint8_t iree_hal_amd_gpu_pm4_launch_assign_input(uint16_t properties,
 
 iree_status_t iree_hal_amd_gpu_pm4_launch_initialize(
     iree_hal_amd_gpu_gfxip_version_t gfxip,
+    amdf_queue_format_features_t format_features,
     const iree_hal_amd_gpu_image_kernel_t* kernel, uint64_t image_address,
     iree_hal_amd_gpu_pm4_launch_t* out_launch) {
   const bool gfx11 = gfxip.major == 11 &&
@@ -79,9 +80,17 @@ iree_status_t iree_hal_amd_gpu_pm4_launch_initialize(
       .program = {(uint32_t)(entry >> 8), (uint32_t)(entry >> 40)},
       .resources =
           {
-              .resource1 = kernel->compute_pgm_rsrc1,
+              .resource1 =
+                  kernel->compute_pgm_rsrc1 |
+                  ((format_features & AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_PRIV)
+                       ? 1u << 20
+                       : 0),
               .resource2 =
-                  kernel->compute_pgm_rsrc2 & ~IREE_HAL_AMD_GPU_PM4_LDS_MASK,
+                  (kernel->compute_pgm_rsrc2 & ~IREE_HAL_AMD_GPU_PM4_LDS_MASK) |
+                  ((format_features &
+                    AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_TRAP_PRESENT)
+                       ? 1u << 6
+                       : 0),
               .resource3 = kernel->compute_pgm_rsrc3,
           },
       .resource3_register = gfx125 ? 0x2e23u : 0x2e28u,
@@ -89,6 +98,7 @@ iree_status_t iree_hal_amd_gpu_pm4_launch_initialize(
       .user_data_count =
           (uint8_t)((kernel->compute_pgm_rsrc2 >> 1) & (gfx125 ? 63u : 31u)),
       .wavefront_size_log2 = wavefront_size == 32 ? 5 : 6,
+      .group_segment_unit_log2 = gfx125 ? 11 : 9,
   };
   uint8_t input_count = 0;
   launch.user_data.dispatch_pointer = iree_hal_amd_gpu_pm4_launch_assign_input(
@@ -147,7 +157,10 @@ uint32_t* iree_hal_amd_gpu_pm4_launch_emit(
   const uint32_t resources[] = {
       launch->resources.resource1,
       launch->resources.resource2 |
-          (((group_segment_byte_length + 511u) / 512u) << 15),
+          (((group_segment_byte_length +
+             (1u << launch->group_segment_unit_log2) - 1u) >>
+            launch->group_segment_unit_log2)
+           << 15),
   };
   words = iree_hal_amd_gpu_pm4_emit_registers(words, 0x2e12, 2, resources);
   words = iree_hal_amd_gpu_pm4_emit_registers(words, launch->resource3_register,

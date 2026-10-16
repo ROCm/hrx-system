@@ -49,6 +49,7 @@ iree_runtime_cc_library(
     hdrs = ["launch.h"],
     deps = [
         ":commands",
+        "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/drivers/amd/gpu/image",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
@@ -541,6 +542,7 @@ iree_runtime_cc_test(
     deps = [
         ":commands",
         ":launch",
+        "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/hal/drivers/amd/gpu/image",

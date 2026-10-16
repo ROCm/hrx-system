@@ -272,7 +272,7 @@ TEST_F(DispatchTest, PreparationProgramEmitsCompleteOrderedLaunch) {
               IREE_HAL_AMD_GPU_PM4_DISPATCH_PROGRAM_LENGTH);
     iree_hal_amd_gpu_pm4_launch_t launch;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
-        gfxip, &program.kernel, UINT64_C(0x123456780000), &launch));
+        gfxip, 0, &program.kernel, UINT64_C(0x123456780000), &launch));
     EXPECT_EQ(launch.requirements, 0u);
     EXPECT_EQ(launch.user_data_count, 2u);
     EXPECT_EQ(launch.user_data.kernarg_pointer, 0u);

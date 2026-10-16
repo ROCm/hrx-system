@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_LAUNCH_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_LAUNCH_H_
 
+#include "amdf/gpu.h"
 #include "iree/base/api.h"
 #include "iree/hal/drivers/amd/gpu/image/image.h"
 #include "iree/hal/drivers/amd/gpu/target/identity.h"
@@ -36,7 +37,8 @@ typedef uint16_t iree_hal_amd_gpu_pm4_launch_requirements_t;
 typedef struct iree_hal_amd_gpu_pm4_launch_t {
   // COMPUTE_PGM_LO/HI, encoding the placed entry address in 256-byte units.
   uint32_t program[2];
-  // Compiler resource registers, with LDS_SIZE cleared for each binding.
+  // Compiler resource registers plus native queue requirements, with LDS_SIZE
+  // cleared for each binding.
   struct {
     // COMPUTE_PGM_RSRC1, including compiler allocation and execution modes.
     uint32_t resource1;
@@ -55,6 +57,8 @@ typedef struct iree_hal_amd_gpu_pm4_launch_t {
   uint8_t user_data_count;
   // Log2 of compiled workitems per wave, avoiding division during binding.
   uint8_t wavefront_size_log2;
+  // Log2 of the target's LDS allocation unit in bytes.
+  uint8_t group_segment_unit_log2;
   // Dense SGPR indices, or UINT8_MAX when the corresponding input is absent.
   struct {
     // Two-word AQL-compatible dispatch packet pointer.
@@ -73,14 +77,16 @@ typedef struct iree_hal_amd_gpu_pm4_launch_t {
 // Resolves target-dependent register state and the descriptor's initial SGPR
 // layout. This is cold executable-load work. The image has already passed
 // structural parsing and target compatibility; |gfxip| is the physical target.
-// |image_address| is the placed image base. Failure leaves |out_launch|
-// unchanged.
+// |format_features| comes from the selected native PM4 queue family and
+// supplies its context-save requirements. |image_address| is the placed image
+// base. Failure leaves |out_launch| unchanged.
 //
 // Success establishes encoding, not dispatch admission. The owner additionally
 // supplies the required native services, validates metadata/dispatch resource
 // limits, and retains code plus the descriptor's instruction-fetch extent.
 iree_status_t iree_hal_amd_gpu_pm4_launch_initialize(
     iree_hal_amd_gpu_gfxip_version_t gfxip,
+    amdf_queue_format_features_t format_features,
     const iree_hal_amd_gpu_image_kernel_t* kernel, uint64_t image_address,
     iree_hal_amd_gpu_pm4_launch_t* out_launch);
 

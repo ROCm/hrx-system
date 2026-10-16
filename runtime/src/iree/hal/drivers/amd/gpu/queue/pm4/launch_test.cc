@@ -10,6 +10,7 @@
 #include <cstring>
 #include <vector>
 
+#include "amdf/gpu.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco_test_util.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
@@ -19,7 +20,7 @@
 namespace iree::hal::amd::gpu {
 namespace {
 
-static_assert(sizeof(iree_hal_amd_gpu_pm4_launch_t) <= 64);
+static_assert(sizeof(iree_hal_amd_gpu_pm4_launch_t) == 40);
 
 class LaunchTest : public ::testing::Test {
  protected:
@@ -40,7 +41,7 @@ class LaunchTest : public ::testing::Test {
       iree_hal_amd_gpu_gfxip_version_t target = {11, 0, 0}) {
     iree_hal_amd_gpu_pm4_launch_t launch;
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_launch_initialize(
-        target, &kernel_, kImageAddress, &launch));
+        target, 0, &kernel_, kImageAddress, &launch));
     return launch;
   }
 };
@@ -118,16 +119,87 @@ TEST_F(LaunchTest, TargetRowsAndWaveModes) {
       if (target.major == 12 && target.minor == 5 && wavefront_size == 64) {
         IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                               iree_hal_amd_gpu_pm4_launch_initialize(
-                                  target, &kernel_, kImageAddress, &launch));
+                                  target, 0, &kernel_, kImageAddress, &launch));
       } else {
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
-            target, &kernel_, kImageAddress, &launch));
+            target, 0, &kernel_, kImageAddress, &launch));
         EXPECT_EQ(launch.resource3_register,
                   target.major == 12 && target.minor == 5 ? 0x2e23u : 0x2e28u);
         EXPECT_EQ(launch.dispatch_initiator,
                   wavefront_size == 32 ? 0x8005u : 5u);
       }
     }
+  }
+}
+
+TEST_F(LaunchTest, NativeQueueRequirementsPreserveCompilerDescriptor) {
+  struct Case {
+    // Native queue requirements independent of the compiler target.
+    amdf_queue_format_features_t features;
+    // Complete resource register values emitted for this queue context.
+    std::array<uint32_t, 2> resources;
+  };
+  const uint32_t workgroup_size[] = {32, 1, 1};
+  const uint32_t partial_size[] = {0, 0, 0};
+  const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {};
+  const auto descriptor = kernel_;
+  for (const Case& test_case : {
+           Case{0, {0xe0af0000, 0x84}},
+           {AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_PRIV, {0xe0bf0000, 0x84}},
+           {AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_TRAP_PRESENT,
+            {0xe0af0000, 0xc4}},
+           {AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_PRIV |
+                AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_TRAP_PRESENT,
+            {0xe0bf0000, 0xc4}},
+       }) {
+    SCOPED_TRACE(test_case.features);
+    iree_hal_amd_gpu_pm4_launch_t launch;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
+        {11, 0, 0}, test_case.features, &kernel_, kImageAddress, &launch));
+    std::array<uint32_t, 64> words = {};
+    iree_hal_amd_gpu_pm4_launch_emit(words.data(), &launch, workgroup_size,
+                                     partial_size, 0, &inputs);
+    const std::vector<uint32_t> expected = {
+        0xc0027602,
+        0x20c,
+        0x34567802,
+        0x12,
+        0xc0027602,
+        0x212,
+        test_case.resources[0],
+        test_case.resources[1],
+        0xc0017602,
+        0x228,
+        0x20,
+        0xc0017602,
+        0x215,
+        0,
+        0xc0067602,
+        0x204,
+        0,
+        0,
+        0,
+        32,
+        1,
+        1,
+        0xc0027602,
+        0x240,
+        0,
+        0,
+    };
+    EXPECT_EQ(std::vector<uint32_t>(words.begin(), words.begin() + 26),
+              expected);
+    EXPECT_EQ(launch.user_data_count, 2u);
+    EXPECT_EQ(std::memcmp(&kernel_, &descriptor, sizeof(kernel_)), 0);
+  }
+
+  // GFX12 reuses the former trap bit for compiler-selected dynamic VGPRs.
+  // Native feature absence must preserve either compiler selection.
+  for (uint32_t resource2 : {0x84u, 0xc4u}) {
+    kernel_.compute_pgm_rsrc2 = resource2;
+    auto launch = Prepare({12, 0, 0});
+    EXPECT_EQ(launch.resources.resource2, resource2);
+    EXPECT_EQ(launch.user_data_count, 2u);
   }
 }
 
@@ -201,30 +273,42 @@ TEST_F(LaunchTest, ScratchAndStackRequirementsRemainVisible) {
 
 TEST_F(LaunchTest, LdsRebindingReplacesAndCanShrink) {
   kernel_.compute_pgm_rsrc2 |= 0xff8000;
-  auto launch = Prepare();
   const uint32_t workgroup_size[] = {33, 1, 1};
   const uint32_t partial_size[] = {0, 0, 0};
   const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {};
   struct Case {
     // Total admitted workgroup allocation in bytes.
     uint32_t length;
-    // Hardware allocation in 512-byte units.
-    uint32_t units;
+    // Encoded allocation for GFX11/GFX12 and GFX12.5, respectively.
+    std::array<uint32_t, 2> units;
   };
-  for (const Case& test_case : {Case{0, 0},
-                                {1, 1},
-                                {512, 1},
-                                {513, 2},
-                                {65536, 128},
-                                {1024, 2},
-                                {0, 0}}) {
-    std::array<uint32_t, 64> words = {};
-    iree_hal_amd_gpu_pm4_launch_emit(words.data(), &launch, workgroup_size,
-                                     partial_size, test_case.length, &inputs);
-    EXPECT_EQ(words[7], 0x84u | (test_case.units << 15));
-    EXPECT_EQ(words[13], 0u);
+  for (auto target : {iree_hal_amd_gpu_gfxip_version_t{11, 0, 0},
+                      {11, 5, 1},
+                      {11, 7, 0},
+                      {12, 0, 0},
+                      {12, 5, 0}}) {
+    SCOPED_TRACE(::testing::Message() << target.major << '.' << target.minor);
+    auto launch = Prepare(target);
+    for (const Case& test_case : {Case{0, {0, 0}},
+                                  {1, {1, 1}},
+                                  {512, {1, 1}},
+                                  {513, {2, 1}},
+                                  {2048, {4, 1}},
+                                  {2049, {5, 2}},
+                                  {65536, {128, 32}},
+                                  {1024, {2, 1}},
+                                  {0, {0, 0}}}) {
+      SCOPED_TRACE(test_case.length);
+      std::array<uint32_t, 64> words = {};
+      iree_hal_amd_gpu_pm4_launch_emit(words.data(), &launch, workgroup_size,
+                                       partial_size, test_case.length, &inputs);
+      const uint32_t units =
+          test_case.units[target.major == 12 && target.minor == 5];
+      EXPECT_EQ(words[7], 0x84u | (units << 15));
+      EXPECT_EQ(words[13], 0u);
+    }
+    EXPECT_EQ(launch.resources.resource2, 0x84u);
   }
-  EXPECT_EQ(launch.resources.resource2, 0x84u);
 }
 
 TEST_F(LaunchTest, WaveDistributionUsesRoundedWorkgroupSize) {
@@ -257,27 +341,27 @@ TEST_F(LaunchTest, RejectsUnrepresentableDescriptorsWithoutPublishingOutput) {
     kernel_.code_properties = 0x408 | invalid;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           iree_hal_amd_gpu_pm4_launch_initialize(
-                              {11, 0, 0}, &kernel_, kImageAddress, &launch));
+                              {11, 0, 0}, 0, &kernel_, kImageAddress, &launch));
     EXPECT_EQ(std::memcmp(&launch, untouched.data(), sizeof(launch)), 0);
   }
   kernel_.code_properties = 0x408;
   kernel_.kernarg_preload = 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
                         iree_hal_amd_gpu_pm4_launch_initialize(
-                            {11, 0, 0}, &kernel_, kImageAddress, &launch));
+                            {11, 0, 0}, 0, &kernel_, kImageAddress, &launch));
   EXPECT_EQ(std::memcmp(&launch, untouched.data(), sizeof(launch)), 0);
   kernel_.kernarg_preload = 0;
   for (uint32_t count : {0u, 1u, 17u, 31u}) {
     kernel_.compute_pgm_rsrc2 = 0x80u | (count << 1);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           iree_hal_amd_gpu_pm4_launch_initialize(
-                              {11, 0, 0}, &kernel_, kImageAddress, &launch));
+                              {11, 0, 0}, 0, &kernel_, kImageAddress, &launch));
   }
   // GFX12.5's sixth count bit must not be mistaken for GFX11's trap enable.
   kernel_.compute_pgm_rsrc2 = 0xc4;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_amd_gpu_pm4_launch_initialize(
-                            {12, 5, 0}, &kernel_, kImageAddress, &launch));
+                            {12, 5, 0}, 0, &kernel_, kImageAddress, &launch));
   EXPECT_EQ(std::memcmp(&launch, untouched.data(), sizeof(launch)), 0);
 }
 
@@ -290,16 +374,16 @@ TEST_F(LaunchTest, RejectsUnsupportedTargetsAndInvalidPlacement) {
                       {13, 0, 0}}) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
                           iree_hal_amd_gpu_pm4_launch_initialize(
-                              target, &kernel_, kImageAddress, &launch));
+                              target, 0, &kernel_, kImageAddress, &launch));
   }
   for (uint64_t address : {uint64_t{1}, UINT64_C(0xffffffffff00),
                            UINT64_C(0x1000000000000), UINT64_MAX}) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                           iree_hal_amd_gpu_pm4_launch_initialize(
-                              {11, 0, 0}, &kernel_, address, &launch));
+                              {11, 0, 0}, 0, &kernel_, address, &launch));
   }
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
-      {11, 0, 0}, &kernel_, UINT64_C(0xffffffffff00) - kernel_.entry_offset,
+      {11, 0, 0}, 0, &kernel_, UINT64_C(0xffffffffff00) - kernel_.entry_offset,
       &launch));
   EXPECT_EQ(launch.program[0], 0xffffffffu);
   EXPECT_EQ(launch.program[1], 0xffu);
@@ -321,7 +405,8 @@ TEST_F(LaunchTest, PreparesActualHipCompilerArtifacts) {
       for (size_t j = 0; j < image.metadata.kernel_count; ++j) {
         iree_hal_amd_gpu_pm4_launch_t launch = {};
         IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
-            image.target.version, &image.kernels[j], kImageAddress, &launch));
+            image.target.version, 0, &image.kernels[j], kImageAddress,
+            &launch));
         const bool packet = iree_string_view_equal(
             image.metadata.kernels[j].name, IREE_SV("image_dispatch_packet"));
         EXPECT_EQ(launch.requirements,
