@@ -8,6 +8,8 @@ func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
 
+func.decl @qwen38_vision_geometry(%width: i32, %height: i32, %maximum_tokens: i32) -> (i32, i32)
+
 global.rodata.def @input_user_prefix = bytes("3c7c696d5f73746172747c3e757365720a")
 
 global.rodata.def @input_user_suffix = bytes("3c7c696d5f656e647c3e0a3c7c696d5f73746172747c3e617373697374616e740a3c7468696e6b3e0a0a3c2f7468696e6b3e0a0a")
@@ -604,11 +606,11 @@ global.rodata.def @chat_thinking_key = bytes("656e61626c655f7468696e6b696e67")
 
 global.rodata.def @chat_options_key = bytes("6d6f64656c5f6f7074696f6e73")
 
-global.rodata.def @chat_options_error = bytes("7468697320706f6c696379206465636c61726573206e6f206d6f64656c5f6f7074696f6e73")
+global.rodata.def @chat_options_error = bytes("5177656e206d6f64656c5f6f7074696f6e732061636365707473206f6e6c79206d61785f696d6167655f746f6b656e732c20616e20696e74656765722066726f6d20313238207468726f756768203136333834")
 
 global.rodata.def @chat_invalid = bytes("756e737570706f7274656420726f6c652c20726f6c65206669656c64732c206f72206d657373616765206f72646572")
 
-global.rodata.def @chat_image_invalid = bytes("5177656e20696d61676520636f6e74656e742072657175697265732061207573657220726f6c6520616e64206578616374203235367832353620646973706c61792067656f6d65747279")
+global.rodata.def @chat_image_invalid = bytes("5177656e20696d6167657320726571756972652061207573657220726f6c6520616e6420646973706c61792061737065637420726174696f206174206d6f737420323030")
 
 global.rodata.def @chat_end_invalid = bytes("63686174206d75737420636f6e7461696e2061207573657220717565727920616e6420656e6420776974682075736572206f7220746f6f6c20696e707574")
 
@@ -627,10 +629,10 @@ func.def public @model_name() -> (buffer) {
 
 func.def public @chat_image_limits() -> (i64, i64, i64, i64, i64) {
   %maximum_count = scalar.constant 4 : i64
-  %compressed_bytes = scalar.constant 1048576 : i64
-  %width = scalar.constant 256 : i64
-  %height = scalar.constant 256 : i64
-  %pixels = scalar.constant 65536 : i64
+  %compressed_bytes = scalar.constant 67108864 : i64
+  %width = scalar.constant 4096 : i64
+  %height = scalar.constant 4096 : i64
+  %pixels = scalar.constant 16777216 : i64
   func.return %maximum_count, %compressed_bytes, %width, %height, %pixels : i64, i64, i64, i64, i64
 }
 
@@ -946,6 +948,52 @@ func.def public @bind_request(%state: buffer, %row: i32, %options: buffer) {
   func.return
 }
 
+global.rodata.def @chat_image_budget_key = bytes("6d61785f696d6167655f746f6b656e73")
+
+// A budget below 128 cannot contain the checkpoint's minimum-size aligned
+// output at every supported aspect ratio. Larger budgets remain request-local.
+func.def @chat_image_budget(%options: buffer, %default: i64) -> (i64) {
+  %origin = index.constant 0 : offset
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %object_type = scalar.constant 2 : i32
+  %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %at_most_one = scalar.cmpi ule, %count, %one : i64
+  %valid = scalar.andi %object, %at_most_one : i1
+  %valid32 = scalar.extui %valid : i1 to i32
+  %error = global.load @chat_options_error : buffer
+  func.call @require(%valid32, %error) : (i32, buffer)
+  %nonempty = scalar.cmpi ne, %count, %zero : i64
+  %result = scf.if %nonempty -> (i64) {
+    %record = buffer.view %fields[%origin] : buffer -> view<1x5xi64>
+    %key_begin = view.load %record[0, 0] : view<1x5xi64> -> i64
+    %key_length = view.load %record[0, 1] : view<1x5xi64> -> i64
+    %key = func.call @option_key(%options, %key_begin, %key_length) : (buffer, i64, i64) -> (buffer)
+    %name = global.load @chat_image_budget_key : buffer
+    %known = func.call @chat_equal(%key, %name) : (buffer, buffer) -> (i1)
+    %value_type = view.load %record[0, 4] : view<1x5xi64> -> i64
+    %number = scalar.cmpi eq, %value_type, %one : i64
+    %valid = scalar.andi %known, %number : i1
+    %valid32 = scalar.extui %valid : i1 to i32
+    func.call @require(%valid32, %error) : (i32, buffer)
+    %value_begin = view.load %record[0, 2] : view<1x5xi64> -> i64
+    %value_length = view.load %record[0, 3] : view<1x5xi64> -> i64
+    %value = func.call @parse_i64(%options, %value_begin, %value_length) : (buffer, i64, i64) -> (i64)
+    %minimum = scalar.constant 128 : i64
+    %maximum = scalar.constant 16384 : i64
+    %large_enough = scalar.cmpi uge, %value, %minimum : i64
+    %small_enough = scalar.cmpi ule, %value, %maximum : i64
+    %bounded = scalar.andi %large_enough, %small_enough : i1
+    %bounded32 = scalar.extui %bounded : i1 to i32
+    func.call @require(%bounded32, %error) : (i32, buffer)
+    scf.yield %value : i64
+  } else {
+    scf.yield %default : i64
+  }
+  func.return %result : i64
+}
+
 func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -960,27 +1008,27 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
   %records = buffer.view %fields[%origin] : buffer -> view<[%extent]x5xi64>
   %thinking_key = global.load @chat_thinking_key : buffer
   %true = scalar.constant true : i1
-  %thinking = scf.for %i = [%c0 to %extent step %c1](%selected = %true : i1) -> (i1) {
+  %default_image_tokens = scalar.constant 1024 : i64
+  %thinking, %image_tokens = scf.for %i = [%c0 to %extent step %c1](%selected = %true : i1, %budget = %default_image_tokens : i64) -> (i1, i64) {
     %key_origin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
     %key_length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
-    %key = func.call @chat_range(%request, %key_origin, %key_length) : (buffer, i64, i64) -> (buffer)
+    %key = func.call @option_key(%request, %key_origin, %key_length) : (buffer, i64, i64) -> (buffer)
     %options_key = global.load @chat_options_key : buffer
     %is_options = func.call @chat_equal(%key, %options_key) : (buffer, buffer) -> (i1)
-    scf.if %is_options {
+    %next_budget = scf.if %is_options -> (i64) {
       %value_origin = view.load %records[%i, 2] : view<[%extent]x5xi64> -> i64
       %value_length = view.load %records[%i, 3] : view<[%extent]x5xi64> -> i64
       %value = func.call @chat_range(%request, %value_origin, %value_length) : (buffer, i64, i64) -> (buffer)
-      %options, %options_type, %options_count = func.call @members(%value) : (buffer) -> (buffer, i32, i64)
-      %none = scalar.cmpi eq, %options_count, %zero64 : i64
-      %none32 = scalar.extui %none : i1 to i32
-      %options_error = global.load @chat_options_error : buffer
-      func.call @require(%none32, %options_error) : (i32, buffer)
+      %tokens = func.call @chat_image_budget(%value, %budget) : (buffer, i64) -> (i64)
+      scf.yield %tokens : i64
+    } else {
+      scf.yield %budget : i64
     }
     %is_thinking = func.call @chat_equal(%key, %thinking_key) : (buffer, buffer) -> (i1)
     %value_type = view.load %records[%i, 4] : view<[%extent]x5xi64> -> i64
     %enabled = scalar.cmpi eq, %value_type, %true_type : i64
     %next = scf.select %is_thinking, %enabled, %selected : i1
-    scf.yield %next : i1
+    scf.yield %next, %next_budget : i1, i64
   }
   %tool_fields, %tool_type, %tool_count = func.call @members(%tools) : (buffer) -> (buffer, i32, i64)
   %has_tools = scalar.cmpi ne, %tool_count, %zero64 : i64
@@ -1039,45 +1087,58 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
   %system_bit = scf.select %open_system, %four64, %zero64 : i64
   %sixteen = scalar.constant 16 : i64
   %thinking_bit = scf.select %thinking, %sixteen, %zero64 : i64
-  %state = scalar.ori %system_bit, %thinking_bit : i64
+  %flags = scalar.ori %system_bit, %thinking_bit : i64
+  %budget_shift = scalar.constant 5 : i64
+  %budget_bits = scalar.shli %image_tokens, %budget_shift : i64
+  %state = scalar.ori %flags, %budget_bits : i64
   func.return %rendered, %state : buffer, i64
 }
 
 // Renders ordered user content with one logical image-input slot per projected
 // row. Marker ranges cover only the repeated image-pad tokens; the surrounding
 // vision delimiters remain ordinary language-model inputs.
-func.def @chat_ordered_content(%content: buffer, %parts: buffer, %part_count: i64, %images_allowed: i1) -> (buffer, buffer, i64) {
+func.def @chat_ordered_content(%content: buffer, %parts: buffer, %part_count: i64, %images_allowed: i1, %maximum_tokens: i32) -> (buffer, buffer, i64) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c24 = index.constant 24 : index
-  %c64 = index.constant 64 : index
-  %zero32 = scalar.constant 0 : i32
   %text_kind = scalar.constant 0 : i32
-  %feature_count = scalar.constant 64 : i32
-  %dimension = scalar.constant 256 : i32
+  %shape_capacity = index.constant 32 : offset
+  %shapes = buffer.alloca<private> align(4) %shape_capacity : buffer
+  %shape_records = buffer.view %shapes[%origin] : buffer -> view<4x2xi32>
+  %token_pixels = scalar.constant 1024 : i32
   %bounded_part_count = scalar.assume %part_count [range(%part_count, 1, 4096)] : i64
   %part_extent = index.cast %bounded_part_count : i64 to index
   %records = buffer.view %parts[%origin] : buffer -> view<[%part_extent]x7xi32>
-  %image_count_value = scf.for %i = [%c0 to %part_extent step %c1](%count = %c0 : index) -> (index) {
+  %image_count_value, %total_rows = scf.for %i = [%c0 to %part_extent step %c1](%count = %c0 : index, %rows = %c0 : index) -> (index, index) {
     %kind = view.load %records[%i, 0] : view<[%part_extent]x7xi32> -> i32
     %is_text = scalar.cmpi eq, %kind, %text_kind : i32
-    %next = scf.if %is_text -> (index) {
-      scf.yield %count : index
+    %next, %next_rows = scf.if %is_text -> (index, index) {
+      scf.yield %count, %rows : index, index
     } else {
       %width = view.load %records[%i, 4] : view<[%part_extent]x7xi32> -> i32
       %height = view.load %records[%i, 5] : view<[%part_extent]x7xi32> -> i32
-      %width_matches = scalar.cmpi eq, %width, %dimension : i32
-      %height_matches = scalar.cmpi eq, %height, %dimension : i32
-      %geometry_matches = scalar.andi %width_matches, %height_matches : i1
-      %valid = scalar.andi %images_allowed, %geometry_matches : i1
+      %short_axis = scalar.minui %width, %height : i32
+      %long_axis = scalar.maxui %width, %height : i32
+      %ratio_limit = scalar.constant 200 : i32
+      %long_limit = scalar.muli %short_axis, %ratio_limit : i32
+      %aspect_valid = scalar.cmpi ule, %long_axis, %long_limit : i32
+      %valid = scalar.andi %images_allowed, %aspect_valid : i1
       %valid32 = scalar.extui %valid : i1 to i32
       %error = global.load @chat_image_invalid : buffer
       func.call @require(%valid32, %error) : (i32, buffer)
+      %selected_width, %selected_height = func.call @qwen38_vision_geometry(%width, %height, %maximum_tokens) : (i32, i32, i32) -> (i32, i32)
+      %shape_index = index.assume %count [range(%count, 0, 3)] : index
+      view.store %selected_width, %shape_records[%shape_index, 0] : i32, view<4x2xi32>
+      view.store %selected_height, %shape_records[%shape_index, 1] : i32, view<4x2xi32>
+      %pixels = scalar.muli %selected_width, %selected_height : i32
+      %feature_count = scalar.divui %pixels, %token_pixels : i32
+      %feature_extent = index.cast %feature_count : i32 to index
+      %total = index.add %rows, %feature_extent : index
       %incremented = index.add %count, %c1 : index
-      scf.yield %incremented : index
+      scf.yield %incremented, %total : index, index
     }
-    scf.yield %next : index
+    scf.yield %next, %next_rows : index, index
   }
   %image_count64_value = index.cast %image_count_value : index to i64
   %image_count64 = scalar.assume %image_count64_value [range(%image_count64_value, 0, 4)] : i64
@@ -1088,19 +1149,22 @@ func.def @chat_ordered_content(%content: buffer, %parts: buffer, %part_count: i6
   %vision_start_length = buffer.length %vision_start
   %image_pad_length = buffer.length %image_pad
   %vision_end_length = buffer.length %vision_end
-  %pad_bytes = index.scale %c64, %image_pad_length : index, offset -> offset
-  %with_start = index.add %vision_start_length, %pad_bytes : offset
-  %image_bytes = index.add %with_start, %vision_end_length : offset
-  %all_image_bytes = index.scale %image_count, %image_bytes : index, offset -> offset
+  %pad_bytes = index.scale %total_rows, %image_pad_length : index, offset -> offset
+  %delimiter_bytes = index.add %vision_start_length, %vision_end_length : offset
+  %all_delimiters = index.scale %image_count, %delimiter_bytes : index, offset -> offset
+  %all_image_bytes = index.add %all_delimiters, %pad_bytes : offset
   %content_length = buffer.length %content
   %output_capacity = index.add %content_length, %all_image_bytes : offset
   %scratch = buffer.alloca<private> align(1) %output_capacity : buffer
   %plan_size = index.mul %image_count, %c24 : index
   %plan_size64_value = index.cast %plan_size : index to i64
   %plan_size64 = scalar.assume %plan_size64_value [range(%plan_size64_value, 0, 96)] : i64
-  %plan_bytes = index.cast %plan_size64 : i64 to offset
-  %metadata_offset = scalar.trunci %plan_size64 : i64 to i32
+  %metadata_begin = index.cast %plan_size64 : i64 to offset
+  %shape_stride = index.constant 8 : offset
+  %metadata_bytes = index.scale %image_count, %shape_stride : index, offset -> offset
+  %plan_bytes = index.add %metadata_begin, %metadata_bytes : offset
   %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
+  buffer.copy %shapes[%origin], %plan[%metadata_begin], %metadata_bytes
   %markers = buffer.view %plan[%origin] : buffer -> view<[%image_count]x6xi32>
   %used, %final_image = scf.for %i = [%c0 to %part_extent step %c1](%cursor = %origin : offset, %image = %c0 : index) -> (offset, index) {
     %kind = view.load %records[%i, 0] : view<[%part_extent]x7xi32> -> i32
@@ -1118,9 +1182,15 @@ func.def @chat_ordered_content(%content: buffer, %parts: buffer, %part_count: i6
       %after_text = index.add %cursor, %length : offset
       scf.yield %after_text, %image : offset, index
     } else {
+      %shape_index = index.assume %image [range(%image, 0, 3)] : index
+      %width = view.load %shape_records[%shape_index, 0] : view<4x2xi32> -> i32
+      %height = view.load %shape_records[%shape_index, 1] : view<4x2xi32> -> i32
+      %pixels = scalar.muli %width, %height : i32
+      %feature_count = scalar.divui %pixels, %token_pixels : i32
+      %feature_extent = index.cast %feature_count : i32 to index
       buffer.copy %vision_start[%origin], %scratch[%cursor], %vision_start_length
       %marker_begin = index.add %cursor, %vision_start_length : offset
-      %after_pads = scf.for %j = [%c0 to %c64 step %c1](%pad_cursor = %marker_begin : offset) -> (offset) {
+      %after_pads = scf.for %j = [%c0 to %feature_extent step %c1](%pad_cursor = %marker_begin : offset) -> (offset) {
         buffer.copy %image_pad[%origin], %scratch[%pad_cursor], %image_pad_length
         %next = index.add %pad_cursor, %image_pad_length : offset
         scf.yield %next : offset
@@ -1139,8 +1209,12 @@ func.def @chat_ordered_content(%content: buffer, %parts: buffer, %part_count: i6
       view.store %marker_begin32, %bounded_markers[%bounded_image, 1] : i32, view<[%bounded_image_count]x6xi32>
       view.store %marker_length32, %bounded_markers[%bounded_image, 2] : i32, view<[%bounded_image_count]x6xi32>
       view.store %feature_count, %bounded_markers[%bounded_image, 3] : i32, view<[%bounded_image_count]x6xi32>
+      %shape_offset = index.scale %image, %shape_stride : index, offset -> offset
+      %metadata_position = index.add %metadata_begin, %shape_offset : offset
+      %metadata_offset = index.cast %metadata_position : offset to i32
+      %metadata_length = scalar.constant 8 : i32
       view.store %metadata_offset, %bounded_markers[%bounded_image, 4] : i32, view<[%bounded_image_count]x6xi32>
-      view.store %zero32, %bounded_markers[%bounded_image, 5] : i32, view<[%bounded_image_count]x6xi32>
+      view.store %metadata_length, %bounded_markers[%bounded_image, 5] : i32, view<[%bounded_image_count]x6xi32>
       %after_image_index = index.add %image, %c1 : index
       scf.yield %after_image, %after_image_index : offset, index
     }
@@ -1178,7 +1252,7 @@ func.def @chat_shift_markers(%plan: buffer, %image_count64: i64, %base: offset) 
 }
 
 // Low two bits hold the preceding role; bits 2/3 retain system/user presence,
-// and bit 4 selects thinking for this generation.
+// bit 4 selects thinking, and the upper bits hold the per-image token budget.
 // This is source-private state. Native code carries it without interpreting it.
 func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64, buffer) {
   %zero64 = scalar.constant 0 : i64
@@ -1187,7 +1261,7 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   %three64 = scalar.constant 3 : i64
   %four64 = scalar.constant 4 : i64
   %eight64 = scalar.constant 8 : i64
-  %retained_mask = scalar.constant 28 : i64
+  %retained_mask = scalar.constant -4 : i64
   %c0 = index.constant 0 : offset
   %empty = global.load @input_empty_boundary : buffer
   %close = global.load @input_open_boundary : buffer
@@ -1226,7 +1300,10 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   func.call @require(%valid32, %error) : (i32, buffer)
   %has_parts = scalar.cmpi ne, %part_count, %zero64 : i64
   %text, %plan, %image_count = scf.if %has_parts -> (buffer, buffer, i64) {
-    %ordered, %markers, %images = func.call @chat_ordered_content(%content, %parts, %part_count, %user) : (buffer, buffer, i64, i1) -> (buffer, buffer, i64)
+    %budget_shift = scalar.constant 5 : i64
+    %budget = scalar.shrui %state, %budget_shift : i64
+    %maximum_tokens = scalar.trunci %budget : i64 to i32
+    %ordered, %markers, %images = func.call @chat_ordered_content(%content, %parts, %part_count, %user, %maximum_tokens) : (buffer, buffer, i64, i1, i32) -> (buffer, buffer, i64)
     scf.yield %ordered, %markers, %images : buffer, buffer, i64
   } else {
     %trimmed = func.call @chat_trim(%content) : (buffer) -> (buffer)

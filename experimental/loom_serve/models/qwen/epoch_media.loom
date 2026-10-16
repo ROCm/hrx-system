@@ -5,10 +5,20 @@
 // continuation compaction moves records without moving their projected rows.
 // Ordinary epochs retain their four-byte token array.
 //
-// The 256-square projector emits an 8x8 merged grid in row-major order. Its
-// source frontier is one past the maximum coordinate of the consumed prefix:
-// the first eight rows advance it, and the remaining rows leave it unchanged.
-// The complete-image row index recovers the same base across epoch boundaries.
+// A row-major rectangular grid advances the source frontier to one past the
+// maximum consumed coordinate. Its width comes from the source-owned image
+// metadata. The complete-image row index recovers the same base across epoch
+// boundaries, including tall grids whose later rows advance the frontier again.
+func.def @image_source_frontier(%consumed: i32, %width: i32) -> (i32) {
+  %one = scalar.constant 1 : i32
+  %bias = scalar.subi %width, %one : i32
+  %rounded = scalar.addi %consumed, %bias : i32
+  %height_frontier = scalar.divui %rounded, %width : i32
+  %width_frontier = scalar.minui %consumed, %width : i32
+  %frontier = scalar.maxui %height_frontier, %width_frontier : i32
+  func.return %frontier : i32
+}
+
 func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: buffer, %media_begin: index, %media_end: index, %count: index, %first: index, %metadata: buffer, %tokens: buffer, %packet_begin: index) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
@@ -21,7 +31,7 @@ func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: 
   %records = buffer.view %tokens[%origin] : buffer -> view<1024x8xi32>
   %token_placeholder = scalar.constant 0 : i32
   %position_step = scalar.constant 1 : i32
-  %grid_extent = scalar.constant 8 : i32
+  %merged_patch = scalar.constant 32 : i32
   %primary = index.cmp eq, %first, %c0 : index
   %last_input, %last_media = scf.for %span = [%c0 to %count step %c1](%begin = %packet_begin : index, %media_cursor = %media_begin : index) -> (index, index) {
     %plan_index_value = index.add %first, %span : index
@@ -82,14 +92,20 @@ func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: 
         %media_index = index.assume %cursor [range(%cursor, 0, 1023), lt(%cursor, %media_end)] : index
         %feature_offset = view.load %media[%media_index, 2] : view<[%media_end]x7xi32> -> i32
         %feature_index = view.load %media[%media_index, 6] : view<[%media_end]x7xi32> -> i32
-        %in_first_row = scalar.cmpi ult, %feature_index, %grid_extent : i32
-        %prefix_extent = scf.select %in_first_row, %feature_index, %grid_extent : i32
+        %image_metadata_word = view.load %media[%media_index, 4] : view<[%media_end]x7xi32> -> i32
+        %image_metadata_offset = index.cast %image_metadata_word : i32 to offset
+        %image_metadata = buffer.view %media_plan[%image_metadata_offset] : buffer -> view<2xi32>
+        %image_width = view.load %image_metadata[0] : view<2xi32> -> i32
+        %grid_extent = scalar.divui %image_width, %merged_patch : i32
+        %prefix_extent = func.call @image_source_frontier(%feature_index, %grid_extent) : (i32, i32) -> (i32)
         %base = scalar.subi %source, %prefix_extent : i32
         %height = scalar.divui %feature_index, %grid_extent : i32
         %width = scalar.remui %feature_index, %grid_extent : i32
         %height_position = scalar.addi %base, %height : i32
         %width_position = scalar.addi %base, %width : i32
-        %advance = scalar.extui %in_first_row : i1 to i32
+        %consumed = scalar.addi %feature_index, %position_step : i32
+        %suffix_extent = func.call @image_source_frontier(%consumed, %grid_extent) : (i32, i32) -> (i32)
+        %advance = scalar.subi %suffix_extent, %prefix_extent : i32
         %following = scalar.addi %source, %advance : i32
         view.store %feature_offset, %records[%record, 1] : i32, view<1024x8xi32>
         view.store %base, %records[%record, 2] : i32, view<1024x8xi32>
@@ -123,13 +139,21 @@ func.def public @publish_media_positions(%plan: buffer, %media_plan: buffer, %co
   %c1 = index.constant 1 : index
   %c16 = index.constant 16 : index
   %position_step = scalar.constant 1 : i32
-  %grid_extent = scalar.constant 8 : i32
+  %merged_patch = scalar.constant 32 : i32
   %requests = buffer.view %plan[%origin] : buffer -> view<32x9xi32>
   %media = buffer.view %media_plan[%origin] : buffer -> view<[%count]x7xi32>
   %published = buffer.view %progress[%origin] : buffer -> view<16x21xi32>
   scf.for %i = [%c0 to %count step %c1] {
     %feature_index = view.load %media[%i, 6] : view<[%count]x7xi32> -> i32
-    %compressed = scalar.cmpi uge, %feature_index, %grid_extent : i32
+    %image_metadata_word = view.load %media[%i, 4] : view<[%count]x7xi32> -> i32
+    %image_metadata_offset = index.cast %image_metadata_word : i32 to offset
+    %image_metadata = buffer.view %media_plan[%image_metadata_offset] : buffer -> view<2xi32>
+    %image_width = view.load %image_metadata[0] : view<2xi32> -> i32
+    %grid_extent = scalar.divui %image_width, %merged_patch : i32
+    %prefix_extent = func.call @image_source_frontier(%feature_index, %grid_extent) : (i32, i32) -> (i32)
+    %consumed = scalar.addi %feature_index, %position_step : i32
+    %suffix_extent = func.call @image_source_frontier(%consumed, %grid_extent) : (i32, i32) -> (i32)
+    %compressed = scalar.cmpi eq, %prefix_extent, %suffix_extent : i32
     scf.if %compressed {
       %plan_word = view.load %media[%i, 0] : view<[%count]x7xi32> -> i32
       %plan_value = index.cast %plan_word : i32 to index

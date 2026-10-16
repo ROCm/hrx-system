@@ -1,0 +1,25 @@
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
+
+global.rodata.def @vision_root = bytes("7177656e33385f766973696f6e5f70726f6a6563746f72")
+
+global.rodata.def @vision_height_key = bytes("7177656e33382e766973696f6e2e696d6167655f686569676874")
+
+global.rodata.def @vision_width_key = bytes("7177656e33382e766973696f6e2e696d6167655f7769647468")
+
+global.rodata.def @vision_count_key = bytes("7177656e33382e766973696f6e2e696d6167655f636f756e74")
+
+// Cold preparation and request cohorts share one declaration contract. Native
+// serving owns compilation, bounded executable reuse, and checkpoint residency.
+func.def @qwen38_vision_stage(%height: i64, %width: i64, %count: i64) -> (i32) {
+  %root = global.load @vision_root : buffer
+  %stage = func.call @stage(%root, %count) : (buffer, i64) -> (i32)
+  %height_key = global.load @vision_height_key : buffer
+  %width_key = global.load @vision_width_key : buffer
+  %count_key = global.load @vision_count_key : buffer
+  func.call @config_i64(%stage, %height_key, %height) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %width_key, %width) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %count_key, %count) : (i32, buffer, i64)
+  func.return %stage : i32
+}
