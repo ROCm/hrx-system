@@ -26,7 +26,7 @@ func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i
 
 // The native packer transfers ownership of its exact upload. Fill the reserved
 // directory in place; the original decoded planes need no further cohort copy.
-func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
+func.def public @prepare_batch(%state: buffer, %stage_tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -36,12 +36,14 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
   %count_value = scalar.divui %range_bytes64, %sixteen : i64
   %count64 = scalar.assume %count_value [range(%count_value, 1, 4)] : i64
   %count = index.cast %count64 : i64 to index
-  %tag_words = buffer.view %tags[%origin] : buffer -> view<[%count]xi64>
-  %tag = view.load %tag_words[0] : view<[%count]xi64> -> i64
-  %shift = scalar.constant 32 : i64
-  %mask = scalar.constant 4294967295 : i64
-  %width64 = scalar.shrui %tag, %shift : i64
-  %height64 = scalar.andi %tag, %mask : i64
+  // Compatibility tags select the cohort; stage_tags names cold declarations.
+  // The first prepared packet carries the selected geometry for this cohort.
+  %resize_header_offset = index.constant 64 : offset
+  %resize_header = buffer.view %packed[%resize_header_offset] : buffer -> view<16xi32>
+  %height = view.load %resize_header[2] : view<16xi32> -> i32
+  %width = view.load %resize_header[3] : view<16xi32> -> i32
+  %width64 = scalar.extui %width : i32 to i64
+  %height64 = scalar.extui %height : i32 to i64
   %pixels = scalar.muli %width64, %height64 : i64
   %token_pixels = scalar.constant 1024 : i64
   %image_rows = scalar.divui %pixels, %token_pixels : i64
