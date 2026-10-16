@@ -273,6 +273,7 @@ loom_cc_library(
     "managed_media_service_test.cc"
     "media_execution_test.cc"
     "media_service_test.cc"
+    "native_service_test.cc"
     "projector_execution_test.cc"
     "source_execution_test.cc"
   DEPS
@@ -281,7 +282,9 @@ loom_cc_library(
     ::model
     ::readiness
     ::source_service_fixture
+    ::stream
     iree::base::internal::json
+    iree::base::tooling::flags
     loom::serve::media::image_codec
     loom::serve::media::image_codecs
     loom::serve::media::image_request
@@ -626,6 +629,40 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    stream
+  HDRS
+    "stream.h"
+  SRCS
+    "stream.c"
+  DEPS
+    ::chat
+    ::consumer
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    stream_test
+  SRCS
+    "stream_test.cc"
+  DEPS
+    ::chat
+    ::consumer
+    ::stream
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     session
   HDRS
     "session.h"
@@ -925,7 +962,7 @@ loom_cc_library(
     ::admission
     ::chat
     ::checkpoint_registry
-    ::http
+    ::consumer
     ::media_projector
     ::model
     ::pending_request
@@ -936,8 +973,6 @@ loom_cc_library(
     iree::base
     loom::serve::runtime::parameter::residency
     loom::serve::telemetry::stream
-    loom::serve::transport::http::request
-    loom::serve::transport::http::server
   PUBLIC
 )
 endif()
@@ -992,6 +1027,7 @@ loom_cc_library(
     ::schedule
     ::session
     ::session_cache
+    ::stream
     ::telemetry
     iree::async
     iree::async::util::proactor_pool

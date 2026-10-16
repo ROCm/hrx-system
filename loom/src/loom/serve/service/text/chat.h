@@ -151,7 +151,7 @@ typedef struct loom_serve_text_chat_tool_t {
 } loom_serve_text_chat_tool_t;
 
 enum loom_serve_text_chat_flag_bits_e {
-  // Publish incremental SSE output instead of one JSON completion.
+  // Publish incremental semantic spans; HTTP encodes them as SSE events.
   LOOM_SERVE_TEXT_CHAT_FLAG_STREAM = 1u << 0,
   // Append a final usage chunk and include usage:null on preceding chunks.
   LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE = 1u << 1,
@@ -159,7 +159,7 @@ enum loom_serve_text_chat_flag_bits_e {
 typedef uint32_t loom_serve_text_chat_flags_t;
 
 // One validated chat request. The prompt owns its canonical rendered
-// text; tool and encoded-image views borrow the HTTP body.
+// text; tool and encoded-image views borrow the consumer-owned request body.
 typedef struct loom_serve_text_chat_t {
   // Source policy borrowed from the model for the request lifetime.
   const loom_serve_text_chat_policy_t* policy;
@@ -184,7 +184,7 @@ typedef struct loom_serve_text_chat_t {
   iree_host_size_t max_tokens;
   // Validated transport and usage options; inference is independent of these.
   loom_serve_text_chat_flags_t flags;
-  // Original tool declarations borrowing the HTTP body, or the literal [].
+  // Original tool declarations borrowing the request body, or the literal [].
   iree_string_view_t tool_schemas;
   // Host allocator owning the tool descriptor array.
   iree_allocator_t host_allocator;
@@ -330,7 +330,7 @@ iree_status_t loom_serve_text_chat_complete(
     loom_serve_text_chat_scratch_t* scratch, iree_allocator_t scratch_allocator,
     loom_serve_text_chat_completion_t* completion);
 
-// Borrowed wire metadata copied from a session at each publication. Identity
+// Borrowed output metadata copied from a session at each publication. Identity
 // and creation time remain fixed across a response; counters include only
 // committed tokens, never rejected speculative predictions.
 typedef struct loom_serve_text_chat_response_t {

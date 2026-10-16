@@ -1,0 +1,548 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "iree/base/tooling/flags.h"
+#include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/serve/service/text/stream.h"
+
+IREE_FLAG(string, native_text_model, "",
+          "Optional learned model document for native text qualification.");
+IREE_FLAG(string, native_text_request, "",
+          "Streaming chat JSON paired with native_text_model.");
+IREE_FLAG(int32_t, native_text_workers, 1,
+          "Shared worker count for filtered native text qualification.");
+
+namespace {
+
+using loom_serve::testing::text::Oracle;
+using loom_serve::testing::text::OwnerTurn;
+using loom_serve::testing::text::RegisteredSourceTextServiceTest;
+
+using NativeStream = std::unique_ptr<loom_serve_text_stream_t,
+                                     decltype(&loom_serve_text_stream_close)>;
+
+std::string String(iree_string_view_t value) {
+  return std::string(value.data, value.size);
+}
+
+iree_string_view_t Field(iree_string_view_t object, const char* name) {
+  iree_string_view_t value = iree_string_view_empty();
+  IREE_EXPECT_OK(iree_json_lookup_object_value(
+      object, iree_make_cstring_view(name), &value));
+  return value;
+}
+
+std::string Decode(iree_string_view_t value) {
+  std::string decoded(value.size, '\0');
+  iree_host_size_t length = 0;
+  IREE_EXPECT_OK(iree_json_unescape_string(value, decoded.size(),
+                                           decoded.data(), &length));
+  decoded.resize(length);
+  return decoded;
+}
+
+class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
+ protected:
+  iree_host_size_t WorkerCount() const override {
+    return FLAG_native_text_workers;
+  }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(RegisteredSourceTextServiceTest::SetUp());
+    registration_options_.device_group = group_;
+    IREE_ASSERT_OK(loom_serve_registry_allocate(
+        0, nullptr, 1,
+        loom_serve_model_registration_factory(&registration_options_),
+        host_allocator_, &registry_));
+    ASSERT_EQ(FLAG_native_text_model[0] != 0, FLAG_native_text_request[0] != 0);
+    if (FLAG_native_text_request[0]) {
+      iree_io_file_contents_t* contents = nullptr;
+      IREE_ASSERT_OK(iree_io_file_contents_read(
+          iree_make_cstring_view(FLAG_native_text_request), host_allocator_,
+          &contents));
+      body_.assign(reinterpret_cast<const char*>(contents->buffer.data),
+                   contents->buffer.data_length);
+      iree_io_file_contents_free(contents);
+    } else {
+      body_ = Request(Message("user", "abxa"), 4);
+    }
+    ASSERT_EQ(String(Field(iree_make_cstring_view(body_.c_str()), "stream")),
+              "true");
+    ASSERT_NO_FATAL_FAILURE(Register());
+  }
+
+  void TearDown() override {
+    if (registry_ && loom_serve_registry_count(registry_)) {
+      IREE_EXPECT_OK(
+          loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));
+      AdvanceRegistryUntil(
+          [&] { return loom_serve_registry_count(registry_) == 0; });
+    }
+    IREE_EXPECT_OK(loom_serve_registry_free(registry_));
+    loom_serve_http_server_request_stop(server_);
+    if (reader_.joinable()) {
+      reader_.join();
+    }
+    IREE_EXPECT_OK(read_status_);
+    RegisteredSourceTextServiceTest::TearDown();
+  }
+
+  void Register() {
+    loom_serve_model_configuration_t configuration;
+    if (FLAG_native_text_model[0]) {
+      IREE_ASSERT_OK(loom_serve_model_configuration_load(
+          iree_make_cstring_view(FLAG_native_text_model), host_allocator_,
+          &configuration));
+    } else {
+      const auto declaration =
+          Declaration("fixture-text", directory_, "drained");
+      IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
+          iree_make_cstring_view(declaration.c_str()), iree_string_view_empty(),
+          nullptr, host_allocator_, &configuration));
+    }
+    name_ = String(configuration.name);
+    configuration.start_drained = true;
+    auto status =
+        loom_serve_registry_register(registry_, &configuration, &index_);
+    loom_serve_model_configuration_deinitialize(&configuration);
+    IREE_ASSERT_OK(status);
+  }
+
+  loom_serve_registered_model_t* Model() {
+    return loom_serve_registry_at(registry_, index_);
+  }
+
+  template <typename Predicate>
+  void AdvanceRegistryUntil(Predicate ready) {
+    auto* notification = loom_serve_http_server_notification(server_);
+    const loom_serve_wake_callback_t wake = {
+        [](void* self) {
+          iree_notification_post(static_cast<iree_notification_t*>(self),
+                                 IREE_ALL_WAITERS);
+        },
+        notification};
+    while (!ready()) {
+      const auto ticket = iree_notification_prepare_wait(notification);
+      bool progress = false;
+      auto status = iree_ok_status();
+      if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
+        auto& service = Model()->service;
+        status = service.advance(service.self,
+                                 loom_serve_registry_service_flags(Model()),
+                                 &progress);
+      }
+      bool registry_progress = false;
+      if (iree_status_is_ok(status)) {
+        status = loom_serve_registry_advance(registry_, index_, wake,
+                                             &registry_progress);
+      }
+      status = iree_status_join(status, iree_status_clone(Model()->status));
+      if (ready() || progress || registry_progress ||
+          !iree_status_is_ok(status)) {
+        iree_notification_cancel_wait(notification);
+      } else {
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+      IREE_ASSERT_OK(status);
+    }
+  }
+
+  void Prepare() {
+    Model()->closed = false;
+    ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
+        [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
+  }
+
+  bool Idle() {
+    const auto& service = Model()->service;
+    return !service.is_pending(service.self) &&
+           !service.is_active(service.self) &&
+           !service.snapshot(service.self).queued_requests;
+  }
+
+  iree_status_t Open(const std::string& body, const char* session,
+                     NativeStream* stream, const char* checkpoint = "") {
+    loom_serve_text_request_t request = {
+        .session = iree_make_cstring_view(session),
+        .checkpoint = iree_make_cstring_view(checkpoint),
+    };
+    iree_string_builder_initialize(host_allocator_, &request.body);
+    auto status = iree_string_builder_append_string(
+        &request.body, iree_make_string_view(body.data(), body.size()));
+    const char* input = iree_string_builder_buffer(&request.body);
+    loom_serve_text_stream_t* value = nullptr;
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_registry_try_open_text(
+          registry_, iree_make_cstring_view(name_.c_str()), &request, &value);
+    }
+    if (value) {
+      EXPECT_EQ(request.body.buffer, nullptr);
+      EXPECT_EQ(request.session.data, nullptr);
+    } else {
+      EXPECT_EQ(iree_string_builder_buffer(&request.body), input);
+      EXPECT_EQ(String(iree_string_builder_view(&request.body)), body);
+      EXPECT_EQ(String(request.session), session);
+    }
+    iree_string_builder_deinitialize(&request.body);
+    stream->reset(value);
+    return status;
+  }
+
+  void AwaitBlock(const NativeStream& stream) {
+    ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+      return loom_serve_text_stream_peek(stream.get()) ||
+             loom_serve_text_stream_is_complete(stream.get());
+    }));
+    IREE_ASSERT_OK(loom_serve_text_stream_status(stream.get()));
+    ASSERT_NE(loom_serve_text_stream_peek(stream.get()), nullptr);
+  }
+
+  void ReadFinal(const NativeStream& stream) {
+    std::string content, reasoning;
+    ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+      if (const auto* block = loom_serve_text_stream_peek(stream.get())) {
+        for (iree_host_size_t i = 0;
+             i < loom_serve_text_stream_block_count(block); ++i) {
+          const auto span = loom_serve_text_stream_block_at(block, i);
+          EXPECT_TRUE(span.kind == LOOM_SERVE_TEXT_CHAT_OUTPUT_CONTENT ||
+                      span.kind == LOOM_SERVE_TEXT_CHAT_OUTPUT_REASONING);
+          (span.kind == LOOM_SERVE_TEXT_CHAT_OUTPUT_CONTENT ? content
+                                                            : reasoning)
+              .append(span.text.data, span.text.size);
+        }
+        loom_serve_text_stream_consume(stream.get());
+      }
+      return loom_serve_text_stream_is_complete(stream.get());
+    }));
+    IREE_ASSERT_OK(loom_serve_text_stream_status(stream.get()));
+    const auto* result = loom_serve_text_stream_result(stream.get());
+    ASSERT_NE(result, nullptr);
+    if (result->response.flags & LOOM_SERVE_TEXT_CHAT_FLAG_STREAM) {
+      EXPECT_EQ(String(result->content), content);
+      EXPECT_EQ(String(result->reasoning), reasoning);
+    } else {
+      EXPECT_TRUE(content.empty());
+      EXPECT_TRUE(reasoning.empty());
+    }
+    EXPECT_EQ(String(result->response.model_name), name_);
+    EXPECT_GT(result->response.usage.output_tokens, 0u);
+  }
+
+  std::string CompleteRequest() {
+    std::string body = body_;
+    iree_string_view_t options;
+    IREE_EXPECT_OK(
+        iree_json_try_lookup_object_value(iree_make_cstring_view(body.c_str()),
+                                          IREE_SV("stream_options"), &options));
+    if (options.size) {
+      body.replace(options.data - body.data(), options.size, "null");
+    }
+    const auto streaming =
+        Field(iree_make_cstring_view(body.c_str()), "stream");
+    body.replace(streaming.data - body.data(), streaming.size, "false");
+    return body;
+  }
+
+  void StartHttp() {
+    const auto body = CompleteRequest();
+    const int client = Send(body, "X-Loom-Session: http\r\n");
+    loom_serve_http_connection_t* connection = nullptr;
+    ASSERT_NO_FATAL_FAILURE(Accept(client, Model()->service, &connection));
+    reader_ = std::thread([this, client] {
+      read_status_ = http_.Read(client, false, &response_);
+    });
+  }
+
+  void CheckHttp(const loom_serve_text_stream_result_t& result) {
+    reader_.join();
+    ASSERT_EQ(response_.find("HTTP/1.1 200 OK\r\n"), 0u) << response_;
+    const size_t offset = response_.find("\r\n\r\n");
+    ASSERT_NE(offset, std::string::npos);
+    const auto document = iree_make_string_view(response_.data() + offset + 4,
+                                                response_.size() - offset - 4);
+    iree_string_view_t choice;
+    IREE_ASSERT_OK(iree_json_array_get(Field(document, "choices"), 0, &choice));
+    const auto message = Field(choice, "message");
+    if (result.calls->count && !result.content.size) {
+      EXPECT_EQ(String(Field(message, "content")), "null");
+    } else {
+      EXPECT_EQ(Decode(Field(message, "content")), String(result.content));
+    }
+    if (result.reasoning.size) {
+      EXPECT_EQ(Decode(Field(message, "reasoning_content")),
+                String(result.reasoning));
+    }
+    EXPECT_EQ(Decode(Field(choice, "finish_reason")),
+              String(result.finish_reason));
+    const auto usage = Field(document, "usage");
+    EXPECT_EQ(String(Field(usage, "prompt_tokens")),
+              std::to_string(result.response.usage.input_tokens));
+    EXPECT_EQ(String(Field(usage, "completion_tokens")),
+              std::to_string(result.response.usage.output_tokens));
+    if (result.calls->count) {
+      const auto calls = Field(message, "tool_calls");
+      iree_host_size_t count = 0;
+      IREE_ASSERT_OK(iree_json_array_length(calls, &count));
+      ASSERT_EQ(count, result.calls->count);
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        iree_string_view_t call;
+        IREE_ASSERT_OK(iree_json_array_get(calls, i, &call));
+        const auto function = Field(call, "function");
+        const auto native = loom_serve_text_tool_calls_at(result.calls, i);
+        EXPECT_EQ(Decode(Field(function, "name")), String(native.name));
+        EXPECT_EQ(Decode(Field(function, "arguments")),
+                  String(native.arguments));
+        EXPECT_NE(Decode(Field(call, "id")), String(native.id));
+      }
+    }
+  }
+
+  // Factory borrows the process-wide physical group through model retirement.
+  loom_serve_model_registration_options_t registration_options_ = {};
+  // Actual managed service, with no duplicate executor or model loop.
+  loom_serve_registry_t* registry_ = nullptr;
+  // Stable registry slot, reused only after the prior incarnation retires.
+  iree_host_size_t index_ = 0;
+  // Copied deployment identity, retained across model destruction.
+  std::string name_;
+  // Complete supported request, reused across native and HTTP representations.
+  std::string body_;
+  // Outer socket reader, independent of the serialized serving owner.
+  std::thread reader_;
+  // Reader output, inspected only after joining the reader.
+  std::string response_;
+  // Reader terminal status, consumed by teardown after joining.
+  iree_status_t read_status_ = iree_ok_status();
+};
+
+TEST_F(NativeTextRegistryTest, StalledNativeAndHttpPeerRetainDetachedResult) {
+  NativeStream stream(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "native", &stream));
+  EXPECT_EQ(stream, nullptr);
+  EXPECT_EQ(Model()->phase, LOOM_SERVE_REGISTRATION_DECLARED);
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  IREE_ASSERT_OK(Open(body_, "native", &stream));
+  ASSERT_NE(stream, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AwaitBlock(stream));
+  const auto* block = loom_serve_text_stream_peek(stream.get());
+  ASSERT_GT(loom_serve_text_stream_block_count(block), 0u);
+  const auto held = loom_serve_text_stream_block_at(block, 0);
+  const std::string held_text = String(held.text);
+  ASSERT_EQ(loom_serve_text_stream_result(stream.get()), nullptr);
+  ASSERT_NO_FATAL_FAILURE(StartHttp());
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+    const auto* counters = Model()->service.telemetry.counters;
+    return counters->completed || counters->failed || counters->rejected;
+  }));
+  ASSERT_EQ(Model()->service.telemetry.counters->completed, 1u);
+  EXPECT_EQ(String(held.text), held_text);
+  EXPECT_EQ(loom_serve_text_stream_peek(stream.get()), block);
+  EXPECT_EQ(loom_serve_text_stream_result(stream.get()), nullptr);
+  const auto incarnation = Model()->incarnation;
+  IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_DRAIN));
+  NativeStream rejected(nullptr, loom_serve_text_stream_close);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        Open(body_, "later", &rejected));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(stream));
+  const auto* final = loom_serve_text_stream_result(stream.get());
+  ASSERT_NE(final, nullptr);
+  ASSERT_NO_FATAL_FAILURE(CheckHttp(*final));
+  const std::string content = String(final->content);
+  if (!FLAG_native_text_model[0]) {
+    EXPECT_EQ(content, Oracle::Complete("abxa", 4));
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
+      [&] { return loom_serve_registry_count(registry_) == 0; }));
+  loom_serve_telemetry_counters_t counters;
+  ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
+  EXPECT_EQ(counters.requests, 2u);
+  EXPECT_EQ(counters.completed, 2u);
+
+  ASSERT_NO_FATAL_FAILURE(Register());
+  EXPECT_GT(Model()->incarnation, incarnation);
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream replacement(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "replacement", &replacement));
+  ASSERT_NE(replacement, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(replacement));
+  EXPECT_EQ(String(loom_serve_text_stream_result(replacement.get())->content),
+            content);
+  IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_DRAIN));
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
+      [&] { return loom_serve_registry_count(registry_) == 0; }));
+  IREE_ASSERT_OK(loom_serve_registry_free(registry_));
+  registry_ = nullptr;
+  EXPECT_EQ(loom_serve_text_stream_result(stream.get()), final);
+  EXPECT_EQ(String(final->content), content);
+  EXPECT_EQ(String(final->response.model_name), name_);
+  IREE_EXPECT_OK(loom_serve_text_stream_status(stream.get()));
+}
+
+TEST_F(NativeTextRegistryTest, AbortRetiresAcceptedWorkBeforeReleasingInput) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream first(nullptr, loom_serve_text_stream_close);
+  NativeStream second(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "first", &first));
+  ASSERT_NE(first, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+    const auto phase = loom_serve_registry_snapshot(Model()).phase;
+    return std::string(phase) == "execute";
+  }));
+  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+    IREE_ASSERT_OK(Open(body_, "second", &second));
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(Model()->service.telemetry.counters->batches, 0u);
+    // Admission has accepted the independent preparation loan. With one worker
+    // it cannot start until this owner turn returns; additional workers may
+    // already be reading the body. Neither case may release it at close.
+    second.reset();
+    IREE_ASSERT_OK(
+        loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));
+  });
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
+      [&] { return loom_serve_registry_count(registry_) == 0; }));
+  loom_serve_telemetry_counters_t counters;
+  ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
+  EXPECT_EQ(counters.requests, 2u);
+  EXPECT_EQ(counters.cancelled, 2u);
+  IREE_ASSERT_OK(loom_serve_registry_free(registry_));
+  registry_ = nullptr;
+  EXPECT_TRUE(loom_serve_text_stream_is_complete(first.get()));
+  EXPECT_EQ(loom_serve_text_stream_result(first.get()), nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        loom_serve_text_stream_status(first.get()));
+}
+
+TEST_F(NativeTextRegistryTest,
+       AdmissionPressureAndValidationPreserveOwnership) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream rejected(nullptr, loom_serve_text_stream_close);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Open(body_, "invalid/session", &rejected));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        Open(body_, "", &rejected, "missing"));
+  EXPECT_EQ(Model()->service.telemetry.counters->requests, 0u);
+  std::vector<NativeStream> waiting;
+  const auto capacity = Model()->configuration.pending_requests;
+  for (iree_host_size_t i = 0; i < capacity; ++i) {
+    NativeStream stream(nullptr, loom_serve_text_stream_close);
+    IREE_ASSERT_OK(
+        Open(body_, ("queued" + std::to_string(i)).c_str(), &stream));
+    ASSERT_NE(stream, nullptr);
+    waiting.push_back(std::move(stream));
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                        Open(body_, "queued0", &rejected));
+  IREE_ASSERT_OK(Open(body_, "pressure", &rejected));
+  EXPECT_EQ(rejected, nullptr);
+  EXPECT_EQ(Model()->service.telemetry.counters->requests, capacity);
+  waiting.clear();
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+  EXPECT_EQ(Model()->service.telemetry.counters->cancelled, capacity);
+
+  NativeStream invalid(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open("{", "invalid-json", &invalid));
+  ASSERT_NE(invalid, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
+      [&] { return loom_serve_text_stream_is_complete(invalid.get()); }));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_stream_status(invalid.get()));
+  EXPECT_EQ(Model()->service.telemetry.counters->rejected, 1u);
+  NativeStream accepted(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "after-rejection", &accepted));
+  ASSERT_NE(accepted, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(accepted));
+}
+
+TEST_F(NativeTextRegistryTest, CompleteResponseNeedsOnlyFinalDeliveryCredit) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream stream(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(CompleteRequest(), "complete", &stream));
+  ASSERT_NE(stream, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+    return loom_serve_text_stream_result(stream.get()) ||
+           loom_serve_text_stream_is_complete(stream.get());
+  }));
+  IREE_ASSERT_OK(loom_serve_text_stream_status(stream.get()));
+  const auto* result = loom_serve_text_stream_result(stream.get());
+  ASSERT_NE(result, nullptr);
+  EXPECT_FALSE(result->response.flags & LOOM_SERVE_TEXT_CHAT_FLAG_STREAM);
+  const auto* block = loom_serve_text_stream_peek(stream.get());
+  ASSERT_NE(block, nullptr);
+  EXPECT_EQ(loom_serve_text_stream_block_count(block), 0u);
+  EXPECT_EQ(Model()->service.telemetry.counters->completed, 1u);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(stream));
+  if (!FLAG_native_text_model[0]) {
+    EXPECT_EQ(String(result->content), Oracle::Complete("abxa", 4));
+  }
+}
+
+TEST_F(NativeTextRegistryTest, StoppingSealsReadyServiceAdmission) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  bool progress = false;
+  auto& service = Model()->service;
+  IREE_ASSERT_OK(service.advance(service.self, LOOM_SERVE_SERVICE_FLAG_STOPPING,
+                                 &progress));
+  NativeStream stream(nullptr, loom_serve_text_stream_close);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        Open(body_, "after-stop", &stream));
+  EXPECT_EQ(stream, nullptr);
+  EXPECT_EQ(service.telemetry.counters->requests, 0u);
+  const int client = Send(body_);
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client, service, &connection));
+  EXPECT_EQ(Read(client).find("HTTP/1.1 503"), 0u);
+  EXPECT_EQ(service.telemetry.counters->rejected, 1u);
+}
+
+TEST_F(NativeTextRegistryTest,
+       NativeCompletionPreservesPinnedCanonicalHistory) {
+  // The fixture's arithmetic oracle checks exact cache reuse. Learned requests
+  // have their own authored histories and are qualified by the mixed test.
+  if (FLAG_native_text_model[0]) {
+    GTEST_SKIP() << "This exact history uses the arithmetic fixture tokenizer";
+  }
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream first(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(
+      Open(Request(Message("user", "abxa"), 2), "conversation", &first));
+  ASSERT_NE(first, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(first));
+  const auto* final = loom_serve_text_stream_result(first.get());
+  ASSERT_NE(final, nullptr);
+  const std::string answer = String(final->content);
+  EXPECT_EQ(answer, Oracle::Complete("abxa", 2));
+  const int pin =
+      Send("", "X-Loom-Session: conversation\r\n", "/v1/checkpoints/retained");
+  loom_serve_http_connection_t* connection = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(pin, Model()->service, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+  const auto pinned = Read(pin);
+  EXPECT_EQ(pinned.find("HTTP/1.1 201"), 0u) << pinned;
+  const auto continuation =
+      Request(Message("user", "abxa") + "," + Message("assistant", answer) +
+                  "," + Message("user", "b"),
+              2);
+  NativeStream branch(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(continuation, "branch", &branch, "retained"));
+  ASSERT_NE(branch, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(branch));
+  const auto* resumed = loom_serve_text_stream_result(branch.get());
+  ASSERT_NE(resumed, nullptr);
+  EXPECT_EQ(resumed->response.usage.cached_tokens, 5u);
+  EXPECT_EQ(String(resumed->content),
+            Oracle::Complete("abxa" + answer + "#b", 2));
+  const int client = Send(continuation, "X-Loom-Session: conversation\r\n");
+  ASSERT_NO_FATAL_FAILURE(Accept(client, Model()->service, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+  const auto response = Read(client);
+  EXPECT_EQ(Content(response), String(resumed->content));
+  EXPECT_NE(response.find(R"("cached_tokens":5)"), std::string::npos);
+  EXPECT_EQ(String(final->content), answer);
+}
+
+}  // namespace
