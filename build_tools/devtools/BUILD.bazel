@@ -23,6 +23,19 @@ py_library(
     srcs = ["command_line.py"],
 )
 
+py_library(
+    name = "bazel_test_results",
+    srcs = ["bazel_test_results.py"],
+)
+
+py_test(
+    name = "bazel_test_results_test",
+    size = _PRESUBMIT_TEST_SIZE,
+    srcs = ["bazel_test_results_test.py"],
+    tags = _PRESUBMIT_TEST_TAGS,
+    deps = [":bazel_test_results"],
+)
+
 py_test(
     name = "command_line_test",
     size = _PRESUBMIT_TEST_SIZE,
@@ -76,6 +89,7 @@ py_library(
     ],
     data = ["tsan.supp"],
     deps = [
+        ":bazel_test_results",
         ":command_line",
         ":run_requirements",
         "//build_tools/bazel:compile_commands_merge_lib",
@@ -93,6 +107,7 @@ py_binary(
     ],
     data = ["tsan.supp"],
     deps = [
+        ":bazel_test_results",
         ":run_requirements",
         "//build_tools/ci:windows_diagnostics",
     ],
@@ -185,6 +200,7 @@ py_test(
     main = "ci_test.py",
     tags = _PRESUBMIT_TEST_TAGS,
     deps = [
+        ":bazel_test_results",
         ":run_requirements",
         "//build_tools/ci:windows_diagnostics",
     ],
@@ -395,6 +411,7 @@ test_suite(
     tests = [
         ":bazel_launcher_test",
         ":bazel_test",
+        ":bazel_test_results_test",
         ":ci_test",
         ":cli_test",
         ":cmake_file_api_test",

@@ -137,7 +137,7 @@ else:
     from build_tools.devtools import ci_config
 
 from build_tools.ci import windows_diagnostics
-from build_tools.devtools import run_requirements
+from build_tools.devtools import bazel_test_results, run_requirements
 
 
 @dataclass(frozen=True)
@@ -155,6 +155,8 @@ class CiStep:
     env: tuple[tuple[str, str], ...] = ()
     # Metadata preflight that must succeed before executing a test command.
     requirement_audit: RequirementAudit | None = None
+    # Current-invocation Bazel test evidence staged after this command.
+    test_results: bazel_test_results.BazelTestResultsCapture | None = None
 
     def command_line(self) -> str:
         env_args = tuple(f"{key}={value}" for key, value in self.env)
@@ -1302,16 +1304,72 @@ def add_bazel_profiles(steps: list[CiStep], profile_dir: Path) -> list[CiStep]:
     return profiled_steps
 
 
+def add_bazel_test_results(steps: list[CiStep], output_dir: Path) -> list[CiStep]:
+    captured_steps = []
+    event_owners = {}
+    for step in steps:
+        if step.argv[1:4] != ("dev.py", "bazel", "test"):
+            captured_steps.append(step)
+            continue
+
+        if any(
+            arg == "--build_event_json_file"
+            or arg.startswith("--build_event_json_file=")
+            for arg in step.argv[4:]
+        ):
+            raise ValueError(f"{step.name} already configures a Bazel build event file")
+        event_stem = "-".join(
+            token.lower() for token in re.findall(r"[A-Za-z0-9]+", step.name)
+        )
+        if not event_stem:
+            raise ValueError(
+                f"cannot derive a Bazel build event name from {step.name!r}"
+            )
+        event_path = output_dir / ".events" / f"{event_stem}.json"
+        if previous_owner := event_owners.get(event_path):
+            raise ValueError(
+                f"Bazel build event path collision between {previous_owner!r} and "
+                f"{step.name!r}: {event_path}"
+            )
+        event_owners[event_path] = step.name
+        captured_steps.append(
+            replace(
+                step,
+                argv=step.argv[:4]
+                + (f"--build_event_json_file={event_path}",)
+                + step.argv[4:],
+                test_results=bazel_test_results.BazelTestResultsCapture(
+                    build_event_path=event_path,
+                    output_dir=output_dir,
+                ),
+            )
+        )
+    if not event_owners:
+        raise ValueError("--bazel-test-results-dir requires a Bazel test phase")
+    return captured_steps
+
+
 def bazel_profile_dir(args: argparse.Namespace) -> Path | None:
     if args.bazel_profile_dir is None:
         return None
     return args.bazel_profile_dir.expanduser().resolve()
 
 
+def bazel_test_results_dir(args: argparse.Namespace) -> Path | None:
+    if args.bazel_test_results_dir is None:
+        return None
+    return args.bazel_test_results_dir.expanduser().resolve()
+
+
 def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
     profile_dir = bazel_profile_dir(args)
+    test_results_dir = bazel_test_results_dir(args)
     if profile_dir is not None and args.command not in BAZEL_COMMANDS:
         raise ValueError("--bazel-profile-dir is only supported for Bazel CI commands")
+    if test_results_dir is not None and args.command not in BAZEL_COMMANDS:
+        raise ValueError(
+            "--bazel-test-results-dir is only supported for Bazel CI commands"
+        )
     steps = _steps_from_args(args)
     if args.keep_going:
         # Continue independent actions inside each phase as well as subsequent
@@ -1328,6 +1386,8 @@ def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
                 )
     if profile_dir is not None:
         steps = add_bazel_profiles(steps, profile_dir)
+    if test_results_dir is not None:
+        steps = add_bazel_test_results(steps, test_results_dir)
     return steps
 
 
@@ -1404,6 +1464,20 @@ def run_step(step: CiStep, verbose: bool) -> StepResult:
         returncode = subprocess.run(
             step.argv, cwd=REPO_ROOT, env=environment
         ).returncode
+    if step.test_results is not None:
+        try:
+            output_count = bazel_test_results.stage(
+                step.test_results.build_event_path,
+                step.test_results.output_dir,
+            )
+            print(
+                f"[artifact] Staged {output_count} current Bazel test outputs",
+                flush=True,
+            )
+        except bazel_test_results.BazelTestResultsError as error:
+            print(f"[fail] Stage Bazel test results: {error}", file=sys.stderr)
+            if returncode == 0:
+                returncode = 1
     elapsed_seconds = time.monotonic() - start_time
     result = StepResult(step, returncode)
     if result.ok:
@@ -1517,6 +1591,15 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--bazel-test-results-dir",
+        type=Path,
+        help=(
+            "Stage test.log and test.xml outputs named by the current Bazel "
+            "invocation into this fresh directory. Only supported for Bazel "
+            "CI commands."
+        ),
+    )
+    parser.add_argument(
         "--target",
         action="append",
         help=(
@@ -1531,8 +1614,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_arguments(argv)
     steps = steps_from_args(args)
     profile_dir = bazel_profile_dir(args)
+    test_results_dir = bazel_test_results_dir(args)
     if profile_dir is not None and not args.dry_run:
         profile_dir.mkdir(parents=True, exist_ok=True)
+    if test_results_dir is not None and not args.dry_run:
+        bazel_test_results.prepare_output_directory(test_results_dir)
     return run_steps(
         steps,
         dry_run=args.dry_run,

@@ -357,8 +357,10 @@ jobs:
         if: matrix.kind == 'amd_client'
         id: client_ci
         run: |
+          native_results_dir="${RUNNER_TEMP}/native-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           python3 build_tools/devtools/ci.py ${{ matrix.command }} \
-            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles"
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" \
+            --bazel-test-results-dir "${native_results_dir}"
 
       - name: Upload Bazel profiles
         continue-on-error: true
@@ -387,11 +389,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-test-results-amd-client-linux-attempt-${{ github.run_attempt }}
-          path: |
-            bazel-testlogs/libamdf/**/test.log
-            bazel-testlogs/libamdf/**/test.xml
-            bazel-testlogs/experimental/xdna/**/test.log
-            bazel-testlogs/experimental/xdna/**/test.xml
+          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/bazel-testlogs
           if-no-files-found: warn
           retention-days: 7
 
@@ -748,7 +746,10 @@ jobs:
           $env:CC = Join-Path $env:BAZEL_LLVM 'bin\clang-cl.exe'
           $env:CXX = $env:CC
           $env:AR = Join-Path $env:BAZEL_LLVM 'bin\llvm-lib.exe'
-          python build_tools/devtools/ci.py iree-bazel-amd-client --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles"
+          $nativeResultsDir = Join-Path $env:RUNNER_TEMP "native-test-results-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          python build_tools/devtools/ci.py iree-bazel-amd-client `
+            --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles" `
+            --bazel-test-results-dir $nativeResultsDir
           exit $LASTEXITCODE
 
       - name: Report Windows build storage
@@ -799,17 +800,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-test-results-amd-client-windows-attempt-${{ github.run_attempt }}
-          path: |
-            bazel-testlogs/libamdf/**/test.log
-            bazel-testlogs/libamdf/**/test.xml
-            bazel-testlogs/experimental/xdna/**/test.log
-            bazel-testlogs/experimental/xdna/**/test.xml
-            bazel-testlogs/runtime/src/iree/hal/drivers/vulkan/**/test.log
-            bazel-testlogs/runtime/src/iree/hal/drivers/vulkan/**/test.xml
-            bazel-testlogs/loom/binding/c/test/target/spirv/**/test.log
-            bazel-testlogs/loom/binding/c/test/target/spirv/**/test.xml
-            bazel-testlogs/loom/src/loom/tooling/target/spirv/**/test.log
-            bazel-testlogs/loom/src/loom/tooling/target/spirv/**/test.xml
+          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/bazel-testlogs
           if-no-files-found: warn
           retention-days: 7
 

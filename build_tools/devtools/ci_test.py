@@ -343,6 +343,30 @@ class CiTest(unittest.TestCase):
             ],
         )
 
+    def test_bazel_test_results_capture_only_test_phases(self):
+        result_dir = Path("/tmp/iree-bazel-test-results").resolve()
+        steps = [
+            ci.bazel_build_step("Build example", ("//example:all",)),
+            ci.bazel_test_step("Test example", ("//example:all",)),
+        ]
+        args = ci.parse_arguments(
+            ["iree-bazel-cpu", "--bazel-test-results-dir", str(result_dir)]
+        )
+
+        with mock.patch.object(ci, "_steps_from_args", return_value=steps):
+            planned = ci.steps_from_args(args)
+
+        self.assertEqual(planned[0], steps[0])
+        event_path = result_dir / ".events" / "test-example.json"
+        self.assertIn(f"--build_event_json_file={event_path}", planned[1].argv)
+        self.assertEqual(
+            planned[1].test_results,
+            ci.bazel_test_results.BazelTestResultsCapture(
+                build_event_path=event_path,
+                output_dir=result_dir,
+            ),
+        )
+
     def test_bazel_profile_names_must_be_unique(self):
         duplicate_steps = [
             ci.bazel_build_step("Compile IREE", ("//runtime/...",)),
@@ -354,15 +378,17 @@ class CiTest(unittest.TestCase):
 
     def test_non_bazel_commands_reject_bazel_profile_directory(self):
         for command in ("iree-cmake-cpu", "iree-importers-tilelang"):
-            with self.subTest(command=command):
-                args = ci.parse_arguments(
-                    [command, "--bazel-profile-dir", "/tmp/profiles"]
-                )
-                with self.assertRaisesRegex(
-                    ValueError,
-                    "--bazel-profile-dir is only supported for Bazel CI commands",
-                ):
-                    ci.steps_from_args(args)
+            for option, path in (
+                ("--bazel-profile-dir", "/tmp/profiles"),
+                ("--bazel-test-results-dir", "/tmp/results"),
+            ):
+                with self.subTest(command=command, option=option):
+                    args = ci.parse_arguments([command, option, path])
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        f"{option} is only supported for Bazel CI commands",
+                    ):
+                        ci.steps_from_args(args)
 
     def test_main_creates_bazel_profile_directory_only_when_executing(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -380,6 +406,20 @@ class CiTest(unittest.TestCase):
 
                 self.assertEqual(ci.main(argv), 0)
                 self.assertTrue(profile_dir.is_dir())
+
+    def test_main_creates_fresh_bazel_test_result_directory(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            result_dir = Path(temporary_dir) / "results"
+            argv = [
+                "iree-bazel-cpu",
+                "--bazel-test-results-dir",
+                str(result_dir),
+            ]
+            with mock.patch.object(ci, "run_steps", return_value=0):
+                self.assertEqual(ci.main([*argv, "--dry-run"]), 0)
+                self.assertFalse(result_dir.exists())
+                self.assertEqual(ci.main(argv), 0)
+                self.assertTrue((result_dir / ".events").is_dir())
 
     def test_bazel_default_targets_include_loom(self):
         args = ci.parse_arguments(["iree-bazel-cpu"])
