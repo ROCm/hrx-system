@@ -5,9 +5,12 @@
 // input/weight storage, and a wave grid dividing the 16-aligned output tile.
 // fragment_count is (tile_rows/wave_rows/16)*(tile_columns/wave_columns/16).
 // Fragments are row-major within each wave, using the gfx11 wave32 layout.
-template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
+// Each wave's column panel contains streams equal-sized feature panels. The
+// original weight rows are stream-major, with outputs features per stream.
+// Per-stream panel widths are multiples of 16; streams=1 gives dense rows.
+template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
 
-template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: index, %inputs: index, %outputs: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>) {
+template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>) {
   %origin = index.constant 0 : offset
   %workitem = kernel.workitem.id<x> : index
   %wave = kernel.subgroup.id : index
@@ -73,8 +76,25 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
         %packet_group = index.div %task, %c8 : index
         %packet = index.rem %packet_group, %c8 : index
         %local_k = index.mul %packet, %c4 : index
-        %channel = index.add %channel_base, %local_channel : index
-        %valid_channel = index.cmp ult, %channel, %outputs : index
+        %dense = index.cmp eq, %streams, %c1 : index
+        %channel, %valid_channel = scf.if %dense -> (index, i1) {
+          %channel = index.add %channel_base, %local_channel : index
+          %valid = index.cmp ult, %channel, %outputs : index
+          scf.yield %channel, %valid : index, i1
+        } else {
+          // Stage every stream for a feature panel in the same wave. Its
+          // consumer can combine F32 fragments before any global publication.
+          %stream_columns = index.div %per_wave_columns, %streams : index
+          %wave_column = index.div %local_channel, %per_wave_columns : index
+          %within_wave = index.rem %local_channel, %per_wave_columns : index
+          %stream = index.div %within_wave, %stream_columns : index
+          %within_stream = index.rem %within_wave, %stream_columns : index
+          %local_feature = index.madd %wave_column, %stream_columns, %within_stream : index
+          %feature = index.add %channel_base, %local_feature : index
+          %channel = index.madd %stream, %outputs, %feature : index
+          %valid = index.cmp ult, %feature, %outputs : index
+          scf.yield %channel, %valid : index, i1
+        }
         %safe_channel = scf.select %valid_channel, %channel, %c0 : index
         %row_origin = index.scale %safe_channel, %row_bytes : index, offset -> offset
         %block_origin = index.add %row_origin, %block_delta : offset
@@ -226,7 +246,7 @@ template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, 
     %output_row_bytes = index.scale %outputs, %element_bytes : index, offset -> offset
     %tile_byte_offset = index.scale %first, %output_row_bytes : index, offset -> offset
     %output_view = buffer.view %output[%tile_byte_offset] : buffer -> view<[%remaining_rows]x[%outputs]xbf16>
-    %result_tile = template.apply<@flash_next.q8_contract>(%capacity, %inputs, %outputs, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %fragment_count, %first, %end, %channel_base, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
+    %result_tile = template.apply<@flash_next.q8_contract>(%capacity, %inputs, %outputs, %c1, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %fragment_count, %first, %end, %channel_base, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
     scf.for %ordinal = [%c0 to %fragment_count step %c1] unroll schedule(linear) {
       %row_fragment = index.div %ordinal, %column_fragments : index
       %column_fragment = index.rem %ordinal, %column_fragments : index

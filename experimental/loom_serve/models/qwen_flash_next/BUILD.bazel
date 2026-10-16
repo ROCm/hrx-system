@@ -168,6 +168,7 @@ loom_library(
     for capacity in [
         1,
         5,
+        131,
     ]
 ]
 
