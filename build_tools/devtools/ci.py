@@ -199,11 +199,19 @@ def sanitizer_env(config: str | None) -> tuple[tuple[str, str], ...]:
     return (("TSAN_OPTIONS", f"suppressions={TSAN_SUPPRESSIONS_FILE}"),)
 
 
-def codec_options(build_system: str) -> tuple[str, ...]:
+def platform_coverage_enabled() -> bool:
     selection = os.environ.get("IREE_CI_PLATFORM_COVERAGE", "0")
     if selection not in ("0", "1"):
         raise ValueError("IREE_CI_PLATFORM_COVERAGE must be 0 or 1")
-    codecs = ci_config.OPTIONAL_IMAGE_CODECS if selection == "1" else ()
+    return selection == "1"
+
+
+def platform_coverage_build_steps(step: CiStep) -> list[CiStep]:
+    return [step] if platform_coverage_enabled() else []
+
+
+def codec_options(build_system: str) -> tuple[str, ...]:
+    codecs = ci_config.OPTIONAL_IMAGE_CODECS if platform_coverage_enabled() else ()
     if build_system == "cmake":
         return ("-DLOOM_SERVE_IMAGE_CODECS=" + ";".join(codecs),)
     return ("--//loom/config/serve:image_codecs=" + ",".join(codecs),)
@@ -367,6 +375,7 @@ def bazel_test_step(
     for key, value in sanitizer_env(config) + test_env:
         options.append(f"--test_env={key}={value}")
     options.extend(bazel_options)
+    options.append("--build_tests_only")
     # Focus filters compose with mandatory all-participant admission.
     test_tag_filters = tuple(
         dict.fromkeys(
@@ -490,6 +499,19 @@ def cmake_build_step(
     )
 
 
+def cmake_explicit_build_steps(
+    command_name: str,
+    name: str,
+    targets: tuple[str, ...] = (),
+    *,
+    tests_enabled: bool,
+) -> list[CiStep]:
+    step = cmake_build_step(command_name, name, targets)
+    if not tests_enabled:
+        return [step]
+    return platform_coverage_build_steps(step)
+
+
 def combine_ctest_regex(*regexes: str) -> str:
     return "|".join(f"({regex})" for regex in regexes if regex)
 
@@ -537,7 +559,7 @@ def cpu_steps(targets: tuple[str, ...]) -> list[CiStep]:
     scoped_targets = targets + ci_config.CPU_BAZEL_TARGET_EXCLUDES
     return [
         bazel_configure_step(),
-        bazel_build_step("Build IREE", scoped_targets),
+        *platform_coverage_build_steps(bazel_build_step("Build IREE", scoped_targets)),
         bazel_test_step(
             "Test IREE",
             scoped_targets + ci_config.CPU_XFAIL_TARGETS,
@@ -546,19 +568,27 @@ def cpu_steps(targets: tuple[str, ...]) -> list[CiStep]:
     ]
 
 
+def repository_configure_step() -> CiStep:
+    return bazel_configure_step(
+        enabled_drivers=REPOSITORY_BUILD_HAL_DRIVERS,
+        enabled_loom_targets=REPOSITORY_BUILD_LOOM_TARGETS,
+        enabled_loom_importers=REPOSITORY_BUILD_LOOM_IMPORTERS,
+        extra_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
+    )
+
+
+def repository_build_step() -> CiStep:
+    return bazel_build_step(
+        "Build repository",
+        ("//...",),
+        bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
+    )
+
+
 def repository_build_steps() -> list[CiStep]:
     return [
-        bazel_configure_step(
-            enabled_drivers=REPOSITORY_BUILD_HAL_DRIVERS,
-            enabled_loom_targets=REPOSITORY_BUILD_LOOM_TARGETS,
-            enabled_loom_importers=REPOSITORY_BUILD_LOOM_IMPORTERS,
-            extra_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
-        ),
-        bazel_build_step(
-            "Build repository",
-            ("//...",),
-            bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
-        ),
+        repository_configure_step(),
+        repository_build_step(),
     ]
 
 
@@ -572,7 +602,8 @@ def repository_integration_steps(
         )
     amdgpu_options = amdgpu_bazel_options(amdgpu_target_selector)
     return [
-        *repository_build_steps(),
+        repository_configure_step(),
+        *platform_coverage_build_steps(repository_build_step()),
         bazel_build_step(
             "Build AMDGPU device toolchain smoke",
             ci_config.BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS,
@@ -618,13 +649,20 @@ def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     scoped_targets = targets + ci_config.CPU_BAZEL_TARGET_EXCLUDES
     if config in ci_config.SANITIZER_TEST_CONFIGS:
         return [
+            *platform_coverage_build_steps(
+                bazel_build_step(
+                    f"Build IREE with {config.upper()}",
+                    scoped_targets,
+                    config=config,
+                )
+            ),
             bazel_test_step(
                 f"Test IREE with {config.upper()}",
                 scoped_targets + ci_config.CPU_SANITIZERS_XFAIL_TARGETS,
                 config=config,
                 test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
                 test_language_filters=ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS,
-            )
+            ),
         ]
     if config in ci_config.SANITIZER_BUILD_CONFIGS:
         return [
@@ -649,11 +687,13 @@ def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
         bazel_configure_step(
             enabled_loom_targets=("vm", "xdna"), extra_options=options
         ),
-        bazel_build_step(
-            f"Build IREE / XDNA{config_name}",
-            targets,
-            config=config,
-            bazel_options=options,
+        *platform_coverage_build_steps(
+            bazel_build_step(
+                f"Build IREE / XDNA{config_name}",
+                targets,
+                config=config,
+                bazel_options=options,
+            )
         ),
         bazel_test_step(
             f"Test IREE / XDNA{config_name}",
@@ -680,11 +720,13 @@ def amd_client_steps(targets: tuple[str, ...], config: str | None) -> list[CiSte
     targets = targets or default_targets
     return [
         bazel_configure_step(extra_options=options),
-        bazel_build_step(
-            f"Build IREE / AMD RDNA+XDNA{config_name}",
-            targets,
-            config=config,
-            bazel_options=options,
+        *platform_coverage_build_steps(
+            bazel_build_step(
+                f"Build IREE / AMD RDNA+XDNA{config_name}",
+                targets,
+                config=config,
+                bazel_options=options,
+            )
         ),
         bazel_test_step(
             f"Test IREE / AMD RDNA+XDNA{config_name}",
@@ -697,7 +739,7 @@ def amd_client_steps(targets: tuple[str, ...], config: str | None) -> list[CiSte
     ]
 
 
-def amdgpu_build_and_test_steps(
+def amdgpu_test_steps(
     targets: tuple[str, ...],
     target_selector: str,
     config: str | None = None,
@@ -712,11 +754,13 @@ def amdgpu_build_and_test_steps(
         (f"-{ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL}",) if config == "tsan" else ()
     )
     return [
-        bazel_build_step(
-            f"Build IREE / AMDGPU{config_name}",
-            scoped_targets,
-            config=config,
-            bazel_options=bazel_options,
+        *platform_coverage_build_steps(
+            bazel_build_step(
+                f"Build IREE / AMDGPU{config_name}",
+                scoped_targets,
+                config=config,
+                bazel_options=bazel_options,
+            )
         ),
         bazel_test_step(
             f"Test IREE / AMDGPU{config_name}",
@@ -743,7 +787,7 @@ def amdgpu_steps(
             enabled_loom_targets=("amdgpu", "vm"),
             enabled_loom_importers=enabled_loom_importers,
         ),
-        *amdgpu_build_and_test_steps(
+        *amdgpu_test_steps(
             targets,
             target_selector,
             xfail_targets=(
@@ -773,7 +817,7 @@ def amdgpu_config_steps(
         if config == "tsan"
         else ci_config.AMDGPU_SANITIZERS_XFAIL_TARGETS
     )
-    return amdgpu_build_and_test_steps(
+    return amdgpu_test_steps(
         targets,
         target_selector,
         config=config,
@@ -797,10 +841,12 @@ def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
             enabled_loom_targets=("spirv", "vm"),
             extra_options=api_options,
         ),
-        bazel_build_step(
-            "Build IREE / Vulkan",
-            scoped_targets,
-            bazel_options=bazel_options,
+        *platform_coverage_build_steps(
+            bazel_build_step(
+                "Build IREE / Vulkan",
+                scoped_targets,
+                bazel_options=bazel_options,
+            )
         ),
         bazel_test_step(
             "Test IREE / Vulkan",
@@ -827,7 +873,11 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     )
     steps = [
         cmake_configure_step(command_name, sanitizer=sanitizer),
-        cmake_build_step(command_name, f"Build IREE CMake{sanitizer_name}"),
+        *cmake_explicit_build_steps(
+            command_name,
+            f"Build IREE CMake{sanitizer_name}",
+            tests_enabled=tests_enabled,
+        ),
     ]
     if tests_enabled:
         steps.append(
@@ -880,10 +930,11 @@ def cmake_repository_build_steps(command_name: str) -> list[CiStep]:
 
 def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     sanitizer_name = f" with {sanitizer.upper()}" if sanitizer is not None else ""
+    tests_enabled = cmake_tests_enabled(sanitizer)
     package_regex = combine_ctest_regex(
         ci_config.AMDF_CTEST_REGEX, ci_config.XDNA_CTEST_PACKAGE_REGEX
     )
-    return [
+    steps = [
         cmake_configure_step(
             command_name,
             enabled_drivers=("xdna",),
@@ -896,30 +947,39 @@ def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
                 "-DLOOM_BUILD=ON",
             ),
         ),
-        cmake_build_step(
+        *cmake_explicit_build_steps(
             command_name,
             f"Build IREE CMake XDNA{sanitizer_name}",
             ci_config.XDNA_CMAKE_BUILD_TARGETS,
-        ),
-        cmake_test_step(
-            command_name,
-            f"Test IREE CMake XDNA package tests{sanitizer_name}",
-            regex=package_regex,
-            label_exclude_regex=combine_ctest_regex(
-                ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
-                ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX,
-            ),
-            parallelism=1,
-        ),
-        cmake_test_step(
-            command_name,
-            f"Test IREE CMake XDNA resource tests{sanitizer_name}",
-            label_regex=ci_config.XDNA_CTEST_RESOURCE_LABEL,
-            available_resources=ci_config.XDNA_RESOURCES,
-            label_exclude_regex=ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
-            parallelism=1,
+            tests_enabled=tests_enabled,
         ),
     ]
+    if not tests_enabled:
+        return steps
+
+    steps.extend(
+        [
+            cmake_test_step(
+                command_name,
+                f"Test IREE CMake XDNA package tests{sanitizer_name}",
+                regex=package_regex,
+                label_exclude_regex=combine_ctest_regex(
+                    ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
+                    ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX,
+                ),
+                parallelism=1,
+            ),
+            cmake_test_step(
+                command_name,
+                f"Test IREE CMake XDNA resource tests{sanitizer_name}",
+                label_regex=ci_config.XDNA_CTEST_RESOURCE_LABEL,
+                available_resources=ci_config.XDNA_RESOURCES,
+                label_exclude_regex=ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
+                parallelism=1,
+            ),
+        ]
+    )
+    return steps
 
 
 def cmake_amdgpu_steps(
@@ -949,10 +1009,11 @@ def cmake_amdgpu_steps(
                 "-DLOOM_BUILD=ON",
             ),
         ),
-        cmake_build_step(
+        *cmake_explicit_build_steps(
             command_name,
             f"Build IREE CMake AMDGPU{sanitizer_name}",
             build_targets,
+            tests_enabled=tests_enabled,
         ),
     ]
     if not tests_enabled:
@@ -1019,10 +1080,11 @@ def cmake_vulkan_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
             sanitizer=sanitizer,
             extra_options=("-DIREE_ENABLE_VULKAN=ON",),
         ),
-        cmake_build_step(
+        *cmake_explicit_build_steps(
             command_name,
             f"Build IREE CMake Vulkan{sanitizer_name}",
             build_targets,
+            tests_enabled=tests_enabled,
         ),
     ]
     if tests_enabled:

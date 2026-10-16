@@ -455,11 +455,15 @@ host compiler/platform boundaries without repeating dependency builds across
 every hardware or sanitizer configuration.
 
 These rows pass `IREE_CI_PLATFORM_COVERAGE=1` to the CI command script, enabling
-all optional image codecs. Other source-tree CI jobs retain image-serving tests
-through the built-in PAM provider. Ordinary build/test commands and release
-packaging retain the normal codec defaults. Additional portable optional
-dependencies share this representative set; hardware execution remains governed
-by its own resource requirements.
+all optional image codecs and the explicit compile-coverage phase for their
+configured graph. Other test-capable source-tree jobs invoke only their tests:
+Bazel and `dev.py cmake test` build the exact selected test closure before
+execution. Build-only sanitizer configurations and focused non-test integration
+witnesses retain explicit build phases. Other source-tree CI jobs retain
+image-serving tests through the built-in PAM provider. Ordinary build/test
+commands and release packaging retain the normal codec defaults. Additional
+portable optional dependencies share this representative set; hardware execution
+remains governed by its own resource requirements.
 
 Windows Bazel also uses `platform_coverage` to select its single Python test
 run. Interpreter coverage remains once per OS/build system: ordinary Linux CPU
