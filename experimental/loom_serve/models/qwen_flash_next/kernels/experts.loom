@@ -29,6 +29,8 @@ kernel.decl @expert_bucket_down_q51() launch(%input: buffer, %tasks: buffer, %we
 
 kernel.decl @expert_bucket_down_q8() launch(%input: buffer, %tasks: buffer, %weight: buffer, %output: buffer)
 
+kernel.decl @shared_matrix() launch(%span: buffer, %input: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
+
 kernel.decl @expert_matrix() launch(%contraction: index, %format: index, %rows: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer)
 
 func.def public inline @expert_swiglu(%gate: f32, %up: f32) -> (bf16) {
@@ -400,7 +402,13 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %shared_down_weight = command.parameter %parameters, "blk.{}.ffn_down_shexp.weight"[%layer] : view<2560x20x34xi8>
   %hidden_width = index.constant 640 : index
   %output_width = index.constant 2560 : index
-  kernel.launch @shared_gate_up(%span, %input, %shared_gate_weight, %shared_up_weight, %shared_hidden) : (buffer, buffer, view<640x80x34xi8>, view<640x80x34xi8>, buffer)
+  %shared_threshold = index.constant 64 : index
+  %shared_matrix = index.cmp uge, %tokens, %shared_threshold : index
+  scf.if %shared_matrix {
+    kernel.launch @shared_matrix(%span, %input, %shared_gate_weight, %shared_up_weight, %shared_hidden) : (buffer, buffer, view<640x80x34xi8>, view<640x80x34xi8>, buffer)
+  } else {
+    kernel.launch @shared_gate_up(%span, %input, %shared_gate_weight, %shared_up_weight, %shared_hidden) : (buffer, buffer, view<640x80x34xi8>, view<640x80x34xi8>, buffer)
+  }
   %shared_down_weight_block_size = index.constant 32 : index
   %shared_down_weight_blocks = index.div %hidden_width, %shared_down_weight_block_size : index
   %shared_down_weight_shaped = view.refine %shared_down_weight : view<2560x20x34xi8> -> view<[%output_width]x[%shared_down_weight_blocks]x34xi8>
