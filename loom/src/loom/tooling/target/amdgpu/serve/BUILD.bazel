@@ -654,7 +654,6 @@ loom_cc_test(
         "//loom/src/loom/serve/testing:device",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/memory:maintenance",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

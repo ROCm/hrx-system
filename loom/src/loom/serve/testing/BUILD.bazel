@@ -39,6 +39,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/host",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:maintenance",
     ],
 )
 

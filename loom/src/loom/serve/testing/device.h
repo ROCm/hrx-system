@@ -40,6 +40,13 @@ iree_status_t loom_serve_test_driver_create(loom_serve_host_t* host,
                                             iree_allocator_t host_allocator,
                                             iree_hal_driver_t** out_driver);
 
+// Trims managed backing and joins the cold memory owner, including cascading
+// slab returns, before tests inspect physical accounting. Device work remains
+// independent: live reservations survive, and callers retire unused buffers
+// before expecting their backing to disappear.
+iree_status_t loom_serve_test_device_trim_and_drain(loom_serve_device_t* device,
+                                                    uint64_t target_bytes);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

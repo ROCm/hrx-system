@@ -18,6 +18,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
+#include "loom/serve/testing/device.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
 #include "loom/serve/testing/stalled_stderr.h"
@@ -125,7 +126,7 @@ TEST_F(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
   for (uint32_t word : output_) {
     EXPECT_EQ(word, pattern);
   }
-  IREE_ASSERT_OK(loom_serve_device_trim(first, 0));
+  IREE_ASSERT_OK(loom_serve_test_device_trim_and_drain(first, 0));
   EXPECT_EQ(
       loom_serve_device_memory_statistics(first).workspace.bytes_committed, 0u);
 }

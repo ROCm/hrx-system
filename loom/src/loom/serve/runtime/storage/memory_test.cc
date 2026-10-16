@@ -9,7 +9,6 @@
 #include <array>
 #include <vector>
 
-#include "iree/hal/memory/maintenance.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/runtime/device/device.h"
@@ -112,21 +111,6 @@ class MemoryTest : public ::testing::Test {
     for (const auto word : observed) {
       EXPECT_EQ(word, value);
     }
-  }
-
-  void TrimAndDrainMaintenance(uint64_t target_bytes) {
-    IREE_ASSERT_OK(loom_serve_device_trim(device, target_bytes));
-    // Queue completion returns reservations, not physical backing. Join the
-    // cold owner and its cascading slab returns before observing final bytes.
-    auto* maintenance = loom_serve_device_storage_pool(device)->maintenance;
-    iree_hal_memory_maintenance_call(
-        maintenance,
-        [](void* user_data) {
-          auto* owner = static_cast<iree_hal_memory_maintenance_t*>(user_data);
-          while (iree_hal_memory_maintenance_run_one(owner)) {
-          }
-        },
-        maintenance);
   }
 
   // Coarse physical slabs, independent of logical KV block size.
@@ -374,7 +358,7 @@ TEST_F(MemoryTest, DeviceTrimPreservesLiveWorkspaceAndMutableState) {
     EXPECT_EQ(before.retained.committed_bytes, kSlabSize);
     EXPECT_EQ(before.workspace.bytes_committed, kSlabSize);
     EXPECT_EQ(before.workspace.reservation_count, 1u);
-    TrimAndDrainMaintenance(0);
+    IREE_ASSERT_OK(loom_serve_test_device_trim_and_drain(device, 0));
     const auto live = loom_serve_device_memory_statistics(device);
     EXPECT_EQ(live.retained.committed_bytes, kSlabSize);
     EXPECT_EQ(live.workspace.bytes_committed, kSlabSize);
@@ -389,11 +373,12 @@ TEST_F(MemoryTest, DeviceTrimPreservesLiveWorkspaceAndMutableState) {
     iree_hal_buffer_release(workspace);
     workspace = nullptr;
     IREE_ASSERT_OK(loom_serve_execution_drain(execution));
-    TrimAndDrainMaintenance(2 * kSlabSize);
+    IREE_ASSERT_OK(
+        loom_serve_test_device_trim_and_drain(device, 2 * kSlabSize));
     EXPECT_EQ(
         loom_serve_device_memory_statistics(device).workspace.bytes_committed,
         kSlabSize);
-    TrimAndDrainMaintenance(kSlabSize);
+    IREE_ASSERT_OK(loom_serve_test_device_trim_and_drain(device, kSlabSize));
     const auto idle = loom_serve_device_memory_statistics(device);
     EXPECT_EQ(idle.retained.committed_bytes, kSlabSize);
     EXPECT_EQ(idle.workspace.bytes_committed, 0u);

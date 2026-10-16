@@ -814,7 +814,6 @@ loom_cc_test(
     ::test_device
     iree::base
     iree::hal
-    iree::hal::memory::maintenance
     iree::testing::gtest
     iree::testing::gtest_main
     loom::serve::runtime::device

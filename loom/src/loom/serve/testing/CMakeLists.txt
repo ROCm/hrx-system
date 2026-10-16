@@ -36,6 +36,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::hal
+    iree::hal::memory::maintenance
     loom::serve::runtime::device
     loom::serve::runtime::host
   TESTONLY
