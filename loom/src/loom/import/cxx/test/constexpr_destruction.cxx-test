@@ -32,11 +32,24 @@ static constexpr unsigned early_exit() {
   return output;
 }
 
+static constexpr unsigned temporary_boundaries() {
+  unsigned output = 0;
+  Guard{&output, 2};
+  {
+    const Guard& extended = Guard{&output, 3};
+    Guard{&output, 4};
+    if (output != 24 || extended.digit != 3) return 99;
+  }
+  return output;
+}
+
 constexpr unsigned nested_result_value = nested_blocks();
 constexpr unsigned early_result_value = early_exit();
+constexpr unsigned temporary_result_value = temporary_boundaries();
 
 unsigned nested_result() { return nested_result_value; }
 unsigned early_result() { return early_result_value; }
+unsigned temporary_result() { return temporary_result_value; }
 
 // ----
 func.def public @nested_result() -> (i32) {
@@ -47,4 +60,9 @@ func.def public @nested_result() -> (i32) {
 func.def public @early_result() -> (i32) {
   %early_result_value = scalar.constant 465 : i32
   func.return %early_result_value : i32
+}
+
+func.def public @temporary_result() -> (i32) {
+  %temporary_result_value = scalar.constant 243 : i32
+  func.return %temporary_result_value : i32
 }
