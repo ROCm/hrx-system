@@ -1,0 +1,216 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+config.decl @flash_next.span_capacity : %value: index where [range(%value, 1, 16)]
+
+config.decl @qsa.query_tile : %value: index where [range(%value, 1, 32768)]
+
+func.decl @flash_next_span_active(%epoch: buffer, %span: index) -> (i1)
+
+func.decl @flash_next_cache_origin(%rows: buffer, %row: index, %plane_origin: offset) -> (offset)
+
+func.decl @flash_next_physical_token(%rows: buffer, %row: index, %position: index) -> (index)
+
+amdgpu.target<gfx11-generic> @qsa_score_tiled_wave32 {subgroup_size = 32}
+
+// Four queries share 64 pooled keys. Each query contributes four independent
+// heads to the 16-row matrix; ReLU precedes the head reduction. The span axis
+// proves common cache ownership before sharing keys, including retained forks.
+// Spans crossing a four-query tile publish disjoint rows of the score scratch.
+kernel.def target(@qsa_score_tiled_wave32) @qsa_score_tiled() {
+  %tokens = config.get @flash_next.token_count : index
+  %tile_limit = config.get @qsa.query_tile : index
+  %short = index.cmp ult, %tokens, %tile_limit : index
+  %query_capacity = scf.select %short, %tokens, %tile_limit : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %spans = config.get @flash_next.span_capacity : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %key_tile = index.constant 64 : index
+  %round_keys = index.constant 63 : index
+  %blocks = index.div %capacity, %c4 : index
+  %rounded_blocks = index.add %blocks, %round_keys : index
+  %key_groups = index.div %rounded_blocks, %key_tile : index
+  %rounded_queries = index.add %query_capacity, %c3 : index
+  %query_groups = index.div %rounded_queries, %c4 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%key_groups, %query_groups, %spans) workgroup_size(%threads, %c1, %c1) : index
+} launch(%query_begin_arg: index, %index_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %arena: buffer, %scores: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %tile_limit = config.get @qsa.query_tile : index
+  %short = index.cmp ult, %tokens, %tile_limit : index
+  %query_capacity = scf.select %short, %tokens, %tile_limit : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %pool = config.get @flash_next.pool_capacity : index
+  %span = kernel.workgroup.id<z> : index
+  %span_active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %span_active {
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c2 = index.constant 2 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %matrix_width = index.constant 16 : index
+    %key_tile = index.constant 64 : index
+    %channels = index.constant 128 : index
+    %budget = index.constant 512 : index
+    %header_bytes = index.constant 12 : offset
+    %record_bytes = index.constant 20 : offset
+    %record_relative = index.scale %span, %record_bytes : index, offset -> offset
+    %record_origin = index.add %header_bytes, %record_relative : offset
+    %record = buffer.view %epoch[%record_origin] : buffer -> view<5xi32>
+    %length_word = view.load %record[0] : view<5xi32> -> i32
+    %position_word = view.load %record[1] : view<5xi32> -> i32
+    %begin_word = view.load %record[2] : view<5xi32> -> i32
+    %row_word = view.load %record[3] : view<5xi32> -> i32
+    %length_value = index.cast %length_word : i32 to index
+    %length = index.assume %length_value [range(%length_value, 1, %tokens)] : index
+    %span_begin_value = index.cast %begin_word : i32 to index
+    %span_begin = index.assume %span_begin_value [range(%span_begin_value, 0, %tokens)] : index
+    %span_end_value = index.add %span_begin, %length : index
+    %span_end = index.assume %span_end_value [range(%span_end_value, 1, %tokens)] : index
+    %first_value = index.cast %position_word : i32 to index
+    %first = index.assume %first_value [range(%first_value, 0, %capacity)] : index
+    %row_value = index.cast %row_word : i32 to index
+    %resident_row = index.assume %row_value [range(%row_value, 0, 15)] : index
+    %query_begin = index.assume %query_begin_arg [range(%query_begin_arg, 0, %tokens)] : index
+    %query_group = kernel.workgroup.id<y> : index
+    %group_begin = index.madd %query_group, %c4, %query_begin : index
+    %group_end = index.add %group_begin, %c4 : index
+    %earlier_begin = index.cmp ult, %group_begin, %span_begin : index
+    %intersection_begin = scf.select %earlier_begin, %span_begin, %group_begin : index
+    %earlier_end = index.cmp ult, %group_end, %span_end : index
+    %span_intersection_end = scf.select %earlier_end, %group_end, %span_end : index
+    %cohort_end = index.add %query_begin, %query_capacity : index
+    %before_cohort_end = index.cmp ult, %span_intersection_end, %cohort_end : index
+    %intersection_end = scf.select %before_cohort_end, %span_intersection_end, %cohort_end : index
+    %overlaps = index.cmp ult, %intersection_begin, %intersection_end : index
+    scf.if %overlaps {
+      %relative_end = index.sub %intersection_end, %span_begin : index
+      %visible_end_value = index.add %first, %relative_end : index
+      %visible_end = index.assume %visible_end_value [range(%visible_end_value, 1, %capacity)] : index
+      %complete_value = index.div %visible_end, %c4 : index
+      %blocks = index.div %capacity, %c4 : index
+      %complete = index.assume %complete_value [range(%complete_value, 0, %blocks)] : index
+      %sparse = index.cmp ugt, %complete, %budget : index
+      %key_group = kernel.workgroup.id<x> : index
+      %key_begin = index.mul %key_group, %key_tile : index
+      %causal = index.cmp ult, %key_begin, %complete : index
+      %active = scalar.andi %sparse, %causal : i1
+      scf.if %active {
+        %origin = index.constant 0 : offset
+        %query_view = buffer.view %queries[%origin] : buffer -> view<[%tokens]x4x128xbf16>
+        %cache_origin = func.call @flash_next_cache_origin(%rows, %resident_row, %index_origin) : (buffer, index, offset) -> (offset)
+        %physical_blocks = index.div %pool, %c4 : index
+        %key_view = buffer.view %arena[%cache_origin] : buffer -> view<[%physical_blocks]x128xbf16>
+        %outputs = buffer.view %scores[%origin] : buffer -> view<[%query_capacity]x[%blocks]xf32>
+        // Eight BF16 padding elements distribute row starts across LDS banks.
+        // The same key panel is viewed transposed for the matrix RHS without
+        // another copy. Four waves own disjoint 16-key output columns.
+        %shared_bytes = index.constant 21760 : offset
+        %keys_origin = index.constant 4352 : offset
+        %shared = buffer.alloca<workgroup> align(16) %shared_bytes : buffer
+        %query_tile = buffer.view %shared[%origin] : buffer -> view<16x136xbf16>
+        %keys = buffer.view %shared[%keys_origin] : buffer -> view<64x136xbf16>
+        %key_layout = encoding.layout.strided [1, 136] : encoding<layout>
+        %key_transpose = buffer.view %shared[%keys_origin] : buffer -> view<128x64xbf16, %key_layout>
+        %thread = kernel.workitem.id<x> : index
+        %lane = kernel.subgroup.lane.id : index
+        %wave = kernel.subgroup.id : index
+        %stage_row = index.div %thread, %c8 : index
+        %stage_packet = index.rem %thread, %c8 : index
+        %stage_channel = index.mul %stage_packet, %matrix_width : index
+        %query_slot = index.div %stage_row, %c4 : index
+        %head = index.rem %stage_row, %c4 : index
+        %query_token = index.add %group_begin, %query_slot : index
+        %after_begin = index.cmp uge, %query_token, %intersection_begin : index
+        %before_end = index.cmp ult, %query_token, %intersection_end : index
+        %valid_query = scalar.andi %after_begin, %before_end : i1
+        %padding = vector.constant 0.0 : vector<16xbf16>
+        %query_packet = scf.if %valid_query -> (vector<16xbf16>) {
+          %bounded_token = index.assume %query_token [range(%query_token, 0, 32767), lt(%query_token, %tokens)] : index
+          %packet = vector.load %query_view[%bounded_token, %head, %stage_channel] : view<[%tokens]x4x128xbf16> -> vector<16xbf16>
+          scf.yield %packet : vector<16xbf16>
+        } else {
+          scf.yield %padding : vector<16xbf16>
+        }
+        vector.store %query_packet, %query_tile[%stage_row, %stage_channel] : vector<16xbf16>, view<16x136xbf16>
+        scf.for %round = [%c0 to %c4 step %c1] unroll {
+          %tile_row = index.madd %round, %matrix_width, %stage_row : index
+          %block = index.add %key_begin, %tile_row : index
+          %valid = index.cmp ult, %block, %complete : index
+          %packet = scf.if %valid -> (vector<16xbf16>) {
+            %logical_value = index.mul %block, %c4 : index
+            %logical = index.assume %logical_value [lt(%logical_value, %capacity)] : index
+            %physical_token = func.call @flash_next_physical_token(%rows, %resident_row, %logical) : (buffer, index, index) -> (index)
+            %physical = index.div %physical_token, %c4 : index
+            %loaded = vector.load %key_view[%physical, %stage_channel] : view<[%physical_blocks]x128xbf16> -> vector<16xbf16>
+            scf.yield %loaded : vector<16xbf16>
+          } else {
+            scf.yield %padding : vector<16xbf16>
+          }
+          vector.store %packet, %keys[%tile_row, %stage_channel] : vector<16xbf16>, view<64x136xbf16>
+        }
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        %column = index.mul %wave, %matrix_width : index
+        %initial_values = vector.constant 0.0 : vector<8xf32>
+        %initial = vector.fragment<init> %initial_values shape [%matrix_width, %matrix_width] : vector<8xf32>
+        %products = scf.for %channel = [%c0 to %channels step %matrix_width](%accumulator = %initial : vector<8xf32>) -> (vector<8xf32>) unroll {
+          %query_fragment = vector.fragment.load<lhs> %query_tile[%c0, %channel] shape [%matrix_width, %matrix_width] : view<16x136xbf16> -> vector<16xbf16>
+          %key_fragment = vector.fragment.load<rhs> %key_transpose[%channel, %column] shape [%matrix_width, %matrix_width] : view<128x64xbf16, %key_layout> -> vector<16xbf16>
+          %next = vector.mma %query_fragment, %key_fragment, %accumulator : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+          scf.yield %next : vector<8xf32>
+        }
+        // Matrix rows interleave heads within each query. A lane holds two
+        // heads per query; its XOR-16 partner holds the other two heads.
+        %positive = vector.maxnumf %products, %initial_values : vector<8xf32>
+        %lane_column = index.rem %lane, %matrix_width : index
+        %relative_key = index.add %column, %lane_column : index
+        %block = index.add %key_begin, %relative_key : index
+        %leader = index.cmp ult, %lane, %matrix_width : index
+        %head_partner = scalar.constant 16 : i32
+        %wave_width = scalar.constant 32 : i32
+        scf.for %query = [%c0 to %c4 step %c1] unroll {
+          %even = index.mul %query, %c2 : index
+          %odd = index.add %even, %c1 : index
+          %first_pair = vector.extract %positive[%even] : vector<8xf32> -> f32
+          %second_pair = vector.extract %positive[%odd] : vector<8xf32> -> f32
+          %pair = scalar.addf %first_pair, %second_pair : f32
+          %other, %other_valid = kernel.subgroup.shuffle<xor> %pair, %head_partner, %wave_width : f32, i32, i32
+          %score = scalar.addf %pair, %other : f32
+          %token = index.add %group_begin, %query : index
+          %after_span = index.cmp uge, %token, %intersection_begin : index
+          %before_span_end = index.cmp ult, %token, %intersection_end : index
+          %live_query = scalar.andi %after_span, %before_span_end : i1
+          %publish = scalar.andi %leader, %live_query : i1
+          scf.if %publish {
+            %relative_token = index.sub %token, %span_begin : index
+            %position = index.add %first, %relative_token : index
+            %visible_value = index.add %position, %c1 : index
+            %visible = index.assume %visible_value [range(%visible_value, 1, %capacity)] : index
+            %query_complete_value = index.div %visible, %c4 : index
+            %query_complete = index.assume %query_complete_value [range(%query_complete_value, 0, %blocks)] : index
+            %query_sparse = index.cmp ugt, %query_complete, %budget : index
+            %key_valid = index.cmp ult, %block, %query_complete : index
+            %live_key = scalar.andi %query_sparse, %key_valid : i1
+            scf.if %live_key {
+              %relative_query_value = index.sub %token, %query_begin : index
+              %relative_query = index.assume %relative_query_value [lt(%relative_query_value, %query_capacity)] : index
+              view.store %score, %outputs[%relative_query, %block] : f32, view<[%query_capacity]x[%blocks]xf32>
+            }
+          }
+        }
+      }
+    }
+  }
+  kernel.return
+}

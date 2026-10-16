@@ -4,7 +4,7 @@ config.decl @flash_next.context_capacity : %value: index where [range(%value, 64
 
 config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
 
-config.decl @qsa.query_tile : %value: index where [range(%value, 1, 32)]
+config.decl @qsa.query_tile : %value: index where [range(%value, 1, 32768)]
 
 command.program.decl @flash_next_capture_inputs(%prefix_bytes: offset, %row_bytes: offset) launch(%epoch: buffer, %input: buffer, %capture: buffer)
 
