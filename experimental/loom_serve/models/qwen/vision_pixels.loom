@@ -147,7 +147,7 @@ global.rodata.def @qwen38_orientation_layouts = bytes("00040c0802060e0a")
 // The first 64 bytes reserve a four-image cohort directory. Batch preparation
 // fills the first packet's directory in the native packed upload. All offsets in
 // the following 64-byte resize header are relative to that header, not the cohort.
-func.def @qwen38_vision_pixel_packet(%request: buffer) -> (buffer) {
+func.def public @qwen38_vision_pixel_packet(%request: buffer) -> (buffer) {
   %origin = index.constant 0 : offset
   %header = buffer.view %request[%origin] : buffer -> view<16xi32>
   %source_width = view.load %header[4] : view<16xi32> -> i32

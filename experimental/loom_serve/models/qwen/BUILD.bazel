@@ -6,7 +6,7 @@
 
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
+load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_module", "loom_test")
 load("//loom/src/loom/tooling/target/spirv:execution_profiles.bzl", "SPIRV_VULKAN_HARDWARE_PROFILE")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "amdgpu_execution_profile")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
@@ -161,6 +161,21 @@ loom_library(
     deps = [":vision_kernels"],
 )
 
+loom_library(
+    name = "vision_geometry",
+    srcs = ["vision_geometry.loom"],
+)
+
+loom_library(
+    name = "vision_pixels",
+    srcs = ["vision_pixels.loom"],
+)
+
+loom_library(
+    name = "vision_stages",
+    srcs = ["vision_stages.loom"],
+)
+
 loom_test(
     name = "vision_pixels_test",
     srcs = [
@@ -173,26 +188,24 @@ loom_test(
 
 loom_test(
     name = "vision_geometry_test",
-    srcs = [
-        "tests/vision_geometry.loom",
-        "vision_geometry.loom",
-    ],
+    srcs = ["tests/vision_geometry.loom"],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
+    deps = [":vision_geometry"],
 )
 
 loom_test(
     name = "vision_resize_test",
-    srcs = [
-        "tests/vision_resize.loom",
-        "vision_pixels.loom",
-    ],
+    srcs = ["tests/vision_resize.loom"],
     benchmark_smoke = False,
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
     ],
-    deps = [":vision_kernels"],
+    deps = [
+        ":vision_kernels",
+        ":vision_pixels",
+    ],
 )
 
 loom_test(
@@ -200,10 +213,10 @@ loom_test(
     srcs = [
         "tests/vision_control.loom",
         "vision_control.loom",
-        "vision_pixels.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
+    deps = [":vision_pixels"],
 )
 
 loom_test(
@@ -548,12 +561,39 @@ loom_test(
     ],
 )
 
-loom_library(
+# Link entry programs against separate providers, as registration does. Merging
+# their source files would hide missing exports at these ownership boundaries.
+loom_module(
     name = "request_control",
-    srcs = [
-        "control.loom",
-        "vision_geometry.loom",
+    srcs = ["control.loom"],
+    include_input_exports = True,
+    libraries = [":vision_geometry"],
+    mode = "link",
+    output_format = "bc",
+    strict_deps = True,
+)
+
+loom_module(
+    name = "vision_preparation",
+    srcs = ["vision_prepare.loom"],
+    include_input_exports = True,
+    libraries = [":vision_stages"],
+    mode = "link",
+    output_format = "bc",
+    strict_deps = True,
+)
+
+loom_module(
+    name = "vision_request_control",
+    srcs = ["vision_control.loom"],
+    include_input_exports = True,
+    libraries = [
+        ":vision_pixels",
+        ":vision_stages",
     ],
+    mode = "link",
+    output_format = "bc",
+    strict_deps = True,
 )
 
 py_test(
@@ -567,6 +607,8 @@ py_test(
     data = [
         "testdata/portable_chat.loom",
         ":request_control",
+        ":vision_preparation",
+        ":vision_request_control",
         "//loom/src/loom/serve/testing:text_request_check",
     ],
     target_compatible_with = loom_config_compatible_with([
