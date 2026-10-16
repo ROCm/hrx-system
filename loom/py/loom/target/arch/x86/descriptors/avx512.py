@@ -869,6 +869,15 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 AVX512_BITWISE_FAMILIES, native.AVX512_BITWISE, strict=True
             )
         ),
+        _evex_descriptor(
+            _vector_i32_binary_descriptor(
+                vector_bit_width=512,
+                key="x86.avx512.vpshufb.zmm",
+                mnemonic="vpshufb",
+                semantic_tag="bits.shuffle.bytes.v512",
+            ),
+            native.VPSHUFB,
+        ),
         *(
             _evex_descriptor(
                 Descriptor(

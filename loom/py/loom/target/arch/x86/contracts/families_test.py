@@ -1588,10 +1588,18 @@ def test_avx512_arithmetic_covers_every_native_family() -> None:
         for vector_bit_width in AVX512VL_VECTOR_BIT_WIDTHS
     }
     direct_descriptor_keys = {descriptor_key for descriptor_key, _ in expected_direct}
+    direct_source_ops = {
+        getattr(vector, f"vector_{family.source_operation}")
+        for family in (
+            *AVX512_INTEGER_BINARY_FAMILIES,
+            *AVX512_FLOAT_BINARY_FAMILIES,
+            *AVX512VL_INTEGER_BINARY_FAMILIES,
+        )
+    }
     actual_direct = {
         (rule.descriptor.key, _value_type_guard(rule, "result"))
         for rule in rules
-        if rule.source_op is not vector.vector_reduce
+        if rule.source_op in direct_source_ops
         and rule.descriptor.key in direct_descriptor_keys
     }
     assert actual_direct == expected_direct
@@ -1617,7 +1625,11 @@ def test_avx512_arithmetic_covers_every_native_family() -> None:
     bitwise_rules = tuple(
         rule
         for rule in rules
-        if rule.source_op is not vector.vector_reduce
+        if rule.source_op
+        in {
+            getattr(vector, f"vector_{source_operation}")
+            for source_operation, _, _ in AVX512_BITWISE_FAMILIES
+        }
         and rule.descriptor.key
         in {f"x86.avx512.{mnemonic}.zmm" for _, mnemonic, _ in AVX512_BITWISE_FAMILIES}
         and _value_type_guard(rule, "result") != Vector("i1", lanes=64)

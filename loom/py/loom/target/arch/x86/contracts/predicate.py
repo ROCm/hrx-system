@@ -151,8 +151,16 @@ def _predicate_carrier_element_bit_width(
     return representation_bit_width // lane_count
 
 
-def _predicate_representation_id(lane_count: int, representation_bit_width: int) -> int:
+def avx2_predicate_representation_id(
+    lane_count: int, representation_bit_width: int
+) -> int:
+    """Returns the physical bits per logical AVX2 predicate lane."""
     return _predicate_carrier_element_bit_width(lane_count, representation_bit_width)
+
+
+def avx2_predicate_register_class(representation_bit_width: int) -> str:
+    """Returns the register class carrying an AVX2 predicate representation."""
+    return _REGISTER_CLASSES[representation_bit_width]
 
 
 def _predicate_representation_guards(
@@ -160,11 +168,11 @@ def _predicate_representation_guards(
 ) -> tuple[Guard, Guard]:
     return (
         Guard.low_value_register_class(
-            field, _REGISTER_CLASSES[representation_bit_width]
+            field, avx2_predicate_register_class(representation_bit_width)
         ),
         Guard.low_value_representation(
             field,
-            _predicate_representation_id(lane_count, representation_bit_width),
+            avx2_predicate_representation_id(lane_count, representation_bit_width),
         ),
     )
 
@@ -249,7 +257,7 @@ def _predicate_constant_rules(
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     for lane_count, result_type in _PREDICATE_TYPES.items():
-        for representation_bit_width in _predicate_representation_bit_widths(
+        for representation_bit_width in avx2_predicate_representation_bit_widths(
             lane_count
         ):
             carrier_type = _PREDICATE_CARRIER_TYPES[
@@ -324,7 +332,7 @@ def _predicate_splat_rules(
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     for lane_count, result_type in _PREDICATE_TYPES.items():
-        for representation_bit_width in _predicate_representation_bit_widths(
+        for representation_bit_width in avx2_predicate_representation_bit_widths(
             lane_count
         ):
             element_bit_width = _predicate_carrier_element_bit_width(
@@ -701,7 +709,8 @@ def _integer_compare_program(
     )
 
 
-def _predicate_representation_bit_widths(lane_count: int) -> tuple[int, ...]:
+def avx2_predicate_representation_bit_widths(lane_count: int) -> tuple[int, ...]:
+    """Returns every legal SIMD representation width for an AVX2 predicate."""
     return tuple(
         bit_width
         for bit_width in _PREDICATE_SIMD_BIT_WIDTHS
@@ -761,7 +770,7 @@ def _predicate_extension_rules(
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     for lane_count, source_type in _PREDICATE_TYPES.items():
-        for source_bit_width in _predicate_representation_bit_widths(lane_count):
+        for source_bit_width in avx2_predicate_representation_bit_widths(lane_count):
             source_element_bit_width = _predicate_carrier_element_bit_width(
                 lane_count, source_bit_width
             )
@@ -873,7 +882,9 @@ def _predicate_truncation_rules(
                 f"{AVX2_INTEGER_COMPARE_MNEMONICS[source_element.name][1]}."
                 f"{source_register_suffix}"
             )
-            for result_bit_width in _predicate_representation_bit_widths(lane_count):
+            for result_bit_width in avx2_predicate_representation_bit_widths(
+                lane_count
+            ):
                 result_element_bit_width = _predicate_carrier_element_bit_width(
                     lane_count, result_bit_width
                 )
@@ -977,7 +988,7 @@ def _predicate_lane_movement_rules(
     insert_half = descriptor_lookup("x86.avx2.vinsertf128.ymm.xmm")
     rules: list[DescriptorRule] = []
     for lane_count, predicate_type in _PREDICATE_TYPES.items():
-        for representation_bit_width in _predicate_representation_bit_widths(
+        for representation_bit_width in avx2_predicate_representation_bit_widths(
             lane_count
         ):
             element_bit_width = _predicate_carrier_element_bit_width(
@@ -1223,7 +1234,7 @@ def _integer_compare_rules(
                 "ugt",
                 "uge",
             ):
-                for result_bit_width in _predicate_representation_bit_widths(
+                for result_bit_width in avx2_predicate_representation_bit_widths(
                     lane_count
                 ):
                     requires_conversion = result_bit_width != payload_bit_width
@@ -1302,7 +1313,9 @@ def _floating_compare_rules(
                 f"x86.avx2.{AVX2_FLOAT_COMPARE_MNEMONICS[element.name]}."
                 f"{_REGISTER_SUFFIXES[instruction_bit_width]}"
             )
-            for result_bit_width in _predicate_representation_bit_widths(lane_count):
+            for result_bit_width in avx2_predicate_representation_bit_widths(
+                lane_count
+            ):
                 requires_conversion = result_bit_width != payload_bit_width
                 native_result = (
                     ValueRef.temporary("native_mask")
@@ -1364,7 +1377,7 @@ def _vector_select_rules(
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     for lane_count, condition_type in _PREDICATE_TYPES.items():
-        for payload_bit_width in _predicate_representation_bit_widths(lane_count):
+        for payload_bit_width in avx2_predicate_representation_bit_widths(lane_count):
             payload_type = Vector(
                 _PAYLOAD_ELEMENT_NAMES_BY_BIT_WIDTH[payload_bit_width // lane_count],
                 lanes=lane_count,
@@ -1372,7 +1385,9 @@ def _vector_select_rules(
             blend = descriptor_lookup(
                 f"x86.avx2.vpblendvb.{_REGISTER_SUFFIXES[payload_bit_width]}"
             )
-            for condition_bit_width in _predicate_representation_bit_widths(lane_count):
+            for condition_bit_width in avx2_predicate_representation_bit_widths(
+                lane_count
+            ):
                 requires_conversion = condition_bit_width != payload_bit_width
                 mask = ValueRef.operand("condition")
                 conversion_emits: tuple[EmitDescriptorOp, ...] = ()
@@ -1489,7 +1504,7 @@ def _predicate_bitwise_rules(
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     for lane_count, predicate_type in _PREDICATE_TYPES.items():
-        for representation_bit_width in _predicate_representation_bit_widths(
+        for representation_bit_width in avx2_predicate_representation_bit_widths(
             lane_count
         ):
             register_suffix = _REGISTER_SUFFIXES[representation_bit_width]

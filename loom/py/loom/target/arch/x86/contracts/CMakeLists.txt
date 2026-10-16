@@ -44,6 +44,7 @@ iree_py_library(
     "vector_arithmetic.py"
     "vector_construction.py"
     "vector_integer_conversion.py"
+    "vector_integer_count.py"
   DEPS
     loom::py::loom::core
     loom::py::loom::dialect::buffer::buffer
@@ -262,6 +263,27 @@ iree_py_test(
     loom::py::loom::target::arch::x86::contracts::contracts
     loom::py::loom::dialect::index::index
     loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::target::arch::x86::descriptors
+    loom::py::loom::target::contracts::contracts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    vector_integer_count_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
+  SRCS
+    "vector_integer_count_test.py"
+    "../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.x86.contracts.vector_integer_count_test"
+  DEPS
+    loom::py::loom::target::arch::x86::contracts::contracts
+    loom::py::loom::dialect::vector::vector
     loom::py::loom::target::arch::x86::descriptors
     loom::py::loom::target::contracts::contracts
   PACKAGE_DIRS

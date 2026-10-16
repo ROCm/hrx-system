@@ -31,13 +31,13 @@ _ZMM_SWAP_256_BIT_HALVES_CONTROL = 0x4E
 _ZMM_SWAP_128_BIT_QUARTERS_CONTROL = 0xB1
 
 _VECTOR_CARRIERS = {
-    8: ("xmm", "x86.xmm"),
-    16: ("xmm", "x86.xmm"),
-    32: ("xmm", "x86.xmm"),
-    64: ("xmm", "x86.xmm"),
-    128: ("xmm", "x86.xmm"),
-    256: ("ymm", "x86.ymm"),
-    512: ("zmm", "x86.zmm"),
+    8: (128, "xmm", "x86.xmm"),
+    16: (128, "xmm", "x86.xmm"),
+    32: (128, "xmm", "x86.xmm"),
+    64: (128, "xmm", "x86.xmm"),
+    128: (128, "xmm", "x86.xmm"),
+    256: (256, "ymm", "x86.ymm"),
+    512: (512, "zmm", "x86.zmm"),
 }
 
 
@@ -45,6 +45,7 @@ _VECTOR_CARRIERS = {
 class VectorCarrier:
     """One physical register carrier for a range of logical vector widths."""
 
+    register_bit_width: int
     descriptor_suffix: str
     register_class: str
     value_type: TypePattern
@@ -83,23 +84,25 @@ def vector_carriers(
     element: VectorElement, vector_bit_widths: Sequence[int]
 ) -> tuple[VectorCarrier, ...]:
     """Groups logical vector widths by their physical register carrier."""
-    grouped_widths: dict[tuple[str, str], list[int]] = {}
+    grouped_widths: dict[tuple[int, str, str], list[int]] = {}
     for vector_bit_width in vector_bit_widths:
         if vector_bit_width < element.bit_width:
             continue
-        descriptor_suffix, register_class = _VECTOR_CARRIERS[vector_bit_width]
-        grouped_widths.setdefault((descriptor_suffix, register_class), []).append(
-            vector_bit_width
-        )
+        carrier = _VECTOR_CARRIERS[vector_bit_width]
+        grouped_widths.setdefault(carrier, []).append(vector_bit_width)
 
     carriers: list[VectorCarrier] = []
-    for (descriptor_suffix, register_class), logical_widths in grouped_widths.items():
+    for (
+        register_bit_width,
+        descriptor_suffix,
+        register_class,
+    ), logical_widths in grouped_widths.items():
         minimum_width = min(logical_widths)
         maximum_width = max(logical_widths)
         expected_widths = [
             vector_bit_width
             for vector_bit_width, carrier in _VECTOR_CARRIERS.items()
-            if carrier == (descriptor_suffix, register_class)
+            if carrier == (register_bit_width, descriptor_suffix, register_class)
             and minimum_width <= vector_bit_width <= maximum_width
             and vector_bit_width >= element.bit_width
         ]
@@ -119,7 +122,14 @@ def vector_carriers(
                 maximum_lanes=maximum_lanes,
             )
         )
-        carriers.append(VectorCarrier(descriptor_suffix, register_class, value_type))
+        carriers.append(
+            VectorCarrier(
+                register_bit_width,
+                descriptor_suffix,
+                register_class,
+                value_type,
+            )
+        )
     return tuple(carriers)
 
 

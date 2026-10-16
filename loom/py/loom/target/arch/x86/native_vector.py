@@ -1584,6 +1584,7 @@ VPSHUFB = _instruction(
     _NDS,
     _OPERANDS_16,
     _IMMEDIATES_0,
+    _encoding(_EVEX, _MAP_2, 1, 0, 0x00, (512,)),
     _encoding(_VEX, _MAP_2, 1, 0, 0x00, (128, 256)),
 )
 VPSHUFD = _instruction(

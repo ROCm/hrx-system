@@ -1,0 +1,54 @@
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @vector_i8x64_population(%input: vector<64xi8>) -> (vector<64xi8>) {
+  %population = vector.ctpopi %input : vector<64xi8>
+  func.return %population : vector<64xi8>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<64xi8>) -> (vector<64xi8>)}) @vector_i8x64_population(%input: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %5 = avx512.vmovdqu64.rodata.zmm @__low_rodata_3712eedf
+  %6 = avx512.vmovdqu64.rodata.zmm @__low_rodata_b7c7099f
+  %7 = vpandd %input, %6
+  %8 = avx512.vpsrlw.zmm %input, 4
+  %9 = vpandd %8, %6
+  %10 = vpshufb %5, %7
+  %11 = vpshufb %5, %9
+  %population = vpaddb %10, %11
+  return %population
+}
+
+// ====
+
+func.def @count_compare_select(%lhs: vector<16xi32>, %rhs: vector<16xi32>, %true_value: vector<16xi32>, %false_value: vector<16xi32>) -> (vector<16xi32>) {
+  %predicate = vector.cmpi slt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %counted = vector.ctlzi %predicate : vector<16xi1>
+  %result = vector.select %counted, %true_value, %false_value : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<16xi32>) -> (vector<16xi32>)}) @count_compare_select(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %true_value: reg<x86.zmm>, %false_value: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %predicate = vpcmpd %lhs, %rhs, 1
+  %14 = mov.imm64 -1
+  %15 = avx512.kmovq.k.gpr64 %14
+  %counted = kxorq %predicate, %15
+  %result = vpblendmd %counted, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+func.def @predicate_i1x64_counts(%input: vector<64xi1>) -> (vector<64xi1>, vector<64xi1>, vector<64xi1>) {
+  %leading = vector.ctlzi %input : vector<64xi1>
+  %trailing = vector.cttzi %input : vector<64xi1>
+  %population = vector.ctpopi %input : vector<64xi1>
+  func.return %leading, %trailing, %population : vector<64xi1>, vector<64xi1>, vector<64xi1>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<64xi1>) -> (vector<64xi1>, vector<64xi1>, vector<64xi1>)}) @predicate_i1x64_counts(%population: reg<x86.zmm>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>) asm {
+  %11 = avx512.vmovdqu64.rodata.zmm @__low_rodata_67b5f91f
+  %leading = vpxord %population, %11
+  return %leading, %leading, %population
+}

@@ -86,6 +86,23 @@ iree_executable_test(
     ]
 ]
 
+# Executes the complete shared integer bit-count family through the task HAL.
+iree_executable_test(
+    name = "integer_bit_counts_scenario_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(rootpath //loom/src/loom/test/corpus/numeric:integer/bit_count.loom)",
+        "--device=task",
+    ],
+    data = ["//loom/src/loom/test/corpus/numeric:integer/bit_count.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+        "//loom/config/execute:task_hal",
+        "//loom/config/target/arch:vm",
+    ]) + ["@platforms//cpu:x86_64"],
+)
+
 # Exercises shared corpus programs through the task HAL and independent VM oracle.
 [
     iree_executable_test(
