@@ -240,6 +240,14 @@ record. Together they occupy 8,964 bytes at the default capacity of 32 and
 their unused tail fields require initialization, so storage reuse needs no
 global clear.
 
+The shared expert uses the same contraction with contiguous token rows and
+original Q8_0 gate/up weights. At capacities of 64 or more, 64-token by
+64-feature tiles reuse each activation panel across both projections and keep
+the nonlinear result in F32 until BF16 publication. The immutable epoch header
+supplies the live row count directly; shared work needs no routing table.
+Smaller capacities retain packed dot products, including the default predictor
+proposal and verification shapes. Shared down uses the dense Q8 matrix policy.
+
 Both dot and matrix consumers preserve the original packed weights, BF16
 activations, and publication boundaries. Their accumulation order differs;
 independent F64 references check the original-value numerical contract instead
@@ -251,8 +259,8 @@ The checkpoint-free kernel suite uses independent scalar arithmetic and
 ownership checks, including partitioned recurrent execution, shared-anchor
 forks, incomplete index blocks, EOS history, inactive storage guards, IQ4_NL
 decoding, stable top-512 selection, and exact route ownership through empty and
-ragged expert buckets. An independent F64 oracle covers every expert encoding
-and routed row count:
+ragged expert buckets. An independent F64 oracle covers every expert encoding,
+routed row count, and empty or ragged contiguous shared-expert tile:
 
 ```sh
 iree-bazel-test --config=asan //experimental/loom_serve/models/qwen_flash_next/...
