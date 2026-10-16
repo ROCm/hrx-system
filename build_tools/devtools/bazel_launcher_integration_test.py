@@ -5,7 +5,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Exercises the lock-free Bazel launcher against a real Bazel server."""
+"""Manually exercises the Bazel launcher against a real Bazel server."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEV_PY = REPO_ROOT / "dev.py"
 FIXTURE_TARGET = "//build_tools/devtools:bazel_launcher_integration_fixture"
 
-# This integration harness also runs directly from a source checkout in CI.
+# This integration harness runs directly from a source checkout.
 sys.path.insert(0, str(REPO_ROOT))
 from build_tools.devtools import bazel as bazel_dev  # noqa: E402
 from build_tools.devtools import environment  # noqa: E402

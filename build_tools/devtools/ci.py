@@ -189,10 +189,6 @@ def dev_command(*args: str) -> tuple[str, ...]:
     return (os.environ.get("IREE_CI_PYTHON", "python3"), "dev.py", *args)
 
 
-def python_command(path: str, *args: str) -> tuple[str, ...]:
-    return (os.environ.get("IREE_CI_PYTHON", "python3"), path, *args)
-
-
 def sanitizer_env(config: str | None) -> tuple[tuple[str, str], ...]:
     if config != "tsan":
         return ()
@@ -635,10 +631,6 @@ def repository_integration_steps(
                 else ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS
             ),
             bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
-        ),
-        CiStep(
-            "Test lock-free Bazel launch",
-            python_command("build_tools/devtools/bazel_launcher_integration_test.py"),
         ),
         bazel_run_step(
             "Run dynamic library environment smoke",

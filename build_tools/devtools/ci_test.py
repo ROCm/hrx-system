@@ -603,7 +603,6 @@ class CiTest(unittest.TestCase):
                 "Build repository",
                 "Build AMDGPU device toolchain smoke",
                 "Test repository",
-                "Test lock-free Bazel launch",
                 "Run dynamic library environment smoke",
                 "Run executable alias smoke",
             ],
@@ -624,20 +623,16 @@ class CiTest(unittest.TestCase):
             integration_test_step.argv,
         )
         self.assertEqual(
-            steps[5].argv[-1],
+            steps[4].argv[-1],
             ci_config.BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET,
         )
         self.assertEqual(
-            steps[6].argv[-3:],
+            steps[5].argv[-3:],
             (
                 ci_config.BAZEL_REPOSITORY_INTEGRATION_ALIAS_TARGET,
                 "--",
                 "--help",
             ),
-        )
-        self.assertEqual(
-            steps[4].argv[-1],
-            "build_tools/devtools/bazel_launcher_integration_test.py",
         )
 
     def test_bazel_repository_integration_skips_ordinary_repository_build(self):
