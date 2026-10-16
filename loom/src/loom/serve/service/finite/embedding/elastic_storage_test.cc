@@ -268,7 +268,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   EXPECT_EQ(queued.oldest_active_age, 0);
   // The outer owner holds another model's pin and will release it. Queue the
   // cohort behind that activity instead of treating capacity as unreachable.
-  constexpr auto kShared = LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
+  constexpr auto kShared = LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
   EXPECT_TRUE(Step(kShared));  // Prepare requests.
   EXPECT_TRUE(Step(kShared));  // Prepare cohort.
   EXPECT_TRUE(Step(kShared));  // Consume preparation; admission denied.
