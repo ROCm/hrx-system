@@ -21,7 +21,10 @@ The local `loom_serve_testing` Python package contains these helpers:
 - `logs` owns an observer's cursors. Gaps, model removal and stream reincarnation
   remain explicit; a reader never owns server resources.
 - `chat` consumes complete chat/SSE responses, validates terminal outcomes and
-  records monotonic request, first-text and output-chunk times.
+  records monotonic request, first-text and output-chunk times. An optional
+  content observer receives answer deltas with their receipt timestamps while
+  the response is live, allowing a workload to feed a downstream consumer.
+  Reasoning and tools remain separate, and observer time is part of the sample.
 - `workload` replays frozen requests with independent arrivals, completion-linked
   followups, and bounded client concurrency. Its `replay` command writes JSONL
   observations and per-model/endpoint summaries.
