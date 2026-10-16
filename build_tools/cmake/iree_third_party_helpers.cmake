@@ -56,6 +56,53 @@ function(iree_dependency_require_pinned_source_allowed dep_name)
   endif()
 endfunction()
 
+# Expands GitHub download URLs with checksum-identical independent routes.
+# Keep these routes synchronized with build_tools/bazel/downloader.cfg.
+function(_iree_dependency_expand_download_urls out_var)
+  set(_expanded_urls)
+  foreach(_url IN LISTS ARGN)
+    list(APPEND _expanded_urls "${_url}")
+
+    # GitHub source archives normally redirect to codeload. A direct request
+    # avoids routing a second attempt through github.com.
+    if(_url MATCHES
+       "^https://github\\.com/([^/]+/[^/]+)/archive/(.+)\\.tar\\.gz$")
+      list(APPEND _expanded_urls
+        "https://codeload.github.com/${CMAKE_MATCH_1}/tar.gz/${CMAKE_MATCH_2}")
+    endif()
+
+    # These release assets are byte-identical to their source tag archives.
+    if(_url MATCHES
+       "^https://github\\.com/(bazel-contrib/rules_python|bazelbuild/rules_cc|bazelbuild/rules_shell|bazelbuild/rules_testing|google/googletest)/releases/download/([^/]+)/[^/]+\\.tar\\.gz$")
+      list(APPEND _expanded_urls
+        "https://codeload.github.com/${CMAKE_MATCH_1}/tar.gz/refs/tags/${CMAKE_MATCH_2}")
+    endif()
+
+    # Bazel's public mirror carries these exact release archives.
+    if(_url MATCHES
+       "^https://(github\\.com/(bazelbuild/(bazel-skylib|platforms|rules_shell|rules_testing)|google/googletest|facebook/zstd)/releases/download/[^/]+/[^/]+\\.tar\\.gz)$")
+      list(APPEND _expanded_urls
+        "https://mirror.bazel.build/${CMAKE_MATCH_1}")
+    endif()
+
+    # Kernel.org is the independent canonical mirror for Torvalds' Linux tree.
+    if(_url MATCHES
+       "^https://raw\\.githubusercontent\\.com/torvalds/linux/([^/]+)/(.*)$")
+      list(APPEND _expanded_urls
+        "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/${CMAKE_MATCH_2}?id=${CMAKE_MATCH_1}")
+    endif()
+
+    # jsDelivr mirrors the remaining pinned raw-file repositories.
+    if(_url MATCHES
+       "^https://raw\\.githubusercontent\\.com/(amd/xdna-driver|ROCm/rocm-systems)/([^/]+)/(.*)$")
+      list(APPEND _expanded_urls
+        "https://cdn.jsdelivr.net/gh/${CMAKE_MATCH_1}@${CMAKE_MATCH_2}/${CMAKE_MATCH_3}")
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _expanded_urls)
+  set(${out_var} "${_expanded_urls}" PARENT_SCOPE)
+endfunction()
+
 function(_iree_dependency_variable_name out_var dep_name property_name)
   string(TOUPPER "${dep_name}" _dependency_identifier)
   string(REGEX REPLACE "[^A-Z0-9]" "_" _dependency_identifier
@@ -120,6 +167,7 @@ function(iree_declare_locked_fetch_content dep_name)
   if(NOT _sha256)
     message(FATAL_ERROR "${dep_name} has no locked SHA256")
   endif()
+  _iree_dependency_expand_download_urls(_urls ${_urls})
 
   set(_source_subdir_args)
   if(_ARGS_SOURCE_SUBDIR)
@@ -226,6 +274,7 @@ function(iree_populate_locked_file dep_name out_file)
   if(NOT _sha256)
     message(FATAL_ERROR "${dep_name} has no locked SHA256")
   endif()
+  _iree_dependency_expand_download_urls(_urls ${_urls})
   if(NOT _downloaded_file_path OR
      IS_ABSOLUTE "${_downloaded_file_path}" OR
      _downloaded_file_path MATCHES "^[A-Za-z]:" OR
@@ -242,23 +291,41 @@ function(iree_populate_locked_file dep_name out_file)
   cmake_path(GET _download_file PARENT_PATH _download_directory)
   file(MAKE_DIRECTORY "${_download_directory}")
 
+  if(EXISTS "${_download_file}")
+    file(SHA256 "${_download_file}" _download_sha256)
+    if("${_download_sha256}" STREQUAL "${_sha256}")
+      set(${out_file} "${_download_file}" PARENT_SCOPE)
+      return()
+    endif()
+    file(REMOVE "${_download_file}")
+  endif()
+
   set(_download_errors)
+  set(_download_candidate "${_download_file}.download")
   foreach(_url IN LISTS _urls)
+    file(REMOVE "${_download_candidate}")
     file(DOWNLOAD
       "${_url}"
-      "${_download_file}"
-      EXPECTED_HASH "SHA256=${_sha256}"
+      "${_download_candidate}"
       STATUS _download_status
       TLS_VERIFY ON
     )
     list(GET _download_status 0 _download_code)
     if(_download_code EQUAL 0)
-      set(${out_file} "${_download_file}" PARENT_SCOPE)
-      return()
+      file(SHA256 "${_download_candidate}" _download_sha256)
+      if("${_download_sha256}" STREQUAL "${_sha256}")
+        file(RENAME "${_download_candidate}" "${_download_file}")
+        set(${out_file} "${_download_file}" PARENT_SCOPE)
+        return()
+      endif()
+      list(APPEND _download_errors
+        "${_url}: SHA256 ${_download_sha256} does not match ${_sha256}")
+    else()
+      list(GET _download_status 1 _download_message)
+      list(APPEND _download_errors "${_url}: ${_download_message}")
     endif()
-    list(GET _download_status 1 _download_message)
-    list(APPEND _download_errors "${_url}: ${_download_message}")
   endforeach()
+  file(REMOVE "${_download_candidate}")
 
   list(JOIN _download_errors "\n  " _download_error_text)
   message(FATAL_ERROR
