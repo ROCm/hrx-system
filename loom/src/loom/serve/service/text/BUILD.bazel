@@ -250,6 +250,7 @@ loom_cc_library(
         "//loom/src/loom/serve/service/finite:model",
         "//loom/src/loom/serve/service/finite:result",
         "//loom/src/loom/serve/service/finite/embedding:protocol",
+        "//loom/src/loom/util:json",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/tooling:flags",
     ],
