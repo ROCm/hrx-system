@@ -34,6 +34,28 @@ typedef struct loom_serve_speech_fields_t {
 #define SPEECH_NUMBER (1u << IREE_JSON_VALUE_TYPE_NUMBER)
 #define SPEECH_OBJECT (1u << IREE_JSON_VALUE_TYPE_OBJECT)
 
+static iree_status_t loom_serve_speech_request_validate(
+    iree_string_view_t input, iree_string_view_t voice,
+    iree_string_view_t instructions, float speed) {
+  if (!iree_unicode_utf8_validate(input) ||
+      !iree_unicode_utf8_validate(voice) ||
+      !iree_unicode_utf8_validate(instructions)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "speech strings must be UTF-8");
+  }
+  if (!input.size || !voice.size ||
+      iree_string_view_find_char(voice, '\0', 0) != IREE_STRING_VIEW_NPOS) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "speech requires nonempty input and a nonempty "
+                            "voice identifier without NUL bytes");
+  }
+  if (!isfinite(speed) || speed < 0.25f || speed > 4.0f) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "speech speed must be between 0.25 and 4");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_serve_speech_field_visit(void* user_data,
                                                    iree_string_view_t key,
                                                    iree_json_value_type_t type,
@@ -80,10 +102,6 @@ static iree_status_t loom_serve_speech_decode_string(
   iree_host_size_t length = 0;
   IREE_RETURN_IF_ERROR(iree_json_unescape_string(raw, capacity, data, &length));
   iree_string_builder_commit_append(output, length);
-  if (!iree_unicode_utf8_validate(iree_string_builder_view(output))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "decoded speech strings must be UTF-8");
-  }
   return iree_ok_status();
 }
 
@@ -151,9 +169,7 @@ static iree_status_t loom_serve_speech_request_decode(
         host_allocator));
   }
   if (values[SPEED].value.data &&
-      (!iree_string_view_atof(values[SPEED].value, &request->speed) ||
-       !isfinite(request->speed) || request->speed < 0.25f ||
-       request->speed > 4.0f)) {
+      !iree_string_view_atof(values[SPEED].value, &request->speed)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "speech speed must be between 0.25 and 4");
   }
@@ -191,17 +207,10 @@ static iree_status_t loom_serve_speech_request_decode(
     IREE_RETURN_IF_ERROR(loom_serve_speech_decode_string(
         values[INSTRUCTIONS].value, &request->instructions));
   }
-  const iree_string_view_t decoded_voice =
-      iree_string_builder_view(&request->voice);
-  if (iree_string_view_is_empty(iree_string_builder_view(&request->input)) ||
-      iree_string_view_is_empty(decoded_voice) ||
-      iree_string_view_find_char(decoded_voice, '\0', 0) !=
-          IREE_STRING_VIEW_NPOS) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "speech requires nonempty input and a nonempty "
-                            "voice identifier without NUL bytes");
-  }
-  return iree_ok_status();
+  return loom_serve_speech_request_validate(
+      iree_string_builder_view(&request->input),
+      iree_string_builder_view(&request->voice),
+      iree_string_builder_view(&request->instructions), request->speed);
 }
 
 void loom_serve_speech_request_deinitialize(
@@ -210,6 +219,33 @@ void loom_serve_speech_request_deinitialize(
   iree_string_builder_deinitialize(&request->voice);
   iree_string_builder_deinitialize(&request->instructions);
   memset(request, 0, sizeof(*request));
+}
+
+iree_status_t loom_serve_speech_request_initialize_text(
+    iree_string_view_t input, iree_string_view_t voice,
+    iree_string_view_t instructions, uint64_t seed, float speed,
+    iree_allocator_t host_allocator, loom_serve_speech_request_t* out_request) {
+  memset(out_request, 0, sizeof(*out_request));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_speech_request_validate(input, voice, instructions, speed));
+  iree_string_builder_initialize(host_allocator, &out_request->input);
+  iree_string_builder_initialize(host_allocator, &out_request->voice);
+  iree_string_builder_initialize(host_allocator, &out_request->instructions);
+  out_request->seed = seed;
+  out_request->speed = speed;
+  iree_status_t status =
+      iree_string_builder_append_string(&out_request->input, input);
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_string(&out_request->voice, voice);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_string(&out_request->instructions,
+                                               instructions);
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_serve_speech_request_deinitialize(out_request);
+  }
+  return status;
 }
 
 iree_status_t loom_serve_speech_request_initialize(

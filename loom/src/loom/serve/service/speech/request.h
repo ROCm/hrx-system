@@ -28,6 +28,15 @@ typedef struct loom_serve_speech_request_t {
   float speed;
 } loom_serve_speech_request_t;
 
+// Copies a native request without JSON encoding. Text, voice, and instructions
+// must be UTF-8; text and voice are nonempty and voice contains no NUL. Speed
+// is finite and in [0.25, 4]. Source preparation owns model-specific limits and
+// voice/instruction support. Failure leaves a deinitializable empty value.
+iree_status_t loom_serve_speech_request_initialize_text(
+    iree_string_view_t input, iree_string_view_t voice,
+    iree_string_view_t instructions, uint64_t seed, float speed,
+    iree_allocator_t host_allocator, loom_serve_speech_request_t* out_request);
+
 // Decodes one complete UTF-8 JSON/JSONC speech request. Model, nonempty input
 // and voice are required; voice accepts a string or an object containing id.
 // The binary PCM protocol requires explicit response_format="pcm" and accepts
