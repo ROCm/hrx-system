@@ -406,9 +406,10 @@ static iree_status_t loom_amdgpu_wait_state_allocate(
   builder->sgprs.allocated_count =
       allocation->physical_extents
           .ends_by_reg_class[LOOM_AMDGPU_REG_CLASS_ID_SGPR];
-  builder->sgprs.fixed_location_base = sgpr_class->fixed_location_base;
-  builder->sgprs.count =
-      builder->sgprs.allocated_count + sgpr_class->fixed_location_count;
+  builder->sgprs.fixed_location_base =
+      loom_low_reg_class_fixed_location_base(sgpr_class);
+  builder->sgprs.count = builder->sgprs.allocated_count +
+                         loom_low_reg_class_fixed_location_count(sgpr_class);
   if (builder->sgprs.count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         builder->transient_arena, builder->sgprs.count,

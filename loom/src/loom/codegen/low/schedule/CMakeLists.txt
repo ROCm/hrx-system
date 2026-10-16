@@ -125,6 +125,8 @@ loom_cc_library(
   SRCS
     "block.c"
     "block.h"
+    "call_pressure.c"
+    "call_pressure.h"
     "candidate_policy.c"
     "candidate_policy.h"
     "completion_demand.c"
@@ -171,6 +173,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::analysis::liveness
     loom::analysis::liveness_json
+    loom::codegen::low::allocation::call
     loom::codegen::low::allocation::storage
     loom::codegen::low::allocation::target_constraints
     loom::codegen::low::descriptor_traits

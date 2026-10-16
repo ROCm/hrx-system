@@ -121,6 +121,150 @@ TEST_F(LowAllocationTargetConstraintsTest, AppliesBudgetToUnboundedClass) {
 }
 
 TEST_F(LowAllocationTargetConstraintsTest,
+       ExplicitBudgetsRemainWithinTargetBanks) {
+  const uint16_t first_id = RegisterClassId(IREE_SV("test.explicit32"));
+  const uint16_t second_id =
+      RegisterClassId(IREE_SV("test.spillable.explicit32"));
+  loom_low_descriptor_set_t descriptor_set = *target_.descriptor_set;
+  std::vector<loom_low_reg_class_t> reg_classes(
+      descriptor_set.reg_classes,
+      descriptor_set.reg_classes + descriptor_set.reg_class_count);
+  reg_classes[first_id].target_bank_id = 1;
+  reg_classes[second_id].target_bank_id = 2;
+  descriptor_set.reg_classes = reg_classes.data();
+  target_.descriptor_set = &descriptor_set;
+
+  const loom_low_allocation_budget_t budgets[] = {
+      {IREE_SV("test.explicit32"), 2},
+      {IREE_SV("test.spillable.explicit32"), 3},
+  };
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, budgets, IREE_ARRAYSIZE(budgets),
+      /*reserved_ranges=*/nullptr, /*reserved_range_count=*/0,
+      /*emitter=*/iree_diagnostic_emitter_t{}, &arena_, &constraints));
+
+  loom_low_allocation_class_capacity_t capacity = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_reg_class_capacity(
+      &constraints, first_id, &capacity));
+  EXPECT_EQ(capacity.max_units, 2u);
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_reg_class_capacity(
+      &constraints, second_id, &capacity));
+  EXPECT_EQ(capacity.max_units, 3u);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
+       SchedulableCapacityExcludesReservedAliasRanges) {
+  const loom_low_allocation_budget_t budget = {
+      .register_class = IREE_SV("test.pressure.alias32"),
+      .max_units = 7,
+  };
+  const loom_low_allocation_reserved_range_t reserved_ranges[] = {
+      {IREE_SV("test.pressure.alias64"),
+       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 1, 2},
+      {IREE_SV("test.pressure.alias32"),
+       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 5, 1},
+  };
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, &budget, /*budget_count=*/1,
+      reserved_ranges, IREE_ARRAYSIZE(reserved_ranges), {}, &arena_,
+      &constraints));
+
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_reg_class_schedulable_unit_capacity(
+          &constraints, RegisterClassId(IREE_SV("test.pressure.alias32"))),
+      4u);
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_reg_class_schedulable_unit_capacity(
+          &constraints, RegisterClassId(IREE_SV("test.pressure.alias64"))),
+      4u);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
+       CallCapacityUnionsReservationsAndAliasClobbers) {
+  const loom_low_allocation_reserved_range_t reservation = {
+      IREE_SV("test.pressure.alias32"),
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 1, 2};
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, /*budgets=*/nullptr,
+      /*budget_count=*/0, &reservation, /*reserved_range_count=*/1, {}, &arena_,
+      &constraints));
+
+  const loom_low_call_clobber_t common_clobbers[] = {
+      {RegisterClassId(IREE_SV("test.pressure.alias64")), 2, 3},
+      {RegisterClassId(IREE_SV("test.pressure.alias64")), 9, 1},
+  };
+  const loom_low_call_clobber_t callee_clobber = {
+      RegisterClassId(IREE_SV("test.pressure.alias32")), 4, 2};
+  const uint16_t reg_class_id =
+      RegisterClassId(IREE_SV("test.pressure.alias32"));
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_reg_class_schedulable_unit_capacity(
+          &constraints, reg_class_id),
+      6u);
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_reg_class_call_preserved_unit_capacity(
+          &constraints, reg_class_id,
+          loom_low_call_clobber_list_t{common_clobbers,
+                                       IREE_ARRAYSIZE(common_clobbers)},
+          loom_low_call_clobber_list_t{&callee_clobber, 1}),
+      3u);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
+       ExplicitCallCapacityUsesSharedPhysicalStorage) {
+  const uint16_t explicit_id = RegisterClassId(IREE_SV("test.explicit32"));
+  const uint16_t spillable_id =
+      RegisterClassId(IREE_SV("test.spillable.explicit32"));
+  const uint16_t fixed_r2_id = RegisterClassId(IREE_SV("test.fixed.r2"));
+  const loom_low_descriptor_set_t* descriptor_set = target_.descriptor_set;
+  const uint32_t r0 = loom_low_descriptor_set_physical_register_candidate(
+      descriptor_set, explicit_id, 0);
+  const uint32_t r1 = loom_low_descriptor_set_physical_register_candidate(
+      descriptor_set, explicit_id, 1);
+  const uint32_t r2 = loom_low_descriptor_set_physical_register_candidate(
+      descriptor_set, explicit_id, 2);
+  const loom_low_allocation_reserved_range_t reservation = {
+      IREE_SV("test.explicit32"),
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, r0, 1};
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, /*budgets=*/nullptr,
+      /*budget_count=*/0, &reservation, /*reserved_range_count=*/1, {}, &arena_,
+      &constraints));
+
+  const loom_low_call_clobber_t common_clobber = {spillable_id, r1, 1};
+  const loom_low_call_clobber_t callee_clobber = {fixed_r2_id, r2, 1};
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_reg_class_call_preserved_unit_capacity(
+          &constraints, explicit_id,
+          loom_low_call_clobber_list_t{&common_clobber, 1},
+          loom_low_call_clobber_list_t{&callee_clobber, 1}),
+      1u);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
+       LinearCapacityDoesNotWalkLargeBudgets) {
+  const loom_low_allocation_budget_t budget = {
+      .register_class = IREE_SV("test.i32"),
+      .max_units = UINT32_MAX - 1,
+  };
+  const loom_low_allocation_reserved_range_t reservation = {
+      IREE_SV("test.i32"), LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID, 5, 2};
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      &module_, &function_op_, &target_, &budget, /*budget_count=*/1,
+      &reservation, /*reserved_range_count=*/1, {}, &arena_, &constraints));
+
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_reg_class_schedulable_unit_capacity(
+          &constraints, RegisterClassId(IREE_SV("test.i32"))),
+      UINT32_MAX - 3);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
        MoveFailureRetainsDescriptorClassIdentity) {
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(

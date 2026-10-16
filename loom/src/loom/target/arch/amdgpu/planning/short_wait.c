@@ -330,9 +330,9 @@ iree_status_t loom_amdgpu_short_wait_allocate(
   const loom_low_reg_class_t* sgpr =
       &schedule->target.descriptor_set
            ->reg_classes[LOOM_AMDGPU_REG_CLASS_ID_SGPR];
-  state->banks.sgpr_fixed_base = sgpr->fixed_location_base;
+  state->banks.sgpr_fixed_base = loom_low_reg_class_fixed_location_base(sgpr);
   state->banks.vcc = state->banks.sgpr + state->banks.sgpr_allocated_count +
-                     sgpr->fixed_location_count;
+                     loom_low_reg_class_fixed_location_count(sgpr);
   state->banks.m0 = state->banks.vcc + 1;
   const uint32_t pipeline_count =
       (reasons & LOOM_AMDGPU_SHORT_WAIT_DGEMM_PIPELINE) != 0;

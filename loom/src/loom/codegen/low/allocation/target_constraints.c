@@ -84,6 +84,31 @@ loom_low_allocation_target_constraints_reg_class_at(
   return &descriptor_set->reg_classes[reg_class_id];
 }
 
+// Returns true when two register classes consume one allocation-budget bank.
+// Linear aliases identify their shared bank through the storage key. Explicit
+// classes share a descriptor-wide atomic-unit namespace for overlap checks but
+// retain authored target-bank identities for independent allocation budgets.
+static bool loom_low_allocation_target_constraints_budget_classes_share(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t lhs_reg_class_id,
+    uint16_t rhs_reg_class_id) {
+  const loom_low_reg_class_t* lhs =
+      loom_low_allocation_target_constraints_reg_class_at(descriptor_set,
+                                                          lhs_reg_class_id);
+  const loom_low_reg_class_t* rhs =
+      loom_low_allocation_target_constraints_reg_class_at(descriptor_set,
+                                                          rhs_reg_class_id);
+  const bool lhs_is_explicit =
+      loom_low_reg_class_uses_explicit_physical_registers(lhs);
+  const bool rhs_is_explicit =
+      loom_low_reg_class_uses_explicit_physical_registers(rhs);
+  if (lhs_is_explicit || rhs_is_explicit) {
+    return lhs_is_explicit && rhs_is_explicit &&
+           lhs->target_bank_id == rhs->target_bank_id;
+  }
+  return loom_low_allocation_storage_reg_classes_share(
+      descriptor_set, lhs_reg_class_id, rhs_reg_class_id);
+}
+
 static bool loom_low_allocation_target_constraints_lookup_budget(
     const loom_low_allocation_target_constraints_t* constraints,
     uint16_t reg_class_id, uint32_t* out_max_units) {
@@ -92,7 +117,7 @@ static bool loom_low_allocation_target_constraints_lookup_budget(
   for (iree_host_size_t i = 0; i < constraints->budget_count; ++i) {
     const loom_low_allocation_resolved_budget_t* budget =
         &constraints->budgets[i];
-    if (!loom_low_allocation_storage_reg_classes_share(
+    if (!loom_low_allocation_target_constraints_budget_classes_share(
             descriptor_set, budget->descriptor_reg_class_id, reg_class_id)) {
       continue;
     }
@@ -203,20 +228,14 @@ iree_status_t loom_low_allocation_target_constraints_resolve_reg_class(
   return iree_ok_status();
 }
 
-iree_status_t loom_low_allocation_target_constraints_reg_class_capacity(
+static loom_low_allocation_class_capacity_t
+loom_low_allocation_target_constraints_valid_reg_class_capacity(
     const loom_low_allocation_target_constraints_t* constraints,
-    uint16_t reg_class_id, loom_low_allocation_class_capacity_t* out_capacity) {
-  IREE_ASSERT_ARGUMENT(constraints);
-  IREE_ASSERT_ARGUMENT(out_capacity);
+    uint16_t reg_class_id) {
   const loom_low_descriptor_set_t* descriptor_set =
       constraints->target->descriptor_set;
-  if (reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
-      reg_class_id >= descriptor_set->reg_class_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low allocation cannot resolve invalid register class %" PRIu16,
-        reg_class_id);
-  }
+  IREE_ASSERT_NE(reg_class_id, LOOM_LOW_REG_CLASS_NONE);
+  IREE_ASSERT_LT(reg_class_id, descriptor_set->reg_class_count);
   const loom_low_reg_class_t* reg_class =
       loom_low_allocation_target_constraints_reg_class_at(descriptor_set,
                                                           reg_class_id);
@@ -242,7 +261,7 @@ iree_status_t loom_low_allocation_target_constraints_reg_class_capacity(
 
   const bool is_spillable =
       !iree_any_bit_set(reg_class->flags, LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
-  *out_capacity = (loom_low_allocation_class_capacity_t){
+  return (loom_low_allocation_class_capacity_t){
       .descriptor_reg_class_id = reg_class_id,
       .location_kind =
           loom_low_allocation_storage_reg_class_location_kind(reg_class),
@@ -253,7 +272,303 @@ iree_status_t loom_low_allocation_target_constraints_reg_class_capacity(
       .is_spillable = is_spillable,
       .is_bounded = is_bounded,
   };
+}
+
+iree_status_t loom_low_allocation_target_constraints_reg_class_capacity(
+    const loom_low_allocation_target_constraints_t* constraints,
+    uint16_t reg_class_id, loom_low_allocation_class_capacity_t* out_capacity) {
+  IREE_ASSERT_ARGUMENT(constraints);
+  IREE_ASSERT_ARGUMENT(out_capacity);
+  const loom_low_descriptor_set_t* descriptor_set =
+      constraints->target->descriptor_set;
+  if (reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
+      reg_class_id >= descriptor_set->reg_class_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "low allocation cannot resolve invalid register class %" PRIu16,
+        reg_class_id);
+  }
+  *out_capacity =
+      loom_low_allocation_target_constraints_valid_reg_class_capacity(
+          constraints, reg_class_id);
   return iree_ok_status();
+}
+
+typedef struct loom_low_allocation_unavailable_range_query_t {
+  const loom_low_allocation_target_constraints_t* constraints;
+  loom_low_call_clobber_list_t clobber_lists[2];
+  iree_host_size_t range_count;
+} loom_low_allocation_unavailable_range_query_t;
+
+static loom_low_allocation_assignment_t
+loom_low_allocation_unavailable_range_query_at(
+    const loom_low_allocation_unavailable_range_query_t* query,
+    iree_host_size_t index) {
+  const loom_low_allocation_target_constraints_t* constraints =
+      query->constraints;
+  if (index < constraints->reserved_range_count) {
+    const loom_low_allocation_resolved_reserved_range_t* range =
+        &constraints->reserved_ranges[index];
+    return (loom_low_allocation_assignment_t){
+        .descriptor_reg_class_id = range->descriptor_reg_class_id,
+        .location_kind = range->location_kind,
+        .location_base = range->location_base,
+        .location_count = range->location_count,
+    };
+  }
+
+  index -= constraints->reserved_range_count;
+  const loom_low_call_clobber_list_t* clobbers = &query->clobber_lists[0];
+  if (index >= clobbers->count) {
+    index -= clobbers->count;
+    clobbers = &query->clobber_lists[1];
+  }
+  IREE_ASSERT_LT(index, clobbers->count);
+  const loom_low_call_clobber_t* clobber = &clobbers->values[index];
+  const loom_low_descriptor_set_t* descriptor_set =
+      constraints->target->descriptor_set;
+  IREE_ASSERT_LT(clobber->register_class, descriptor_set->reg_class_count);
+  return (loom_low_allocation_assignment_t){
+      .descriptor_reg_class_id = clobber->register_class,
+      .location_kind = loom_low_allocation_storage_reg_class_location_kind(
+          &descriptor_set->reg_classes[clobber->register_class]),
+      .location_base = clobber->location,
+      .location_count = clobber->count,
+  };
+}
+
+static bool loom_low_allocation_unavailable_range_query_conflicts(
+    const loom_low_allocation_unavailable_range_query_t* query,
+    const loom_low_allocation_assignment_t* candidate) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      query->constraints->target->descriptor_set;
+  for (iree_host_size_t i = 0; i < query->range_count; ++i) {
+    const loom_low_allocation_assignment_t unavailable =
+        loom_low_allocation_unavailable_range_query_at(query, i);
+    if (loom_low_allocation_storage_assignment_ranges_overlap(
+            descriptor_set, candidate, &unavailable)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+typedef struct loom_low_allocation_linear_range_stream_t {
+  // Next row in this ordered source.
+  iree_host_size_t index;
+  // Exclusive source bound.
+  iree_host_size_t end;
+  // Current clipped interval.
+  uint64_t start;
+  uint64_t range_end;
+  // Whether the current interval is populated.
+  bool has_range;
+} loom_low_allocation_linear_range_stream_t;
+
+static void loom_low_allocation_linear_reserved_range_advance(
+    const loom_low_allocation_target_constraints_t* constraints, uint32_t limit,
+    loom_low_allocation_linear_range_stream_t* stream) {
+  stream->has_range = false;
+  if (stream->index >= stream->end) {
+    return;
+  }
+  const loom_low_allocation_reserved_range_index_entry_t* range =
+      &constraints->reserved_range_index[stream->index++];
+  if (range->location_base >= limit) {
+    stream->index = stream->end;
+    return;
+  }
+  stream->start = range->location_base;
+  stream->range_end = iree_min(
+      (uint64_t)range->location_base + range->location_count, (uint64_t)limit);
+  stream->has_range = stream->start < stream->range_end;
+}
+
+static void loom_low_allocation_linear_clobber_range_advance(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_low_call_clobber_list_t clobbers, uint64_t storage_space,
+    uint32_t limit, loom_low_allocation_linear_range_stream_t* stream) {
+  stream->has_range = false;
+  while (stream->index < stream->end) {
+    const loom_low_call_clobber_t* clobber = &clobbers.values[stream->index++];
+    IREE_ASSERT_LT(clobber->register_class, descriptor_set->reg_class_count);
+    const loom_low_reg_class_t* reg_class =
+        &descriptor_set->reg_classes[clobber->register_class];
+    const uint64_t clobber_storage_space =
+        loom_low_allocation_reserved_range_storage_space(
+            descriptor_set, clobber->register_class,
+            loom_low_allocation_storage_reg_class_location_kind(reg_class));
+    if (clobber_storage_space < storage_space || clobber->count == 0) {
+      continue;
+    }
+    if (clobber_storage_space > storage_space || clobber->location >= limit) {
+      stream->index = stream->end;
+      return;
+    }
+    stream->start = clobber->location;
+    stream->range_end =
+        iree_min((uint64_t)clobber->location + clobber->count, (uint64_t)limit);
+    stream->has_range = stream->start < stream->range_end;
+    if (stream->has_range) {
+      return;
+    }
+  }
+}
+
+static uint32_t loom_low_allocation_unavailable_linear_unit_count(
+    const loom_low_allocation_unavailable_range_query_t* query,
+    uint16_t reg_class_id, loom_low_allocation_location_kind_t location_kind,
+    uint32_t limit) {
+  const loom_low_allocation_target_constraints_t* constraints =
+      query->constraints;
+  const loom_low_descriptor_set_t* descriptor_set =
+      constraints->target->descriptor_set;
+  const uint64_t storage_space =
+      loom_low_allocation_reserved_range_storage_space(
+          descriptor_set, reg_class_id, location_kind);
+  const uint32_t reserved_begin =
+      loom_low_allocation_reserved_range_index_bound(
+          constraints, storage_space, /*location_base=*/0, /*upper=*/false);
+  const uint32_t reserved_end = loom_low_allocation_reserved_range_index_bound(
+      constraints, storage_space, UINT32_MAX, /*upper=*/true);
+  loom_low_allocation_linear_range_stream_t streams[] = {
+      {.index = reserved_begin, .end = reserved_end},
+      {.end = query->clobber_lists[0].count},
+      {.end = query->clobber_lists[1].count},
+  };
+  loom_low_allocation_linear_reserved_range_advance(constraints, limit,
+                                                    &streams[0]);
+  for (iree_host_size_t i = 1; i < IREE_ARRAYSIZE(streams); ++i) {
+    loom_low_allocation_linear_clobber_range_advance(
+        descriptor_set, query->clobber_lists[i - 1], storage_space, limit,
+        &streams[i]);
+  }
+
+  uint64_t union_start = 0;
+  uint64_t union_end = 0;
+  uint64_t unavailable_unit_count = 0;
+  while (true) {
+    iree_host_size_t selected = IREE_ARRAYSIZE(streams);
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(streams); ++i) {
+      if (streams[i].has_range &&
+          (selected == IREE_ARRAYSIZE(streams) ||
+           streams[i].start < streams[selected].start)) {
+        selected = i;
+      }
+    }
+    if (selected == IREE_ARRAYSIZE(streams)) {
+      break;
+    }
+
+    const uint64_t range_start = streams[selected].start;
+    const uint64_t range_end = streams[selected].range_end;
+    if (range_start > union_end) {
+      unavailable_unit_count += union_end - union_start;
+      union_start = range_start;
+      union_end = range_end;
+    } else {
+      union_end = iree_max(union_end, range_end);
+    }
+    if (selected == 0) {
+      loom_low_allocation_linear_reserved_range_advance(constraints, limit,
+                                                        &streams[0]);
+    } else {
+      loom_low_allocation_linear_clobber_range_advance(
+          descriptor_set, query->clobber_lists[selected - 1], storage_space,
+          limit, &streams[selected]);
+    }
+  }
+  unavailable_unit_count += union_end - union_start;
+  IREE_ASSERT_LE(unavailable_unit_count, limit);
+  return (uint32_t)unavailable_unit_count;
+}
+
+static uint32_t
+loom_low_allocation_target_constraints_reg_class_available_unit_capacity(
+    const loom_low_allocation_target_constraints_t* constraints,
+    uint16_t reg_class_id, loom_low_call_clobber_list_t common_clobbers,
+    loom_low_call_clobber_list_t callee_clobbers) {
+  IREE_ASSERT_ARGUMENT(constraints);
+  const loom_low_descriptor_set_t* descriptor_set =
+      constraints->target->descriptor_set;
+  IREE_ASSERT_NE(reg_class_id, LOOM_LOW_REG_CLASS_NONE);
+  IREE_ASSERT_LT(reg_class_id, descriptor_set->reg_class_count);
+  const loom_low_allocation_class_capacity_t capacity =
+      loom_low_allocation_target_constraints_valid_reg_class_capacity(
+          constraints, reg_class_id);
+  if (!capacity.is_bounded || capacity.max_units == 0) {
+    return capacity.is_bounded ? capacity.max_units : UINT32_MAX;
+  }
+
+  const loom_low_allocation_unavailable_range_query_t unavailable_ranges = {
+      .constraints = constraints,
+      .clobber_lists = {common_clobbers, callee_clobbers},
+      .range_count = constraints->reserved_range_count + common_clobbers.count +
+                     callee_clobbers.count,
+  };
+  if (unavailable_ranges.range_count == 0) {
+    return capacity.max_units;
+  }
+
+  const loom_low_reg_class_t* reg_class =
+      &descriptor_set->reg_classes[reg_class_id];
+  if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
+    uint32_t available_unit_count = 0;
+    const uint32_t candidate_count =
+        loom_low_allocation_storage_explicit_location_candidate_count(
+            descriptor_set, reg_class_id, /*unit_count=*/1);
+    for (uint32_t candidate_index = 0; candidate_index < candidate_count;
+         ++candidate_index) {
+      uint32_t location_base = 0;
+      uint32_t pressure_extent = 0;
+      if (!loom_low_allocation_storage_explicit_location_candidate(
+              descriptor_set, reg_class_id, /*unit_count=*/1, candidate_index,
+              &location_base, /*out_first_candidate_ordinal=*/NULL,
+              &pressure_extent, /*out_packing_rank=*/NULL) ||
+          pressure_extent > capacity.max_units) {
+        continue;
+      }
+      const loom_low_allocation_assignment_t candidate = {
+          .descriptor_reg_class_id = reg_class_id,
+          .location_kind = capacity.location_kind,
+          .location_base = location_base,
+          .location_count = 1,
+      };
+      if (loom_low_allocation_unavailable_range_query_conflicts(
+              &unavailable_ranges, &candidate)) {
+        continue;
+      }
+      ++available_unit_count;
+    }
+    return available_unit_count;
+  }
+
+  // Linear storage ranges can overlap across aliases and between static and
+  // call constraints. Count their union without walking the capacity itself;
+  // test budgets may deliberately use very large linear namespaces.
+  const uint32_t unavailable_unit_count =
+      loom_low_allocation_unavailable_linear_unit_count(
+          &unavailable_ranges, reg_class_id, capacity.location_kind,
+          capacity.max_units);
+  return capacity.max_units - unavailable_unit_count;
+}
+
+uint32_t
+loom_low_allocation_target_constraints_reg_class_schedulable_unit_capacity(
+    const loom_low_allocation_target_constraints_t* constraints,
+    uint16_t reg_class_id) {
+  return loom_low_allocation_target_constraints_reg_class_available_unit_capacity(
+      constraints, reg_class_id, (loom_low_call_clobber_list_t){0},
+      (loom_low_call_clobber_list_t){0});
+}
+
+uint32_t
+loom_low_allocation_target_constraints_reg_class_call_preserved_unit_capacity(
+    const loom_low_allocation_target_constraints_t* constraints,
+    uint16_t reg_class_id, loom_low_call_clobber_list_t common_clobbers,
+    loom_low_call_clobber_list_t callee_clobbers) {
+  return loom_low_allocation_target_constraints_reg_class_available_unit_capacity(
+      constraints, reg_class_id, common_clobbers, callee_clobbers);
 }
 
 iree_status_t loom_low_allocation_target_constraints_class_capacity(
@@ -314,7 +629,7 @@ static iree_status_t loom_low_allocation_target_constraints_resolve_budgets(
       continue;
     }
     for (iree_host_size_t j = 0; j < constraints->budget_count; ++j) {
-      if (!loom_low_allocation_storage_reg_classes_share(
+      if (!loom_low_allocation_target_constraints_budget_classes_share(
               descriptor_set, constraints->budgets[j].descriptor_reg_class_id,
               reg_class_id)) {
         continue;

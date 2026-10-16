@@ -302,6 +302,24 @@ iree_status_t loom_low_allocation_target_constraints_reg_class_capacity(
     const loom_low_allocation_target_constraints_t* constraints,
     uint16_t reg_class_id, loom_low_allocation_class_capacity_t* out_capacity);
 
+// Returns the number of register units available to ordinary values after
+// applying the class budget and whole-function target reservations. Returns
+// UINT32_MAX for an unbounded class. The caller provides a descriptor-set-local
+// register class ID.
+uint32_t
+loom_low_allocation_target_constraints_reg_class_schedulable_unit_capacity(
+    const loom_low_allocation_target_constraints_t* constraints,
+    uint16_t reg_class_id);
+
+// Returns the schedulable capacity that remains across a call after applying
+// common and callee-specific physical clobbers. Dying arguments do not consume
+// this capacity; call results are produced after it is observed.
+uint32_t
+loom_low_allocation_target_constraints_reg_class_call_preserved_unit_capacity(
+    const loom_low_allocation_target_constraints_t* constraints,
+    uint16_t reg_class_id, loom_low_call_clobber_list_t common_clobbers,
+    loom_low_call_clobber_list_t callee_clobbers);
+
 // Resolves |value_class| and returns its effective capacity.
 iree_status_t loom_low_allocation_target_constraints_class_capacity(
     const loom_low_allocation_target_constraints_t* constraints,

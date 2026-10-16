@@ -717,8 +717,9 @@ loom_low_allocation_storage_lease_distinct_unit_capacity(
     if (reg_class->allocatable_count == 0) {
       return lease_unit_capacity;
     }
-    const uint32_t class_capacity = (uint32_t)reg_class->allocatable_count +
-                                    reg_class->fixed_location_count;
+    const uint32_t class_capacity =
+        (uint32_t)reg_class->allocatable_count +
+        loom_low_reg_class_fixed_location_count(reg_class);
     if (class_capacity >= lease_unit_capacity - capacity) {
       return lease_unit_capacity;
     }

@@ -141,6 +141,8 @@ class CompiledDescriptorSet:
     descriptors: list[Descriptor]
     instruction_classes: list[tuple[InstructionClass, ...]]
     reg_classes: list[RegClass]
+    # Shared pressure sets derived from linear aliases and explicit domains.
+    reg_class_pressure_set_ids: list[int]
     physical_registers: list[PhysicalRegister]
     physical_register_candidate_ids: list[int]
     # Class-local semantic ordinals in aggregate-preserving search order.

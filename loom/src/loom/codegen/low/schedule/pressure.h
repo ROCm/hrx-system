@@ -19,8 +19,8 @@
 extern "C" {
 #endif
 
-typedef struct loom_low_schedule_alias_pressure_record_t
-    loom_low_schedule_alias_pressure_record_t;
+typedef struct loom_low_schedule_pressure_set_record_t
+    loom_low_schedule_pressure_set_record_t;
 typedef struct loom_low_schedule_resource_pressure_record_t
     loom_low_schedule_resource_pressure_record_t;
 typedef struct loom_low_schedule_unlock_record_t
@@ -32,19 +32,19 @@ struct loom_low_schedule_pressure_state_t {
   uint64_t* current_live_units_by_reg_class;
   // Block-local aligned-packing headroom by descriptor register-class ID.
   uint32_t* packing_reserve_units_by_reg_class;
-  // Shared pressure state for overlapping register classes.
+  // Shared pressure state for register classes with one allocation domain.
   struct {
-    // Mutable records indexed by one-based alias-set ID.
-    loom_low_schedule_alias_pressure_record_t* records;
-    // Alias-set IDs seen with live pressure in the current block.
+    // Mutable records indexed by one-based pressure-set ID.
+    loom_low_schedule_pressure_set_record_t* records;
+    // Pressure-set IDs seen with live pressure in the current block.
     uint16_t* block_ids;
-    // Alias-set IDs touched by the current candidate.
+    // Pressure-set IDs touched by the current candidate.
     uint16_t* candidate_delta_touched_ids;
     // Number of populated entries in block_ids.
     iree_host_size_t block_count;
     // Number of populated entries in candidate_delta_touched_ids.
     iree_host_size_t candidate_delta_touched_count;
-  } alias_sets;
+  } pressure_sets;
   // Incremental high-water state for derived target pressure resources.
   struct {
     // Per-class high-water marks, dense by descriptor register-class ID.
@@ -77,6 +77,9 @@ struct loom_low_schedule_pressure_state_t {
   loom_value_ordinal_t* candidate_operand_ordinals;
   // Scratch live-unit delta by descriptor register-class ID.
   int64_t* candidate_delta_units_by_reg_class;
+  // Candidate operand deaths by descriptor register-class ID. Allocated only
+  // when retained calls impose narrower boundary capacities.
+  uint64_t* candidate_killed_units_by_reg_class;
   // Candidate instruction-phase overlap, indexed by descriptor register class.
   struct {
     // Result storage created before ordinary input reads complete.
@@ -355,7 +358,7 @@ enum loom_low_schedule_candidate_flag_bits_e {
   // Candidate grows at least one constrained register-packing resource.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE = 1u << 4,
   // Candidate itself requires more physical storage than an unspillable
-  // register class, alias set, or shared packing resource can provide.
+  // register class, pressure set, or shared packing resource can provide.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY = 1u << 5,
   // Candidate opens required storage above a spillable bank's capacity.
   // Other live values can still spill, so this is pressure debt, not proof

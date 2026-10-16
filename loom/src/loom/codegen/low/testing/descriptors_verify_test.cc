@@ -2264,7 +2264,7 @@ TEST(LowDescriptorsTest, AcceptsPhysicalRegisterClassWithPhysicalCount) {
 TEST(LowDescriptorsTest, RejectsVirtualRegisterClassWithFixedLocations) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.reg_classes[0].fixed_location_count = 1;
+  tables.reg_classes[0].storage.fixed_locations.fixed_location_count = 1;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -2275,8 +2275,8 @@ TEST(LowDescriptorsTest, RejectsPhysicalRegisterClassFixedLocationOverlap) {
   InitializeTestTables(&tables);
   tables.reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
   tables.reg_classes[0].allocatable_count = 32;
-  tables.reg_classes[0].fixed_location_base = 31;
-  tables.reg_classes[0].fixed_location_count = 2;
+  tables.reg_classes[0].storage.fixed_locations.fixed_location_base = 31;
+  tables.reg_classes[0].storage.fixed_locations.fixed_location_count = 2;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -2287,8 +2287,8 @@ TEST(LowDescriptorsTest, AcceptsPhysicalRegisterClassFixedLocationWindow) {
   InitializeTestTables(&tables);
   tables.reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
   tables.reg_classes[0].allocatable_count = 32;
-  tables.reg_classes[0].fixed_location_base = 36;
-  tables.reg_classes[0].fixed_location_count = 4;
+  tables.reg_classes[0].storage.fixed_locations.fixed_location_base = 36;
+  tables.reg_classes[0].storage.fixed_locations.fixed_location_count = 4;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }

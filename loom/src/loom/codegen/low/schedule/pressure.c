@@ -179,6 +179,16 @@ iree_status_t loom_low_schedule_pressure_initialize(
         state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->candidate_delta_units_by_reg_class),
         (void**)&out_pressure_state->candidate_delta_units_by_reg_class));
+    if (state->call_pressure != NULL) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->scratch_arena, reg_class_count,
+          sizeof(*out_pressure_state->candidate_killed_units_by_reg_class),
+          (void**)&out_pressure_state->candidate_killed_units_by_reg_class));
+      memset(
+          out_pressure_state->candidate_killed_units_by_reg_class, 0,
+          reg_class_count *
+              sizeof(*out_pressure_state->candidate_killed_units_by_reg_class));
+    }
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->scratch_arena, reg_class_count,
         sizeof(*out_pressure_state->candidate_lifetime.early_added_units),
@@ -281,24 +291,24 @@ iree_status_t loom_low_schedule_pressure_initialize(
             sizeof(
                 *out_pressure_state->candidate_unspillable_activation_units));
   }
-  const uint16_t alias_set_count = state->pressure_limits.alias_set_count;
-  if (alias_set_count != 0) {
-    const iree_host_size_t alias_set_slot_count =
-        (iree_host_size_t)alias_set_count + 1;
+  const uint16_t pressure_set_count = state->pressure_limits.pressure_set_count;
+  if (pressure_set_count != 0) {
+    const iree_host_size_t pressure_set_slot_count =
+        (iree_host_size_t)pressure_set_count + 1;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->scratch_arena, alias_set_slot_count,
-        sizeof(*out_pressure_state->alias_sets.records),
-        (void**)&out_pressure_state->alias_sets.records));
-    memset(
-        out_pressure_state->alias_sets.records, 0,
-        alias_set_slot_count * sizeof(*out_pressure_state->alias_sets.records));
+        state->scratch_arena, pressure_set_slot_count,
+        sizeof(*out_pressure_state->pressure_sets.records),
+        (void**)&out_pressure_state->pressure_sets.records));
+    memset(out_pressure_state->pressure_sets.records, 0,
+           pressure_set_slot_count *
+               sizeof(*out_pressure_state->pressure_sets.records));
     uint16_t* touched_ids = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->scratch_arena, (iree_host_size_t)alias_set_count * 2,
+        state->scratch_arena, (iree_host_size_t)pressure_set_count * 2,
         sizeof(*touched_ids), (void**)&touched_ids));
-    out_pressure_state->alias_sets.block_ids = touched_ids;
-    out_pressure_state->alias_sets.candidate_delta_touched_ids =
-        touched_ids + alias_set_count;
+    out_pressure_state->pressure_sets.block_ids = touched_ids;
+    out_pressure_state->pressure_sets.candidate_delta_touched_ids =
+        touched_ids + pressure_set_count;
   }
   if (state->pressure_resources != NULL) {
     const uint16_t resource_count = state->pressure_resources->resource_count;
@@ -368,67 +378,66 @@ static void loom_low_schedule_track_pressure_value(
       value_ordinal;
 }
 
-static inline uint16_t loom_low_schedule_alias_set_id(
+static inline uint16_t loom_low_schedule_pressure_set_id(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
   return reg_class_id == LOOM_LOW_REG_CLASS_NONE
              ? 0
-             : state->target.descriptor_set->reg_classes[reg_class_id]
-                   .alias_set_id;
+             : loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
 }
 
-static void loom_low_schedule_note_block_pressure_alias_set(
-    loom_low_schedule_pressure_state_t* pressure_state, uint16_t alias_set_id) {
-  if (alias_set_id == 0 || pressure_state->alias_sets.records == NULL) {
+static void loom_low_schedule_note_block_pressure_set(
+    loom_low_schedule_pressure_state_t* pressure_state,
+    uint16_t pressure_set_id) {
+  if (pressure_set_id == 0 || pressure_state->pressure_sets.records == NULL) {
     return;
   }
-  loom_low_schedule_alias_pressure_record_t* record =
-      &pressure_state->alias_sets.records[alias_set_id];
+  loom_low_schedule_pressure_set_record_t* record =
+      &pressure_state->pressure_sets.records[pressure_set_id];
   if (iree_any_bit_set(record->flags,
-                       LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_BLOCK_TOUCHED)) {
+                       LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_BLOCK_TOUCHED)) {
     return;
   }
-  record->flags |= LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_BLOCK_TOUCHED;
-  pressure_state->alias_sets
-      .block_ids[pressure_state->alias_sets.block_count++] = alias_set_id;
+  record->flags |= LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_BLOCK_TOUCHED;
+  pressure_state->pressure_sets
+      .block_ids[pressure_state->pressure_sets.block_count++] = pressure_set_id;
 }
 
-static inline void loom_low_schedule_adjust_alias_pressure(
+static inline void loom_low_schedule_adjust_pressure_set(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state, uint16_t reg_class_id,
     int64_t delta_units) {
-  if (pressure_state->alias_sets.records == NULL || delta_units == 0) {
+  if (pressure_state->pressure_sets.records == NULL || delta_units == 0) {
     return;
   }
-  const uint16_t alias_set_id =
-      loom_low_schedule_alias_set_id(state, reg_class_id);
-  if (alias_set_id == 0) {
+  const uint16_t pressure_set_id =
+      loom_low_schedule_pressure_set_id(state, reg_class_id);
+  if (pressure_set_id == 0) {
     return;
   }
-  loom_low_schedule_alias_pressure_record_t* record =
-      &pressure_state->alias_sets.records[alias_set_id];
+  loom_low_schedule_pressure_set_record_t* record =
+      &pressure_state->pressure_sets.records[pressure_set_id];
   if (delta_units < 0) {
     const uint64_t removed_units = (uint64_t)-delta_units;
     IREE_ASSERT_LE(removed_units, record->current_live_units);
     record->current_live_units -= removed_units;
   } else {
-    loom_low_schedule_note_block_pressure_alias_set(pressure_state,
-                                                    alias_set_id);
+    loom_low_schedule_note_block_pressure_set(pressure_state, pressure_set_id);
     record->current_live_units += (uint64_t)delta_units;
   }
 }
 
-static void loom_low_schedule_reset_block_alias_pressure(
+static void loom_low_schedule_reset_block_pressure_sets(
     loom_low_schedule_pressure_state_t* pressure_state) {
-  for (iree_host_size_t i = 0; i < pressure_state->alias_sets.block_count;
+  for (iree_host_size_t i = 0; i < pressure_state->pressure_sets.block_count;
        ++i) {
-    loom_low_schedule_alias_pressure_record_t* record =
-        &pressure_state->alias_sets
-             .records[pressure_state->alias_sets.block_ids[i]];
+    loom_low_schedule_pressure_set_record_t* record =
+        &pressure_state->pressure_sets
+             .records[pressure_state->pressure_sets.block_ids[i]];
     record->current_live_units = 0;
     record->packing_reserve_units = 0;
-    record->flags &= ~LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_BLOCK_TOUCHED;
+    record->flags &= ~LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_BLOCK_TOUCHED;
   }
-  pressure_state->alias_sets.block_count = 0;
+  pressure_state->pressure_sets.block_count = 0;
 }
 
 static void loom_low_schedule_advance_resource_cliffs(
@@ -659,8 +668,8 @@ static uint32_t loom_low_schedule_remove_live_pressure_value(
         unit_count,
         pressure_state->current_live_units_by_reg_class[reg_class_id]);
     pressure_state->current_live_units_by_reg_class[reg_class_id] -= unit_count;
-    loom_low_schedule_adjust_alias_pressure(state, pressure_state, reg_class_id,
-                                            -(int64_t)unit_count);
+    loom_low_schedule_adjust_pressure_set(state, pressure_state, reg_class_id,
+                                          -(int64_t)unit_count);
   }
   return unit_count;
 }
@@ -697,8 +706,8 @@ static void loom_low_schedule_add_source_pressure_value(
   }
   loom_low_schedule_note_block_pressure_reg_class(pressure_state, reg_class_id);
   pressure_state->current_live_units_by_reg_class[reg_class_id] += added_units;
-  loom_low_schedule_adjust_alias_pressure(state, pressure_state, reg_class_id,
-                                          (int64_t)added_units);
+  loom_low_schedule_adjust_pressure_set(state, pressure_state, reg_class_id,
+                                        (int64_t)added_units);
   loom_low_schedule_advance_source_pressure_cliff_floor(state, pressure_state,
                                                         reg_class_id);
   loom_low_schedule_note_resource_high_water(
@@ -755,7 +764,7 @@ static void loom_low_schedule_reset_source_pressure_block(
     pressure_state->packing_reserve_units_by_reg_class[reg_class_id] = 0;
   }
   pressure_state->block_reg_class_count = 0;
-  loom_low_schedule_reset_block_alias_pressure(pressure_state);
+  loom_low_schedule_reset_block_pressure_sets(pressure_state);
   loom_low_schedule_pressure_alias_reset(&pressure_state->storage_aliases);
   pressure_state->current_live_units = 0;
 }
@@ -802,15 +811,15 @@ static void loom_low_schedule_note_block_pressure_use(
       uint32_t* reg_class_reserve =
           &pressure_state->packing_reserve_units_by_reg_class[reg_class_id];
       *reg_class_reserve = iree_max(*reg_class_reserve, packing_reserve_units);
-      const uint16_t alias_set_id =
-          loom_low_schedule_alias_set_id(state, reg_class_id);
-      if (alias_set_id != 0) {
-        loom_low_schedule_note_block_pressure_alias_set(pressure_state,
-                                                        alias_set_id);
-        loom_low_schedule_alias_pressure_record_t* alias_record =
-            &pressure_state->alias_sets.records[alias_set_id];
-        alias_record->packing_reserve_units = iree_max(
-            alias_record->packing_reserve_units, packing_reserve_units);
+      const uint16_t pressure_set_id =
+          loom_low_schedule_pressure_set_id(state, reg_class_id);
+      if (pressure_set_id != 0) {
+        loom_low_schedule_note_block_pressure_set(pressure_state,
+                                                  pressure_set_id);
+        loom_low_schedule_pressure_set_record_t* pressure_set_record =
+            &pressure_state->pressure_sets.records[pressure_set_id];
+        pressure_set_record->packing_reserve_units = iree_max(
+            pressure_set_record->packing_reserve_units, packing_reserve_units);
       }
     }
   }
@@ -830,7 +839,7 @@ void loom_low_schedule_pressure_initialize_block(
     pressure_state->packing_reserve_units_by_reg_class[reg_class_id] = 0;
   }
   pressure_state->block_reg_class_count = 0;
-  loom_low_schedule_reset_block_alias_pressure(pressure_state);
+  loom_low_schedule_reset_block_pressure_sets(pressure_state);
   loom_low_schedule_pressure_alias_reset(&pressure_state->storage_aliases);
   for (iree_host_size_t i = 0; i < pressure_state->block_value_count; ++i) {
     loom_value_ordinal_t ordinal = pressure_state->block_value_ordinals[i];
@@ -920,8 +929,8 @@ void loom_low_schedule_pressure_initialize_block(
                                                       reg_class_id);
       pressure_state->current_live_units_by_reg_class[reg_class_id] +=
           unit_count;
-      loom_low_schedule_adjust_alias_pressure(
-          state, pressure_state, reg_class_id, (int64_t)unit_count);
+      loom_low_schedule_adjust_pressure_set(state, pressure_state, reg_class_id,
+                                            (int64_t)unit_count);
       loom_low_schedule_note_resource_high_water(
           state, pressure_state, reg_class_id,
           LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED);
@@ -1116,22 +1125,26 @@ static void loom_low_schedule_reset_candidate_pressure_deltas(
     const uint16_t reg_class_id =
         pressure_state->candidate_delta_touched_reg_class_ids[i];
     pressure_state->candidate_delta_units_by_reg_class[reg_class_id] = 0;
+    if (pressure_state->candidate_killed_units_by_reg_class != NULL) {
+      pressure_state->candidate_killed_units_by_reg_class[reg_class_id] = 0;
+    }
     pressure_state->candidate_lifetime.early_added_units[reg_class_id] = 0;
     pressure_state->candidate_lifetime.late_released_units[reg_class_id] = 0;
     pressure_state->candidate_delta_touched_flags[reg_class_id] = 0;
   }
   pressure_state->candidate_delta_touched_count = 0;
   for (iree_host_size_t i = 0;
-       i < pressure_state->alias_sets.candidate_delta_touched_count; ++i) {
-    loom_low_schedule_alias_pressure_record_t* record =
-        &pressure_state->alias_sets.records
-             [pressure_state->alias_sets.candidate_delta_touched_ids[i]];
+       i < pressure_state->pressure_sets.candidate_delta_touched_count; ++i) {
+    loom_low_schedule_pressure_set_record_t* record =
+        &pressure_state->pressure_sets.records
+             [pressure_state->pressure_sets.candidate_delta_touched_ids[i]];
     record->candidate_delta_units = 0;
+    record->candidate_killed_units = 0;
     record->candidate_lifetime.early_added_units = 0;
     record->candidate_lifetime.late_released_units = 0;
-    record->flags &= ~LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_CANDIDATE_TOUCHED;
+    record->flags &= ~LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_CANDIDATE_TOUCHED;
   }
-  pressure_state->alias_sets.candidate_delta_touched_count = 0;
+  pressure_state->pressure_sets.candidate_delta_touched_count = 0;
   for (uint16_t i = 0; i < pressure_state->resources.candidate_touched_count;
        ++i) {
     loom_low_schedule_resource_pressure_record_t* record =
@@ -1159,23 +1172,23 @@ static void loom_low_schedule_note_candidate_pressure_delta(
   }
   pressure_state->candidate_delta_units_by_reg_class[reg_class_id] +=
       delta_units;
-  if (pressure_state->alias_sets.records == NULL) {
+  if (pressure_state->pressure_sets.records == NULL) {
     return;
   }
-  const uint16_t alias_set_id =
-      loom_low_schedule_alias_set_id(state, reg_class_id);
-  if (alias_set_id == 0) {
+  const uint16_t pressure_set_id =
+      loom_low_schedule_pressure_set_id(state, reg_class_id);
+  if (pressure_set_id == 0) {
     return;
   }
-  loom_low_schedule_alias_pressure_record_t* record =
-      &pressure_state->alias_sets.records[alias_set_id];
+  loom_low_schedule_pressure_set_record_t* record =
+      &pressure_state->pressure_sets.records[pressure_set_id];
   if (!iree_any_bit_set(
           record->flags,
-          LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_CANDIDATE_TOUCHED)) {
-    record->flags |= LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_CANDIDATE_TOUCHED;
-    pressure_state->alias_sets.candidate_delta_touched_ids
-        [pressure_state->alias_sets.candidate_delta_touched_count++] =
-        alias_set_id;
+          LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_CANDIDATE_TOUCHED)) {
+    record->flags |= LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_CANDIDATE_TOUCHED;
+    pressure_state->pressure_sets.candidate_delta_touched_ids
+        [pressure_state->pressure_sets.candidate_delta_touched_count++] =
+        pressure_set_id;
   }
   record->candidate_delta_units += delta_units;
 }
@@ -1727,6 +1740,18 @@ void loom_low_schedule_pressure_score_candidate(
     const uint32_t unit_count = value->live_unit_count - transfer.live_units;
     killed_live_units += unit_count;
     ++killed_live_value_count;
+    if (pressure_state->candidate_killed_units_by_reg_class != NULL &&
+        value->register_class_id != LOOM_LOW_REG_CLASS_NONE) {
+      pressure_state
+          ->candidate_killed_units_by_reg_class[value->register_class_id] +=
+          unit_count;
+      const uint16_t pressure_set_id =
+          loom_low_schedule_pressure_set_id(state, value->register_class_id);
+      if (pressure_set_id != 0) {
+        pressure_state->pressure_sets.records[pressure_set_id]
+            .candidate_killed_units += unit_count;
+      }
+    }
     loom_low_schedule_note_candidate_pressure_delta(
         state, pressure_state, value->register_class_id, -(int64_t)unit_count);
     const uint32_t late_units =
@@ -1737,10 +1762,10 @@ void loom_low_schedule_pressure_score_candidate(
     if (late_units != 0) {
       pressure_state->candidate_lifetime
           .late_released_units[value->register_class_id] += late_units;
-      const uint16_t alias_set_id =
-          loom_low_schedule_alias_set_id(state, value->register_class_id);
-      if (alias_set_id != 0) {
-        pressure_state->alias_sets.records[alias_set_id]
+      const uint16_t pressure_set_id =
+          loom_low_schedule_pressure_set_id(state, value->register_class_id);
+      if (pressure_set_id != 0) {
+        pressure_state->pressure_sets.records[pressure_set_id]
             .candidate_lifetime.late_released_units += late_units;
       }
     }
@@ -1949,8 +1974,8 @@ void loom_low_schedule_pressure_note_node_scheduled(
                                                       reg_class_id);
       pressure_state->current_live_units_by_reg_class[reg_class_id] +=
           unit_count;
-      loom_low_schedule_adjust_alias_pressure(
-          state, pressure_state, reg_class_id, (int64_t)unit_count);
+      loom_low_schedule_adjust_pressure_set(state, pressure_state, reg_class_id,
+                                            (int64_t)unit_count);
       loom_low_schedule_note_resource_high_water(
           state, pressure_state, reg_class_id,
           LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED);

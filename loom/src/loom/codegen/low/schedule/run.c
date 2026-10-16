@@ -11,6 +11,7 @@
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/schedule/block.h"
+#include "loom/codegen/low/schedule/call_pressure.h"
 #include "loom/codegen/low/schedule/candidate_policy.h"
 #include "loom/codegen/low/schedule/completion_wait.h"
 #include "loom/codegen/low/schedule/context.h"
@@ -289,18 +290,37 @@ static void loom_low_schedule_record_pressure_limit(uint32_t* existing_limit,
   }
 }
 
+static void loom_low_schedule_note_active_pressure_class(
+    loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
+  if (reg_class_id == LOOM_LOW_REG_CLASS_NONE) {
+    return;
+  }
+  const uint16_t pressure_set_id = loom_low_reg_class_pressure_set_id(
+      &state->target.descriptor_set->reg_classes[reg_class_id]);
+  if (pressure_set_id == 0) {
+    return;
+  }
+  loom_low_schedule_pressure_set_limit_t* limit =
+      &state->pressure_limits.pressure_sets[pressure_set_id];
+  if (limit->representative_reg_class_id == LOOM_LOW_REG_CLASS_NONE) {
+    limit->representative_reg_class_id = reg_class_id;
+  } else if (limit->representative_reg_class_id != reg_class_id) {
+    limit->has_multiple_active_reg_classes = 1;
+  }
+}
+
 // Returns the hard capacity owned by a required-register storage domain, or
 // UINT32_MAX when the class has no finite limit.
 static uint32_t loom_low_schedule_unspillable_completion_capacity(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
-  const loom_low_reg_class_t* reg_class =
-      &state->target.descriptor_set->reg_classes[reg_class_id];
-  if (reg_class->alias_set_id == 0) {
+  const uint16_t pressure_set_id =
+      loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
+  if (pressure_set_id == 0) {
     return state->pressure_limits.by_reg_class[reg_class_id];
   }
-  const loom_low_schedule_alias_pressure_limit_t* alias_limit =
-      &state->pressure_limits.alias_sets[reg_class->alias_set_id];
-  return alias_limit->live_unit_limit;
+  const loom_low_schedule_pressure_set_limit_t* pressure_set_limit =
+      &state->pressure_limits.pressure_sets[pressure_set_id];
+  return pressure_set_limit->live_unit_limit;
 }
 
 static iree_status_t loom_low_schedule_initialize_pressure_limits(
@@ -320,16 +340,37 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
   if (descriptor_set->reg_class_count == 0) {
     return iree_ok_status();
   }
+
   bool has_pressure_limit = state->options->allocation_budget_count != 0;
-  uint16_t alias_set_count = 0;
+  uint16_t descriptor_pressure_set_count = 0;
   for (uint32_t reg_class_id = 0;
        reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
     const loom_low_reg_class_t* reg_class =
         &descriptor_set->reg_classes[reg_class_id];
     has_pressure_limit |= reg_class->allocatable_count != 0;
-    alias_set_count = iree_max(alias_set_count, reg_class->alias_set_id);
+    descriptor_pressure_set_count =
+        iree_max(descriptor_pressure_set_count,
+                 loom_low_reg_class_pressure_set_id(reg_class));
   }
   if (!has_pressure_limit) {
+    return iree_ok_status();
+  }
+
+  loom_low_allocation_target_constraints_t* allocation_constraints = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->scratch_arena, 1, sizeof(*allocation_constraints),
+      (void**)&allocation_constraints));
+  memset(allocation_constraints, 0, sizeof(*allocation_constraints));
+  IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_initialize(
+      state->module, state->function_op, &state->target,
+      state->options->allocation_budgets,
+      state->options->allocation_budget_count,
+      state->options->allocation_reserved_ranges,
+      state->options->allocation_reserved_range_count, state->options->emitter,
+      state->scratch_arena, allocation_constraints));
+  state->allocation_constraints = allocation_constraints;
+  if (allocation_constraints->error_count != 0) {
+    state->error_count += allocation_constraints->error_count;
     return iree_ok_status();
   }
 
@@ -337,24 +378,49 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
       state->scratch_arena, descriptor_set->reg_class_count,
       sizeof(*state->pressure_limits.by_reg_class),
       (void**)&state->pressure_limits.by_reg_class));
-  memset(state->pressure_limits.by_reg_class, 0xFF,
-         descriptor_set->reg_class_count *
-             sizeof(*state->pressure_limits.by_reg_class));
+  for (uint32_t reg_class_id = 0;
+       reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
+    const uint32_t capacity =
+        loom_low_allocation_target_constraints_reg_class_schedulable_unit_capacity(
+            allocation_constraints, (uint16_t)reg_class_id);
+    state->pressure_limits.by_reg_class[reg_class_id] = capacity;
+  }
 
-  state->pressure_limits.alias_set_count = alias_set_count;
-  if (alias_set_count != 0) {
-    const iree_host_size_t alias_set_slot_count =
-        (iree_host_size_t)alias_set_count + 1;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->scratch_arena, alias_set_slot_count,
-                                  sizeof(*state->pressure_limits.alias_sets),
-                                  (void**)&state->pressure_limits.alias_sets));
-    memset(state->pressure_limits.alias_sets, 0xFF,
-           alias_set_slot_count * sizeof(*state->pressure_limits.alias_sets));
-    for (uint16_t alias_set_id = 1; alias_set_id <= alias_set_count;
-         ++alias_set_id) {
-      state->pressure_limits.alias_sets[alias_set_id].all_classes_unspillable =
-          1;
+  if (descriptor_pressure_set_count != 0) {
+    const iree_host_size_t pressure_set_slot_count =
+        (iree_host_size_t)descriptor_pressure_set_count + 1;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, pressure_set_slot_count,
+        sizeof(*state->pressure_limits.pressure_sets),
+        (void**)&state->pressure_limits.pressure_sets));
+    memset(state->pressure_limits.pressure_sets, 0xFF,
+           pressure_set_slot_count *
+               sizeof(*state->pressure_limits.pressure_sets));
+    for (uint32_t pressure_set_id = 1;
+         pressure_set_id <= descriptor_pressure_set_count; ++pressure_set_id) {
+      state->pressure_limits.pressure_sets[pressure_set_id]
+          .all_classes_unspillable = 1;
+      state->pressure_limits.pressure_sets[pressure_set_id]
+          .has_multiple_active_reg_classes = 0;
+    }
+    for (loom_value_ordinal_t value_ordinal = 0;
+         value_ordinal < state->value_domain->value_count; ++value_ordinal) {
+      loom_low_schedule_note_active_pressure_class(
+          state, state->values[value_ordinal].register_class_id);
+    }
+    for (uint32_t reg_class_id = 0;
+         reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
+      if (state->reg_class_state_flags[reg_class_id] != 0) {
+        loom_low_schedule_note_active_pressure_class(state,
+                                                     (uint16_t)reg_class_id);
+      }
+    }
+    for (uint32_t pressure_set_id = 1;
+         pressure_set_id <= descriptor_pressure_set_count; ++pressure_set_id) {
+      if (state->pressure_limits.pressure_sets[pressure_set_id]
+              .has_multiple_active_reg_classes) {
+        state->pressure_limits.pressure_set_count = (uint16_t)pressure_set_id;
+      }
     }
   }
 
@@ -362,62 +428,30 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
        reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
     const loom_low_reg_class_t* reg_class =
         &descriptor_set->reg_classes[reg_class_id];
-    const uint16_t alias_set_id = reg_class->alias_set_id;
-    if (alias_set_id != 0) {
-      state->pressure_limits.alias_sets[alias_set_id].all_classes_unspillable &=
-          iree_all_bits_set(reg_class->flags,
-                            LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
+    const uint16_t pressure_set_id =
+        loom_low_schedule_reg_class_pressure_set_id(state,
+                                                    (uint16_t)reg_class_id);
+    if (pressure_set_id != 0) {
+      state->pressure_limits.pressure_sets[pressure_set_id]
+          .all_classes_unspillable &= iree_all_bits_set(
+          reg_class->flags, LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
     }
-    if (alias_set_id != 0 &&
-        state->pressure_limits.alias_sets[alias_set_id]
-                .representative_reg_class_id == LOOM_LOW_REG_CLASS_NONE) {
-      state->pressure_limits.alias_sets[alias_set_id]
-          .representative_reg_class_id = (uint16_t)reg_class_id;
-    }
-    const uint32_t allocatable_count = reg_class->allocatable_count;
+    const uint32_t schedulable_unit_capacity =
+        state->pressure_limits.by_reg_class[reg_class_id];
     // Architectural state lifetimes are serialized by state dependencies.
     // Occupying a fixed state register needs no allocation headroom. State
     // sharing an alias namespace still contributes to that storage pool.
-    if (allocatable_count == 0 ||
-        (alias_set_id == 0 &&
+    if (schedulable_unit_capacity == UINT32_MAX ||
+        (pressure_set_id == 0 &&
          state->reg_class_state_flags[reg_class_id] != 0)) {
+      state->pressure_limits.by_reg_class[reg_class_id] = UINT32_MAX;
       continue;
     }
-    if (alias_set_id != 0) {
+    if (pressure_set_id != 0) {
       loom_low_schedule_record_pressure_limit(
-          &state->pressure_limits.alias_sets[alias_set_id].live_unit_limit,
-          allocatable_count);
-    } else {
-      loom_low_schedule_record_pressure_limit(
-          &state->pressure_limits.by_reg_class[reg_class_id],
-          allocatable_count);
-    }
-  }
-
-  for (iree_host_size_t i = 0; i < state->options->allocation_budget_count;
-       ++i) {
-    const loom_low_allocation_budget_t* budget =
-        &state->options->allocation_budgets[i];
-    uint16_t budget_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
-    if (!loom_low_descriptor_set_lookup_register_class(
-            descriptor_set, budget->register_class, &budget_reg_class_id,
-            NULL)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "low schedule allocation budget references unknown register class "
-          "'%.*s'",
-          (int)budget->register_class.size, budget->register_class.data);
-    }
-    const uint16_t alias_set_id =
-        descriptor_set->reg_classes[budget_reg_class_id].alias_set_id;
-    if (alias_set_id != 0) {
-      loom_low_schedule_record_pressure_limit(
-          &state->pressure_limits.alias_sets[alias_set_id].live_unit_limit,
-          budget->max_units);
-    } else {
-      loom_low_schedule_record_pressure_limit(
-          &state->pressure_limits.by_reg_class[budget_reg_class_id],
-          budget->max_units);
+          &state->pressure_limits.pressure_sets[pressure_set_id]
+               .live_unit_limit,
+          schedulable_unit_capacity);
     }
   }
 
@@ -466,19 +500,21 @@ static iree_status_t loom_low_schedule_initialize_pressure_limits(
       *completion_domain_id = UINT16_MAX;
       continue;
     }
-    const uint16_t alias_set_id =
-        descriptor_set->reg_classes[reg_class_id].alias_set_id;
-    if (alias_set_id == 0) {
+    const uint16_t pressure_set_id =
+        loom_low_schedule_reg_class_pressure_set_id(state,
+                                                    (uint16_t)reg_class_id);
+    if (pressure_set_id == 0) {
       *completion_domain_id = (uint16_t)completion_domain_count++;
       continue;
     }
-    loom_low_schedule_alias_pressure_limit_t* alias_limit =
-        &state->pressure_limits.alias_sets[alias_set_id];
-    if (alias_limit->unspillable_completion_domain_id == UINT16_MAX) {
-      alias_limit->unspillable_completion_domain_id =
+    loom_low_schedule_pressure_set_limit_t* pressure_set_limit =
+        &state->pressure_limits.pressure_sets[pressure_set_id];
+    if (pressure_set_limit->unspillable_completion_domain_id == UINT16_MAX) {
+      pressure_set_limit->unspillable_completion_domain_id =
           (uint16_t)completion_domain_count++;
     }
-    *completion_domain_id = alias_limit->unspillable_completion_domain_id;
+    *completion_domain_id =
+        pressure_set_limit->unspillable_completion_domain_id;
   }
   if (completion_domain_count >= UINT16_MAX) {
     return iree_make_status(
@@ -714,6 +750,8 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
                               "size");
     }
   }
+  IREE_ASSERT_EQ(call_index, state->call_node_count);
+  IREE_RETURN_IF_ERROR(loom_low_schedule_call_pressure_initialize(state));
   if (max_descriptor_operand_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->scratch_arena, max_descriptor_operand_count,
@@ -1632,9 +1670,11 @@ static uint32_t loom_low_schedule_pressure_summary_budget(
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[reg_class_id];
   if (state->pressure_limits.by_reg_class != NULL) {
+    const uint16_t pressure_set_id =
+        loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
     const uint32_t limit_units =
-        reg_class->alias_set_id != 0
-            ? state->pressure_limits.alias_sets[reg_class->alias_set_id]
+        pressure_set_id != 0
+            ? state->pressure_limits.pressure_sets[pressure_set_id]
                   .live_unit_limit
             : state->pressure_limits.by_reg_class[reg_class_id];
     if (limit_units != UINT32_MAX) {

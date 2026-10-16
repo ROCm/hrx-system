@@ -30,6 +30,8 @@ typedef struct loom_low_call_clobber_t {
 
 typedef struct loom_low_call_clobber_list_t {
   // Borrowed immutable physical writes performed by the callee or transport.
+  // Rows are ordered by target storage identity and then location so consumers
+  // can merge aliasing intervals without sorting or allocating.
   const loom_low_call_clobber_t* values;
   // Number of rows in |values|.
   iree_host_size_t count;

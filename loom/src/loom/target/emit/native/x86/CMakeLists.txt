@@ -230,6 +230,7 @@ loom_check_test_suite(
     "test/function.loom-test"
     "test/operand_ties.loom-test"
     "test/root_native_bytes.loom-test"
+    "test/spill_pressure.loom-test"
     "test/unused_abi_inputs.loom-test"
 )
 endif()

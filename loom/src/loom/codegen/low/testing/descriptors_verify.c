@@ -2954,8 +2954,9 @@ static iree_status_t loom_low_verify_reg_class(
   if (reg_class->name_string_ref == LOOM_STRING_REF_NONE) {
     if (reg_class->target_bank_id != 0 || reg_class->flags != 0 ||
         reg_class->alloc_unit_bits != 0 || reg_class->allocatable_count != 0 ||
-        reg_class->fixed_location_base != 0 ||
-        reg_class->fixed_location_count != 0 || reg_class->alias_set_id != 0 ||
+        reg_class->storage.fixed_locations.fixed_location_base != 0 ||
+        reg_class->storage.fixed_locations.fixed_location_count != 0 ||
+        reg_class->alias_set_id != 0 ||
         reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE ||
         reg_class->full_register_part_mask != 0 ||
         reg_class->spill_slot_space != 0) {
@@ -3005,6 +3006,14 @@ static iree_status_t loom_low_verify_reg_class(
   const bool uses_contiguous_physical_register_candidates = iree_all_bits_set(
       reg_class->flags,
       LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES);
+  const uint16_t fixed_location_base =
+      uses_explicit_physical_registers
+          ? 0
+          : reg_class->storage.fixed_locations.fixed_location_base;
+  const uint16_t fixed_location_count =
+      uses_explicit_physical_registers
+          ? 0
+          : reg_class->storage.fixed_locations.fixed_location_count;
   if (is_virtual_only == is_physical) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -3018,8 +3027,8 @@ static iree_status_t loom_low_verify_reg_class(
                             " has non-zero allocatable count %" PRIu16,
                             reg_class_index, reg_class->allocatable_count);
   }
-  if (is_virtual_only && (reg_class->fixed_location_base != 0 ||
-                          reg_class->fixed_location_count != 0)) {
+  if (is_virtual_only &&
+      (fixed_location_base != 0 || fixed_location_count != 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low virtual register class %" PRIu32
                             " has a non-empty fixed-location window",
@@ -3047,12 +3056,17 @@ static iree_status_t loom_low_verify_reg_class(
         "physical registers",
         reg_class_index);
   }
-  if (uses_explicit_physical_registers &&
-      (reg_class->fixed_location_base != 0 ||
-       reg_class->fixed_location_count != 0 || reg_class->alias_set_id != 0)) {
+  if (uses_explicit_physical_registers && reg_class->alias_set_id != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low explicit physical register class %" PRIu32
-                            " has a linear fixed-location or alias contract",
+                            " has a linear alias contract",
+                            reg_class_index);
+  }
+  if (uses_explicit_physical_registers &&
+      reg_class->storage.explicit_registers.reserved != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low explicit physical register class %" PRIu32
+                            " has non-zero reserved storage metadata",
                             reg_class_index);
   }
   if (uses_explicit_physical_registers) {
@@ -3081,30 +3095,29 @@ static iree_status_t loom_low_verify_reg_class(
                             " has a physical-register candidate start",
                             reg_class_index);
   }
-  if (reg_class->fixed_location_count == 0 &&
-      reg_class->fixed_location_base != 0) {
+  if (fixed_location_count == 0 && fixed_location_base != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low physical register class %" PRIu32
                             " has fixed-location base %" PRIu16
                             " without a count",
-                            reg_class_index, reg_class->fixed_location_base);
+                            reg_class_index, fixed_location_base);
   }
-  const uint32_t fixed_location_end = (uint32_t)reg_class->fixed_location_base +
-                                      reg_class->fixed_location_count;
+  const uint32_t fixed_location_end =
+      (uint32_t)fixed_location_base + fixed_location_count;
   if (fixed_location_end > UINT16_MAX + UINT32_C(1)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "low physical register class %" PRIu32 " fixed-location range [%" PRIu16
         ", %" PRIu32 ") exceeds the u16 location namespace",
-        reg_class_index, reg_class->fixed_location_base, fixed_location_end);
+        reg_class_index, fixed_location_base, fixed_location_end);
   }
-  if (reg_class->fixed_location_count != 0 &&
-      reg_class->fixed_location_base < reg_class->allocatable_count) {
+  if (fixed_location_count != 0 &&
+      fixed_location_base < reg_class->allocatable_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low physical register class %" PRIu32
                             " fixed-location range begins at %" PRIu16
                             " inside its %" PRIu16 " allocatable locations",
-                            reg_class_index, reg_class->fixed_location_base,
+                            reg_class_index, fixed_location_base,
                             reg_class->allocatable_count);
   }
   if (reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE &&

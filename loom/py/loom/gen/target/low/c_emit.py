@@ -34,6 +34,7 @@ from loom.target.low_descriptors import (
     InstructionClass,
     Operand,
     RegClass,
+    RegClassFlag,
     descriptor_stable_id,
     operand_source_binding,
 )
@@ -410,6 +411,27 @@ def _register_class_row_lines(
 ) -> list[list[str]]:
     pool = compiled.string_pool
     physical_register_widths = {register.name: len(register.atomic_units) for register in compiled.physical_registers}
+
+    def storage_lines(reg_class: RegClass) -> list[str]:
+        reg_class_id = compiled.reg_class_ids[reg_class.name]
+        if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in reg_class.flags:
+            pressure_set_id = compiled.reg_class_pressure_set_ids[reg_class_id]
+            return [
+                ".storage = {",
+                "  .explicit_registers = {",
+                f"    .pressure_set_id = {pressure_set_id},",
+                "  },",
+                "},",
+            ]
+        return [
+            ".storage = {",
+            "  .fixed_locations = {",
+            f"    .fixed_location_base = {reg_class.fixed_location_base},",
+            f"    .fixed_location_count = {reg_class.fixed_location_count},",
+            "  },",
+            "},",
+        ]
+
     return [
         [
             f".name_string_ref = {pool.ref(f'reg_{reg_class.name}')},",
@@ -417,8 +439,7 @@ def _register_class_row_lines(
             f".flags = {c_spelling.flag_expr(reg_class.flags)},",
             f".alloc_unit_bits = {reg_class.alloc_unit_bits},",
             f".allocatable_count = {len(reg_class.physical_registers) if reg_class.physical_registers else reg_class.allocatable_count},",
-            f".fixed_location_base = {reg_class.fixed_location_base},",
-            f".fixed_location_count = {reg_class.fixed_location_count},",
+            *storage_lines(reg_class),
             f".physical_register_candidate_start = {compiled.physical_register_candidate_starts[compiled.reg_class_ids[reg_class.name]] if reg_class.physical_registers else 0},",
             ".candidate_lookup = {",
             f"  .ordinal_start = {compiled.physical_register_candidate_lookups[compiled.reg_class_ids[reg_class.name]].ordinal_start},",

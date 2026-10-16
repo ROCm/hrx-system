@@ -32,6 +32,11 @@ extern "C" {
 
 #define LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE UINT32_MAX
 
+typedef struct loom_low_allocation_target_constraints_t
+    loom_low_allocation_target_constraints_t;
+typedef struct loom_low_schedule_call_pressure_table_t
+    loom_low_schedule_call_pressure_table_t;
+
 typedef struct loom_low_schedule_dependency_endpoint_t {
   // Descriptor-local attachment row, or LOOM_LOW_ID_NONE.
   uint16_t attachment_index;
@@ -208,8 +213,8 @@ static inline bool loom_low_schedule_value_requires_register(
                           LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER);
 }
 
-typedef struct loom_low_schedule_alias_pressure_limit_t {
-  // Hard live-unit limit shared by the alias set.
+typedef struct loom_low_schedule_pressure_set_limit_t {
+  // Hard live-unit limit shared by the pressure set.
   uint32_t live_unit_limit;
   // Representative descriptor register class used by diagnostics.
   uint16_t representative_reg_class_id;
@@ -217,13 +222,15 @@ typedef struct loom_low_schedule_alias_pressure_limit_t {
   uint16_t unspillable_completion_domain_id;
   // True when every register class sharing the limit is unspillable.
   uint8_t all_classes_unspillable;
-} loom_low_schedule_alias_pressure_limit_t;
+  // True when values or architectural state use multiple member classes.
+  uint8_t has_multiple_active_reg_classes;
+} loom_low_schedule_pressure_set_limit_t;
 
 // One bounded unspillable register-pressure domain.
 typedef struct loom_low_schedule_completion_domain_t {
-  // Hard live-unit capacity, including any shared register alias set.
+  // Hard live-unit capacity, including any shared register pressure set.
   uint32_t capacity;
-  // Representative class selecting the live register or alias-set counter.
+  // Representative class selecting the class or shared pressure counter.
   uint16_t reg_class_id;
 } loom_low_schedule_completion_domain_t;
 
@@ -346,13 +353,13 @@ typedef struct loom_low_schedule_build_state_t {
   uint8_t* reg_class_state_flags;
   // Hard register-pressure limits used while scoring candidates.
   struct {
-    // Live-unit limits indexed by descriptor register-class ID. Classes in an
-    // alias set use alias_sets instead.
+    // Live-unit limits indexed by descriptor register-class ID. Classes in a
+    // shared pressure set use pressure_sets instead.
     uint32_t* by_reg_class;
-    // Shared limits indexed by one-based register alias-set ID.
-    loom_low_schedule_alias_pressure_limit_t* alias_sets;
-    // Highest dense one-based alias-set ID, or zero when none are present.
-    uint16_t alias_set_count;
+    // Shared limits indexed by one-based register pressure-set ID.
+    loom_low_schedule_pressure_set_limit_t* pressure_sets;
+    // Highest active shared pressure-set ID, or zero when none are present.
+    uint16_t pressure_set_count;
     // Hard limits and live-counter identities indexed by completion domain.
     loom_low_schedule_completion_domain_t* unspillable_completion_domains;
     // Completion-domain IDs indexed by descriptor register-class ID.
@@ -360,6 +367,10 @@ typedef struct loom_low_schedule_build_state_t {
     // Number of bounded-unspillable completion domains.
     uint16_t unspillable_completion_domain_count;
   } pressure_limits;
+  // Resolved allocation limits shared by pressure-domain construction.
+  const loom_low_allocation_target_constraints_t* allocation_constraints;
+  // Sparse capacities observed by values crossing retained calls.
+  const loom_low_schedule_call_pressure_table_t* call_pressure;
   // Most recent architectural-state writer, dense by register class.
   loom_low_schedule_state_access_t* state_last_writes;
   // First architectural-state writer in the current block, dense by register
@@ -496,6 +507,19 @@ typedef struct loom_low_schedule_build_state_t {
   // Pending visible descriptor node that can start a target pair.
   uint32_t pending_pair_affinity_node;
 } loom_low_schedule_build_state_t;
+
+// Returns the pressure set shared by active function classes, or zero when the
+// class can use its class-local counter for this schedule.
+static inline uint16_t loom_low_schedule_reg_class_pressure_set_id(
+    const loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
+  const uint16_t pressure_set_id = loom_low_reg_class_pressure_set_id(
+      &state->target.descriptor_set->reg_classes[reg_class_id]);
+  return pressure_set_id != 0 && state->pressure_limits.pressure_sets != NULL &&
+                 state->pressure_limits.pressure_sets[pressure_set_id]
+                     .has_multiple_active_reg_classes
+             ? pressure_set_id
+             : 0;
+}
 
 #ifdef __cplusplus
 }  // extern "C"

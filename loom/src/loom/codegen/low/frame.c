@@ -187,24 +187,6 @@ static void loom_low_emission_frame_advance_repair_iteration(
   }
 }
 
-// Target call admission is an external boundary. Validate each retained
-// callee after scheduling so allocation can consume its contract without a
-// nullable or fallible path in liveness and move construction.
-static iree_status_t loom_low_emission_frame_validate_call_contracts(
-    const loom_low_schedule_table_t* schedule,
-    loom_low_call_contract_provider_t provider) {
-  if (provider.query == NULL || provider.validate == NULL) {
-    return iree_ok_status();
-  }
-  for (iree_host_size_t i = 0; i < schedule->call_node_count; ++i) {
-    const loom_low_schedule_node_t* node =
-        &schedule->nodes[schedule->call_node_indices[i]];
-    IREE_RETURN_IF_ERROR(provider.validate(
-        provider.user_data, loom_low_func_call_callee(node->op)));
-  }
-  return iree_ok_status();
-}
-
 static bool loom_low_emission_frame_input_has_retained_read(
     const loom_value_t* value, const loom_low_resolved_target_t* target) {
   const loom_low_read_retention_t* rule = target->target_facts->read_retention;
@@ -445,6 +427,10 @@ static iree_status_t loom_low_emission_frame_build_impl(
       .residency = out_frame->residency,
       .allocation_budgets = options->allocation_budgets,
       .allocation_budget_count = options->allocation_budget_count,
+      .allocation_reserved_ranges = options->allocation_reserved_ranges,
+      .allocation_reserved_range_count =
+          options->allocation_reserved_range_count,
+      .call_contracts = &options->call_contracts,
       .pair_affinities = options->schedule_pair_affinities,
       .preferred_pair_uses = preferred_pair_uses,
       .required_register_values = required_register_values,
@@ -474,11 +460,6 @@ static iree_status_t loom_low_emission_frame_build_impl(
     status = loom_low_schedule_function(&model, &schedule_options, arena,
                                         &out_frame->schedule);
   }
-  if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0) {
-    status = loom_low_emission_frame_validate_call_contracts(
-        &out_frame->schedule, options->call_contracts);
-  }
-
   loom_low_storage_lease_table_t storage_leases = {0};
   if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0 &&
       options->storage_lease_provider != NULL) {
@@ -1195,6 +1176,14 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       return iree_ok_status();
     }
     IREE_ASSERT_EQ((iree_host_size_t)result.storage_count, storage_plan_count);
+    IREE_RETURN_IF_ERROR(loom_low_emission_frame_record_value_list(
+        result.required_register_values.values,
+        result.required_register_values.count, repair_arena,
+        &required_register_values));
+    IREE_RETURN_IF_ERROR(loom_low_emission_frame_record_value_list(
+        result.per_user_placement_values.values,
+        result.per_user_placement_values.count, repair_arena,
+        &rematerialization.per_user_values));
     if (statistics != NULL) {
       ++statistics->repair.spill_materialization_batch_count;
     }

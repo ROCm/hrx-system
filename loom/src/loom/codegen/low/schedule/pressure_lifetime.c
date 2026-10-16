@@ -22,18 +22,18 @@ void loom_low_schedule_pressure_lifetime_note_early_result(
       iree_math_saturating_add_u64(
           pressure_state->candidate_lifetime.early_added_units[reg_class_id],
           unit_count);
-  if (pressure_state->alias_sets.records == NULL) {
+  if (pressure_state->pressure_sets.records == NULL) {
     return;
   }
-  const uint16_t alias_set_id =
-      state->target.descriptor_set->reg_classes[reg_class_id].alias_set_id;
-  if (alias_set_id == 0) {
+  const uint16_t pressure_set_id =
+      loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
+  if (pressure_set_id == 0) {
     return;
   }
-  loom_low_schedule_alias_pressure_record_t* record =
-      &pressure_state->alias_sets.records[alias_set_id];
+  loom_low_schedule_pressure_set_record_t* record =
+      &pressure_state->pressure_sets.records[pressure_set_id];
   IREE_ASSERT(iree_any_bit_set(
-      record->flags, LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_CANDIDATE_TOUCHED));
+      record->flags, LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_CANDIDATE_TOUCHED));
   record->candidate_lifetime.early_added_units = iree_math_saturating_add_u64(
       record->candidate_lifetime.early_added_units, unit_count);
 }

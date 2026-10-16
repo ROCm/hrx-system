@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from loom.gen.support.string_pool import CStringPool
@@ -114,6 +114,57 @@ def _derive_mutable_state_classes(
         if any(atomic_unit in written_atomic_units for register_name in register_class.physical_registers for atomic_unit in physical_registers[register_name].atomic_units):
             mutable_classes.add(register_class.name)
     return frozenset(mutable_classes)
+
+
+def _derive_reg_class_pressure_set_ids(
+    register_classes: Sequence[RegClass],
+    physical_register_views: Sequence[PhysicalRegisterView],
+) -> list[int]:
+    """Assigns shared pressure sets for equivalent allocation domains."""
+
+    views_by_class: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
+    for view in physical_register_views:
+        views_by_class.setdefault(view.reg_class, []).append((view.physical_register, view.units))
+
+    keys: list[Hashable | None] = []
+    key_counts: dict[Hashable, int] = {}
+    for register_class in register_classes:
+        if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS not in register_class.flags:
+            keys.append(None)
+            continue
+        key = (
+            register_class.target_bank_id,
+            RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES in register_class.flags,
+            RegClassFlag.EVEN_ALIGNED_TUPLES in register_class.flags,
+            register_class.physical_registers,
+            tuple(views_by_class.get(register_class.name, ())),
+        )
+        keys.append(key)
+        key_counts[key] = key_counts.get(key, 0) + 1
+
+    next_pressure_set_id = (
+        max(
+            (register_class.alias_set_id for register_class in register_classes),
+            default=0,
+        )
+        + 1
+    )
+    pressure_set_ids_by_key: dict[Hashable, int] = {}
+    pressure_set_ids = [register_class.alias_set_id for register_class in register_classes]
+    for register_class_index, key in enumerate(keys):
+        if key is None or key_counts[key] == 1:
+            continue
+        pressure_set_id = pressure_set_ids_by_key.get(key)
+        if pressure_set_id is None:
+            validation.validate_u16(
+                next_pressure_set_id,
+                "derived explicit register pressure-set ID",
+            )
+            pressure_set_id = next_pressure_set_id
+            pressure_set_ids_by_key[key] = pressure_set_id
+            next_pressure_set_id += 1
+        pressure_set_ids[register_class_index] = pressure_set_id
+    return pressure_set_ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -1388,6 +1439,10 @@ def compile_descriptor_set(
     )
     validation.validate_u16_table_count(len(register_parts), f"descriptor set '{spec.key}' register part")
     reg_class_ids = {reg_class.name: i for i, reg_class in enumerate(reg_classes)}
+    reg_class_pressure_set_ids = _derive_reg_class_pressure_set_ids(
+        reg_classes,
+        spec.physical_register_views,
+    )
     physical_register_ids = {physical_register.name: i for i, physical_register in enumerate(physical_registers)}
     register_part_ids = {part.name: i for i, part in enumerate(register_parts)}
     resource_ids = {resource.name: i for i, resource in enumerate(resources)}
@@ -1864,6 +1919,7 @@ def compile_descriptor_set(
         descriptors=selected_descriptors,
         instruction_classes=instruction_classes,
         reg_classes=reg_classes,
+        reg_class_pressure_set_ids=reg_class_pressure_set_ids,
         physical_registers=physical_registers,
         physical_register_candidate_ids=physical_register_candidate_ids,
         physical_register_allocation_ordinals=physical_register_allocation_ordinals,

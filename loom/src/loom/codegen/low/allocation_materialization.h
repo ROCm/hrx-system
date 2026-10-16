@@ -81,6 +81,13 @@ typedef struct loom_low_allocation_materialized_spill_list_t {
   iree_host_size_t record_count;
 } loom_low_allocation_materialized_spill_list_t;
 
+typedef struct loom_low_allocation_materialized_value_list_t {
+  // Materialized values owned by the caller-provided arena.
+  const loom_value_id_t* values;
+  // Number of entries in |values|.
+  iree_host_size_t count;
+} loom_low_allocation_materialized_value_list_t;
+
 typedef struct loom_low_allocation_materialization_options_t {
   // True when |supported_storage_spaces| names the complete target lowering
   // capability for newly generated spill storage.
@@ -109,6 +116,11 @@ typedef struct loom_low_allocation_materialization_options_t {
 typedef struct loom_low_allocation_materialization_result_t {
   // Number of error diagnostics emitted before mutating the low function.
   uint32_t error_count;
+  // Register values that generated spill traffic requires in later frames.
+  // Includes low.reload results and values newly consumed by low.spill.
+  loom_low_allocation_materialized_value_list_t required_register_values;
+  // Single-consumer low.reload results private to their consumer setup chain.
+  loom_low_allocation_materialized_value_list_t per_user_placement_values;
   // Number of low.storage.reserve ops created from spill plans.
   uint32_t storage_count;
   // Number of low.spill stores inserted.

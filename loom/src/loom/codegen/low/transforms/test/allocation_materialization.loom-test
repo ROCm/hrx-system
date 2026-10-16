@@ -173,9 +173,10 @@ low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test
 
 // ====
 
-// Each materialized spill rebuilds the complete allocation snapshot. The
-// per-attempt memory high-water must remain bounded across all three attempts.
-// RUN: pass-report low-materialize-allocation{budgets=test.i32=2}
+// Each materialized spill rebuilds the complete allocation snapshot. Resetting
+// the attempt arena keeps all three attempts within one owned block; the used
+// byte count remains observable without pinning internal table layout.
+// RUN: with-checks pass-report low-materialize-allocation{budgets=test.i32=2}
 
 test.target<low_core> @test_target
 
@@ -191,7 +192,8 @@ low.func.def target<test.low.core>(@test_target) @reports_released_allocation_at
 }
 
 // ----
-{"invocations":[{"pass":"low-materialize-allocation","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"reports_released_allocation_attempt_storage","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"storage":2,"spills":2,"reloads":2,"rematerializations":0,"live_range_splits":0,"attempts":3,"attempt_arena_used_bytes_high_water":11456,"attempt_arena_owned_bytes_high_water":32768},"details":[]}]}
+CHECK: *"attempts":3,*
+CHECK: *"attempt_arena_used_bytes_high_water":*,"attempt_arena_owned_bytes_high_water":32768*
 
 // ====
 

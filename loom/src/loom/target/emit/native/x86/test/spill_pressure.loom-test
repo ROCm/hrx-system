@@ -1,0 +1,71 @@
+// Call-boundary pressure accounts only values that survive the clobber phase.
+// Arguments dying at the call are already consumed, and results do not exist
+// until afterward.
+// RUN: emit x86-frame @call_boundary strategy=resource-stall x86.gpr64=7
+x86.target<scalar> @target
+
+low.func.decl target<x86.scalar.core>(@target) @external_pair(%v0: reg<x86.gpr64>, %v1: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+low.func.def target<x86.scalar.core>(@target) @call_boundary(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %k0 = mov.imm64 17
+  %c0 = copy %a0 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %h0 = add.gpr64 %c0, %k0
+  %k1 = mov.imm64 34
+  %c1 = copy %a1 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %h1 = add.gpr64 %c1, %k1
+  %k2 = mov.imm64 51
+  %c2 = copy %a0 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %h2 = add.gpr64 %c2, %k2
+  %k3 = mov.imm64 68
+  %c3 = copy %a1 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %h3 = add.gpr64 %c3, %k3
+  %first = low.func.call @external_pair(%a1, %a0) : (reg<x86.gpr64>, reg<x86.gpr64>) -> (reg<x86.gpr64>)
+  %second = low.func.call @external_pair(%h0, %h1) : (reg<x86.gpr64>, reg<x86.gpr64>) -> (reg<x86.gpr64>)
+  %sum0 = add.gpr64 %first, %second
+  %sum1 = add.gpr64 %sum0, %h0
+  %sum2 = add.gpr64 %sum1, %h1
+  %sum3 = add.gpr64 %sum2, %h2
+  %sum4 = add.gpr64 %sum3, %h3
+  return %sum4
+}
+
+// ----
+callee-preserved: rbx, rbp
+stack: 40 bytes, alignment 16
+
+// ====
+
+// GPR32 and GPR64 values consume the same physical register bank even though
+// their instruction operands use distinct descriptor classes.
+// RUN: emit x86-frame @mixed_width_boundary strategy=resource-stall x86.gpr64=7
+x86.target<scalar> @target
+
+low.func.decl target<x86.scalar.core>(@target) @external_args(%v0: reg<x86.gpr32>, %v1: reg<x86.gpr64>, %v2: reg<x86.gpr32>, %v3: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+low.func.decl target<x86.scalar.core>(@target) @external_mix(%x: reg<x86.gpr32>, %y: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+low.func.def target<x86.scalar.core>(@target) @mixed_width_boundary(%a0: reg<x86.gpr32>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr32>, %a3: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>) asm {
+  %k0 = mov.imm32 17
+  %c0 = copy %a0 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %h0 = add.gpr32 %c0, %k0
+  %k1 = mov.imm64 34
+  %c1 = copy %a1 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %h1 = add.gpr64 %c1, %k1
+  %k2 = mov.imm32 51
+  %c2 = copy %a2 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %h2 = add.gpr32 %c2, %k2
+  %k3 = mov.imm64 68
+  %c3 = copy %a3 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %h3 = add.gpr64 %c3, %k3
+  %first = low.func.call @external_args(%a0, %a1, %a2, %a3) : (reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr32>, reg<x86.gpr64>) -> (reg<x86.gpr64>)
+  %second = low.func.call @external_mix(%h0, %h1) : (reg<x86.gpr32>, reg<x86.gpr64>) -> (reg<x86.gpr64>)
+  %sum32 = add.gpr32 %h0, %h2
+  %sum64_0 = add.gpr64 %first, %second
+  %sum64_1 = add.gpr64 %sum64_0, %h1
+  %sum64_2 = add.gpr64 %sum64_1, %h3
+  return %sum32, %sum64_2
+}
+
+// ----
+callee-preserved: rbx, rbp
+stack: 56 bytes, alignment 16

@@ -685,6 +685,43 @@ def test_compiler_emits_explicit_physical_register_candidates() -> None:
     assert "kTestLowCorePhysicalRegisterAtomicUnits" in generated.source
 
 
+def test_compiler_derives_shared_explicit_register_pressure_sets() -> None:
+    distinct = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+    explicit_id = distinct.reg_class_ids["test.explicit32"]
+    spillable_id = distinct.reg_class_ids["test.spillable.explicit32"]
+    alias_id = distinct.reg_class_ids["test.alias32"]
+    assert distinct.reg_class_pressure_set_ids[explicit_id] == 0
+    assert distinct.reg_class_pressure_set_ids[spillable_id] == 0
+    assert distinct.reg_class_pressure_set_ids[alias_id] == distinct.reg_classes[alias_id].alias_set_id
+
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        physical_register_views=(
+            *TEST_LOW_CORE_DESCRIPTOR_SET.physical_register_views,
+            PhysicalRegisterView(
+                "test.l0",
+                "test.spillable.explicit32",
+                ("test.r0", "test.r2"),
+            ),
+            PhysicalRegisterView(
+                "test.l1",
+                "test.spillable.explicit32",
+                ("test.r1", "test.r3"),
+            ),
+        ),
+    )
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    fixed_id = compiled.reg_class_ids["test.fixed.r0"]
+
+    pressure_set_id = compiled.reg_class_pressure_set_ids[explicit_id]
+    assert pressure_set_id != 0
+    assert compiled.reg_class_pressure_set_ids[spillable_id] == pressure_set_id
+    assert compiled.reg_class_pressure_set_ids[fixed_id] == 0
+
+    generated = generate_descriptor_set(descriptor_set)
+    assert f".pressure_set_id = {pressure_set_id}," in generated.source
+
+
 def test_compiler_derives_ordered_physical_register_views() -> None:
     compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
     register_ids = {physical_register.name: index for index, physical_register in enumerate(compiled.physical_registers)}

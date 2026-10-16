@@ -381,12 +381,13 @@ static iree_status_t loom_amdgpu_wait_plan_allocate_physical_state(
     const uint32_t fixed_sgpr_end =
         allocation->physical_extents
             .fixed_ends_by_reg_class[LOOM_AMDGPU_REG_CLASS_ID_SGPR];
-    const uint32_t fixed_sgpr_count =
-        fixed_sgpr_end > sgpr_class->fixed_location_base
-            ? fixed_sgpr_end - sgpr_class->fixed_location_base
-            : 0;
+    const uint32_t fixed_location_base =
+        loom_low_reg_class_fixed_location_base(sgpr_class);
+    const uint32_t fixed_sgpr_count = fixed_sgpr_end > fixed_location_base
+                                          ? fixed_sgpr_end - fixed_location_base
+                                          : 0;
     IREE_RETURN_IF_ERROR(loom_amdgpu_sgpr_read_hazard_initialize(
-        sgpr_count, sgpr_class->fixed_location_base, fixed_sgpr_count,
+        sgpr_count, fixed_location_base, fixed_sgpr_count,
         builder->transient_arena, &builder->sgpr_read_hazard));
   }
   return iree_ok_status();

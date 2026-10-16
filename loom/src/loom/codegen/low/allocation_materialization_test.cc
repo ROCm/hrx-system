@@ -224,6 +224,25 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
   EXPECT_EQ(result.materialized_spills[1].reload_count, 0u);
   EXPECT_EQ(result.materialized_spills[1].reload_bytes, 0u);
 
+  ASSERT_EQ(result.required_register_values.count, 2u);
+  bool found_spill_input = false;
+  loom_value_id_t reload_result = LOOM_VALUE_ID_INVALID;
+  for (iree_host_size_t i = 0; i < result.required_register_values.count; ++i) {
+    const loom_value_id_t value_id = result.required_register_values.values[i];
+    if (value_id == wide) {
+      found_spill_input = true;
+      continue;
+    }
+    const loom_value_t* value = loom_module_value(module.get(), value_id);
+    ASSERT_NE(value, nullptr);
+    EXPECT_TRUE(loom_low_reload_isa(loom_value_def_op(value)));
+    reload_result = value_id;
+  }
+  EXPECT_TRUE(found_spill_input);
+  ASSERT_NE(reload_result, LOOM_VALUE_ID_INVALID);
+  ASSERT_EQ(result.per_user_placement_values.count, 1u);
+  EXPECT_EQ(result.per_user_placement_values.values[0], reload_result);
+
   iree_arena_deinitialize(&arena);
 }
 

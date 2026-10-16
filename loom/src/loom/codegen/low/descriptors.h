@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 61u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 62u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -609,11 +609,26 @@ typedef struct loom_low_reg_class_t {
   uint16_t alloc_unit_bits;
   // Allocatable units in this class, or zero when virtual/unbounded.
   uint16_t allocatable_count;
-  // First non-allocatable physical location available only to ABI-fixed values.
-  uint16_t fixed_location_base;
-  // Number of contiguous ABI-fixed physical locations at
-  // |fixed_location_base|, or zero when none exist.
-  uint16_t fixed_location_count;
+  // Storage-kind metadata selected by EXPLICIT_PHYSICAL_REGISTERS.
+  union {
+    // Linear-storage metadata.
+    struct {
+      // First non-allocatable physical location available only to ABI-fixed
+      // values.
+      uint16_t fixed_location_base;
+      // Number of contiguous ABI-fixed physical locations at
+      // |fixed_location_base|, or zero when none exist.
+      uint16_t fixed_location_count;
+    } fixed_locations;
+    // Explicit-register metadata.
+    struct {
+      // Dense one-based identity shared by classes with an identical physical
+      // allocation domain, or zero when class-local.
+      uint16_t pressure_set_id;
+      // Reserved; must be zero.
+      uint16_t reserved;
+    } explicit_registers;
+  } storage;
   // First descriptor-set physical-register candidate ID. Explicit physical
   // classes use |allocatable_count| rows beginning here; linear classes leave
   // this zero.
@@ -629,7 +644,7 @@ typedef struct loom_low_reg_class_t {
     uint16_t register_count;
   } candidate_lookup;
   // Dense one-based alias-set identifier shared by overlapping register
-  // classes, or zero when this class has a disjoint storage namespace.
+  // classes in a linear storage namespace, or zero when disjoint.
   uint16_t alias_set_id;
   // Register class used for spill/reload values, or LOOM_LOW_REG_CLASS_NONE.
   uint16_t spill_class_id;
@@ -642,6 +657,23 @@ typedef struct loom_low_reg_class_t {
   // whose locations each occupy one unit in their storage namespace.
   uint16_t physical_atomic_unit_count;
 } loom_low_reg_class_t;
+
+static_assert(sizeof(loom_low_reg_class_t) == 40,
+              "register classes must remain compact table rows");
+
+// Returns the shared pressure-domain identity, or zero when class-local.
+// Linear aliases reuse their existing identity; explicit-register classes use
+// the generated identity for their complete physical allocation domain.
+static inline uint16_t loom_low_reg_class_pressure_set_id(
+    const loom_low_reg_class_t* reg_class) {
+  if (reg_class->alias_set_id != 0) {
+    return reg_class->alias_set_id;
+  }
+  return iree_all_bits_set(reg_class->flags,
+                           LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS)
+             ? reg_class->storage.explicit_registers.pressure_set_id
+             : 0;
+}
 
 // Returns the class's required base alignment in register units. Individual
 // instruction operands may impose stronger constraints through their register
@@ -745,16 +777,38 @@ typedef struct loom_low_register_packing_resource_member_t {
   uint16_t reserved;
 } loom_low_register_packing_resource_member_t;
 
+// Returns the first ABI-fixed location, or zero for explicit storage.
+static inline uint16_t loom_low_reg_class_fixed_location_base(
+    const loom_low_reg_class_t* reg_class) {
+  return iree_any_bit_set(reg_class->flags,
+                          LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS)
+             ? 0
+             : reg_class->storage.fixed_locations.fixed_location_base;
+}
+
+// Returns the ABI-fixed location count, or zero for explicit storage.
+static inline uint16_t loom_low_reg_class_fixed_location_count(
+    const loom_low_reg_class_t* reg_class) {
+  return iree_any_bit_set(reg_class->flags,
+                          LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS)
+             ? 0
+             : reg_class->storage.fixed_locations.fixed_location_count;
+}
+
 // Returns true when the non-empty physical range is wholly contained in the
 // register class's non-allocatable ABI-fixed location window.
 static inline bool loom_low_reg_class_fixed_location_range_contains(
     const loom_low_reg_class_t* reg_class, uint32_t location_base,
     uint32_t location_count) {
-  const uint64_t fixed_location_end = (uint64_t)reg_class->fixed_location_base +
-                                      reg_class->fixed_location_count;
+  const uint16_t fixed_location_base =
+      loom_low_reg_class_fixed_location_base(reg_class);
+  const uint16_t fixed_location_count =
+      loom_low_reg_class_fixed_location_count(reg_class);
+  const uint64_t fixed_location_end =
+      (uint64_t)fixed_location_base + fixed_location_count;
   const uint64_t location_end = (uint64_t)location_base + location_count;
-  return location_count != 0 && reg_class->fixed_location_count != 0 &&
-         location_base >= reg_class->fixed_location_base &&
+  return location_count != 0 && fixed_location_count != 0 &&
+         location_base >= fixed_location_base &&
          location_end <= fixed_location_end;
 }
 

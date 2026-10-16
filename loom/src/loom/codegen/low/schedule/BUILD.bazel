@@ -102,6 +102,8 @@ loom_cc_library(
     srcs = [
         "block.c",
         "block.h",
+        "call_pressure.c",
+        "call_pressure.h",
         "candidate_policy.c",
         "candidate_policy.h",
         "completion_demand.c",
@@ -169,6 +171,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:storage_transport",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low/allocation:call",
         "//loom/src/loom/codegen/low/allocation:storage",
         "//loom/src/loom/codegen/low/allocation:target_constraints",
         "//loom/src/loom/error:emitter",

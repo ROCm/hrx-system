@@ -106,6 +106,28 @@ def test_scalar_physical_ownership_is_shared_by_core_profiles() -> None:
         compiled = compiler.compile_descriptor_set(storage)
         assert tuple(register.name for register in compiled.physical_registers) == names
         assert tuple(register.atomic_units for register in compiled.physical_registers) == tuple((i,) for i in range(16))
+        gpr32_id = compiled.reg_class_ids["x86.gpr32"]
+        gpr64_id = compiled.reg_class_ids["x86.gpr64"]
+        gpr_pressure_set_id = compiled.reg_class_pressure_set_ids[gpr32_id]
+        assert gpr_pressure_set_id != 0
+        assert compiled.reg_class_pressure_set_ids[gpr64_id] == gpr_pressure_set_id
+        for narrow_class, wide_class in (
+            ("x86.eax", "x86.rax"),
+            ("x86.edx", "x86.rdx"),
+            ("x86.ecx", "x86.rcx"),
+        ):
+            narrow_id = compiled.reg_class_ids[narrow_class]
+            wide_id = compiled.reg_class_ids[wide_class]
+            fixed_pressure_set_id = compiled.reg_class_pressure_set_ids[narrow_id]
+            assert fixed_pressure_set_id != 0
+            assert compiled.reg_class_pressure_set_ids[wide_id] == fixed_pressure_set_id
+            assert fixed_pressure_set_id != gpr_pressure_set_id
+        for vector_class in ("x86.xmm", "x86.ymm", "x86.zmm"):
+            vector_id = compiled.reg_class_ids.get(vector_class)
+            if vector_id is not None:
+                vector_pressure_set_id = compiled.reg_class_pressure_set_ids[vector_id]
+                assert vector_pressure_set_id == compiled.reg_classes[vector_id].alias_set_id
+                assert vector_pressure_set_id != gpr_pressure_set_id
         for name, width, physical_ids in (
             ("x86.gpr32", 32, tuple(range(16))),
             ("x86.gpr64", 64, tuple(range(16))),

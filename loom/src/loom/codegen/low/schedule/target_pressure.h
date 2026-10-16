@@ -15,21 +15,23 @@
 extern "C" {
 #endif
 
-enum loom_low_schedule_alias_pressure_flag_bits_e {
-  LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_BLOCK_TOUCHED = 1u << 0,
-  LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_CANDIDATE_TOUCHED = 1u << 1,
+enum loom_low_schedule_pressure_set_flag_bits_e {
+  LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_BLOCK_TOUCHED = 1u << 0,
+  LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_CANDIDATE_TOUCHED = 1u << 1,
 };
 
 enum loom_low_schedule_resource_pressure_flag_bits_e {
   LOOM_LOW_SCHEDULE_RESOURCE_PRESSURE_FLAG_CANDIDATE_TOUCHED = 1u << 0,
 };
 
-// Mutable pressure state for one shared register-class namespace.
-struct loom_low_schedule_alias_pressure_record_t {
-  // Current live units in the shared alias namespace.
+// Mutable pressure state for one shared register-class allocation domain.
+struct loom_low_schedule_pressure_set_record_t {
+  // Current live units in the shared pressure set.
   uint64_t current_live_units;
   // Live-unit delta projected for the candidate being scored.
   int64_t candidate_delta_units;
+  // Candidate operand deaths in the shared pressure set.
+  uint64_t candidate_killed_units;
   // Candidate instruction-phase overlap in the shared register namespace.
   struct {
     // Result storage created before ordinary input reads complete.
@@ -39,7 +41,7 @@ struct loom_low_schedule_alias_pressure_record_t {
   } candidate_lifetime;
   // Block-local headroom required by aligned contiguous values.
   uint32_t packing_reserve_units;
-  // Mutable loom_low_schedule_alias_pressure_flag_bits_e bits.
+  // Mutable loom_low_schedule_pressure_set_flag_bits_e bits.
   uint8_t flags;
 };
 

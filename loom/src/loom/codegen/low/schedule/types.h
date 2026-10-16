@@ -39,6 +39,10 @@ extern "C" {
 #endif
 
 typedef struct loom_low_allocation_budget_t loom_low_allocation_budget_t;
+typedef struct loom_low_call_contract_provider_t
+    loom_low_call_contract_provider_t;
+typedef struct loom_low_allocation_reserved_range_t
+    loom_low_allocation_reserved_range_t;
 typedef struct loom_low_schedule_dependency_index_t
     loom_low_schedule_dependency_index_t;
 
@@ -774,6 +778,12 @@ typedef struct loom_low_schedule_options_t {
   const loom_low_allocation_budget_t* allocation_budgets;
   // Number of entries in |allocation_budgets|.
   iree_host_size_t allocation_budget_count;
+  // Whole-function target-owned locations unavailable to ordinary values.
+  const loom_low_allocation_reserved_range_t* allocation_reserved_ranges;
+  // Number of entries in |allocation_reserved_ranges|.
+  iree_host_size_t allocation_reserved_range_count;
+  // Optional target call contracts validated before scheduling retained calls.
+  const loom_low_call_contract_provider_t* call_contracts;
   // Optional target-provided pair-affinity table.
   loom_low_schedule_pair_affinity_list_t pair_affinities;
   // Optional concrete pair groups preferred when rescheduling rewritten IR.

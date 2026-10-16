@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/codegen/low/schedule/call_pressure.h"
 #include "loom/codegen/low/schedule/pressure_lifetime.h"
 #include "loom/target/residency.h"
 
@@ -343,9 +344,7 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_class(
     loom_low_schedule_pressure_state_t* pressure_state,
     loom_low_schedule_candidate_score_t* score, uint32_t candidate_node_index,
     uint16_t reg_class_id) {
-  if (state->pressure_limits.alias_sets != NULL &&
-      state->target.descriptor_set->reg_classes[reg_class_id].alias_set_id !=
-          0) {
+  if (loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id) != 0) {
     return;
   }
   const int64_t delta_units =
@@ -382,15 +381,16 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_class(
           state, candidate_node_index, completion_domain_id));
 }
 
-static void loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
+static void loom_low_schedule_score_candidate_pressure_limit_for_pressure_set(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state,
     loom_low_schedule_candidate_score_t* score, uint32_t candidate_node_index,
-    uint16_t alias_set_id) {
-  const loom_low_schedule_alias_pressure_record_t* record =
-      &pressure_state->alias_sets.records[alias_set_id];
-  const uint16_t reg_class_id = state->pressure_limits.alias_sets[alias_set_id]
-                                    .representative_reg_class_id;
+    uint16_t pressure_set_id) {
+  const loom_low_schedule_pressure_set_record_t* record =
+      &pressure_state->pressure_sets.records[pressure_set_id];
+  const uint16_t reg_class_id =
+      state->pressure_limits.pressure_sets[pressure_set_id]
+          .representative_reg_class_id;
   const uint16_t completion_domain_id =
       loom_low_schedule_unspillable_completion_domain_id(state, reg_class_id);
   const uint32_t unspillable_activation_units =
@@ -401,14 +401,15 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
           : 0;
   loom_low_schedule_score_candidate_pressure_limit(
       score, reg_class_id,
-      state->pressure_limits.alias_sets[alias_set_id].live_unit_limit,
+      state->pressure_limits.pressure_sets[pressure_set_id].live_unit_limit,
       record->current_live_units, record->candidate_delta_units,
       loom_low_schedule_pressure_lifetime_transient_growth(
           record->candidate_delta_units,
           record->candidate_lifetime.early_added_units,
           record->candidate_lifetime.late_released_units),
       record->packing_reserve_units, unspillable_activation_units,
-      state->pressure_limits.alias_sets[alias_set_id].all_classes_unspillable,
+      state->pressure_limits.pressure_sets[pressure_set_id]
+          .all_classes_unspillable,
       loom_low_schedule_candidate_opens_required_register_lifetime(
           state, candidate_node_index, completion_domain_id));
 }
@@ -436,22 +437,23 @@ static void loom_low_schedule_score_candidate_pressure_limits(
     loom_low_schedule_score_candidate_pressure_limit_for_class(
         state, pressure_state, score, candidate_node_index, reg_class_id);
   }
-  for (iree_host_size_t i = 0; i < pressure_state->alias_sets.block_count;
+  for (iree_host_size_t i = 0; i < pressure_state->pressure_sets.block_count;
        ++i) {
-    loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
+    loom_low_schedule_score_candidate_pressure_limit_for_pressure_set(
         state, pressure_state, score, candidate_node_index,
-        pressure_state->alias_sets.block_ids[i]);
+        pressure_state->pressure_sets.block_ids[i]);
   }
   for (iree_host_size_t i = 0;
-       i < pressure_state->alias_sets.candidate_delta_touched_count; ++i) {
-    const uint16_t alias_set_id =
-        pressure_state->alias_sets.candidate_delta_touched_ids[i];
-    if (iree_any_bit_set(pressure_state->alias_sets.records[alias_set_id].flags,
-                         LOOM_LOW_SCHEDULE_ALIAS_PRESSURE_FLAG_BLOCK_TOUCHED)) {
+       i < pressure_state->pressure_sets.candidate_delta_touched_count; ++i) {
+    const uint16_t pressure_set_id =
+        pressure_state->pressure_sets.candidate_delta_touched_ids[i];
+    if (iree_any_bit_set(
+            pressure_state->pressure_sets.records[pressure_set_id].flags,
+            LOOM_LOW_SCHEDULE_PRESSURE_SET_FLAG_BLOCK_TOUCHED)) {
       continue;
     }
-    loom_low_schedule_score_candidate_pressure_limit_for_alias_set(
-        state, pressure_state, score, candidate_node_index, alias_set_id);
+    loom_low_schedule_score_candidate_pressure_limit_for_pressure_set(
+        state, pressure_state, score, candidate_node_index, pressure_set_id);
   }
 }
 
@@ -789,11 +791,11 @@ uint32_t loom_low_schedule_target_pressure_full_unspillable_completion_capacity(
       &state->pressure_limits
            .unspillable_completion_domains[completion_domain_id];
   const uint16_t reg_class_id = domain->reg_class_id;
-  const loom_low_reg_class_t* reg_class =
-      &state->target.descriptor_set->reg_classes[reg_class_id];
+  const uint16_t pressure_set_id =
+      loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
   const uint64_t current_live_units =
-      reg_class->alias_set_id != 0
-          ? pressure_state->alias_sets.records[reg_class->alias_set_id]
+      pressure_set_id != 0
+          ? pressure_state->pressure_sets.records[pressure_set_id]
                 .current_live_units
           : pressure_state->current_live_units_by_reg_class[reg_class_id];
   return current_live_units >= domain->capacity ? domain->capacity : UINT32_MAX;
@@ -807,15 +809,15 @@ static uint64_t loom_low_schedule_target_pressure_unspillable_transaction_units(
       &state->pressure_limits
            .unspillable_completion_domains[completion_domain_id];
   const uint16_t reg_class_id = domain->reg_class_id;
-  const uint16_t alias_set_id =
-      state->target.descriptor_set->reg_classes[reg_class_id].alias_set_id;
+  const uint16_t pressure_set_id =
+      loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
   uint64_t current_live_units = 0;
   int64_t candidate_delta_units = 0;
   uint64_t candidate_transient_added_units = 0;
   uint32_t packing_reserve_units = 0;
-  if (alias_set_id != 0) {
-    const loom_low_schedule_alias_pressure_record_t* record =
-        &pressure_state->alias_sets.records[alias_set_id];
+  if (pressure_set_id != 0) {
+    const loom_low_schedule_pressure_set_record_t* record =
+        &pressure_state->pressure_sets.records[pressure_set_id];
     current_live_units = record->current_live_units;
     candidate_delta_units = record->candidate_delta_units;
     candidate_transient_added_units =
@@ -1102,4 +1104,6 @@ void loom_low_schedule_target_pressure_score_candidate(
       state, pressure_state, candidate_node_index, score);
   loom_low_schedule_score_active_unspillable_completions(
       state, pressure_state, candidate_node_index, score);
+  loom_low_schedule_call_pressure_score_candidate(state, pressure_state,
+                                                  candidate_node_index, score);
 }
