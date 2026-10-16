@@ -1,0 +1,100 @@
+// The contiguous expert uses the same contraction as routed work without a
+// route table. Empty, single-row, full-tile, and ragged epochs exercise its
+// header, masked input rows, and publication ownership. Independent original
+// Q8 decoding accumulates in F64 before the model's F32 nonlinear boundary.
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+kernel.decl @shared_matrix() launch(%epoch: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer)
+
+func.decl @quantized_finite_headers(%format: index, %width: index, %rows: index, %scale: f16, %minimum: f16, %weight: buffer)
+
+func.decl @quantized_sparse_input(%capacity: index, %count: index, %width: index, %input: buffer)
+
+func.decl @quantized_sparse_dot(%format: index, %width: index, %input_row: index, %weight_row: index, %input: buffer, %weight: buffer) -> (f64)
+
+func.def @geometry(%trial: index) -> (index, index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %tile = index.constant 64 : index
+  %capacity = config.get @flash_next.token_count : index
+  %tail = index.add %tile, %c1 : index
+  %empty = index.cmp eq, %trial, %c0 : index
+  %single = index.cmp eq, %trial, %c1 : index
+  %aligned = index.cmp eq, %trial, %c2 : index
+  %tile_count = scf.select %aligned, %tile, %tail : index
+  %nonempty_count = scf.select %single, %c1, %tile_count : index
+  %count = scf.select %empty, %c0, %nonempty_count : index
+  func.return %capacity, %count : index, index
+}
+
+func.def @fixture(%count: index, %epoch: buffer, %input: buffer, %gate: buffer, %up: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.constant 640 : index
+  %format = index.constant 0 : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = index.cast %count : index to i32
+  view.store %word, %header[0] : i32, view<3xi32>
+  %gate_scale = scalar.constant 0.00125 : f16
+  %up_scale = scalar.constant 0.0027299999999999998 : f16
+  %minimum = scalar.constant 0.0 : f16
+  func.call @quantized_finite_headers(%format, %inputs, %outputs, %gate_scale, %minimum, %gate) : (index, index, index, f16, f16, buffer)
+  func.call @quantized_finite_headers(%format, %inputs, %outputs, %up_scale, %minimum, %up) : (index, index, index, f16, f16, buffer)
+  func.call @quantized_sparse_input(%capacity, %count, %inputs, %input) : (index, index, index, buffer)
+  func.return
+}
+
+func.def @reference(%epoch: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.constant 640 : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %one = scalar.constant 1.0 : f32
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, %capacity)] : index
+  %result = buffer.view %output[%origin] : buffer -> view<[%capacity]x640xbf16>
+  scf.for %token = [%c0 to %count step %c1] {
+    scf.for %column = [%c0 to %outputs step %c1] {
+      %gate_value = func.call @quantized_sparse_dot(%c0, %inputs, %token, %column, %input, %gate) : (index, index, index, index, buffer, buffer) -> (f64)
+      %up_value = func.call @quantized_sparse_dot(%c0, %inputs, %token, %column, %input, %up) : (index, index, index, index, buffer, buffer) -> (f64)
+      %gate_f32 = scalar.fptrunc %gate_value : f64 to f32
+      %up_f32 = scalar.fptrunc %up_value : f64 to f32
+      %negative = scalar.negf %gate_f32 : f32
+      %exponential = scalar.expf<afn> %negative : f32
+      %denominator = scalar.addf %one, %exponential : f32
+      %silu = scalar.divf %gate_f32, %denominator : f32
+      %product = scalar.mulf %silu, %up_f32 : f32
+      %packed = scalar.fptrunc %product : f32 to bf16
+      view.store %packed, %result[%token, %column] : bf16, view<[%capacity]x640xbf16>
+    }
+  }
+  func.return
+}
+
+check.scenario public @shared_original_q8 {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %capacity, %count = check.generate<@geometry>(%trial) : (index) -> (index, index)
+    %gate_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %up_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %epoch = check.generate.fill value(0) : tensor<3xi32>
+    %input = check.generate.fill value(0.0) : tensor<[%capacity]x2560xbf16>
+    %gate = check.generate.random.uniform seed(%gate_seed) range(-128 to 127) : tensor<640x80x34xi8>
+    %up = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<640x80x34xi8>
+    check.generate<@fixture>(%count, %epoch, %input, %gate, %up) : (index, tensor<3xi32>, tensor<[%capacity]x2560xbf16>, tensor<640x80x34xi8>, tensor<640x80x34xi8>) -> ()
+    %output = check.generate.fill value(-17.0) : tensor<[%capacity]x640xbf16>
+    check.compare<@shared_matrix, @reference>(%epoch, %input, %gate, %up, %output) : (tensor<3xi32>, tensor<[%capacity]x2560xbf16>, tensor<640x80x34xi8>, tensor<640x80x34xi8>, tensor<[%capacity]x640xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%capacity]x640xbf16>
+      check.expect.bitwise actual(%epoch) expected(%epoch) : tensor<3xi32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%capacity]x2560xbf16>
+      check.expect.bitwise actual(%gate) expected(%gate) : tensor<640x80x34xi8>
+      check.expect.bitwise actual(%up) expected(%up) : tensor<640x80x34xi8>
+    }
+  }
+  check.return
+}
