@@ -299,8 +299,14 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c3 = index.constant 3 : index
-  %matrix_threshold = index.constant 16384 : index
-  %matrix_rows = index.constant 128 : index
+  // Compact matrix tiles limit padded work for sparse expert populations.
+  // Larger epochs amortize each packed weight panel across wider records.
+  %matrix_threshold = index.constant 256 : index
+  %wide_threshold = index.constant 4096 : index
+  %compact_rows = index.constant 64 : index
+  %wide_rows = index.constant 128 : index
+  %wide = index.cmp uge, %tokens, %wide_threshold : index
+  %matrix_rows = scf.select %wide, %wide_rows, %compact_rows : index
   %matrix = index.cmp uge, %tokens, %matrix_threshold : index
   %record_rows = scf.select %matrix, %matrix_rows, %c4 : index
   // Capacity specialization keeps small epochs on the direct route path.
