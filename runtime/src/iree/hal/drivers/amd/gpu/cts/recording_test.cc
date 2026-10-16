@@ -415,10 +415,14 @@ TEST_P(GpuNativeRecordingSizeTest,
       recording, {table.size(), table.data()}, captured.data(), 0,
       &invocation));
   // One buffer input, plus at most one executable base, serves every dispatch.
-  // The same bound holds for the one-, thousand-, and eight-thousand-op cases.
+  // The same bound holds across native block boundaries in large recordings.
   EXPECT_LE(invocation.program->value_count, 5u);
   EXPECT_LE(invocation.program->argument_length, 104u);
   EXPECT_EQ(invocation.program->dispatch_count, count);
+  EXPECT_LE(invocation.program->entry.word_count, 0xfffffu);
+  if (count == 65536) {
+    EXPECT_GT(invocation.program->resident.byte_length, 0xfffffu * 4);
+  }
   iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
   std::array<std::thread, 2> threads;
   for (size_t i = 0; i < threads.size(); ++i) {
@@ -513,7 +517,7 @@ TEST_P(GpuNativeRecordingSizeTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(ProgramSize, GpuNativeRecordingSizeTest,
-                         ::testing::Values(1u, 1000u, 8000u));
+                         ::testing::Values(1u, 1000u, 8000u, 65536u));
 
 TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
   for (bool indirect : {false, true}) {

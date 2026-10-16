@@ -339,6 +339,7 @@ iree_runtime_cc_library(
     srcs = ["recording.c"],
     hdrs = ["recording.h"],
     deps = [
+        ":commands",
         ":fixup",
         "//runtime/src/iree/base",
     ],

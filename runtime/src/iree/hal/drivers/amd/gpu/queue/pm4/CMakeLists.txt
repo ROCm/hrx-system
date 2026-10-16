@@ -630,6 +630,7 @@ iree_cc_library(
   SRCS
     "recording.c"
   DEPS
+    ::commands
     ::fixup
     iree::base
   PUBLIC

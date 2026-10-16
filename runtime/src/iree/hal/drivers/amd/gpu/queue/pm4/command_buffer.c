@@ -169,7 +169,8 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
   for (uint32_t i = 0; i <= binding_capacity; ++i) {
     buffer->requirements[i].parent = i;
   }
-  iree_hal_amd_gpu_pm4_recording_initialize(host_allocator, &buffer->recording);
+  iree_hal_amd_gpu_pm4_recording_initialize(
+      host_allocator, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, &buffer->recording);
   iree_arena_block_pool_initialize(4096, host_allocator,
                                    &buffer->resource_blocks);
   iree_status_t status = iree_ok_status();
@@ -464,34 +465,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
     iree_hal_command_buffer_t* base) {
   iree_hal_amd_gpu_pm4_command_buffer_t* buffer = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
-  // One block initially. An exit is a native block edge, independent of the
-  // command/data placement and invocation's private KERNEL continuation.
-  uint32_t padding = (0u - buffer->recording.commands.length / 4 - 4) & 7u;
-  if (padding == 1) {
-    padding += 8;
-  }
-  uint32_t offset = 0;
-  uint32_t* words = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
-      &buffer->recording, padding + 4, &offset, &words));
-  if (padding) {
-    words = iree_hal_amd_gpu_pm4_emit_nop(words, padding);
-  }
-  if (buffer->pool->chain) {
-    iree_hal_amd_gpu_pm4_emit_indirect_buffer(words, 0, 32, true);
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_fixup(
-        &buffer->recording, false, offset + padding * 4 + 4,
-        IREE_HAL_AMD_GPU_PM4_VALUE_CONTINUATION, 0, false, 0, true));
-  } else {
-    iree_hal_amd_gpu_pm4_emit_nop(words, 4);
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_end(
+      &buffer->recording, IREE_HAL_AMD_GPU_PM4_VALUE_CONTINUATION,
+      buffer->pool->chain));
   buffer->program.entry = (iree_hal_amd_gpu_pm4_program_block_t){
       .offset = 0,
-      .word_count = buffer->recording.commands.length / 4,
+      .word_count = buffer->recording.entry_word_count,
   };
-  const uint64_t length =
-      (uint64_t)iree_hal_amd_gpu_pm4_recording_data_offset(&buffer->recording) +
-      buffer->recording.data.length;
+  const uint64_t length = iree_align_uint64(buffer->recording.commands.length,
+                                            buffer->recording.alignment) +
+                          buffer->recording.data.length;
   if (length > UINT32_MAX - 15) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "resident command/data placement exceeds 4 GiB");
