@@ -29,6 +29,7 @@
       "kernels/qsa_selection.loom",
       "kernels/quantized.loom",
       "kernels/routing.loom",
+      "kernels/routing_matrix.loom",
       "kernels/speculation.loom",
       "kernels/work.loom",
       "kernels/weights_prepare.loom",

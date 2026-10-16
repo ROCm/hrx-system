@@ -405,6 +405,192 @@ loom_module(
 
 loom_test_module(
   NAME
+    routing_7_test_module
+  SRCS
+    "tests/routing.loom"
+  LIBRARIES
+    "::residual_programs"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    routing_7_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::routing_7_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=flash_next.token_count=7"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    routing_7_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::routing_7_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=7"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    routing_7_test_execute_amdgpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::routing_7_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--config=flash_next.token_count=7"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    routing_131_test_module
+  SRCS
+    "tests/routing.loom"
+  LIBRARIES
+    "::residual_programs"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    routing_131_test_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::routing_131_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=flash_next.token_count=131"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    routing_131_test_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::routing_131_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=131"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    routing_131_test_execute_amdgpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::routing_131_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--amdgpu_tsan=true"
+    "--amdgpu_tsan_report_policy=report-only"
+    "--config=flash_next.token_count=131"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
     q8_matrix_16x64_waves_1x4_test_module
   SRCS
     "tests/q8_matrix.loom"
