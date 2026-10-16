@@ -13,6 +13,7 @@
       "kernels/expert_matrix.loom",
       "kernels/gdn.loom",
       "kernels/hyperconnection.loom",
+      "kernels/hyperconnection_matrix.loom",
       "kernels/iq4.loom",
       "kernels/pages.loom",
       "kernels/ple_consumer.loom",
