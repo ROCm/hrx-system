@@ -1,0 +1,310 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+func.decl @flash_next_token_binding(%mapping: buffer, %token: index) -> (index, index, index, index)
+
+func.decl @flash_next_physical_token(%rows: buffer, %row: index, %position: index) -> (index)
+
+func.decl @flash_next_cache_origin(%rows: buffer, %row: index, %plane_origin: offset) -> (offset)
+
+amdgpu.target<gfx11-generic> @qsa_matrix_wave32 {subgroup_size = 32}
+
+// Wave32 result component j owns head 2*j+lane/16 and column lane%16.
+// Only six components are live: the remaining four padded heads have no I/O.
+func.def inline @qsa_matrix_store(%token: index, %head_base: index, %channel: index, %lane: index, %values: vector<8xf32>, %gate: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %origin = index.constant 0 : offset
+  %gates = buffer.view %gate[%origin] : buffer -> view<[%tokens]x24x512xbf16>
+  %outputs = buffer.view %output[%origin] : buffer -> view<[%tokens]x24x256xbf16>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c6 = index.constant 6 : index
+  %tile = index.constant 16 : index
+  %width = index.constant 256 : index
+  %head_parity = index.div %lane, %tile : index
+  %lane_column = index.rem %lane, %tile : index
+  %column = index.add %channel, %lane_column : index
+  %gate_column = index.add %width, %column : index
+  %one = scalar.constant 1.0 : f32
+  scf.for %component = [%c0 to %c6 step %c1] unroll {
+    %relative = index.madd %component, %c2, %head_parity : index
+    %head = index.add %head_base, %relative : index
+    %value = vector.extract %values[%component] : vector<8xf32> -> f32
+    // The model rounds attended values before sigmoid gating, then rounds
+    // again when publishing the gated BF16 output.
+    %rounded = scalar.fptrunc %value : f32 to bf16
+    %attention = scalar.extf %rounded : bf16 to f32
+    %gate_packed = view.load %gates[%token, %head, %gate_column] : view<[%tokens]x24x512xbf16> -> bf16
+    %gate_value = scalar.extf %gate_packed : bf16 to f32
+    %negative = scalar.negf %gate_value : f32
+    %exponential = scalar.expf<afn> %negative : f32
+    %denominator = scalar.addf %one, %exponential : f32
+    %gated = scalar.divf %attention, %denominator : f32
+    %result = scalar.fptrunc %gated : f32 to bf16
+    view.store %result, %outputs[%token, %head, %column] : bf16, view<[%tokens]x24x256xbf16>
+  }
+  func.return
+}
+
+// Sparse grouped-query attention shares each selected K/V tile across the
+// twelve query heads that consume it. Four waves retain disjoint 64-channel
+// query panels, merge their Q*K partials, and own the corresponding output
+// channels. Native 16x16 matrices pad twelve heads to sixteen; dummy heads
+// never read or write external memory. Every query retains its exact selected
+// blocks and causal tail, including when an epoch packs unrelated resident rows.
+kernel.def target(@qsa_matrix_wave32) @qsa_matrix_attention() {
+  %heads = index.constant 2 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 128 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %pool = config.get @flash_next.pool_capacity : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %end = index.assume %count_value [range(%count_value, 0, %tokens)] : index
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %kv_head = kernel.workgroup.id<x> : index
+    %lane = kernel.subgroup.lane.id : index
+    %wave = kernel.subgroup.id : index
+    %thread = kernel.workitem.id<x> : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c2 = index.constant 2 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %c12 = index.constant 12 : index
+    %tile = index.constant 16 : index
+    %wave_width = index.constant 64 : index
+    %budget = index.constant 512 : index
+    %head_base = index.mul %kv_head, %c12 : index
+    %lane_column = index.rem %lane, %tile : index
+    %query_head = index.add %head_base, %lane_column : index
+    %real_head = index.cmp ult, %lane_column, %c12 : index
+    %channel_origin = index.mul %wave, %wave_width : index
+    %position, %row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %key_base = func.call @flash_next_cache_origin(%rows, %row, %key_origin) : (buffer, index, offset) -> (offset)
+    %value_base = func.call @flash_next_cache_origin(%rows, %row, %value_origin) : (buffer, index, offset) -> (offset)
+    %visible = index.add %position, %c1 : index
+    %complete = index.div %visible, %c4 : index
+    %sparse = index.cmp ugt, %complete, %budget : index
+    %selected_count = scf.select %sparse, %budget, %complete : index
+    %selected_tokens = index.mul %selected_count, %c4 : index
+    %tail_count = index.rem %visible, %c4 : index
+    %count = index.add %selected_tokens, %tail_count : index
+    %tail_origin = index.mul %complete, %c4 : index
+    %query_view = buffer.view %queries[%origin] : buffer -> view<[%tokens]x24x256xbf16>
+    %key_view = buffer.view %arena[%key_base] : buffer -> view<[%pool]x2x256xbf16>
+    %value_view = buffer.view %arena[%value_base] : buffer -> view<[%pool]x2x256xbf16>
+    %ids = buffer.view %selected_blocks[%origin] : buffer -> view<[%tokens]x512xi32>
+    // Padded row strides distribute shared-memory banks for both transposed
+    // K reads and row-major V reads. Q stays in registers; the only shared
+    // storage is two 16-key panels and four partial-score planes (23,040 bytes).
+    %shared_bytes = index.constant 23040 : offset
+    %value_offset = index.constant 8448 : offset
+    %score_offset = index.constant 16896 : offset
+    %score_plane_bytes = index.constant 1536 : offset
+    %score_relative = index.scale %wave, %score_plane_bytes : index, offset -> offset
+    %score_wave_offset = index.add %score_offset, %score_relative : offset
+    %shared = buffer.alloca<workgroup> align(16) %shared_bytes : buffer
+    %keys = buffer.view %shared[%origin] : buffer -> view<16x264xbf16>
+    %key_layout = encoding.layout.strided [1, 264] : encoding<layout>
+    %keys_transposed = buffer.view %shared[%origin] : buffer -> view<256x16xbf16, %key_layout>
+    %values = buffer.view %shared[%value_offset] : buffer -> view<16x264xbf16>
+    %score_stage = buffer.view %shared[%score_wave_offset] : buffer -> view<16x24xf32>
+    %stage_row_base = index.div %thread, %tile : index
+    %stage_packet = index.rem %thread, %tile : index
+    %stage_channel = index.mul %stage_packet, %tile : index
+    %zeros = vector.constant 0.0 : vector<8xf32>
+    %lowest = vector.constant -1e+30 : vector<8xf32>
+    %scale = vector.constant 0.0625 : vector<8xf32>
+    %packed_zeros = vector.constant 0.0 : vector<16xbf16>
+    %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xf32>
+    %shuffle_width = scalar.constant 16 : i32
+    %offset0 = index.constant 0 : index
+    %channel0 = index.add %channel_origin, %offset0 : index
+    %query_values0 = scf.if %real_head -> (vector<16xbf16>) {
+      %query_head_bounded = index.assume %query_head [range(%query_head, 0, 23)] : index
+      %loaded = vector.load %query_view[%token, %query_head_bounded, %channel0] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
+      scf.yield %loaded : vector<16xbf16>
+    } else {
+      scf.yield %packed_zeros : vector<16xbf16>
+    }
+    %query_fragment0 = vector.fragment<lhs> %query_values0 shape [%tile, %tile] : vector<16xbf16>
+    %offset1 = index.constant 16 : index
+    %channel1 = index.add %channel_origin, %offset1 : index
+    %query_values1 = scf.if %real_head -> (vector<16xbf16>) {
+      %query_head_bounded = index.assume %query_head [range(%query_head, 0, 23)] : index
+      %loaded = vector.load %query_view[%token, %query_head_bounded, %channel1] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
+      scf.yield %loaded : vector<16xbf16>
+    } else {
+      scf.yield %packed_zeros : vector<16xbf16>
+    }
+    %query_fragment1 = vector.fragment<lhs> %query_values1 shape [%tile, %tile] : vector<16xbf16>
+    %offset2 = index.constant 32 : index
+    %channel2 = index.add %channel_origin, %offset2 : index
+    %query_values2 = scf.if %real_head -> (vector<16xbf16>) {
+      %query_head_bounded = index.assume %query_head [range(%query_head, 0, 23)] : index
+      %loaded = vector.load %query_view[%token, %query_head_bounded, %channel2] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
+      scf.yield %loaded : vector<16xbf16>
+    } else {
+      scf.yield %packed_zeros : vector<16xbf16>
+    }
+    %query_fragment2 = vector.fragment<lhs> %query_values2 shape [%tile, %tile] : vector<16xbf16>
+    %offset3 = index.constant 48 : index
+    %channel3 = index.add %channel_origin, %offset3 : index
+    %query_values3 = scf.if %real_head -> (vector<16xbf16>) {
+      %query_head_bounded = index.assume %query_head [range(%query_head, 0, 23)] : index
+      %loaded = vector.load %query_view[%token, %query_head_bounded, %channel3] : view<[%tokens]x24x256xbf16> -> vector<16xbf16>
+      scf.yield %loaded : vector<16xbf16>
+    } else {
+      scf.yield %packed_zeros : vector<16xbf16>
+    }
+    %query_fragment3 = vector.fragment<lhs> %query_values3 shape [%tile, %tile] : vector<16xbf16>
+    %final_max, %final_sum, %final0, %final1, %final2, %final3 = scf.for %key_begin = [%c0 to %count step %tile](%current_max = %lowest : vector<8xf32>, %current_sum = %zeros : vector<8xf32>, %output0 = %initial : vector<8xf32>, %output1 = %initial : vector<8xf32>, %output2 = %initial : vector<8xf32>, %output3 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+      // Each selected K/V is published once for all twelve heads. Padding
+      // executes no page-table or external operand reads.
+      scf.for %round = [%c0 to %c2 step %c1] unroll {
+        %stage_row = index.madd %round, %c8, %stage_row_base : index
+        %slot = index.add %key_begin, %stage_row : index
+        %live = index.cmp ult, %slot, %count : index
+        %key_packet, %value_packet = scf.if %live -> (vector<16xbf16>, vector<16xbf16>) {
+          %from_block = index.cmp ult, %slot, %selected_tokens : index
+          %logical = scf.if %from_block -> (index) {
+            %block_slot = index.div %slot, %c4 : index
+            %id = view.load %ids[%token, %block_slot] : view<[%tokens]x512xi32> -> i32
+            %block = index.cast %id : i32 to index
+            %member = index.rem %slot, %c4 : index
+            %logical = index.madd %block, %c4, %member : index
+            scf.yield %logical : index
+          } else {
+            %relative = index.sub %slot, %selected_tokens : index
+            %logical = index.add %tail_origin, %relative : index
+            scf.yield %logical : index
+          }
+          %bounded = index.assume %logical [lt(%logical, %visible), lt(%logical, %capacity)] : index
+          %physical = func.call @flash_next_physical_token(%rows, %row, %bounded) : (buffer, index, index) -> (index)
+          %key_packet = vector.load %key_view[%physical, %kv_head, %stage_channel] : view<[%pool]x2x256xbf16> -> vector<16xbf16>
+          %value_packet = vector.load %value_view[%physical, %kv_head, %stage_channel] : view<[%pool]x2x256xbf16> -> vector<16xbf16>
+          scf.yield %key_packet, %value_packet : vector<16xbf16>, vector<16xbf16>
+        } else {
+          scf.yield %packed_zeros, %packed_zeros : vector<16xbf16>, vector<16xbf16>
+        }
+        vector.store %key_packet, %keys[%stage_row, %stage_channel] : vector<16xbf16>, view<16x264xbf16>
+        vector.store %value_packet, %values[%stage_row, %stage_channel] : vector<16xbf16>, view<16x264xbf16>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %key_fragment0 = vector.fragment.load<rhs> %keys_transposed[%channel0, %c0] shape [%tile, %tile] : view<256x16xbf16, %key_layout> -> vector<16xbf16>
+      %partial0 = vector.mma %query_fragment0, %key_fragment0, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %key_fragment1 = vector.fragment.load<rhs> %keys_transposed[%channel1, %c0] shape [%tile, %tile] : view<256x16xbf16, %key_layout> -> vector<16xbf16>
+      %partial1 = vector.mma %query_fragment1, %key_fragment1, %partial0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %key_fragment2 = vector.fragment.load<rhs> %keys_transposed[%channel2, %c0] shape [%tile, %tile] : view<256x16xbf16, %key_layout> -> vector<16xbf16>
+      %partial2 = vector.mma %query_fragment2, %key_fragment2, %partial1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %key_fragment3 = vector.fragment.load<rhs> %keys_transposed[%channel3, %c0] shape [%tile, %tile] : view<256x16xbf16, %key_layout> -> vector<16xbf16>
+      %partial3 = vector.mma %query_fragment3, %key_fragment3, %partial2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      vector.fragment.store<result> %partial3, %score_stage[%c0, %c0] shape [%tile, %tile] : vector<8xf32>, view<16x24xf32>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %raw = scf.for %peer = [%c0 to %c4 step %c1](%sum = %zeros : vector<8xf32>) -> (vector<8xf32>) unroll {
+        %relative = index.scale %peer, %score_plane_bytes : index, offset -> offset
+        %peer_offset = index.add %score_offset, %relative : offset
+        %peer_scores = buffer.view %shared[%peer_offset] : buffer -> view<16x24xf32>
+        %part = vector.fragment.load<result> %peer_scores[%c0, %c0] shape [%tile, %tile] : view<16x24xf32> -> vector<8xf32>
+        %next = vector.addf %sum, %part : vector<8xf32>
+        scf.yield %next : vector<8xf32>
+      }
+      %key_slot = index.add %key_begin, %lane_column : index
+      %valid_scalar = index.cmp ult, %key_slot, %count : index
+      %valid = vector.splat %valid_scalar : vector<8xi1>
+      %scores = vector.select %valid, %raw, %lowest : vector<8xf32>
+      %offset_max8 = scalar.constant 8 : i32
+      %peer_max8, %valid_max8 = kernel.subgroup.shuffle<xor> %scores, %offset_max8, %shuffle_width : vector<8xf32>, i32, i32
+      %max8 = vector.maxnumf %scores, %peer_max8 : vector<8xf32>
+      %offset_max4 = scalar.constant 4 : i32
+      %peer_max4, %valid_max4 = kernel.subgroup.shuffle<xor> %max8, %offset_max4, %shuffle_width : vector<8xf32>, i32, i32
+      %max4 = vector.maxnumf %max8, %peer_max4 : vector<8xf32>
+      %offset_max2 = scalar.constant 2 : i32
+      %peer_max2, %valid_max2 = kernel.subgroup.shuffle<xor> %max4, %offset_max2, %shuffle_width : vector<8xf32>, i32, i32
+      %max2 = vector.maxnumf %max4, %peer_max2 : vector<8xf32>
+      %offset_max1 = scalar.constant 1 : i32
+      %peer_max1, %valid_max1 = kernel.subgroup.shuffle<xor> %max2, %offset_max1, %shuffle_width : vector<8xf32>, i32, i32
+      %max1 = vector.maxnumf %max2, %peer_max1 : vector<8xf32>
+      %next_max = vector.maxnumf %current_max, %max1 : vector<8xf32>
+      %raw_delta = vector.subf %scores, %next_max : vector<8xf32>
+      %delta = vector.mulf %raw_delta, %scale : vector<8xf32>
+      %exponential = vector.expf<afn> %delta : vector<8xf32>
+      %probability = vector.select %valid, %exponential, %zeros : vector<8xf32>
+      %old_raw_delta = vector.subf %current_max, %next_max : vector<8xf32>
+      %old_delta = vector.mulf %old_raw_delta, %scale : vector<8xf32>
+      %old_scale = vector.expf<afn> %old_delta : vector<8xf32>
+      // All lanes for a head share the same maximum. Keep a denominator
+      // partial per key lane and defer its reduction until the end of the loop.
+      %rescaled_sum = vector.mulf %current_sum, %old_scale : vector<8xf32>
+      %next_sum = vector.addf %rescaled_sum, %probability : vector<8xf32>
+      // One BF16 probability loses meaningful information in cancellation
+      // cases. A second BF16 component retains the rounding residual while
+      // both contractions and the softmax denominator accumulate in F32.
+      %probability_fragment = vector.fragment<result> %probability shape [%tile, %tile] : vector<8xf32>
+      %probability_lhs = vector.fragment.repack<lhs> %probability_fragment shape [%tile, %tile] : vector<8xf32> -> vector<16xbf16>
+      %probability_high = vector.fptrunc %probability : vector<8xf32> to vector<8xbf16>
+      %probability_wide = vector.extf %probability_high : vector<8xbf16> to vector<8xf32>
+      %probability_residual = vector.subf %probability, %probability_wide : vector<8xf32>
+      %probability_low_fragment = vector.fragment<result> %probability_residual shape [%tile, %tile] : vector<8xf32>
+      %probability_low_lhs = vector.fragment.repack<lhs> %probability_low_fragment shape [%tile, %tile] : vector<8xf32> -> vector<16xbf16>
+      %value_fragment0 = vector.fragment.load<rhs> %values[%c0, %channel0] shape [%tile, %tile] : view<16x264xbf16> -> vector<16xbf16>
+      %scaled0 = vector.mulf %output0, %old_scale : vector<8xf32>
+      %high0 = vector.mma %probability_lhs, %value_fragment0, %scaled0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next0 = vector.mma %probability_low_lhs, %value_fragment0, %high0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %value_fragment1 = vector.fragment.load<rhs> %values[%c0, %channel1] shape [%tile, %tile] : view<16x264xbf16> -> vector<16xbf16>
+      %scaled1 = vector.mulf %output1, %old_scale : vector<8xf32>
+      %high1 = vector.mma %probability_lhs, %value_fragment1, %scaled1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next1 = vector.mma %probability_low_lhs, %value_fragment1, %high1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %value_fragment2 = vector.fragment.load<rhs> %values[%c0, %channel2] shape [%tile, %tile] : view<16x264xbf16> -> vector<16xbf16>
+      %scaled2 = vector.mulf %output2, %old_scale : vector<8xf32>
+      %high2 = vector.mma %probability_lhs, %value_fragment2, %scaled2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next2 = vector.mma %probability_low_lhs, %value_fragment2, %high2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %value_fragment3 = vector.fragment.load<rhs> %values[%c0, %channel3] shape [%tile, %tile] : view<16x264xbf16> -> vector<16xbf16>
+      %scaled3 = vector.mulf %output3, %old_scale : vector<8xf32>
+      %high3 = vector.mma %probability_lhs, %value_fragment3, %scaled3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next3 = vector.mma %probability_low_lhs, %value_fragment3, %high3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.yield %next_max, %next_sum, %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    %offset_sum8 = scalar.constant 8 : i32
+    %peer_sum8, %valid_sum8 = kernel.subgroup.shuffle<xor> %final_sum, %offset_sum8, %shuffle_width : vector<8xf32>, i32, i32
+    %sum8 = vector.addf %final_sum, %peer_sum8 : vector<8xf32>
+    %offset_sum4 = scalar.constant 4 : i32
+    %peer_sum4, %valid_sum4 = kernel.subgroup.shuffle<xor> %sum8, %offset_sum4, %shuffle_width : vector<8xf32>, i32, i32
+    %sum4 = vector.addf %sum8, %peer_sum4 : vector<8xf32>
+    %offset_sum2 = scalar.constant 2 : i32
+    %peer_sum2, %valid_sum2 = kernel.subgroup.shuffle<xor> %sum4, %offset_sum2, %shuffle_width : vector<8xf32>, i32, i32
+    %sum2 = vector.addf %sum4, %peer_sum2 : vector<8xf32>
+    %offset_sum1 = scalar.constant 1 : i32
+    %peer_sum1, %valid_sum1 = kernel.subgroup.shuffle<xor> %sum2, %offset_sum1, %shuffle_width : vector<8xf32>, i32, i32
+    %sum1 = vector.addf %sum2, %peer_sum1 : vector<8xf32>
+    %normalized0 = vector.divf %final0, %sum1 : vector<8xf32>
+    func.call @qsa_matrix_store(%token, %head_base, %channel0, %lane, %normalized0, %query_gate, %output) : (index, index, index, index, vector<8xf32>, buffer, buffer)
+    %normalized1 = vector.divf %final1, %sum1 : vector<8xf32>
+    func.call @qsa_matrix_store(%token, %head_base, %channel1, %lane, %normalized1, %query_gate, %output) : (index, index, index, index, vector<8xf32>, buffer, buffer)
+    %normalized2 = vector.divf %final2, %sum1 : vector<8xf32>
+    func.call @qsa_matrix_store(%token, %head_base, %channel2, %lane, %normalized2, %query_gate, %output) : (index, index, index, index, vector<8xf32>, buffer, buffer)
+    %normalized3 = vector.divf %final3, %sum1 : vector<8xf32>
+    func.call @qsa_matrix_store(%token, %head_base, %channel3, %lane, %normalized3, %query_gate, %output) : (index, index, index, index, vector<8xf32>, buffer, buffer)
+  }
+  kernel.return
+}
