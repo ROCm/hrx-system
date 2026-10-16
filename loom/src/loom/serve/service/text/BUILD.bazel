@@ -32,6 +32,20 @@ loom_py_test(
     ],
 )
 
+loom_py_test(
+    name = "tool_policy_test",
+    size = "small",
+    srcs = ["tool_policy_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/serve/testing:text_request_check)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:portable_chat.loom)",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/text:portable_chat.loom",
+        "//loom/src/loom/serve/testing:text_request_check",
+    ],
+)
+
 loom_cc_library(
     name = "admission",
     srcs = ["admission.c"],
@@ -269,10 +283,12 @@ loom_cc_library(
     srcs = [
         "chat.c",
         "media.c",
+        "tool_calls.c",
     ],
     hdrs = [
         "chat.h",
         "media.h",
+        "tool_calls.h",
     ],
     deps = [
         "//loom/src/loom/serve/media:digest",
@@ -301,6 +317,17 @@ loom_cc_library(
 loom_cc_test(
     name = "chat_test",
     srcs = ["chat_test.cc"],
+    deps = [
+        ":chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "tool_calls_test",
+    srcs = ["tool_calls_test.cc"],
     deps = [
         ":chat",
         "//runtime/src/iree/base",

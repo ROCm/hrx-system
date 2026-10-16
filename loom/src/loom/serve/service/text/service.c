@@ -157,8 +157,8 @@ struct loom_serve_text_service_t {
   loom_serve_text_prefix_cache_t prefixes;
   // Shared JSON/SSE serialization scratch, copied into a row packet or carrier.
   iree_string_builder_t scratch;
-  // Shared typed tool-call serialization scratch used at generation end.
-  iree_string_builder_t tool_calls;
+  // Shared validated tool records used after complete source parsing.
+  loom_serve_text_tool_calls_t tool_calls;
   // Completion parser/formatter backing reused by all serialized output jobs.
   loom_serve_text_chat_scratch_t completion_scratch;
   // Fixed retained rows sharing one model, command set and execution timeline.
@@ -1602,7 +1602,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
     loom_serve_text_session_deinitialize(&service->sessions[i]);
   }
   loom_serve_text_readiness_deinitialize(&service->readiness);
-  iree_string_builder_deinitialize(&service->tool_calls);
+  loom_serve_text_tool_calls_deinitialize(&service->tool_calls);
   loom_serve_text_chat_scratch_deinitialize(&service->completion_scratch);
   iree_string_builder_deinitialize(&service->scratch);
   iree_allocator_free(host_allocator, service->pending.storage);
@@ -1685,7 +1685,7 @@ iree_status_t loom_serve_text_service_allocate(
   loom_serve_text_readiness_initialize(loom_serve_host_executor(host), proactor,
                                        &service->readiness);
   iree_string_builder_initialize(host_allocator, &service->scratch);
-  iree_string_builder_initialize(host_allocator, &service->tool_calls);
+  loom_serve_text_tool_calls_initialize(host_allocator, &service->tool_calls);
   loom_serve_text_chat_scratch_initialize(host_allocator,
                                           &service->completion_scratch);
   iree_status_t status = loom_serve_text_service_initialize(service, stream);

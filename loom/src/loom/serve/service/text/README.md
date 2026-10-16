@@ -137,6 +137,14 @@ incremental decoding, bounded JSON/SSE packets and output credit. Shared error
 [responses](response.h) consume diagnostic status at the wire boundary without
 borrowing scratch used by a CPU output task.
 
+Generated function calls form one completed transaction. Source parsing and
+canonical history formatting must both succeed before the owned
+[tool-call table](tool_calls.h) is published. It retains decoded names,
+argument documents, and stable request-derived IDs independently of VM or
+request storage. HTTP encoders consume those records directly, adding delta
+indexes for streaming output. A later invalid record leaves no partial call
+set, and retained session/checkpoint histories do not keep this output table.
+
 Source `request_defaults(options)` validates deployment policy once. Each
 `request_options(defaults, request, nonce)` call validates overrides and returns
 an owned opaque buffer retained by the chat through completion. Both inputs
