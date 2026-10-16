@@ -74,6 +74,25 @@ loom_library(
 ]
 
 loom_test(
+    name = "scoring_test",
+    srcs = ["tests/scoring.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "flash_next.context_capacity": "2112",
+        "flash_next.pool_capacity": "2112",
+        "flash_next.span_capacity": "16",
+        "flash_next.token_count": "32",
+        "qsa.query_tile": "13",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_BYTE_GRANULE_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
     name = "projection_test",
     srcs = ["tests/projection.loom"],
     benchmark_smoke = False,
