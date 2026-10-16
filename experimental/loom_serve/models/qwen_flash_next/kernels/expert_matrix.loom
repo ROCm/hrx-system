@@ -517,13 +517,13 @@ kernel.def target(@flash_next_expert_matrix_wave32) @shared_matrix() {
   %columns = index.constant 10 : index
   %limit = index.constant 1280 : index
   %threads = index.constant 256 : index
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %rounded = index.add %capacity, %rounding : index
   %row_tiles = index.div %rounded, %rows : index
   %work = index.mul %row_tiles, %columns : index
   %small = index.cmp ult, %work, %limit : index
   %workers = scf.select %small, %work, %limit : index
-  kernel.launch.config workgroups(%workers, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%workers, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%span: buffer, %input: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %false = scalar.constant false : i1
