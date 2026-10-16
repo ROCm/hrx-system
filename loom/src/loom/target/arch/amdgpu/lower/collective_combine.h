@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 #include "loom/ops/kernel/ops.h"
-#include "loom/target/arch/amdgpu/lower/plan.h"
+#include "loom/target/arch/amdgpu/lower/collective_plan.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 #ifdef __cplusplus

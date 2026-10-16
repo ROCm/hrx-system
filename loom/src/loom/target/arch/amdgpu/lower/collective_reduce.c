@@ -1295,7 +1295,7 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
         tail_lane_count, lane_type, &tail_lane_count_value));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_select_peer(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_select(
         context, source_op, &plan->select_descriptor, full_lane_count_value,
         tail_lane_count_value, tail_wave_guard, lane_type,
         &dynamic_active_lane_count));

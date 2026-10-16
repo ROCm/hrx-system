@@ -1,0 +1,281 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+// Legacy DPP moves scan each row; two boundary exchanges complete a wave64
+// prefix without substituting an empty value for a missing predecessor.
+kernel.def target(@target) @subgroup_scan_integer_rows() {
+  %unit = index.constant 1 : index
+  %items = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<64xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<64xi32>
+  %value = view.load %source[%item] : view<64xi32> -> i32
+  %result = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
+  view.store %result, %destination[%item] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_scan_integer_rows() asm {
+  %item = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = v_lshlrev_b32_src0_inline %item, 2
+  %value = global_load_dword_saddr %13, %source : reg<amdgpu.vgpr>
+  %15 = v_and_b32_lit %item, 4294967280
+  %16 = v_and_b32_src0_inline %item, 15
+  %17 = v_mov_b32 1
+  %19 = v_cmp_ge_u32 %16, %17
+  %20 = v_mov_b32 2
+  %22 = v_cmp_ge_u32 %16, %20
+  %23 = v_mov_b32 4
+  %25 = v_cmp_ge_u32 %16, %23
+  %26 = v_mov_b32 8
+  %28 = v_cmp_ge_u32 %16, %26
+  %29 = v_mov_b32 16
+  %30 = v_sub_u32 %15, %29
+  %31 = v_cmp_ge_u32 %15, %29
+  %32 = v_lshlrev_b32_src0_inline %30, 2
+  %33 = v_mov_b32 32
+  %34 = v_sub_u32 %15, %33
+  %35 = v_cmp_ge_u32 %15, %33
+  %36 = v_lshlrev_b32_src0_inline %34, 2
+  %37 = v_mov_b32_dpp %value {dpp_ctrl = 273}
+  %38 = v_add_u32 %value, %37
+  %39 = v_cndmask_b32 %value, %38, %19
+  %40 = v_mov_b32_dpp %39 {dpp_ctrl = 274}
+  %41 = v_add_u32 %39, %40
+  %42 = v_cndmask_b32 %39, %41, %22
+  %43 = v_mov_b32_dpp %42 {dpp_ctrl = 276}
+  %44 = v_add_u32 %42, %43
+  %45 = v_cndmask_b32 %42, %44, %25
+  %46 = v_mov_b32_dpp %45 {dpp_ctrl = 280}
+  %47 = v_add_u32 %45, %46
+  %48 = v_cndmask_b32 %45, %47, %28
+  %49 = ds_bpermute_b32 %32, %48 {offset = 60}
+  %50 = v_add_u32 %48, %49
+  %51 = v_cndmask_b32 %48, %50, %31
+  %52 = ds_bpermute_b32 %36, %51 {offset = 60}
+  %53 = v_add_u32 %51, %52
+  %result = v_cndmask_b32 %51, %53, %35
+  %55 = v_lshlrev_b32_src0_inline %item, 2
+  global_store_dword_saddr %55, %result, %destination
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// Fused arithmetic permutes the first operand. Exclusive shifting still
+// crosses row boundaries after both vector components have complete suffixes.
+kernel.def target(@target) @subgroup_scan_reverse_vector() {
+  %unit = index.constant 1 : index
+  %items = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<64x2xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<64x2xf32>
+  %value = vector.load %source[%item, 0] : view<64x2xf32> -> vector<2xf32>
+  %result = kernel.subgroup.scan<minnumf> %value {direction = reverse, mode = exclusive} : vector<2xf32>
+  vector.store %result, %destination[%item, 0] : vector<2xf32>, view<64x2xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_scan_reverse_vector() asm {
+  %item = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %24 = v_lshlrev_b32_src0_inline %item, 3
+  %value = global_load_dwordx2_saddr %24, %source : reg<amdgpu.vgpr x2>
+  %26 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %27 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %28 = v_mov_b32 64
+  %29 = v_and_b32_lit %item, 4294967280
+  %30 = v_add_u32_src0_inline %29, 16
+  %31 = v_min_u32 %28, %30
+  %32 = v_mov_b32 1
+  %33 = v_add_u32 %item, %32
+  %34 = v_cmp_lt_u32 %33, %31
+  %35 = v_mov_b32 2
+  %36 = v_add_u32 %item, %35
+  %37 = v_cmp_lt_u32 %36, %31
+  %38 = v_mov_b32 4
+  %39 = v_add_u32 %item, %38
+  %40 = v_cmp_lt_u32 %39, %31
+  %41 = v_mov_b32 8
+  %42 = v_add_u32 %item, %41
+  %43 = v_cmp_lt_u32 %42, %31
+  %44 = v_mov_b32 16
+  %45 = v_add_u32 %29, %44
+  %46 = v_cmp_lt_u32 %45, %28
+  %47 = v_lshlrev_b32_src0_inline %45, 2
+  %48 = v_mov_b32 32
+  %49 = v_add_u32 %29, %48
+  %50 = v_cmp_lt_u32 %49, %28
+  %51 = v_lshlrev_b32_src0_inline %49, 2
+  %54 = v_cmp_lt_u32 %33, %28
+  %55 = v_lshlrev_b32_src0_inline %33, 2
+  %56 = v_min_f32_dpp %26, %26 {dpp_ctrl = 257}
+  %57 = v_cndmask_b32 %26, %56, %34
+  %58 = v_min_f32_dpp %27, %27 {dpp_ctrl = 257}
+  %59 = v_cndmask_b32 %27, %58, %34
+  %60 = v_min_f32_dpp %57, %57 {dpp_ctrl = 258}
+  %61 = v_cndmask_b32 %57, %60, %37
+  %62 = v_min_f32_dpp %59, %59 {dpp_ctrl = 258}
+  %63 = v_cndmask_b32 %59, %62, %37
+  %64 = v_min_f32_dpp %61, %61 {dpp_ctrl = 260}
+  %65 = v_cndmask_b32 %61, %64, %40
+  %66 = v_min_f32_dpp %63, %63 {dpp_ctrl = 260}
+  %67 = v_cndmask_b32 %63, %66, %40
+  %68 = v_min_f32_dpp %65, %65 {dpp_ctrl = 264}
+  %69 = v_cndmask_b32 %65, %68, %43
+  %70 = v_min_f32_dpp %67, %67 {dpp_ctrl = 264}
+  %71 = v_cndmask_b32 %67, %70, %43
+  %72 = ds_bpermute_b32 %47, %69
+  %73 = v_min_f32 %69, %72
+  %74 = v_cndmask_b32 %69, %73, %46
+  %75 = ds_bpermute_b32 %47, %71
+  %76 = v_min_f32 %71, %75
+  %77 = v_cndmask_b32 %71, %76, %46
+  %78 = ds_bpermute_b32 %51, %74
+  %79 = v_min_f32 %74, %78
+  %80 = v_cndmask_b32 %74, %79, %50
+  %81 = ds_bpermute_b32 %51, %77
+  %82 = v_min_f32 %77, %81
+  %83 = v_cndmask_b32 %77, %82, %50
+  %84 = ds_bpermute_b32 %55, %80
+  %85 = v_mov_b32 2139095040
+  %86 = v_cndmask_b32 %85, %84, %54
+  %87 = ds_bpermute_b32 %55, %83
+  %88 = v_mov_b32 2139095040
+  %89 = v_cndmask_b32 %88, %87, %54
+  %result = concat(%86, %89) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %91 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_dwordx2_saddr %91, %result, %destination
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+// A partial final row changes reverse participation. Cross-wave composition
+// preserves nonempty totals and uses the partition-wide predecessor guard.
+kernel.def target(@target) @workgroup_scan_reverse_partial_rows() {
+  %unit = index.constant 1 : index
+  %items = index.constant 83 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%base] : buffer -> view<83xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<83xf32>
+  %value = view.load %source[%item] : view<83xf32> -> f32
+  %result = kernel.workgroup.scan<minnumf> %value {direction = reverse, mode = exclusive} : f32
+  view.store %result, %destination[%item] : f32, view<83xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(83, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_reverse_partial_rows() asm {
+  %item = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 332, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 332, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = v_lshlrev_b32_src0_inline %item, 2
+  %value = global_load_b32_saddr %13, %source
+  %15 = v_and_b32_src0_inline %item, 31
+  %16 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
+  %17 = storage_address %16 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %18 = v_mov_b32 64
+  %19 = v_cmp_ge_u32 %item, %18
+  %20 = v_mov_b32 32
+  %21 = v_mov_b32 19
+  %22 = v_cndmask_b32 %20, %21, %19
+  %23 = v_and_b32_lit %15, 4294967280
+  %24 = v_add_u32_src0_inline %23, 16
+  %25 = v_min_u32 %22, %24
+  %26 = v_mov_b32 1
+  %27 = v_add_u32 %15, %26
+  %28 = v_cmp_lt_u32 %27, %25
+  %29 = v_mov_b32 2
+  %30 = v_add_u32 %15, %29
+  %31 = v_cmp_lt_u32 %30, %25
+  %32 = v_mov_b32 4
+  %33 = v_add_u32 %15, %32
+  %34 = v_cmp_lt_u32 %33, %25
+  %35 = v_mov_b32 8
+  %36 = v_add_u32 %15, %35
+  %37 = v_cmp_lt_u32 %36, %25
+  %38 = v_mov_b32 16
+  %39 = v_add_u32 %23, %38
+  %40 = v_cmp_lt_u32 %39, %22
+  %41 = v_lshlrev_b32_src0_inline %39, 2
+  %44 = v_cmp_lt_u32 %27, %22
+  %45 = v_lshlrev_b32_src0_inline %27, 2
+  %46 = v_min_f32_dpp16 %value, %value {dpp_ctrl = 257}
+  %47 = v_cndmask_b32 %value, %46, %28
+  %48 = v_min_f32_dpp16 %47, %47 {dpp_ctrl = 258}
+  %49 = v_cndmask_b32 %47, %48, %31
+  %50 = v_min_f32_dpp16 %49, %49 {dpp_ctrl = 260}
+  %51 = v_cndmask_b32 %49, %50, %34
+  %52 = v_min_f32_dpp16 %51, %51 {dpp_ctrl = 264}
+  %53 = v_cndmask_b32 %51, %52, %37
+  %54 = ds_bpermute_b32 %41, %53
+  %55 = v_min_f32 %53, %54
+  %56 = v_cndmask_b32 %53, %55, %40
+  %57 = ds_bpermute_b32 %45, %56
+  %58 = v_mov_b32 2139095040
+  %59 = v_cndmask_b32 %58, %57, %44
+  %60 = v_lshrrev_b32_src0_inline %item, 5
+  %61 = v_lshlrev_b32_src0_inline %60, 2
+  %62 = v_mov_b32 1
+  %63 = v_cmp_lt_u32 %15, %62
+  %64, %65 = s_and_saveexec_b64 %63
+  %66 = v_add_u32 %17, %61
+  ds_write_b32 %66, %56
+  s_mov_b64_exec %64
+  s_barrier
+  %67 = v_mov_b32 3
+  %68 = v_cmp_lt_u32 %item, %67
+  %69, %70 = s_and_saveexec_b64 %68
+  %71 = v_lshlrev_b32_src0_inline %15, 2
+  %72 = v_add_u32 %17, %71
+  %73 = ds_read_b32 %72
+  %74 = v_mov_b32 3
+  %75 = v_mov_b32 1
+  %76 = v_add_u32 %15, %75
+  %77 = v_cmp_lt_u32 %76, %74
+  %78 = v_mov_b32 2
+  %79 = v_add_u32 %15, %78
+  %80 = v_cmp_lt_u32 %79, %74
+  %84 = v_lshlrev_b32_src0_inline %76, 2
+  %85 = v_min_f32_dpp16 %73, %73 {dpp_ctrl = 257}
+  %86 = v_cndmask_b32 %73, %85, %77
+  %87 = v_min_f32_dpp16 %86, %86 {dpp_ctrl = 258}
+  %88 = v_cndmask_b32 %86, %87, %80
+  %89 = ds_bpermute_b32 %84, %88
+  %90 = v_mov_b32 2139095040
+  %91 = v_cndmask_b32 %90, %89, %77
+  %92 = v_add_u32 %17, %71
+  ds_write_b32 %92, %91
+  s_mov_b64_exec %69
+  s_barrier
+  %93 = v_add_u32 %17, %61
+  %94 = ds_read_b32 %93
+  %95 = v_mov_b32 64
+  %96 = v_cmp_lt_u32 %item, %95
+  %97 = v_min_f32 %59, %94
+  %98 = v_cndmask_b32 %94, %97, %44
+  %result = v_cndmask_b32 %59, %98, %96
+  %100 = v_lshlrev_b32_src0_inline %item, 2
+  global_store_b32_saddr %100, %result, %destination
+  return
+}

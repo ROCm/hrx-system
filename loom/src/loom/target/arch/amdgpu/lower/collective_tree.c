@@ -15,7 +15,7 @@
 #define LOOM_AMDGPU_MAX_SUBGROUP_TREE_STEPS 6u
 
 static const loom_amdgpu_collective_combine_dpp_form_t
-    kLoomAmdgpuSubgroupReduceDppCombineForms[] = {
+    kLoomAmdgpuCollectiveDppCombineForms[] = {
         LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_DPP16,
         LOOM_AMDGPU_COLLECTIVE_COMBINE_DPP_FORM_LEGACY,
 };
@@ -45,18 +45,18 @@ loom_amdgpu_subgroup_reduce_choose_crosslane_kind(
   return LOOM_AMDGPU_SUBGROUP_REDUCE_CROSSLANE_DPP_ROW_BPERMUTE;
 }
 
-static iree_status_t loom_amdgpu_resolve_subgroup_reduce_dpp_combine_descriptor(
+static iree_status_t loom_amdgpu_resolve_collective_dpp_combine_descriptor(
     loom_low_lower_context_t* context, loom_combining_kind_t kind,
     loom_amdgpu_subgroup_payload_kind_t payload_kind,
     loom_low_lower_resolved_descriptor_t* out_descriptor, bool* out_present) {
   *out_descriptor = (loom_low_lower_resolved_descriptor_t){0};
   *out_present = false;
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(kLoomAmdgpuSubgroupReduceDppCombineForms); ++i) {
+       i < IREE_ARRAYSIZE(kLoomAmdgpuCollectiveDppCombineForms); ++i) {
     loom_amdgpu_descriptor_ref_t descriptor_ref =
         LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
     if (!loom_amdgpu_collective_combine_dpp_descriptor_ref(
-            kind, payload_kind, kLoomAmdgpuSubgroupReduceDppCombineForms[i],
+            kind, payload_kind, kLoomAmdgpuCollectiveDppCombineForms[i],
             &descriptor_ref)) {
       continue;
     }
@@ -67,6 +67,21 @@ static iree_status_t loom_amdgpu_resolve_subgroup_reduce_dpp_combine_descriptor(
     }
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_resolve_collective_dpp_descriptors(
+    loom_low_lower_context_t* context, loom_combining_kind_t kind,
+    loom_amdgpu_subgroup_payload_kind_t payload_kind,
+    loom_low_lower_resolved_descriptor_t* dpp_move,
+    loom_low_lower_resolved_descriptor_t* dpp_combine) {
+  bool present = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_collective_dpp_combine_descriptor(
+      context, kind, payload_kind, dpp_combine, &present));
+  return loom_amdgpu_resolve_descriptor_ref_if_present(
+      context,
+      loom_amdgpu_select_dpp_descriptor_ref(
+          loom_low_lower_context_descriptor_set(context)),
+      dpp_move, &present);
 }
 
 iree_status_t loom_amdgpu_select_subgroup_reduce_crosslane_kind(
@@ -85,22 +100,9 @@ iree_status_t loom_amdgpu_select_subgroup_reduce_crosslane_kind(
     return iree_ok_status();
   }
 
-  bool dpp_combine_descriptor_present = false;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_resolve_subgroup_reduce_dpp_combine_descriptor(
-          context, kind, payload_kind, dpp_combine,
-          &dpp_combine_descriptor_present));
-
-  bool dpp_descriptor_present = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32_DPP16, dpp_move,
-      &dpp_descriptor_present));
-  if (!dpp_descriptor_present) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32_DPP, dpp_move,
-        &dpp_descriptor_present));
-  }
-  if (!dpp_combine_descriptor_present && !dpp_descriptor_present) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_collective_dpp_descriptors(
+      context, kind, payload_kind, dpp_move, dpp_combine));
+  if (!dpp_combine->descriptor && !dpp_move->descriptor) {
     return iree_ok_status();
   }
 
@@ -119,11 +121,11 @@ bool loom_amdgpu_subgroup_reduce_dpp_row_descriptor_is_present(
     const loom_low_descriptor_set_t* descriptor_set, loom_combining_kind_t kind,
     loom_amdgpu_subgroup_payload_kind_t payload_kind) {
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(kLoomAmdgpuSubgroupReduceDppCombineForms); ++i) {
+       i < IREE_ARRAYSIZE(kLoomAmdgpuCollectiveDppCombineForms); ++i) {
     loom_amdgpu_descriptor_ref_t descriptor_ref =
         LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
     if (loom_amdgpu_collective_combine_dpp_descriptor_ref(
-            kind, payload_kind, kLoomAmdgpuSubgroupReduceDppCombineForms[i],
+            kind, payload_kind, kLoomAmdgpuCollectiveDppCombineForms[i],
             &descriptor_ref) &&
         loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref)) {
       return true;
@@ -159,7 +161,7 @@ static iree_status_t loom_amdgpu_emit_subgroup_permlanex16_register(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_emit_subgroup_dpp_combine_register(
+iree_status_t loom_amdgpu_emit_subgroup_dpp_combine_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* descriptor, loom_value_id_t lhs,
     loom_value_id_t rhs, uint32_t dpp_ctrl, loom_type_t lane_type,
@@ -229,15 +231,15 @@ static uint32_t loom_amdgpu_subgroup_reduce_first_offset(
   return offset;
 }
 
-iree_status_t loom_amdgpu_emit_subgroup_select_peer(
+iree_status_t loom_amdgpu_emit_subgroup_select(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* select_descriptor,
-    loom_value_id_t identity, loom_value_id_t peer, loom_value_id_t guard,
-    loom_type_t lane_type, loom_value_id_t* out_selected_peer) {
-  *out_selected_peer = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t false_value, loom_value_id_t true_value,
+    loom_value_id_t guard, loom_type_t lane_type, loom_value_id_t* out_result) {
+  *out_result = LOOM_VALUE_ID_INVALID;
   const loom_value_id_t operands[] = {
-      identity,
-      peer,
+      false_value,
+      true_value,
       guard,
   };
   loom_op_t* low_op = NULL;
@@ -246,7 +248,7 @@ iree_status_t loom_amdgpu_emit_subgroup_select_peer(
       loom_make_named_attr_slice(NULL, 0), &lane_type, 1,
       /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
       &low_op));
-  *out_selected_peer = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  *out_result = loom_value_slice_get(loom_low_op_results(low_op), 0);
   return iree_ok_status();
 }
 
@@ -529,7 +531,7 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_down_tree(
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_combine(
           context, source_op, &plan->combine_descriptor, accumulator, peer,
           lane_type, &combined));
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_select_peer(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_select(
           context, source_op, &plan->select_descriptor, accumulator, combined,
           guard, lane_type, &accumulator));
     }

@@ -93,60 +93,54 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_c
   %19 = v_and_b32_src0_inline %tid, 31
   %20 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
   %21 = storage_address %20 : low.storage<workgroup> -> reg<amdgpu.vgpr>
-  %22 = v_mov_b32 1
-  %23 = v_sub_nc_u32 %19, %22
-  %24 = v_cmp_ge_u32 %19, %22
-  %25 = v_lshlrev_b32_src0_inline %23, 2
-  %26 = v_mov_b32 2
-  %27 = v_sub_nc_u32 %19, %26
-  %28 = v_cmp_ge_u32 %19, %26
-  %29 = v_lshlrev_b32_src0_inline %27, 2
+  %22 = v_and_b32_lit %19, 4294967280
+  %23 = v_and_b32_src0_inline %19, 15
+  %24 = v_mov_b32 1
+  %26 = v_cmp_ge_u32 %23, %24
+  %27 = v_mov_b32 2
+  %29 = v_cmp_ge_u32 %23, %27
   %30 = v_mov_b32 4
-  %31 = v_sub_nc_u32 %19, %30
-  %32 = v_cmp_ge_u32 %19, %30
-  %33 = v_lshlrev_b32_src0_inline %31, 2
-  %34 = v_mov_b32 8
-  %35 = v_sub_nc_u32 %19, %34
-  %36 = v_cmp_ge_u32 %19, %34
-  %37 = v_lshlrev_b32_src0_inline %35, 2
-  %38 = v_mov_b32 16
-  %39 = v_sub_nc_u32 %19, %38
-  %40 = v_cmp_ge_u32 %19, %38
-  %41 = v_lshlrev_b32_src0_inline %39, 2
-  %42 = ds_bpermute_b32 %25, %value
-  %43 = v_add_u32 %value, %42
-  %44 = v_cndmask_b32 %value, %43, %24
-  %45 = ds_bpermute_b32 %29, %44
-  %46 = v_add_u32 %44, %45
-  %47 = v_cndmask_b32 %44, %46, %28
-  %48 = ds_bpermute_b32 %33, %47
-  %49 = v_add_u32 %47, %48
-  %50 = v_cndmask_b32 %47, %49, %32
-  %51 = ds_bpermute_b32 %37, %50
-  %52 = v_add_u32 %50, %51
-  %53 = v_cndmask_b32 %50, %52, %36
-  %54 = ds_bpermute_b32 %41, %53
-  %55 = v_add_u32 %53, %54
-  %56 = v_cndmask_b32 %53, %55, %40
-  %57 = v_lshrrev_b32_src0_inline %tid, 5
-  %58 = v_lshlrev_b32_src0_inline %57, 2
-  %59 = v_mov_b32 31
-  %60 = v_cmp_ge_u32 %19, %59
-  %61, %62 = s_and_saveexec_b64 %60
-  %63 = v_add_u32 %21, %58
-  ds_write_b32 %63, %56
-  s_mov_b64_exec %61
+  %32 = v_cmp_ge_u32 %23, %30
+  %33 = v_mov_b32 8
+  %35 = v_cmp_ge_u32 %23, %33
+  %36 = v_mov_b32 16
+  %37 = v_sub_nc_u32 %22, %36
+  %38 = v_cmp_ge_u32 %22, %36
+  %39 = v_lshlrev_b32_src0_inline %37, 2
+  %43 = v_mov_b32_dpp16 %value {dpp_ctrl = 273}
+  %44 = v_add_u32 %value, %43
+  %45 = v_cndmask_b32 %value, %44, %26
+  %46 = v_mov_b32_dpp16 %45 {dpp_ctrl = 274}
+  %47 = v_add_u32 %45, %46
+  %48 = v_cndmask_b32 %45, %47, %29
+  %49 = v_mov_b32_dpp16 %48 {dpp_ctrl = 276}
+  %50 = v_add_u32 %48, %49
+  %51 = v_cndmask_b32 %48, %50, %32
+  %52 = v_mov_b32_dpp16 %51 {dpp_ctrl = 280}
+  %53 = v_add_u32 %51, %52
+  %54 = v_cndmask_b32 %51, %53, %35
+  %55 = ds_bpermute_b32 %39, %54 {offset = 60}
+  %56 = v_add_u32 %54, %55
+  %57 = v_cndmask_b32 %54, %56, %38
+  %58 = v_lshrrev_b32_src0_inline %tid, 5
+  %59 = v_lshlrev_b32_src0_inline %58, 2
+  %60 = v_mov_b32 31
+  %61 = v_cmp_ge_u32 %19, %60
+  %62, %63 = s_and_saveexec_b64 %61
+  %64 = v_add_u32 %21, %59
+  ds_write_b32 %64, %57
+  s_mov_b64_exec %62
   s_barrier_signal_all
   s_barrier_wait_all
-  %64 = v_mov_b32 0
-  %65 = v_add_u32 %21, %64
-  %66 = ds_read_b32 %65
-  %67 = v_mov_b32 32
-  %68 = v_cmp_ge_u32 %tid, %67
-  %69 = v_add_u32 %56, %66
-  %result = v_cndmask_b32 %56, %69, %68
-  %71 = v_lshlrev_b32_src0_inline %tid, 2
-  global_store_b32_saddr %71, %result, %output_view
+  %65 = v_mov_b32 0
+  %66 = v_add_u32 %21, %65
+  %67 = ds_read_b32 %66
+  %68 = v_mov_b32 32
+  %69 = v_cmp_ge_u32 %tid, %68
+  %70 = v_add_u32 %57, %67
+  %result = v_cndmask_b32 %57, %70, %69
+  %72 = v_lshlrev_b32_src0_inline %tid, 2
+  global_store_b32_saddr %72, %result, %output_view
   return
 }
 

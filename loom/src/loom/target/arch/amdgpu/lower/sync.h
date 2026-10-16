@@ -12,7 +12,7 @@
 #include <stdbool.h>
 
 #include "loom/codegen/low/lower/lower.h"
-#include "loom/target/arch/amdgpu/lower/plan.h"
+#include "loom/target/arch/amdgpu/lower/synchronization_plan.h"
 #include "loom/target/low_legality.h"
 
 #ifdef __cplusplus

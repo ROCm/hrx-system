@@ -4,17 +4,25 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// AMDGPU reduction trees shared by subgroup and workgroup collective stages.
+// AMDGPU scan and reduction trees shared by subgroup and workgroup stages.
 
 #ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_COLLECTIVE_TREE_H_
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_COLLECTIVE_TREE_H_
 
 #include "loom/codegen/low/lower/lower.h"
-#include "loom/target/arch/amdgpu/lower/plan.h"
+#include "loom/target/arch/amdgpu/lower/collective_plan.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Resolves optional DPP move and fused-combine capabilities once for a
+// collective plan. Absent descriptors leave the corresponding field empty.
+iree_status_t loom_amdgpu_resolve_collective_dpp_descriptors(
+    loom_low_lower_context_t* context, loom_combining_kind_t kind,
+    loom_amdgpu_subgroup_payload_kind_t payload_kind,
+    loom_low_lower_resolved_descriptor_t* dpp_move,
+    loom_low_lower_resolved_descriptor_t* dpp_combine);
 
 // Selects a tree exchange strategy for a validated collective shape. The
 // enclosing collective plan owns target lane reach and publication semantics.
@@ -51,12 +59,19 @@ iree_status_t loom_amdgpu_emit_subgroup_combine(
     const loom_low_lower_resolved_descriptor_t* descriptor, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t lane_type, loom_value_id_t* out_result);
 
-// Replaces an inactive peer with the reduction identity using its lane guard.
-iree_status_t loom_amdgpu_emit_subgroup_select_peer(
+// Combines a DPP-permuted first operand with the unmodified second operand.
+iree_status_t loom_amdgpu_emit_subgroup_dpp_combine_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor, loom_value_id_t lhs,
+    loom_value_id_t rhs, uint32_t dpp_ctrl, loom_type_t lane_type,
+    loom_value_id_t* out_low_result);
+
+// Selects the participating result or unchanged accumulator using a lane guard.
+iree_status_t loom_amdgpu_emit_subgroup_select(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* select_descriptor,
-    loom_value_id_t identity, loom_value_id_t peer, loom_value_id_t guard,
-    loom_type_t lane_type, loom_value_id_t* out_selected_peer);
+    loom_value_id_t false_value, loom_value_id_t true_value,
+    loom_value_id_t guard, loom_type_t lane_type, loom_value_id_t* out_result);
 
 // Compares lane coordinates with the selected predicate descriptor.
 iree_status_t loom_amdgpu_emit_subgroup_lane_compare(
