@@ -97,6 +97,7 @@ kernel.def @route_reference() {
 }
 
 check.case public @original_f32_router {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %requested = check.param.choice values([0, 1, 64, 129]) name("active") : index
   %capacity = check.literal value(131) : index
   %input_seed = check.literal value(3187) : i64
