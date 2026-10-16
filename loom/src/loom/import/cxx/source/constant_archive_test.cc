@@ -254,6 +254,54 @@ TEST(ConstantArchiveTest, EvaluatesAggregateDefaultsAfterSourceDestruction) {
   }
 }
 
+TEST(ConstantArchiveTest, PreservesReferenceMemberIdentity) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  std::vector<std::uint8_t> bytes;
+  {
+    Source source(
+        IREE_SV("constexpr unsigned weights[3] = {2, 3, 5};"
+                "struct Policy {"
+                "  unsigned width = 7;"
+                "  const unsigned& alias = width;"
+                "  const unsigned (&table)[3] = weights;"
+                "};"
+                "constexpr Policy policy = Policy();"
+                "constexpr unsigned evaluate() {"
+                "  return policy.alias + policy.table[2] +"
+                "         (&policy.alias == &policy.width ? 100u : 0u) +"
+                "         (&policy.table == &weights ? 1000u : 0u);"
+                "}"),
+        IREE_SV("reference_members.cxx"), options);
+    cxx::ArchiveWriter writer;
+    cxx::SemanticArchiveRoots roots;
+    roots.ast = source.unit().ast();
+    roots.globalScope = source.unit().globalScope();
+    cxx::SemanticEncoder encoder(&source.unit());
+    ASSERT_TRUE(encoder(roots, writer));
+    bytes = writer();
+  }
+
+  Source destination(IREE_SV(""), IREE_SV("restored.cxx"), options);
+  cxx::SemanticArchiveRoots restored;
+  {
+    cxx::ArchiveReader reader;
+    ASSERT_TRUE(reader(bytes)) << reader.error();
+    cxx::SemanticDecoder decoder(&destination.unit());
+    ASSERT_TRUE(decoder(reader, restored)) << decoder.error();
+  }
+
+  auto symbols = restored.globalScope->find("evaluate");
+  ASSERT_FALSE(symbols.begin() == symbols.end());
+  auto functions = cxx::views::each_function(*symbols.begin());
+  ASSERT_EQ(std::ranges::distance(functions), 1);
+
+  cxx::ASTInterpreter interpreter(&destination.unit());
+  auto value = interpreter.evaluateCall(*functions.begin(), {});
+  ASSERT_TRUE(value);
+  EXPECT_EQ(interpreter.toInt(*value), 1112);
+}
+
 TEST(ConstantArchiveTest, ExecutesNestedConstructorsAfterSourceDestruction) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

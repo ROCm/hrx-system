@@ -1,0 +1,27 @@
+// INPUT: cxx root=reference_member_result
+// RUN: roundtrip
+constexpr unsigned weights[3] = {2, 3, 5};
+
+struct Policy {
+  unsigned width = 7;
+  const unsigned& alias = width;
+  const unsigned (&table)[3] = weights;
+};
+
+constexpr Policy policy = Policy();
+
+constexpr unsigned evaluate() {
+  return policy.alias + policy.table[2] +
+         (&policy.alias == &policy.width ? 100u : 0u) +
+         (&policy.table == &weights ? 1000u : 0u);
+}
+
+constexpr unsigned result = evaluate();
+
+unsigned reference_member_result() { return result; }
+
+// ----
+func.def public @reference_member_result() -> (i32) {
+  %result = scalar.constant 1112 : i32
+  func.return %result : i32
+}

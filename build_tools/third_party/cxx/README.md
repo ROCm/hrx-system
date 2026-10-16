@@ -5,7 +5,7 @@ changes live in the maintained fork rather than as patches in this directory:
 
 - Upstream: <https://github.com/robertoraggi/cplusplus>
 - Maintained fork: <https://github.com/benvanik/cplusplus>
-- Current stack: [`hrx-upstream/76-constexpr-temporary-destruction`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/76-constexpr-temporary-destruction/)
+- Current stack: [`hrx-upstream/77-reference-member-value-initialization`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/77-reference-member-value-initialization/)
 
 `../deps.MODULE.bazel` owns the archive commit and checksum. The generated root
 `MODULE.cmake.lock` carries the same identity for CMake. `cxx.BUILD.bazel` and
