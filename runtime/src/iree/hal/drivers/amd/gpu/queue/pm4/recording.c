@@ -174,14 +174,16 @@ void iree_hal_amd_gpu_pm4_recording_write(
         (const void*)(chunk + 1);
     const uint32_t count = chunk->length / sizeof(*entries);
     for (uint32_t i = 0; i < count; ++i) {
-      *table = entries[i].value;
+      // The destination may be write-combined VRAM. Resolve in host storage
+      // before writing the final entry so no adjustment reads it back.
+      iree_hal_amd_gpu_pm4_fixup_t value = entries[i].value;
       if (entries[i].target_data) {
-        table->target_offset += data_offset;
+        value.target_offset += data_offset;
       }
       if (entries[i].addend_data) {
-        table->addend += data_offset;
+        value.addend += data_offset;
       }
-      ++table;
+      *table++ = value;
     }
   }
 }

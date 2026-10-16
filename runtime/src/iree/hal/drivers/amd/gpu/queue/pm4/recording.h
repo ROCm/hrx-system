@@ -78,6 +78,7 @@ uint32_t iree_hal_amd_gpu_pm4_recording_fixup_count(
 
 // Copies admitted recording bytes and resolves section-relative fixups once.
 // Destination covers data_offset + data.length; table covers fixup_count.
+// Both outputs may be write-combined device memory and are only written.
 void iree_hal_amd_gpu_pm4_recording_write(
     const iree_hal_amd_gpu_pm4_recording_t* recording, uint8_t* destination,
     iree_hal_amd_gpu_pm4_fixup_t* table);
