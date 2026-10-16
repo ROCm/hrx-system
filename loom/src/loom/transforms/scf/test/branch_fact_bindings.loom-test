@@ -1,0 +1,332 @@
+// RUN: pass combine
+
+// Borrowed view dimensions retain their callable binding.
+func.decl @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = func.call @consume(%width, %value) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.decl @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = func.call @consume(%width, %value) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// Dependent vectors use the same signature contract.
+func.decl @consume(%width: index, %value: vector<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: vector<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = func.call @consume(%width, %value) : (index, vector<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.decl @consume(%width: index, %value: vector<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: vector<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = func.call @consume(%width, %value) : (index, vector<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// Unresolved template applications own dependent signatures too.
+template.decl @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = template.apply<@consume>(%width, %value) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+template.decl @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = template.apply<@consume>(%width, %value) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// Purity does not release signature ownership.
+template.decl pure @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = template.apply<@consume>(%width, %value) pure : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+template.decl pure @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = template.apply<@consume>(%width, %value) pure : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// A call result can bind an argument even without a shaped input.
+func.decl @make(%width: index) -> (view<[%width]xf32>)
+
+func.def public @caller(%width: index) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %view = func.call @make(%width) : (index) -> (view<[%width]xf32>)
+    %read = view.load %view[0] : view<[%width]xf32> -> f32
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.decl @make(%width: index) -> (view<[%width]xf32>)
+
+func.def public @caller(%width: index) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %view = func.call @make(%width) : (index) -> (view<[%width]xf32>)
+    %read = view.load %view[0] : view<[%width]xf32> -> f32
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// Locally produced views remain bound to their callable dimension.
+func.decl @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %storage: buffer) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %view = buffer.view %storage[%base] : buffer -> view<[%width]xf32>
+    %read = func.call @consume(%width, %view) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.decl @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %storage: buffer) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %view = buffer.view %storage[%base] : buffer -> view<[%width]xf32>
+    %read = func.call @consume(%width, %view) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// Structured result tuples preserve their dependent yield bindings.
+func.def public @choose(%width: index, %first: view<[%width]xf32>, %other_width: index, %second: view<[%other_width]xf32>) -> (%result_width: index, view<[%result_width]xf32>) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %count, %view = scf.if %positive -> (index, view<[%count]xf32>) {
+    scf.yield %width, %first : index, view<[%width]xf32>
+  } else {
+    scf.yield %other_width, %second : index, view<[%other_width]xf32>
+  }
+  func.return %count, %view : index, view<[%count]xf32>
+}
+
+// ====
+
+// Ordinary scalar calls still receive edge-local facts.
+func.decl @consume(%width: index) -> (index)
+
+func.def public @caller(%width: index) -> (index) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (index) {
+    %read = func.call @consume(%width) : (index) -> (index)
+    scf.yield %read : index
+  } else {
+    scf.yield %empty_extent : index
+  }
+  func.return %result : index
+}
+
+// ----
+func.decl @consume(%width: index) -> (index)
+
+func.def public @caller(%width: index) -> (index) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (index) {
+    %8 = index.assume %width [gt(%width, 0)] : index
+    %read = func.call @consume(%8) : (index) -> (index)
+    scf.yield %read : index
+  } else {
+    scf.yield %empty_extent : index
+  }
+  func.return %result : index
+}
+
+// ====
+
+// Pure calls retain the same dependent argument binding.
+func.decl pure @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = func.call pure @consume(%width, %value) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.decl pure @consume(%width: index, %value: view<[%width]xf32>) -> (f32)
+
+func.def public @caller(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %read = func.call pure @consume(%width, %value) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// RUN: pass combine,inline-callables,combine,dce
+
+// Inlining releases the local view for edge-specific type refinement.
+func.def inline @consume(%width: index, %value: view<[%width]xf32>) -> (f32) {
+  %read = view.load %value[0] : view<[%width]xf32> -> f32
+  func.return %read : f32
+}
+
+func.def public @caller(%width: index, %storage: buffer) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %view = buffer.view %storage[%base] : buffer -> view<[%width]xf32>
+    %read = func.call @consume(%width, %view) : (index, view<[%width]xf32>) -> (f32)
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}
+
+// ----
+func.def public @caller(%width: index, %storage: buffer) -> (f32) {
+  %empty_extent = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %positive = index.cmp sgt, %width, %empty_extent : index
+  %result = scf.if %positive -> (f32) {
+    %14 = index.assume %width [gt(%width, 0)] : index
+    %view = buffer.view %storage[%base] : buffer -> view<[%14]xf32>
+    %read = view.load %view[0] : view<[%14]xf32> -> f32
+    scf.yield %read : f32
+  } else {
+    %nothing = scalar.constant 0.0 : f32
+    scf.yield %nothing : f32
+  }
+  func.return %result : f32
+}

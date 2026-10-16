@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "branch_fact_bindings.loom-test"
     "branch_fact_convergence.loom-test"
     "loop_widening.loom-test"
     "scf_for_termination.loom-test"

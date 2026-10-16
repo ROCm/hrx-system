@@ -21,6 +21,13 @@ static float read_view(View source) {
   return loom::view::load(source, 2, 3);
 }
 
+template <class Input, class Output>
+static void copy_view_element(Input source, Output destination, unsigned row,
+                              unsigned column) {
+  loom::view::store(loom::view::load(source, row, column), destination, row,
+                    column);
+}
+
 // Specializations retain different shape types through auto return deduction.
 template <bool Strided>
 static auto make_view(const float* input) {
@@ -54,16 +61,16 @@ void typed_view_copy(const float* input, float* output, unsigned rows,
 
   auto input_layout = loom::encoding::layout::strided(input_stride, 1u);
   auto output_layout = loom::encoding::layout::dense<2>();
+  auto row_count = loom::index::cast(rows);
   auto source = preserve_view(loom::buffer::view<loomt::dynamic, 8>(
-      input + input_origin, {rows}, input_layout));
+      input + input_origin, {row_count}, input_layout));
   auto destination = loom::buffer::view<loomt::dynamic, 8>(
-      output + output_origin, {rows}, output_layout);
+      output + output_origin, {row_count}, output_layout);
 
   unsigned row = loom::kernel::workitem::id.y;
   unsigned column = loom::kernel::workitem::id.x;
-  if (row < rows) {
-    float value = loom::view::load(source, row, column);
-    loom::view::store(value, destination, row, column);
+  if (loom::index::cast(row) < row_count) {
+    copy_view_element(source, destination, row, column);
   }
 }
 

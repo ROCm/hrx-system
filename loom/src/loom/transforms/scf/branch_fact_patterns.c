@@ -380,7 +380,8 @@ static bool loom_branch_facts_value_has_type_sensitive_use(
     if (!vtable) {
       return true;
     }
-    if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR)) {
+    if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR |
+                                             LOOM_TRAIT_CALLABLE_BOUNDARY)) {
       return true;
     }
     if (loom_branch_facts_op_type_constraints_mention_operand(
@@ -389,6 +390,17 @@ static bool loom_branch_facts_value_has_type_sensitive_use(
     }
   }
   return false;
+}
+
+// A callable or region edge owns its dependent tuple as one contract. Replacing
+// a dimension or encoding operand alone cannot rebind the other tuple values.
+// The retained type-use index identifies these bindings without inspecting the
+// signature; ordinary scalar operands remain eligible for edge refinement.
+static bool loom_branch_facts_operand_binds_boundary_type(
+    const loom_module_t* module, const loom_op_t* op, loom_value_id_t operand) {
+  return iree_any_bit_set(op->traits, LOOM_TRAIT_CALLABLE_BOUNDARY |
+                                          LOOM_TRAIT_TERMINATOR) &&
+         loom_module_value_has_type_uses(module, operand);
 }
 
 static bool loom_branch_facts_can_rewrite_edge_type_refs_for_result(
@@ -562,6 +574,10 @@ static iree_status_t loom_branch_facts_scan_region_uses(
   const loom_value_id_t* operands = loom_op_const_operands(op);
   for (uint16_t operand_index = 0; operand_index < op->operand_count;
        ++operand_index) {
+    if (loom_branch_facts_operand_binds_boundary_type(
+            scan->module, op, operands[operand_index])) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(
         loom_branch_facts_scan_edge_value_use(scan, operands[operand_index]));
   }
@@ -710,6 +726,10 @@ static iree_status_t loom_branch_facts_replace_region_uses(
   for (uint16_t operand_index = 0; operand_index < op->operand_count;
        ++operand_index) {
     loom_value_id_t operand = operands[operand_index];
+    if (loom_branch_facts_operand_binds_boundary_type(
+            replacement->rewriter->module, op, operand)) {
+      continue;
+    }
     for (uint16_t candidate_count = replacement->assume_set->candidate_count;
          candidate_count > 0; --candidate_count) {
       const loom_branch_facts_edge_assume_candidate_t* candidate =
