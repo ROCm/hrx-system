@@ -4,8 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Source closure for the incremental waveform serving fixture."""
+"""Source closure for the continuing-input recognition fixture."""
 
-SOURCE_FILES = ["prepare.loom", "control.loom", "generate.loom"]
+SOURCE_FILES = ["control.loom", "generate.loom", "model.json", "prepare.loom"]
 
 SOURCES = ["//loom/src/loom/serve/fixture/recognition:" + path for path in SOURCE_FILES]

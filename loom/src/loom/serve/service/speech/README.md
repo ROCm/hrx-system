@@ -26,6 +26,27 @@ persist voice samples. Package assets supply its conditioning inputs.
 The [waveform fixture](../../fixture/speech/README.md) is an executable example
 of the model contract. It generates deterministic samples, not learned speech.
 
+## Native waveform consumers
+
+An in-process serving owner uses `loom_serve_registry_try_open_speech` with an
+initialized request and a deployment name. A successful admission moves the
+request and returns an independently owned [stream handle](stream.h). NULL
+success reports bounded admission pressure and leaves the request with its
+caller. Native requests share HTTP's queue, numerical cohorts, residency, and
+retirement; opening a handle does not expose a model or service pointer.
+
+The stream reports its sample geometry and publishes one copied F32LE block at
+a time, with an absolute frame position and explicit completion. Consuming the
+block returns output credit. A stalled reader makes only its own request
+ineligible for the next compatible batch. Copies run in the existing shared
+CPU collection task. HTTP consumers encode directly into their PCM buffer.
+
+Closing a native handle cancels caller interest, while accepted CPU and device
+work retains its storage through retirement. Final blocks and terminal status
+can outlive model removal, same-name replacement, and registry destruction.
+Holding that result keeps no model pin or source row. The request's text is
+complete at admission; waveform streaming does not imply appendable text input.
+
 ## Model ownership
 
 The [model ABI](model.h) separates cold preparation, CPU request preparation,
@@ -66,10 +87,11 @@ after its producer retires; cancelled partial work cannot publish a valid cache
 entry.
 
 The [generator](generator.h) carries native sample rate and channel count.
-The PCM HTTP service currently requires 24 kHz mono at registration; this wire
-format does not redefine the model ABI's geometry. Supporting a package with a
-different native geometry requires an explicit continuous audio conversion
-path, including filter history and final tail handling.
+PCM HTTP requests require 24 kHz mono; a package with different geometry remains
+usable through native handles and rejects incompatible HTTP requests. This wire
+format does not redefine the model ABI's geometry. HTTP conversion for another
+native geometry requires a continuous converter with retained filter history
+and final tail handling.
 
 ## Scheduling and retirement
 

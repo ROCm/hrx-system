@@ -190,7 +190,7 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "source_recognition_service_test",
+    name = "source_recognition_stream_test",
     args = [
         "--model_source=$(rootpath //loom/src/loom/serve/fixture/recognition:prepare.loom)",
     ],
@@ -208,7 +208,7 @@ loom_cc_test(
     deps = [
         ":test_compiler",
         ":test_device",
-        "//loom/src/loom/serve/service/recognition:source_service_tests",
+        "//loom/src/loom/serve/service/recognition:source_stream_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
@@ -233,6 +233,30 @@ loom_cc_test(
         ":test_compiler",
         ":test_device",
         "//loom/src/loom/serve/server:registry_speech_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "registry_recognition_test",
+    args = [
+        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
+    ],
+    data = RECOGNITION_SOURCES,
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=vulkan.resource.device",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:spirv_vulkan_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/server:registry_recognition_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )

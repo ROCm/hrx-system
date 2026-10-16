@@ -1,0 +1,11 @@
+{
+  "name": "recognition",
+  "definition": {
+    "kind": "recognition",
+    "prepare": "prepare.loom",
+    "control": "control.loom",
+    "sources": ["generate.loom"],
+    "assets": ".",
+    "pending_requests": 4
+  }
+}

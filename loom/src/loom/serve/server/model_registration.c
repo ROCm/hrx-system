@@ -15,8 +15,8 @@
 #include "loom/serve/service/finite/service.h"
 #include "loom/serve/service/image/model.h"
 #include "loom/serve/service/image/service.h"
-#include "loom/serve/service/recognition/http.h"
 #include "loom/serve/service/recognition/model.h"
+#include "loom/serve/service/recognition/service.h"
 #include "loom/serve/service/speech/model.h"
 #include "loom/serve/service/speech/service.h"
 #include "loom/serve/service/text/schedule.h"
@@ -594,8 +594,9 @@ typedef struct loom_serve_recognition_registration_t {
   loom_serve_recognition_load_t* load;
   // Owned prepared model, retained through actual consumer retirement.
   loom_serve_recognition_model_t* model;
-  // Owned HTTP service, destroyed after CPU and external borrowers retire.
-  loom_serve_recognition_http_t* service;
+  // Owned native/HTTP service, destroyed after CPU and external borrowers
+  // retire.
+  loom_serve_recognition_service_t* service;
   // Explicit warmup, joined before service/model retirement.
   loom_serve_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
@@ -625,20 +626,21 @@ static iree_status_t loom_serve_recognition_registration_prepare(
   if (iree_status_is_ok(status)) {
     const loom_serve_model_configuration_t* configuration =
         registration->configuration;
-    const loom_serve_recognition_http_options_t service_options = {
+    const loom_serve_recognition_service_options_t service_options = {
         .name = configuration->name,
         .pending_capacity = configuration->pending_requests,
         .request_limit = 64 * 1024,
         .document_limit = 1024 * 1024,
         .decode_frames = 4096};
-    status = loom_serve_recognition_http_allocate(
+    status = loom_serve_recognition_service_allocate(
         loom_serve_device_host(registration->device),
         loom_serve_recognition_model_generator(registration->model),
         &service_options, registration->stream, registration->host_allocator,
         &registration->service);
   }
   if (iree_status_is_ok(status)) {
-    *out_service = loom_serve_recognition_http_interface(registration->service);
+    *out_service =
+        loom_serve_recognition_service_interface(registration->service);
   }
   return status;
 }
@@ -651,7 +653,7 @@ static iree_status_t loom_serve_recognition_registration_retire(
     IREE_RETURN_IF_ERROR(loom_serve_recognition_load_free(registration->load));
     registration->load = NULL;
   }
-  loom_serve_recognition_http_free(registration->service);
+  loom_serve_recognition_service_free(registration->service);
   registration->service = NULL;
   if (registration->model && !registration->retiring) {
     loom_serve_recognition_model_retire(registration->model,
