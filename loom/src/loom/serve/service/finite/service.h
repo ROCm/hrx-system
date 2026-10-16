@@ -37,7 +37,7 @@ iree_status_t loom_serve_finite_service_allocate(
     iree_duration_t heartbeat_interval, loom_serve_telemetry_stream_t* stream,
     iree_allocator_t host_allocator, loom_serve_finite_service_t** out_service);
 
-loom_serve_http_service_t loom_serve_finite_service_interface(
+loom_serve_service_t loom_serve_finite_service_interface(
     loom_serve_finite_service_t* service);
 
 // After router retirement only. CPU/process release, not completion, releases

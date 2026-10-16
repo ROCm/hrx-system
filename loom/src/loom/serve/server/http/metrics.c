@@ -52,7 +52,7 @@ static iree_status_t loom_serve_http_metrics_label(
 
 static iree_status_t loom_serve_http_metrics_identity(
     iree_string_builder_t* output, const loom_serve_registered_model_t* model) {
-  const loom_serve_http_service_t* service = &model->service;
+  const loom_serve_service_t* service = &model->service;
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "model="));
   IREE_RETURN_IF_ERROR(loom_serve_http_metrics_label(output, service->name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, ",kind="));
@@ -231,7 +231,7 @@ static iree_status_t loom_serve_http_metrics_counters(
          ++i) {
       const loom_serve_registered_model_t* model =
           loom_serve_registry_at(registry, i);
-      const loom_serve_http_service_t* service = &model->service;
+      const loom_serve_service_t* service = &model->service;
       if (!service->telemetry.counters) {
         continue;
       }

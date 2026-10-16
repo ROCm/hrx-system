@@ -547,13 +547,13 @@ static iree_status_t loom_serve_text_media_projector_reject(
 
 iree_status_t loom_serve_text_media_projector_advance(
     loom_serve_text_media_projector_t* projector,
-    loom_serve_http_service_flags_t flags, bool* out_progress) {
+    loom_serve_service_flags_t flags, bool* out_progress) {
   *out_progress = false;
   if (!projector || projector->phase == MEDIA_FAILED) {
     return iree_ok_status();
   }
   const bool stopping =
-      iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING);
   iree_status_t status = iree_ok_status();
   if (projector->phase == MEDIA_PREPARING ||
       projector->phase == MEDIA_BATCHING) {
@@ -644,8 +644,8 @@ iree_status_t loom_serve_text_media_projector_advance(
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
                  admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
-                 !iree_any_bit_set(
-                     flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY)) {
+                 !iree_any_bit_set(flags,
+                                   LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
         for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
           loom_serve_text_media_job_t* job = projector->cohort[i];
           if (job->request) {

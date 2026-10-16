@@ -163,7 +163,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
 
     if (action == OverlapAction::kStop) {
       ASSERT_NO_FATAL_FAILURE(
-          AdvanceUntil(interface, idle, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+          AdvanceUntil(interface, idle, LOOM_SERVE_SERVICE_FLAG_STOPPING));
       EXPECT_EQ(interface.telemetry.counters->cancelled, 3u);
       EXPECT_TRUE(Read(head, /*allow_empty=*/true).empty());
       EXPECT_TRUE(Read(extra, /*allow_empty=*/true).empty());
@@ -308,7 +308,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
                  !interface.is_active(interface.self) &&
                  !interface.snapshot(interface.self).queued_requests;
         },
-        LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+        LOOM_SERVE_SERVICE_FLAG_STOPPING));
     if (action == OverlapAction::kStop) {
       EXPECT_TRUE(Read(head, /*allow_empty=*/true).empty());
       EXPECT_TRUE(Read(tail, /*allow_empty=*/true).empty());

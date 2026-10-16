@@ -209,7 +209,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
   // Bounded modality services borrowing the corresponding models.
   loom_serve_finite_service_t* services_[2] = {};
   // Exact production scheduling and routing interfaces.
-  loom_serve_http_service_t interfaces_[2] = {};
+  loom_serve_service_t interfaces_[2] = {};
   // Shared HTTP connection and request owner.
   loom_serve_http_server_t* server_ = nullptr;
   // Independent binding borrowing the HTTP owner and shared host pool.

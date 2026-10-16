@@ -120,7 +120,7 @@ iree_status_t loom_serve_text_service_allocate(
 // This policy does not alter epoch shapes or wait for matching requests.
 // Peer cancellation discards its live row, not independently pinned endpoints,
 // at a completed stage boundary. Capacities match the created model.
-loom_serve_http_service_t loom_serve_text_service_interface(
+loom_serve_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service);
 
 // Relinquishes the idle projector's model borrow before independent image
