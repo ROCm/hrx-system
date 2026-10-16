@@ -158,6 +158,13 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_initialize(
       iree_hal_buffer_retain(source_buffer);
       iree_hal_buffer_retain(target_buffer);
       out_transfer->operations[out_transfer->count++] = operation;
+      if (source->type != IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
+          source->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY) {
+        out_transfer->staging_capacity = iree_max(
+            out_transfer->staging_capacity,
+            (uint32_t)iree_min(
+                length, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH));
+      }
     }
   }
   return status;
@@ -196,7 +203,7 @@ iree_hal_amd_gpu_pm4_transfer_packet_t
 iree_hal_amd_gpu_pm4_transfer_emit_packet(
     const iree_hal_amd_gpu_pm4_transfer_span_t* span, uint64_t offset,
     iree_byte_span_t staging, uint64_t staging_address, uint32_t* words) {
-  // The firmware limit is narrower than DMA_DATA's representable count.
+  // Keep the conservative packet policy independent of publication batching.
   uint32_t length = (uint32_t)iree_min(
       span->length - offset, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH);
   uint64_t source = span->source_address + offset;
@@ -256,7 +263,7 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
   iree_status_t status = iree_ok_status();
   while (out_chunk->next.index < transfer->count &&
          out_chunk->word_count + 7 <= word_capacity &&
-         !out_chunk->download.length && iree_status_is_ok(status)) {
+         iree_status_is_ok(status)) {
     const iree_hal_amd_gpu_pm4_transfer_operation_t* operation =
         &transfer->operations[out_chunk->next.index];
     const uint64_t offset = out_chunk->next.offset;
@@ -291,11 +298,13 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
         break;
       }
       if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
-        out_chunk->download = (iree_hal_amd_gpu_pm4_download_t){
-            .source = data,
-            .target = (uint8_t*)operation->target.host + offset,
-            .length = packet.length,
-        };
+        if (!out_chunk->download.length) {
+          out_chunk->download = (iree_hal_amd_gpu_pm4_download_t){
+              .source = data,
+              .target = (uint8_t*)operation->target.host + offset,
+          };
+        }
+        out_chunk->download.length += packet.length;
       }
       out_chunk->word_count += 7;
       out_chunk->staging_length += packet.staging_length;
@@ -303,6 +312,11 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
       if (out_chunk->next.offset == operation->length) {
         ++out_chunk->next.index;
         out_chunk->next.offset = 0;
+        if (out_chunk->download.length) {
+          // One retirement record owns one contiguous host destination. A
+          // different operation starts a new publication, even if it downloads.
+          break;
+        }
       }
     }
   }

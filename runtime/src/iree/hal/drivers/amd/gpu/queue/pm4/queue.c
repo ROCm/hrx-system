@@ -491,6 +491,9 @@ iree_hal_amd_gpu_pm4_publish_transfer(
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
   iree_hal_amd_gpu_pm4_argument_storage_t* arguments =
       queue->producer.arguments;
+  if (arguments->capacity < transfer->staging_capacity) {
+    return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
+  }
   const uint64_t relative =
       iree_align_uint64(arguments->end - arguments->begin, 8);
   const uint64_t offset = relative & (arguments->capacity - 1);
@@ -516,8 +519,10 @@ iree_hal_amd_gpu_pm4_publish_transfer(
       transfer,
       iree_min(IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
                word_budget - wait_words - 96),
-      iree_make_byte_span(arguments->memory.contents.data + offset,
-                          iree_min(available, 32736u)),
+      iree_make_byte_span(
+          arguments->memory.contents.data + offset,
+          iree_min(available,
+                   IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH)),
       arguments->address + offset, &chunk);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
@@ -1297,6 +1302,9 @@ static bool iree_hal_amd_gpu_pm4_progress(void* user_data) {
           uint64_t capacity = 0;
           if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE) {
             capacity = submission->execute.program->argument_length;
+          } else if (submission->kind ==
+                     IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER) {
+            capacity = submission->transfer.staging_capacity;
           } else {
             const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
                 iree_hal_amd_gpu_pm4_dispatch_storage(

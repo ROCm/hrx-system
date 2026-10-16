@@ -6,11 +6,13 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/pm4/transfer.h"
 
+#include <algorithm>
 #include <array>
 #include <initializer_list>
 #include <vector>
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 namespace {
 
@@ -44,7 +46,7 @@ class TransferTest : public ::testing::Test {
   std::array<uint8_t, 8> staging_;
 };
 
-TEST_F(TransferTest, CopySplitsAtFirmwareLimitWithoutStaging) {
+TEST_F(TransferTest, CopySplitsAtPacketLimitWithoutStaging) {
   const iree_hal_amd_gpu_pm4_transfer_span_t span = {
       .source_address = 0x1234FFFFFFF0,
       .target_address = 0x567800000003,
@@ -146,6 +148,118 @@ TEST_F(TransferTest, EmptyStagingEmitsNothingForStagedOperations) {
       EXPECT_EQ(word, kGuard);
     }
   }
+}
+
+TEST(TransferBatchTest, HostTransfersFillOneWindowAcrossPacketBoundaries) {
+  constexpr size_t kLength = 1024 * 1024;
+  constexpr uint64_t kDeviceAddress = UINT64_C(0x123400001003);
+  constexpr uint64_t kStagingAddress = UINT64_C(0x567800002005);
+  std::vector<uint8_t> host(kLength + 17), staging(kLength + 2, 0xCC);
+  for (size_t i = 0; i < host.size(); ++i) {
+    host[i] = static_cast<uint8_t>(i ^ (i >> 9));
+  }
+  const iree_hal_buffer_native_binding_t binding = {
+      .device_address = kDeviceAddress,
+  };
+  iree_hal_buffer_t buffer = {};
+  buffer.memory.bindings = &binding;
+  for (auto type : {IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD}) {
+    SCOPED_TRACE(type);
+    std::fill(staging.begin(), staging.end(), 0xCC);
+    const bool download = type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    iree_hal_amd_gpu_pm4_transfer_operation_t operation = {
+        .type = type,
+        .length = host.size(),
+    };
+    auto& device = download ? operation.source.device : operation.target.device;
+    device.buffer = &buffer;
+    device.slot = {
+        .index = 0,
+        .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+    };
+    (download ? operation.target.host : operation.source.host) = host.data();
+    const iree_hal_amd_gpu_pm4_transfer_t transfer = {
+        .count = 1,
+        .operations = &operation,
+    };
+    iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
+        &transfer, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
+        iree_make_byte_span(staging.data() + 1, kLength), kStagingAddress,
+        &chunk));
+    ASSERT_EQ(chunk.word_count, 33u * 7);
+    EXPECT_EQ(chunk.staging_length, kLength);
+    EXPECT_EQ(chunk.next.index, 0u);
+    EXPECT_EQ(chunk.next.offset, kLength);
+    // All packets share one retirement extent. Check their complete native
+    // encoding, including the small final packet and high address words.
+    for (size_t i = 0; i < 33; ++i) {
+      const uint64_t offset = i * 32736;
+      const uint64_t source =
+          (download ? kDeviceAddress : kStagingAddress) + offset;
+      const uint64_t target =
+          (download ? kStagingAddress : kDeviceAddress) + offset;
+      const std::array<uint32_t, 7> expected = {
+          0xC0055000,
+          0x60300000,
+          static_cast<uint32_t>(source),
+          static_cast<uint32_t>(source >> 32),
+          static_cast<uint32_t>(target),
+          static_cast<uint32_t>(target >> 32),
+          i == 32 ? 1024u : 32736u};
+      EXPECT_EQ(
+          std::vector<uint32_t>(chunk.words + i * 7, chunk.words + (i + 1) * 7),
+          std::vector<uint32_t>(expected.begin(), expected.end()));
+    }
+    EXPECT_EQ(staging.front(), 0xCC);
+    EXPECT_EQ(staging.back(), 0xCC);
+    if (download) {
+      EXPECT_EQ(chunk.download.source, staging.data() + 1);
+      EXPECT_EQ(chunk.download.target, host.data());
+      EXPECT_EQ(chunk.download.length, kLength);
+      EXPECT_TRUE(std::all_of(staging.begin(), staging.end(),
+                              [](uint8_t byte) { return byte == 0xCC; }));
+    } else {
+      EXPECT_EQ(chunk.download.length, 0u);
+      EXPECT_TRUE(
+          std::equal(staging.begin() + 1, staging.end() - 1, host.begin()));
+    }
+  }
+}
+
+TEST(TransferBatchTest, DownloadRetirementStopsAtTheHostDestinationBoundary) {
+  std::vector<uint8_t> host(65536), staging(1024 * 1024);
+  const iree_hal_buffer_native_binding_t binding = {.device_address = 0x10000};
+  iree_hal_buffer_t buffer = {};
+  buffer.memory.bindings = &binding;
+  std::array<iree_hal_amd_gpu_pm4_transfer_operation_t, 2> operations = {};
+  for (auto& operation : operations) {
+    operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    operation.source.device.buffer = &buffer;
+    operation.source.device.slot = {
+        .index = 0,
+        .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+    };
+    operation.target.host = host.data();
+    operation.length = host.size();
+  }
+  const iree_hal_amd_gpu_pm4_transfer_t transfer = {
+      .count = operations.size(),
+      .operations = operations.data(),
+  };
+  iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
+      &transfer, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
+      iree_make_byte_span(staging.data(), staging.size()), 0x20000, &chunk));
+  EXPECT_EQ(chunk.word_count, 3u * 7);
+  EXPECT_EQ(chunk.next.index, 1u);
+  EXPECT_EQ(chunk.next.offset, 0u);
+  EXPECT_EQ(chunk.staging_length, host.size());
+  EXPECT_EQ(chunk.download.length, host.size());
+  EXPECT_EQ(chunk.download.source, staging.data());
+  EXPECT_EQ(chunk.download.target, host.data());
 }
 
 }  // namespace

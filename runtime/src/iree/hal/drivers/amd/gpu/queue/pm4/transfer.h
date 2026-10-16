@@ -67,6 +67,9 @@ typedef struct iree_hal_amd_gpu_pm4_transfer_t {
   iree_hal_amd_gpu_pm4_transfer_operation_t* operations;
   // Unpublished suffix, advanced only after a successful native publication.
   iree_hal_amd_gpu_pm4_transfer_cursor_t cursor;
+  // Largest staged operation, capped at one bounded bulk window. Captured once
+  // so publication can request service-owned growth without walking the batch.
+  uint32_t staging_capacity;
   // Uploads read host bytes and therefore require completed host dependencies.
   bool host_wait_required;
   // Downloads finish on the host and cannot signal a native completion early.
@@ -85,8 +88,16 @@ typedef struct iree_hal_amd_gpu_pm4_download_t {
 } iree_hal_amd_gpu_pm4_download_t;
 
 enum {
-  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS = 32 * 7,
+  // Conservative per-packet policy, independent of host retirement granularity.
   IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH = 32736,
+  // Reusable bulk staging; small transfers keep the initial argument storage.
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH = 1024 * 1024,
+  // Enough packets to consume a complete bulk window, including its short tail.
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS =
+      ((IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH +
+        IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH - 1) /
+       IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH) *
+      7,
 };
 
 // Admitted native DMA span, independent of direct or recorded ownership.
@@ -115,8 +126,8 @@ typedef struct iree_hal_amd_gpu_pm4_transfer_packet_t {
   uint32_t staging_length;
 } iree_hal_amd_gpu_pm4_transfer_packet_t;
 
-// Emits one native piece from a nonempty remaining span. Applies the firmware
-// byte-count limit and stages unaligned fill edges or host bytes when needed.
+// Emits one native packet from a nonempty remaining span. Applies the qualified
+// byte-count policy and stages unaligned fill edges or host bytes when needed.
 // The caller supplies seven writable DWORDs and retains both ranges and staging
 // through DMA completion. Capacity exhaustion emits nothing. This trusted
 // transform performs no allocation, buffer lookup, or failure construction.
@@ -125,9 +136,10 @@ iree_hal_amd_gpu_pm4_transfer_emit_packet(
     const iree_hal_amd_gpu_pm4_transfer_span_t* span, uint64_t offset,
     iree_byte_span_t staging, uint64_t staging_address, uint32_t* words);
 
-// One bounded candidate publication. A download ends the batch, so retirement
-// needs one direct host copy instead of a list walk. No owner changes until the
-// enclosing queue commits this candidate and its staging prefix.
+// One bounded candidate publication. Consecutive packets for one download
+// share a contiguous retirement copy; completing that operation ends the batch.
+// No owner changes until the enclosing queue commits this candidate and its
+// staging prefix.
 typedef struct iree_hal_amd_gpu_pm4_transfer_chunk_t {
   // Native commands, with all addresses already resolved.
   uint32_t words[IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS];
@@ -164,8 +176,9 @@ void iree_hal_amd_gpu_pm4_transfer_deinitialize(
 
 // Plans at most word_capacity DWORDs and writes only into available staging.
 // The transaction has an unpublished suffix and its required dependencies have
-// been satisfied. Staging capacity is bounded by the queue and at most 32736
-// bytes; no native allocation occurs. The caller alone owns staging writes.
+// been satisfied. Staging capacity is bounded by the queue and at most
+// one bulk window; no native allocation occurs. The caller alone owns staging
+// writes. Packet boundaries do not require independent retirement.
 // Capacity exhaustion is represented by an empty chunk, not an error status.
 // Failure means a captured buffer still lacks its queue-ordered native address.
 iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(

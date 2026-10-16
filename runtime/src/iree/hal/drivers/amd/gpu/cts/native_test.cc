@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -210,8 +211,9 @@ class GpuNativeTransferTest : public GpuNativeTest,
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
-    // Every real transaction crosses staging, retirement, and primary-ring
-    // capacity boundaries. Progress must come from native completion events.
+    // Start with small staging, retirement, and primary-ring capacities. Bulk
+    // transfers must grow staging and reuse it through native completion
+    // events.
     options_.pm4.ring_byte_length = 4096;
     options_.pm4.retirement_capacity = 4;
     options_.pm4.argument_capacity = 1024;
@@ -454,6 +456,63 @@ TEST_P(GpuNativeTransferTest, CapturedUpdatesAndDeferredHostTransfers) {
   Wait(downloaded);
   EXPECT_EQ(downloaded_update, expected_update);
   EXPECT_EQ(downloaded_upload, upload);
+}
+
+TEST_P(GpuNativeTransferTest,
+       BulkTransfersWrapStagingAndRetainDeferredBuffers) {
+  using iree::hal::cts::Ref;
+  constexpr size_t kBulkLength = 3 * 1024 * 1024 + 37;
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(kBulkLength + 3, 4),
+      iree_infinite_timeout(), buffer.out()));
+  std::vector<uint8_t> source(kBulkLength, 0), target(kBulkLength + 2, 0xCC);
+  for (uint64_t iteration = 0; iteration < 2; ++iteration) {
+    SCOPED_TRACE(iteration);
+    uint64_t ready = iteration + 1;
+    uint64_t produced = iteration * 2 + 1;
+    uint64_t downloaded = produced + 1;
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = buffer,
+                .source_offset = 3,
+                .target = target.data() + 1,
+                .length = kBulkLength,
+            },
+    };
+    IREE_ASSERT_OK(iree_hal_queue_transfer(
+        queues_[1], {1, &timeline_, &produced}, {1, &timeline_, &downloaded}, 1,
+        &download, Barriers()));
+    const iree_hal_transfer_operation_t upload = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+        .upload =
+            {
+                .source = source.data(),
+                .target_buffer = buffer,
+                .target_offset = 3,
+                .length = kBulkLength,
+            },
+    };
+    IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &gate_, &ready},
+                                           {1, &timeline_, &produced}, 1,
+                                           &upload, Barriers()));
+    // Upload reads these borrowed bytes only after the host dependency. The
+    // second iteration starts at the previous short tail in the staging ring.
+    for (size_t i = 0; i < source.size(); ++i) {
+      source[i] = static_cast<uint8_t>((i * 29) ^ (i >> 9) ^ iteration);
+    }
+    std::fill(target.begin(), target.end(), 0xCC);
+    if (iteration == 1) {
+      buffer.reset();
+    }
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, ready, nullptr));
+    Wait(downloaded);
+    EXPECT_EQ(target.front(), 0xCC);
+    EXPECT_EQ(target.back(), 0xCC);
+    EXPECT_TRUE(std::equal(source.begin(), source.end(), target.begin() + 1));
+  }
 }
 
 TEST_P(GpuNativeTransferTest, ManyFillsAndUnalignedCopiesRetireInPieces) {
