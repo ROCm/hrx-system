@@ -48,6 +48,16 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_dispatch_direct(
 uint32_t* iree_hal_amd_gpu_pm4_emit_dispatch_indirect(
     uint32_t* words, uint64_t dimensions_address, uint32_t initiator);
 
+// Emits four DWORDs entering a resident compute indirect buffer. The address
+// is DWORD aligned and word_count is in [1, 0xfffff]. A primary USER ring uses
+// chain=false to return after the IB. Within an IB, chain=true replaces the
+// current block and must be its final packet; compute does not support nested
+// IB calls. Storage and fetch visibility are established by the caller.
+uint32_t* iree_hal_amd_gpu_pm4_emit_indirect_buffer(uint32_t* words,
+                                                    uint64_t address,
+                                                    uint32_t word_count,
+                                                    bool chain);
+
 // Emits two DWORDs waiting for preceding compute shader work to complete.
 // This CS_PARTIAL_FLUSH establishes execution ordering, not cache visibility.
 uint32_t* iree_hal_amd_gpu_pm4_emit_compute_flush(uint32_t* words);

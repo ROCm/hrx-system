@@ -448,6 +448,45 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_test(
   NAME
+    program_test
+  SRCS
+    "program_test.cc"
+  DEPS
+    ::test_device
+    amdf::headers
+    iree::async
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::image
+    iree::hal::drivers::amd::gpu::queue::pm4::barrier
+    iree::hal::drivers::amd::gpu::queue::pm4::commands
+    iree::hal::drivers::amd::gpu::queue::pm4::fixup
+    iree::hal::drivers::amd::gpu::queue::pm4::kmq::storage
+    iree::hal::drivers::amd::gpu::queue::pm4::launch
+    iree::hal::drivers::amd::gpu::queue::pm4::program
+    iree::hal::drivers::amd::gpu::queue::pm4::queue
+    iree::hal::drivers::amd::gpu::queue::pm4::ring
+    iree::hal::drivers::amd::gpu::queue::pm4::umq::ring
+    iree::hal::drivers::amd::gpu::target::identity
+    iree::hal::drivers::amd::status
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
     profile_test
   SRCS
     "profile_test.cc"

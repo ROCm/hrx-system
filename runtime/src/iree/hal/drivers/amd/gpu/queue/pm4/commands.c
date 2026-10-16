@@ -50,6 +50,17 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_compute_flush(uint32_t* words) {
   return words + 2;
 }
 
+uint32_t* iree_hal_amd_gpu_pm4_emit_indirect_buffer(uint32_t* words,
+                                                    uint64_t address,
+                                                    uint32_t word_count,
+                                                    bool chain) {
+  words[0] = UINT32_C(0xc0023f00);
+  words[1] = (uint32_t)address;
+  words[2] = (uint32_t)(address >> 32);
+  words[3] = word_count | (1u << 23) | ((uint32_t)chain << 20);
+  return words + 4;
+}
+
 uint32_t* iree_hal_amd_gpu_pm4_emit_dma_flush(uint32_t* words) {
   words[0] = UINT32_C(0xc0055000);
   memset(words + 1, 0, 6 * sizeof(*words));

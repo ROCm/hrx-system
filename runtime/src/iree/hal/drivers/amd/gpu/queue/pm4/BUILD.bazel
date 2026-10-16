@@ -56,6 +56,19 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "fixup",
+    srcs = ["fixup.c"],
+    hdrs = ["fixup.h"],
+    deps = [
+        ":commands",
+        ":launch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "retirement",
     srcs = ["retirement.c"],
     hdrs = ["retirement.h"],
@@ -204,6 +217,44 @@ iree_c_embed_data(
     target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
 )
 
+[
+    loom_kernel_binary(
+        name = "fixup_program_" + target,
+        testonly = True,
+        srcs = ["fixup.loom"],
+        out = "fixup_program_" + target + ".hsaco",
+        target = ":dispatch_program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "fixup_programs",
+    testonly = True,
+    srcs = [":fixup_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "fixup_programs.c",
+    h_file_output = "fixup_programs.h",
+    identifier = "iree_hal_amd_gpu_pm4_fixup_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_test(
+    name = "fixup_test",
+    srcs = ["fixup_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    deps = [
+        ":fixup",
+        ":fixup_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "dispatch_program_test",
     srcs = ["dispatch_program_test.cc"],
@@ -238,6 +289,23 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu:executable",
         "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
         "//runtime/src/iree/hal/utils:resource_set",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = ["program.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":fixup",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory",
+        "//runtime/src/iree/hal/drivers/amd/gpu:context",
     ],
 )
 

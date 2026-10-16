@@ -1,0 +1,55 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Each lane writes one complete mutable DWORD. Immutable entries encode a
+// destination byte offset, a 24-bit value index and six-bit right shift, and a
+// 64-bit addend. No destination value is read: cloning an active instance may
+// copy arbitrary mutable bytes, all of which are overwritten before entry.
+kernel.def export("apply_fixups") @apply_fixups(%groups: index) {
+  %one = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%entries: buffer, %values: buffer, %target: buffer, %entry_count: i32) {
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = index.constant 64 : offset
+  %group_offset = index.scale %group, %width : index, offset -> offset
+  %group_begin = index.cast %group_offset : offset to index
+  %position = index.add %group_begin, %lane : index
+  %position_i32 = index.cast %position : index to i32
+  %active = scalar.cmpi ult, %position_i32, %entry_count : i32
+  scf.if %active {
+    %entry_size = index.constant 16 : offset
+    %entry_offset = index.scale %position, %entry_size : index, offset -> offset
+    %entry = buffer.view %entries[%entry_offset] : buffer -> view<4xi32>
+    %destination = view.load %entry[0] : view<4xi32> -> i32
+    %source = view.load %entry[1] : view<4xi32> -> i32
+    %low = view.load %entry[2] : view<4xi32> -> i32
+    %high = view.load %entry[3] : view<4xi32> -> i32
+    %index_mask = scalar.constant 16777215 : i32
+    %shift_position = scalar.constant 24 : i32
+    %source_index = scalar.andi %source, %index_mask : i32
+    %shift_i32 = scalar.shrui %source, %shift_position : i32
+    %shift = scalar.extui %shift_i32 : i32 to i64
+    %value_index = index.cast %source_index : i32 to index
+    %value_size = index.constant 8 : offset
+    %value_offset = index.scale %value_index, %value_size : index, offset -> offset
+    %value_view = buffer.view %values[%value_offset] : buffer -> view<1xi64>
+    %value = view.load %value_view[0] : view<1xi64> -> i64
+    %low_wide = scalar.extui %low : i32 to i64
+    %high_wide = scalar.extui %high : i32 to i64
+    %word_bits = scalar.constant 32 : i64
+    %high_shifted = scalar.shli %high_wide, %word_bits : i64
+    %addend = scalar.ori %low_wide, %high_shifted : i64
+    %sum = scalar.addi %value, %addend : i64
+    %shifted = scalar.shrui %sum, %shift : i64
+    %result = scalar.trunci %shifted : i64 to i32
+    %destination_offset = index.cast %destination : i32 to offset
+    %output = buffer.view %target[%destination_offset] : buffer -> view<1xi32, align(1)>
+    view.store %result, %output[0] : i32, view<1xi32, align(1)>
+  }
+  kernel.return
+}

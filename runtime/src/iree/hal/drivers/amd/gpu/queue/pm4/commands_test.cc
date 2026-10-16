@@ -97,6 +97,15 @@ TEST_F(CommandsTest, ExecutionAndVisibilityRemainSeparate) {
                0x0a, 0x0000c3a1});
 }
 
+TEST_F(CommandsTest, ResidentCallsAndTerminalChains) {
+  auto* end = iree_hal_amd_gpu_pm4_emit_indirect_buffer(
+      words(), UINT64_C(0x00001234fffffffc), 0xfffff, false);
+  end = iree_hal_amd_gpu_pm4_emit_indirect_buffer(
+      end, UINT64_C(0x0000567800000100), 1, true);
+  Expect(end, {0xc0023f00, 0xfffffffc, 0x00001234, 0x008fffff, 0xc0023f00,
+               0x00000100, 0x00005678, 0x00900001});
+}
+
 TEST_F(CommandsTest, AcquirePreservesTargetSpecificControls) {
   auto* end = iree_hal_amd_gpu_pm4_emit_acquire(words(), 0xc181);
   end = iree_hal_amd_gpu_pm4_emit_acquire(end, 0x1c1e1);
