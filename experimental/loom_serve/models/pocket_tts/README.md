@@ -26,7 +26,7 @@ the [cloning checkpoint](https://huggingface.co/kyutai/pocket-tts), run from the
 repository root:
 
 ```sh
-pocket_assets="$HOME/.cache/loom/models/pocket-tts/default"
+pocket_assets="$HOME/models/loom-prepared/pocket-tts/default"
 uv run --python 3.12 experimental/loom_serve/models/pocket_tts/prepare_assets.py \
   --output "$pocket_assets"
 
@@ -75,7 +75,7 @@ Supply one or more named reference files instead of the default set:
 
 ```sh
 uv run --python 3.12 experimental/loom_serve/models/pocket_tts/prepare_assets.py \
-  --output "$HOME/.cache/loom/models/pocket-tts/my-voices" \
+  --output "$HOME/models/loom-prepared/pocket-tts/my-voices" \
   --voice narrator=/path/to/reference.wav --voice alba
 ```
 
