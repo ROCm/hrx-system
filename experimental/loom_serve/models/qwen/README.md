@@ -72,8 +72,9 @@ the source policy formats and parses the model's XML tool-call protocol.
 This projector accepts upright 256×256 RGB images, up to four in the complete
 conversation, with at most 1 MiB of compressed data per image. Other dimensions,
 orientation transforms and alpha channels are rejected; the package does not
-resize or convert them implicitly. PNG, JPEG and WebP availability follows the
-server's enabled codecs.
+resize or convert them implicitly. PAM input is built in; PNG, JPEG, GIF and
+WebP availability follows the server's enabled codecs. Projection consumes the
+decoded RGB pixels independently of their original container format.
 
 For an RGB PNG named `image.png`, send an ordinary OpenAI-style image part:
 

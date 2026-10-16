@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import zlib
 from pathlib import Path
 
 CHECKER = Path(sys.argv.pop(1)).resolve()
@@ -121,22 +120,13 @@ class RequestCheckTest(unittest.TestCase):
         return value
 
     def image(self, color):
-        def chunk(kind, payload):
-            data = kind + payload
-            return (
-                struct.pack(">I", len(payload))
-                + data
-                + struct.pack(">I", zlib.crc32(data))
-            )
-
-        pixels = (b"\x00" + bytes(color) * 256) * 256
-        png = (
-            b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", 256, 256, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(pixels))
-            + chunk(b"IEND", b"")
+        pam = (
+            b"P7\nWIDTH 256\nHEIGHT 256\nDEPTH 3\nMAXVAL 255\n"
+            b"TUPLTYPE RGB\nENDHDR\n" + bytes(color) * (256 * 256)
         )
-        url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        url = "data:image/x-portable-arbitrarymap;base64," + base64.b64encode(
+            pam
+        ).decode("ascii")
         return {"type": "image_url", "image_url": {"url": url}}
 
     def request(self, model="qwen3.8-27b", **options):
