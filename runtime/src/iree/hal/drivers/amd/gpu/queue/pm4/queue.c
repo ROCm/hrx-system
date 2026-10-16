@@ -11,13 +11,13 @@
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/continuation.h"
+#include "iree/hal/drivers/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_call.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/backing.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
-#include "iree/hal/drivers/amd/gpu/queue/pm4/file_transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/kmq/storage.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/retirement.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/submission.h"
@@ -91,7 +91,7 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   // Persistent services borrowed by host calls and mappings.
   iree_hal_amd_gpu_host_call_executor_t host_executor;
   // Persistent services borrowed by file transfers.
-  iree_hal_amd_gpu_pm4_file_executor_t file_executor;
+  iree_hal_amd_gpu_file_executor_t file_executor;
   // Group-assigned completed progress; immutable after the first submission.
   struct {
     // Retained tracker, or NULL before group construction.
@@ -181,8 +181,7 @@ static const iree_hal_queue_vtable_t iree_hal_amd_gpu_pm4_queue_vtable;
 
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
     iree_hal_queue_t* base, const iree_hal_transfer_operation_t* operation,
-    iree_hal_semaphore_list_t signals, iree_hal_amd_gpu_pm4_barrier_t before,
-    iree_hal_amd_gpu_pm4_barrier_t after);
+    iree_hal_semaphore_list_t signals, const void* before, const void* after);
 
 void iree_hal_amd_gpu_pm4_queue_set_profile(
     iree_hal_queue_t* base, iree_hal_amd_gpu_profile_t* profile) {
@@ -1935,13 +1934,14 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .service = options->service,
       .captures = &queue->captures,
       .barrier = iree_hal_amd_gpu_pm4_host_barrier};
-  queue->file_executor = (iree_hal_amd_gpu_pm4_file_executor_t){
+  queue->file_executor = (iree_hal_amd_gpu_file_executor_t){
       .queue = &queue->base,
       .context = context,
       .service = options->service,
       .captures = &queue->captures,
       .waits = &queue->wait_context,
       .queue_ordinal = options->queue_ordinal,
+      .barrier_size = sizeof(iree_hal_amd_gpu_pm4_barrier_t),
       .submit = iree_hal_amd_gpu_pm4_file_submit};
   queue->issued = (iree_hal_amd_gpu_pm4_retirement_t*)(queue + 1);
   queue->producer.frontier.count = queue_count;
@@ -2148,8 +2148,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_transfer(
 // Reuse ordinary bounded transfer publication without another HAL replay layer.
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
     iree_hal_queue_t* base, const iree_hal_transfer_operation_t* operation,
-    iree_hal_semaphore_list_t signals, iree_hal_amd_gpu_pm4_barrier_t before,
-    iree_hal_amd_gpu_pm4_barrier_t after) {
+    iree_hal_semaphore_list_t signals, const void* before, const void* after) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
   const iree_hal_barrier_list_t empty = {0};
@@ -2159,8 +2158,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
       &queue->captures, false, base->queue_family,
       iree_hal_semaphore_list_empty(), signals, operation ? 1 : 0, operation,
       &queue->options.barriers, &barriers, &submission));
-  submission->before = before;
-  submission->after = after;
+  if (before) {
+    submission->before = *(const iree_hal_amd_gpu_pm4_barrier_t*)before;
+  }
+  if (after) {
+    submission->after = *(const iree_hal_amd_gpu_pm4_barrier_t*)after;
+  }
   iree_hal_amd_gpu_pm4_submit(queue, submission);
   return iree_ok_status();
 }
@@ -2173,13 +2176,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_read(
     const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
-  return iree_hal_amd_gpu_pm4_file_transfer_submit(
+  const iree_hal_amd_gpu_pm4_barrier_t before =
+      iree_hal_amd_gpu_pm4_barrier_prepare(&queue->options.barriers,
+                                           barriers ? barriers->before : NULL);
+  const iree_hal_amd_gpu_pm4_barrier_t after =
+      iree_hal_amd_gpu_pm4_barrier_prepare(&queue->options.barriers,
+                                           barriers ? barriers->after : NULL);
+  return iree_hal_amd_gpu_file_transfer_submit(
       &queue->file_executor, waits, signals, source,
       IREE_HAL_MEMORY_ACCESS_READ, source_offset, target, target_offset, length,
-      iree_hal_amd_gpu_pm4_barrier_prepare(&queue->options.barriers,
-                                           barriers ? barriers->before : NULL),
-      iree_hal_amd_gpu_pm4_barrier_prepare(&queue->options.barriers,
-                                           barriers ? barriers->after : NULL));
+      &before, &after);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_queue_write(
@@ -2190,14 +2196,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_write(
     const iree_hal_queue_barriers_t* barriers, iree_hal_write_flags_t flags) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
-  return iree_hal_amd_gpu_pm4_file_transfer_submit(
+  const iree_hal_amd_gpu_pm4_barrier_t before =
+      iree_hal_amd_gpu_pm4_barrier_prepare(&queue->options.barriers,
+                                           barriers ? barriers->before : NULL);
+  const iree_hal_amd_gpu_pm4_barrier_t after =
+      iree_hal_amd_gpu_pm4_barrier_prepare(&queue->options.barriers,
+                                           barriers ? barriers->after : NULL);
+  return iree_hal_amd_gpu_file_transfer_submit(
       &queue->file_executor, waits, signals, target,
       IREE_HAL_MEMORY_ACCESS_WRITE, target_offset, source, source_offset,
-      length,
-      iree_hal_amd_gpu_pm4_barrier_prepare(&queue->options.barriers,
-                                           barriers ? barriers->before : NULL),
-      iree_hal_amd_gpu_pm4_barrier_prepare(&queue->options.barriers,
-                                           barriers ? barriers->after : NULL));
+      length, &before, &after);
 }
 
 static const iree_hal_queue_vtable_t iree_hal_amd_gpu_pm4_queue_vtable = {

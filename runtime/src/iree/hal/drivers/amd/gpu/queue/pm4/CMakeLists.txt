@@ -110,30 +110,6 @@ iree_cc_library(
   PUBLIC
 )
 
-if(AMDF_BUILD)
-iree_cc_library(
-  NAME
-    file_transfer
-  HDRS
-    "file_transfer.h"
-  SRCS
-    "file_transfer.c"
-  DEPS
-    ::barrier
-    iree::async
-    iree::async::util::semaphore_wait
-    iree::base
-    iree::hal
-    iree::hal::drivers::amd::fabric::file_transfer
-    iree::hal::drivers::amd::gpu::context
-    iree::hal::drivers::amd::gpu::profile
-    iree::hal::drivers::amd::gpu::queue::capture_pool
-    iree::hal::drivers::amd::gpu::queue::host_wait
-    iree::hal::memory::maintenance
-  PUBLIC
-)
-endif()
-
 iree_cc_library(
   NAME
     dispatch
@@ -951,7 +927,6 @@ iree_cc_library(
     ::command_buffer
     ::commands
     ::dispatch
-    ::file_transfer
     ::launch
     ::program
     ::retirement
@@ -977,6 +952,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::allocation
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::continuation
+    iree::hal::drivers::amd::gpu::queue::file_transfer
     iree::hal::drivers::amd::gpu::queue::host_call
     iree::hal::drivers::amd::gpu::queue::host_wait
     iree::hal::drivers::amd::gpu::queue::pm4::kmq::storage

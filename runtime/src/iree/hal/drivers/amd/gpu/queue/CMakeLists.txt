@@ -32,6 +32,29 @@ iree_cc_library(
 )
 endif()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    file_transfer
+  HDRS
+    "file_transfer.h"
+  SRCS
+    "file_transfer.c"
+  DEPS
+    ::capture_pool
+    ::host_wait
+    iree::async
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::fabric::file_transfer
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::profile
+    iree::hal::memory::maintenance
+  PUBLIC
+)
+endif()
+
 iree_cc_library(
   NAME
     host_call
