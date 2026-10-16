@@ -10,6 +10,7 @@
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/generator.h"
+#include "loom/serve/service/speech/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,16 +28,26 @@ typedef struct loom_serve_speech_service_options_t {
 typedef struct loom_serve_speech_service_t loom_serve_speech_service_t;
 
 // Allocates a bounded streaming service without accepting asynchronous work.
-// Explicit response_format=pcm emits 24 kHz mono PCM16; generators of other
-// waveform geometry reject at registration. The source/model ABI itself carries
-// arbitrary rate/channels independently of this wire format. Source CPU work
-// shares the host executor; device completion uses its proactor. A non-NULL
-// telemetry stream remains borrowed through retirement.
+// Native streams preserve the source's F32 waveform geometry. The HTTP PCM
+// consumer requires 24 kHz mono output and rejects other geometry before audio.
+// Source CPU work shares the host executor; device completion uses its
+// proactor. A non-NULL telemetry stream remains borrowed through retirement.
 iree_status_t loom_serve_speech_service_allocate(
     loom_serve_host_t* host, loom_serve_speech_generator_t generator,
     const loom_serve_speech_service_options_t* options,
     loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_speech_service_t** out_service);
+
+// Opens a native output stream in the same bounded queue and compatible cohorts
+// as HTTP requests. request must be initialized; successful acceptance moves it
+// into the service and clears the caller's value. Success with NULL is normal
+// queue pressure and leaves request unchanged. Failure leaves request
+// unchanged. Calls are serialized on the serving owner. The caller closes the
+// returned handle independently of model retirement, including after terminal
+// failure.
+iree_status_t loom_serve_speech_service_try_open(
+    loom_serve_speech_service_t* service, loom_serve_speech_request_t* request,
+    loom_serve_speech_stream_t** out_stream);
 
 // POST /v1/audio/speech owns one bounded encoded block per resident request,
 // outside copied carrier sends. Each request's credit independently determines

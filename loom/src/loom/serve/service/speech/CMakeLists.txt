@@ -60,6 +60,37 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    consumer
+  HDRS
+    "consumer.h"
+  DEPS
+    ::generator
+    iree::base
+    loom::serve::telemetry::record
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    stream
+  HDRS
+    "stream.h"
+  SRCS
+    "stream.c"
+  DEPS
+    ::consumer
+    ::generator
+    iree::base
+    loom::serve::telemetry::record
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     model
   HDRS
     "model.h"
@@ -108,6 +139,7 @@ loom_cc_library(
     ::model
     ::request
     ::service
+    ::stream
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -129,6 +161,7 @@ loom_cc_library(
     loom::serve::testing::package
     loom::serve::testing::service_application
     loom::serve::testing::stalled_http_client
+    loom::serve::testing::worker_gate
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   TESTONLY
@@ -170,15 +203,38 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    http
+  HDRS
+    "http.h"
+  SRCS
+    "http.c"
+  DEPS
+    ::consumer
+    ::generator
+    ::output
+    iree::base
+    loom::serve::telemetry::record
+    loom::serve::transport::http::server
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     service
   HDRS
     "service.h"
   SRCS
     "service.c"
   DEPS
+    ::consumer
     ::generator
-    ::output
+    ::http
     ::request
+    ::stream
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -195,8 +251,6 @@ loom_cc_library(
     loom::serve::telemetry::stream
     loom::serve::transport::http::request
     loom::serve::transport::http::server
-    loom::util::json
-    loom::util::stream
   PUBLIC
 )
 endif()

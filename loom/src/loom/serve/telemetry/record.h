@@ -18,7 +18,7 @@ extern "C" {
 typedef struct loom_serve_telemetry_counters_t {
   // Requests reaching this model's protocol, including immediate rejections.
   uint64_t requests;
-  // Successful responses copied into the HTTP carrier.
+  // Successful responses published to their native or transport consumer.
   uint64_t completed;
   // Requests rejected by protocol, source validation or capacity admission.
   uint64_t rejected;
