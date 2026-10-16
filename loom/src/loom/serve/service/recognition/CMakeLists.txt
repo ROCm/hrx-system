@@ -86,6 +86,7 @@ loom_cc_library(
     loom::serve::runtime::host
     loom::serve::testing::http_harness
     loom::serve::testing::service_application
+    loom::serve::testing::worker_gate
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   DEFINES
