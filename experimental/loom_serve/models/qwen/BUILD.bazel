@@ -169,8 +169,8 @@ loom_test(
 )
 
 loom_test(
-    name = "vision_execution_test",
-    srcs = ["tests/vision_projector.loom"],
+    name = "vision_square_test",
+    srcs = ["tests/vision_projector/square.loom"],
     benchmark_smoke = False,
     configs = {
         "qwen38.vision.image_height": "256",
@@ -181,6 +181,61 @@ loom_test(
         AMDGPU_ACCESS_PROFILE,
     ],
     deps = [":vision_kernels"],
+)
+
+loom_test(
+    name = "vision_minimum_test",
+    srcs = ["tests/vision_projector/minimum.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "qwen38.vision.image_height": "32",
+        "qwen38.vision.image_width": "32",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":vision_kernels"],
+)
+
+loom_test(
+    name = "vision_landscape_test",
+    srcs = ["tests/vision_projector/rectangle.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "qwen38.vision.image_height": "224",
+        "qwen38.vision.image_width": "320",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":vision_kernels"],
+)
+
+loom_test(
+    name = "vision_portrait_test",
+    srcs = ["tests/vision_projector/rectangle.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "qwen38.vision.image_height": "320",
+        "qwen38.vision.image_width": "224",
+    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":vision_kernels"],
+)
+
+test_suite(
+    name = "vision_execution_test",
+    tests = [
+        ":vision_landscape_test",
+        ":vision_minimum_test",
+        ":vision_portrait_test",
+        ":vision_square_test",
+    ],
 )
 
 loom_test(
