@@ -154,6 +154,22 @@ bool loom_vector_packet_shape_from_type(
   return true;
 }
 
+bool loom_vector_packet_shape_has_source_carriers(
+    const loom_target_legalization_context_t* context, loom_type_t vector_type,
+    const loom_vector_packet_shape_t* shape) {
+  if (!loom_target_legalization_has_source_vector_carrier(
+          context,
+          loom_vector_packet_type(vector_type, shape->chunk_lane_count),
+          LOOM_VALUE_ID_INVALID)) {
+    return false;
+  }
+  const uint32_t tail_lane_count = shape->lane_count % shape->chunk_lane_count;
+  return tail_lane_count == 0 ||
+         loom_target_legalization_has_source_vector_carrier(
+             context, loom_vector_packet_type(vector_type, tail_lane_count),
+             LOOM_VALUE_ID_INVALID);
+}
+
 static iree_status_t loom_vector_packet_component_query(
     loom_target_legalization_context_t* context, const loom_op_t* op,
     uint32_t source_lane_count, uint32_t packet_lane_count,

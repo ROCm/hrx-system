@@ -1049,6 +1049,20 @@ static iree_status_t loom_vector_legalize_from_elements(
   if (loom_type_rank(result_type) != 1) {
     return iree_ok_status();
   }
+  // Linear construction must terminate in native vectors or native packets.
+  // Otherwise partition insertion reconstructs this logical constructor and
+  // creates a rewrite cycle. Retain it for consumer projection or diagnostics.
+  if (!loom_target_legalization_has_source_vector_carrier(
+          context, result_type, loom_vector_from_elements_result(op))) {
+    loom_vector_packet_shape_t shape = {0};
+    if (context->vector_packet_policy == NULL ||
+        !loom_vector_packet_shape_from_type(
+            context, context->vector_packet_policy, result_type, &shape) ||
+        !loom_vector_packet_shape_has_source_carriers(context, result_type,
+                                                      &shape)) {
+      return iree_ok_status();
+    }
+  }
 
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(loom_vector_from_elements_linearize_rewrite_op(

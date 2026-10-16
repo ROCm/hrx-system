@@ -245,21 +245,10 @@ iree_status_t loom_vector_packet_legalize_insert(
     return iree_ok_status();
   }
 
-  bool geometric_packets_supported = true;
-  for (uint32_t lane_offset = 0; lane_offset < shape.lane_count;
-       lane_offset += shape.chunk_lane_count) {
-    const uint32_t packet_lane_count =
-        iree_min(shape.lane_count - lane_offset, shape.chunk_lane_count);
-    if (!loom_target_legalization_has_source_vector_carrier(
-            context, loom_vector_packet_type(result_type, packet_lane_count),
-            LOOM_VALUE_ID_INVALID)) {
-      geometric_packets_supported = false;
-      break;
-    }
-  }
   const uint32_t static_index =
       has_static_index ? (uint32_t)static_indices.i64_array[0] : 0u;
-  if (!geometric_packets_supported) {
+  if (!loom_vector_packet_shape_has_source_carriers(context, result_type,
+                                                    &shape)) {
     const loom_value_fact_vector_partition_t partition =
         loom_value_fact_table_query_vector_partition(context->fact_table, dest);
     return loom_vector_packet_legalize_partition_insert(

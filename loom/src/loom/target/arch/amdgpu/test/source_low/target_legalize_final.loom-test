@@ -115,3 +115,78 @@ func.def target(@target) @hadamard_transform(%input: vector<4xf32>) -> (vector<4
   %result = vector.transform %input, %transform : vector<4xf32>, encoding<transform> -> vector<4xf32>
   func.return %result : vector<4xf32>
 }
+
+// ====
+// RUN: pass target-legalize{mode=eager},target-legalize{mode=eager}
+
+// Address aggregates have no ordinary AMDGPU vector carrier. Their exact
+// scalar partition survives legalization for projections or a final target
+// diagnostic; it must not cycle between constructors and insertions.
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @logical_address_construction(%a: offset, %b: offset, %c: offset, %replacement: offset) -> (vector<3xoffset>) {
+  %values = vector.from_elements %a, %b, %c : vector<3xoffset>
+  %result = vector.insert %replacement into %values[1] : offset, vector<3xoffset>
+  func.return %result : vector<3xoffset>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @logical_address_construction(%a: offset, %b: offset, %c: offset, %replacement: offset) -> (vector<3xoffset>) {
+  %result = vector.from_elements %a, %replacement, %c : vector<3xoffset>
+  func.return %result : vector<3xoffset>
+}
+
+// ====
+// RUN: pass target-legalize{mode=final},target-legalize{mode=final}
+
+// Native construction still reaches the target's ordinary register vector.
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @native_integer_construction(%a: i32, %b: i32, %replacement: i32) -> (vector<2xi32>) {
+  %values = vector.from_elements %a, %b : vector<2xi32>
+  %result = vector.insert %replacement into %values[1] : i32, vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @native_integer_construction(%a: i32, %b: i32, %replacement: i32) -> (vector<2xi32>) {
+  %values = vector.from_elements %a, %b : vector<2xi32>
+  %result = vector.insert %replacement into %values[1] : i32, vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
+
+// A live non-native aggregate reaches precise target diagnostics instead of
+// repeatedly reconstructing itself while legalizing the subgroup operand.
+kernel.def @rejected_address_payload() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32x3xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<32x3xi64>
+  %left = view.load %source[%lane, 0] : view<32x3xi32> -> i32
+  %middle = view.load %source[%lane, 1] : view<32x3xi32> -> i32
+  %right = view.load %source[%lane, 2] : view<32x3xi32> -> i32
+  %a = index.cast %left : i32 to offset
+  %b = index.cast %middle : i32 to offset
+  %c = index.cast %right : i32 to offset
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="vector<3xoffset>"}
+  %values = vector.from_elements %a, %b, %c : vector<3xoffset>
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast_first.payload"}
+  %first = kernel.subgroup.broadcast.first %values : vector<3xoffset>
+  // ERROR@+3: TARGET/002 {field_name="source", actual_type="vector<3xoffset>"}
+  // ERROR@+2: TARGET/002 {field_name="source", actual_type="vector<3xoffset>"}
+  // ERROR@+1: TARGET/002 {field_name="source", actual_type="vector<3xoffset>"}
+  %bits = vector.index_cast %first : vector<3xoffset> to vector<3xi64>
+  vector.store %bits, %destination[%lane, 0] : vector<3xi64>, view<32x3xi64>
+  kernel.return
+}
