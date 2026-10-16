@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/spirv/cooperative_properties.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
@@ -120,14 +121,20 @@ bool loom_spirv_component_type_from_numeric_format(
 
 iree_string_view_t loom_spirv_scope_name(loom_spirv_scope_t scope) {
   switch (scope) {
+    case LOOM_SPIRV_SCOPE_CROSS_DEVICE:
+      return IREE_SV("cross_device");
     case LOOM_SPIRV_SCOPE_DEVICE:
       return IREE_SV("device");
     case LOOM_SPIRV_SCOPE_WORKGROUP:
       return IREE_SV("workgroup");
     case LOOM_SPIRV_SCOPE_SUBGROUP:
       return IREE_SV("subgroup");
+    case LOOM_SPIRV_SCOPE_INVOCATION:
+      return IREE_SV("invocation");
     case LOOM_SPIRV_SCOPE_QUEUE_FAMILY:
       return IREE_SV("queue_family");
+    case LOOM_SPIRV_SCOPE_SHADER_CALL_KHR:
+      return IREE_SV("shader_call");
     case LOOM_SPIRV_SCOPE_MAX:
     default:
       return IREE_SV("unknown");
@@ -287,6 +294,8 @@ void loom_spirv_cooperative_property_set_prepare(
       .matrix_property_count = IREE_ARRAYSIZE(kCooperativeMatrixProperties),
       .matrix_shape_spans = kCooperativeMatrixShapeSpans,
       .matrix_shape_span_count = IREE_ARRAYSIZE(kCooperativeMatrixShapeSpans),
+      .matrix_type_shapes = kCooperativeMatrixTypeShapes,
+      .matrix_type_shape_count = IREE_ARRAYSIZE(kCooperativeMatrixTypeShapes),
       .vector_properties = kCooperativeVectorProperties,
       .vector_property_count = IREE_ARRAYSIZE(kCooperativeVectorProperties),
       .vector_shape_spans = kCooperativeVectorShapeSpans,
@@ -430,6 +439,94 @@ static iree_status_t loom_spirv_cooperative_property_storage_build_matrix_spans(
   return iree_ok_status();
 }
 
+// Vulkan integer component properties match OpTypeInt with either signedness.
+// Multiply-add interpretation is separately constrained by its operand flags.
+static loom_spirv_scalar_type_t loom_spirv_cooperative_matrix_component_type(
+    loom_spirv_scalar_type_t type) {
+  switch (type) {
+    case LOOM_SPIRV_SCALAR_TYPE_U8:
+      return LOOM_SPIRV_SCALAR_TYPE_S8;
+    case LOOM_SPIRV_SCALAR_TYPE_U16:
+      return LOOM_SPIRV_SCALAR_TYPE_S16;
+    case LOOM_SPIRV_SCALAR_TYPE_U32:
+      return LOOM_SPIRV_SCALAR_TYPE_S32;
+    case LOOM_SPIRV_SCALAR_TYPE_U64:
+      return LOOM_SPIRV_SCALAR_TYPE_S64;
+    default:
+      return type;
+  }
+}
+
+static int loom_spirv_cooperative_matrix_type_shape_compare(const void* lhs,
+                                                            const void* rhs) {
+  const uint64_t lhs_key =
+      ((const loom_spirv_cooperative_matrix_type_shape_t*)lhs)->shape_key;
+  const uint64_t rhs_key =
+      ((const loom_spirv_cooperative_matrix_type_shape_t*)rhs)->shape_key;
+  return (lhs_key > rhs_key) - (lhs_key < rhs_key);
+}
+
+static iree_status_t loom_spirv_cooperative_property_storage_build_matrix_types(
+    iree_allocator_t allocator,
+    loom_spirv_cooperative_property_storage_t* storage) {
+  const uint32_t shape_count = 3u * storage->set.matrix_property_count;
+  if (shape_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      allocator, shape_count * sizeof(*storage->matrix_type_shapes),
+      (void**)&storage->matrix_type_shapes));
+  loom_spirv_cooperative_matrix_type_shape_t* shapes =
+      storage->matrix_type_shapes;
+  for (uint32_t i = 0; i < storage->set.matrix_property_count; ++i) {
+    const loom_spirv_cooperative_matrix_property_t* row =
+        &storage->matrix_properties[i];
+    shapes[3 * i] = (loom_spirv_cooperative_matrix_type_shape_t){
+        .shape_key = loom_spirv_cooperative_matrix_type_shape_key(
+            row->m_size, row->k_size, row->scope),
+        .component_types = {1u << loom_spirv_cooperative_matrix_component_type(
+                                row->lhs_type),
+                            0, 0},
+    };
+    shapes[3 * i + 1] = (loom_spirv_cooperative_matrix_type_shape_t){
+        .shape_key = loom_spirv_cooperative_matrix_type_shape_key(
+            row->k_size, row->n_size, row->scope),
+        .component_types = {0,
+                            1u << loom_spirv_cooperative_matrix_component_type(
+                                row->rhs_type),
+                            0},
+    };
+    shapes[3 * i + 2] = (loom_spirv_cooperative_matrix_type_shape_t){
+        .shape_key = loom_spirv_cooperative_matrix_type_shape_key(
+            row->m_size, row->n_size, row->scope),
+        .component_types =
+            {0, 0,
+             (1u << loom_spirv_cooperative_matrix_component_type(
+                  row->accumulator_type)) |
+                 (1u << loom_spirv_cooperative_matrix_component_type(
+                      row->result_type))},
+    };
+  }
+  qsort(shapes, shape_count, sizeof(*shapes),
+        loom_spirv_cooperative_matrix_type_shape_compare);
+  uint32_t unique_count = 0;
+  for (uint32_t i = 0; i < shape_count; ++i) {
+    if (unique_count == 0 ||
+        shapes[i].shape_key != shapes[unique_count - 1].shape_key) {
+      shapes[unique_count++] = shapes[i];
+    } else {
+      for (uint32_t use = 0; use < IREE_ARRAYSIZE(shapes[i].component_types);
+           ++use) {
+        shapes[unique_count - 1].component_types[use] |=
+            shapes[i].component_types[use];
+      }
+    }
+  }
+  storage->set.matrix_type_shapes = shapes;
+  storage->set.matrix_type_shape_count = unique_count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_spirv_cooperative_property_storage_build_vector_spans(
     iree_host_size_t vector_property_count, iree_allocator_t allocator,
     loom_spirv_cooperative_property_storage_t* storage) {
@@ -502,6 +599,10 @@ iree_status_t loom_spirv_cooperative_property_storage_initialize(
         matrix_property_count, allocator, out_storage);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_spirv_cooperative_property_storage_build_matrix_types(
+        allocator, out_storage);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_spirv_cooperative_property_storage_build_vector_spans(
         vector_property_count, allocator, out_storage);
   }
@@ -521,8 +622,43 @@ void loom_spirv_cooperative_property_storage_deinitialize(
   iree_allocator_free(allocator, storage->vector_shape_spans);
   iree_allocator_free(allocator, storage->vector_properties);
   iree_allocator_free(allocator, storage->matrix_shape_spans);
+  iree_allocator_free(allocator, storage->matrix_type_shapes);
   iree_allocator_free(allocator, storage->matrix_properties);
   *storage = (loom_spirv_cooperative_property_storage_t){0};
+}
+
+bool loom_spirv_cooperative_matrix_type_is_supported(
+    const loom_spirv_cooperative_property_set_t* property_set, uint16_t rows,
+    uint16_t columns, loom_spirv_scalar_type_t component_type,
+    loom_spirv_scope_t scope, loom_spirv_cooperative_matrix_use_t use) {
+  loom_spirv_feature_bits_t required_features =
+      LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR |
+      loom_spirv_scalar_type_descriptor(component_type)->required_feature_bits;
+  if (component_type == LOOM_SPIRV_SCALAR_TYPE_BF16) {
+    required_features |= LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR;
+  }
+  if (!iree_all_bits_set(property_set->feature_bits, required_features)) {
+    return false;
+  }
+  const uint64_t shape_key =
+      loom_spirv_cooperative_matrix_type_shape_key(rows, columns, scope);
+  uint32_t begin = 0;
+  uint32_t end = property_set->matrix_type_shape_count;
+  while (begin < end) {
+    const uint32_t middle = begin + (end - begin) / 2;
+    const loom_spirv_cooperative_matrix_type_shape_t* shape =
+        &property_set->matrix_type_shapes[middle];
+    if (shape->shape_key < shape_key) {
+      begin = middle + 1;
+    } else if (shape->shape_key > shape_key) {
+      end = middle;
+    } else {
+      return (shape->component_types[use] &
+              (1u << loom_spirv_cooperative_matrix_component_type(
+                   component_type))) != 0;
+    }
+  }
+  return false;
 }
 
 static loom_spirv_cooperative_matrix_layout_flags_t

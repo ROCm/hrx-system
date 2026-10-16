@@ -48,6 +48,7 @@ static iree_status_t loom_spirv_target_profile_copy_cooperative_properties(
       .feature_bits = source->feature_bits,
       .matrix_property_count = source->matrix_property_count,
       .matrix_shape_span_count = source->matrix_shape_span_count,
+      .matrix_type_shape_count = source->matrix_type_shape_count,
       .vector_property_count = source->vector_property_count,
       .vector_shape_span_count = source->vector_shape_span_count,
   };
@@ -60,6 +61,10 @@ static iree_status_t loom_spirv_target_profile_copy_cooperative_properties(
       arena, source->matrix_shape_spans,
       source->matrix_shape_span_count * sizeof(*source->matrix_shape_spans),
       (void**)&out_properties->matrix_shape_spans));
+  IREE_RETURN_IF_ERROR(loom_spirv_target_profile_allocate_copy(
+      arena, source->matrix_type_shapes,
+      source->matrix_type_shape_count * sizeof(*source->matrix_type_shapes),
+      (void**)&out_properties->matrix_type_shapes));
   IREE_RETURN_IF_ERROR(loom_spirv_target_profile_allocate_copy(
       arena, source->vector_properties,
       source->vector_property_count * sizeof(*source->vector_properties),

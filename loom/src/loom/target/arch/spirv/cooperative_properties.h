@@ -204,6 +204,25 @@ typedef struct loom_spirv_cooperative_property_span_t {
   uint16_t count;
 } loom_spirv_cooperative_property_span_t;
 
+// Independent native types admitted by the matrix properties. A type may be
+// used without a multiply-add, and conversion endpoints may come from different
+// multiply-add rows. Accumulator types include both C and result components.
+typedef struct loom_spirv_cooperative_matrix_type_shape_t {
+  // Packed (rows, columns, scope), ordered by the type-shape key below.
+  uint64_t shape_key;
+  // Scalar-type bits indexed by CooperativeMatrixUse: A, B, accumulator.
+  // Integer types use the signed scalar bit; either SPIR-V sign is admitted.
+  uint16_t component_types[3];
+} loom_spirv_cooperative_matrix_type_shape_t;
+
+static_assert(sizeof(loom_spirv_cooperative_matrix_type_shape_t) == 16,
+              "cooperative matrix type shapes must remain compact");
+
+static inline uint64_t loom_spirv_cooperative_matrix_type_shape_key(
+    uint16_t rows, uint16_t columns, loom_spirv_scope_t scope) {
+  return ((uint64_t)rows << 48) | ((uint64_t)columns << 32) | (uint32_t)scope;
+}
+
 typedef struct loom_spirv_cooperative_property_set_t {
   // Feature bits selected by the prepared SPIR-V target profile.
   loom_spirv_feature_bits_t feature_bits;
@@ -215,6 +234,10 @@ typedef struct loom_spirv_cooperative_property_set_t {
   const loom_spirv_cooperative_property_span_t* matrix_shape_spans;
   // Number of entries in |matrix_shape_spans|.
   uint16_t matrix_shape_span_count;
+  // Independent matrix types, sorted by (rows, columns, scope).
+  const loom_spirv_cooperative_matrix_type_shape_t* matrix_type_shapes;
+  // Number of entries in |matrix_type_shapes|, at most three per property row.
+  uint32_t matrix_type_shape_count;
   // Cooperative vector property rows sorted by shape key.
   const loom_spirv_cooperative_vector_property_t* vector_properties;
   // Number of entries in |vector_properties|.
@@ -232,6 +255,8 @@ typedef struct loom_spirv_cooperative_property_storage_t {
   loom_spirv_cooperative_matrix_property_t* matrix_properties;
   // Matrix shape-key spans owned by this storage object.
   loom_spirv_cooperative_property_span_t* matrix_shape_spans;
+  // Independent matrix type index owned by this storage object.
+  loom_spirv_cooperative_matrix_type_shape_t* matrix_type_shapes;
   // Vector property rows owned by this storage object.
   loom_spirv_cooperative_vector_property_t* vector_properties;
   // Vector shape-key spans owned by this storage object.
@@ -374,6 +399,13 @@ iree_status_t loom_spirv_cooperative_property_storage_initialize(
 void loom_spirv_cooperative_property_storage_deinitialize(
     loom_spirv_cooperative_property_storage_t* storage,
     iree_allocator_t allocator);
+
+// Tests an exact native matrix type against the retained property index and
+// enabled component capabilities. Inputs are verified SPIR-V type operands.
+bool loom_spirv_cooperative_matrix_type_is_supported(
+    const loom_spirv_cooperative_property_set_t* property_set, uint16_t rows,
+    uint16_t columns, loom_spirv_scalar_type_t component_type,
+    loom_spirv_scope_t scope, loom_spirv_cooperative_matrix_use_t use);
 
 // Selects a cooperative matrix property row for |query|. |out_diagnostic| may
 // be NULL when the caller only needs the selected row.

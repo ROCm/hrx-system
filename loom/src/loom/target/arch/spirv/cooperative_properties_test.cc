@@ -9,6 +9,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
+#include "loom/target/arch/spirv/scalar_types.h"
 
 namespace {
 
@@ -247,6 +248,195 @@ TEST(SpirvCooperativePropertiesTest, PreparesSelectedPropertyTables) {
   EXPECT_GT(property_set.matrix_shape_span_count, 0u);
   EXPECT_GT(property_set.vector_property_count, 0u);
   EXPECT_GT(property_set.vector_shape_span_count, 0u);
+}
+
+bool ComponentTypesMatch(loom_spirv_scalar_type_t lhs,
+                         loom_spirv_scalar_type_t rhs) {
+  const auto* lhs_descriptor = loom_spirv_scalar_type_descriptor(lhs);
+  const auto* rhs_descriptor = loom_spirv_scalar_type_descriptor(rhs);
+  if (lhs_descriptor->kind == LOOM_SPIRV_SCALAR_TYPE_KIND_FLOAT ||
+      rhs_descriptor->kind == LOOM_SPIRV_SCALAR_TYPE_KIND_FLOAT) {
+    return lhs == rhs;
+  }
+  return lhs_descriptor->bit_width == rhs_descriptor->bit_width;
+}
+
+// Independent Vulkan property matching oracle: each matrix type matches one
+// operand of an advertised property, with C and D both admitting accumulators.
+bool PropertyRowsAdmitType(
+    const loom_spirv_cooperative_property_set_t& properties, uint16_t rows,
+    uint16_t columns, loom_spirv_scalar_type_t component_type,
+    loom_spirv_scope_t scope, loom_spirv_cooperative_matrix_use_t use) {
+  for (uint32_t i = 0; i < properties.matrix_property_count; ++i) {
+    const auto& row = properties.matrix_properties[i];
+    if (row.scope != scope) {
+      continue;
+    }
+    switch (use) {
+      case LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_AKHR:
+        if (row.m_size == rows && row.k_size == columns &&
+            ComponentTypesMatch(row.lhs_type, component_type)) {
+          return true;
+        }
+        break;
+      case LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_BKHR:
+        if (row.k_size == rows && row.n_size == columns &&
+            ComponentTypesMatch(row.rhs_type, component_type)) {
+          return true;
+        }
+        break;
+      case LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_ACCUMULATOR_KHR:
+        if (row.m_size == rows && row.n_size == columns &&
+            (ComponentTypesMatch(row.accumulator_type, component_type) ||
+             ComponentTypesMatch(row.result_type, component_type))) {
+          return true;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
+constexpr loom_spirv_feature_bits_t kMatrixTypeFeatures =
+    kF16CooperativeMatrixFeatures | kBf16CooperativeMatrixFeatures |
+    kIntegerCooperativeMatrixFeatures | LOOM_SPIRV_FEATURE_FLOAT64 |
+    LOOM_SPIRV_FEATURE_INT16 | LOOM_SPIRV_FEATURE_INT64;
+
+TEST(SpirvCooperativePropertiesTest, NativeTypesMatchAdvertisedOperands) {
+  loom_spirv_cooperative_property_set_t catalog = {};
+  PreparePropertySet(kMatrixTypeFeatures, &catalog);
+  loom_spirv_cooperative_property_storage_t storage = {};
+  IREE_ASSERT_OK(loom_spirv_cooperative_property_storage_initialize(
+      catalog.feature_bits, catalog.matrix_properties,
+      catalog.matrix_property_count, nullptr, 0, iree_allocator_system(),
+      &storage));
+
+  for (uint16_t rows : {8, 16, 32}) {
+    for (uint16_t columns : {8, 16, 32}) {
+      for (auto scope :
+           {LOOM_SPIRV_SCOPE_WORKGROUP, LOOM_SPIRV_SCOPE_SUBGROUP}) {
+        for (uint32_t scalar = LOOM_SPIRV_SCALAR_TYPE_F16;
+             scalar <= LOOM_SPIRV_SCALAR_TYPE_U64; ++scalar) {
+          const auto component_type =
+              static_cast<loom_spirv_scalar_type_t>(scalar);
+          for (uint32_t role = 0; role < 3; ++role) {
+            const auto use =
+                static_cast<loom_spirv_cooperative_matrix_use_t>(role);
+            const bool expected = PropertyRowsAdmitType(
+                catalog, rows, columns, component_type, scope, use);
+            EXPECT_EQ(loom_spirv_cooperative_matrix_type_is_supported(
+                          &catalog, rows, columns, component_type, scope, use),
+                      expected);
+            EXPECT_EQ(
+                loom_spirv_cooperative_matrix_type_is_supported(
+                    &storage.set, rows, columns, component_type, scope, use),
+                expected);
+          }
+        }
+      }
+    }
+  }
+  loom_spirv_cooperative_property_storage_deinitialize(&storage,
+                                                       iree_allocator_system());
+}
+
+TEST(SpirvCooperativePropertiesTest, RestrictedProfilesPreserveTypeAndScope) {
+  loom_spirv_cooperative_property_set_t catalog = {};
+  PreparePropertySet(kMatrixTypeFeatures, &catalog);
+  for (uint32_t scalar = LOOM_SPIRV_SCALAR_TYPE_F16;
+       scalar <= LOOM_SPIRV_SCALAR_TYPE_U64; ++scalar) {
+    const auto component_type = static_cast<loom_spirv_scalar_type_t>(scalar);
+    auto property = catalog.matrix_properties[0];
+    property.m_size = 8;
+    property.n_size = 16;
+    property.k_size = 32;
+    property.lhs_type = component_type;
+    property.rhs_type = LOOM_SPIRV_SCALAR_TYPE_U8;
+    property.accumulator_type = LOOM_SPIRV_SCALAR_TYPE_F16;
+    property.result_type = LOOM_SPIRV_SCALAR_TYPE_F32;
+    property.scope = LOOM_SPIRV_SCOPE_WORKGROUP;
+    property.required_feature_bits = kMatrixTypeFeatures;
+    property.mul_add_descriptor_ref = 0;
+    loom_spirv_cooperative_property_storage_t storage = {};
+    IREE_ASSERT_OK(loom_spirv_cooperative_property_storage_initialize(
+        catalog.feature_bits, &property, 1, nullptr, 0, iree_allocator_system(),
+        &storage));
+    for (uint16_t rows : {8, 16, 32}) {
+      for (uint16_t columns : {8, 16, 32}) {
+        for (auto scope :
+             {LOOM_SPIRV_SCOPE_WORKGROUP, LOOM_SPIRV_SCOPE_SUBGROUP}) {
+          for (uint32_t role = 0; role < 3; ++role) {
+            const auto use =
+                static_cast<loom_spirv_cooperative_matrix_use_t>(role);
+            for (uint32_t query_scalar = LOOM_SPIRV_SCALAR_TYPE_F16;
+                 query_scalar <= LOOM_SPIRV_SCALAR_TYPE_U64; ++query_scalar) {
+              const auto query_type =
+                  static_cast<loom_spirv_scalar_type_t>(query_scalar);
+              EXPECT_EQ(
+                  loom_spirv_cooperative_matrix_type_is_supported(
+                      &storage.set, rows, columns, query_type, scope, use),
+                  PropertyRowsAdmitType(storage.set, rows, columns, query_type,
+                                        scope, use));
+            }
+          }
+        }
+      }
+    }
+    const auto required_features =
+        loom_spirv_scalar_type_descriptor(component_type)
+            ->required_feature_bits;
+    if (required_features) {
+      storage.set.feature_bits &= ~required_features;
+      EXPECT_FALSE(loom_spirv_cooperative_matrix_type_is_supported(
+          &storage.set, 8, 32, component_type, LOOM_SPIRV_SCOPE_WORKGROUP,
+          LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_AKHR));
+    }
+    loom_spirv_cooperative_property_storage_deinitialize(
+        &storage, iree_allocator_system());
+  }
+}
+
+TEST(SpirvCooperativePropertiesTest, TypeCapabilitiesAreIndependentOfMulAdd) {
+  loom_spirv_cooperative_property_set_t catalog = {};
+  PreparePropertySet(kMatrixTypeFeatures, &catalog);
+  const auto accumulator =
+      LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_ACCUMULATOR_KHR;
+  const auto lhs = LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_AKHR;
+  // An F32 accumulator is valid without enabling the F16 operands of its MMA.
+  catalog.feature_bits = LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR;
+  EXPECT_TRUE(loom_spirv_cooperative_matrix_type_is_supported(
+      &catalog, 16, 16, LOOM_SPIRV_SCALAR_TYPE_F32, LOOM_SPIRV_SCOPE_SUBGROUP,
+      accumulator));
+  EXPECT_FALSE(loom_spirv_cooperative_matrix_type_is_supported(
+      &catalog, 16, 16, LOOM_SPIRV_SCALAR_TYPE_F16, LOOM_SPIRV_SCOPE_SUBGROUP,
+      lhs));
+  EXPECT_FALSE(loom_spirv_cooperative_matrix_type_is_supported(
+      &catalog, 16, 32, LOOM_SPIRV_SCALAR_TYPE_S8, LOOM_SPIRV_SCOPE_SUBGROUP,
+      lhs));
+  for (auto missing : {LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR,
+                       LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR,
+                       LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR}) {
+    catalog.feature_bits = kMatrixTypeFeatures & ~missing;
+    EXPECT_FALSE(loom_spirv_cooperative_matrix_type_is_supported(
+        &catalog, 16, 16, LOOM_SPIRV_SCALAR_TYPE_BF16,
+        LOOM_SPIRV_SCOPE_SUBGROUP, lhs));
+  }
+  catalog.feature_bits =
+      kMatrixTypeFeatures & ~LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR;
+  EXPECT_FALSE(loom_spirv_cooperative_matrix_type_is_supported(
+      &catalog, 16, 16, LOOM_SPIRV_SCALAR_TYPE_F32, LOOM_SPIRV_SCOPE_SUBGROUP,
+      accumulator));
+  loom_spirv_cooperative_property_storage_t empty = {};
+  IREE_ASSERT_OK(loom_spirv_cooperative_property_storage_initialize(
+      kMatrixTypeFeatures, nullptr, 0, nullptr, 0, iree_allocator_system(),
+      &empty));
+  EXPECT_FALSE(loom_spirv_cooperative_matrix_type_is_supported(
+      &empty.set, 16, 16, LOOM_SPIRV_SCALAR_TYPE_F32, LOOM_SPIRV_SCOPE_SUBGROUP,
+      accumulator));
+  loom_spirv_cooperative_property_storage_deinitialize(&empty,
+                                                       iree_allocator_system());
 }
 
 TEST(SpirvCooperativePropertiesTest, SelectsCooperativeMatrixByShapeAndFacts) {

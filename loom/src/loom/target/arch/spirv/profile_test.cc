@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/arch/spirv/cooperative_properties.h"
 #include "loom/target/arch/spirv/records/target_records.h"
 #include "loom/target/facts_builder.h"
 
@@ -36,11 +37,23 @@ TEST(SpirvTargetProfileTest, ProjectsOwnedCooperativePropertyFacts) {
       .m_size = 16,
       .n_size = 16,
       .k_size = 16,
+      .lhs_type = LOOM_SPIRV_SCALAR_TYPE_F16,
+      .rhs_type = LOOM_SPIRV_SCALAR_TYPE_F16,
+      .accumulator_type = LOOM_SPIRV_SCALAR_TYPE_F32,
+      .result_type = LOOM_SPIRV_SCALAR_TYPE_F32,
+      .scope = LOOM_SPIRV_SCOPE_SUBGROUP,
   };
   const loom_spirv_cooperative_property_span_t matrix_span = {
       .shape_key = loom_spirv_cooperative_matrix_shape_key(16, 16, 16),
       .start = 0,
       .count = 1,
+  };
+  loom_spirv_cooperative_matrix_type_shape_t matrix_type_shape = {
+      .shape_key = loom_spirv_cooperative_matrix_type_shape_key(
+          16, 16, LOOM_SPIRV_SCOPE_SUBGROUP),
+      .component_types = {1u << LOOM_SPIRV_SCALAR_TYPE_F16,
+                          1u << LOOM_SPIRV_SCALAR_TYPE_F16,
+                          1u << LOOM_SPIRV_SCALAR_TYPE_F32},
   };
   char vector_name[] = "profile.vector";
   loom_spirv_cooperative_vector_property_t vector_property = {
@@ -61,6 +74,8 @@ TEST(SpirvTargetProfileTest, ProjectsOwnedCooperativePropertyFacts) {
       .matrix_property_count = 1,
       .matrix_shape_spans = &matrix_span,
       .matrix_shape_span_count = 1,
+      .matrix_type_shapes = &matrix_type_shape,
+      .matrix_type_shape_count = 1,
       .vector_properties = &vector_property,
       .vector_property_count = 1,
       .vector_shape_spans = &vector_span,
@@ -89,6 +104,8 @@ TEST(SpirvTargetProfileTest, ProjectsOwnedCooperativePropertyFacts) {
   ASSERT_EQ(facts->cooperative_properties.vector_property_count, 1);
   EXPECT_NE(facts->cooperative_properties.matrix_properties, &matrix_property);
   EXPECT_NE(facts->cooperative_properties.matrix_shape_spans, &matrix_span);
+  EXPECT_NE(facts->cooperative_properties.matrix_type_shapes,
+            &matrix_type_shape);
   EXPECT_NE(facts->cooperative_properties.vector_properties, &vector_property);
   EXPECT_NE(facts->cooperative_properties.vector_shape_spans, &vector_span);
   EXPECT_NE(facts->cooperative_properties.matrix_properties[0].name.data,
@@ -98,12 +115,17 @@ TEST(SpirvTargetProfileTest, ProjectsOwnedCooperativePropertyFacts) {
 
   matrix_name[0] = 'x';
   matrix_property.m_size = 8;
+  matrix_type_shape.component_types[2] = 0;
   vector_name[0] = 'x';
   vector_property.m_size = 8;
   EXPECT_TRUE(iree_string_view_equal(
       facts->cooperative_properties.matrix_properties[0].name,
       IREE_SV("profile.matrix")));
   EXPECT_EQ(facts->cooperative_properties.matrix_properties[0].m_size, 16);
+  EXPECT_TRUE(loom_spirv_cooperative_matrix_type_is_supported(
+      &facts->cooperative_properties, 16, 16, LOOM_SPIRV_SCALAR_TYPE_F32,
+      LOOM_SPIRV_SCOPE_SUBGROUP,
+      LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_ACCUMULATOR_KHR));
   EXPECT_TRUE(iree_string_view_equal(
       facts->cooperative_properties.vector_properties[0].name,
       IREE_SV("profile.vector")));

@@ -472,6 +472,31 @@ ERR_SPIRV_031 = ErrorDef(
     ),
 )
 
+ERR_SPIRV_032 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=32,
+    severity=Severity.ERROR,
+    summary="Cooperative matrix type is unavailable in the target profile.",
+    message=(
+        "SPIR-V function '@{function_name}' requires cooperative matrix type "
+        "{rows}x{columns}x{component_type}, scope '{scope}', use '{matrix_use}', "
+        "which is not supported by its target profile"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("rows", ParamKind.U32),
+        ErrorParam("columns", ParamKind.U32),
+        ErrorParam("component_type", ParamKind.STRING),
+        ErrorParam("scope", ParamKind.STRING),
+        ErrorParam("matrix_use", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Select a matrix shape, component type, scope, and use advertised by "
+        "the target profile, with the required component capabilities enabled"
+    ),
+)
+
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_005,
     ERR_SPIRV_006,
@@ -497,4 +522,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_029,
     ERR_SPIRV_030,
     ERR_SPIRV_031,
+    ERR_SPIRV_032,
 )
