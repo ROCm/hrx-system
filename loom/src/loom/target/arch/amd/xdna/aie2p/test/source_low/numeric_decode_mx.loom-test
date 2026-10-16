@@ -14,8 +14,8 @@ func.def @decode_mx_shapes(%mxfp8_x8_payload: vector<8xf8E4M3>, %mxfp8_x8_scale:
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=3 emitted_ops=641 rows=3 unkeyed_maximum_emitted_ops=0
+COMPILE-REPORT: source_low selected_ops=3 emitted_ops=671 rows=3 unkeyed_maximum_emitted_ops=0
 COMPILE-REPORT: source_low_target[0] function=decode_mx_shapes source=specialization target=- bundle=aie2p-core config=amd.xdna.aie2p.core
-COMPILE-REPORT: source_low[0] function=decode_mx_shapes source_op=vector.decode selection=rule plan_key=native_mxfp8_e4m3fn_e8m0x8_to_bfloat16x8 descriptor_key=amd.xdna.aie2p.select.i32x16 descriptor_semantic_tag=integer.select.i32x16 emitted_ops=130
-COMPILE-REPORT: source_low[1] function=decode_mx_shapes source_op=vector.decode selection=rule plan_key=native_mxfp4_e2m1_e8m0x64_to_bfloat16x64 descriptor_key=amd.xdna.aie2p.select.i32x16 descriptor_semantic_tag=integer.select.i32x16 emitted_ops=246
-COMPILE-REPORT: source_low[2] function=decode_mx_shapes source_op=vector.decode selection=rule plan_key=native_mxfp8_e4m3fn_e8m0x64_to_bfloat16x64 descriptor_key=amd.xdna.aie2p.select.i32x16 descriptor_semantic_tag=integer.select.i32x16 emitted_ops=265
+COMPILE-REPORT: source_low[0] function=decode_mx_shapes source_op=vector.decode selection=rule plan_key=native_mxfp8_e4m3fn_e8m0x8_to_bfloat16x8 descriptor_key=amd.xdna.aie2p.select.i32x16 descriptor_semantic_tag=integer.select.i32x16 emitted_ops=136
+COMPILE-REPORT: source_low[1] function=decode_mx_shapes source_op=vector.decode selection=rule plan_key=native_mxfp4_e2m1_e8m0x64_to_bfloat16x64 descriptor_key=amd.xdna.aie2p.select.i32x16 descriptor_semantic_tag=integer.select.i32x16 emitted_ops=258
+COMPILE-REPORT: source_low[2] function=decode_mx_shapes source_op=vector.decode selection=rule plan_key=native_mxfp8_e4m3fn_e8m0x64_to_bfloat16x64 descriptor_key=amd.xdna.aie2p.select.i32x16 descriptor_semantic_tag=integer.select.i32x16 emitted_ops=277

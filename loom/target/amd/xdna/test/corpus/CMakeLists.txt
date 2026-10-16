@@ -42,9 +42,6 @@ loom_corpus_test(
     "numeric/vector/reductions.loom"
   XFAILS
     "numeric/conversion/float8_dequantization.loom"
-    "@e8m0_mxfp4_bf16_subnormal_values"
-    "EXPECT/002"
-    "numeric/conversion/float8_dequantization.loom"
     "@e8m0_mxfp4_wide_bf16_values"
     "BACKEND/005"
     "numeric/conversion/float8_dequantization.loom"

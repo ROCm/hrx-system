@@ -2534,27 +2534,32 @@ def _e8m0_scale_bf16_group_emits(
         "is_overflow", magnitude, overflow_threshold
     )
 
-    magnitude_low = program.temporary("magnitude_low")
-    program.emits.append(
-        EmitRegisterSlice(
-            source=magnitude,
-            result=magnitude_low,
-            unit_count=1,
+    subnormal_accumulators: list[ValueRef] = []
+    for unit_ordinal in range(2):
+        magnitude_unit = program.temporary(f"magnitude_{unit_ordinal}")
+        program.emits.append(
+            EmitRegisterSlice(
+                source=magnitude,
+                result=magnitude_unit,
+                unit_offset=unit_ordinal,
+                unit_count=1,
+            )
         )
-    )
-    subnormal_units_i32 = program.operation(
-        "subnormal_units_i32",
-        "convert.floor.bf16x16.to.i32x16",
-        "dst",
-        src=magnitude_low,
-        shft=program.shift(9),
-    )
-    subnormal_units_accumulator = program.operation(
-        "subnormal_units_accumulator",
-        "move.vector512.to.accumulator512",
-        "dst",
-        src=subnormal_units_i32,
-    )
+        subnormal_units_i32 = program.operation(
+            f"subnormal_units_{unit_ordinal}_i32",
+            "convert.floor.bf16x16.to.i32x16",
+            "dst",
+            src=magnitude_unit,
+            shft=program.shift(9),
+        )
+        subnormal_accumulators.append(
+            program.operation(
+                f"subnormal_units_{unit_ordinal}_accumulator",
+                "move.vector512.to.accumulator512",
+                "dst",
+                src=subnormal_units_i32,
+            )
+        )
     shift_zero = program.shift(0)
     shift_one = program.shift(1)
     shift_two = program.shift(2)
@@ -2562,59 +2567,32 @@ def _e8m0_scale_bf16_group_emits(
     program.state("rounding", 12)
     program.state("srs-mode", 0)
     program.state("saturation", 0)
-    units_low = program.operation(
-        "units_low",
-        "narrow.2x.b-to-w.unsigned.configured",
-        "dst",
-        src=subnormal_units_accumulator,
-        su=shift_zero,
-    )
-    scale_two_low = program.operation(
-        "scale_two_low",
-        "narrow.2x.b-to-w.unsigned.configured",
-        "dst",
-        src=subnormal_units_accumulator,
-        su=shift_one,
-    )
-    scale_one_low = program.operation(
-        "scale_one_low",
-        "narrow.2x.b-to-w.unsigned.configured",
-        "dst",
-        src=subnormal_units_accumulator,
-        su=shift_two,
-    )
-    scale_zero_low = program.operation(
-        "scale_zero_low",
-        "narrow.2x.b-to-w.unsigned.configured",
-        "dst",
-        src=subnormal_units_accumulator,
-        su=shift_three,
-    )
-    unused_high = program.temporary("unused_high")
-    program.emits.append(
-        EmitRegisterSlice(
-            source=finite_magnitude,
-            result=unused_high,
-            unit_offset=1,
-            unit_count=1,
-        )
-    )
 
-    def concat_low(name: str, low: ValueRef) -> ValueRef:
+    def narrow_subnormal_units(name: str, shift: ValueRef) -> ValueRef:
+        narrowed_units = tuple(
+            program.operation(
+                f"{name}_{unit_ordinal}",
+                "narrow.2x.b-to-w.unsigned.configured",
+                "dst",
+                src=accumulator,
+                su=shift,
+            )
+            for unit_ordinal, accumulator in enumerate(subnormal_accumulators)
+        )
         result = program.temporary(name)
         program.emits.append(
             EmitRegisterConcat(
-                sources=(low, unused_high),
+                sources=narrowed_units,
                 result=result,
                 result_type=_exact_vector("i16", 32),
             )
         )
         return result
 
-    units = concat_low("units", units_low)
-    scale_two = concat_low("scale_two", scale_two_low)
-    scale_one = concat_low("scale_one", scale_one_low)
-    scale_zero = concat_low("scale_zero", scale_zero_low)
+    units = narrow_subnormal_units("units", shift_zero)
+    scale_two = narrow_subnormal_units("scale_two", shift_one)
+    scale_one = narrow_subnormal_units("scale_one", shift_two)
+    scale_zero = narrow_subnormal_units("scale_zero", shift_three)
 
     scale_below_three = program.operation(
         "scale_below_three",
