@@ -321,6 +321,8 @@ loom_cc_library(
 loom_cc_library(
     name = "target_legalization",
     srcs = [
+        "bitwise_legalization.c",
+        "bitwise_legalization.h",
         "memory_legalization.c",
         "target_legalization.c",
     ],

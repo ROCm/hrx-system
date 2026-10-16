@@ -20,6 +20,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/vector/transpose.h"
 #include "loom/transforms/vector/bitstream_packet_legalization.h"
+#include "loom/transforms/vector/bitwise_legalization.h"
 #include "loom/transforms/vector/cast_packet_legalization.h"
 #include "loom/transforms/vector/memory_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"

@@ -205,7 +205,6 @@ loom_scenario_test(
             "numeric/float/trigonometry_narrow.loom:@trigonometry_f16_special": "LOWERING/036",
             "numeric/float/trigonometry_narrow.loom:@trigonometry_f16_values": "LOWERING/036",
             "numeric/float/turns.loom:@turn_values": "LOWERING/036",
-            "numeric/integer/bitfield.loom:@bitfield_values": "TARGET/002",
             "numeric/integer/division.loom:@integer_division_i64_values": "AMDGPU/023",
             "numeric/predicate/selection.loom:@predicate_vector_values": "TARGET/002",
             "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/003",

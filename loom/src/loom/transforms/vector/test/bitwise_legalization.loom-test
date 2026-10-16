@@ -1,0 +1,401 @@
+// RUN: pass target-legalize{mode=eager},dce,canonicalize
+
+test.target<low_core> @target
+
+func.def target(@target) @singleton_fields(%byte: vector<1xi8>, %wide: vector<1x1xi64>) -> (vector<1xi64>, vector<1xi64>, vector<1x1xi8>, vector<1x1xi8>) {
+  %byte_signed = vector.bitfield.extracts %byte {offset = 2, width = 3} : vector<1xi8> -> vector<1xi64>
+  %byte_unsigned = vector.bitfield.extractu %byte {offset = 2, width = 3} : vector<1xi8> -> vector<1xi64>
+  %wide_signed = vector.bitfield.extracts %wide {offset = 43, width = 7} : vector<1x1xi64> -> vector<1x1xi8>
+  %wide_unsigned = vector.bitfield.extractu %wide {offset = 43, width = 7} : vector<1x1xi64> -> vector<1x1xi8>
+  func.return %byte_signed, %byte_unsigned, %wide_signed, %wide_unsigned : vector<1xi64>, vector<1xi64>, vector<1x1xi8>, vector<1x1xi8>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @singleton_fields(%byte: vector<1xi8>, %wide: vector<1x1xi64>) -> (vector<1xi64>, vector<1xi64>, vector<1x1xi8>, vector<1x1xi8>) {
+  %36 = vector.extract %byte[0] : vector<1xi8> -> i8
+  %40 = scalar.extui %36 : i8 to i32
+  %41 = scalar.constant 27 : i32
+  %42 = scalar.shli %40, %41 : i32
+  %43 = scalar.constant 29 : i32
+  %44 = scalar.shrsi %42, %43 : i32
+  %45 = scalar.extsi %44 : i32 to i64
+  %byte_signed = vector.splat %45 : vector<1xi64>
+  %26 = vector.extract %byte[0] : vector<1xi8> -> i8
+  %30 = scalar.extui %26 : i8 to i32
+  %31 = scalar.constant 2 : i32
+  %32 = scalar.shrui %30, %31 : i32
+  %33 = scalar.constant 7 : i32
+  %34 = scalar.andi %32, %33 : i32
+  %35 = scalar.extui %34 : i32 to i64
+  %byte_unsigned = vector.splat %35 : vector<1xi64>
+  %18 = vector.extract %wide[0, 0] : vector<1x1xi64> -> i64
+  %21 = scalar.constant 14 : i64
+  %22 = scalar.shli %18, %21 : i64
+  %23 = scalar.constant 57 : i64
+  %24 = scalar.shrsi %22, %23 : i64
+  %25 = scalar.trunci %24 : i64 to i8
+  %wide_signed = vector.splat %25 : vector<1x1xi8>
+  %10 = vector.extract %wide[0, 0] : vector<1x1xi64> -> i64
+  %13 = scalar.constant 43 : i64
+  %14 = scalar.shrui %10, %13 : i64
+  %15 = scalar.constant 127 : i64
+  %16 = scalar.andi %14, %15 : i64
+  %17 = scalar.trunci %16 : i64 to i8
+  %wide_unsigned = vector.splat %17 : vector<1x1xi8>
+  func.return %byte_signed, %byte_unsigned, %wide_signed, %wide_unsigned : vector<1xi64>, vector<1xi64>, vector<1x1xi8>, vector<1x1xi8>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @boolean_fields(%source: vector<2xi1>) -> (vector<2xi1>, vector<2xi8>, vector<2xi8>) {
+  %identity = vector.bitfield.extractu %source {offset = 0, width = 1} : vector<2xi1> -> vector<2xi1>
+  %signed = vector.bitfield.extracts %source {offset = 0, width = 1} : vector<2xi1> -> vector<2xi8>
+  %unsigned = vector.bitfield.extractu %source {offset = 0, width = 1} : vector<2xi1> -> vector<2xi8>
+  func.return %identity, %signed, %unsigned : vector<2xi1>, vector<2xi8>, vector<2xi8>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @boolean_fields(%source: vector<2xi1>) -> (vector<2xi1>, vector<2xi8>, vector<2xi8>) {
+  %12 = vector.constant -1 : vector<2xi8>
+  %13 = vector.constant 0 : vector<2xi8>
+  %signed = vector.select %source, %12, %13 : vector<2xi8>
+  %8 = vector.constant 1 : vector<2xi8>
+  %9 = vector.constant 0 : vector<2xi8>
+  %unsigned = vector.select %source, %8, %9 : vector<2xi8>
+  func.return %source, %signed, %unsigned : vector<2xi1>, vector<2xi8>, vector<2xi8>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @byte_fields(%source: vector<2xi8>) -> (vector<2xi8>, vector<2xi16>, vector<2xi16>) {
+  %top = vector.bitfield.extracts %source {offset = 4, width = 4} : vector<2xi8> -> vector<2xi8>
+  %signed = vector.bitfield.extracts %source {offset = 2, width = 3} : vector<2xi8> -> vector<2xi16>
+  %unsigned = vector.bitfield.extractu %source {offset = 2, width = 3} : vector<2xi8> -> vector<2xi16>
+  func.return %top, %signed, %unsigned : vector<2xi8>, vector<2xi16>, vector<2xi16>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @byte_fields(%source: vector<2xi8>) -> (vector<2xi8>, vector<2xi16>, vector<2xi16>) {
+  %85 = vector.extract %source[0] : vector<2xi8> -> i8
+  %86 = scalar.extsi %85 : i8 to i16
+  %102 = scalar.extsi %86 : i16 to i32
+  %113 = scalar.constant 4 : i32
+  %104 = scalar.shrsi %102, %113 : i32
+  %105 = scalar.trunci %104 : i32 to i16
+  %90 = vector.extract %source[1] : vector<2xi8> -> i8
+  %91 = scalar.extsi %90 : i8 to i16
+  %98 = scalar.extsi %91 : i16 to i32
+  %112 = scalar.constant 4 : i32
+  %100 = scalar.shrsi %98, %112 : i32
+  %101 = scalar.trunci %100 : i32 to i16
+  %96 = vector.splat %105 : vector<2xi16>
+  %97 = vector.insert %101 into %96[1] : i16, vector<2xi16>
+  %top = vector.trunci %97 : vector<2xi16> to vector<2xi8>
+  %46 = vector.extract %source[0] : vector<2xi8> -> i8
+  %75 = scalar.extsi %46 : i8 to i32
+  %111 = scalar.constant 3 : i32
+  %77 = scalar.shli %75, %111 : i32
+  %78 = scalar.trunci %77 : i32 to i8
+  %49 = scalar.extsi %78 : i8 to i16
+  %71 = scalar.extsi %49 : i16 to i32
+  %110 = scalar.constant 5 : i32
+  %73 = scalar.shrsi %71, %110 : i32
+  %74 = scalar.trunci %73 : i32 to i16
+  %53 = vector.extract %source[1] : vector<2xi8> -> i8
+  %67 = scalar.extsi %53 : i8 to i32
+  %109 = scalar.constant 3 : i32
+  %69 = scalar.shli %67, %109 : i32
+  %70 = scalar.trunci %69 : i32 to i8
+  %56 = scalar.extsi %70 : i8 to i16
+  %63 = scalar.extsi %56 : i16 to i32
+  %108 = scalar.constant 5 : i32
+  %65 = scalar.shrsi %63, %108 : i32
+  %66 = scalar.trunci %65 : i32 to i16
+  %61 = vector.splat %74 : vector<2xi16>
+  %62 = vector.insert %66 into %61[1] : i16, vector<2xi16>
+  %45 = vector.trunci %62 : vector<2xi16> to vector<2xi8>
+  %signed = vector.extsi %45 : vector<2xi8> to vector<2xi16>
+  %16 = vector.extract %source[0] : vector<2xi8> -> i8
+  %17 = scalar.extui %16 : i8 to i16
+  %33 = scalar.extui %17 : i16 to i32
+  %107 = scalar.constant 2 : i32
+  %35 = scalar.shrui %33, %107 : i32
+  %36 = scalar.trunci %35 : i32 to i16
+  %21 = vector.extract %source[1] : vector<2xi8> -> i8
+  %22 = scalar.extui %21 : i8 to i16
+  %29 = scalar.extui %22 : i16 to i32
+  %106 = scalar.constant 2 : i32
+  %31 = scalar.shrui %29, %106 : i32
+  %32 = scalar.trunci %31 : i32 to i16
+  %27 = vector.splat %36 : vector<2xi16>
+  %28 = vector.insert %32 into %27[1] : i16, vector<2xi16>
+  %15 = vector.trunci %28 : vector<2xi16> to vector<2xi8>
+  %9 = vector.constant 7 : vector<2xi8>
+  %10 = vector.andi %15, %9 : vector<2xi8>
+  %unsigned = vector.extui %10 : vector<2xi8> to vector<2xi16>
+  func.return %top, %signed, %unsigned : vector<2xi8>, vector<2xi16>, vector<2xi16>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @halfword_fields(%source: vector<2xi16>) -> (vector<2xi16>, vector<2xi16>, vector<2xi32>, vector<2xi32>) {
+  %signed = vector.bitfield.extracts %source {offset = 7, width = 9} : vector<2xi16> -> vector<2xi16>
+  %unsigned = vector.bitfield.extractu %source {offset = 7, width = 9} : vector<2xi16> -> vector<2xi16>
+  %signed_full = vector.bitfield.extracts %source {offset = 0, width = 16} : vector<2xi16> -> vector<2xi32>
+  %unsigned_full = vector.bitfield.extractu %source {offset = 0, width = 16} : vector<2xi16> -> vector<2xi32>
+  func.return %signed, %unsigned, %signed_full, %unsigned_full : vector<2xi16>, vector<2xi16>, vector<2xi32>, vector<2xi32>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @halfword_fields(%source: vector<2xi16>) -> (vector<2xi16>, vector<2xi16>, vector<2xi32>, vector<2xi32>) {
+  %32 = vector.extract %source[0] : vector<2xi16> -> i16
+  %45 = scalar.extsi %32 : i16 to i32
+  %52 = scalar.constant 7 : i32
+  %47 = scalar.shrsi %45, %52 : i32
+  %48 = scalar.trunci %47 : i32 to i16
+  %35 = vector.extract %source[1] : vector<2xi16> -> i16
+  %41 = scalar.extsi %35 : i16 to i32
+  %51 = scalar.constant 7 : i32
+  %43 = scalar.shrsi %41, %51 : i32
+  %44 = scalar.trunci %43 : i32 to i16
+  %39 = vector.splat %48 : vector<2xi16>
+  %signed = vector.insert %44 into %39[1] : i16, vector<2xi16>
+  %13 = vector.extract %source[0] : vector<2xi16> -> i16
+  %26 = scalar.extui %13 : i16 to i32
+  %50 = scalar.constant 7 : i32
+  %28 = scalar.shrui %26, %50 : i32
+  %29 = scalar.trunci %28 : i32 to i16
+  %16 = vector.extract %source[1] : vector<2xi16> -> i16
+  %22 = scalar.extui %16 : i16 to i32
+  %49 = scalar.constant 7 : i32
+  %24 = scalar.shrui %22, %49 : i32
+  %25 = scalar.trunci %24 : i32 to i16
+  %20 = vector.splat %29 : vector<2xi16>
+  %unsigned = vector.insert %25 into %20[1] : i16, vector<2xi16>
+  %signed_full = vector.extsi %source : vector<2xi16> to vector<2xi32>
+  %unsigned_full = vector.extui %source : vector<2xi16> to vector<2xi32>
+  func.return %signed, %unsigned, %signed_full, %unsigned_full : vector<2xi16>, vector<2xi16>, vector<2xi32>, vector<2xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @word_fields(%source: vector<2xi32>) -> (vector<2xi8>, vector<2xi1>, vector<2xi32>, vector<2xi32>) {
+  %byte = vector.bitfield.extractu %source {offset = 16, width = 8} : vector<2xi32> -> vector<2xi8>
+  %predicate = vector.bitfield.extracts %source {offset = 31, width = 1} : vector<2xi32> -> vector<2xi1>
+  %signed = vector.bitfield.extracts %source {offset = 7, width = 13} : vector<2xi32> -> vector<2xi32>
+  %unsigned = vector.bitfield.extractu %source {offset = 7, width = 13} : vector<2xi32> -> vector<2xi32>
+  func.return %byte, %predicate, %signed, %unsigned : vector<2xi8>, vector<2xi1>, vector<2xi32>, vector<2xi32>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @word_fields(%source: vector<2xi32>) -> (vector<2xi8>, vector<2xi1>, vector<2xi32>, vector<2xi32>) {
+  %50 = vector.extract %source[0] : vector<2xi32> -> i32
+  %51 = scalar.constant 16 : i32
+  %52 = scalar.shrui %50, %51 : i32
+  %53 = vector.extract %source[1] : vector<2xi32> -> i32
+  %54 = scalar.constant 16 : i32
+  %55 = scalar.shrui %53, %54 : i32
+  %56 = vector.from_elements %52, %55 : vector<2xi32>
+  %47 = vector.constant 255 : vector<2xi32>
+  %48 = vector.andi %56, %47 : vector<2xi32>
+  %byte = vector.trunci %48 : vector<2xi32> to vector<2xi8>
+  %38 = vector.extract %source[0] : vector<2xi32> -> i32
+  %39 = scalar.constant 31 : i32
+  %40 = scalar.shrsi %38, %39 : i32
+  %41 = vector.extract %source[1] : vector<2xi32> -> i32
+  %42 = scalar.constant 31 : i32
+  %43 = scalar.shrsi %41, %42 : i32
+  %44 = vector.from_elements %40, %43 : vector<2xi32>
+  %predicate = vector.trunci %44 : vector<2xi32> to vector<2xi1>
+  %24 = vector.extract %source[0] : vector<2xi32> -> i32
+  %25 = scalar.constant 12 : i32
+  %26 = scalar.shli %24, %25 : i32
+  %27 = scalar.constant 19 : i32
+  %28 = scalar.shrsi %26, %27 : i32
+  %29 = vector.extract %source[1] : vector<2xi32> -> i32
+  %30 = scalar.constant 12 : i32
+  %31 = scalar.shli %29, %30 : i32
+  %32 = scalar.constant 19 : i32
+  %33 = scalar.shrsi %31, %32 : i32
+  %signed = vector.from_elements %28, %33 : vector<2xi32>
+  %13 = vector.extract %source[0] : vector<2xi32> -> i32
+  %14 = scalar.constant 7 : i32
+  %15 = scalar.shrui %13, %14 : i32
+  %16 = vector.extract %source[1] : vector<2xi32> -> i32
+  %17 = scalar.constant 7 : i32
+  %18 = scalar.shrui %16, %17 : i32
+  %19 = vector.from_elements %15, %18 : vector<2xi32>
+  %11 = vector.constant 8191 : vector<2xi32>
+  %unsigned = vector.andi %19, %11 : vector<2xi32>
+  func.return %byte, %predicate, %signed, %unsigned : vector<2xi8>, vector<2xi1>, vector<2xi32>, vector<2xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @wide_fields(%source: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi32>) {
+  %identity = vector.bitfield.extractu %source {offset = 0, width = 64} : vector<2xi64> -> vector<2xi64>
+  %signed = vector.bitfield.extracts %source {offset = 0, width = 63} : vector<2xi64> -> vector<2xi64>
+  %unsigned = vector.bitfield.extractu %source {offset = 0, width = 63} : vector<2xi64> -> vector<2xi64>
+  %upper = vector.bitfield.extractu %source {offset = 32, width = 32} : vector<2xi64> -> vector<2xi32>
+  func.return %identity, %signed, %unsigned, %upper : vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi32>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @wide_fields(%source: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi32>) {
+  %37 = vector.extract %source[0] : vector<2xi64> -> i64
+  %38 = scalar.constant 1 : i64
+  %39 = scalar.shli %37, %38 : i64
+  %57 = scalar.constant 1 : i64
+  %43 = scalar.shrsi %39, %57 : i64
+  %44 = vector.extract %source[1] : vector<2xi64> -> i64
+  %45 = scalar.constant 1 : i64
+  %46 = scalar.shli %44, %45 : i64
+  %56 = scalar.constant 1 : i64
+  %50 = scalar.shrsi %46, %56 : i64
+  %52 = vector.splat %43 : vector<2xi64>
+  %signed = vector.insert %50 into %52[1] : i64, vector<2xi64>
+  %28 = vector.constant 9223372036854775807 : vector<2xi64>
+  %unsigned = vector.andi %source, %28 : vector<2xi64>
+  %15 = vector.extract %source[0] : vector<2xi64> -> i64
+  %55 = scalar.constant 32 : i64
+  %19 = scalar.shrui %15, %55 : i64
+  %20 = vector.extract %source[1] : vector<2xi64> -> i64
+  %54 = scalar.constant 32 : i64
+  %24 = scalar.shrui %20, %54 : i64
+  %26 = vector.splat %19 : vector<2xi64>
+  %27 = vector.insert %24 into %26[1] : i64, vector<2xi64>
+  %upper = vector.trunci %27 : vector<2xi64> to vector<2xi32>
+  func.return %source, %signed, %unsigned, %upper : vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @dynamic_fields(%count: index, %source: vector<[%count]xi32>) -> (vector<[%count]xi32>, vector<[%count]xi8>) {
+  %signed = vector.bitfield.extracts %source {offset = 3, width = 7} : vector<[%count]xi32> -> vector<[%count]xi32>
+  %unsigned = vector.bitfield.extractu %source {offset = 3, width = 7} : vector<[%count]xi32> -> vector<[%count]xi8>
+  func.return %signed, %unsigned : vector<[%count]xi32>, vector<[%count]xi8>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @dynamic_fields(%count: index, %source: vector<[%count]xi32>) -> (vector<[%count]xi32>, vector<[%count]xi8>) {
+  %35 = index.constant 0 : index
+  %36 = index.constant 1 : index
+  %39 = scf.for %37 = [%35 to %count step %36](%38 = %source : vector<[%count]xi32>) -> (vector<[%count]xi32>) {
+    %40 = vector.extract %source[%37] : vector<[%count]xi32> -> i32
+    %41 = scalar.constant 22 : i32
+    %42 = scalar.shli %40, %41 : i32
+    %43 = vector.insert %42 into %38[%37] : i32, vector<[%count]xi32>
+    scf.yield %43 : vector<[%count]xi32>
+  }
+  %24 = index.constant 0 : index
+  %25 = index.constant 1 : index
+  %signed = scf.for %26 = [%24 to %count step %25](%27 = %39 : vector<[%count]xi32>) -> (vector<[%count]xi32>) {
+    %29 = vector.extract %source[%26] : vector<[%count]xi32> -> i32
+    %30 = scalar.constant 22 : i32
+    %31 = scalar.shli %29, %30 : i32
+    %32 = scalar.constant 25 : i32
+    %33 = scalar.shrsi %31, %32 : i32
+    %34 = vector.insert %33 into %27[%26] : i32, vector<[%count]xi32>
+    scf.yield %34 : vector<[%count]xi32>
+  }
+  %11 = index.constant 0 : index
+  %12 = index.constant 1 : index
+  %15 = scf.for %13 = [%11 to %count step %12](%14 = %source : vector<[%count]xi32>) -> (vector<[%count]xi32>) {
+    %16 = vector.extract %source[%13] : vector<[%count]xi32> -> i32
+    %17 = scalar.constant 3 : i32
+    %18 = scalar.shrui %16, %17 : i32
+    %19 = vector.insert %18 into %14[%13] : i32, vector<[%count]xi32>
+    scf.yield %19 : vector<[%count]xi32>
+  }
+  %8 = vector.constant 127 : vector<[%count]xi32>
+  %9 = vector.andi %15, %8 : vector<[%count]xi32>
+  %unsigned = vector.trunci %9 : vector<[%count]xi32> to vector<[%count]xi8>
+  func.return %signed, %unsigned : vector<[%count]xi32>, vector<[%count]xi8>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @matrix_fields(%source: vector<2x2xi32>) -> (vector<2x2xi32>, vector<2x2xi32>) {
+  %signed = vector.bitfield.extracts %source {offset = 4, width = 5} : vector<2x2xi32> -> vector<2x2xi32>
+  %unsigned = vector.bitfield.extractu %source {offset = 4, width = 5} : vector<2x2xi32> -> vector<2x2xi32>
+  func.return %signed, %unsigned : vector<2x2xi32>, vector<2x2xi32>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @matrix_fields(%source: vector<2x2xi32>) -> (vector<2x2xi32>, vector<2x2xi32>) {
+  %26 = vector.extract %source[0, 0] : vector<2x2xi32> -> i32
+  %27 = scalar.constant 23 : i32
+  %28 = scalar.shli %26, %27 : i32
+  %29 = scalar.constant 27 : i32
+  %30 = scalar.shrsi %28, %29 : i32
+  %31 = vector.extract %source[0, 1] : vector<2x2xi32> -> i32
+  %32 = scalar.constant 23 : i32
+  %33 = scalar.shli %31, %32 : i32
+  %34 = scalar.constant 27 : i32
+  %35 = scalar.shrsi %33, %34 : i32
+  %36 = vector.extract %source[1, 0] : vector<2x2xi32> -> i32
+  %37 = scalar.constant 23 : i32
+  %38 = scalar.shli %36, %37 : i32
+  %39 = scalar.constant 27 : i32
+  %40 = scalar.shrsi %38, %39 : i32
+  %41 = vector.extract %source[1, 1] : vector<2x2xi32> -> i32
+  %42 = scalar.constant 23 : i32
+  %43 = scalar.shli %41, %42 : i32
+  %44 = scalar.constant 27 : i32
+  %45 = scalar.shrsi %43, %44 : i32
+  %signed = vector.from_elements %30, %35, %40, %45 : vector<2x2xi32>
+  %9 = vector.extract %source[0, 0] : vector<2x2xi32> -> i32
+  %10 = scalar.constant 4 : i32
+  %11 = scalar.shrui %9, %10 : i32
+  %12 = vector.extract %source[0, 1] : vector<2x2xi32> -> i32
+  %13 = scalar.constant 4 : i32
+  %14 = scalar.shrui %12, %13 : i32
+  %15 = vector.extract %source[1, 0] : vector<2x2xi32> -> i32
+  %16 = scalar.constant 4 : i32
+  %17 = scalar.shrui %15, %16 : i32
+  %18 = vector.extract %source[1, 1] : vector<2x2xi32> -> i32
+  %19 = scalar.constant 4 : i32
+  %20 = scalar.shrui %18, %19 : i32
+  %21 = vector.from_elements %11, %14, %17, %20 : vector<2x2xi32>
+  %7 = vector.constant 31 : vector<2x2xi32>
+  %unsigned = vector.andi %21, %7 : vector<2x2xi32>
+  func.return %signed, %unsigned : vector<2x2xi32>, vector<2x2xi32>
+}
+
+// ====
+
+test.target<low_core> @target
+
+func.def target(@target) @empty_fields(%source: vector<0xi64>) -> (vector<0xi64>, vector<0xi64>) {
+  %signed = vector.bitfield.extracts %source {offset = 0, width = 64} : vector<0xi64> -> vector<0xi64>
+  %unsigned = vector.bitfield.extractu %source {offset = 0, width = 64} : vector<0xi64> -> vector<0xi64>
+  func.return %signed, %unsigned : vector<0xi64>, vector<0xi64>
+}
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @empty_fields(%source: vector<0xi64>) -> (vector<0xi64>, vector<0xi64>) {
+  func.return %source, %source : vector<0xi64>, vector<0xi64>
+}
