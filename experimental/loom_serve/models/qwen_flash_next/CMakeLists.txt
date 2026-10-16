@@ -72,6 +72,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -101,6 +102,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "notsan"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -135,6 +137,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -172,6 +175,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -201,6 +205,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "notsan"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -239,6 +244,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -268,6 +274,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "notsan"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -306,6 +313,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -335,6 +343,7 @@ loom_execution_test(
     "--config=flash_next.context_capacity=2112"
     "--config=flash_next.pool_capacity=2112"
     "--config=flash_next.token_count=8"
+    "--config=qsa.query_tile=4"
   LABELS
     "notsan"
     "iree-build-requirement=loom.target.arch.amdgpu"
