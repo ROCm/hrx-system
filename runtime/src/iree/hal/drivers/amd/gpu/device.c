@@ -938,10 +938,15 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
     const iree_hal_executable_load_params_t* params,
     iree_hal_executable_t** out_executable) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
+  // Live control storage can require uncached device access. Executable bytes
+  // use the qualified program profile: the loader flushes host writes and
+  // queues establish instruction-cache visibility before dispatch.
+  iree_hal_amd_fabric_memory_options_t memory = device->programs.upload;
+  memory.host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
   const iree_hal_amd_gpu_executable_options_t options = {
       .target = &device->target,
       .native_family_ordinal = device->memory.family.queue_family_ordinal,
-      .memory = &device->memory.control,
+      .memory = &memory,
       .maintenance = device->memory.service,
       .feedback = device->feedback.context ? &device->feedback : NULL,
       .asan = device->memory.asan,
