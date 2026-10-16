@@ -62,7 +62,7 @@ loom_library(
         execution_profiles = [
             AMDGPU_HARDWARE_PROFILE,
             AMDGPU_ACCESS_PROFILE,
-        ],
+        ] + ([AMDGPU_TSAN_BYTE_GRANULE_PROFILE] if name == "attention" else []),
         deps = [":residual_programs"],
     )
     for name in [
