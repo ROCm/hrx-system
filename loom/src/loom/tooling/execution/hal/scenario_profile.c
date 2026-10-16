@@ -318,19 +318,6 @@ static void loom_run_hal_testbench_scenario_product_destroy(void* user_data) {
   iree_allocator_free(host_allocator, product);
 }
 
-static iree_status_t loom_run_hal_testbench_scenario_product_validate(
-    const loom_run_hal_testbench_scenario_product_t* product,
-    const loom_testbench_invocation_plan_t* invocation) {
-  const loom_run_hal_testbench_actual_provider_t* provider = &product->provider;
-  if (invocation != product->subject) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "HAL scenario product received an unexpected invocation");
-  }
-  IREE_ASSERT(provider->invocation != NULL);
-  return iree_ok_status();
-}
-
 static iree_status_t loom_run_hal_testbench_scenario_batch_prepare(
     loom_run_hal_testbench_scenario_product_t* product,
     iree_host_size_t call_count, loom_testbench_product_call_t* calls,
@@ -432,8 +419,7 @@ static iree_status_t loom_run_hal_testbench_scenario_product_execute(
     iree_host_size_t call_count, loom_testbench_product_call_t* calls) {
   loom_run_hal_testbench_scenario_product_t* product =
       (loom_run_hal_testbench_scenario_product_t*)user_data;
-  IREE_RETURN_IF_ERROR(
-      loom_run_hal_testbench_scenario_product_validate(product, invocation));
+  (void)invocation;
   if (call_count == 0) {
     return iree_ok_status();
   }
@@ -470,8 +456,7 @@ static iree_status_t loom_run_hal_testbench_scenario_product_benchmark(
   loom_run_benchmark_result_initialize(out_result);
   loom_run_hal_testbench_scenario_product_t* product =
       (loom_run_hal_testbench_scenario_product_t*)user_data;
-  IREE_RETURN_IF_ERROR(
-      loom_run_hal_testbench_scenario_product_validate(product, invocation));
+  (void)invocation;
   if (call_count != options->batch_size) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

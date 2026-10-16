@@ -18,12 +18,12 @@
 extern "C" {
 #endif
 
-// Compiler inputs shared by independently prepared Wasm scenario products.
+// Compiler inputs shared by prepared Wasm scenario products.
 //
-// Each product compiles and instantiates one ordinary function during scenario
-// preparation. Trial execution reuses that instance and only transports raw
-// scalar payloads and complete physical allocation roots through the
-// synchronous host boundary.
+// Each unique product compiles and instantiates one ordinary function during
+// scenario preparation. Trial domains calling the same function share that
+// instance. Execution only transports raw scalar payloads and complete
+// physical allocation roots through the synchronous host boundary.
 typedef struct loom_wasm_testbench_t {
   // Borrowed public compiler inputs, live through the final product prepare.
   loom_testbench_compilation_t compilation;
@@ -43,9 +43,9 @@ iree_status_t loom_wasm_testbench_initialize(
 // Releases the selected target profile. Safe for a zero-initialized testbench.
 void loom_wasm_testbench_deinitialize(loom_wasm_testbench_t* testbench);
 
-// Binds compilation inputs and returns an eager Wasm execution profile.
-// Every prepared product owns an independently compiled and instantiated
-// module. Product preparation finishes before trial-local values exist.
+// Binds compilation inputs and returns an eager Wasm execution profile. Every
+// unique prepared product owns a compiled and instantiated module. Product
+// preparation finishes before trial-local values exist.
 loom_testbench_execution_profile_t loom_wasm_testbench_execution_profile(
     void* user_data, const loom_testbench_compilation_t* compilation,
     const loom_source_table_resolver_t* sources,

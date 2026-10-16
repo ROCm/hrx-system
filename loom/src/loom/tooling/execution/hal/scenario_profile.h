@@ -24,9 +24,9 @@ extern "C" {
 typedef struct loom_run_hal_testbench_scenario_profile_t {
   // Stable profile name surfaced in scenario results and diagnostics.
   iree_string_view_t name;
-  // Provider options copied into each independently prepared HAL product. The
-  // module and kernel launch may be replaced by a target-only function adapter
-  // during product preparation.
+  // Provider options copied into each unique prepared HAL product. The module
+  // and kernel launch may be replaced by a target-only function adapter during
+  // product preparation.
   loom_run_hal_testbench_actual_provider_options_t provider_options;
   // Exact source snapshots used by tooling-generated diagnostics.
   const loom_source_table_resolver_t* source_table;
@@ -44,15 +44,16 @@ void loom_run_hal_testbench_scenario_profile_initialize(
 
 // Returns the external execution profile backed by |profile|.
 //
-// Product preparation compiles and loads one ordinary kernel artifact before
-// any trial-local values exist. An ordinary function with scalar and buffer
-// arguments and scalar results is privately adapted to a fixed 1x1 kernel;
-// the authored module remains unchanged for oracle execution. Returned values
-// occupy typed slots in a private output binding, separate from mutable input
-// buffers. Correctness calls execute sequentially with alias-preserving staging
-// and readback, decoding and reusing one result record after each completion.
-// Product benchmarking stages a bounded batch once, binds disjoint result
-// records, and replays one command sequence without allocation or readback.
+// Product preparation compiles and loads one HAL artifact for each unique
+// subject before trial-local values exist. Trial domains calling the same
+// subject share that product while retaining their own value IDs and source
+// identity. An ordinary function with scalar and buffer arguments and scalar
+// results is privately adapted to a fixed 1x1 kernel; the authored module
+// remains unchanged for oracle execution. Returned values occupy typed slots
+// in a private output binding, separate from mutable input buffers.
+// Correctness stages and executes bounded batches, reads back once, and decodes
+// each disjoint result record. Product benchmarking stages a bounded batch once
+// and replays one command sequence without allocation or readback.
 loom_testbench_execution_profile_t
 loom_run_hal_testbench_scenario_execution_profile(
     loom_run_hal_testbench_scenario_profile_t* profile);

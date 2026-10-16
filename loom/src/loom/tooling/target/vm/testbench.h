@@ -21,8 +21,10 @@ extern "C" {
 // Executes semantic functions through the VM. The direct-call provider compiles
 // all selected function roots on its first call and reuses one process. The
 // check.scenario profile instead uses this instance as compiler configuration
-// and eagerly creates an independent bytecode module and process per prepared
-// target or oracle product. The authored functions need no target binding.
+// and eagerly creates one bytecode module and process per unique target or
+// oracle subject in a concrete scenario configuration. Trial domains calling
+// the same subject share that product. The authored functions need no target
+// binding.
 // Buffer arguments and results share storage with testbench HAL bindings.
 // Arguments require coherent persistent host mappings; results retain the VM
 // storage until the final binding or alias is released.
@@ -80,9 +82,9 @@ loom_testbench_invocation_provider_t loom_vm_testbench_invocation_provider(
     loom_testbench_compile_result_callback_t result_callback);
 
 // Binds compilation inputs and returns an eager VM execution profile. Every
-// prepared product owns an independently compiled bytecode module and process.
-// Product preparation finishes before any trial-local values are materialized;
-// product execution only marshals batches through that prepared process.
+// unique prepared product owns a bytecode module and process. Product
+// preparation finishes before any trial-local values are materialized; product
+// execution only marshals batches through that prepared process.
 loom_testbench_execution_profile_t loom_vm_testbench_execution_profile(
     void* user_data, const loom_testbench_compilation_t* compilation,
     const loom_source_table_resolver_t* sources,

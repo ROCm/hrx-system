@@ -67,6 +67,50 @@ static iree_status_t loom_testbench_prepare_scenario_product(
   return iree_ok_status();
 }
 
+// Product preparation is rooted at the callee under one concrete scenario
+// configuration. Workload and ordinary values remain runtime call data; their
+// IDs, storage extents, source locations, and expectations are trial-local.
+// Arity is retained because prepared providers size their call transport from
+// the representative invocation.
+static bool loom_testbench_scenario_invocations_share_product(
+    const loom_testbench_invocation_plan_t* lhs,
+    const loom_testbench_invocation_plan_t* rhs) {
+  return lhs->module == rhs->module && lhs->kind == rhs->kind &&
+         lhs->callee_ref.module_id == rhs->callee_ref.module_id &&
+         lhs->callee_ref.symbol_id == rhs->callee_ref.symbol_id &&
+         lhs->workload_count == rhs->workload_count &&
+         lhs->input_count == rhs->input_count &&
+         lhs->result_count == rhs->result_count;
+}
+
+static iree_status_t loom_testbench_prepare_or_reuse_scenario_product(
+    const loom_testbench_execution_profile_t* profile,
+    const loom_testbench_invocation_plan_t* invocation,
+    const loom_testbench_value_table_t* configuration,
+    loom_testbench_scenario_execution_mode_t mode,
+    iree_allocator_t host_allocator,
+    const loom_testbench_prepared_scenario_trial_t* previous_trials,
+    iree_host_size_t previous_trial_count, bool use_oracle,
+    loom_testbench_prepared_product_t* out_product) {
+  for (iree_host_size_t i = 0; i < previous_trial_count; ++i) {
+    const loom_testbench_prepared_product_t* product =
+        use_oracle ? &previous_trials[i].oracle : &previous_trials[i].target;
+    if (product->invocation != NULL &&
+        loom_testbench_scenario_invocations_share_product(product->invocation,
+                                                          invocation)) {
+      // Reused products borrow the earliest matching product's state. Trials
+      // are released in reverse order, so the sole owning handle outlives every
+      // borrower and performs teardown exactly once.
+      *out_product = *product;
+      out_product->destroy = NULL;
+      return iree_ok_status();
+    }
+  }
+
+  return loom_testbench_prepare_scenario_product(
+      profile, invocation, configuration, mode, host_allocator, out_product);
+}
+
 iree_status_t loom_testbench_prepare_scenario_configuration(
     const loom_testbench_scenario_execution_options_t* options,
     const loom_testbench_scenario_configuration_values_t* configuration,
@@ -129,15 +173,17 @@ iree_status_t loom_testbench_prepare_scenario_configuration(
           (int)scenario->name.size, scenario->name.data, trial_index);
       break;
     }
-    status = loom_testbench_prepare_scenario_product(
+    status = loom_testbench_prepare_or_reuse_scenario_product(
         &options->target, &trial->action.target, &configuration->values, mode,
-        host_allocator, &prepared_trial->target);
+        host_allocator, out_prepared->trials, trial_index,
+        /*use_oracle=*/false, &prepared_trial->target);
     if (iree_status_is_ok(status) &&
         mode == LOOM_TESTBENCH_SCENARIO_EXECUTION_MODE_CORRECTNESS &&
         trial->action.kind == LOOM_TESTBENCH_SCENARIO_ACTION_COMPARE) {
-      status = loom_testbench_prepare_scenario_product(
+      status = loom_testbench_prepare_or_reuse_scenario_product(
           &options->oracle, &trial->action.oracle, &configuration->values,
           LOOM_TESTBENCH_SCENARIO_EXECUTION_MODE_CORRECTNESS, host_allocator,
+          out_prepared->trials, trial_index, /*use_oracle=*/true,
           &prepared_trial->oracle);
     }
   }
@@ -264,7 +310,7 @@ static void loom_testbench_scenario_trial_executor_reset_calls(
     loom_testbench_scenario_trial_executor_t* executor,
     iree_host_size_t call_count) {
   const loom_testbench_invocation_plan_t* target =
-      executor->prepared_trial->target.invocation;
+      &executor->prepared_trial->trial_plan->action.target;
   loom_testbench_scenario_reset_values(executor->target_call_parameters,
                                        call_count, target->workload_count);
   loom_testbench_scenario_reset_values(executor->target_arguments, call_count,
@@ -272,8 +318,10 @@ static void loom_testbench_scenario_trial_executor_reset_calls(
   loom_testbench_scenario_reset_values(executor->target_results, call_count,
                                        target->result_count);
   const loom_testbench_invocation_plan_t* oracle =
-      executor->prepared_trial->oracle.invocation;
-  if (oracle != NULL) {
+      &executor->prepared_trial->trial_plan->action.oracle;
+  if (executor->mode == LOOM_TESTBENCH_SCENARIO_EXECUTION_MODE_CORRECTNESS &&
+      executor->prepared_trial->trial_plan->action.kind ==
+          LOOM_TESTBENCH_SCENARIO_ACTION_COMPARE) {
     loom_testbench_scenario_reset_values(executor->oracle_call_parameters,
                                          call_count, oracle->workload_count);
     loom_testbench_scenario_reset_values(executor->oracle_arguments, call_count,
@@ -329,9 +377,13 @@ iree_status_t loom_testbench_scenario_trial_executor_initialize(
   const loom_testbench_prepared_scenario_trial_t* prepared_trial =
       &prepared->trials[trial_index];
   const loom_testbench_invocation_plan_t* target =
-      prepared_trial->target.invocation;
+      &prepared_trial->trial_plan->action.target;
   const loom_testbench_invocation_plan_t* oracle =
-      prepared_trial->oracle.invocation;
+      prepared->mode == LOOM_TESTBENCH_SCENARIO_EXECUTION_MODE_CORRECTNESS &&
+              prepared_trial->trial_plan->action.kind ==
+                  LOOM_TESTBENCH_SCENARIO_ACTION_COMPARE
+          ? &prepared_trial->trial_plan->action.oracle
+          : NULL;
   *out_executor = (loom_testbench_scenario_trial_executor_t){
       .prepared_trial = prepared_trial,
       .configuration = prepared->configuration,
@@ -608,14 +660,15 @@ static iree_status_t loom_testbench_scenario_store_batch_results(
 
 static iree_status_t loom_testbench_scenario_execute_product(
     const loom_testbench_prepared_product_t* product,
+    const loom_testbench_invocation_plan_t* invocation,
     loom_testbench_scenario_trial_values_t* trial_values, bool use_oracle,
     iree_host_size_t call_count, loom_testbench_product_call_t* calls) {
   IREE_RETURN_IF_ERROR(loom_testbench_scenario_load_batch_calls(
-      product->invocation, trial_values, use_oracle, call_count, calls));
-  IREE_RETURN_IF_ERROR(product->execute(product->user_data, product->invocation,
-                                        call_count, calls));
+      invocation, trial_values, use_oracle, call_count, calls));
+  IREE_RETURN_IF_ERROR(
+      product->execute(product->user_data, invocation, call_count, calls));
   return loom_testbench_scenario_store_batch_results(
-      product->invocation, trial_values, use_oracle, call_count, calls);
+      invocation, trial_values, use_oracle, call_count, calls);
 }
 
 static iree_status_t loom_testbench_scenario_materialize_trials(
@@ -765,12 +818,15 @@ static iree_status_t loom_testbench_scenario_execute_target_isolated(
     iree_host_size_t trial_count) {
   const loom_testbench_prepared_product_t* target =
       &executor->prepared_trial->target;
+  const loom_testbench_invocation_plan_t* invocation =
+      &executor->prepared_trial->trial_plan->action.target;
   for (iree_host_size_t call_index = 0; call_index < trial_count;
        ++call_index) {
     loom_testbench_device_event_capture_reset(executor->device_event_capture);
     IREE_RETURN_IF_ERROR(loom_testbench_scenario_execute_product(
-        target, &executor->trial_values[call_index], /*use_oracle=*/false,
-        /*call_count=*/1, &executor->target_calls[call_index]));
+        target, invocation, &executor->trial_values[call_index],
+        /*use_oracle=*/false, /*call_count=*/1,
+        &executor->target_calls[call_index]));
     IREE_RETURN_IF_ERROR(
         loom_testbench_scenario_snapshot_device_events(executor, call_index));
   }
@@ -785,10 +841,11 @@ static iree_status_t loom_testbench_scenario_execute_target(
       &executor->prepared_trial->trial_plan->action;
   const loom_testbench_prepared_product_t* target =
       &executor->prepared_trial->target;
+  const loom_testbench_invocation_plan_t* invocation = &action->target;
   if (executor->device_event_capture == NULL) {
     return loom_testbench_scenario_execute_product(
-        target, executor->trial_values, /*use_oracle=*/false, trial_count,
-        executor->target_calls);
+        target, invocation, executor->trial_values, /*use_oracle=*/false,
+        trial_count, executor->target_calls);
   }
   if (action->expects_device_events) {
     return loom_testbench_scenario_execute_target_isolated(executor,
@@ -797,8 +854,8 @@ static iree_status_t loom_testbench_scenario_execute_target(
 
   loom_testbench_device_event_capture_reset(executor->device_event_capture);
   IREE_RETURN_IF_ERROR(loom_testbench_scenario_execute_product(
-      target, executor->trial_values, /*use_oracle=*/false, trial_count,
-      executor->target_calls));
+      target, invocation, executor->trial_values, /*use_oracle=*/false,
+      trial_count, executor->target_calls));
   loom_testbench_device_event_list_t batch_events = {0};
   loom_testbench_device_event_capture_events(executor->device_event_capture,
                                              &batch_events);
@@ -946,8 +1003,9 @@ iree_status_t loom_testbench_run_scenario_trial_batch(
   if (iree_status_is_ok(status) && trial_count != 0 &&
       trial->action.kind == LOOM_TESTBENCH_SCENARIO_ACTION_COMPARE) {
     status = loom_testbench_scenario_execute_product(
-        &executor->prepared_trial->oracle, executor->trial_values,
-        /*use_oracle=*/true, trial_count, executor->oracle_calls);
+        &executor->prepared_trial->oracle, &trial->action.oracle,
+        executor->trial_values, /*use_oracle=*/true, trial_count,
+        executor->oracle_calls);
     if (!iree_status_is_ok(status)) {
       status = iree_status_annotate_f(
           status, "executing oracle profile '%.*s'",
@@ -1062,14 +1120,15 @@ iree_status_t loom_testbench_benchmark_scenario_trial(
   }
   const loom_testbench_prepared_product_t* product =
       &executor->prepared_trial->target;
+  const loom_testbench_invocation_plan_t* invocation = &trial->action.target;
   if (iree_status_is_ok(status)) {
     status = loom_testbench_scenario_load_batch_calls(
-        product->invocation, executor->trial_values, /*use_oracle=*/false,
-        call_count, executor->target_calls);
+        invocation, executor->trial_values, /*use_oracle=*/false, call_count,
+        executor->target_calls);
   }
   if (iree_status_is_ok(status)) {
-    status = product->benchmark(product->user_data, product->invocation,
-                                call_count, executor->target_calls, options,
+    status = product->benchmark(product->user_data, invocation, call_count,
+                                executor->target_calls, options,
                                 executor->host_allocator, out_result);
   }
   if (iree_status_is_ok(status) &&

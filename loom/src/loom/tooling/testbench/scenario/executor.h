@@ -59,13 +59,13 @@ typedef void(IREE_API_PTR* loom_testbench_product_destroy_fn_t)(
 typedef struct loom_testbench_prepared_product_t {
   // External profile that prepared this product.
   iree_string_view_t profile;
-  // Static invocation compiled into this product.
+  // Representative static invocation compiled into this product.
   const loom_testbench_invocation_plan_t* invocation;
   // Executes one bounded batch.
   loom_testbench_product_execute_fn_t execute;
   // Benchmarks one target-only batch, or NULL when unsupported.
   loom_testbench_product_benchmark_fn_t benchmark;
-  // Optional teardown for |user_data|.
+  // Optional teardown for |user_data|, cleared on borrowed product handles.
   loom_testbench_product_destroy_fn_t destroy;
   // Product-owned state passed to callbacks.
   void* user_data;
@@ -74,7 +74,10 @@ typedef struct loom_testbench_prepared_product_t {
 // Prepares one executable product from static IR and configuration values.
 //
 // The configuration table contains only values defined outside check.trial.
-// Runtime trial values do not exist while this callback runs.
+// Runtime trial values do not exist while this callback runs. The product is
+// reusable by every invocation of the same subject with the same arities in
+// this concrete configuration; trial-local SSA IDs and source locations are
+// supplied separately during execution.
 typedef iree_status_t(IREE_API_PTR* loom_testbench_product_prepare_fn_t)(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     const loom_testbench_value_table_t* configuration,

@@ -31,6 +31,8 @@ typedef struct ExecutionTimeline {
 typedef struct TestProfileState {
   ExecutionTimeline* timeline;
   iree_host_size_t prepare_count;
+  iree_host_size_t fail_prepare_ordinal;
+  iree_host_size_t destroy_count;
   iree_host_size_t execute_count;
   iree_host_size_t last_call_count;
   iree_host_size_t benchmark_count;
@@ -152,6 +154,11 @@ static iree_status_t BenchmarkTestProduct(
   return iree_ok_status();
 }
 
+static void DestroyTestProduct(void* user_data) {
+  TestProfileState* state = static_cast<TestProfileState*>(user_data);
+  ++state->destroy_count;
+}
+
 static iree_status_t PrepareTestProduct(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     const loom_testbench_value_table_t* configuration,
@@ -171,9 +178,14 @@ static iree_status_t PrepareTestProduct(
         loom_testbench_value_table_contains(configuration,
                                             invocation->input_value_ids[i]);
   }
+  if (state->prepare_count == state->fail_prepare_ordinal) {
+    return iree_make_status(IREE_STATUS_ABORTED,
+                            "injected scenario product preparation failure");
+  }
   *out_product = {};
   out_product->execute = ExecuteTestProduct;
   out_product->benchmark = BenchmarkTestProduct;
+  out_product->destroy = DestroyTestProduct;
   out_product->user_data = state;
   return iree_ok_status();
 }
@@ -294,6 +306,14 @@ check.scenario public @batched configure[2](%configuration: index, %configuratio
     %input_stream = check.entropy.fork %entropy name("input") : check.entropy
     %seed = check.entropy.read %input_stream[0] : check.entropy -> i64
     %storage = check.generate.random.uniform seed(%seed) range(-16 to 16) : tensor<4xi32>
+    %tail = check.tensor.view %storage offset(8) : tensor<4xi32> -> tensor<2xi32>
+    check.compare<@update, @update_oracle>(%storage, %tail) : (tensor<4xi32>, tensor<2xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<4xi32>
+      check.expect.bitwise actual(%tail) expected(%tail) : tensor<2xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.iota offset(7) step(1) : tensor<4xi32>
     %tail = check.tensor.view %storage offset(8) : tensor<4xi32> -> tensor<2xi32>
     check.compare<@update, @update_oracle>(%storage, %tail) : (tensor<4xi32>, tensor<2xi32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<4xi32>
@@ -436,6 +456,12 @@ TEST_F(ScenarioExecutorTest, PreparesBeforeMaterializationAndExecutesBatches) {
       LOOM_TESTBENCH_SCENARIO_EXECUTION_MODE_CORRECTNESS, &prepared));
   EXPECT_EQ(target_state.prepare_count, 2u);
   EXPECT_EQ(oracle_state.prepare_count, 1u);
+  EXPECT_EQ(prepared.trials[1].target.invocation,
+            prepared.trials[0].target.invocation);
+  EXPECT_EQ(prepared.trials[1].oracle.invocation,
+            prepared.trials[0].oracle.invocation);
+  EXPECT_EQ(prepared.trials[1].target.destroy, nullptr);
+  EXPECT_EQ(prepared.trials[1].oracle.destroy, nullptr);
   EXPECT_EQ(target_state.execute_count, 0u);
   EXPECT_EQ(oracle_state.execute_count, 0u);
   EXPECT_FALSE(target_state.saw_runtime_value_during_prepare);
@@ -485,7 +511,7 @@ TEST_F(ScenarioExecutorTest, PreparesBeforeMaterializationAndExecutesBatches) {
 
   loom_testbench_scenario_trial_executor_t invoke_executor = {};
   IREE_ASSERT_OK(loom_testbench_scenario_trial_executor_initialize(
-      &prepared, /*trial_index=*/1, &materializer, /*batch_capacity=*/2,
+      &prepared, /*trial_index=*/2, &materializer, /*batch_capacity=*/2,
       &invoke_executor));
   loom_testbench_scenario_trial_result_list_t invoke_results = {};
   IREE_ASSERT_OK(loom_testbench_run_scenario_trial_batch(
@@ -497,14 +523,79 @@ TEST_F(ScenarioExecutorTest, PreparesBeforeMaterializationAndExecutesBatches) {
   EXPECT_EQ(oracle_state.execute_count, 1u);
   for (iree_host_size_t i = 0; i < invoke_results.count; ++i) {
     EXPECT_TRUE(invoke_results.values[i].passed);
-    EXPECT_EQ(invoke_results.values[i].identity.trial_index, 1u);
+    EXPECT_EQ(invoke_results.values[i].identity.trial_index, 2u);
     EXPECT_EQ(invoke_results.values[i].identity.trial_ordinal, i);
     EXPECT_EQ(invoke_results.values[i].expectation_report, nullptr);
   }
 
+  loom_testbench_scenario_trial_executor_t repeated_executor = {};
+  IREE_ASSERT_OK(loom_testbench_scenario_trial_executor_initialize(
+      &prepared, /*trial_index=*/1, &materializer, /*batch_capacity=*/1,
+      &repeated_executor));
+  loom_testbench_scenario_trial_result_list_t repeated_results = {};
+  IREE_ASSERT_OK(loom_testbench_run_scenario_trial_batch(
+      &repeated_executor, /*first_trial_ordinal=*/0, /*trial_count=*/1,
+      &repeated_results));
+  ASSERT_EQ(repeated_results.count, 1u);
+  EXPECT_TRUE(repeated_results.values[0].passed);
+  EXPECT_EQ(repeated_results.values[0].identity.trial_index, 1u);
+  EXPECT_EQ(target_state.execute_count, 3u);
+  EXPECT_EQ(oracle_state.execute_count, 2u);
+
+  loom_testbench_scenario_trial_executor_deinitialize(&repeated_executor);
   loom_testbench_scenario_trial_executor_deinitialize(&invoke_executor);
   loom_testbench_scenario_trial_executor_deinitialize(&compare_executor);
   loom_testbench_prepared_scenario_configuration_deinitialize(&prepared);
+  EXPECT_EQ(target_state.destroy_count, 2u);
+  EXPECT_EQ(oracle_state.destroy_count, 1u);
+  loom_testbench_scenario_configuration_values_deinitialize(&configuration);
+  loom_module_free(module);
+}
+
+TEST_F(ScenarioExecutorTest, ReleasesOwnedProductsAfterPreparationFailure) {
+  loom_module_t* module = ParseModule();
+  ASSERT_NE(module, nullptr);
+  loom_testbench_module_plan_t plan = PlanModule(module);
+  ASSERT_EQ(plan.issue_count, 0u);
+  ASSERT_EQ(plan.scenario_count, 1u);
+  const loom_testbench_scenario_plan_t& scenario = plan.scenarios[0];
+
+  loom_testbench_value_materializer_options_t materializer =
+      MaterializerOptions();
+  loom_testbench_scenario_configuration_values_t configuration = {};
+  IREE_ASSERT_OK(loom_testbench_scenario_configuration_values_initialize(
+      module, &scenario, host_allocator_, &configuration));
+  IREE_ASSERT_OK(loom_testbench_scenario_configuration_values_materialize(
+      &materializer, loom_testbench_entropy_root(0),
+      /*configuration_ordinal=*/0, &configuration));
+
+  ExecutionTimeline timeline = {};
+  TestProfileState target_state = {
+      .timeline = &timeline,
+      .fail_prepare_ordinal = 2,
+  };
+  TestProfileState oracle_state = {.timeline = &timeline};
+  loom_testbench_scenario_execution_options_t execution_options = {};
+  loom_testbench_scenario_execution_options_initialize(&execution_options);
+  execution_options.target.name = IREE_SV("test-target");
+  execution_options.target.prepare = PrepareTestProduct;
+  execution_options.target.user_data = &target_state;
+  execution_options.oracle.name = IREE_SV("test-oracle");
+  execution_options.oracle.prepare = PrepareTestProduct;
+  execution_options.oracle.user_data = &oracle_state;
+
+  loom_testbench_prepared_scenario_configuration_t prepared = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      loom_testbench_prepare_scenario_configuration(
+          &execution_options, &configuration,
+          LOOM_TESTBENCH_SCENARIO_EXECUTION_MODE_CORRECTNESS, &prepared));
+  EXPECT_EQ(target_state.prepare_count, 2u);
+  EXPECT_EQ(target_state.destroy_count, 1u);
+  EXPECT_EQ(oracle_state.prepare_count, 1u);
+  EXPECT_EQ(oracle_state.destroy_count, 1u);
+  EXPECT_EQ(prepared.trials, nullptr);
+
   loom_testbench_scenario_configuration_values_deinitialize(&configuration);
   loom_module_free(module);
 }
@@ -609,6 +700,8 @@ TEST_F(ScenarioExecutorTest, BenchmarksIndependentTargetOnlyReplicas) {
 
   loom_testbench_scenario_trial_executor_deinitialize(&executor);
   loom_testbench_prepared_scenario_configuration_deinitialize(&prepared);
+  EXPECT_EQ(target_state.destroy_count, 2u);
+  EXPECT_EQ(oracle_state.destroy_count, 0u);
   loom_testbench_scenario_configuration_values_deinitialize(&configuration);
   loom_module_free(module);
 }
