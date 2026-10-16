@@ -175,6 +175,22 @@ projections and embeddings use Q8_0; index projections use BF16. Accumulation is
 F32, with explicit BF16 activation publication boundaries. The output head
 projects only rows that require token selection.
 
+Sparse attention keeps each query's exact top-512 four-token blocks and its
+incomplete causal tail. At capacities of at least 32 tokens, one workgroup
+shares a selected K/V tile across the twelve query heads that consume it.
+Four waves retain their query panels in registers, merge Q*K partials, and
+compute P*V through BF16/F32 matrix instructions. Twelve heads occupy a padded
+16-row matrix; the remaining rows have no external reads or writes. The two
+K/V panels and four partial-score planes occupy 23,040 bytes of shared memory,
+with no dense mask, attention matrix, or extra global workspace.
+
+Softmax and accumulation remain F32. Probabilities use a BF16 high component
+and a BF16 rounding residual for the matrix contractions; using only the high
+component loses accuracy in cancellation-sensitive outputs. Attended values
+still round to BF16 before sigmoid gating and final BF16 publication. Smaller
+cohorts use sixteen waves to partition one head's keys, providing parallelism
+when too few independent queries are available to occupy the device.
+
 The 36 GDN QKV tensors use an in-place preparation pass. Each workgroup owns
 four complete output channels, captures their original bytes into 10,880 bytes
 of shared memory, and separates their scales and codes into contiguous planes.
