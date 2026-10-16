@@ -6,7 +6,6 @@
 
 #include "loom/serve/service/text/pending_request.h"
 
-#include "loom/serve/service/text/response.h"
 #include "loom/serve/service/text/schedule.h"
 
 iree_status_t loom_serve_text_pending_request_prepare(
@@ -63,26 +62,19 @@ void loom_serve_text_pending_request_cancel(
                                     ? LOOM_SERVE_TELEMETRY_FAILED
                                     : LOOM_SERVE_TELEMETRY_CANCELLED,
                                 0, iree_ok_status());
-  loom_serve_http_connection_abort(request->connection);
+  request->consumer.vtable->end(request->consumer.self, false,
+                                telemetry->failure_code
+                                    ? telemetry->failure_code
+                                    : IREE_STATUS_CANCELLED);
 }
 
 iree_status_t loom_serve_text_pending_request_reject(
     loom_serve_text_pending_request_t* request,
     loom_serve_text_telemetry_t* telemetry, iree_status_t failure,
     iree_allocator_t host_allocator) {
-  int code = 503;
-  const char* reason = "Service Unavailable";
-  if (iree_status_is_invalid_argument(failure) ||
-      iree_status_is_out_of_range(failure)) {
-    code = 400;
-    reason = "Bad Request";
-  } else if (iree_status_is_unimplemented(failure)) {
-    code = 501;
-    reason = "Not Implemented";
-  }
   failure = iree_status_join(failure, loom_serve_text_pending_request_release(
                                           request, host_allocator));
-  return loom_serve_text_response_reject(telemetry, request->connection,
-                                         request->receipt, code, reason,
-                                         failure, host_allocator);
+  loom_serve_text_telemetry_end(telemetry, request->receipt,
+                                LOOM_SERVE_TELEMETRY_REJECTED, 0, failure);
+  return request->consumer.vtable->reject(request->consumer.self, failure);
 }
