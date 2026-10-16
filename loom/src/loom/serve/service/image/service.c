@@ -476,7 +476,7 @@ static void loom_serve_image_finish(loom_serve_image_service_t* service,
 }
 
 static void loom_serve_image_prepared(loom_serve_image_service_t* service,
-                                      loom_serve_http_service_flags_t flags,
+                                      loom_serve_service_flags_t flags,
                                       bool* progress) {
   if (service->stopping || !service->connection) {
     service->generator.discard_prepared_request(service->generator.self);
@@ -495,7 +495,7 @@ static void loom_serve_image_prepared(loom_serve_image_service_t* service,
   }
   if (iree_status_is_ok(service->status) &&
       admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY) {
-    if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY)) {
+    if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
       return;
     }
     // No accepted producer can release capacity; waiting on queued peers
@@ -647,7 +647,7 @@ static void loom_serve_image_prune(loom_serve_image_service_t* service,
 static iree_status_t loom_serve_image_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_http_service_flags_t flags) {
+    loom_serve_service_flags_t flags) {
   loom_serve_image_service_t* service = self;
   loom_serve_image_pending_t pending = {
       .connection = connection,
@@ -716,11 +716,10 @@ static iree_status_t loom_serve_image_accept(
   return iree_ok_status();
 }
 
-static loom_serve_http_service_snapshot_t loom_serve_image_snapshot(
-    void* self) {
+static loom_serve_service_snapshot_t loom_serve_image_snapshot(void* self) {
   const loom_serve_image_service_t* service = self;
   const iree_time_t now = iree_time_now();
-  return (loom_serve_http_service_snapshot_t){
+  return (loom_serve_service_snapshot_t){
       .phase = image_phases[service->phase],
       .queued_requests = service->pending_count,
       .active_requests = service->active ? 1 : 0,
@@ -756,7 +755,7 @@ static bool loom_serve_image_request_at(
 // Heartbeat work is a scheduler turn, woken by an asynchronous timer. These
 // phases describe ownership, not individual completed device dispatches.
 static void loom_serve_image_heartbeat(loom_serve_image_service_t* service) {
-  const loom_serve_http_service_snapshot_t state =
+  const loom_serve_service_snapshot_t state =
       loom_serve_image_snapshot(service);
   loom_serve_telemetry_record_t record = {
       .time_ns = iree_time_now(),
@@ -824,12 +823,13 @@ static bool loom_serve_image_is_pending(void* self) {
          loom_serve_timer_is_pending(&service->timer);
 }
 
-static iree_status_t loom_serve_image_advance(
-    void* self, loom_serve_http_service_flags_t flags, bool* out_progress) {
+static iree_status_t loom_serve_image_advance(void* self,
+                                              loom_serve_service_flags_t flags,
+                                              bool* out_progress) {
   loom_serve_image_service_t* service = self;
   *out_progress = false;
   if (!service->stopping &&
-      iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
     loom_serve_image_stop(service);
     *out_progress = true;
   }
@@ -922,11 +922,11 @@ static iree_status_t loom_serve_image_advance(
   return status;
 }
 
-loom_serve_http_service_t loom_serve_image_service_interface(
+loom_serve_service_t loom_serve_image_service_interface(
     loom_serve_image_service_t* service) {
   static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
   static const iree_string_view_t output_modalities[] = {IREE_SVL("image")};
-  return (loom_serve_http_service_t){
+  return (loom_serve_service_t){
       .name = service->options.name,
       .self = service,
       .set_observer = loom_serve_image_set_observer,

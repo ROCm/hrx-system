@@ -203,7 +203,7 @@ struct loom_serve_test_model_service_t {
     // The owner has considered a request, not merely accepted its transport.
     bool observed = false;
     // Copied router inputs, independent of later service/registry lifetimes.
-    loom_serve_http_service_flags_t flags = 0;
+    loom_serve_service_flags_t flags = 0;
   } admission;
   // Optional immutable historical work, published before owner startup.
   const loom_serve_telemetry_counters_t* counters = nullptr;
@@ -230,7 +230,7 @@ struct loom_serve_test_model_service_t {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this, count] { return accepted >= count; });
   }
-  loom_serve_http_service_flags_t WaitAdmission() {
+  loom_serve_service_flags_t WaitAdmission() {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return admission.observed; });
     return admission.flags;
@@ -252,7 +252,7 @@ struct loom_serve_test_model_service_t {
     return !service->wait_for_shared_activity && !service->pending.empty();
   }
 
-  static loom_serve_http_service_snapshot_t Snapshot(void* self) {
+  static loom_serve_service_snapshot_t Snapshot(void* self) {
     auto* service = static_cast<loom_serve_test_model_service_t*>(self);
     std::lock_guard<std::mutex> lock(service->mutex);
     const size_t queued = service->pending.size() - service->waiting;
@@ -266,7 +266,7 @@ struct loom_serve_test_model_service_t {
   static iree_status_t Accept(void* self,
                               loom_serve_http_connection_t* connection,
                               const loom_serve_http_request_t* request,
-                              loom_serve_http_service_flags_t flags) {
+                              loom_serve_service_flags_t flags) {
     auto* service = static_cast<loom_serve_test_model_service_t*>(self);
     std::lock_guard<std::mutex> lock(service->mutex);
     service->pending.emplace_back(connection, request);
@@ -274,12 +274,11 @@ struct loom_serve_test_model_service_t {
     service->condition.notify_all();
     return iree_ok_status();
   }
-  static iree_status_t Advance(void* self,
-                               loom_serve_http_service_flags_t flags,
+  static iree_status_t Advance(void* self, loom_serve_service_flags_t flags,
                                bool* progress) {
     auto* service = static_cast<loom_serve_test_model_service_t*>(self);
     *progress = false;
-    if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+    if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
       std::lock_guard<std::mutex> lock(service->mutex);
       service->stopping = true;
       service->condition.notify_all();
@@ -304,7 +303,7 @@ struct loom_serve_test_model_service_t {
         return iree_ok_status();
       }
       service->stopping =
-          iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+          iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING);
       service->condition.notify_all();
       if (!service->ready) {
         if (service->advance_ready_work && !service->stopping) {
@@ -330,7 +329,7 @@ struct loom_serve_test_model_service_t {
       }
     }
     if (service->wait_for_shared_activity &&
-        iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY)) {
+        iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
       *progress = false;
       return iree_ok_status();
     }
@@ -357,8 +356,8 @@ struct loom_serve_test_model_service_t {
     return status;
   }
 
-  loom_serve_http_service_t Interface(const iree_tokenizer_t* tokenizer,
-                                      const void* capacity_domain) {
+  loom_serve_service_t Interface(const iree_tokenizer_t* tokenizer,
+                                 const void* capacity_domain) {
     return {.name = iree_make_cstring_view(name),
             .self = this,
             .set_observer = SetObserver,
@@ -419,7 +418,7 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     iree_tokenizer_builder_deinitialize(&builder);
     IREE_ASSERT_OK(tokenizer_status);
     owner_ = std::thread([this] {
-      const loom_serve_http_service_t services[] = {
+      const loom_serve_service_t services[] = {
           a_.Interface(tokenizer_a_, &a_), b_.Interface(tokenizer_b_, &a_),
           held_.Interface(tokenizer_a_, &a_),
           other_.Interface(nullptr, nullptr),

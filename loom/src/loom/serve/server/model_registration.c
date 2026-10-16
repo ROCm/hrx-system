@@ -86,7 +86,7 @@ typedef struct loom_serve_finite_registration_t {
 
 static iree_status_t loom_serve_finite_registration_prepare(
     void* self, bool cancel, bool* out_complete,
-    loom_serve_http_service_t* out_service,
+    loom_serve_service_t* out_service,
     loom_serve_compilation_report_t* out_report) {
   loom_serve_finite_registration_t* registration = self;
   iree_status_t status = loom_serve_finite_load_advance(
@@ -257,7 +257,7 @@ typedef struct loom_serve_image_registration_t {
 
 static iree_status_t loom_serve_image_registration_prepare(
     void* self, bool cancel, bool* out_complete,
-    loom_serve_http_service_t* out_service,
+    loom_serve_service_t* out_service,
     loom_serve_compilation_report_t* out_report) {
   loom_serve_image_registration_t* registration = self;
   iree_status_t status = loom_serve_image_load_advance(
@@ -436,7 +436,7 @@ typedef struct loom_serve_speech_registration_t {
 
 static iree_status_t loom_serve_speech_registration_prepare(
     void* self, bool cancel, bool* out_complete,
-    loom_serve_http_service_t* out_service,
+    loom_serve_service_t* out_service,
     loom_serve_compilation_report_t* out_report) {
   loom_serve_speech_registration_t* registration = self;
   iree_status_t status = loom_serve_speech_load_advance(
@@ -604,7 +604,7 @@ typedef struct loom_serve_recognition_registration_t {
 
 static iree_status_t loom_serve_recognition_registration_prepare(
     void* self, bool cancel, bool* out_complete,
-    loom_serve_http_service_t* out_service,
+    loom_serve_service_t* out_service,
     loom_serve_compilation_report_t* out_report) {
   loom_serve_recognition_registration_t* registration = self;
   iree_status_t status = loom_serve_recognition_load_advance(
@@ -781,7 +781,7 @@ typedef struct loom_serve_text_registration_t {
 
 static iree_status_t loom_serve_text_registration_prepare(
     void* self, bool cancel, bool* out_complete,
-    loom_serve_http_service_t* out_service,
+    loom_serve_service_t* out_service,
     loom_serve_compilation_report_t* out_report) {
   loom_serve_text_registration_t* registration = self;
   iree_status_t status = loom_serve_text_load_advance(

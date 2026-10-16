@@ -57,7 +57,7 @@ typedef struct loom_serve_registration_t {
   // latency distributions; terminal failure still requires retire.
   // Copies compilation evidence on terminal completion, including failure.
   iree_status_t (*prepare)(void* self, bool cancel, bool* out_complete,
-                           loom_serve_http_service_t* out_service,
+                           loom_serve_service_t* out_service,
                            loom_serve_compilation_report_t* out_report);
   // Called after preparation terminates and service/tokenizer borrowers retire.
   // Drops service consumers, then waits by ownership wake, not readiness value.
@@ -157,7 +157,7 @@ typedef enum loom_serve_parameter_operation_e {
 // never model pointers. The opaque capacity owner survives native retirement.
 typedef struct loom_serve_registered_model_t {
   // Borrowed ready interface or metadata-only description for an owned model.
-  loom_serve_http_service_t service;
+  loom_serve_service_t service;
   // Owned declaration for managed entries; empty name denotes borrowed service.
   loom_serve_model_configuration_t configuration;
   // Owned modality operation, created lazily by admission or explicit
@@ -183,7 +183,7 @@ typedef struct loom_serve_registered_model_t {
   // Independent tokenizer processes still borrowing the model.
   iree_host_size_t tokenizer_count;
   // Copied scheduler observation for one response; never a readiness signal.
-  loom_serve_http_service_snapshot_t snapshot;
+  loom_serve_service_snapshot_t snapshot;
   // Final work totals after service destruction, or zero before publication.
   loom_serve_telemetry_counters_t counters;
   // Final duration distributions after service destruction, or zero before
@@ -207,7 +207,7 @@ typedef struct loom_serve_registry_t loom_serve_registry_t;
 // capacity for managed registrations. Borrowed services remain externally owned
 // and cannot be unregistered here. No source work or model allocation occurs.
 iree_status_t loom_serve_registry_allocate(
-    iree_host_size_t service_count, const loom_serve_http_service_t* services,
+    iree_host_size_t service_count, const loom_serve_service_t* services,
     iree_host_size_t managed_capacity,
     loom_serve_registration_factory_t factory, iree_allocator_t host_allocator,
     loom_serve_registry_t** out_registry);
@@ -227,7 +227,7 @@ loom_serve_registered_model_t* loom_serve_registry_at(
 // Snapshots service state only after publication and before retirement.
 // Other states report their registration phase without calling a service.
 // The registry owner serializes this query with model advancement/removal.
-loom_serve_http_service_snapshot_t loom_serve_registry_snapshot(
+loom_serve_service_snapshot_t loom_serve_registry_snapshot(
     const loom_serve_registered_model_t* model);
 
 // Moves a validated declaration, including its owning allocator, into a
@@ -238,6 +238,17 @@ iree_status_t loom_serve_registry_register(
     loom_serve_registry_t* registry,
     loom_serve_model_configuration_t* configuration,
     iree_host_size_t* out_index);
+
+// Resolves the current named speech registration and tries native admission
+// on the serialized serving owner. Success with a stream moves the initialized
+// request; NULL success is preparation/admission/queue pressure and leaves it
+// with the caller. Waiting HTTP admissions retain priority. Failure leaves the
+// request untouched. An accepted stream never rebinds to a later registration;
+// its copied output/status can outlive model removal and registry destruction.
+iree_status_t loom_serve_registry_try_open_speech(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    loom_serve_speech_request_t* request,
+    loom_serve_speech_stream_t** out_stream);
 
 // Seals admission; callers resolve held claims before the next advance.
 // Repeated removal is idempotent, with abort escalation and explicit
@@ -284,7 +295,7 @@ bool loom_serve_registry_has_component(
 
 // Returns STOPPING only for abort or after graceful admitted work has finished.
 // The router still owns held claims and external tokenizer lifetimes.
-loom_serve_http_service_flags_t loom_serve_registry_service_flags(
+loom_serve_service_flags_t loom_serve_registry_service_flags(
     const loom_serve_registered_model_t* model);
 
 // Advances one lifecycle after the router advances its ready service. Package

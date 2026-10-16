@@ -480,7 +480,7 @@ static bool loom_serve_speech_has_resident(
 }
 
 static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
-                                       loom_serve_http_service_flags_t flags,
+                                       loom_serve_service_flags_t flags,
                                        bool* progress) {
   loom_serve_speech_row_t* row = service->admission;
   loom_serve_residency_admission_t admission;
@@ -514,7 +514,7 @@ static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
   if (iree_status_is_ok(service->status) &&
       admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY) {
     if (loom_serve_speech_has_resident(service) ||
-        iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY)) {
+        iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
       return;
     }
     service->generator.discard(service->generator.self, row->invocation);
@@ -761,7 +761,7 @@ iree_status_t loom_serve_speech_service_try_open(
 static iree_status_t loom_serve_speech_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_http_service_flags_t flags) {
+    loom_serve_service_flags_t flags) {
   loom_serve_speech_service_t* service = self;
   loom_serve_speech_pending_t pending = {
       .job = {.id = ++service->telemetry.counters.requests,
@@ -842,11 +842,10 @@ static const char* loom_serve_speech_row_phase(
   return speech_row_phases[row->phase];
 }
 
-static loom_serve_http_service_snapshot_t loom_serve_speech_snapshot(
-    void* self) {
+static loom_serve_service_snapshot_t loom_serve_speech_snapshot(void* self) {
   const loom_serve_speech_service_t* service = self;
   const iree_time_t now = iree_time_now();
-  loom_serve_http_service_snapshot_t snapshot = {
+  loom_serve_service_snapshot_t snapshot = {
       .phase = speech_phases[service->phase],
       .queued_requests = service->pending_count,
       .oldest_queued_age = service->pending_count
@@ -913,7 +912,7 @@ static bool loom_serve_speech_request_at(
 }
 
 static void loom_serve_speech_heartbeat(loom_serve_speech_service_t* service) {
-  const loom_serve_http_service_snapshot_t state =
+  const loom_serve_service_snapshot_t state =
       loom_serve_speech_snapshot(service);
   loom_serve_telemetry_record_t record = {
       .time_ns = iree_time_now(),
@@ -982,7 +981,7 @@ static bool loom_serve_speech_is_pending(void* self) {
 // Offers are queried from a fresh snapshot on the CPU. A blocked output row
 // never enters this snapshot; neighbors continue using their own send credit.
 static void loom_serve_speech_schedule(loom_serve_speech_service_t* service,
-                                       loom_serve_http_service_flags_t flags,
+                                       loom_serve_service_flags_t flags,
                                        bool* progress) {
   if (service->admission) {
     loom_serve_speech_prepared(service, flags, progress);
@@ -1017,12 +1016,13 @@ static void loom_serve_speech_schedule(loom_serve_speech_service_t* service,
   }
 }
 
-static iree_status_t loom_serve_speech_advance(
-    void* self, loom_serve_http_service_flags_t flags, bool* out_progress) {
+static iree_status_t loom_serve_speech_advance(void* self,
+                                               loom_serve_service_flags_t flags,
+                                               bool* out_progress) {
   loom_serve_speech_service_t* service = self;
   *out_progress = false;
   if (!service->stopping &&
-      iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
     loom_serve_speech_stop(service);
     *out_progress = true;
   }
@@ -1076,17 +1076,24 @@ static iree_status_t loom_serve_speech_advance(
   return status;
 }
 
-loom_serve_http_service_t loom_serve_speech_service_interface(
+static iree_status_t loom_serve_speech_open(
+    void* self, loom_serve_speech_request_t* request,
+    loom_serve_speech_stream_t** out_stream) {
+  return loom_serve_speech_service_try_open(self, request, out_stream);
+}
+
+loom_serve_service_t loom_serve_speech_service_interface(
     loom_serve_speech_service_t* service) {
   static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
   static const iree_string_view_t output_modalities[] = {IREE_SVL("audio")};
-  return (loom_serve_http_service_t){
+  return (loom_serve_service_t){
       .name = service->options.name,
       .self = service,
       .set_observer = loom_serve_speech_set_observer,
       .is_pending = loom_serve_speech_is_pending,
       .is_active = loom_serve_speech_is_active,
       .accept = loom_serve_speech_accept,
+      .try_open_speech = loom_serve_speech_open,
       .advance = loom_serve_speech_advance,
       .tokenizer = service->generator.tokenizer,
       .kind = "speech",
