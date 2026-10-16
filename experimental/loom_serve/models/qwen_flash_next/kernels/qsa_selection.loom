@@ -14,7 +14,7 @@ func.decl @flash_next_cache_origin(%rows: buffer, %row: index, %plane_origin: of
 
 func.decl @flash_next_row_state(%rows: buffer, %row: index, %position: index, %layer_origin: offset) -> (offset, offset)
 
-config.decl @qsa.query_tile : %value: index where [range(%value, 1, 32)]
+config.decl @qsa.query_tile : %value: index where [range(%value, 1, 32768)]
 
 amdgpu.target<gfx11-generic> @qsa_selection_wave32 {subgroup_size = 32}
 
