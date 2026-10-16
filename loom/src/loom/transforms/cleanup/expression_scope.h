@@ -126,9 +126,11 @@ loom_expression_entry_t* loom_expression_scope_find(
 void loom_expression_scope_insert(const loom_expression_cursor_t* cursor,
                                   loom_expression_entry_t entry);
 
-// Advances shared effect epochs and returns the current expression's minimum
-// reusable epoch. PURE expressions are independent of memory writes but not
-// convergent participant changes. Nested effects apply before entering regions.
+// Advances shared effect epochs and returns a conservative minimum reuse epoch.
+// PURE excludes memory-write barriers but retains convergence barriers for
+// machine materializations with implicit execution state. Source-only callers
+// can ignore the returned epoch for eligible pure SSA expressions. Nested
+// effects apply before entering regions.
 uint32_t loom_expression_observe_barriers(
     const loom_expression_cursor_t* cursor,
     loom_expression_barriers_t* barriers);

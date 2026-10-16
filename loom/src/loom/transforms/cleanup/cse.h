@@ -18,9 +18,10 @@ const loom_pass_info_t* loom_cse_pass_info(void);
 
 // Semantic expression elimination for source function-like definitions.
 // Equivalent deterministic expressions are reused within their dominance scope,
-// respecting memory/convergence epochs and linear ownership. Low definitions
-// are left unchanged: descriptor-backed machine identity belongs to low-cse.
-// Each root region has independent SSA availability.
+// respecting linear ownership and source context. Pure expressions survive
+// convergent operations; memory reads obey memory and convergence epochs. Each
+// root region has independent SSA availability. Low definitions are unchanged:
+// descriptor-backed machine identity and execution state belong to low-cse.
 iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
                            loom_func_like_t function);
 
