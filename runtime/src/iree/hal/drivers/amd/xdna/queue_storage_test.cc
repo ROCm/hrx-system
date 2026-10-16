@@ -14,7 +14,9 @@
 namespace {
 
 struct AllocationCounts {
+  // System allocations performed by the queue's backing pools.
   uint64_t allocations = 0;
+  // System frees performed while trimming or destroying the queue.
   uint64_t frees = 0;
 };
 
@@ -76,7 +78,62 @@ TEST(XdnaQueueStorageTest, ReusesMetadataAndChunkedPayloadBlocks) {
   EXPECT_EQ(counts.allocations, counts.frees);
 }
 
-TEST(XdnaQueueStorageTest, RejectsOversizedMetadataWithoutAllocation) {
+TEST(XdnaQueueStorageTest, ReusesLargeContiguousRecordsAcrossCaptures) {
+  AllocationCounts counts;
+  iree_hal_amd_xdna_queue_storage_t storage;
+  iree_hal_amd_xdna_queue_storage_initialize(CountingAllocator(&counts),
+                                             &storage);
+  const iree_host_size_t lengths[] = {4080,  4081,  4608,       8192,
+                                      65536, 65537, 1024 * 1024};
+  auto capture_and_check = [&]() {
+    iree_hal_amd_xdna_queue_capture_t first;
+    iree_hal_amd_xdna_queue_capture_t second;
+    iree_hal_amd_xdna_queue_capture_initialize(&storage, &first);
+    iree_hal_amd_xdna_queue_capture_initialize(&storage, &second);
+    std::vector<uint8_t*> records;
+    for (iree_host_size_t length : lengths) {
+      uint8_t* first_bytes = nullptr;
+      uint8_t* second_bytes = nullptr;
+      IREE_ASSERT_OK(iree_hal_amd_xdna_queue_capture_allocate_metadata(
+          &first, length, (void**)&first_bytes));
+      IREE_ASSERT_OK(iree_hal_amd_xdna_queue_capture_allocate_metadata(
+          &second, length, (void**)&second_bytes));
+      EXPECT_NE(first_bytes, second_bytes);
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(first_bytes) % iree_max_align_t,
+                0u);
+      memset(first_bytes, 0xA5, length);
+      memset(second_bytes, 0x5A, length);
+      records.push_back(first_bytes);
+    }
+    iree_hal_amd_xdna_queue_capture_deinitialize(&second);
+    for (size_t i = 0; i < records.size(); ++i) {
+      EXPECT_EQ(records[i][0], 0xA5);
+      EXPECT_EQ(records[i][lengths[i] - 1], 0xA5);
+    }
+    iree_hal_amd_xdna_queue_capture_deinitialize(&first);
+  };
+  ASSERT_NO_FATAL_FAILURE(capture_and_check());
+  const AllocationCounts warm_counts = counts;
+  ASSERT_NO_FATAL_FAILURE(capture_and_check());
+  EXPECT_EQ(counts.allocations, warm_counts.allocations);
+  EXPECT_EQ(counts.frees, warm_counts.frees);
+
+  iree_hal_amd_xdna_queue_capture_t live;
+  iree_hal_amd_xdna_queue_capture_initialize(&storage, &live);
+  uint8_t* bytes = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_queue_capture_allocate_metadata(
+      &live, 65536, (void**)&bytes));
+  memset(bytes, 0xC3, 65536);
+  iree_hal_amd_xdna_queue_storage_trim(&storage);
+  EXPECT_GT(counts.frees, warm_counts.frees);
+  EXPECT_EQ(bytes[0], 0xC3);
+  EXPECT_EQ(bytes[65535], 0xC3);
+  iree_hal_amd_xdna_queue_capture_deinitialize(&live);
+  iree_hal_amd_xdna_queue_storage_deinitialize(&storage);
+  EXPECT_EQ(counts.allocations, counts.frees);
+}
+
+TEST(XdnaQueueStorageTest, RejectsMetadataSizeOverflowWithoutAllocation) {
   AllocationCounts counts;
   iree_hal_amd_xdna_queue_storage_t storage;
   iree_hal_amd_xdna_queue_storage_initialize(CountingAllocator(&counts),
@@ -87,7 +144,7 @@ TEST(XdnaQueueStorageTest, RejectsOversizedMetadataWithoutAllocation) {
   void* metadata = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_amd_xdna_queue_capture_allocate_metadata(
-                            &capture, 4096, &metadata));
+                            &capture, IREE_HOST_SIZE_MAX, &metadata));
   EXPECT_EQ(metadata, nullptr);
   EXPECT_EQ(counts.allocations, 0u);
   EXPECT_EQ(counts.frees, 0u);

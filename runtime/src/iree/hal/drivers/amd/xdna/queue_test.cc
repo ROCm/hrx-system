@@ -569,6 +569,72 @@ TEST(XdnaQueueTest, QueueTransfersUsePrivateCachedPoolMapping) {
   iree_hal_pool_release(pool);
 }
 
+TEST(XdnaQueueTest, LargeAllocationBatchRetainsTransfersUntilRetirement) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(
+      harness.CreateCachedTLSFPool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool));
+  iree_hal_semaphore_t* progress = nullptr;
+  iree_hal_semaphore_t* retired = nullptr;
+  for (auto** semaphore : {&progress, &retired}) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, semaphore));
+  }
+
+  // Both the captured request arrays and the temporary caller-output array
+  // exceed an ordinary metadata block. Transfer descriptors do as well.
+  constexpr size_t kBufferCount = 600;
+  std::vector<iree_hal_pool_reservation_request_t> requests(
+      kBufferCount, iree_hal_make_pool_reservation_request(64, 0));
+  std::vector<iree_hal_buffer_t*> buffers(kBufferCount);
+  uint64_t allocated_value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(
+      harness.queue, {}, {1, &progress, &allocated_value}, pool,
+      requests.size(), requests.data(), buffers.data()));
+
+  std::vector<uint32_t> expected(kBufferCount);
+  std::vector<uint32_t> actual(kBufferCount);
+  std::vector<iree_hal_transfer_operation_t> uploads(kBufferCount);
+  std::vector<iree_hal_transfer_operation_t> downloads(kBufferCount);
+  for (size_t i = 0; i < kBufferCount; ++i) {
+    ASSERT_NE(buffers[i], nullptr);
+    expected[i] = 0x12340000u + static_cast<uint32_t>(i);
+    uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+    uploads[i].upload.source = &expected[i];
+    uploads[i].upload.target_buffer = buffers[i];
+    uploads[i].upload.length = sizeof(expected[i]);
+    downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    downloads[i].download.source_buffer = buffers[i];
+    downloads[i].download.target = &actual[i];
+    downloads[i].download.length = sizeof(actual[i]);
+  }
+  uint64_t uploaded_value = 2;
+  uint64_t downloaded_value = 3;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      harness.queue, {1, &progress, &allocated_value},
+      {1, &progress, &uploaded_value}, uploads.size(), uploads.data(),
+      /*barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      harness.queue, {1, &progress, &uploaded_value},
+      {1, &progress, &downloaded_value}, downloads.size(), downloads.data(),
+      /*barriers=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(
+      harness.queue, {1, &progress, &downloaded_value},
+      {1, &retired, &allocated_value}, buffers.size(), buffers.data()));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(retired, allocated_value));
+  EXPECT_EQ(actual, expected);
+  for (iree_hal_buffer_t* buffer : buffers) {
+    iree_hal_buffer_release(buffer);
+  }
+  iree_hal_semaphore_release(retired);
+  iree_hal_semaphore_release(progress);
+  iree_hal_pool_release(pool);
+}
+
 TEST(XdnaQueueTest, AllocationFailureLeavesEveryOutputUntouched) {
   QueueHarness harness;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());

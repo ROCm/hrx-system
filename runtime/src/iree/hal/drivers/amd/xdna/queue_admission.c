@@ -472,59 +472,22 @@ static iree_status_t iree_hal_amd_xdna_operation_capture_semaphores(
                                 iree_alignof(iree_hal_semaphore_t*),
                                 &semaphores_offset),
       IREE_STRUCT_FIELD_ALIGNED(source.count, uint64_t, iree_alignof(uint64_t),
-                                &values_offset)));
-  const iree_host_size_t list_size = size;
-  IREE_RETURN_IF_ERROR(
-      IREE_STRUCT_LAYOUT(size, &size,
-                         IREE_STRUCT_FIELD_ALIGNED(
-                             producer_count, iree_hal_amd_xdna_producer_entry_t,
-                             iree_alignof(iree_hal_amd_xdna_producer_entry_t),
-                             &producers_offset)));
-  const iree_host_size_t maximum_record_size =
-      iree_arena_block_pool_max_allocation_size(operation->metadata_block_pool);
-  const bool producers_are_packed = size <= maximum_record_size;
-  if (!producers_are_packed) {
-    size = list_size;
-  }
+                                &values_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          producer_count, iree_hal_amd_xdna_producer_entry_t,
+          iree_alignof(iree_hal_amd_xdna_producer_entry_t),
+          &producers_offset)));
   uint8_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_capture_allocate_metadata(
       &operation->capture, size, (void**)&storage));
   memset(storage, 0, size);
 
   iree_hal_amd_xdna_producer_entry_t* producer_entries = NULL;
-  iree_host_size_t remaining_producer_count = producer_count;
-  if (producers_are_packed) {
-    iree_hal_amd_xdna_producer_entry_t* packed_entries =
-        (iree_hal_amd_xdna_producer_entry_t*)(storage + producers_offset);
-    for (iree_host_size_t i = 0; i < producer_count; ++i) {
-      packed_entries[i].next = producer_entries;
-      producer_entries = &packed_entries[i];
-    }
-    remaining_producer_count = 0;
-  }
-  const iree_host_size_t maximum_chunk_count =
-      maximum_record_size / sizeof(iree_hal_amd_xdna_producer_entry_t);
-  while (remaining_producer_count) {
-    const iree_host_size_t chunk_count =
-        iree_min(remaining_producer_count, maximum_chunk_count);
-    iree_host_size_t chunk_size = 0;
-    iree_host_size_t chunk_offset = 0;
-    IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-        0, &chunk_size,
-        IREE_STRUCT_FIELD_ALIGNED(
-            chunk_count, iree_hal_amd_xdna_producer_entry_t,
-            iree_alignof(iree_hal_amd_xdna_producer_entry_t), &chunk_offset)));
-    uint8_t* chunk_storage = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_capture_allocate_metadata(
-        &operation->capture, chunk_size, (void**)&chunk_storage));
-    memset(chunk_storage, 0, chunk_size);
-    iree_hal_amd_xdna_producer_entry_t* chunk_entries =
-        (iree_hal_amd_xdna_producer_entry_t*)(chunk_storage + chunk_offset);
-    for (iree_host_size_t i = 0; i < chunk_count; ++i) {
-      chunk_entries[i].next = producer_entries;
-      producer_entries = &chunk_entries[i];
-    }
-    remaining_producer_count -= chunk_count;
+  iree_hal_amd_xdna_producer_entry_t* packed_entries =
+      (iree_hal_amd_xdna_producer_entry_t*)(storage + producers_offset);
+  for (iree_host_size_t i = 0; i < producer_count; ++i) {
+    packed_entries[i].next = producer_entries;
+    producer_entries = &packed_entries[i];
   }
 
   iree_hal_semaphore_list_t captured_list = {

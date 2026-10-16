@@ -16,6 +16,16 @@ extern "C" {
 
 typedef struct iree_hal_amd_xdna_queue_payload_chunk_t
     iree_hal_amd_xdna_queue_payload_chunk_t;
+typedef struct iree_hal_amd_xdna_queue_metadata_block_t
+    iree_hal_amd_xdna_queue_metadata_block_t;
+
+enum {
+  // Contiguous metadata above the ordinary arena uses 8 KiB through the
+  // largest representable power of two. Backing grows only on first use.
+  IREE_HAL_AMD_XDNA_LARGE_METADATA_MIN_SHIFT = 13,
+  IREE_HAL_AMD_XDNA_LARGE_METADATA_CLASS_COUNT =
+      sizeof(iree_host_size_t) * 8 - IREE_HAL_AMD_XDNA_LARGE_METADATA_MIN_SHIFT,
+};
 
 // Captured bytes split across reusable fixed-size blocks.
 typedef struct iree_hal_amd_xdna_queue_payload_t {
@@ -27,16 +37,23 @@ typedef struct iree_hal_amd_xdna_queue_payload_t {
 
 // Reusable fixed-block storage shared by every operation on one queue.
 typedef struct iree_hal_amd_xdna_queue_storage_t {
-  // Small blocks holding operation metadata and bounded descriptor arrays.
+  // Small blocks holding operation metadata and ordinary descriptor arrays.
   iree_arena_block_pool_t metadata_block_pool;
+  // Reusable contiguous backing for larger metadata arrays, indexed by size.
+  iree_arena_block_pool_t
+      large_metadata_pools[IREE_HAL_AMD_XDNA_LARGE_METADATA_CLASS_COUNT];
   // Large blocks holding captured host payload bytes.
   iree_arena_block_pool_t payload_block_pool;
 } iree_hal_amd_xdna_queue_storage_t;
 
 // Per-operation ownership of blocks acquired from queue storage.
 typedef struct iree_hal_amd_xdna_queue_capture_t {
+  // Queue-owned pools, retained through the operation's device reference.
+  iree_hal_amd_xdna_queue_storage_t* storage;
   // Arena owning the operation and its metadata arrays.
   iree_arena_allocator_t metadata_arena;
+  // Larger contiguous metadata blocks owned until this capture retires.
+  iree_hal_amd_xdna_queue_metadata_block_t* large_metadata_head;
   // Arena owning chunked captured host payloads.
   iree_arena_allocator_t payload_arena;
 } iree_hal_amd_xdna_queue_capture_t;
@@ -59,8 +76,9 @@ void iree_hal_amd_xdna_queue_capture_initialize(
     iree_hal_amd_xdna_queue_storage_t* storage,
     iree_hal_amd_xdna_queue_capture_t* out_capture);
 
-// Allocates one contiguous metadata record. Requests larger than a fixed block
-// are rejected instead of falling through to a per-operation system allocation.
+// Allocates one contiguous metadata record from reusable queue-owned storage.
+// Larger arrays use power-of-two block classes without splitting their logical
+// batch or introducing system allocations on warmed submissions.
 iree_status_t iree_hal_amd_xdna_queue_capture_allocate_metadata(
     iree_hal_amd_xdna_queue_capture_t* capture, iree_host_size_t byte_length,
     void** out_ptr);

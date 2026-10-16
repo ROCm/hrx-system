@@ -136,6 +136,7 @@ iree_runtime_cc_library(
     hdrs = ["queue_storage.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

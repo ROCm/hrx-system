@@ -181,6 +181,7 @@ iree_cc_library(
     "queue_storage.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
   PUBLIC
 )

@@ -6,9 +6,18 @@
 
 #include "iree/hal/drivers/amd/xdna/queue_storage.h"
 
+#include "iree/base/internal/math.h"
+
 enum {
   IREE_HAL_AMD_XDNA_METADATA_BLOCK_SIZE = 4096,
   IREE_HAL_AMD_XDNA_PAYLOAD_BLOCK_SIZE = 32768,
+};
+
+struct iree_alignas(iree_max_align_t) iree_hal_amd_xdna_queue_metadata_block_t {
+  // Next large block held by this capture.
+  iree_hal_amd_xdna_queue_metadata_block_t* next;
+  // Queue-owned size class to which this block returns at retirement.
+  iree_arena_block_pool_t* pool;
 };
 
 struct iree_hal_amd_xdna_queue_payload_chunk_t {
@@ -26,6 +35,12 @@ void iree_hal_amd_xdna_queue_storage_initialize(
   iree_arena_block_pool_initialize(IREE_HAL_AMD_XDNA_METADATA_BLOCK_SIZE,
                                    host_allocator,
                                    &out_storage->metadata_block_pool);
+  for (iree_host_size_t i = 0; i < IREE_HAL_AMD_XDNA_LARGE_METADATA_CLASS_COUNT;
+       ++i) {
+    iree_arena_block_pool_initialize(
+        (iree_host_size_t)1 << (IREE_HAL_AMD_XDNA_LARGE_METADATA_MIN_SHIFT + i),
+        host_allocator, &out_storage->large_metadata_pools[i]);
+  }
   iree_arena_block_pool_initialize(IREE_HAL_AMD_XDNA_PAYLOAD_BLOCK_SIZE,
                                    host_allocator,
                                    &out_storage->payload_block_pool);
@@ -34,18 +49,28 @@ void iree_hal_amd_xdna_queue_storage_initialize(
 void iree_hal_amd_xdna_queue_storage_deinitialize(
     iree_hal_amd_xdna_queue_storage_t* storage) {
   iree_arena_block_pool_deinitialize(&storage->payload_block_pool);
+  for (iree_host_size_t i = 0; i < IREE_HAL_AMD_XDNA_LARGE_METADATA_CLASS_COUNT;
+       ++i) {
+    iree_arena_block_pool_deinitialize(&storage->large_metadata_pools[i]);
+  }
   iree_arena_block_pool_deinitialize(&storage->metadata_block_pool);
 }
 
 void iree_hal_amd_xdna_queue_storage_trim(
     iree_hal_amd_xdna_queue_storage_t* storage) {
   iree_arena_block_pool_trim(&storage->payload_block_pool);
+  for (iree_host_size_t i = 0; i < IREE_HAL_AMD_XDNA_LARGE_METADATA_CLASS_COUNT;
+       ++i) {
+    iree_arena_block_pool_trim(&storage->large_metadata_pools[i]);
+  }
   iree_arena_block_pool_trim(&storage->metadata_block_pool);
 }
 
 void iree_hal_amd_xdna_queue_capture_initialize(
     iree_hal_amd_xdna_queue_storage_t* storage,
     iree_hal_amd_xdna_queue_capture_t* out_capture) {
+  out_capture->storage = storage;
+  out_capture->large_metadata_head = NULL;
   iree_arena_initialize(&storage->metadata_block_pool,
                         &out_capture->metadata_arena);
   iree_arena_initialize(&storage->payload_block_pool,
@@ -60,10 +85,30 @@ iree_status_t iree_hal_amd_xdna_queue_capture_allocate_metadata(
       iree_arena_block_pool_max_allocation_size(
           capture->metadata_arena.block_pool);
   if (byte_length > maximum_length) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "XDNA queue metadata record of %" PRIhsz
-                            " bytes exceeds fixed-block capacity %" PRIhsz,
-                            byte_length, maximum_length);
+    const iree_host_size_t overhead =
+        sizeof(iree_hal_amd_xdna_queue_metadata_block_t) +
+        sizeof(iree_arena_block_t);
+    const iree_host_size_t maximum_block_size =
+        (iree_host_size_t)1 << (sizeof(iree_host_size_t) * 8 - 1);
+    if (byte_length > maximum_block_size - overhead) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "XDNA queue metadata record size overflow");
+    }
+    const uint32_t block_shift =
+        64 - iree_math_count_leading_zeros_u64(byte_length + overhead - 1);
+    const uint32_t class_index =
+        block_shift - IREE_HAL_AMD_XDNA_LARGE_METADATA_MIN_SHIFT;
+    iree_arena_block_pool_t* pool =
+        &capture->storage->large_metadata_pools[class_index];
+    iree_arena_block_t* block = NULL;
+    iree_hal_amd_xdna_queue_metadata_block_t* metadata = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_block_pool_acquire(pool, &block, (void**)&metadata));
+    metadata->pool = pool;
+    metadata->next = capture->large_metadata_head;
+    capture->large_metadata_head = metadata;
+    *out_ptr = metadata + 1;
+    return iree_ok_status();
   }
   if (!byte_length) {
     return iree_ok_status();
@@ -124,5 +169,14 @@ void iree_hal_amd_xdna_queue_payload_copy(
 void iree_hal_amd_xdna_queue_capture_deinitialize(
     iree_hal_amd_xdna_queue_capture_t* capture) {
   iree_arena_deinitialize(&capture->payload_arena);
+  iree_hal_amd_xdna_queue_metadata_block_t* metadata =
+      capture->large_metadata_head;
+  while (metadata) {
+    iree_hal_amd_xdna_queue_metadata_block_t* next = metadata->next;
+    iree_arena_block_pool_t* pool = metadata->pool;
+    iree_arena_block_t* block = iree_arena_block_trailer(pool, metadata);
+    iree_arena_block_pool_release(pool, block, block);
+    metadata = next;
+  }
   iree_arena_deinitialize(&capture->metadata_arena);
 }

@@ -624,12 +624,18 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
   // operation. Submission consumes the operation on both success and failure,
   // while the public contract requires every output entry to remain untouched
   // on synchronous failure.
-  iree_arena_allocator_t output_arena;
-  iree_arena_initialize(operation->metadata_block_pool, &output_arena);
+  iree_hal_amd_xdna_queue_capture_t output_capture;
+  iree_hal_amd_xdna_queue_capture_initialize(operation->capture.storage,
+                                             &output_capture);
   iree_hal_buffer_t** captured_outputs = NULL;
-  status = iree_arena_allocate_array(&output_arena, request_count,
-                                     sizeof(*captured_outputs),
-                                     (void**)&captured_outputs);
+  iree_host_size_t outputs_size = 0;
+  status = IREE_STRUCT_LAYOUT(
+      0, &outputs_size,
+      IREE_STRUCT_FIELD_FAM(request_count, iree_hal_buffer_t*));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_xdna_queue_capture_allocate_metadata(
+        &output_capture, outputs_size, (void**)&captured_outputs);
+  }
   if (iree_status_is_ok(status)) {
     memset(captured_outputs, 0, request_count * sizeof(*captured_outputs));
   }
@@ -747,7 +753,7 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
   if (operation) {
     iree_hal_amd_xdna_operation_discard(operation);
   }
-  iree_arena_deinitialize(&output_arena);
+  iree_hal_amd_xdna_queue_capture_deinitialize(&output_capture);
   return status;
 }
 
