@@ -556,8 +556,10 @@ static iree_status_t loom_scalar_bitfield_extract_facts(
     result_facts[0] = loom_value_facts_unknown();
     return iree_ok_status();
   }
+  // A field filling the result has no extension bits. Use its signed
+  // representation so the fact lattice can retain every i64 bit pattern.
   bool valid =
-      signed_extract
+      (signed_extract || width == result_width)
           ? loom_value_facts_extract_signed_bitfield(
                 operand_facts[0], source_width, offset, width, &result_facts[0])
           : loom_value_facts_extract_unsigned_bitfield(operand_facts[0],
@@ -567,6 +569,8 @@ static iree_status_t loom_scalar_bitfield_extract_facts(
     result_facts[0] = loom_value_facts_unknown();
     return iree_ok_status();
   }
+  result_facts[0] =
+      loom_value_facts_wrap_integer(result_facts[0], result_width);
   loom_value_facts_propagate_unary_distribution(operand_facts[0],
                                                 &result_facts[0]);
   return iree_ok_status();

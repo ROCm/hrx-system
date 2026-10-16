@@ -418,8 +418,9 @@ loom_value_facts_t loom_value_facts_make_signed_bit_count_range(
     int64_t bit_count);
 
 // Extracts a fixed unsigned bitfield from an integer fact summary. Returns
-// false only for invalid transfer parameters; unknown source facts produce the
-// conservative range implied by |width|.
+// false for invalid transfer parameters or an exact unsigned result outside
+// the signed i64 fact domain. Unknown source facts produce the unsigned range
+// envelope implied by |width|.
 bool loom_value_facts_extract_unsigned_bitfield(loom_value_facts_t source,
                                                 int32_t source_bit_count,
                                                 int64_t offset, int64_t width,
