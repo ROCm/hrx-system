@@ -34,6 +34,7 @@ typedef struct loom_serve_text_consumer_vtable_t {
   // Encodes the complete successful source transaction on the same CPU loan.
   // May move content, reasoning, and calls, leaving their owners initialized
   // and empty. Canonical retained history is independent of these outputs.
+  // finish_reason is a process-lifetime classification, safe to retain.
   iree_status_t (*complete)(void* self,
                             const loom_serve_text_chat_response_t* response,
                             iree_string_builder_t* content,
