@@ -5,8 +5,8 @@ This directory contains learned model packages, not another server. The supporte
 Loom programs, and owns their shared device resources and HTTP lifetimes. There
 are no per-model C implementations or compiler-internal dependencies here.
 
-- [Qwen3.8-27B](models/qwen/README.md): retained text, mixed prefill/decode,
-  paged KV, MTP and DFlash2 source programs.
+- [Qwen3.8-27B](models/qwen/README.md): retained text and image chat, lazy vision
+  loading, mixed prefill/decode, paged KV, MTP and DFlash2 source programs.
 - [Qwen3.8 Flash-Next](models/qwen_flash_next/README.md): resident MoE text,
   recurrent GDN, paged sparse attention, and n-gram embeddings over packed epochs.
 - [Krea 2 Turbo](models/krea/README.md): text-to-image, BF16 or INT8 ConvRot DiT,

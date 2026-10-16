@@ -1,36 +1,41 @@
 # Qwen3.8-27B
 
 This package runs the Qwen3.8-27B UD-Q5_K_XL GGUF through the supported
-`loom-serve` text service. Preparation, chat formatting, command programs and
-numerical kernels are Loom source. One prepared model and weight bank serve many
-sessions; sessions own pooled state, not separate VM processes.
+`loom-serve` text service, including image-conditioned chat. Preparation, chat
+formatting, command programs and numerical kernels are Loom source. One prepared
+model and weight bank serve many sessions; sessions own pooled state, not
+separate VM processes.
 
-The deployment accepts text input. Vision numerical sources and their kernel
-checks are included, but the deployment does not register a vision component
-or accept images. Image input requires the separately developed batched media
-service and its corresponding source-policy and device-packet integration.
+The optional vision component loads on the first image request, independently
+of the language weights. Text-only requests leave it dormant. Image features
+stay on the device through language execution, and both image projection and
+mixed text/image inputs support concurrent request cohorts.
 
 ## Assets and deployment
 
 Supply `Qwen3.8-27B-UD-Q5_K_XL.gguf` and its matching `tokenizer.json`.
+Image input also needs the matching `mmproj-F16.gguf` in the image asset directory.
 The weight policy expects this model's tensor keys and mixed GGML encodings;
 renaming another checkpoint does not make it compatible. MTP additionally
 requires the checkpoint's prediction block. Weights are read and prepared into
 the model's final parameter storage during activation, then reused by requests.
 
-From the repository root, set the two asset paths and produce one deployment
+From the repository root, set the asset paths and produce one deployment
 document. `jq` preserves the complete source provider list from `model.json`:
 
 ```sh
 qwen_weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf
 qwen_tokenizer=/path/to/tokenizer.json
+qwen_image_assets=/path/to/directory/containing/mmproj
 jq --arg directory "$PWD/experimental/loom_serve/models/qwen" \
    --arg weights "$qwen_weights" --arg tokenizer "$qwen_tokenizer" \
+   --arg image_assets "$qwen_image_assets" \
    '.base_directory = $directory | .definition += {
       weights: $weights, tokenizer: $tokenizer,
       rows: 8, context_capacity: 32768, pool_capacity: 65536,
       prefill_capacity: 512, draft_depth: 3, continuation_epochs: 2
-    }' experimental/loom_serve/models/qwen/model.json \
+    } | .definition.image.assets = $image_assets' \
+   experimental/loom_serve/models/qwen/model.json \
    > /tmp/qwen-deployment.json
 ```
 
@@ -61,6 +66,41 @@ decoded response. Whitespace trimming or tool-call normalization that changes
 that suffix requires replay; byte-identical history remains reusable.
 Tool definitions and tool-result turns use the chat endpoint;
 the source policy formats and parses the model's XML tool-call protocol.
+
+## Image chat
+
+This projector accepts upright 256×256 RGB images, up to four in the complete
+conversation, with at most 1 MiB of compressed data per image. Other dimensions,
+orientation transforms and alpha channels are rejected; the package does not
+resize or convert them implicitly. PNG, JPEG and WebP availability follows the
+server's enabled codecs.
+
+For an RGB PNG named `image.png`, send an ordinary OpenAI-style image part:
+
+```sh
+base64 < image.png | tr -d '\n' | jq -Rs '{
+  model: "qwen", enable_thinking: false, temperature: 0, max_tokens: 128,
+  stream: true,
+  messages: [{role: "user", content: [
+    {type: "image_url", image_url: {url: ("data:image/png;base64," + .)}},
+    {type: "text", text: "Describe the image briefly."}
+  ]}]
+}' | curl --fail --silent --show-error --no-buffer \
+  http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' -H 'X-Loom-Session: image-example' \
+  --data-binary @-
+```
+
+Multiple image parts preserve their order relative to text. Follow-up turns
+send the complete conversation, including the original images and the assistant
+reply, under the same session name. A matching retained prefix can serve the
+follow-up without loading vision weights again, even after memory pressure
+releases them. The feature rows have their own device-buffer lifetime and do
+not pin the projector's weights.
+
+For a text-only deployment, remove `definition.image`; no projector asset is
+then required. The [model-document reference](../../../../loom/docs/src/serving/model-documents.md#image-input)
+describes independent activation and residency controls.
 
 ## Device sampling
 
@@ -119,8 +159,10 @@ drafting and retention settings.
 
 `prepare.loom` declares stage roots, specialization and storage geometry;
 `weights.loom` and `dflash_weights.loom` describe checkpoint preparation.
-`control.loom` owns request framing, state-table encoding, submission and progress
-publication. `prefill.loom`, `epoch.loom`, `mtp.loom`, `verify.loom` and
+`control.loom` owns request framing; `epoch_control.loom` and `epoch_media.loom`
+encode text and mixed-input state tables, submission and progress publication.
+`vision_prepare.loom` and `vision_control.loom` declare and execute independent
+image cohorts. `prefill.loom`, `epoch.loom`, `mtp.loom`, `verify.loom` and
 `continue.loom` compose the model traversal. `programs/qwen38/` composes layers;
 `kernels/qwen38/` supplies concrete numerical leaves. Generic quantization and
 projection helpers live in `../../motifs/ggml/`.
