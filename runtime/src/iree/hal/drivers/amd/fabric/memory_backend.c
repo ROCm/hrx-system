@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/math.h"
 #include "iree/hal/device_group.h"
+#include "iree/hal/drivers/amd/fabric/asan.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/fabric/memory_transition.h"
 #include "iree/hal/drivers/amd/fabric/slab_provider.h"
@@ -73,6 +74,9 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_plan_create(
         .memory_contract = plan->contract,
         .epoch_query = plan->progress.epoch_query,
         .owned_mode = plan->owned_mode,
+        .asan = plan->provider_options.asan
+                    ? plan->provider_options.asan->pool_options
+                    : (iree_hal_asan_pool_options_t){0},
         .imports =
             {
                 .class_count = plan->provider_options.import_count,
@@ -275,6 +279,8 @@ typedef struct iree_hal_amd_fabric_slab_pool_query_t {
   iree_hal_slab_pool_plan_callback_t callback;
   // Allocator for temporary construction state and candidate plans.
   iree_allocator_t host_allocator;
+  // One consumer shadow namespace, or NULL when no family is instrumented.
+  iree_hal_amd_fabric_asan_t* asan;
 } iree_hal_amd_fabric_slab_pool_query_t;
 
 static void iree_hal_amd_fabric_memory_accumulate_pair(
@@ -584,9 +590,14 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
   iree_host_size_t access_devices_offset = 0;
   iree_host_size_t bindings_offset = 0;
   iree_host_size_t imports_offset = 0;
+  const bool asan_application_mapping =
+      query->asan && profile &&
+      profile->memory_class == AMDF_MEMORY_CLASS_LOCAL;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_fabric_slab_pool_plan_t), &plan_size,
-      IREE_STRUCT_FIELD_FAM(query->access_count, amdf_memory_device_access_t),
+      IREE_STRUCT_FIELD_FAM(
+          query->access_count * (asan_application_mapping ? 2 : 1),
+          amdf_memory_device_access_t),
       IREE_STRUCT_FIELD(query->access_count, iree_hal_device_t*,
                         &access_devices_offset),
       IREE_STRUCT_FIELD_ALIGNED(
@@ -674,7 +685,51 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
       .memory_type = memory_type,
       .supported_usage = usage | mapping_usage,
       .maintenance_alignment = 1,
+      .asan = query->asan,
+      .asan_application_mapping = asan_application_mapping,
   };
+  if (asan_application_mapping) {
+    amdf_memory_device_access_t* imports_accesses =
+        plan->accesses + query->access_count;
+    memcpy(imports_accesses, query->accesses,
+           query->access_count * sizeof(*imports_accesses));
+    plan->provider_options.import_accesses = imports_accesses;
+    for (uint32_t i = 0; i < query->access_count; ++i) {
+      if (plan->accesses[i].device == query->asan->device) {
+        plan->accesses[i].requirements.access |=
+            query->asan->application_info.access;
+        plan->accesses[i].requirements.flags |= AMDF_MEMORY_FLAG_MAPPING_SOURCE;
+      }
+    }
+    plan->provider_options.memory.required_flags |=
+        query->asan->application_source_flags;
+    const amdf_status_t native_status =
+        owner->native.api->memory_scope_query_device_profile(
+            storage->scope, profile->ordinal, query->access_count,
+            plan->accesses, &plan->provider_options.memory.profile,
+            query->capabilities);
+    if (!amdf_status_is_ok(native_status)) {
+      iree_hal_amd_fabric_slab_pool_plan_destroy(&plan->base);
+      return native_status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)
+                 ? iree_ok_status()
+                 : IREE_HAL_AMD_STATUS_FROM_AMDF(native_status,
+                                                 "ASAN owned backing profile");
+    }
+    amdf_memory_construction_capabilities_t* allocation =
+        &plan->provider_options.memory.profile.allocation;
+    if (!iree_math_checked_lcm_u64(
+            allocation->byte_length_granularity,
+            query->asan->application_info.mapping_granularity,
+            &allocation->byte_length_granularity) ||
+        allocation->byte_length_granularity > allocation->maximum_byte_length ||
+        !iree_hal_amd_fabric_memory_constrain_profile(
+            (iree_hal_external_storage_class_t){0},
+            query->options->owned.exports,
+            &plan->provider_options.memory.profile)) {
+      iree_hal_amd_fabric_slab_pool_plan_destroy(&plan->base);
+      return iree_ok_status();
+    }
+  }
   plan->owned_mode = query->options->owned.mode;
   plan->import_classes = query->options->imports.classes;
   plan->progress.notification = owner->notification;
@@ -1039,6 +1094,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
         AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
   }
   const iree_hal_amd_fabric_memory_backend_t* owner = NULL;
+  iree_hal_amd_fabric_asan_t* asan = NULL;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t device_index = 0;
        device_index < iree_hal_device_group_device_count(group) && supported;
@@ -1131,6 +1187,14 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       }
       const iree_hal_amd_fabric_memory_backend_t* backend =
           (const iree_hal_amd_fabric_memory_backend_t*)base;
+      if (backend->native.asan) {
+        if (asan && asan != backend->native.asan) {
+          // This provider's advice describes one device shadow namespace.
+          supported = false;
+          break;
+        }
+        asan = backend->native.asan;
+      }
       if (!owner) {
         owner = backend;
       } else if (backend->native.api != owner->native.api ||
@@ -1293,6 +1357,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       .binding_types = binding_types,
       .callback = callback,
       .host_allocator = host_allocator,
+      .asan = asan,
   };
   // Keep consumer-owned storage first for automatic placement. Other devices
   // in the sealed group may own reachable storage without exposing a family in

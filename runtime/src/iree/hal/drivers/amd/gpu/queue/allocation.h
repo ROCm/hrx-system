@@ -30,6 +30,8 @@ typedef struct iree_hal_amd_gpu_allocation_context_t {
   iree_arena_block_pool_t blocks;
   // Dependency associations shared by this device's allocation operations.
   iree_async_semaphore_wait_context_t waits;
+  // Optional device failure code, borrowed through the retained device owner.
+  const iree_atomic_int32_t* failure;
 } iree_hal_amd_gpu_allocation_context_t;
 
 // Initializes embedded state without creating a worker or native allocation.

@@ -725,12 +725,9 @@ static iree_status_t iree_hal_passthrough_pool_import_buffer(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "external storage class was not admitted by pool");
   }
-  if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "external storage cannot satisfy pass-through ASAN layout policy");
-  }
-
+  // Redzone layout applies to storage allocated by this pool. Imported storage
+  // retains its caller-defined layout and lifetime; the provider publishes any
+  // target-specific shadow for the attached range without pool release advice.
   iree_hal_passthrough_pool_allocation_state_t* allocation = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       pool->host_allocator, sizeof(*allocation), (void**)&allocation));

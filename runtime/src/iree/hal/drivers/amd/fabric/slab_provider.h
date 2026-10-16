@@ -15,6 +15,8 @@
 extern "C" {
 #endif  // __cplusplus
 
+typedef struct iree_hal_amd_fabric_asan_t iree_hal_amd_fabric_asan_t;
+
 // One native address to resolve into a prepared binding slot. The request at
 // host_binding_index is unused: that slot receives the optional host pointer.
 typedef struct iree_hal_amd_fabric_binding_request_t {
@@ -48,6 +50,9 @@ typedef struct iree_hal_amd_fabric_slab_provider_options_t {
   iree_hal_amd_fabric_memory_options_t memory;
   // HAL owners parallel to memory.accesses, retained through native cleanup.
   iree_hal_device_t* const* access_devices;
+  // Optional distinct import access set, with memory.access_count entries.
+  // ASAN-owned alias preparation must not constrain external registrations.
+  const amdf_memory_device_access_t* import_accesses;
   // Number of exact external storage routes.
   iree_host_size_t import_count;
   // Qualified input routes, including their export class arrays.
@@ -64,6 +69,10 @@ typedef struct iree_hal_amd_fabric_slab_provider_options_t {
   iree_hal_buffer_usage_t supported_usage;
   // Smallest independently cache-maintained range across all access pairs.
   iree_device_size_t maintenance_alignment;
+  // Optional device-owned shadow namespace, dominated by the sealed group.
+  iree_hal_amd_fabric_asan_t* asan;
+  // Owned device-local backing uses the compact ASAN application reservation.
+  bool asan_application_mapping;
 } iree_hal_amd_fabric_slab_provider_options_t;
 
 // Creates a provider that obtains one fully attached libamdf allocation per

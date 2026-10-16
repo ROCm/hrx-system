@@ -64,6 +64,7 @@ iree_runtime_cc_test(
     name = "hsaco_test",
     srcs = ["hsaco_test.cc"],
     deps = [
+        ":asan_images",
         ":hip_images",
         ":hsaco",
         ":image",
@@ -81,6 +82,18 @@ iree_amdgpu_binary_variants_embed_data(
     srcs = ["testdata/image.hip"],
     copts = ["-fno-offload-uniform-block"],
     identifier = "iree_hal_amd_gpu_hip_images",
+    source_format = "hip",
+    tags = ["manual"],
+    target = "amdgcn-amd-amdhsa",
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
+)
+
+iree_amdgpu_binary_variants_embed_data(
+    name = "asan_images",
+    testonly = True,
+    srcs = ["testdata/asan.hip"],
+    copts = ["-fuse-cuid=none"],
+    identifier = "iree_hal_amd_gpu_asan_images",
     source_format = "hip",
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
@@ -114,6 +127,7 @@ iree_runtime_cc_fuzz(
     name = "hsaco_fuzz",
     srcs = ["hsaco_fuzz.cc"],
     deps = [
+        ":asan_images",
         ":hsaco",
         ":hsaco_test_util",
         ":image",

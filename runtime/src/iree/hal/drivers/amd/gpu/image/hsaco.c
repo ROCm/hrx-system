@@ -1236,6 +1236,141 @@ static iree_status_t iree_hal_amd_gpu_hsaco_decode_kernels(
   return status;
 }
 
+static int iree_hal_amd_gpu_hsaco_compare_data_objects(const void* lhs,
+                                                       const void* rhs) {
+  uint64_t a = ((const iree_hal_amd_gpu_image_data_object_t*)lhs)->offset;
+  uint64_t b = ((const iree_hal_amd_gpu_image_data_object_t*)rhs)->offset;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// Marked images opt into the existing global-layout ABI. Ordinary HSACO still
+// needs no section table; instrumented globals require section-bounded
+// redzones.
+static iree_status_t iree_hal_amd_gpu_hsaco_decode_asan_layout(
+    const iree_hal_amd_gpu_hsaco_reader_t* reader,
+    iree_hal_amd_gpu_image_t* image) {
+  const iree_hal_amd_gpu_image_symbol_t* marker =
+      iree_hal_amd_gpu_image_find_symbol(image,
+                                         IREE_SV("iree_asan_global_layout_v0"));
+  if (!marker) {
+    return iree_ok_status();
+  }
+  if (marker->kind != IREE_HAL_AMD_GPU_IMAGE_SYMBOL_DATA ||
+      marker->address.kind != IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMAGE ||
+      marker->length != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HSACO ASAN global layout marker is invalid");
+  }
+  uint8_t header[64];
+  IREE_RETURN_IF_ERROR(iree_byte_sequence_read(
+      reader->source, 0, iree_make_byte_span(header, sizeof(header))));
+  uint64_t section_offset = iree_unaligned_load_le_u64(header + 40);
+  uint32_t section_stride = iree_unaligned_load_le_u16(header + 58);
+  uint32_t section_count = iree_unaligned_load_le_u16(header + 60);
+  if (!section_count || section_stride < 64) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HSACO ASAN globals require a section table");
+  }
+  void* section_storage = NULL;
+  iree_const_byte_span_t sections = iree_const_byte_span_empty();
+  iree_status_t status = iree_hal_amd_gpu_hsaco_read_blob(
+      reader, section_offset, (uint64_t)section_count * section_stride,
+      &sections, &section_storage);
+  bool* descriptors = NULL;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc_array(reader->host_allocator, image->symbol_count,
+                                    sizeof(*descriptors), (void**)&descriptors);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        reader->host_allocator, image->symbol_count,
+        sizeof(*image->asan_data_objects), (void**)&image->asan_data_objects);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < image->metadata.kernel_count; ++i) {
+      const iree_hal_amd_gpu_image_symbol_t* symbol =
+          iree_hal_amd_gpu_image_find_symbol(
+              image, image->metadata.kernels[i].symbol_name);
+      descriptors[symbol - image->symbols] = true;
+    }
+  }
+  for (uint32_t i = 1; i < reader->symbol_count && iree_status_is_ok(status);
+       ++i) {
+    const uint8_t* data =
+        reader->symbols.data + (uint64_t)i * IREE_HAL_AMD_GPU_HSACO_SYMBOL_SIZE;
+    uint32_t binding = data[4] >> 4;
+    uint32_t type = data[4] & 15;
+    uint32_t section = iree_unaligned_load_le_u16(data + 6);
+    if (type != 1 || !binding || !section) {
+      continue;
+    }
+    // Names and complete symbol extents were admitted by decode_symbols.
+    iree_string_view_t name = iree_make_cstring_view(
+        (const char*)reader->strings.data + iree_unaligned_load_le_u32(data));
+    const iree_hal_amd_gpu_image_symbol_t* symbol =
+        iree_hal_amd_gpu_image_find_symbol(image, name);
+    if (!symbol) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "HSACO ASAN data symbol has no name");
+      continue;
+    }
+    if (descriptors[symbol - image->symbols]) {
+      continue;
+    }
+    if (section >= section_count ||
+        symbol->address.kind != IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMAGE) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "HSACO ASAN data symbol has invalid section");
+      continue;
+    }
+    const uint8_t* section_data = sections.data + section * section_stride;
+    uint64_t flags = iree_unaligned_load_le_u64(section_data + 8);
+    uint64_t begin = iree_unaligned_load_le_u64(section_data + 16);
+    uint64_t length = iree_unaligned_load_le_u64(section_data + 32);
+    uint64_t address = iree_unaligned_load_le_u64(data + 8);
+    uint64_t object_length = iree_unaligned_load_le_u64(data + 16);
+    uint64_t end = 0, redzone_end = 0;
+    uint32_t segment_ordinal = 0;
+    if (!(flags & 2u) || (address & 7u) ||
+        !iree_checked_add_u64(begin, length, &end) ||
+        !iree_checked_add_u64(address, object_length, &redzone_end) ||
+        !iree_checked_add_u64(redzone_end, 15, &redzone_end) ||
+        address < begin || (redzone_end & ~UINT64_C(7)) > end ||
+        !iree_hal_amd_gpu_hsaco_find_segment(
+            image, symbol->address.offset,
+            (redzone_end & ~UINT64_C(7)) - address, false, &segment_ordinal)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "HSACO ASAN data symbol `%.*s` lacks its aligned trailing redzone",
+          (int)name.size, name.data);
+      continue;
+    }
+    image->asan_data_objects[image->asan_data_object_count++] =
+        (iree_hal_amd_gpu_image_data_object_t){.offset = symbol->address.offset,
+                                               .length = object_length};
+  }
+  if (iree_status_is_ok(status)) {
+    qsort(image->asan_data_objects, image->asan_data_object_count,
+          sizeof(*image->asan_data_objects),
+          iree_hal_amd_gpu_hsaco_compare_data_objects);
+    for (iree_host_size_t i = 1;
+         i < image->asan_data_object_count && iree_status_is_ok(status); ++i) {
+      const iree_hal_amd_gpu_image_data_object_t* previous =
+          &image->asan_data_objects[i - 1];
+      uint64_t redzone_end =
+          (previous->offset + previous->length + 15) & ~UINT64_C(7);
+      if (image->asan_data_objects[i].offset < redzone_end) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "HSACO ASAN globals overlap a redzone");
+      }
+    }
+  }
+  iree_allocator_free(reader->host_allocator, descriptors);
+  iree_allocator_free(reader->host_allocator, section_storage);
+  return status;
+}
+
 iree_status_t iree_hal_amd_gpu_hsaco_image_initialize(
     iree_byte_sequence_t* source_sequence, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_image_t* out_image) {
@@ -1276,6 +1411,9 @@ iree_status_t iree_hal_amd_gpu_hsaco_image_initialize(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_hsaco_decode_kernels(&reader, &image);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_hsaco_decode_asan_layout(&reader, &image);
   }
   iree_hal_amd_gpu_hsaco_reader_deinitialize(&reader);
   if (iree_status_is_ok(status)) {

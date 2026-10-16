@@ -53,6 +53,35 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "asan",
+    srcs = ["asan.c"],
+    hdrs = ["asan.h"],
+    deps = [
+        ":memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/memory:asan_pool",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "asan_test",
+    srcs = ["asan_test.cc"],
+    deps = [
+        ":asan",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "buffer",
     srcs = ["buffer.c"],
     hdrs = ["buffer.h"],
@@ -104,6 +133,7 @@ iree_runtime_cc_library(
         "slab_provider.h",
     ],
     deps = [
+        ":asan",
         ":buffer",
         ":memory",
         "//libamdf:headers",
@@ -182,6 +212,7 @@ iree_runtime_cc_library(
     ],
     hdrs = ["memory_backend.h"],
     deps = [
+        ":asan",
         ":memory",
         ":memory_transition",
         ":slab_provider",

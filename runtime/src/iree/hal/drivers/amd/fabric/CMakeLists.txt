@@ -66,6 +66,45 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    asan
+  HDRS
+    "asan.h"
+  SRCS
+    "asan.c"
+  DEPS
+    ::memory
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::memory::asan_pool
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    asan_test
+  SRCS
+    "asan_test.cc"
+  DEPS
+    ::asan
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     buffer
   HDRS
     "buffer.h"
@@ -130,6 +169,7 @@ iree_cc_library(
     "allocation_queue.c"
     "slab_provider.c"
   DEPS
+    ::asan
     ::buffer
     ::memory
     amdf::headers
@@ -231,6 +271,7 @@ iree_cc_library(
     "memory_backend.c"
     "virtual_buffer.c"
   DEPS
+    ::asan
     ::memory
     ::memory_transition
     ::slab_provider

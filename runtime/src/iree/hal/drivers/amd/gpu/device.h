@@ -8,11 +8,20 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_DEVICE_H_
 
 #include "iree/hal/device.h"
+#include "iree/hal/drivers/amd/fabric/asan.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
+#include "iree/hal/drivers/amd/gpu/feedback.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
+
+typedef enum iree_hal_amd_gpu_asan_shadow_backing_e {
+  // Local VRAM/HBM keeps instrumented reads on the device's memory interface.
+  IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL = 0,
+  // Pinned system backing, with host publication before instrumented uses.
+  IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_HOST_LOCAL = 1,
+} iree_hal_amd_gpu_asan_shadow_backing_t;
 
 // Cold provisioning of a PM4 family with USER or KERNEL publication. Native
 // protocol and publication capability determine admission, independently of
@@ -40,6 +49,15 @@ typedef struct iree_hal_amd_gpu_device_options_t {
     // Number of blocks preallocated for each queue.
     iree_host_size_t capture_block_count;
   } pm4;
+  // Provisioning used when the device's runtime features enable ASAN.
+  struct {
+    // Placement of physical shadow backing; reservations consume only VA.
+    iree_hal_amd_gpu_asan_shadow_backing_t shadow_backing;
+    // Effect of a shader access report on subsequent device use.
+    iree_hal_amd_gpu_sanitizer_report_policy_t report_policy;
+    // Shadow geometry, redzone policy, and freed-backing retention.
+    iree_hal_amd_fabric_asan_options_t memory;
+  } asan;
 } iree_hal_amd_gpu_device_options_t;
 
 // Initializes ordinary provisioning sizes and automatic PM4 family selection.

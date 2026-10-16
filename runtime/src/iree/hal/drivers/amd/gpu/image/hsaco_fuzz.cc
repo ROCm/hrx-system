@@ -9,6 +9,7 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/hal/drivers/amd/gpu/image/asan_images.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco_test_util.h"
 
@@ -91,6 +92,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     Check(contiguous.value.byte_length == segmented.value.byte_length);
     Check(contiguous.value.segment_count == segmented.value.segment_count);
     Check(contiguous.value.symbol_count == segmented.value.symbol_count);
+    Check(contiguous.value.asan_data_object_count ==
+          segmented.value.asan_data_object_count);
+    for (size_t i = 0; i < contiguous.value.asan_data_object_count; ++i) {
+      Check(contiguous.value.asan_data_objects[i].offset ==
+            segmented.value.asan_data_objects[i].offset);
+      Check(contiguous.value.asan_data_objects[i].length ==
+            segmented.value.asan_data_objects[i].length);
+    }
     Check(contiguous.Load() == segmented.Load());
     Check(contiguous.storage == segmented.storage);
   }
@@ -103,9 +112,14 @@ extern "C" size_t LLVMFuzzerMutate(uint8_t* data, size_t size, size_t max_size);
 // symbols, descriptors and relocations. All other mutations remain byte-level.
 extern "C" size_t LLVMFuzzerCustomMutator(uint8_t* data, size_t size,
                                           size_t max_size, unsigned int seed) {
-  const size_t count = iree_hal_amd_gpu_hip_images_size();
+  const size_t hip_count = iree_hal_amd_gpu_hip_images_size();
+  const size_t count = hip_count + iree_hal_amd_gpu_asan_images_size();
   if (count && (size == 0 || seed % 32 == 0)) {
-    const auto& file = iree_hal_amd_gpu_hip_images_create()[seed % count];
+    const size_t ordinal = seed % count;
+    const auto& file =
+        ordinal < hip_count
+            ? iree_hal_amd_gpu_hip_images_create()[ordinal]
+            : iree_hal_amd_gpu_asan_images_create()[ordinal - hip_count];
     if (file.size <= max_size) {
       std::memcpy(data, file.data, file.size);
       return file.size;

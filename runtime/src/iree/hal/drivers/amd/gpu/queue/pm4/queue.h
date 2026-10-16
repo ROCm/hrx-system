@@ -83,6 +83,10 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_assign_frontier(
 iree_hal_amd_gpu_completion_source_t
 iree_hal_amd_gpu_pm4_queue_completion_source(iree_hal_queue_t* queue);
 
+// Wakes deferred admission after the shared feedback owner latches failure.
+// Already-published native work retains its completion and cleanup ownership.
+void iree_hal_amd_gpu_pm4_queue_notify_failure(iree_hal_queue_t* queue);
+
 // Trims unused capture blocks, replaced argument generations, and inactive
 // signal backing on the device's shared service. Live publishers/readers keep
 // their storage. This never waits for native execution to complete.

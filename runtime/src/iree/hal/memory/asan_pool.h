@@ -30,6 +30,8 @@ typedef enum iree_hal_asan_pool_mode_e {
 // These options are target-neutral. Pools use them to compute backing ranges
 // and redzones; slab providers use them to decide whether they can publish the
 // target-specific shadow state required by those ranges.
+// Imported storage retains its external layout and lifetime. Its provider
+// establishes addressability without pool-owned redzones or release poisoning.
 typedef struct iree_hal_asan_pool_options_t {
   // ASAN protection mode requested from the pool and slab provider.
   iree_hal_asan_pool_mode_t mode;

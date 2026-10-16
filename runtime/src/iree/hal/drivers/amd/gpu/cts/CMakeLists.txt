@@ -105,6 +105,30 @@ iree_cc_test(
 endif()
 
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    asan_test
+  SRCS
+    "asan_test.cc"
+  DEPS
+    ::test_device
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::image::asan_images
+    iree::hal::drivers::amd::status
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME
     backends

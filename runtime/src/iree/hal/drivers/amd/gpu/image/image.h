@@ -134,6 +134,15 @@ typedef struct iree_hal_amd_gpu_image_kernel_t {
   uint16_t kernarg_preload;
 } iree_hal_amd_gpu_image_kernel_t;
 
+// One precisely addressable global in an ASAN-instrumented image. The frontend
+// verifies eight-byte alignment and a disjoint trailing eight-byte redzone.
+typedef struct iree_hal_amd_gpu_image_data_object_t {
+  // Byte offset from the loaded image base.
+  uint64_t offset;
+  // Addressable bytes, excluding alignment padding and the trailing redzone.
+  uint64_t length;
+} iree_hal_amd_gpu_image_data_object_t;
+
 // Immutable image description initialized by a serialized-format frontend.
 //
 // This is a plain owner, not a refcounted HAL resource. The enclosing
@@ -180,6 +189,10 @@ typedef struct iree_hal_amd_gpu_image_t {
   iree_host_size_t dependency_count;
   // Dependency names borrowed from storage or the retained source.
   iree_string_view_t* dependencies;
+  // Number of precisely addressable globals; zero for unmarked images.
+  iree_host_size_t asan_data_object_count;
+  // Independently owned global ranges sorted by offset, excluding descriptors.
+  iree_hal_amd_gpu_image_data_object_t* asan_data_objects;
   // Complete kernel ABI and reflection metadata owned by the image.
   iree_hal_amd_gpu_metadata_t metadata;
   // Dispatch facts borrowed from storage, indexed by metadata kernel ordinal.

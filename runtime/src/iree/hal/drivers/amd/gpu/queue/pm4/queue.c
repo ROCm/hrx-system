@@ -115,6 +115,8 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   // Service has failed every published operation after native failure and
   // the last publishing caller's handoff. Their GPU ownership stays retained.
   bool issued_failure_delivered;
+  // Completion-owned delivery of logical failure while native retirement runs.
+  bool feedback_failure_delivered;
   // Native queue and mapping, joined after the final notification tail.
   iree_hal_amd_gpu_pm4_ring_storage_t storage;
   // Finite command owner, present only for KERNEL publication.
@@ -634,23 +636,45 @@ iree_hal_amd_gpu_pm4_publish_execute(
       arguments->end, (iree_hal_amd_gpu_pm4_download_t){0}, terminal);
 }
 
+static iree_status_code_t iree_hal_amd_gpu_pm4_feedback_failure(
+    const iree_hal_amd_gpu_pm4_queue_t* queue) {
+  return queue->options.feedback ? (iree_status_code_t)iree_atomic_load(
+                                       &queue->options.feedback->failure_code,
+                                       iree_memory_order_acquire)
+                                 : IREE_STATUS_OK;
+}
+
+static iree_status_t iree_hal_amd_gpu_pm4_check_failure(
+    const iree_hal_amd_gpu_pm4_queue_t* queue) {
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      (amdf_status_t)iree_atomic_load(&queue->native_failure,
+                                      iree_memory_order_acquire),
+      "PM4 native completion"));
+  iree_status_code_t code = iree_hal_amd_gpu_pm4_feedback_failure(queue);
+  return code == IREE_STATUS_OK
+             ? iree_ok_status()
+             : iree_make_status(code, "GPU sanitizer failure");
+}
+
+void iree_hal_amd_gpu_pm4_queue_notify_failure(iree_hal_queue_t* base) {
+  iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
+  iree_hal_amd_gpu_continuation_notify(&queue->continuation);
+}
+
 // The sole publisher prepares one bounded piece without host allocation.
 // Native KERNEL submission is the only fallible publication boundary. The
 // caller detached the entry before calling; immediate retirement may free it.
 static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission) {
-  const amdf_status_t failure = (amdf_status_t)iree_atomic_load(
-      &queue->native_failure, iree_memory_order_acquire);
-  if (!amdf_status_is_ok(failure)) {
+  iree_status_t failure = iree_hal_amd_gpu_pm4_check_failure(queue);
+  if (!iree_status_is_ok(failure)) {
     if (queue->kernel && queue->kernel->pending.byte_length) {
       queue->producer.ring.reserved_words = queue->kernel->rollback.words;
       queue->producer.arguments->end = queue->kernel->rollback.arguments;
       queue->kernel->pending.byte_length = 0;
     }
-    iree_hal_amd_gpu_pm4_abandon(
-        queue, submission,
-        IREE_HAL_AMD_STATUS_FROM_AMDF(failure, "PM4 native completion"));
+    iree_hal_amd_gpu_pm4_abandon(queue, submission, failure);
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
   }
   const uint64_t position = (uint64_t)iree_atomic_load(
@@ -888,6 +912,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_admit(
     iree_host_size_t* out_wait_index,
     iree_hal_amd_gpu_pm4_wait_kind_t* out_kind) {
   *out_kind = IREE_HAL_AMD_GPU_PM4_WAIT_READY;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_failure(queue));
   // A bounded direct publication must fit strictly inside half the ring.
   // Reserve a bounded launch plus 96 words for barriers, signal, retirement,
   // notification, and alignment. Large fan-in joins use completed host
@@ -993,10 +1018,7 @@ static void iree_hal_amd_gpu_pm4_pending_begin(
   iree_hal_amd_gpu_pm4_submission_t* submission = pending->submission;
   iree_hal_semaphore_t* source = pending->semaphore;
   pending->semaphore = NULL;
-  const amdf_status_t failure = (amdf_status_t)iree_atomic_load(
-      &queue->native_failure, iree_memory_order_acquire);
-  iree_status_t status =
-      IREE_HAL_AMD_STATUS_FROM_AMDF(failure, "PM4 native completion");
+  iree_status_t status = iree_hal_amd_gpu_pm4_check_failure(queue);
   if (iree_status_is_ok(status)) {
     if (pending->kind == IREE_HAL_AMD_GPU_PM4_WAIT_SUBMISSION) {
       status = iree_hal_amd_gpu_pm4_semaphore_acquire_submission_semaphore(
@@ -1114,7 +1136,8 @@ static void iree_hal_amd_gpu_pm4_enqueue(
     remainder = NULL;
   }
   if (iree_hal_amd_gpu_publisher_handoff(&queue->publisher, remainder) ||
-      iree_atomic_load(&queue->native_failure, iree_memory_order_acquire)) {
+      (iree_atomic_load(&queue->native_failure, iree_memory_order_acquire) ||
+       iree_hal_amd_gpu_pm4_feedback_failure(queue))) {
     iree_hal_amd_gpu_continuation_notify(&queue->continuation);
   }
   iree_hal_amd_gpu_pm4_wake_shutdown(queue);
@@ -1208,14 +1231,14 @@ static bool iree_hal_amd_gpu_pm4_progress(void* user_data) {
            !capacity;
     iree_hal_amd_gpu_pm4_wake_shutdown(queue);
   }
-  const amdf_status_t failure = (amdf_status_t)iree_atomic_load(
-      &queue->native_failure, iree_memory_order_acquire);
-  if (!amdf_status_is_ok(failure)) {
+  iree_status_t failure = iree_hal_amd_gpu_pm4_check_failure(queue);
+  if (!iree_status_is_ok(failure)) {
     for (iree_hal_amd_gpu_pm4_pending_t* pending = queue->pending; pending;
          pending = pending->next) {
       iree_hal_amd_gpu_host_wait_cancel(&pending->wait);
     }
     if (!queue->issued_failure_delivered &&
+        iree_atomic_load(&queue->native_failure, iree_memory_order_acquire) &&
         iree_hal_amd_gpu_publisher_is_idle(&queue->publisher)) {
       const uint64_t begin = (uint64_t)iree_atomic_load(
           &queue->completed.count, iree_memory_order_acquire);
@@ -1224,20 +1247,20 @@ static bool iree_hal_amd_gpu_pm4_progress(void* user_data) {
       for (uint64_t i = begin; i != end; ++i) {
         iree_hal_amd_gpu_pm4_submission_t* submission =
             queue->issued[i & queue->retirement.capacity_mask].submission;
-        iree_hal_amd_gpu_pm4_fail_signals(
-            queue, submission->signals,
-            IREE_HAL_AMD_STATUS_FROM_AMDF(failure, "PM4 native completion"));
+        iree_hal_amd_gpu_pm4_fail_signals(queue, submission->signals,
+                                          iree_status_clone(failure));
       }
       // A published operation establishes that group assignment completed.
       // An idle observer must not race construction by reading frontier state.
       if (end && queue->frontier.tracker) {
-        iree_async_frontier_tracker_fail_axis(
-            queue->frontier.tracker, queue->frontier.axis,
-            IREE_HAL_AMD_STATUS_FROM_AMDF(failure, "PM4 native completion"));
+        iree_async_frontier_tracker_fail_axis(queue->frontier.tracker,
+                                              queue->frontier.axis,
+                                              iree_status_clone(failure));
       }
       queue->issued_failure_delivered = true;
     }
   }
+  iree_status_free(failure);
   return more;
 }
 
@@ -1264,6 +1287,26 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
                                                  iree_memory_order_relaxed);
   const uint64_t published = (uint64_t)iree_atomic_load(
       &queue->producer.count, iree_memory_order_acquire);
+  const iree_status_code_t feedback_failure =
+      iree_hal_amd_gpu_pm4_feedback_failure(queue);
+  if (feedback_failure != IREE_STATUS_OK &&
+      !queue->feedback_failure_delivered) {
+    // Only this consumer releases published captures. Service cannot inspect
+    // them during a logical failure because native retirement keeps running.
+    for (uint64_t i = position; i != published; ++i) {
+      iree_hal_amd_gpu_pm4_submission_t* submission =
+          queue->issued[i & queue->retirement.capacity_mask].submission;
+      iree_hal_amd_gpu_pm4_fail_signals(
+          queue, submission->signals,
+          iree_make_status(feedback_failure, "GPU sanitizer failure"));
+    }
+    if (published && queue->frontier.tracker) {
+      iree_async_frontier_tracker_fail_axis(
+          queue->frontier.tracker, queue->frontier.axis,
+          iree_make_status(feedback_failure, "GPU sanitizer failure"));
+    }
+    queue->feedback_failure_delivered = true;
+  }
   uint64_t native_retired = 0;
   if (queue->kernel && position != published) {
     const amdf_status_t status = iree_hal_amd_gpu_pm4_kmq_storage_refresh(
@@ -1304,6 +1347,9 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
       // Native retirement makes this dispatch's reports observable. Drain the
       // ready shared prefix before waking host completion consumers.
       iree_hal_amd_gpu_feedback_drain(queue->options.feedback);
+      if (completion_code == IREE_STATUS_OK) {
+        completion_code = iree_hal_amd_gpu_pm4_feedback_failure(queue);
+      }
     }
     const uint64_t consumed_words = action->consumed_words;
     const uint64_t consumed_arguments = action->consumed_arguments;
@@ -1426,10 +1472,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_check_acceptance(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "GPU queue is closed");
   }
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(
-      (amdf_status_t)iree_atomic_load(&queue->native_failure,
-                                      iree_memory_order_acquire),
-      "PM4 native completion");
+  return iree_hal_amd_gpu_pm4_check_failure(queue);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_queue_barrier(

@@ -74,6 +74,8 @@ typedef struct iree_hal_amd_gpu_device_t {
     iree_hal_amd_fabric_memory_storage_t* storage;
     // Borrowed factory view, without any default pool or slab allocation.
     iree_hal_amd_fabric_memory_backend_t backend;
+    // Optional ASAN namespace; absent devices allocate no sanitizer metadata.
+    iree_hal_amd_fabric_asan_t* asan;
     // Persistent native access set used by internal control/image allocations.
     amdf_memory_device_access_t access;
     // Qualified coherent system backing for native control and placed images.
@@ -104,6 +106,7 @@ void iree_hal_amd_gpu_device_options_initialize(
               .capture_block_size = 1024,
               .capture_block_count = 64},
   };
+  iree_hal_amd_fabric_asan_options_initialize(&out_options->asan.memory);
 }
 
 static iree_string_view_t iree_hal_amd_gpu_device_id(iree_hal_device_t* base) {
@@ -120,7 +123,8 @@ static iree_string_view_t iree_hal_amd_gpu_device_id(iree_hal_device_t* base) {
 
 static iree_status_t iree_hal_amd_gpu_device_build_spec(
     iree_hal_amd_gpu_device_t* device, iree_string_view_t display_name,
-    uint32_t queue_count) {
+    uint32_t queue_count,
+    const iree_hal_amd_fabric_asan_options_t* asan_options) {
   const iree_hal_physical_device_spec_t physical = {
       .identity = {.display_name = display_name, .vendor_id = 0x1002},
       .partition_count = 1,
@@ -179,6 +183,20 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
   if (iree_status_is_ok(status)) {
     status =
         iree_hal_device_spec_builder_add_executable_target(&builder, &target);
+  }
+  if (iree_status_is_ok(status) && asan_options) {
+    const iree_hal_device_sanitizer_spec_t sanitizer = {
+        .flags = IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN,
+        .asan.pool_options =
+            {
+                .mode = IREE_HAL_ASAN_POOL_MODE_SHADOW,
+                .shadow_granule_size = UINT64_C(1)
+                                       << asan_options->shadow_scale_shift,
+                .redzone_size = asan_options->redzone_size,
+                .quarantine_size = asan_options->quarantine_size,
+            },
+    };
+    status = iree_hal_device_spec_builder_set_sanitizer(&builder, &sanitizer);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_finalize(&builder, &device->spec);
@@ -305,6 +323,7 @@ static void iree_hal_amd_gpu_device_initialize_memory(
       .storage = device->memory.storage,
       .event_sink = context->event_sink,
       .families = &device->memory.family,
+      .asan = device->memory.asan,
   };
   iree_hal_amd_fabric_memory_backend_initialize(
       (void*)device, &options, device->memory.notification,
@@ -351,6 +370,21 @@ static bool iree_hal_amd_gpu_device_release_children(
     iree_hal_queue_release(device->queues[i]);
     device->queues[i] = NULL;
   }
+  if (device->memory.service) {
+    iree_hal_amd_gpu_allocation_context_deinitialize(
+        &device->memory.allocations);
+  }
+  iree_hal_memory_maintenance_release(device->memory.service);
+  // Final executable cleanup on service poisons its globals before shadow
+  // teardown.
+  if (device->memory.asan) {
+    if (!iree_hal_amd_fabric_asan_deinitialize(device->memory.asan)) {
+      device->context->cleanup_blocked = true;
+      return false;
+    }
+    iree_allocator_free(device->host_allocator, device->memory.asan);
+  }
+
   if (!iree_hal_amd_gpu_feedback_deinitialize(&device->feedback)) {
     return false;
   }
@@ -362,11 +396,6 @@ static bool iree_hal_amd_gpu_device_release_children(
                                     "completion cleanup");
     return false;
   }
-  if (device->memory.service) {
-    iree_hal_amd_gpu_allocation_context_deinitialize(
-        &device->memory.allocations);
-  }
-  iree_hal_memory_maintenance_release(device->memory.service);
   iree_async_notification_release(device->memory.notification);
   iree_async_proactor_pool_entry_release(device->proactor_entry);
   iree_hal_device_spec_release(device->spec);
@@ -463,9 +492,25 @@ iree_hal_amd_gpu_device_family_publication(
 typedef struct iree_hal_amd_gpu_device_feedback_prepare_t {
   // Unpublished device borrowed until the service call joins.
   iree_hal_amd_gpu_device_t* device;
+  // Borrowed cold options, or NULL when ASAN was not requested.
+  const iree_hal_amd_gpu_device_options_t* asan_options;
   // Construction result transferred back to the creating thread.
   iree_status_t status;
 } iree_hal_amd_gpu_device_feedback_prepare_t;
+
+static void iree_hal_amd_gpu_device_notify_failure(void* user_data) {
+  iree_hal_amd_gpu_device_t* device = user_data;
+  for (uint32_t i = 0; i < device->queue_count; ++i) {
+    if (device->queues[i]) {
+      iree_hal_amd_gpu_pm4_queue_notify_failure(device->queues[i]);
+    }
+  }
+  const amdf_status_t status = iree_hal_amd_gpu_context_signal(device->context);
+  if (!amdf_status_is_ok(status)) {
+    iree_hal_amd_gpu_context_report(device->context, status,
+                                    "GPU sanitizer failure wake");
+  }
+}
 
 static void iree_hal_amd_gpu_device_prepare_feedback(void* user_data) {
   iree_hal_amd_gpu_device_feedback_prepare_t* prepare = user_data;
@@ -474,6 +519,35 @@ static void iree_hal_amd_gpu_device_prepare_feedback(void* user_data) {
       device->context, (iree_hal_device_t*)device, &device->memory.control,
       device->memory.capabilities.address_domain_ordinal,
       device->host_allocator, &device->feedback);
+  device->feedback.failure_callback = iree_hal_amd_gpu_device_notify_failure;
+  device->feedback.failure_user_data = device;
+  const iree_hal_amd_gpu_device_options_t* options = prepare->asan_options;
+  if (iree_status_is_ok(prepare->status) && options) {
+    amdf_memory_scope_t* scope = device->context->fabric->system_scope;
+    if (options->asan.shadow_backing ==
+        IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL) {
+      if (!device->context->memory_scope_count) {
+        prepare->status = iree_make_status(
+            IREE_STATUS_UNAVAILABLE, "ASAN requires local shadow backing");
+        return;
+      }
+      scope = device->context->memory_scopes[0];
+    }
+    prepare->status = iree_allocator_malloc(device->host_allocator,
+                                            sizeof(*device->memory.asan),
+                                            (void**)&device->memory.asan);
+    if (iree_status_is_ok(prepare->status)) {
+      prepare->status = iree_hal_amd_fabric_asan_initialize(
+          device->context->api, device->context->fabric->instance,
+          device->context->device,
+          device->memory.capabilities.address_domain_ordinal, scope,
+          &options->asan.memory, device->context->event_sink,
+          device->host_allocator, device->memory.asan);
+      device->memory.asan->failure_callback = iree_hal_amd_gpu_feedback_fail;
+      device->memory.asan->failure_user_data = &device->feedback;
+      device->feedback.asan_report_policy = options->asan.report_policy;
+    }
+  }
 }
 
 iree_status_t iree_hal_amd_gpu_device_create(
@@ -483,8 +557,22 @@ iree_status_t iree_hal_amd_gpu_device_create(
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
   *out_device = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_device_create_params_verify_runtime_features(
-      create_params, IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK));
+      create_params, IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK |
+                         IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN));
+  const bool asan_enabled =
+      iree_any_bit_set(create_params->runtime_features,
+                       IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN);
+  if (asan_enabled &&
+      (options->asan.memory.shadow_scale_shift > 7 ||
+       (uint32_t)options->asan.shadow_backing >
+           IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_HOST_LOCAL ||
+       (uint32_t)options->asan.report_policy >
+           IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid ASAN device provisioning options");
+  }
   const bool feedback_enabled =
+      asan_enabled ||
       iree_any_bit_set(create_params->runtime_features,
                        IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK);
   uint32_t family_ordinal = options->queue_family_ordinal;
@@ -551,8 +639,9 @@ iree_status_t iree_hal_amd_gpu_device_create(
         context->target_info.asic_revision, &device->target);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_device_build_spec(device, display_name,
-                                                options->queue_count);
+    status = iree_hal_amd_gpu_device_build_spec(
+        device, display_name, options->queue_count,
+        asan_enabled ? &options->asan.memory : NULL);
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -585,11 +674,13 @@ iree_status_t iree_hal_amd_gpu_device_create(
     }
   }
   if (iree_status_is_ok(status) && feedback_enabled) {
-    iree_hal_amd_gpu_device_feedback_prepare_t prepare = {.device = device};
+    iree_hal_amd_gpu_device_feedback_prepare_t prepare = {
+        .device = device, .asan_options = asan_enabled ? options : NULL};
     iree_hal_memory_maintenance_call(device->memory.service,
                                      iree_hal_amd_gpu_device_prepare_feedback,
                                      &prepare);
     status = prepare.status;
+    device->memory.allocations.failure = &device->feedback.failure_code;
   }
   iree_hal_amd_gpu_pm4_queue_options_t queue_options = {
       .family_ordinal = family_ordinal,
@@ -755,6 +846,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .memory = &device->memory.control,
       .maintenance = device->memory.service,
       .feedback = device->feedback.context ? &device->feedback : NULL,
+      .asan = device->memory.asan,
   };
   return iree_hal_amd_gpu_executable_create(family, device->context, &options,
                                             params, device->host_allocator,
@@ -791,8 +883,20 @@ static iree_status_t iree_hal_amd_gpu_device_acquire_queue(
 static iree_status_t iree_hal_amd_gpu_device_sample_observation(
     iree_hal_device_t* base, iree_hal_device_observation_flags_t flags,
     iree_hal_device_observation_t* out_observation) {
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "GPU device observations are unavailable");
+  iree_hal_amd_gpu_device_t* device = (void*)base;
+  if (iree_any_bit_set(flags, IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY)) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_device_observation_populate_memory_total_from_spec(
+            device->spec, out_observation));
+  }
+  if (iree_any_bit_set(flags, IREE_HAL_DEVICE_OBSERVATION_FLAG_SANITIZER) &&
+      device->memory.asan) {
+    out_observation->provided_flags |=
+        IREE_HAL_DEVICE_OBSERVATION_FLAG_SANITIZER;
+    iree_hal_amd_fabric_asan_query_statistics(device->memory.asan,
+                                              &out_observation->sanitizer.asan);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_device_create_channel(

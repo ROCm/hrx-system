@@ -42,8 +42,10 @@ void GpuNativeTest::SetUp() {
   IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
       amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST, &api),
       "amdf_query_api"));
-  IREE_ASSERT_OK(iree_hal_amd_fabric_create(api, AMDF_NATIVE_LIFETIME_INSTANCE,
-                                            iree_allocator_system(), &fabric_));
+  if (!fabric_) {
+    IREE_ASSERT_OK(iree_hal_amd_fabric_create(
+        api, AMDF_NATIVE_LIFETIME_INSTANCE, iree_allocator_system(), &fabric_));
+  }
   for (uint32_t i = 0; i < fabric_->endpoint_count && !context_; ++i) {
     if (fabric_->endpoints[i].engine_kind == AMDF_ENGINE_KIND_GPU) {
       iree::Status status =

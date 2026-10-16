@@ -13,6 +13,7 @@
 
 #include "iree/base/alignment.h"
 #include "iree/base/byte_sequence.h"
+#include "iree/hal/drivers/amd/gpu/image/asan_images.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/drivers/amd/gpu/image/image.h"
 #include "iree/testing/gtest.h"
@@ -168,6 +169,78 @@ size_t FindSymbol(const std::vector<uint8_t>& bytes, const char* name) {
     }
   }
   return 0;
+}
+
+iree_status_t InitializeAsanImage(std::vector<uint8_t> bytes, Image* image,
+                                  size_t segment_length = 0) {
+  auto* source = TestSequence::Allocate(std::move(bytes), segment_length);
+  iree_status_t status = iree_hal_amd_gpu_hsaco_image_initialize(
+      &source->base, iree_allocator_system(), &image->value);
+  iree_byte_sequence_release(&source->base);
+  return status;
+}
+
+TEST(HsacoAsanTest, ExactGlobalRangesExcludeActualDescriptorsOnly) {
+  ASSERT_GT(iree_hal_amd_gpu_asan_images_size(), 0u);
+  const auto* files = iree_hal_amd_gpu_asan_images_create();
+  for (size_t i = 0; i < iree_hal_amd_gpu_asan_images_size(); ++i) {
+    SCOPED_TRACE(files[i].name);
+    std::vector<uint8_t> bytes(files[i].data, files[i].data + files[i].size);
+    for (size_t segment_length : {size_t{0}, size_t{7}}) {
+      Image image;
+      IREE_ASSERT_OK(InitializeAsanImage(bytes, &image, segment_length));
+      ASSERT_EQ(image.value.asan_data_object_count, 3u);
+      EXPECT_EQ(image.value.asan_data_objects[0].length, 1u);
+      EXPECT_EQ(image.value.asan_data_objects[1].length, 96u);
+      EXPECT_EQ(image.value.asan_data_objects[2].length, 12u);
+      const auto* table = iree_hal_amd_gpu_image_find_symbol(
+          &image.value, IREE_SV("lookup_table.kd"));
+      ASSERT_NE(table, nullptr);
+      EXPECT_EQ(image.value.asan_data_objects[2].offset, table->address.offset);
+      EXPECT_EQ(image.value.metadata.kernel_count, 1u);
+    }
+  }
+}
+
+TEST(HsacoAsanTest, RejectsMalformedMarkedGlobalGeometry) {
+  ASSERT_GT(iree_hal_amd_gpu_asan_images_size(), 0u);
+  const auto& file = iree_hal_amd_gpu_asan_images_create()[0];
+  const std::vector<uint8_t> original(file.data, file.data + file.size);
+  for (int variant = 0; variant < 7; ++variant) {
+    SCOPED_TRACE(variant);
+    auto bytes = original;
+    const size_t marker = FindSymbol(bytes, "iree_asan_global_layout_v0");
+    const size_t table = FindSymbol(bytes, "lookup_table.kd");
+    const size_t section =
+        Read64(bytes, 40) + Read16(bytes, table + 6) * Read16(bytes, 58);
+    switch (variant) {
+      case 0:
+        Write16(bytes, 60, 0);
+        break;
+      case 1:
+        Write64(bytes, marker + 16, 2);
+        break;
+      case 2:
+        Write64(bytes, table + 8, Read64(bytes, table + 8) + 1);
+        break;
+      case 3:
+        Write64(bytes, section + 32,
+                Read64(bytes, table + 8) + 12 - Read64(bytes, section + 16));
+        break;
+      case 4:
+        Write64(bytes, table + 8, Read64(bytes, marker + 8) + 8);
+        break;
+      case 5:
+        Write64(bytes, section + 8, 0);
+        break;
+      case 6:
+        Write16(bytes, table + 6, Read16(bytes, 60));
+        break;
+    }
+    Image image;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          InitializeAsanImage(std::move(bytes), &image));
+  }
 }
 
 class HsacoTest : public ::testing::TestWithParam<size_t> {

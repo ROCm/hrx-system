@@ -33,6 +33,8 @@ typedef struct iree_hal_amd_gpu_executable_t {
   iree_hal_amd_gpu_image_t image;
   // Owned code/global backing and persistent upload/global mapping.
   iree_hal_amd_fabric_memory_t memory;
+  // Borrowed shadow owner when this image published precise global ranges.
+  iree_hal_amd_fabric_asan_t* asan;
   // Host and exact-device addresses of image-relative byte zero.
   iree_hal_buffer_native_binding_t bindings[2];
   // Captured native geometry shared by every global view.
@@ -69,6 +71,11 @@ static void iree_hal_amd_gpu_executable_free(void* user_data) {
   iree_slim_mutex_deinitialize(&executable->global_mutex);
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(executable->contracts); ++i) {
     iree_hal_memory_contract_release(executable->contracts[i]);
+  }
+  if (executable->asan) {
+    iree_hal_amd_fabric_asan_advise_range(
+        executable->asan, executable->bindings[1].device_address,
+        executable->memory.info.byte_length, 0, 0);
   }
   iree_hal_amd_fabric_memory_deinitialize(executable->context->api,
                                           executable->context->event_sink,
@@ -151,14 +158,20 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
     if (!symbol) {
       continue;
     }
-    if (i == 2 && options->feedback) {
+    iree_host_size_t required_length =
+        i == 0 && options->asan ? sizeof(iree_hal_amd_fabric_asan_config_t)
+        : i == 2 && options->feedback
+            ? sizeof(iree_hal_amd_gpu_feedback_config_t)
+            : 0;
+    if (required_length) {
       if (symbol->kind != IREE_HAL_AMD_GPU_IMAGE_SYMBOL_DATA ||
           symbol->address.kind != IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMAGE ||
           !(symbol->access & IREE_HAL_AMD_GPU_IMAGE_ACCESS_WRITE) ||
-          symbol->length < sizeof(iree_hal_amd_gpu_feedback_config_t)) {
+          symbol->length < required_length) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "GPU feedback configuration global has an invalid layout");
+            "GPU service global `%.*s` has an invalid layout",
+            (int)symbol->name.size, symbol->name.data);
       }
     } else {
       return iree_make_status(
@@ -167,6 +180,14 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
           "device has not provisioned",
           (int)service_globals[i].size, service_globals[i].data);
     }
+  }
+  if (image->asan_data_object_count &&
+      (!options->asan || options->asan->config.shadow_scale_shift != 3 ||
+       !iree_hal_amd_gpu_image_find_symbol(image,
+                                           IREE_SV("iree_asan_config")))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "ASAN global layout requires scale-three ASAN configuration");
   }
   iree_hal_amd_gpu_target_identity_t artifact = image->target;
   for (iree_host_size_t i = 0; i < image->metadata.kernel_count; ++i) {
@@ -255,6 +276,37 @@ static iree_status_t iree_hal_amd_gpu_executable_publish_feedback(
   IREE_TSAN_RELEASE((void*)source);
   memcpy(executable->memory.contents.data + config_symbol->address.offset,
          &config, sizeof(config));
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amd_gpu_executable_publish_asan(
+    iree_hal_amd_gpu_executable_t* executable,
+    iree_hal_amd_fabric_asan_t* asan) {
+  const iree_hal_amd_gpu_image_t* image = &executable->image;
+  const iree_hal_amd_gpu_image_symbol_t* config =
+      iree_hal_amd_gpu_image_find_symbol(image, IREE_SV("iree_asan_config"));
+  if (!config) {
+    return iree_ok_status();
+  }
+  if (image->asan_data_object_count) {
+    const uint64_t address = executable->bindings[1].device_address;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_asan_map_range(
+        asan, address, executable->memory.info.byte_length));
+    executable->asan = asan;
+    iree_hal_amd_fabric_asan_advise_range(
+        asan, address, executable->memory.info.byte_length, 0, 0);
+    iree_status_t status = iree_ok_status();
+    for (iree_host_size_t i = 0;
+         i < image->asan_data_object_count && iree_status_is_ok(status); ++i) {
+      const iree_hal_amd_gpu_image_data_object_t* object =
+          &image->asan_data_objects[i];
+      status = iree_hal_amd_fabric_asan_publish_imported_range(
+          asan, address + object->offset, object->length);
+    }
+    IREE_RETURN_IF_ERROR(status);
+  }
+  memcpy(executable->memory.contents.data + config->address.offset,
+         &asan->config, sizeof(asan->config));
   return iree_ok_status();
 }
 
@@ -574,6 +626,10 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
         packet->prepare = executable->packet_program;
       }
     }
+  }
+  if (iree_status_is_ok(status) && options->asan) {
+    status =
+        iree_hal_amd_gpu_executable_publish_asan(executable, options->asan);
   }
   if (iree_status_is_ok(status) && options->feedback) {
     status = iree_hal_amd_gpu_executable_publish_feedback(executable,

@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_EXECUTABLE_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_EXECUTABLE_H_
 
+#include "iree/hal/drivers/amd/fabric/asan.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/feedback.h"
@@ -35,6 +36,8 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   iree_hal_memory_maintenance_t* maintenance;
   // Device-owned shared report channel, or NULL when feedback is disabled.
   iree_hal_amd_gpu_feedback_t* feedback;
+  // Optional shadow namespace used by code-object globals and data ranges.
+  iree_hal_amd_fabric_asan_t* asan;
 } iree_hal_amd_gpu_executable_options_t;
 
 // Copies the public artifact, admits its image, and loads native backing for

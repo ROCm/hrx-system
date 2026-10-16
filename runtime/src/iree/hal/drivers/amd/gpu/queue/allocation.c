@@ -142,6 +142,14 @@ static void iree_hal_amd_gpu_allocation_free(
 static void iree_hal_amd_gpu_allocation_complete(
     iree_hal_amd_gpu_allocation_t* operation, iree_status_t status) {
   iree_hal_amd_gpu_allocation_retire(operation);
+  if (iree_status_is_ok(status) && operation->context->failure) {
+    const iree_status_code_t code = (iree_status_code_t)iree_atomic_load(
+        operation->context->failure, iree_memory_order_acquire);
+    if (code != IREE_STATUS_OK) {
+      status =
+          iree_make_status(code, "GPU allocation completed on failed device");
+    }
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_list_signal(operation->signals, NULL);
   }
@@ -185,6 +193,13 @@ static iree_status_t iree_hal_amd_gpu_allocation_materialize(
   iree_hal_pool_advise_asan_reservations(
       pool, operation->count, operation->reservations,
       IREE_HAL_ASAN_RANGE_ADVICE_FLAG_ALLOCATED);
+  if (operation->context->failure) {
+    const iree_status_code_t code = (iree_status_code_t)iree_atomic_load(
+        operation->context->failure, iree_memory_order_acquire);
+    if (code != IREE_STATUS_OK) {
+      return iree_make_status(code, "GPU allocation shadow publication failed");
+    }
+  }
   for (iree_host_size_t i = 0; i < operation->count; ++i) {
     iree_hal_amd_fabric_transient_buffer_attach_reservation(
         operation->buffers[i], pool, &operation->reservations[i]);

@@ -12,6 +12,7 @@
 
 void iree_hal_amd_gpu_image_deinitialize(iree_hal_amd_gpu_image_t* image) {
   iree_hal_amd_gpu_metadata_deinitialize(&image->metadata);
+  iree_allocator_free(image->host_allocator, image->asan_data_objects);
   iree_allocator_free(image->host_allocator, image->reflection_storage);
   iree_allocator_free(image->host_allocator, image->storage);
   iree_byte_sequence_release(image->source);

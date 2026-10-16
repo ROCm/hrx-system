@@ -16,6 +16,8 @@
 extern "C" {
 #endif  // __cplusplus
 
+typedef struct iree_hal_amd_fabric_asan_t iree_hal_amd_fabric_asan_t;
+
 // One engine address interface used by queue and program bindings.
 typedef struct iree_hal_amd_fabric_memory_binding_t {
   // HAL interface naming this native representation.
@@ -86,6 +88,8 @@ typedef struct iree_hal_amd_fabric_memory_backend_options_t {
   iree_hal_device_event_sink_t event_sink;
   // Borrowed immutable facts, one per family in HAL family-ordinal order.
   const iree_hal_amd_fabric_memory_family_t* families;
+  // Optional device-owned shadow namespace, borrowed by all created pools.
+  iree_hal_amd_fabric_asan_t* asan;
 } iree_hal_amd_fabric_memory_backend_options_t;
 
 // Borrowed native and progress owners established during device creation.

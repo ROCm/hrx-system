@@ -90,6 +90,13 @@ typedef struct iree_hal_amd_gpu_feedback_packet_t {
 static_assert(sizeof(iree_hal_amd_gpu_feedback_packet_t) == 64,
               "device feedback packet ABI");
 
+typedef enum iree_hal_amd_gpu_sanitizer_report_policy_e {
+  // Publish the diagnostic and allow subsequent device work.
+  IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_REPORT_ONLY = 0,
+  // Publish the diagnostic and fail subsequent completion/admission.
+  IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE = 1,
+} iree_hal_amd_gpu_sanitizer_report_policy_t;
+
 // One physical device's live shared channel, with a sole completion-thread
 // consumer. Producers reserve with CAS, publish READY, and notify the existing
 // native event. Executable registration is cold and independently synchronized.
@@ -114,6 +121,14 @@ typedef struct iree_hal_amd_gpu_feedback_t {
   iree_hal_amd_gpu_feedback_config_t config;
   // Owned source metadata surviving early executable release.
   iree_hal_amd_gpu_source_context_registry_t sources;
+  // ASAN report behavior selected during device construction.
+  iree_hal_amd_gpu_sanitizer_report_policy_t asan_report_policy;
+  // First logical device failure, independent of native retirement ownership.
+  iree_atomic_int32_t failure_code;
+  // Wakes device queue continuations after the first logical failure.
+  void(IREE_API_PTR* failure_callback)(void* user_data);
+  // Borrowed device owner for failure_callback.
+  void* failure_user_data;
   // First reported channel failure; only the completion worker accesses it.
   iree_status_t failure;
   // Last drop counter reported by the completion worker.
@@ -135,6 +150,11 @@ iree_status_t iree_hal_amd_gpu_feedback_initialize(
 // failed native alias removal, which preserves the remaining ownership graph.
 bool iree_hal_amd_gpu_feedback_deinitialize(
     iree_hal_amd_gpu_feedback_t* feedback);
+
+// Latches a logical device failure and wakes admission/dependency processing.
+// Native completion continues to own retirement of already-published work.
+void iree_hal_amd_gpu_feedback_fail(void* user_data,
+                                    iree_status_code_t status_code);
 
 // Drains a bounded ready prefix without waiting for unpublished reservations.
 // Shader/native publication errors are reported once through the device sink.

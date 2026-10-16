@@ -244,8 +244,7 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
     const iree_hal_amd_gpu_feedback_packet_t* packet) {
   const iree_host_size_t length = packet->record_length - packet->header_length;
   const uint8_t* payload = (const uint8_t*)packet + packet->header_length;
-  // UBSAN includes authored assertions and the complete existing check family.
-  if (packet->kind != 5 || length < 64 ||
+  if ((packet->kind != 1 && packet->kind != 5) || length < 64 ||
       iree_unaligned_load_le_u32(payload) < 64 ||
       iree_unaligned_load_le_u32(payload) > length ||
       iree_unaligned_load_le_u32(payload + 4) != 0) {
@@ -258,23 +257,52 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
       (const void*)(uintptr_t)packet->source_context;
   // Device publication is the handoff from the executable-loading thread.
   IREE_TSAN_ACQUIRE((void*)source);
-  const uint32_t check_kind = iree_unaligned_load_le_u32(payload + 8);
-  const iree_hal_device_ubsan_report_t report = {
-      .record_length = sizeof(report),
-      .abi_version = IREE_HAL_DEVICE_UBSAN_REPORT_ABI_VERSION_0,
-      .check_kind = check_kind <= IREE_HAL_DEVICE_UBSAN_CHECK_KIND_ASSERTION
-                        ? check_kind
-                        : IREE_HAL_DEVICE_UBSAN_CHECK_KIND_UNKNOWN,
-      .flags = iree_unaligned_load_le_u32(payload + 12),
-      .site_id = iree_unaligned_load_le_u64(payload + 16),
-      .operand0 = iree_unaligned_load_le_u64(payload + 24),
-      .operand1 = iree_unaligned_load_le_u64(payload + 32),
-      .workgroup_id = {packet->source_workgroup_id_x},
-      .workitem_id = {packet->source_workitem_id_x},
-      .source_dispatch_ptr = packet->source_dispatch_ptr,
-  };
+  iree_hal_device_asan_report_t asan = {0};
+  iree_hal_device_ubsan_report_t ubsan = {0};
+  uint64_t site_id = 0;
+  iree_const_byte_span_t report;
+  if (packet->kind == 1) {
+    const uint32_t access_kind = iree_unaligned_load_le_u32(payload + 8);
+    asan = (iree_hal_device_asan_report_t){
+        .record_length = sizeof(asan),
+        .abi_version = IREE_HAL_DEVICE_ASAN_REPORT_ABI_VERSION_0,
+        .access_kind = access_kind <= IREE_HAL_DEVICE_ASAN_ACCESS_KIND_ATOMIC
+                           ? access_kind
+                           : IREE_HAL_DEVICE_ASAN_ACCESS_KIND_UNKNOWN,
+        .flags = iree_unaligned_load_le_u32(payload + 12),
+        .fault_address = iree_unaligned_load_le_u64(payload + 16),
+        .access_length = iree_unaligned_load_le_u64(payload + 24),
+        .site_id = iree_unaligned_load_le_u64(payload + 32),
+        .shadow_address = iree_unaligned_load_le_u64(payload + 40),
+        .shadow_value = iree_unaligned_load_le_u64(payload + 48),
+        .workgroup_id = {packet->source_workgroup_id_x},
+        .workitem_id = {packet->source_workitem_id_x},
+        .source_dispatch_ptr = packet->source_dispatch_ptr,
+    };
+    site_id = asan.site_id;
+    report = iree_make_const_byte_span(&asan, sizeof(asan));
+  } else {
+    const uint32_t check_kind = iree_unaligned_load_le_u32(payload + 8);
+    ubsan = (iree_hal_device_ubsan_report_t){
+        .record_length = sizeof(ubsan),
+        .abi_version = IREE_HAL_DEVICE_UBSAN_REPORT_ABI_VERSION_0,
+        .check_kind = check_kind <= IREE_HAL_DEVICE_UBSAN_CHECK_KIND_ASSERTION
+                          ? check_kind
+                          : IREE_HAL_DEVICE_UBSAN_CHECK_KIND_UNKNOWN,
+        .flags = iree_unaligned_load_le_u32(payload + 12),
+        .site_id = iree_unaligned_load_le_u64(payload + 16),
+        .operand0 = iree_unaligned_load_le_u64(payload + 24),
+        .operand1 = iree_unaligned_load_le_u64(payload + 32),
+        .workgroup_id = {packet->source_workgroup_id_x},
+        .workitem_id = {packet->source_workitem_id_x},
+        .source_dispatch_ptr = packet->source_dispatch_ptr,
+    };
+    site_id = ubsan.site_id;
+    report = iree_make_const_byte_span(&ubsan, sizeof(ubsan));
+  }
   iree_hal_device_event_t event = iree_hal_device_event_default();
-  event.type = IREE_HAL_DEVICE_EVENT_TYPE_UBSAN_REPORT;
+  event.type = packet->kind == 1 ? IREE_HAL_DEVICE_EVENT_TYPE_ASAN_REPORT
+                                 : IREE_HAL_DEVICE_EVENT_TYPE_UBSAN_REPORT;
   event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
   event.sequence = packet->sequence;
   event.source.device = feedback->device;
@@ -284,14 +312,31 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
       iree_hal_amd_gpu_source_context_executable_id(source);
   event.source.physical_device_ordinal = 0;
   iree_hal_device_event_site_t site;
-  if (iree_hal_amd_gpu_source_context_resolve(source, report.site_id, &site)) {
+  if (iree_hal_amd_gpu_source_context_resolve(source, site_id, &site)) {
     event.site = &site;
   }
-  event.payload = iree_make_const_byte_span(&report, sizeof(report));
+  event.payload = report;
   event.implementation_payload =
       iree_make_const_byte_span(packet, packet->record_length);
   iree_hal_device_event_sink_publish(feedback->context->event_sink, &event);
+  if (packet->kind == 1 &&
+      feedback->asan_report_policy ==
+          IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE) {
+    iree_hal_amd_gpu_feedback_fail(feedback, IREE_STATUS_ABORTED);
+  }
   return iree_ok_status();
+}
+
+void iree_hal_amd_gpu_feedback_fail(void* user_data,
+                                    iree_status_code_t status_code) {
+  iree_hal_amd_gpu_feedback_t* feedback = user_data;
+  int32_t expected = IREE_STATUS_OK;
+  if (iree_atomic_compare_exchange_strong(
+          &feedback->failure_code, &expected, status_code,
+          iree_memory_order_acq_rel, iree_memory_order_acquire) &&
+      feedback->failure_callback) {
+    feedback->failure_callback(feedback->failure_user_data);
+  }
 }
 
 static bool iree_hal_amd_gpu_feedback_drain_packets(
@@ -336,6 +381,7 @@ static bool iree_hal_amd_gpu_feedback_drain_packets(
     iree_hal_amd_gpu_context_report_status(feedback->context, feedback->device,
                                            status);
     feedback->failure = status;
+    iree_hal_amd_gpu_feedback_fail(feedback, iree_status_code(status));
   }
   const uint64_t dropped =
       iree_hal_amd_gpu_feedback_load(&control->dropped_packet_count);

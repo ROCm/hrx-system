@@ -30,6 +30,7 @@ load(
     "AMDGPU_HARDWARE_PROFILE",
     "AMDGPU_TSAN_CAPACITY_PROFILE",
     "AMDGPU_TSAN_PROFILE",
+    "RDNA_ASAN_PROFILE",
     "RDNA_HARDWARE_PROFILE",
 )
 
@@ -272,7 +273,10 @@ loom_test(
     name = "asan_test",
     srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom"],
     configs = {"asan_launch_bound.tile_capacity": "1"},
-    execution_profiles = [AMDGPU_ASAN_PROFILE],
+    execution_profiles = [
+        AMDGPU_ASAN_PROFILE,
+        RDNA_ASAN_PROFILE,
+    ],
 )
 
 loom_test(
