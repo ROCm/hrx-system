@@ -183,6 +183,22 @@ static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
     iree_hal_queue_t* base, const iree_hal_transfer_operation_t* operation,
     iree_hal_semaphore_list_t signals, const void* before, const void* after);
 
+static void iree_hal_amd_gpu_pm4_file_add_effects(
+    iree_hal_queue_t* base, iree_hal_memory_effects_t effects, void* value) {
+  iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
+  iree_hal_amd_gpu_pm4_barrier_t* barrier = value;
+  if (effects.bits & (IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
+                      IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM)) {
+    barrier->cache_control |= queue->options.barriers.release;
+    barrier->execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
+                          IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  }
+  if (effects.bits & (IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
+                      IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM)) {
+    barrier->cache_control |= queue->options.barriers.acquire;
+  }
+}
+
 void iree_hal_amd_gpu_pm4_queue_set_profile(
     iree_hal_queue_t* base, iree_hal_amd_gpu_profile_t* profile) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
@@ -1942,6 +1958,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .waits = &queue->wait_context,
       .queue_ordinal = options->queue_ordinal,
       .barrier_size = sizeof(iree_hal_amd_gpu_pm4_barrier_t),
+      .add_effects = iree_hal_amd_gpu_pm4_file_add_effects,
       .submit = iree_hal_amd_gpu_pm4_file_submit};
   queue->issued = (iree_hal_amd_gpu_pm4_retirement_t*)(queue + 1);
   queue->producer.frontier.count = queue_count;

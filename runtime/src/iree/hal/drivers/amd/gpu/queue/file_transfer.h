@@ -37,6 +37,11 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   // Size of one immutable native barrier value copied into each operation.
   // The executor defines its representation; the file pipeline never reads it.
   iree_host_size_t barrier_size;
+  // Combines qualified queue-side visibility effects into an owned native
+  // barrier value. Host actions execute separately on service. This consumes
+  // trusted global/ranged queue effects and performs no allocation or query.
+  void (*add_effects)(iree_hal_queue_t* queue,
+                      iree_hal_memory_effects_t effects, void* barrier);
   // Captures one transfer or, for NULL operation, a barrier. The caller has
   // resolved dependencies and prepared immutable cache recipes. Success owns
   // captured arguments through signals; failure retains no borrowed payload.
@@ -50,8 +55,9 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
 
 // The executor is queue-owned and outlives accepted operations.
 // Captures a validated, nonempty queue_read/write transaction. Memory files
-// use their owned host span directly; platform files use bounded ordinary host
-// staging and their imported proactor. Device buffers need no CPU mapping.
+// use their owned host span directly. Buffered platform files use a prepared
+// host view when its device transitions are qualified; other platform transfers
+// use native copies through staging. Device buffers need no public CPU mapping.
 // The before boundary precedes native buffer access. The after boundary and
 // public signals follow every native copy, file request, and host effect.
 // Captured buffer uses end before public signaling, permitting immediate

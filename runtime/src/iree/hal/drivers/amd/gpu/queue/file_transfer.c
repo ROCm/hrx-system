@@ -6,7 +6,9 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/file_transfer.h"
 
+#include "iree/async/file.h"
 #include "iree/async/semaphore.h"
+#include "iree/hal/drivers/amd/fabric/buffer.h"
 #include "iree/hal/drivers/amd/fabric/file_transfer.h"
 
 // The existing native transfer engine provides its own bounded GPU staging.
@@ -29,9 +31,11 @@ typedef struct iree_hal_amd_gpu_file_transfer_t {
   // Copied and retained public completion points.
   iree_hal_semaphore_list_t signals;
   // Prepared cache boundary preceding the first native buffer access.
-  const void* before;
+  void* before;
   // Prepared cache boundary following every file and host effect.
-  const void* after;
+  void* after;
+  // Buffered native I/O uses the buffer's qualified host execution view.
+  bool host_transfer;
   // I/O callback status consumed by the next service turn.
   iree_status_t status;
   // Host-completed native copy progress, private to this file operation.
@@ -131,6 +135,8 @@ static void iree_hal_amd_gpu_file_transfer_io_complete(
   operation->status = iree_ok_status();
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
+  } else if (operation->host_transfer) {
+    iree_hal_amd_gpu_file_transfer_advance(operation);
   } else if (operation->transfer.file_access == IREE_HAL_MEMORY_ACCESS_READ) {
     iree_hal_amd_gpu_file_transfer_copy(operation);
   } else {
@@ -226,17 +232,96 @@ static void iree_hal_amd_gpu_file_transfer_advance(
     iree_hal_amd_gpu_file_transfer_t* operation) {
   iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
   if (transfer->async.bytes_transferred == transfer->length) {
-    iree_hal_amd_gpu_file_transfer_complete(operation, iree_ok_status());
+    iree_status_t status = iree_ok_status();
+    if (operation->host_transfer &&
+        transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
+      // Publish the complete host write once, after all I/O has retired and
+      // before the native consumer acquire. No GPU work occurs per file chunk.
+      status = iree_hal_amd_fabric_buffer_flush_host_range(
+          transfer->buffer, transfer->buffer_offset, transfer->length);
+    }
+    iree_hal_amd_gpu_file_transfer_complete(operation, status);
     return;
   }
-  iree_status_t status = iree_hal_amd_fabric_file_transfer_prepare_chunk(
-      transfer, transfer->async.staging);
+  iree_status_t status =
+      operation->host_transfer
+          ? iree_hal_amd_fabric_file_transfer_prepare(transfer)
+          : iree_hal_amd_fabric_file_transfer_prepare_chunk(
+                transfer, transfer->async.staging);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
-  } else if (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
+  } else if (operation->host_transfer ||
+             transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
     iree_hal_amd_gpu_file_transfer_issue(operation);
   } else {
     iree_hal_amd_gpu_file_transfer_copy(operation);
+  }
+}
+
+// A prepared host pointer alone does not qualify the device cache handoff.
+// Query captured pair facts once per file operation, independently of the
+// caller's optional barriers. Uncached native I/O additionally needs a pinning
+// contract and does not use this buffered route.
+static bool iree_hal_amd_gpu_file_transfer_prepare_host(
+    iree_hal_amd_gpu_file_transfer_t* operation) {
+  const iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
+  if (!transfer->async.file ||
+      iree_any_bit_set(transfer->async.file->flags,
+                       IREE_ASYNC_FILE_FLAG_DIRECT) ||
+      transfer->buffer->host_binding_index ==
+          IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
+    return false;
+  }
+  const iree_hal_memory_contract_t* contract =
+      transfer->buffer->memory.contract;
+  const iree_hal_memory_access_t host_access =
+      transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
+          ? IREE_HAL_MEMORY_ACCESS_WRITE
+          : IREE_HAL_MEMORY_ACCESS_READ;
+  if (!contract || !iree_all_bits_set(contract->host.access, host_access)) {
+    return false;
+  }
+  const iree_hal_queue_family_t* family =
+      operation->executor->queue->queue_family;
+  const iree_hal_memory_scope_t host = {family->memory.domain, 1};
+  const iree_hal_memory_scope_t queue = {family->memory.domain,
+                                         family->memory.queue_scope_id};
+  const iree_hal_memory_access_t queue_access = iree_hal_buffer_usage_access(
+      iree_hal_buffer_family_usage(transfer->buffer, family));
+  iree_hal_memory_effects_t before = {0}, after = {0};
+  if (queue_access & IREE_HAL_MEMORY_ACCESS_WRITE) {
+    // Even a file read replacing bytes must retire dirty device lines before
+    // the host overwrite, so a later writeback cannot restore the old bytes.
+    before =
+        iree_hal_buffer_query_transition(transfer->buffer, queue, host).release;
+  }
+  if (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ &&
+      (queue_access & IREE_HAL_MEMORY_ACCESS_READ)) {
+    after =
+        iree_hal_buffer_query_transition(transfer->buffer, host, queue).acquire;
+  }
+  const uint32_t queue_effects =
+      IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
+      IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM |
+      IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
+      IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM;
+  if ((before.bits | after.bits) & ~queue_effects) {
+    return false;
+  }
+  operation->executor->add_effects(operation->executor->queue, before,
+                                   operation->before);
+  operation->executor->add_effects(operation->executor->queue, after,
+                                   operation->after);
+  return true;
+}
+
+static void iree_hal_amd_gpu_file_transfer_host_start(void* user_data,
+                                                      iree_status_t status) {
+  iree_hal_amd_gpu_file_transfer_t* operation = user_data;
+  if (iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_file_transfer_advance(operation);
+  } else {
+    iree_hal_amd_gpu_file_transfer_complete(operation, status);
   }
 }
 
@@ -252,6 +337,31 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
                                               (void*)(operation + 1), true, 0);
   }
   iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
+  operation->host_transfer =
+      iree_hal_amd_gpu_file_transfer_prepare_host(operation);
+  if (operation->host_transfer) {
+    ++operation->completion.value;
+    const iree_hal_semaphore_list_t completion = {
+        .count = 1,
+        .semaphores = &operation->completion.semaphore,
+        .payload_values = &operation->completion.value,
+    };
+    status = iree_hal_amd_gpu_host_wait_begin(
+        operation->executor->waits, operation->executor->service, completion,
+        iree_hal_amd_gpu_file_transfer_host_start, operation,
+        iree_allocator_inline_arena(&operation->completion.storage),
+        &operation->completion.wait);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_amd_gpu_file_transfer_complete(operation, status);
+      return;
+    }
+    status = operation->executor->submit(operation->executor->queue, NULL,
+                                         completion, operation->before, NULL);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_semaphore_fail(operation->completion.semaphore, status);
+    }
+    return;
+  }
   if (!transfer->async.file) {
     iree_hal_amd_gpu_file_transfer_copy(operation);
     return;

@@ -311,6 +311,33 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_test(
   NAME
+    file_transfer_test
+  SRCS
+    "file_transfer_test.cc"
+  DEPS
+    ::test_device
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amd::gpu::image::hip_images
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
     host_call_test
   DEPS
     ::backends

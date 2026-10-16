@@ -182,6 +182,23 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "file_transfer_test",
+    srcs = ["file_transfer_test.cc"],
+    deps = [
+        ":test_device",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hip_images",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_call_test",
     deps = [
         ":backends",

@@ -47,6 +47,7 @@ iree_cc_library(
     iree::async::util::semaphore_wait
     iree::base
     iree::hal
+    iree::hal::drivers::amd::fabric::buffer
     iree::hal::drivers::amd::fabric::file_transfer
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::profile
