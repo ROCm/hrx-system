@@ -1095,9 +1095,9 @@ CHECK: *"rematerializations":2,*"attempts":3,*
 // ====
 
 // Folding the fallback edge makes the late producer dominate the early loop.
-// Spill repair must use that updated execution domain and retain the values
-// instead of replaying their definitions across loop iterations.
-// RUN: with-checks pass-report cfg-simplify,low-materialize-allocation{budgets=test.i32=2}
+// Spill repair retains the computed result across the loop while constants
+// can replace reloads at their users in the updated execution domain.
+// RUN: with-low-asm pass cfg-simplify,low-materialize-allocation{budgets=test.i32=2}
 
 test.target<low_core> @target
 
@@ -1133,7 +1133,54 @@ low.func.def target<test.low.core>(@target) @dependent_spills_reordered_cfg(%a: 
 }
 
 // ----
-CHECK: *"symbol":"dependent_spills_reordered_cfg"*"rematerializations":0,*
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @dependent_spills_reordered_cfg(%a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) asm {
+  %dependent_spills_reordered_cfg_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %dependent_spills_reordered_cfg_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %dependent_spills_reordered_cfg_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %dependent_spills_reordered_cfg_spill_storage_3 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %dependent_spills_reordered_cfg_spill_storage_4 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %dependent_spills_reordered_cfg_spill_storage_5 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %dependent_spills_reordered_cfg_spill_storage_6 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %b, %dependent_spills_reordered_cfg_spill_storage_0 : reg<test.i32>, low.storage<private>
+  low.cond_br %a, ^produce, ^fallback : reg<test.i32>
+^produce:
+  low.br ^derive
+^derive:
+  %literal_remat$18 = test.const.i32 7
+  %derived = test.rematerialize.i32 %literal_remat$18
+  low.spill %derived, %dependent_spills_reordered_cfg_spill_storage_1 : reg<test.i32>, low.storage<private>
+  %20 = low.reload %dependent_spills_reordered_cfg_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  low.cond_br %20, ^derive, ^finish : reg<test.i32>
+^finish:
+  %21 = low.reload %dependent_spills_reordered_cfg_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %ab = test.add.i32 %a, %21
+  low.spill %ab, %dependent_spills_reordered_cfg_spill_storage_2 : reg<test.i32>, low.storage<private>
+  %22 = low.reload %dependent_spills_reordered_cfg_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %ba = test.add.i32 %22, %a
+  low.spill %ba, %dependent_spills_reordered_cfg_spill_storage_3 : reg<test.i32>, low.storage<private>
+  %25 = low.reload %dependent_spills_reordered_cfg_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %28 = low.reload %dependent_spills_reordered_cfg_spill_storage_2 : low.storage<private> -> reg<test.i32>
+  %first = test.add.i32 %28, %25
+  low.spill %first, %dependent_spills_reordered_cfg_spill_storage_4 : reg<test.i32>, low.storage<private>
+  %26 = low.reload %dependent_spills_reordered_cfg_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %30 = low.reload %dependent_spills_reordered_cfg_spill_storage_3 : low.storage<private> -> reg<test.i32>
+  %second = test.add.i32 %30, %26
+  low.spill %second, %dependent_spills_reordered_cfg_spill_storage_5 : reg<test.i32>, low.storage<private>
+  %literal_remat$17 = test.const.i32 7
+  %24 = low.reload %dependent_spills_reordered_cfg_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  %both = test.add.i32 %literal_remat$17, %24
+  low.spill %both, %dependent_spills_reordered_cfg_spill_storage_6 : reg<test.i32>, low.storage<private>
+  %32 = low.reload %dependent_spills_reordered_cfg_spill_storage_4 : low.storage<private> -> reg<test.i32>
+  %34 = low.reload %dependent_spills_reordered_cfg_spill_storage_5 : low.storage<private> -> reg<test.i32>
+  %partial = test.add.i32 %32, %34
+  %36 = low.reload %dependent_spills_reordered_cfg_spill_storage_6 : low.storage<private> -> reg<test.i32>
+  %result = test.add.i32 %partial, %36
+  return %result
+^fallback:
+  return %a
+}
 
 // ====
 

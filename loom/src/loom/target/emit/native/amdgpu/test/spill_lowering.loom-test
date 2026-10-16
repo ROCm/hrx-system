@@ -958,61 +958,39 @@ low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(128, 1, 1) @scr
 // ----
   s_load_dwordx2 s[2:3], s[0:1], 0
   v_mov_b32 v0, 1
-  v_mov_b32 v2, 2
   v_mov_b32 v1, v0
-  v_mov_b32 v3, 0
-  scratch_store_dwordx2 v3, v[0:1], off offset:0
-  v_mov_b32 v3, v2
-  v_mov_b32 v0, 8
-  scratch_store_dwordx2 v0, v[2:3], off offset:0
-  v_mov_b32 v0, 3
-  v_mov_b32 v1, 60
-  scratch_store_dword v1, v0, off offset:0
-  v_mov_b32 v0, 60
-  v_mov_b32 v1, 60
-  scratch_load_dword v0, v0, off offset:0
-  s_nop 0
-  scratch_load_dword v1, v1, off offset:0
-  v_mov_b32 v2, 16
-  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_mov_b32 v2, 0
   scratch_store_dwordx2 v2, v[0:1], off offset:0
-  v_mov_b32 v0, 4
-  v_mov_b32 v1, 64
-  scratch_store_dword v1, v0, off offset:0
-  v_mov_b32 v0, 64
-  v_mov_b32 v1, 64
-  scratch_load_dword v0, v0, off offset:0
-  s_nop 0
-  scratch_load_dword v1, v1, off offset:0
-  v_mov_b32 v2, 24
-  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_mov_b32 v0, 2
+  v_mov_b32 v1, v0
+  v_mov_b32 v2, 8
   scratch_store_dwordx2 v2, v[0:1], off offset:0
   v_mov_b32 v0, 0
-  scratch_load_dwordx2 v[0:1], v0, off offset:0
-  v_mov_b32 v2, 0
+  v_mov_b32 v2, 3
+  v_mov_b32 v3, v2
+  v_mov_b32 v1, 16
+  scratch_store_dwordx2 v1, v[2:3], off offset:0
+  v_mov_b32 v2, 4
+  v_mov_b32 v3, v2
+  v_mov_b32 v1, 24
+  scratch_store_dwordx2 v1, v[2:3], off offset:0
+  v_mov_b32 v1, 0
+  scratch_load_dwordx2 v[2:3], v1, off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(0)
-  global_store_dwordx2 v2, v[0:1], s[2:3] offset:0
+  global_store_dwordx2 v0, v[2:3], s[2:3] offset:0
   v_mov_b32 v0, 8
   scratch_load_dwordx2 v[0:1], v0, off offset:0
   v_mov_b32 v2, 32
   s_waitcnt vmcnt(0) lgkmcnt(15)
   scratch_store_dwordx2 v2, v[0:1], off offset:0
-  v_mov_b32 v0, 0
-  v_mov_b32 v1, 56
-  scratch_store_dword v1, v0, off offset:0
   v_mov_b32 v0, 32
   scratch_load_dwordx2 v[0:1], v0, off offset:0
-  v_mov_b32 v2, 56
-  scratch_load_dword v2, v2, off offset:0
+  v_mov_b32 v2, 0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   global_store_dwordx2 v2, v[0:1], s[2:3] offset:0
   v_mov_b32 v0, 16
   scratch_load_dwordx2 v[0:1], v0, off offset:0
   v_mov_b32 v2, 0
-  v_mov_b32 v3, 52
-  scratch_store_dword v3, v2, off offset:0
-  v_mov_b32 v2, 52
-  scratch_load_dword v2, v2, off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   global_store_dwordx2 v2, v[0:1], s[2:3] offset:0
   v_mov_b32 v0, 24
@@ -1021,13 +999,94 @@ low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(128, 1, 1) @scr
   s_waitcnt vmcnt(0) lgkmcnt(15)
   scratch_store_dwordx2 v2, v[0:1], off offset:0
   v_mov_b32 v0, 0
-  v_mov_b32 v1, 48
-  scratch_store_dword v1, v0, off offset:0
-  v_mov_b32 v0, 40
-  scratch_load_dwordx2 v[0:1], v0, off offset:0
-  v_mov_b32 v2, 48
-  scratch_load_dword v2, v2, off offset:0
+  v_mov_b32 v1, 40
+  scratch_load_dwordx2 v[2:3], v1, off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  global_store_dwordx2 v2, v[0:1], s[2:3] offset:0
+  global_store_dwordx2 v0, v[2:3], s[2:3] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+
+// Six VGPRs hold one four-word constant group and its store offset. The
+// loop reconstructs each group at its use instead of reloading invariant
+// constants from scratch on every iteration.
+// RUN: emit amdgpu-assembly @loop_constant_groups amdgpu.vgpr=6 strategy=resource-stall
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @loop_constant_groups(%base: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+  %initial = s_mov_b32 0
+  %one = s_mov_b32 1
+  %word0_0 = v_mov_b32 305419896
+  %word0_1 = v_mov_b32 305419897
+  %word0_2 = v_mov_b32 305419898
+  %word0_3 = v_mov_b32 305419899
+  %value0 = concat(%word0_0, %word0_1, %word0_2, %word0_3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %word1_0 = v_mov_b32 305419900
+  %word1_1 = v_mov_b32 305419901
+  %word1_2 = v_mov_b32 305419902
+  %word1_3 = v_mov_b32 305419903
+  %value1 = concat(%word1_0, %word1_1, %word1_2, %word1_3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %word2_0 = v_mov_b32 305419904
+  %word2_1 = v_mov_b32 305419905
+  %word2_2 = v_mov_b32 305419906
+  %word2_3 = v_mov_b32 305419907
+  %value2 = concat(%word2_0, %word2_1, %word2_2, %word2_3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %word3_0 = v_mov_b32 305419908
+  %word3_1 = v_mov_b32 305419909
+  %word3_2 = v_mov_b32 305419910
+  %word3_3 = v_mov_b32 305419911
+  %value3 = concat(%word3_0, %word3_1, %word3_2, %word3_3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  low.br ^loop(%initial: reg<amdgpu.sgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>):
+  %offset = v_mov_b32 0
+  global_store_dwordx4_saddr %offset, %value0, %base
+  global_store_dwordx4_saddr %offset, %value1, %base {offset = 16}
+  global_store_dwordx4_saddr %offset, %value2, %base {offset = 32}
+  global_store_dwordx4_saddr %offset, %value3, %base {offset = 48}
+  %next = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_u32 %next, %limit
+  low.cond_br %again, ^latch, ^exit : reg<amdgpu.scc>
+^latch:
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_u32 s3, s2
+  v_mov_b32 v0, 305419896
+  v_mov_b32 v1, 305419897
+  v_mov_b32 v2, 305419898
+  v_mov_b32 v3, 305419899
+  v_mov_b32 v4, 0
+  global_store_dwordx4 v4, v[0:3], s[0:1] offset:0
+  s_nop 0
+  v_mov_b32 v0, 0
+  v_mov_b32 v2, 305419900
+  v_mov_b32 v3, 305419901
+  v_mov_b32 v4, 305419902
+  v_mov_b32 v5, 305419903
+  global_store_dwordx4 v0, v[2:5], s[0:1] offset:16
+  v_mov_b32 v0, 0
+  v_mov_b32 v2, 305419904
+  v_mov_b32 v3, 305419905
+  v_mov_b32 v4, 305419906
+  v_mov_b32 v5, 305419907
+  global_store_dwordx4 v0, v[2:5], s[0:1] offset:32
+  v_mov_b32 v0, 0
+  v_mov_b32 v2, 305419908
+  v_mov_b32 v3, 305419909
+  v_mov_b32 v4, 305419910
+  v_mov_b32 v5, 305419911
+  global_store_dwordx4 v0, v[2:5], s[0:1] offset:48
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm

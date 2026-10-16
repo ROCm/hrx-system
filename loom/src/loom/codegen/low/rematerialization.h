@@ -6,13 +6,20 @@
 
 // Value rematerialization and allocation-pressure repair.
 //
-// Target packets explicitly opt their results in to rematerialization; pure
-// structural materializations are also eligible. Allocation and scheduling
-// retain the evidence that selects a candidate. This utility owns cloning the
-// declared producer recipe near each user and retaining private producer
-// placement across schedule rebuilds. Tied ownership predecessors are
-// mandatory; descriptor-declared replay sources enrich a packet's recipe when
-// available. Repeated operands in one user share the same cloned recipe.
+// Target packets explicitly opt their results in to rematerialization. Shared
+// structural composition can recreate a closed graph over operand-free target
+// leaves. A narrow view retains its
+// wider input as a capture instead of rebuilding that input for each use.
+// Other native recipes recreate tied ownership predecessors and available
+// descriptor-declared sources, retaining their remaining inputs as external
+// captures. Recipes preserve consuming order. Each distinct user receives a
+// private producer graph, shared by repeated operands of that user.
+//
+// Allocation and scheduling supply function-local value domains and ordering
+// facts. Rematerialization computes closure once per original value in a repair
+// batch, then applies consumer-first repairs using fresh operand uses. Private
+// producer placement survives schedule rebuilds until another rewrite changes
+// its uses.
 
 #ifndef LOOM_CODEGEN_LOW_REMATERIALIZATION_H_
 #define LOOM_CODEGEN_LOW_REMATERIALIZATION_H_
@@ -69,26 +76,14 @@ typedef struct loom_low_rematerialization_state_t {
   iree_bitmap_t* required_register_values;
 } loom_low_rematerialization_state_t;
 
-// Rematerializes an eligible SSA value once near each distinct user.
-// A result recreates its complete declared producer recipe so each tied clone
-// consumes private storage and optional replay sources remain adjacent.
-// Multiple operands of one user share one rematerialized value.
-// Consumes verified IR: the definition dominates its existing operand uses.
-// Recipes with consumed external inputs are ineligible, so every remaining
-// input and external type/attribute capture remains available at each clone.
-// When |schedule| is the completed order that failed allocation, an original
-// data-dependent result already adjacent to its sole user can retain that
-// placement instead of cloning if scheduling separated the pair. The caller
-// must consume retained placement by rebuilding the schedule before allocating
-// again. NULL permits only IR-rewriting repairs. The snapshot is queried only
-// before mutation; callers rewriting a preplanned batch pass NULL.
-//
-// Returns OK with a zero result when |value_id| is not a safe rematerialization
-// candidate. A preplanned batch may retain immutable snapshot facts while
-// rewriting; callers rebuild analyses before making further planning decisions.
-iree_status_t loom_low_rematerialize_value_uses(
-    loom_module_t* module, const loom_low_resolved_target_t* target,
-    loom_value_id_t value_id, const struct loom_low_schedule_table_t* schedule,
+// Repairs a scheduler's architectural-state failure by recreating the selected
+// value privately for each user. The failed schedule supplies its retained
+// function-local value domain and CFG. Recipe planning consumes verified SSA,
+// preserving ownership order and rejecting consumed external inputs. Callers
+// rebuild the schedule after rewriting. Returns OK with a zero result when the
+// selected value has no safe rematerialization recipe.
+iree_status_t loom_low_schedule_rematerialize_failure(
+    loom_module_t* module, const struct loom_low_schedule_table_t* schedule,
     loom_low_rematerialization_state_t* state, iree_arena_allocator_t* arena,
     loom_low_value_rematerialization_result_t* out_result);
 
@@ -117,6 +112,7 @@ iree_status_t loom_low_allocation_rematerialize_failure(
 // Candidate selection consumes the immutable allocation snapshot. Application
 // retains only value IDs and ordering facts, then queries fresh uses for each
 // rewrite so producers see uses introduced by earlier consumer clones.
+// Every recipe producer and use retains its repeated execution domain.
 // Callers rebuild allocation once after the complete batch. One optional
 // diagnostic summarizes the batch; its trigger class is the first spill plan.
 //
@@ -125,6 +121,23 @@ iree_status_t loom_low_allocation_rematerialize_spill_plans(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     loom_low_rematerialization_state_t* state,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
+    loom_low_rematerialization_batch_result_t* out_result);
+
+// Reconstructs closed constant compositions at the selected reload sites.
+// Unlike speculative pressure repair, this replaces storage traffic that would
+// execute at those same users, including users inside loops. Each private
+// result requires a register, preventing reconstruction/spill cycles. The
+// caller supplies state->required_register_values and retains it across
+// rebuilds. Returns the remaining storage plans, borrowing |table| when no
+// reconstruction applies or allocated from |arena| otherwise. Other allocation
+// facts remain an immutable snapshot. Consume the returned plans before
+// rebuilding allocation.
+iree_status_t loom_low_allocation_reconstruct_spills(
+    loom_module_t* module, const loom_low_allocation_table_t* table,
+    loom_low_rematerialization_state_t* state,
+    iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
+    const loom_low_allocation_spill_plan_t** out_spill_plans,
+    iree_host_size_t* out_spill_plan_count,
     loom_low_rematerialization_batch_result_t* out_result);
 
 #ifdef __cplusplus

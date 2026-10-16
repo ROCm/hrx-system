@@ -1,0 +1,221 @@
+// Shared constant producers are reconstructed once per distinct user. The
+// repeated pair and its detached copy preserve their ordered register units.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=4}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @shared_constants() -> (reg<test.f32 x4>, reg<test.f32 x4>, reg<test.f32>) asm {
+  %literal = test.const.i32 7
+  %duplicate = copy %literal {detached = true} : reg<test.i32> -> reg<test.i32>
+  %pair = concat(%literal, %duplicate) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %quad = concat(%pair, %pair) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  %blocker = test.const.i32 9
+  low.br ^consume
+^consume:
+  %other = copy %blocker : reg<test.i32> -> reg<test.f32>
+  %first = copy %quad : reg<test.i32 x4> -> reg<test.f32 x4>
+  %second = copy %quad : reg<test.i32 x4> -> reg<test.f32 x4>
+  return %first, %second, %other
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @shared_constants() -> (reg<test.f32 x4>, reg<test.f32 x4>, reg<test.f32>) asm {
+  %blocker = test.const.i32 9
+  low.br ^consume
+^consume:
+  %other = copy %blocker : reg<test.i32> -> reg<test.f32>
+  %literal_remat$11 = test.const.i32 7
+  %duplicate_remat$12 = copy %literal_remat$11 {detached = true} : reg<test.i32> -> reg<test.i32>
+  %pair_remat$13 = concat(%literal_remat$11, %duplicate_remat$12) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %quad_remat$14 = concat(%pair_remat$13, %pair_remat$13) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  %first = copy %quad_remat$14 : reg<test.i32 x4> -> reg<test.f32 x4>
+  %literal_remat$15 = test.const.i32 7
+  %duplicate_remat$16 = copy %literal_remat$15 {detached = true} : reg<test.i32> -> reg<test.i32>
+  %pair_remat$17 = concat(%literal_remat$15, %duplicate_remat$16) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %quad_remat$18 = concat(%pair_remat$17, %pair_remat$17) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  %second = copy %quad_remat$18 : reg<test.i32 x4> -> reg<test.f32 x4>
+  return %first, %second, %other
+}
+
+// ====
+
+// Operand order visits the move first. Its private source still has to be
+// copied before the move consumes it, as in the original program.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=4}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @consuming_constants() -> (reg<test.f32 x2>, reg<test.f32 x2>, reg<test.f32>, reg<test.f32>, reg<test.f32>) asm {
+  %literal = test.const.i32 7
+  %saved = copy %literal : reg<test.i32> -> reg<test.i32>
+  %moved = move %literal : reg<test.i32> -> reg<test.i32>
+  %pair = concat(%moved, %saved) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %blocker0 = test.const.i32 9
+  %blocker1 = test.const.i32 11
+  %blocker2 = test.const.i32 13
+  low.br ^consume
+^consume:
+  %other0 = copy %blocker0 : reg<test.i32> -> reg<test.f32>
+  %other1 = copy %blocker1 : reg<test.i32> -> reg<test.f32>
+  %other2 = copy %blocker2 : reg<test.i32> -> reg<test.f32>
+  %first = copy %pair : reg<test.i32 x2> -> reg<test.f32 x2>
+  %second = copy %pair : reg<test.i32 x2> -> reg<test.f32 x2>
+  return %first, %second, %other0, %other1, %other2
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @consuming_constants() -> (reg<test.f32 x2>, reg<test.f32 x2>, reg<test.f32>, reg<test.f32>, reg<test.f32>) asm {
+  %blocker0 = test.const.i32 9
+  %blocker1 = test.const.i32 11
+  %blocker2 = test.const.i32 13
+  low.br ^consume
+^consume:
+  %other0 = copy %blocker0 : reg<test.i32> -> reg<test.f32>
+  %other1 = copy %blocker1 : reg<test.i32> -> reg<test.f32>
+  %other2 = copy %blocker2 : reg<test.i32> -> reg<test.f32>
+  %literal_remat$17 = test.const.i32 7
+  %saved_remat$18 = copy %literal_remat$17 : reg<test.i32> -> reg<test.i32>
+  %moved_remat$19 = move %literal_remat$17 : reg<test.i32> -> reg<test.i32>
+  %pair_remat$20 = concat(%moved_remat$19, %saved_remat$18) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %first = copy %pair_remat$20 : reg<test.i32 x2> -> reg<test.f32 x2>
+  %literal_remat$21 = test.const.i32 7
+  %saved_remat$22 = copy %literal_remat$21 : reg<test.i32> -> reg<test.i32>
+  %moved_remat$23 = move %literal_remat$21 : reg<test.i32> -> reg<test.i32>
+  %pair_remat$24 = concat(%moved_remat$23, %saved_remat$22) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %second = copy %pair_remat$24 : reg<test.i32 x2> -> reg<test.f32 x2>
+  return %first, %second, %other0, %other1, %other2
+}
+
+// ====
+
+// A loop reload executes as often as its user. Reconstructing these constants
+// at that user removes storage traffic without retaining their registers across
+// the backedge. The two independent pairs exercise consumer-first application.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=3}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_constants(%again: reg<test.i32>) -> (reg<test.f32 x2>, reg<test.f32 x2>) asm {
+  %word0 = test.const.i32 11
+  %word1 = test.const.i32 12
+  %word2 = test.const.i32 13
+  %word3 = test.const.i32 14
+  %pair0 = concat(%word0, %word1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %pair1 = concat(%word2, %word3) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  low.br ^loop
+^loop:
+  %first = copy %pair0 : reg<test.i32 x2> -> reg<test.f32 x2>
+  %second = copy %pair1 : reg<test.i32 x2> -> reg<test.f32 x2>
+  low.cond_br %again, ^repeat, ^exit : reg<test.i32>
+^repeat:
+  low.br ^loop
+^exit:
+  return %first, %second
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_constants(%again: reg<test.i32>) -> (reg<test.f32 x2>, reg<test.f32 x2>) asm {
+  %loop_constants_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %again, %loop_constants_spill_storage_0 : reg<test.i32>, low.storage<private>
+  low.br ^loop
+^loop:
+  %word0_remat = test.const.i32 11
+  %word1_remat = test.const.i32 12
+  %pair0_remat = concat(%word0_remat, %word1_remat) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %first = copy %pair0_remat : reg<test.i32 x2> -> reg<test.f32 x2>
+  %word2_remat = test.const.i32 13
+  %word3_remat_remat = test.const.i32 14
+  %pair1_remat = concat(%word2_remat, %word3_remat_remat) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %second = copy %pair1_remat : reg<test.i32 x2> -> reg<test.f32 x2>
+  %16 = low.reload %loop_constants_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  low.cond_br %16, ^repeat, ^exit : reg<test.i32>
+^repeat:
+  low.br ^loop
+^exit:
+  return %first, %second
+}
+
+// ====
+
+// Each consumer needs one unit of a closed aggregate. Repairing those views
+// keeps their wide input as a capture instead of rebuilding all four words.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=6}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @narrow_consumers_keep_wide_capture() asm {
+  %storage = storage {byte_alignment = 4, byte_length = 32} : low.storage<private>
+  %word0 = test.const.i32 11
+  %word1 = test.const.i32 12
+  %word2 = test.const.i32 13
+  %word3 = test.const.i32 14
+  %word4 = test.const.i32 15
+  %word5 = test.const.i32 16
+  %word6 = test.const.i32 17
+  %word7 = test.const.i32 18
+  %wide0 = concat(%word0, %word1, %word2, %word3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %wide1 = concat(%word4, %word5, %word6, %word7) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  low.br ^consume
+^consume:
+  %part0 = slice %wide0[0] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part0, %storage : reg<test.i32>, low.storage<private>
+  %part1 = slice %wide0[1] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part1, %storage {offset = 4} : reg<test.i32>, low.storage<private>
+  %part2 = slice %wide0[2] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part2, %storage {offset = 8} : reg<test.i32>, low.storage<private>
+  %part3 = slice %wide0[3] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part3, %storage {offset = 12} : reg<test.i32>, low.storage<private>
+  %part4 = slice %wide1[0] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part4, %storage {offset = 16} : reg<test.i32>, low.storage<private>
+  %part5 = slice %wide1[1] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part5, %storage {offset = 20} : reg<test.i32>, low.storage<private>
+  %part6 = slice %wide1[2] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part6, %storage {offset = 24} : reg<test.i32>, low.storage<private>
+  %part7 = slice %wide1[3] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part7, %storage {offset = 28} : reg<test.i32>, low.storage<private>
+  return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @narrow_consumers_keep_wide_capture() asm {
+  %storage = storage {byte_alignment = 4, byte_length = 32} : low.storage<private>
+  %narrow_consumers_keep_wide_capture_spill_storage_1 = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %word0 = test.const.i32 11
+  %word1 = test.const.i32 12
+  %word2 = test.const.i32 13
+  %word3 = test.const.i32 14
+  %word4 = test.const.i32 15
+  %word5 = test.const.i32 16
+  %wide0 = concat(%word0, %word1, %word2, %word3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  low.spill %wide0, %narrow_consumers_keep_wide_capture_spill_storage_1 : reg<test.i32 x4>, low.storage<private>
+  %word7_remat = test.const.i32 18
+  %word6_remat = test.const.i32 17
+  %wide1 = concat(%word4, %word5, %word6_remat, %word7_remat) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  low.br ^consume
+^consume:
+  %22 = low.reload %narrow_consumers_keep_wide_capture_spill_storage_1 : low.storage<private> -> reg<test.i32>
+  low.spill %22, %storage : reg<test.i32>, low.storage<private>
+  %23 = low.reload %narrow_consumers_keep_wide_capture_spill_storage_1 {offset = 4} : low.storage<private> -> reg<test.i32>
+  low.spill %23, %storage {offset = 4} : reg<test.i32>, low.storage<private>
+  %24 = low.reload %narrow_consumers_keep_wide_capture_spill_storage_1 {offset = 8} : low.storage<private> -> reg<test.i32>
+  low.spill %24, %storage {offset = 8} : reg<test.i32>, low.storage<private>
+  %25 = low.reload %narrow_consumers_keep_wide_capture_spill_storage_1 {offset = 12} : low.storage<private> -> reg<test.i32>
+  low.spill %25, %storage {offset = 12} : reg<test.i32>, low.storage<private>
+  %part4 = slice %wide1[0] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part4, %storage {offset = 16} : reg<test.i32>, low.storage<private>
+  %part5 = slice %wide1[1] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part5, %storage {offset = 20} : reg<test.i32>, low.storage<private>
+  %part6 = slice %wide1[2] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part6, %storage {offset = 24} : reg<test.i32>, low.storage<private>
+  %part7 = slice %wide1[3] : reg<test.i32 x4> -> reg<test.i32>
+  low.spill %part7, %storage {offset = 28} : reg<test.i32>, low.storage<private>
+  return
+}

@@ -412,8 +412,10 @@ static iree_status_t loom_low_materialize_allocation_run_attempts(
   iree_host_size_t iteration_limit = 0;
   iree_host_size_t rematerialization_iteration_count = 0;
   iree_host_size_t rematerialization_iteration_limit = 0;
+  iree_bitmap_t required_register_values = {0};
   loom_low_rematerialization_state_t rematerialization = {
       .arena = pass->arena,
+      .required_register_values = &required_register_values,
   };
   bool has_attempt = false;
   for (;;) {
@@ -424,6 +426,7 @@ static iree_status_t loom_low_materialize_allocation_run_attempts(
     }
     has_attempt = true;
     loom_low_allocation_table_t table = {0};
+    allocation_options.required_register_values = required_register_values;
     IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
         module, function.op, function_target_facts, descriptor_registry,
         &allocation_options, attempt_arena, &table));
@@ -515,6 +518,25 @@ static iree_status_t loom_low_materialize_allocation_run_attempts(
         continue;
       }
     }
+    const loom_low_allocation_spill_plan_t* storage_plans = NULL;
+    iree_host_size_t storage_plan_count = 0;
+    loom_low_rematerialization_batch_result_t reconstruction = {0};
+    const iree_diagnostic_emitter_t reconstruction_emitter =
+        state && state->emit_spill_diagnostics ? pass->diagnostic_emitter
+                                               : (iree_diagnostic_emitter_t){0};
+    IREE_RETURN_IF_ERROR(loom_low_allocation_reconstruct_spills(
+        module, &table, &rematerialization, reconstruction_emitter,
+        attempt_arena, &storage_plans, &storage_plan_count, &reconstruction));
+    if (reconstruction.rewritten_operand_count != 0) {
+      loom_low_materialize_allocation_statistics_t* statistics =
+          loom_low_materialize_allocation_statistics(pass);
+      statistics->rematerializations += reconstruction.cloned_packet_count;
+      loom_pass_mark_changed(pass);
+    }
+    if (storage_plan_count == 0) {
+      ++rematerialization_iteration_count;
+      continue;
+    }
     if (iteration_count >= iteration_limit) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
@@ -535,7 +557,8 @@ static iree_status_t loom_low_materialize_allocation_run_attempts(
         .emitter = pass->diagnostic_emitter,
     };
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_spills(
-        &table, &materialization_options, attempt_arena, &result));
+        &table, storage_plans, storage_plan_count, &materialization_options,
+        attempt_arena, &result));
     if (result.error_count != 0) {
       return iree_ok_status();
     }

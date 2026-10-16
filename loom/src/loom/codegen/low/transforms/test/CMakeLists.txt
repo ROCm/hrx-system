@@ -17,6 +17,7 @@ loom_check_test_suite(
     "allocation_storage_prefix.loom-test"
     "attr_projection.loom-test"
     "cfg_tuple_decomposition.loom-test"
+    "constant_reconstruction.loom-test"
     "cse.loom-test"
     "cse_materializations.loom-test"
     "cse_state.loom-test"

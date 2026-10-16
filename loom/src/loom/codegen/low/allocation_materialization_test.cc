@@ -194,8 +194,9 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
       .fn = CountDiagnostic,
       .user_data = &diagnostic_count,
   };
-  IREE_ASSERT_OK(loom_low_allocation_materialize_spills(&table, &options,
-                                                        &arena, &result));
+  IREE_ASSERT_OK(loom_low_allocation_materialize_spills(
+      &table, table.spill_plans, table.spill_plan_count, &options, &arena,
+      &result));
 
   EXPECT_EQ(diagnostic_count, 0u);
   EXPECT_EQ(result.error_count, 0u);

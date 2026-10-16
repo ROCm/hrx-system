@@ -786,6 +786,7 @@ loom_cc_library(
     ::descriptor_traits
     ::diagnostics
     ::representation_binding
+    ::storage_relation
     ::target_binding
     iree::base
     iree::base::internal::arena
@@ -800,6 +801,7 @@ loom_cc_library(
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
+    loom::target::registers
     loom::util::adaptive_sort
   PUBLIC
 )
