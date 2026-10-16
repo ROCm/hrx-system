@@ -162,17 +162,17 @@ check.case public @publish_known_and_speculative_frontiers {
   check.return
 }
 
-// One ordinary input, a complete image, and one ordinary input have 66 causal
-// positions but ten source positions. Exercise every split through that stream
-// with differently sized and padded first/continuation packet banks.
-func.def @mixed_split_observation(%split: i32) -> (i32) {
+// Exercise every split through an ordinary/image/ordinary stream with padded
+// first/continuation packet banks. The coordinate oracle tracks the maximum
+// coordinate directly, independently of the production prefix formula.
+func.def @mixed_split_observation(%split: i32, %grid_width: i32) -> (i32) {
   %origin = index.constant 0 : offset
   %plan_bytes = index.constant 1152 : offset
   %state_bytes = index.constant 416 : offset
   %input_bytes = index.constant 264 : offset
   %metadata_bytes = index.constant 6128 : offset
   %token_bytes = index.constant 2368 : offset
-  %media_bytes = index.constant 1792 : offset
+  %media_bytes = index.constant 1800 : offset
   %result_bytes = index.constant 1344 : offset
   %progress_bytes = index.constant 1344 : offset
   %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
@@ -188,9 +188,6 @@ func.def @mixed_split_observation(%split: i32) -> (i32) {
   %one = scalar.constant 1 : i32
   %three = scalar.constant 3 : i32
   %five = scalar.constant 5 : i32
-  %eight = scalar.constant 8 : i32
-  %nine = scalar.constant 9 : i32
-  %ten = scalar.constant 10 : i32
   %sixteen = scalar.constant 16 : i32
   %sixty_four = scalar.constant 64 : i32
   %total = scalar.constant 66 : i32
@@ -215,6 +212,16 @@ func.def @mixed_split_observation(%split: i32) -> (i32) {
   %first_media = scalar.subi %split, %one : i32
   %next_media = scalar.subi %sixty_four, %first_media : i32
   %media = buffer.view %media_plan[%origin] : buffer -> view<64x7xi32>
+  %image_metadata_offset = index.constant 1792 : offset
+  %image_metadata_word = scalar.constant 1792 : i32
+  %image_metadata_length = scalar.constant 8 : i32
+  %image_metadata = buffer.view %media_plan[%image_metadata_offset] : buffer -> view<2xi32>
+  %merged_patch = scalar.constant 32 : i32
+  %grid_height = scalar.divui %sixty_four, %grid_width : i32
+  %image_width = scalar.muli %grid_width, %merged_patch : i32
+  %image_height = scalar.muli %grid_height, %merged_patch : i32
+  view.store %image_width, %image_metadata[0] : i32, view<2xi32>
+  view.store %image_height, %image_metadata[1] : i32, view<2xi32>
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -234,11 +241,13 @@ func.def @mixed_split_observation(%split: i32) -> (i32) {
     view.store %offset, %media[%i, 1] : i32, view<64x7xi32>
     view.store %feature_offset, %media[%i, 2] : i32, view<64x7xi32>
     view.store %feature_bytes, %media[%i, 3] : i32, view<64x7xi32>
+    view.store %image_metadata_word, %media[%i, 4] : i32, view<64x7xi32>
+    view.store %image_metadata_length, %media[%i, 5] : i32, view<64x7xi32>
     view.store %row, %media[%i, 6] : i32, view<64x7xi32>
   }
   %outputs = func.call @encode_epoch(%state, %plan, %inputs, %media_plan, %one, %one, %total, %first_media, %next_media, %first_capacity, %next_capacity, %none, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32)
   %records = buffer.view %tokens[%origin] : buffer -> view<74x8xi32>
-  %failures = scf.for %i = [%c0 to %c66 step %c1](%failures = %zero : i32) -> (i32) {
+  %failures, %expected_source = scf.for %i = [%c0 to %c66 step %c1](%failures = %zero : i32, %prior_frontier = %zero : i32) -> (i32, i32) {
     %input = index.cast %i : index to i32
     %primary = scalar.cmpi ult, %input, %split : i32
     %queued_index = scalar.addi %input, %three : i32
@@ -252,18 +261,17 @@ func.def @mixed_split_observation(%split: i32) -> (i32) {
       %row = scalar.subi %input, %one : i32
       %offset = scalar.muli %row, %feature_bytes : i32
       %feature_offset = scalar.addi %features_origin, %offset : i32
-      %y = scalar.divui %row, %eight : i32
-      %x = scalar.remui %row, %eight : i32
+      %y = scalar.divui %row, %grid_width : i32
+      %x = scalar.remui %row, %grid_width : i32
       %height = scalar.addi %one, %y : i32
       %width = scalar.addi %one, %x : i32
-      %early = scalar.cmpi ult, %input, %eight : i32
-      %extent = scf.select %early, %input, %eight : i32
-      %frontier = scalar.addi %one, %extent : i32
+      %maximum = scalar.maxui %height, %width : i32
+      %following = scalar.addi %maximum, %one : i32
+      %frontier = scalar.maxui %prior_frontier, %following : i32
       scf.yield %feature_offset, %one, %height, %width, %frontier : i32, i32, i32, i32, i32
     } else {
-      %position = scf.select %after_start, %nine, %zero : i32
-      %frontier = scalar.addi %position, %one : i32
-      scf.yield %zero, %position, %position, %position, %frontier : i32, i32, i32, i32, i32
+      %frontier = scalar.addi %prior_frontier, %one : i32
+      scf.yield %zero, %prior_frontier, %prior_frontier, %prior_frontier, %frontier : i32, i32, i32, i32, i32
     }
     %actual_id = view.load %records[%record, 0] : view<74x8xi32> -> i32
     %actual_offset = view.load %records[%record, 1] : view<74x8xi32> -> i32
@@ -284,7 +292,7 @@ func.def @mixed_split_observation(%split: i32) -> (i32) {
     %all_ok = scalar.andi %first_ok, %position_ok : i1
     %failure = scf.select %all_ok, %zero, %one : i32
     %next = scalar.addi %failures, %failure : i32
-    scf.yield %next : i32
+    scf.yield %next, %frontier : i32, i32
   }
   %first = buffer.view %first_results[%origin] : buffer -> view<16x10xi32>
   %next = buffer.view %next_results[%origin] : buffer -> view<16x10xi32>
@@ -300,7 +308,7 @@ func.def @mixed_split_observation(%split: i32) -> (i32) {
   %consumed = view.load %published[0, 0] : view<16x21xi32> -> i32
   %source = view.load %published[0, 4] : view<16x21xi32> -> i32
   %consumed_ok = scalar.cmpi eq, %consumed, %total : i32
-  %source_ok = scalar.cmpi eq, %source, %ten : i32
+  %source_ok = scalar.cmpi eq, %source, %expected_source : i32
   %published_ok = scalar.andi %consumed_ok, %source_ok : i1
   %failure = scf.select %published_ok, %zero, %one : i32
   %published_failures = scalar.addi %failures, %failure : i32
@@ -326,13 +334,13 @@ func.def @mixed_split_observation(%split: i32) -> (i32) {
   func.return %all_failures : i32
 }
 
-func.def @all_mixed_splits() -> (i32) {
+func.def @all_mixed_splits(%grid_width: i32) -> (i32) {
   %c1 = index.constant 1 : index
   %c66 = index.constant 66 : index
   %zero = scalar.constant 0 : i32
   %failures = scf.for %split = [%c1 to %c66 step %c1](%prior = %zero : i32) -> (i32) {
     %split_word = index.cast %split : index to i32
-    %current = func.call @mixed_split_observation(%split_word) : (i32) -> (i32)
+    %current = func.call @mixed_split_observation(%split_word, %grid_width) : (i32, i32) -> (i32)
     %next = scalar.addi %prior, %current : i32
     scf.yield %next : i32
   }
@@ -340,8 +348,18 @@ func.def @all_mixed_splits() -> (i32) {
 }
 
 check.case public @mixed_image_frontier_across_every_epoch_split {
-  %failures = func.call @all_mixed_splits() : () -> (i32)
+  %square = check.literal value(8) : i32
+  %landscape = check.literal value(16) : i32
+  %portrait = check.literal value(4) : i32
+  %column = check.literal value(1) : i32
+  %square_failures = func.call @all_mixed_splits(%square) : (i32) -> (i32)
+  %landscape_failures = func.call @all_mixed_splits(%landscape) : (i32) -> (i32)
+  %portrait_failures = func.call @all_mixed_splits(%portrait) : (i32) -> (i32)
+  %column_failures = func.call @all_mixed_splits(%column) : (i32) -> (i32)
   %zero = check.literal value(0) : i32
-  check.expect.equal actual(%failures) expected(%zero) : i32
+  check.expect.equal actual(%square_failures) expected(%zero) : i32
+  check.expect.equal actual(%landscape_failures) expected(%zero) : i32
+  check.expect.equal actual(%portrait_failures) expected(%zero) : i32
+  check.expect.equal actual(%column_failures) expected(%zero) : i32
   check.return
 }
