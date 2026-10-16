@@ -1,0 +1,233 @@
+func.decl @qwen38_vision_pixel_packet(%request: buffer) -> (buffer)
+
+kernel.decl @qwen38_vision_resize(%groups_x: index, %groups_y: index) launch(%image: index, %input: buffer, %output: buffer) where [range(%image, 0, 3)]
+
+// Coordinate-dependent channels distinguish every reflection and transposition.
+// Constant images independently exercise both filter axes at extreme scales.
+func.def @resize_sample(%x: i32, %y: i32, %channel: i32, %constant: i1) -> (i32) {
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %red = scalar.cmpi eq, %channel, %zero : i32
+  %green = scalar.cmpi eq, %channel, %one : i32
+  %alpha = scalar.cmpi eq, %channel, %three : i32
+  %result = scf.if %alpha -> (i32) {
+    %sum = scalar.addi %x, %y : i32
+    %phase = scalar.remui %sum, %three : i32
+    %clear = scalar.cmpi eq, %phase, %zero : i32
+    %opaque = scalar.cmpi eq, %phase, %two : i32
+    %half = scalar.constant 128 : i32
+    %full = scalar.constant 255 : i32
+    %coverage = scf.select %opaque, %full, %half : i32
+    %varying = scf.select %clear, %zero, %coverage : i32
+    %value = scf.select %constant, %half, %varying : i32
+    scf.yield %value : i32
+  } else {
+    %five = scalar.constant 5 : i32
+    %seven = scalar.constant 7 : i32
+    %eleven = scalar.constant 11 : i32
+    %thirteen = scalar.constant 13 : i32
+    %seventeen = scalar.constant 17 : i32
+    %ninety_three = scalar.constant 93 : i32
+    %two_hundred_one = scalar.constant 201 : i32
+    %mask = scalar.constant 255 : i32
+    %other_x = scf.select %green, %seven, %thirteen : i32
+    %other_y = scf.select %green, %eleven, %seventeen : i32
+    %x_scale = scf.select %red, %three, %other_x : i32
+    %y_scale = scf.select %red, %five, %other_y : i32
+    %x_value = scalar.muli %x, %x_scale : i32
+    %y_value = scalar.muli %y, %y_scale : i32
+    %sum = scalar.addi %x_value, %y_value : i32
+    %varying = scalar.andi %sum, %mask : i32
+    %other_constant = scf.select %green, %ninety_three, %two_hundred_one : i32
+    %fixed = scf.select %red, %seventeen, %other_constant : i32
+    %value = scf.select %constant, %fixed, %varying : i32
+    scf.yield %value : i32
+  }
+  func.return %result : i32
+}
+
+func.def @resize_packet_fixture(%trial_value: index, %portrait_value: index, %packet: buffer, %expected: buffer) -> (index) {
+  %trial = index.assume %trial_value [range(%trial_value, 0, 15)] : index
+  %portrait = index.assume %portrait_value [range(%portrait_value, 0, 1)] : index
+  %origin = index.constant 0 : offset
+  %pixel_offset = index.constant 80 : offset
+  %metadata_offset = index.constant 64 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %mode_index = index.div %trial, %c4 : index
+  %orientation_low = index.rem %trial, %c4 : index
+  %orientation_index = index.madd %portrait, %c4, %orientation_low : index
+  %mode = index.cast %mode_index : index to i32
+  %orientation0 = index.cast %orientation_index : index to i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %five = scalar.constant 5 : i32
+  %six = scalar.constant 6 : i32
+  %seven = scalar.constant 7 : i32
+  %eight = scalar.constant 8 : i32
+  %thirty_two = scalar.constant 32 : i32
+  %sixty_four = scalar.constant 64 : i32
+  %one_twenty_eight = scalar.constant 128 : i32
+  %down = scalar.cmpi eq, %mode, %two : i32
+  %up = scalar.cmpi eq, %mode, %three : i32
+  %constant = scalar.cmpi uge, %mode, %two : i32
+  %alpha_bit = scalar.andi %mode, %one : i32
+  %has_alpha = scalar.cmpi ne, %alpha_bit, %zero : i32
+  %channels = scalar.addi %three, %alpha_bit : i32
+  %wide_width = scf.select %down, %one_twenty_eight, %sixty_four : i32
+  %wide_height = scf.select %down, %sixty_four, %thirty_two : i32
+  %physical_width = scf.select %up, %one, %wide_width : i32
+  %physical_height = scf.select %up, %one, %wide_height : i32
+  %orientation = scalar.addi %orientation0, %one : i32
+  %transposed = scalar.cmpi uge, %orientation, %five : i32
+  %display_width = scf.select %transposed, %physical_height, %physical_width : i32
+  %display_height = scf.select %transposed, %physical_width, %physical_height : i32
+  %target_width = scf.select %transposed, %thirty_two, %sixty_four : i32
+  %target_height = scf.select %transposed, %sixty_four, %thirty_two : i32
+  %source_pixels = scalar.muli %physical_width, %physical_height : i32
+  %source_bytes = scalar.muli %source_pixels, %channels : i32
+  %eighty = scalar.constant 80 : i32
+  %request_length = scalar.addi %eighty, %source_bytes : i32
+  %request_bytes = index.cast %request_length : i32 to offset
+  %request = buffer.alloca<private> align(16) %request_bytes : buffer
+  buffer.fill %zero, %request[%origin], %pixel_offset : i32
+  %header = buffer.view %request[%origin] : buffer -> view<16xi32>
+  view.store %one, %header[0] : i32, view<16xi32>
+  view.store %physical_width, %header[2] : i32, view<16xi32>
+  view.store %physical_height, %header[3] : i32, view<16xi32>
+  view.store %display_width, %header[4] : i32, view<16xi32>
+  view.store %display_height, %header[5] : i32, view<16xi32>
+  view.store %orientation, %header[6] : i32, view<16xi32>
+  view.store %two, %header[7] : i32, view<16xi32>
+  view.store %sixty_four, %header[8] : i32, view<16xi32>
+  view.store %eight, %header[9] : i32, view<16xi32>
+  view.store %eighty, %header[10] : i32, view<16xi32>
+  view.store %source_bytes, %header[11] : i32, view<16xi32>
+  view.store %channels, %header[12] : i32, view<16xi32>
+  %geometry = buffer.view %request[%metadata_offset] : buffer -> view<2xi32>
+  view.store %target_width, %geometry[0] : i32, view<2xi32>
+  view.store %target_height, %geometry[1] : i32, view<2xi32>
+  %width = index.cast %physical_width : i32 to index
+  %height = index.cast %physical_height : i32 to index
+  %channel_count = index.cast %channels : i32 to index
+  %pixels = buffer.view %request[%pixel_offset] : buffer -> view<[%height]x[%width]x[%channel_count]xi8>
+  scf.for %y = [%c0 to %height step %c1] {
+    scf.for %x = [%c0 to %width step %c1] {
+      scf.for %channel = [%c0 to %channel_count step %c1] {
+        %x_word = index.cast %x : index to i32
+        %y_word = index.cast %y : index to i32
+        %channel_word = index.cast %channel : index to i32
+        %sample = func.call @resize_sample(%x_word, %y_word, %channel_word, %constant) : (i32, i32, i32, i1) -> (i32)
+        %byte = scalar.trunci %sample : i32 to i8
+        view.store %byte, %pixels[%y, %x, %channel] : i8, view<[%height]x[%width]x[%channel_count]xi8>
+      }
+    }
+  }
+  %prepared = func.call @qwen38_vision_pixel_packet(%request) : (buffer) -> (buffer)
+  %prepared_bytes = buffer.length %prepared
+  buffer.copy %prepared[%origin], %packet[%origin], %prepared_bytes
+  %image = index.rem %trial, %c4 : index
+  %directory = buffer.view %packet[%origin] : buffer -> view<4x2xi64>
+  %header_position = scalar.constant 64 : i64
+  %length = index.cast %prepared_bytes : offset to i64
+  %header_length = scalar.subi %length, %header_position : i64
+  view.store %header_position, %directory[%image, 0] : i64, view<4x2xi64>
+  view.store %header_length, %directory[%image, 1] : i64, view<4x2xi64>
+  %target_x = index.cast %target_width : i32 to index
+  %target_y = index.cast %target_height : i32 to index
+  %result = buffer.view %expected[%origin] : buffer -> view<[%target_y]x[%target_x]x3xi8>
+  %last_x = scalar.subi %physical_width, %one : i32
+  %last_y = scalar.subi %physical_height, %one : i32
+  %is_two = scalar.cmpi eq, %orientation, %two : i32
+  %is_three = scalar.cmpi eq, %orientation, %three : i32
+  %is_four = scalar.cmpi eq, %orientation, %four : i32
+  %is_six = scalar.cmpi eq, %orientation, %six : i32
+  %is_seven = scalar.cmpi eq, %orientation, %seven : i32
+  %is_eight = scalar.cmpi eq, %orientation, %eight : i32
+  %reverse_column0 = scalar.ori %is_two, %is_three : i1
+  %reverse_column1 = scalar.ori %is_seven, %is_eight : i1
+  %reverse_column = scalar.ori %reverse_column0, %reverse_column1 : i1
+  %reverse_row0 = scalar.ori %is_three, %is_four : i1
+  %reverse_row1 = scalar.ori %is_six, %is_seven : i1
+  %reverse_row = scalar.ori %reverse_row0, %reverse_row1 : i1
+  scf.for %y = [%c0 to %target_y step %c1] {
+    scf.for %x = [%c0 to %target_x step %c1] {
+      %x_word = index.cast %x : index to i32
+      %y_word = index.cast %y : index to i32
+      %column = scf.select %transposed, %y_word, %x_word : i32
+      %row = scf.select %transposed, %x_word, %y_word : i32
+      %inverted_column = scalar.subi %last_x, %column : i32
+      %inverted_row = scalar.subi %last_y, %row : i32
+      %source_x = scf.select %reverse_column, %inverted_column, %column : i32
+      %source_y = scf.select %reverse_row, %inverted_row, %row : i32
+      scf.for %channel = [%c0 to %c3 step %c1] {
+        %channel_word = index.cast %channel : index to i32
+        %sample = func.call @resize_sample(%source_x, %source_y, %channel_word, %constant) : (i32, i32, i32, i1) -> (i32)
+        %value = scf.if %has_alpha -> (i32) {
+          %alpha = func.call @resize_sample(%source_x, %source_y, %three, %constant) : (i32, i32, i32, i1) -> (i32)
+          %maximum = scalar.constant 255 : i32
+          %half = scalar.constant 127 : i32
+          %complement = scalar.subi %maximum, %sample : i32
+          %product = scalar.muli %complement, %alpha : i32
+          %rounded = scalar.addi %product, %half : i32
+          %darkening = scalar.divui %rounded, %maximum : i32
+          %composited = scalar.subi %maximum, %darkening : i32
+          scf.yield %composited : i32
+        } else {
+          scf.yield %sample : i32
+        }
+        %byte = scalar.trunci %value : i32 to i8
+        view.store %byte, %result[%y, %x, %channel] : i8, view<[%target_y]x[%target_x]x3xi8>
+      }
+    }
+  }
+  func.return %image : index
+}
+
+// The fixture supplies analytical expected pixels in a separate observation.
+// Its oracle realization leaves those values unchanged; target output starts
+// with a sentinel and must be overwritten by the production device filter.
+func.def @resize_expected(%image: index, %packet: buffer, %output: buffer) {
+  func.return
+}
+
+check.scenario public @landscape_packets_filter_on_device {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %portrait = check.literal value(0) : index
+    %groups_x = check.literal value(2) : index
+    %groups_y = check.literal value(2) : index
+    %packet = check.generate.fill value(-1) : tensor<65536xi8>
+    %expected = check.generate.fill value(-1) : tensor<6144xi8>
+    %image = check.generate<@resize_packet_fixture>(%trial, %portrait, %packet, %expected) : (index, index, tensor<65536xi8>, tensor<6144xi8>) -> (index)
+    %output = check.generate.fill value(-1) : tensor<6144xi8>
+    check.compare<@qwen38_vision_resize, @resize_expected>[%groups_x, %groups_y](%image, %packet, %output) : [index, index](index, tensor<65536xi8>, tensor<6144xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<6144xi8>
+    }
+  }
+  check.return
+}
+
+check.scenario public @portrait_packets_filter_on_device {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %portrait = check.literal value(1) : index
+    %groups_x = check.literal value(1) : index
+    %groups_y = check.literal value(4) : index
+    %packet = check.generate.fill value(-1) : tensor<65536xi8>
+    %expected = check.generate.fill value(-1) : tensor<6144xi8>
+    %image = check.generate<@resize_packet_fixture>(%trial, %portrait, %packet, %expected) : (index, index, tensor<65536xi8>, tensor<6144xi8>) -> (index)
+    %output = check.generate.fill value(-1) : tensor<6144xi8>
+    check.compare<@qwen38_vision_resize, @resize_expected>[%groups_x, %groups_y](%image, %packet, %output) : [index, index](index, tensor<65536xi8>, tensor<6144xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<6144xi8>
+    }
+  }
+  check.return
+}

@@ -7,6 +7,9 @@
     "sources": [
       "epoch_control.loom",
       "epoch_media.loom",
+      "vision_geometry.loom",
+      "vision_pixels.loom",
+      "vision_stages.loom",
       "config.loom",
       "prefill.loom",
       "weights_prepare.loom",
@@ -84,6 +87,7 @@
       "kernels/qwen38/vision_merger.loom",
       "kernels/qwen38/vision_normalization.loom",
       "kernels/qwen38/vision_patch_embedding.loom",
+      "kernels/qwen38/vision_resize.loom",
       "programs/qwen38/vision_projector.loom"
     ],
     "weights": "model.gguf",

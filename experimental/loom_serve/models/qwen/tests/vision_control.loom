@@ -1,5 +1,16 @@
 func.decl @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer)
 
+func.decl @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64)
+
+// Replace only the native declaration sink. The returned observation includes
+// every shape argument supplied by the real cohort planner.
+func.def @qwen38_vision_stage(%height: i64, %width: i64, %count: i64) -> (i32) {
+  %axes = scalar.addi %height, %width : i64
+  %value = scalar.addi %axes, %count : i64
+  %stage = scalar.trunci %value : i64 to i32
+  func.return %stage : i32
+}
+
 // Exercise each native cohort size with complete source packets. The plan's
 // logical request rows and physical feature ranges must agree independently.
 func.def @vision_cohort_observation(%count: index) -> (i32) where [range(%count, 1, 4)] {
@@ -7,9 +18,11 @@ func.def @vision_cohort_observation(%count: index) -> (i32) where [range(%count,
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
-  %header_bytes = index.constant 64 : offset
+  %native_header_bytes = index.constant 64 : offset
+  %pixel_offset = index.constant 80 : offset
   %pixel_bytes = index.constant 196608 : offset
-  %packet_bytes = index.constant 196672 : offset
+  %native_request_bytes = index.constant 196688 : offset
+  %packet_bytes = index.constant 209008 : offset
   %range_stride = index.constant 16 : offset
   %tag_stride = index.constant 8 : offset
   %state_bytes = index.constant 1 : offset
@@ -20,6 +33,7 @@ func.def @vision_cohort_observation(%count: index) -> (i32) where [range(%count,
   %tags = buffer.alloca<private> align(8) %tag_bytes : buffer
   %ranges = buffer.alloca<private> align(8) %range_bytes : buffer
   %packed = buffer.alloca<private> align(16) %input_bytes : buffer
+  %request = buffer.alloca<private> align(16) %native_request_bytes : buffer
   %zero32 = scalar.constant 0 : i32
   %one32 = scalar.constant 1 : i32
   %rgb8 = scalar.constant 3 : i32
@@ -27,17 +41,21 @@ func.def @vision_cohort_observation(%count: index) -> (i32) where [range(%count,
   %rows32 = scalar.constant 64 : i32
   %header32 = scalar.constant 64 : i32
   %pixels32 = scalar.constant 196608 : i32
-  %packet64 = scalar.constant 196672 : i64
+  %packet64 = scalar.constant 209008 : i64
+  %metadata_bytes = scalar.constant 8 : i32
+  %pixel_offset32 = scalar.constant 80 : i32
   buffer.store.i8 %zero32, %state[%origin]
   buffer.fill %zero32, %tags[%origin], %tag_bytes : i32
   buffer.fill %zero32, %packed[%origin], %input_bytes : i32
+  buffer.fill %zero32, %request[%origin], %native_request_bytes : i32
   %range_view = buffer.view %ranges[%origin] : buffer -> view<[%count]x2xi64>
+  %tag_view = buffer.view %tags[%origin] : buffer -> view<[%count]xi64>
   scf.for %i = [%c0 to %count step %c1] {
     %offset = index.scale %i, %packet_bytes : index, offset -> offset
     %offset64 = index.cast %offset : offset to i64
     view.store %offset64, %range_view[%i, 0] : i64, view<[%count]x2xi64>
     view.store %packet64, %range_view[%i, 1] : i64, view<[%count]x2xi64>
-    %header = buffer.view %packed[%offset] : buffer -> view<16xi32>
+    %header = buffer.view %request[%origin] : buffer -> view<16xi32>
     view.store %one32, %header[0] : i32, view<16xi32>
     view.store %one32, %header[1] : i32, view<16xi32>
     view.store %geometry, %header[2] : i32, view<16xi32>
@@ -47,13 +65,19 @@ func.def @vision_cohort_observation(%count: index) -> (i32) where [range(%count,
     view.store %one32, %header[6] : i32, view<16xi32>
     view.store %rows32, %header[7] : i32, view<16xi32>
     view.store %header32, %header[8] : i32, view<16xi32>
-    view.store %header32, %header[10] : i32, view<16xi32>
+    view.store %metadata_bytes, %header[9] : i32, view<16xi32>
+    view.store %pixel_offset32, %header[10] : i32, view<16xi32>
     view.store %pixels32, %header[11] : i32, view<16xi32>
     view.store %rgb8, %header[12] : i32, view<16xi32>
-    %pixels = index.add %offset, %header_bytes : offset
+    %metadata = buffer.view %request[%native_header_bytes] : buffer -> view<2xi32>
+    view.store %geometry, %metadata[0] : i32, view<2xi32>
+    view.store %geometry, %metadata[1] : i32, view<2xi32>
     %color32 = index.cast %i : index to i32
     %color = scalar.trunci %color32 : i32 to i8
-    buffer.fill %color, %packed[%pixels], %pixel_bytes : i8
+    buffer.fill %color, %request[%pixel_offset], %pixel_bytes : i8
+    %prepared, %units, %tag = func.call @prepare_request(%state, %request) : (buffer, buffer) -> (buffer, i64, i64)
+    buffer.copy %prepared[%origin], %packed[%offset], %packet_bytes
+    view.store %tag, %tag_view[%i] : i64, view<[%count]xi64>
   }
   %stage, %payload, %plan = func.call @prepare_batch(%state, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (i32, buffer, buffer)
   %payload_length = buffer.length %payload
@@ -61,7 +85,8 @@ func.def @vision_cohort_observation(%count: index) -> (i32) where [range(%count,
   %order = buffer.compare %payload[%origin], %packed[%origin], %input_bytes
   %payload_valid = scalar.cmpi eq, %order, %zero32 : i32
   %count32 = index.cast %count : index to i32
-  %expected_stage = scalar.subi %count32, %one32 : i32
+  %axes = scalar.constant 512 : i32
+  %expected_stage = scalar.addi %count32, %axes : i32
   %stage_valid = scalar.cmpi eq, %stage, %expected_stage : i32
   %valid0 = scalar.andi %length_valid, %payload_valid : i1
   %valid1 = scalar.andi %valid0, %stage_valid : i1

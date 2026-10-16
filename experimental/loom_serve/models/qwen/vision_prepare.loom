@@ -2,25 +2,15 @@ func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
-
-func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
+func.decl @qwen38_vision_stage(%height: i64, %width: i64, %count: i64) -> (i32)
 
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
-
-global.rodata.def @root = bytes("7177656e33385f766973696f6e5f70726f6a6563746f72")
-
-global.rodata.def @height_key = bytes("7177656e33382e766973696f6e2e696d6167655f686569676874")
-
-global.rodata.def @width_key = bytes("7177656e33382e766973696f6e2e696d6167655f7769647468")
-
-global.rodata.def @image_count_key = bytes("7177656e33382e766973696f6e2e696d6167655f636f756e74")
 
 global.rodata.def @checkpoint = bytes("6d6d70726f6a2d4631362e67677566")
 
 global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
 
-global.rodata.def @name = bytes("7177656e332e382d3237622d766973696f6e2d323536")
+global.rodata.def @name = bytes("7177656e332e382d3237622d766973696f6e")
 
 global.rodata.def @empty = bytes("")
 
@@ -37,28 +27,22 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %diagnostic = global.load @invalid_options : buffer
   func.call @require(%valid32, %diagnostic) : (i32, buffer)
 
-  %root = global.load @root : buffer
   %geometry = scalar.constant 256 : i64
-  %height_key = global.load @height_key : buffer
-  %width_key = global.load @width_key : buffer
-  %image_count_key = global.load @image_count_key : buffer
   %binding = scalar.constant 0 : i32
   %checkpoint = global.load @checkpoint : buffer
   %policy = global.load @policy : buffer
-  %c1 = index.constant 1 : index
-  %c5 = index.constant 5 : index
-  scf.for %image_count = [%c1 to %c5 step %c1] {
-    %count64 = index.cast %image_count : index to i64
-    %stage = func.call @stage(%root, %count64) : (buffer, i64) -> (i32)
-    func.call @config_i64(%stage, %height_key, %geometry) : (i32, buffer, i64)
-    func.call @config_i64(%stage, %width_key, %geometry) : (i32, buffer, i64)
-    func.call @config_i64(%stage, %image_count_key, %count64) : (i32, buffer, i64)
-    func.call @parameter(%stage, %binding, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
-  }
+  // One canonical command establishes checkpoint placement. Actual cohort
+  // dimensions and counts are declared on demand by request preparation.
+  %single_image = scalar.constant 1 : i64
+  %stage = func.call @qwen38_vision_stage(%geometry, %geometry, %single_image) : (i64, i64, i64) -> (i32)
+  func.call @parameter(%stage, %binding, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
 
   %batch_units = scalar.constant 4 : i64
-  %upload_bytes = scalar.constant 786688 : i64
-  %output_bytes = scalar.constant 5242880 : i64
+  // Admission ceilings reserve capacity, not backing. Uploads and outputs use
+  // their exact request extents: four 16-Mpixel RGBA inputs plus axis plans,
+  // and at most four 16,384-row F32 projector results.
+  %upload_bytes = scalar.constant 269746752 : i64
+  %output_bytes = scalar.constant 1342177280 : i64
   %state_bytes = index.constant 1 : offset
   %state = buffer.alloca<private> align(1) %state_bytes : buffer
   %origin = index.constant 0 : offset
