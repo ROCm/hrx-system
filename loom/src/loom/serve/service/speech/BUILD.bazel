@@ -47,6 +47,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "consumer",
+    hdrs = ["consumer.h"],
+    deps = [
+        ":generator",
+        "//loom/src/loom/serve/telemetry:record",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "stream",
+    srcs = ["stream.c"],
+    hdrs = ["stream.h"],
+    deps = [
+        ":consumer",
+        ":generator",
+        "//loom/src/loom/serve/telemetry:record",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "model",
     srcs = ["model.c"],
     hdrs = ["model.h"],
@@ -96,6 +118,7 @@ loom_cc_library(
         ":model",
         ":request",
         ":service",
+        ":stream",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
@@ -111,6 +134,7 @@ loom_cc_library(
         "//loom/src/loom/serve/testing:package",
         "//loom/src/loom/serve/testing:service_application",
         "//loom/src/loom/serve/testing:stalled_http_client",
+        "//loom/src/loom/serve/testing:worker_gate",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
         "//runtime/src/iree/base",
@@ -142,13 +166,31 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "http",
+    srcs = ["http.c"],
+    hdrs = ["http.h"],
+    deps = [
+        ":consumer",
+        ":generator",
+        ":output",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     srcs = ["service.c"],
     hdrs = ["service.h"],
     deps = [
+        ":consumer",
         ":generator",
-        ":output",
+        ":http",
         ":request",
+        ":stream",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/host:timer",
@@ -160,8 +202,6 @@ loom_cc_library(
         "//loom/src/loom/serve/telemetry:stream",
         "//loom/src/loom/serve/transport/http:request",
         "//loom/src/loom/serve/transport/http:server",
-        "//loom/src/loom/util:json",
-        "//loom/src/loom/util:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
