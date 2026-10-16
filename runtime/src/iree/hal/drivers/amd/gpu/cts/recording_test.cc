@@ -547,9 +547,17 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
     IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
         recording, reference(0, IREE_HAL_WHOLE_BUFFER), &zero, sizeof(zero),
         0));
+    // The fill can use a shader while the update uses CP DMA. Their
+    // overlapping writes need a memory dependency across those cache paths.
+    const iree_hal_memory_barrier_t transfer_memory = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+    };
     const iree_hal_barrier_t transfer_dependency = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
         .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .memory_barrier_count = 1,
+        .memory_barriers = &transfer_memory,
     };
     IREE_ASSERT_OK(
         iree_hal_command_buffer_barrier(recording, &transfer_dependency));

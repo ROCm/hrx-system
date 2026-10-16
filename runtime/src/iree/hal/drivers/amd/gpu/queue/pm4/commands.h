@@ -67,7 +67,8 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_compute_flush(uint32_t* words);
 // Shader completion and cache visibility require their own operations.
 uint32_t* iree_hal_amd_gpu_pm4_emit_dma_flush(uint32_t* words);
 
-// Emits seven DWORDs of asynchronous MEC DMA_DATA through the native L2 route.
+// Emits seven DWORDs of asynchronous MEC DMA_DATA through the native CP route.
+// This shares shader L2 on GFX11 and bypasses it on GFX12.
 // The nonoverlapping ranges cover byte_length bytes, between 1 and 0x03ffffff.
 // Byte alignment is sufficient. Write confirmation remains enabled; the owner
 // joins DMA before retiring either range or publishing a dependent operation.
