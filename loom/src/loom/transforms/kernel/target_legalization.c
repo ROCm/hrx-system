@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/analysis/control_uniformity.h"
+#include "loom/ir/module.h"
 #include "loom/ops/combining.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -153,6 +154,81 @@ static iree_status_t loom_kernel_legalize_subgroup_packets(
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }
   return status;
+}
+
+//===----------------------------------------------------------------------===//
+// Subgroup predicate transport
+//===----------------------------------------------------------------------===//
+
+iree_status_t loom_kernel_target_legalize_subgroup_predicate(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  const loom_value_id_t value = loom_op_operands(op)[0];
+  const loom_type_t predicate_type =
+      loom_module_value_type(context->module, value);
+  loom_type_t carrier_type = predicate_type;
+  carrier_type.header = loom_type_make_header(
+      loom_type_kind(predicate_type), LOOM_SCALAR_TYPE_I32,
+      loom_type_rank(predicate_type), loom_type_flags(predicate_type));
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_type(context->module, carrier_type, &carrier_type));
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  const bool is_vector = loom_type_is_vector(predicate_type);
+  loom_op_t* extend_op = NULL;
+  IREE_RETURN_IF_ERROR((is_vector ? loom_vector_extui_build
+                                  : loom_scalar_extui_build)(
+      builder, value, predicate_type, carrier_type, op->location, &extend_op));
+  const loom_value_id_t carrier = loom_op_results(extend_op)[0];
+
+  loom_op_t* exchange_op = NULL;
+  switch (op->kind) {
+    case LOOM_OP_KERNEL_SUBGROUP_SHUFFLE: {
+      IREE_RETURN_IF_ERROR(loom_kernel_subgroup_shuffle_build(
+          builder, loom_kernel_subgroup_shuffle_mode(op), carrier,
+          loom_kernel_subgroup_shuffle_offset(op),
+          loom_kernel_subgroup_shuffle_width(op), carrier_type, op->location,
+          &exchange_op));
+      break;
+    }
+    case LOOM_OP_KERNEL_SUBGROUP_BROADCAST: {
+      IREE_RETURN_IF_ERROR(loom_kernel_subgroup_broadcast_build(
+          builder, carrier, loom_kernel_subgroup_broadcast_lane(op),
+          carrier_type, op->location, &exchange_op));
+      break;
+    }
+    case LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST: {
+      IREE_RETURN_IF_ERROR(loom_kernel_subgroup_broadcast_first_build(
+          builder, carrier, carrier_type, op->location, &exchange_op));
+      break;
+    }
+    default:
+      IREE_ASSERT_UNREACHABLE("expected a subgroup transport operation");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+
+  loom_op_t* truncate_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      (is_vector ? loom_vector_trunci_build : loom_scalar_trunci_build)(
+          builder, loom_op_results(exchange_op)[0], carrier_type,
+          predicate_type, op->location, &truncate_op));
+  loom_value_id_t replacements[2] = {loom_op_results(truncate_op)[0]};
+  if (loom_kernel_subgroup_shuffle_isa(op)) {
+    replacements[1] = loom_kernel_subgroup_shuffle_valid(exchange_op);
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, replacements, op->result_count, checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, replacements, op->result_count));
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+  };
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//

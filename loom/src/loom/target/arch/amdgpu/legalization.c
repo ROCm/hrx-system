@@ -109,7 +109,7 @@ static bool loom_amdgpu_match_subgroup_shuffle_reference_lowering(
              native_width);
 }
 
-static bool loom_amdgpu_match_subgroup_scan_reference_lowering(
+static bool loom_amdgpu_match_target(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
   (void)entry;
@@ -1174,6 +1174,24 @@ static iree_status_t loom_amdgpu_legalize_kernel_subgroup_match_all(
 static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_I1,
+        .match = loom_amdgpu_match_target,
+        .legalize = loom_kernel_target_legalize_subgroup_predicate,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_BROADCAST,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_I1,
+        .match = loom_amdgpu_match_target,
+        .legalize = loom_kernel_target_legalize_subgroup_predicate,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_I1,
+        .match = loom_amdgpu_match_target,
+        .legalize = loom_kernel_target_legalize_subgroup_predicate,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
         .first_operand_element_types =
             LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
         .match = loom_amdgpu_match_subgroup_shuffle_reference_lowering,
@@ -1192,7 +1210,7 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_SCAN,
         .first_operand_element_types =
             LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
-        .match = loom_amdgpu_match_subgroup_scan_reference_lowering,
+        .match = loom_amdgpu_match_target,
         .legalize = loom_amdgpu_legalize_subgroup_scan_reference_lowering,
     },
     {

@@ -1541,3 +1541,48 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @readlane_reuses_lane_index_gf
 // ----
   v_readlane_b32_src1_sgpr s0, v0, s0
   s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @readlane_reuses_lane_index_gfx942_64 strategy=source
+
+amdgpu.target<gfx942> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.cdna3.core>(@target) @readlane_reuses_lane_index_gfx942_64(%value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %result = v_readlane_b32_src1_sgpr %value, %lane
+  return %result
+}
+
+// ----
+  v_readlane_b32_src1_sgpr s0, v0, s0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @readlane_reuses_lane_index_gfx1200_32 strategy=source
+
+amdgpu.target<gfx1200> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @readlane_reuses_lane_index_gfx1200_32(%value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %result = v_readlane_b32_src1_sgpr %value, %lane
+  return %result
+}
+
+// ----
+  v_readlane_b32_src1_sgpr s0, v0, s0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @readlane_reuses_lane_index_gfx1200_64 strategy=source
+
+amdgpu.target<gfx1200> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @readlane_reuses_lane_index_gfx1200_64(%value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %result = v_readlane_b32_src1_sgpr %value, %lane
+  return %result
+}
+
+// ----
+  v_readlane_b32_src1_sgpr s0, v0, s0
+  s_endpgm

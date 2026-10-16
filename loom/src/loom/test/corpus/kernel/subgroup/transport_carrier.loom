@@ -160,3 +160,179 @@ check.scenario @subgroup_carrier_i16_values {
   }
   check.return
 }
+
+// Predicates cross the same three transport operations as numeric payloads.
+// Three complete logical clusters leave a partial physical subgroup on wave64.
+// Each cluster repeats its input, so named and first-active sources have the
+// same oracle for both native wave widths.
+kernel.def @subgroup_carrier_i1() {
+  %c1 = index.constant 1 : index
+  %items = index.constant 96 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%items, %c1, %c1) : index
+} launch(%selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %cluster = index.constant 32 : index
+  %relative_lane = index.rem %item, %cluster : index
+  %input_view = buffer.view %input[%base] : buffer -> view<32xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<288xi32>
+  %source = view.load %input_view[%relative_lane] : view<32xi32> -> i32
+  %predicate = scalar.trunci %source : i32 to i1
+  %bounded = index.assume %selected [range(%selected, 0, 31)] : index
+  %lane = index.cast %bounded : index to i32
+  %named = kernel.subgroup.broadcast %predicate from %lane : i1, i32
+  %named_bits = scalar.extui %named : i1 to i32
+  view.store %named_bits, %output_view[%item] : i32, view<288xi32>
+  %width = scalar.constant 32 : i32
+  %shuffled, %valid = kernel.subgroup.shuffle<index> %predicate, %lane, %width : i1, i32, i32
+  %plane = index.constant 96 : index
+  %second = index.add %item, %plane : index
+  scf.if %valid {
+    %shuffled_bits = scalar.extui %shuffled : i1 to i32
+    view.store %shuffled_bits, %output_view[%second] : i32, view<288xi32>
+  }
+  %first_lane = index.constant 5 : index
+  %end_lane = index.constant 10 : index
+  %above = index.cmp uge, %relative_lane, %first_lane : index
+  %below = index.cmp ult, %relative_lane, %end_lane : index
+  %active = scalar.andi %above, %below : i1
+  scf.if %active {
+    %first = kernel.subgroup.broadcast.first %predicate : i1
+    %first_bits = scalar.extui %first : i1 to i32
+    %third = index.add %second, %plane : index
+    view.store %first_bits, %output_view[%third] : i32, view<288xi32>
+  }
+  kernel.return
+}
+
+kernel.def @subgroup_carrier_i1x4() {
+  %c1 = index.constant 1 : index
+  %items = index.constant 96 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%items, %c1, %c1) : index
+} launch(%selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %cluster = index.constant 32 : index
+  %relative_lane = index.rem %item, %cluster : index
+  %input_view = buffer.view %input[%base] : buffer -> view<32x4xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<288x4xi32>
+  %source = vector.load %input_view[%relative_lane, 0] : view<32x4xi32> -> vector<4xi32>
+  %predicate = vector.trunci %source : vector<4xi32> to vector<4xi1>
+  %bounded = index.assume %selected [range(%selected, 0, 31)] : index
+  %lane = index.cast %bounded : index to i32
+  %named = kernel.subgroup.broadcast %predicate from %lane : vector<4xi1>, i32
+  %named_bits = vector.extui %named : vector<4xi1> to vector<4xi32>
+  vector.store %named_bits, %output_view[%item, 0] : vector<4xi32>, view<288x4xi32>
+  %width = scalar.constant 32 : i32
+  %shuffled, %valid = kernel.subgroup.shuffle<index> %predicate, %lane, %width : vector<4xi1>, i32, i32
+  %plane = index.constant 96 : index
+  %second = index.add %item, %plane : index
+  scf.if %valid {
+    %shuffled_bits = vector.extui %shuffled : vector<4xi1> to vector<4xi32>
+    vector.store %shuffled_bits, %output_view[%second, 0] : vector<4xi32>, view<288x4xi32>
+  }
+  %first_lane = index.constant 5 : index
+  %end_lane = index.constant 10 : index
+  %above = index.cmp uge, %relative_lane, %first_lane : index
+  %below = index.cmp ult, %relative_lane, %end_lane : index
+  %active = scalar.andi %above, %below : i1
+  scf.if %active {
+    %first = kernel.subgroup.broadcast.first %predicate : vector<4xi1>
+    %first_bits = vector.extui %first : vector<4xi1> to vector<4xi32>
+    %third = index.add %second, %plane : index
+    vector.store %first_bits, %output_view[%third, 0] : vector<4xi32>, view<288x4xi32>
+  }
+  kernel.return
+}
+
+func.def inline @subgroup_predicate_carrier_oracle(%selected: index, %components: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %cluster = index.constant 32 : index
+  %items = index.constant 96 : index
+  %rows = index.constant 288 : index
+  %first_lane = index.constant 5 : index
+  %end_lane = index.constant 10 : index
+  %bit_mask = scalar.constant 1 : i32
+  %input_count = index.mul %cluster, %components : index
+  %output_count = index.mul %rows, %components : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%input_count]xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%output_count]xi32>
+  %bounded_selected = index.assume %selected [range(%selected, 0, 31)] : index
+  %selected_start = index.mul %bounded_selected, %components : index
+  %first_start = index.mul %first_lane, %components : index
+  %plane = index.mul %items, %components : index
+  scf.for %item = [%c0 to %items step %c1] {
+    %relative_lane = index.rem %item, %cluster : index
+    %above = index.cmp uge, %relative_lane, %first_lane : index
+    %below = index.cmp ult, %relative_lane, %end_lane : index
+    %active = scalar.andi %above, %below : i1
+    %position = index.mul %item, %components : index
+    scf.for %component = [%c0 to %components step %c1] {
+      %source = index.add %selected_start, %component : index
+      %word = view.load %input_view[%source] : view<[%input_count]xi32> -> i32
+      %predicate = scalar.andi %word, %bit_mask : i32
+      %first = index.add %position, %component : index
+      %second = index.add %first, %plane : index
+      view.store %predicate, %output_view[%first] : i32, view<[%output_count]xi32>
+      view.store %predicate, %output_view[%second] : i32, view<[%output_count]xi32>
+      scf.if %active {
+        %first_source = index.add %first_start, %component : index
+        %first_word = view.load %input_view[%first_source] : view<[%input_count]xi32> -> i32
+        %first_predicate = scalar.andi %first_word, %bit_mask : i32
+        %third = index.add %second, %plane : index
+        view.store %first_predicate, %output_view[%third] : i32, view<[%output_count]xi32>
+      }
+    }
+  }
+  func.return
+}
+
+func.def @subgroup_carrier_i1_oracle(%selected: index, %input: buffer, %output: buffer) {
+  %components = index.constant 1 : index
+  func.call @subgroup_predicate_carrier_oracle(%selected, %components, %input, %output) : (index, index, buffer, buffer)
+  func.return
+}
+
+func.def @subgroup_carrier_i1x4_oracle(%selected: index, %input: buffer, %output: buffer) {
+  %components = index.constant 4 : index
+  func.call @subgroup_predicate_carrier_oracle(%selected, %components, %input, %output) : (index, index, buffer, buffer)
+  func.return
+}
+
+check.scenario @subgroup_carrier_i1_values {
+  check.trial[32](%selected: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<32xi32>
+    %storage = check.generate.fill value(-123) : tensor<320xi32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<320xi32> -> tensor<16xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<320xi32> -> tensor<288xi32>
+    %suffix = check.tensor.view %storage offset(1216) : tensor<320xi32> -> tensor<16xi32>
+    check.compare<@subgroup_carrier_i1, @subgroup_carrier_i1_oracle>(%selected, %input, %output) : (index, tensor<32xi32>, tensor<288xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<32xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<288xi32>
+      check.expect.bitwise actual(%prefix) expected(%prefix) : tensor<16xi32>
+      check.expect.bitwise actual(%suffix) expected(%suffix) : tensor<16xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @subgroup_carrier_i1x4_values {
+  check.trial[32](%selected: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<128xi32>
+    %storage = check.generate.fill value(-123) : tensor<1184xi32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<1184xi32> -> tensor<16xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<1184xi32> -> tensor<1152xi32>
+    %suffix = check.tensor.view %storage offset(4672) : tensor<1184xi32> -> tensor<16xi32>
+    check.compare<@subgroup_carrier_i1x4, @subgroup_carrier_i1x4_oracle>(%selected, %input, %output) : (index, tensor<128xi32>, tensor<1152xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<128xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1152xi32>
+      check.expect.bitwise actual(%prefix) expected(%prefix) : tensor<16xi32>
+      check.expect.bitwise actual(%suffix) expected(%suffix) : tensor<16xi32>
+    }
+  }
+  check.return
+}

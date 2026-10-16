@@ -21,6 +21,15 @@ extern "C" {
 const loom_target_legalizer_provider_t* loom_kernel_target_legalizer_provider(
     void);
 
+// Exchanges scalar or rank-1 i1 payloads through shape-preserving i32 values.
+// Targets whose predicates occupy lane masks use this for shuffle, broadcast,
+// and broadcast.first. Shuffle source validity remains independent of payload
+// conversion.
+iree_status_t loom_kernel_target_legalize_subgroup_predicate(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result);
+
 // Normalizes logical shuffle addressing to an in-range physical indexed
 // exchange, retaining logical bounds and source participation in the validity
 // result. Targets with custom source-low selection call this when their native

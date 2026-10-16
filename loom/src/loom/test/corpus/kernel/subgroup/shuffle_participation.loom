@@ -58,7 +58,50 @@ kernel.def @subgroup_shuffle_participation() {
   kernel.return
 }
 
-func.def inline @store_subgroup_participation_oracle_result(%item: index, %source: i32, %plane: index, %input: buffer, %output: buffer) {
+kernel.def @subgroup_shuffle_predicate_participation() {
+  %unit = index.constant 1 : index
+  %items = index.constant 54 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%distance: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<54xi32>
+  %word = view.load %input_view[%item] : view<54xi32> -> i32
+  %value = scalar.trunci %word : i32 to i1
+  %participation_period = index.constant 4 : index
+  %excluded_lane = index.constant 3 : index
+  %relative_participation_lane = index.rem %item, %participation_period : index
+  %active = index.cmp ne, %relative_participation_lane, %excluded_lane : index
+  %bounded_distance = index.assume %distance [range(%distance, 0, 15)] : index
+  %source = index.cast %bounded_distance : index to i32
+  %width = scalar.constant 16 : i32
+  scf.if %active {
+    %index_value, %index_valid = kernel.subgroup.shuffle<index> %value, %source, %width : i1, i32, i32
+    %index_bits = scalar.extui %index_value : i1 to i32
+    %index_plane = index.constant 0 : index
+    func.call @store_subgroup_participation_result(%item, %index_plane, %index_bits, %index_valid, %output) : (index, index, i32, i1, buffer)
+    %xor_value, %xor_valid = kernel.subgroup.shuffle<xor> %value, %source, %width : i1, i32, i32
+    %xor_bits = scalar.extui %xor_value : i1 to i32
+    %xor_plane = index.constant 1 : index
+    func.call @store_subgroup_participation_result(%item, %xor_plane, %xor_bits, %xor_valid, %output) : (index, index, i32, i1, buffer)
+    %up_value, %up_valid = kernel.subgroup.shuffle<up> %value, %source, %width : i1, i32, i32
+    %up_bits = scalar.extui %up_value : i1 to i32
+    %up_plane = index.constant 2 : index
+    func.call @store_subgroup_participation_result(%item, %up_plane, %up_bits, %up_valid, %output) : (index, index, i32, i1, buffer)
+    %down_value, %down_valid = kernel.subgroup.shuffle<down> %value, %source, %width : i1, i32, i32
+    %down_bits = scalar.extui %down_value : i1 to i32
+    %down_plane = index.constant 3 : index
+    func.call @store_subgroup_participation_result(%item, %down_plane, %down_bits, %down_valid, %output) : (index, index, i32, i1, buffer)
+    %unit_distance = scalar.constant 1 : i32
+    %fixed_xor_value, %fixed_xor_valid = kernel.subgroup.shuffle<xor> %value, %unit_distance, %width : i1, i32, i32
+    %fixed_xor_bits = scalar.extui %fixed_xor_value : i1 to i32
+    %fixed_xor_plane = index.constant 4 : index
+    func.call @store_subgroup_participation_result(%item, %fixed_xor_plane, %fixed_xor_bits, %fixed_xor_valid, %output) : (index, index, i32, i1, buffer)
+  }
+  kernel.return
+}
+
+func.def inline @store_subgroup_participation_oracle_result(%item: index, %source: i32, %plane: index, %input: buffer, %output: buffer, %value_mask: i32) {
   %base = index.constant 0 : offset
   %fields = index.constant 2 : index
   %plane_width = index.constant 108 : index
@@ -89,7 +132,8 @@ func.def inline @store_subgroup_participation_oracle_result(%item: index, %sourc
     %valid = scalar.andi %same_cluster, %source_active : i1
     scf.if %valid {
       %source_index = index.cast %source : i32 to index
-      %value = view.load %input_view[%source_index] : view<54xi32> -> i32
+      %word = view.load %input_view[%source_index] : view<54xi32> -> i32
+      %value = scalar.andi %word, %value_mask : i32
       view.store %value, %output_view[%position] : i32, view<540xi32>
       view.store %c1_i32, %output_view[%valid_position] : i32, view<540xi32>
     }
@@ -97,7 +141,7 @@ func.def inline @store_subgroup_participation_oracle_result(%item: index, %sourc
   func.return
 }
 
-func.def @subgroup_shuffle_participation_oracle(%distance: index, %input: buffer, %output: buffer) {
+func.def inline @subgroup_shuffle_participation_masked_oracle(%distance: index, %input: buffer, %output: buffer, %value_mask: i32) {
   %begin = index.constant 0 : index
   %end = index.constant 54 : index
   %step = index.constant 1 : index
@@ -115,21 +159,33 @@ func.def @subgroup_shuffle_participation_oracle(%distance: index, %input: buffer
       %cluster_base = scalar.muli %item_cluster, %logical_width : i32
       %index_source = scalar.addi %cluster_base, %distance_i32 : i32
       %index_plane = index.constant 0 : index
-      func.call @store_subgroup_participation_oracle_result(%item, %index_source, %index_plane, %input, %output) : (index, i32, index, buffer, buffer)
+      func.call @store_subgroup_participation_oracle_result(%item, %index_source, %index_plane, %input, %output, %value_mask) : (index, i32, index, buffer, buffer, i32)
       %xor_source = scalar.xori %item_i32, %distance_i32 : i32
       %xor_plane = index.constant 1 : index
-      func.call @store_subgroup_participation_oracle_result(%item, %xor_source, %xor_plane, %input, %output) : (index, i32, index, buffer, buffer)
+      func.call @store_subgroup_participation_oracle_result(%item, %xor_source, %xor_plane, %input, %output, %value_mask) : (index, i32, index, buffer, buffer, i32)
       %up_source = scalar.subi %item_i32, %distance_i32 : i32
       %up_plane = index.constant 2 : index
-      func.call @store_subgroup_participation_oracle_result(%item, %up_source, %up_plane, %input, %output) : (index, i32, index, buffer, buffer)
+      func.call @store_subgroup_participation_oracle_result(%item, %up_source, %up_plane, %input, %output, %value_mask) : (index, i32, index, buffer, buffer, i32)
       %down_source = scalar.addi %item_i32, %distance_i32 : i32
       %down_plane = index.constant 3 : index
-      func.call @store_subgroup_participation_oracle_result(%item, %down_source, %down_plane, %input, %output) : (index, i32, index, buffer, buffer)
+      func.call @store_subgroup_participation_oracle_result(%item, %down_source, %down_plane, %input, %output, %value_mask) : (index, i32, index, buffer, buffer, i32)
       %fixed_xor_source = scalar.xori %item_i32, %unit_i32 : i32
       %fixed_xor_plane = index.constant 4 : index
-      func.call @store_subgroup_participation_oracle_result(%item, %fixed_xor_source, %fixed_xor_plane, %input, %output) : (index, i32, index, buffer, buffer)
+      func.call @store_subgroup_participation_oracle_result(%item, %fixed_xor_source, %fixed_xor_plane, %input, %output, %value_mask) : (index, i32, index, buffer, buffer, i32)
     }
   }
+  func.return
+}
+
+func.def @subgroup_shuffle_participation_oracle(%distance: index, %input: buffer, %output: buffer) {
+  %mask = scalar.constant -1 : i32
+  func.call @subgroup_shuffle_participation_masked_oracle(%distance, %input, %output, %mask) : (index, buffer, buffer, i32)
+  func.return
+}
+
+func.def @subgroup_shuffle_predicate_participation_oracle(%distance: index, %input: buffer, %output: buffer) {
+  %mask = scalar.constant 1 : i32
+  func.call @subgroup_shuffle_participation_masked_oracle(%distance, %input, %output, %mask) : (index, buffer, buffer, i32)
   func.return
 }
 
@@ -142,6 +198,24 @@ check.scenario @subgroup_shuffle_participation_values {
     %output = check.tensor.view %storage offset(64) : tensor<572xi32> -> tensor<540xi32>
     %suffix = check.tensor.view %storage offset(2224) : tensor<572xi32> -> tensor<16xi32>
     check.compare<@subgroup_shuffle_participation, @subgroup_shuffle_participation_oracle>(%distance, %input, %output) : (index, tensor<54xi32>, tensor<540xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<540xi32>
+      check.expect.bitwise actual(%prefix) expected(%prefix) : tensor<16xi32>
+      check.expect.bitwise actual(%suffix) expected(%suffix) : tensor<16xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @subgroup_shuffle_predicate_participation_values {
+  check.trial[16](%distance: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<54xi32>
+    %storage = check.generate.fill value(-123) : tensor<572xi32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<572xi32> -> tensor<16xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<572xi32> -> tensor<540xi32>
+    %suffix = check.tensor.view %storage offset(2224) : tensor<572xi32> -> tensor<16xi32>
+    check.compare<@subgroup_shuffle_predicate_participation, @subgroup_shuffle_predicate_participation_oracle>(%distance, %input, %output) : (index, tensor<54xi32>, tensor<540xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<54xi32>
       check.expect.bitwise actual(%output) expected(%output) : tensor<540xi32>
       check.expect.bitwise actual(%prefix) expected(%prefix) : tensor<16xi32>
       check.expect.bitwise actual(%suffix) expected(%suffix) : tensor<16xi32>

@@ -454,8 +454,12 @@ def test_exact_descriptor_storage_orders_portable_view_as_prefix() -> None:
     )
 
 
-def test_v_readlane_b32_reserves_unused_vop3_source() -> None:
-    overlays = {overlay.descriptor_key: overlay for overlay in _gfx11_core_overlays()}
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_v_readlane_b32_reserves_unused_vop3_source(target) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
     for descriptor_key in (
         "amdgpu.v_readlane_b32.src1_inline",
         "amdgpu.v_readlane_b32.src1_sgpr",

@@ -39,54 +39,6 @@ kernel.def target(@target) @subgroup_broadcast_lane_out_of_range_rejected() {
 
 amdgpu.target<gfx11-generic> @target
 
-kernel.def target(@target) @subgroup_broadcast_payload_rejected() {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
-} launch() {
-  %value = vector.constant 1 : vector<4xi1>
-  %lane = scalar.constant 0 : i32
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast.payload"}
-  %broadcast = kernel.subgroup.broadcast %value from %lane : vector<4xi1>, i32
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @subgroup_broadcast_first_payload_rejected() {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
-} launch() {
-  %value = vector.constant 1 : vector<4xi1>
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast_first.payload"}
-  %broadcast = kernel.subgroup.broadcast.first %value : vector<4xi1>
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @subgroup_shuffle_payload_rejected() {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
-} launch() {
-  %value = vector.constant 1 : vector<4xi1>
-  %offset = scalar.constant 0 : i32
-  %width = scalar.constant 32 : i32
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.payload"}
-  %shuffle, %valid = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi1>, i32, i32
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
 kernel.def target(@target) @workgroup_scan_wave_count_rejected() {
   %c1 = index.constant 1 : index
   %c1056 = index.constant 1056 : index
