@@ -55,6 +55,60 @@ flags select devices, listeners, workers and memory policy. The
 [operator guide](../../loom/docs/src/serving/workflows/operate-model-server.md) define
 those shared contracts.
 
+## Run speech recognition and synthesis together
+
+Pocket TTS and Moonshine use the same server and ordinary OpenAI-compatible
+audio endpoints. With [uv](https://docs.astral.sh/uv/) installed and access to
+the [Pocket cloning checkpoint](https://huggingface.co/kyutai/pocket-tts),
+prepare both deployments from the repository root:
+
+```sh
+speech_assets="$HOME/models/loom-prepared/speech"
+uv run --python 3.12 experimental/loom_serve/models/pocket_tts/prepare_assets.py \
+  --output "$speech_assets/pocket-tts"
+uv run --python 3.12 experimental/loom_serve/models/moonshine/prepare_assets.py \
+  --output "$speech_assets/moonshine"
+
+iree-bazel-run --config=opt //loom/src/loom/tools/loom-serve -- \
+  --device=amdgpu --workers=8 --listen=127.0.0.1:8080 \
+  --model="$speech_assets/pocket-tts/model.json" \
+  --model="$speech_assets/moonshine/model.json"
+```
+
+Choose a new deployment directory when preparing again; preparation preserves
+assets that a running server may be using. Downloads use the Hugging Face
+cache, and the deployment directories link those checkpoints. Set
+`HF_HUB_CACHE="$HOME/models/huggingface/hub"` before preparation to keep new
+downloads under `~/models/` too. `--offline` reuses populated cache entries.
+Python prepares the assets; the running server executes the learned models in
+Loom.
+
+With the default audio codecs enabled, transcribe a recording:
+
+```sh
+curl --fail-with-body -H 'Expect:' \
+  http://127.0.0.1:8080/v1/audio/transcriptions \
+  -F model=moonshine-streaming-tiny -F file=@recording.wav
+```
+
+Speak a response with one of the four registered voices:
+
+```sh
+curl --fail --silent --show-error --no-buffer \
+  http://127.0.0.1:8080/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"pocket-tts","input":"Good day. Both speech models are ready.","voice":"alba","response_format":"pcm"}' |
+  ffplay -nodisp -autoexit -f s16le -sample_rate 24000 -ch_layout mono -i pipe:0
+```
+
+The [Pocket guide](models/pocket_tts/README.md) covers custom reference WAVs,
+streaming PCM, and Open WebUI read-aloud. The
+[Moonshine guide](models/moonshine/README.md) covers WAV/MP3/FLAC uploads,
+PCM-only builds, and Open WebUI dictation. Clients orchestrate transcription,
+chat, and synthesis as separate requests. Both speech models keep request
+histories and output credit independent when compatible numerical phases batch
+together.
+
 ## Copy a package
 
 Copy the selected model and the shared sources listed in its guide, preserving
