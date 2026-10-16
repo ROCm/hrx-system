@@ -100,6 +100,25 @@ loom_library(
 
 [
     loom_test(
+        name = "routing_{}_test".format(capacity),
+        srcs = ["tests/routing.loom"],
+        benchmark_smoke = False,
+        configs = {"flash_next.token_count": str(capacity)},
+        execution_profiles = [
+            AMDGPU_HARDWARE_PROFILE,
+            AMDGPU_ACCESS_PROFILE,
+            AMDGPU_TSAN_PROFILE,
+        ],
+        deps = [":residual_programs"],
+    )
+    for capacity in [
+        7,
+        131,
+    ]
+]
+
+[
+    loom_test(
         name = "q8_matrix_{}x{}_waves_{}x{}_test".format(rows, columns, wave_rows, wave_columns),
         srcs = ["tests/q8_matrix.loom"],
         benchmark_smoke = False,
