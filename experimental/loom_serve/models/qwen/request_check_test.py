@@ -167,6 +167,18 @@ class RequestCheckTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
+        self.assertIn("this model does not accept image input", result.stderr)
+
+    def test_text_parts_preserve_order_and_have_no_media_spans(self):
+        request = self.request()
+        expected = self.success(self.execute(PACKAGE / "control.loom", request))
+        request["messages"][0]["content"] = [
+            {"type": "text", "text": text} for text in ("Hello ", "λ", ".")
+        ]
+        actual = self.success(self.execute(PACKAGE / "control.loom", request))
+        self.assertEqual(actual["prompt"], expected["prompt"])
+        self.assertEqual(actual["tokens"], expected["tokens"])
+        self.assertEqual(actual["media_spans"], [])
 
     def test_production_xml_completion(self):
         call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
