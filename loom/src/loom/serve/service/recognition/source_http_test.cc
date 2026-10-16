@@ -128,7 +128,7 @@ class SourceRecognitionHttpTest
   void Advance(bool stopping) {
     bool progress = false;
     IREE_ASSERT_OK(interface_.advance(
-        interface_.self, stopping ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING : 0,
+        interface_.self, stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0,
         &progress));
   }
   template <typename Predicate>
@@ -138,7 +138,7 @@ class SourceRecognitionHttpTest
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       auto status = interface_.advance(
-          interface_.self, stopping ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING : 0,
+          interface_.self, stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0,
           &progress);
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
@@ -167,7 +167,7 @@ class SourceRecognitionHttpTest
   // Adapter whose accepted conversion task borrows the claimed upload.
   loom_serve_recognition_http_t* service_ = nullptr;
   // Manually driven production owner interface.
-  loom_serve_http_service_t interface_ = {};
+  loom_serve_service_t interface_ = {};
   // Readiness-aware socket client; no router thread is running.
   loom_serve::testing::HttpHarness http_;
 };

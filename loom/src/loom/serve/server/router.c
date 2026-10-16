@@ -433,7 +433,7 @@ static iree_status_t loom_serve_router_model(
   return iree_ok_status();
 }
 
-static loom_serve_http_service_flags_t loom_serve_router_service_flags(
+static loom_serve_service_flags_t loom_serve_router_service_flags(
     const loom_serve_router_t* router, iree_host_size_t selected) {
   const void* capacity_domain =
       loom_serve_router_model_at(router, selected)->service.capacity_domain;
@@ -453,7 +453,7 @@ static loom_serve_http_service_flags_t loom_serve_router_service_flags(
          (model->service.is_active(model->service.self) ||
           model->parameter_operation ==
               LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING))) {
-      return LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
+      return LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
     }
   }
   return 0;
@@ -461,7 +461,7 @@ static loom_serve_http_service_flags_t loom_serve_router_service_flags(
 
 static const char* loom_serve_router_admission_phase(
     const loom_serve_registered_model_t* state,
-    const loom_serve_http_service_snapshot_t* snapshot) {
+    const loom_serve_service_snapshot_t* snapshot) {
   if (state->removal) {
     return "removing";
   }
@@ -589,7 +589,7 @@ static iree_status_t loom_serve_router_describe_modalities(
 static iree_status_t loom_serve_router_describe_service(
     const loom_serve_registered_model_t* admission, bool include_status,
     iree_string_builder_t* output) {
-  const loom_serve_http_service_t* service = &admission->service;
+  const loom_serve_service_t* service = &admission->service;
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
       output, "{\"object\":\"model\",\"id\":"));
   IREE_RETURN_IF_ERROR(loom_serve_router_quote(output, service->name));
@@ -669,7 +669,7 @@ static iree_status_t loom_serve_router_describe_service(
       IREE_RETURN_IF_ERROR(
           loom_serve_router_describe_parameters(admission, output));
     }
-    const loom_serve_http_service_snapshot_t state =
+    const loom_serve_service_snapshot_t state =
         loom_serve_registry_snapshot(admission);
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(output, ",\"status\":{\"phase\":"));
@@ -732,9 +732,9 @@ static iree_status_t loom_serve_router_logs(
   iree_string_view_t name;
   if (loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
                                             &name)) {
-    const loom_serve_http_service_t* service = NULL;
+    const loom_serve_service_t* service = NULL;
     for (iree_host_size_t i = 0; i < router->capacity; ++i) {
-      const loom_serve_http_service_t* candidate =
+      const loom_serve_service_t* candidate =
           &loom_serve_router_model_at(router, i)->service;
       if (candidate->name.size &&
           iree_string_view_equal(name, candidate->name)) {
@@ -857,7 +857,7 @@ static iree_status_t loom_serve_router_logs_advance(loom_serve_router_t* router,
     const loom_serve_telemetry_counters_t* counters =
         total_available ? &total : NULL;
     if (reader->service_index < router->capacity) {
-      const loom_serve_http_service_t* service =
+      const loom_serve_service_t* service =
           &loom_serve_router_model_at(router, reader->service_index)->service;
       stream = service->telemetry.stream;
       counters = service->telemetry.counters;
@@ -947,7 +947,7 @@ static iree_status_t loom_serve_router_admit(
     return loom_serve_router_tokenization_accept(router, service_index,
                                                  connection, request);
   }
-  const loom_serve_http_service_t* service =
+  const loom_serve_service_t* service =
       &loom_serve_router_model_at(router, service_index)->service;
   return service->accept(
       service->self, connection, request,
@@ -1467,12 +1467,12 @@ static void loom_serve_router_advance(loom_serve_router_t* router,
           loom_serve_registry_remove(model, LOOM_SERVE_REMOVAL_ABORT));
     }
     if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-      const loom_serve_http_service_t* service = &model->service;
+      const loom_serve_service_t* service = &model->service;
       bool progress = false;
-      const loom_serve_http_service_flags_t flags =
+      const loom_serve_service_flags_t flags =
           loom_serve_router_service_flags(router, index) |
           loom_serve_registry_service_flags(model) |
-          (router->stopping ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING : 0);
+          (router->stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0);
       router->status = iree_status_join(
           router->status, service->advance(service->self, flags, &progress));
       router->stopping |= !iree_status_is_ok(router->status);

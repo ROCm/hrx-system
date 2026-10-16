@@ -52,8 +52,7 @@ class MediaServiceTest : public SourceTextServiceTest {
   void TearDown() override {
     if (service_) {
       AdvanceUntil(
-          interface_, [&] { return Idle(); },
-          LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+          interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
       interface_.set_observer(interface_.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
     }
@@ -150,7 +149,7 @@ class MediaServiceTest : public SourceTextServiceTest {
   // Serialized production HTTP owner, including its native projection window.
   loom_serve_text_service_t* service_ = nullptr;
   // Borrowed callbacks driven on the ordinary shared executor.
-  loom_serve_http_service_t interface_ = {};
+  loom_serve_service_t interface_ = {};
 };
 
 class SplitMediaServiceTest : public MediaServiceTest {
@@ -283,14 +282,13 @@ TEST_P(CancelledMediaServiceTest,
   ASSERT_NO_FATAL_FAILURE(AtImagePhase(GetParam(), [&] {
     bool progress = false;
     IREE_ASSERT_OK(interface_.advance(
-        interface_.self, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING, &progress));
+        interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
     EXPECT_TRUE(interface_.is_pending(interface_.self));
     EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 2u);
     EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);
   }));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return Idle(); },
-      LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+      interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING));
   EXPECT_TRUE(Read(first, true).empty());
   EXPECT_TRUE(Read(second, true).empty());
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);

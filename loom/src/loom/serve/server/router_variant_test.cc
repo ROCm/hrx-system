@@ -64,8 +64,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
            dependency->selection.entry ||
            loom_serve_variant_pool_pending(dependency->variants);
   }
-  static iree_status_t Advance(void* self,
-                               loom_serve_http_service_flags_t flags,
+  static iree_status_t Advance(void* self, loom_serve_service_flags_t flags,
                                bool* out_progress) {
     IREE_RETURN_IF_ERROR(
         loom_serve_test_model_service_t::Advance(self, flags, out_progress));
@@ -132,7 +131,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     return iree_ok_status();
   }
   static iree_status_t Prepare(void* self, bool cancel, bool* out_complete,
-                               loom_serve_http_service_t* out_service,
+                               loom_serve_service_t* out_service,
                                loom_serve_compilation_report_t* out_report) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
     *out_complete = true;

@@ -163,7 +163,7 @@ TEST_F(SourceEmbeddingServiceTest, CancelledDeviceCohortSkipsEncoding) {
 }
 
 TEST_F(SourceEmbeddingServiceTest, StoppingDeviceCohortSkipsEncoding) {
-  CheckAbandonedCohort(LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+  CheckAbandonedCohort(LOOM_SERVE_SERVICE_FLAG_STOPPING);
 }
 
 TEST_F(SourceEmbeddingServiceTest,
