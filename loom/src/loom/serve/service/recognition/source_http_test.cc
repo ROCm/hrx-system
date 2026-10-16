@@ -15,8 +15,8 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/service/recognition/http.h"
 #include "loom/serve/service/recognition/model.h"
+#include "loom/serve/service/recognition/service.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/testing/worker_gate.h"
@@ -94,17 +94,17 @@ class SourceRecognitionHttpTest
     IREE_ASSERT_OK(loom_serve_http_listener_allocate(
         server_, &listener_options, iree_allocator_system(), &listener_));
     IREE_ASSERT_OK(http_.Initialize(server_, listener_));
-    const loom_serve_recognition_http_options_t service_options = {
+    const loom_serve_recognition_service_options_t service_options = {
         .name = IREE_SV("recognition"),
         .pending_capacity = 2,
         .request_limit = 1024,
         .document_limit = 4096,
         .decode_frames = 5,
     };
-    IREE_ASSERT_OK(loom_serve_recognition_http_allocate(
+    IREE_ASSERT_OK(loom_serve_recognition_service_allocate(
         host_, loom_serve_recognition_model_generator(model_), &service_options,
         nullptr, iree_allocator_system(), &service_));
-    interface_ = loom_serve_recognition_http_interface(service_);
+    interface_ = loom_serve_recognition_service_interface(service_);
     interface_.set_observer(interface_.self,
                             {[](void* self) {
                                iree_notification_post(
@@ -119,7 +119,7 @@ class SourceRecognitionHttpTest
       AdvanceUntil([&] { return !interface_.is_pending(interface_.self); },
                    true);
       interface_.set_observer(interface_.self, {});
-      loom_serve_recognition_http_free(service_);
+      loom_serve_recognition_service_free(service_);
     }
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
@@ -165,7 +165,7 @@ class SourceRecognitionHttpTest
   // Real loopback socket listener.
   loom_serve_http_listener_t* listener_ = nullptr;
   // Adapter whose accepted conversion task borrows the claimed upload.
-  loom_serve_recognition_http_t* service_ = nullptr;
+  loom_serve_recognition_service_t* service_ = nullptr;
   // Manually driven production owner interface.
   loom_serve_service_t interface_ = {};
   // Readiness-aware socket client; no router thread is running.

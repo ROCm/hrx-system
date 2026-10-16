@@ -22,6 +22,9 @@ extern "C" {
 // Modality-owned input and detached output types used by native admission.
 typedef struct loom_serve_speech_request_t loom_serve_speech_request_t;
 typedef struct loom_serve_speech_stream_t loom_serve_speech_stream_t;
+typedef struct loom_serve_recognition_request_t
+    loom_serve_recognition_request_t;
+typedef struct loom_serve_recognition_stream_t loom_serve_recognition_stream_t;
 
 typedef enum loom_serve_service_flag_bits_e {
   // Another service in the same capacity domain has accepted work or
@@ -84,6 +87,13 @@ typedef struct loom_serve_service_t {
   iree_status_t (*try_open_speech)(void* self,
                                    loom_serve_speech_request_t* request,
                                    loom_serve_speech_stream_t** out_stream);
+  // Optional native continuing-input recognition on this serialized owner.
+  // Success with a stream copies request options and grants bounded PCM credit
+  // in the stream's format. NULL success is pressure. The caller owns the
+  // handle through close, independently of service/model lifetime.
+  iree_status_t (*try_open_recognition)(
+      void* self, const loom_serve_recognition_request_t* request,
+      loom_serve_recognition_stream_t** out_stream);
   // Advances at most one bounded model unit and reports actual progress. A
   // turn can retry admission after another service released shared capacity.
   // False means awaiting service readiness or a network event, never polling.

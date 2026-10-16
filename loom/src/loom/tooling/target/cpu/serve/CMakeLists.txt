@@ -165,6 +165,7 @@ iree_py_test(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/media/testdata/audio/sample.flac"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/media/testdata/audio/sample.mp3"
@@ -189,6 +190,7 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
   DEPS
     ::test_compiler
@@ -232,6 +234,7 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
   DEPS
     ::test_compiler
@@ -248,16 +251,17 @@ endif()
 if(LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
-    source_recognition_service_test
+    source_recognition_stream_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
   DEPS
     ::test_compiler
     ::test_device
     iree::testing::gtest_main
-    loom::serve::service::recognition::source_service_tests
+    loom::serve::service::recognition::source_stream_tests
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom}}"
   LABELS
@@ -268,16 +272,17 @@ endif()
 if(LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
-    source_recognition_service_parallel_test
+    source_recognition_stream_parallel_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
   DEPS
     ::test_compiler
     ::test_device
     iree::testing::gtest_main
-    loom::serve::service::recognition::source_service_tests
+    loom::serve::service::recognition::source_stream_tests
   ARGS
     "--test_workers=4"
     "--model_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom}}"
@@ -302,6 +307,27 @@ loom_cc_test(
     loom::serve::server::registry_speech_tests
   ARGS
     "--model={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json}}"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    registry_recognition_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/prepare.loom"
+  DEPS
+    ::test_compiler
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::server::registry_recognition_tests
+  ARGS
+    "--model={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/recognition/model.json}}"
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
 )
