@@ -875,6 +875,31 @@ iree_status_t loom_serve_text_chat_prepare_input(
   return status;
 }
 
+// Function records have the same decoded name/argument semantics in client
+// history and generated output. The scratch owner retains both through the
+// synchronous source formatter call.
+static iree_status_t loom_serve_text_chat_function_decode(
+    iree_string_view_t value, iree_string_builder_t* scratch,
+    iree_string_view_t* out_name, iree_string_view_t* out_arguments) {
+  loom_serve_text_chat_field_t fields[] = {{"name", CHAT_STRING},
+                                           {"arguments", CHAT_STRING}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
+      value, IREE_ARRAYSIZE(fields), fields, 0));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
+  iree_string_builder_reset(scratch);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_chat_append_decoded(scratch, fields[0].value));
+  const iree_host_size_t name_length = iree_string_builder_size(scratch);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_chat_append_decoded(scratch, fields[1].value));
+  const iree_string_view_t decoded = iree_string_builder_view(scratch);
+  *out_name = iree_string_view_substr(decoded, 0, name_length);
+  *out_arguments =
+      iree_string_view_substr(decoded, name_length, IREE_HOST_SIZE_MAX);
+  return iree_ok_status();
+}
+
 // Input wrappers borrow only for this synchronous invocation. Source owns the
 // returned bytes until they are appended; no references escape into a request.
 static iree_status_t loom_serve_text_chat_function_render(
@@ -940,7 +965,7 @@ typedef struct loom_serve_text_chat_history_t {
   iree_string_builder_t scratch;
   // Ordered source-policy content records for one message.
   iree_string_builder_t content_records;
-  // Decoded JSON argument document, stable while its values are rendered.
+  // Decoded function name and argument JSON, stable through source rendering.
   iree_string_builder_t arguments;
   // Decoded reasoning content for one message.
   iree_string_builder_t reasoning;
@@ -970,17 +995,11 @@ static iree_status_t loom_serve_text_chat_history_tool(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "assistant tool_calls must be functions");
   }
-  loom_serve_text_chat_field_t function[] = {{"name", CHAT_STRING},
-                                             {"arguments", CHAT_STRING}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      fields[2].value, IREE_ARRAYSIZE(function), function, 0));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&function[1]));
-  iree_string_builder_reset(&history->arguments);
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_append_decoded(&history->arguments,
-                                                           function[1].value));
+  iree_string_view_t name, arguments;
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_decode(
+      fields[2].value, &history->arguments, &name, &arguments));
   return loom_serve_text_chat_function_render(
-      history->chat->policy, function[0].value,
-      iree_string_builder_view(&history->arguments), index, &history->calls,
+      history->chat->policy, name, arguments, index, &history->calls,
       history->chat->host_allocator);
 }
 
@@ -1659,12 +1678,8 @@ typedef struct loom_serve_text_chat_completion_tools_t {
   const loom_serve_text_chat_policy_t* policy;
   // Request-unique namespace for transport tool IDs.
   uint64_t request_id;
-  // Transport options controlling whether calls carry streaming indexes.
-  loom_serve_text_chat_flags_t flags;
-  // Number of fully parsed calls.
-  iree_host_size_t count;
-  // Standard tool-call array destination.
-  iree_string_builder_t* output;
+  // Owned validated records, published only after canonical history succeeds.
+  loom_serve_text_tool_calls_t* calls;
   // Exclusively borrowed formatting storage, reused across completions.
   loom_serve_text_chat_scratch_t* scratch;
 } loom_serve_text_chat_completion_tools_t;
@@ -1688,42 +1703,16 @@ static iree_status_t loom_serve_text_chat_completion_tool(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "source tool call must be a function");
   }
-  loom_serve_text_chat_field_t function[] = {{"name", CHAT_STRING},
-                                             {"arguments", CHAT_STRING}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      call[1].value, IREE_ARRAYSIZE(function), function, 0));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&function[0]));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&function[1]));
-  iree_string_builder_reset(&tools->scratch->arguments);
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_append_decoded(
-      &tools->scratch->arguments, function[1].value));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_render(
-      tools->policy, function[0].value,
-      iree_string_builder_view(&tools->scratch->arguments), index,
-      &tools->scratch->rendered, tools->scratch_allocator));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(tools->output, "%s{",
-                                                         index ? "," : ""));
-  if (iree_any_bit_set(tools->flags, LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        tools->output, "\"index\":%zu,", index));
-  }
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      tools->output,
-      "\"id\":\"call_%" PRIu64
-      "_%zu\",\"type\":\"function\",\"function\":{\"name\":",
-      tools->request_id, index));
-  // Source records preserve JSON escaping of names and arguments.
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(tools->output, "\""));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_string(tools->output, function[0].value));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(tools->output, "\",\"arguments\":\""));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_string(tools->output, function[1].value));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(tools->output, "\"}}"));
-  ++tools->count;
-  return iree_ok_status();
+  iree_string_view_t name, arguments;
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_decode(
+      call[1].value, &tools->scratch->arguments, &name, &arguments));
+  IREE_RETURN_IF_ERROR(loom_serve_text_tool_calls_append(
+      tools->calls, tools->request_id, name, arguments));
+  const loom_serve_text_tool_call_t decoded_call =
+      loom_serve_text_tool_calls_at(tools->calls, index);
+  return loom_serve_text_chat_function_render(tools->policy, decoded_call.name,
+                                              decoded_call.arguments, index,
+                                              &tools->scratch->rendered, tools->scratch_allocator);
 }
 
 void loom_serve_text_chat_scratch_initialize(
@@ -1743,9 +1732,10 @@ void loom_serve_text_chat_scratch_deinitialize(
 
 iree_status_t loom_serve_text_chat_complete(
     loom_serve_text_chat_t* chat, iree_string_view_t response,
-    uint64_t request_id, iree_string_builder_t* tool_calls,
+    uint64_t request_id, loom_serve_text_tool_calls_t* tool_calls,
     loom_serve_text_chat_scratch_t* scratch, iree_allocator_t scratch_allocator,
     loom_serve_text_chat_completion_t* completion) {
+  loom_serve_text_tool_calls_reset(tool_calls);
   loom_serve_text_chat_completion_t result = {0};
   iree_string_builder_reset(&scratch->parsed);
   iree_string_builder_reset(&scratch->rendered);
@@ -1763,25 +1753,17 @@ iree_status_t loom_serve_text_chat_complete(
       .scratch_allocator = scratch_allocator,
       .policy = chat->policy,
       .request_id = request_id,
-      .flags = chat->flags,
-      .output = tool_calls,
+      .calls = tool_calls,
       .scratch = scratch};
   iree_status_t status = loom_serve_text_chat_render(
       chat->policy, chat->policy->parse_tools, IREE_ARRAYSIZE(inputs), inputs,
       0, NULL, &scratch->parsed, scratch_allocator, NULL);
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(tool_calls, "[");
-  }
   if (iree_status_is_ok(status)) {
     status = iree_json_enumerate_array_typed(
         iree_string_builder_view(&scratch->parsed),
         loom_serve_text_chat_completion_tool, &tools);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(tool_calls, "]");
-  }
-  if (iree_status_is_ok(status)) {
-    result.tool_count = tools.count;
     status = loom_serve_text_chat_checkpoint(
         chat, response, iree_string_builder_view(&scratch->rendered),
         chat->host_allocator, &result);
@@ -1794,6 +1776,7 @@ iree_status_t loom_serve_text_chat_complete(
     loom_serve_text_chat_completion_deinitialize(completion);
     *completion = result;
   } else {
+    loom_serve_text_tool_calls_reset(tool_calls);
     loom_serve_text_chat_completion_deinitialize(&result);
   }
   return status;
@@ -1860,7 +1843,8 @@ iree_status_t loom_serve_text_chat_usage(
 
 iree_status_t loom_serve_text_chat_response(
     const loom_serve_text_chat_response_t* response, iree_string_view_t content,
-    iree_string_view_t reasoning, iree_string_view_t tool_calls,
+    iree_string_view_t reasoning,
+    const loom_serve_text_tool_calls_t* tool_calls,
     iree_string_view_t finish_reason, iree_string_builder_t* output) {
   IREE_RETURN_IF_ERROR(
       loom_serve_text_chat_response_begin(response, "chat.completion", output));
@@ -1868,7 +1852,7 @@ iree_status_t loom_serve_text_chat_response(
       output,
       ",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
       "\"content\":"));
-  if (tool_calls.size && !content.size) {
+  if (tool_calls && tool_calls->count && !content.size) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
   } else {
     IREE_RETURN_IF_ERROR(loom_serve_text_chat_quote(output, content));
@@ -1878,10 +1862,11 @@ iree_status_t loom_serve_text_chat_response(
         iree_string_builder_append_cstring(output, ",\"reasoning_content\":"));
     IREE_RETURN_IF_ERROR(loom_serve_text_chat_quote(output, reasoning));
   }
-  if (tool_calls.size) {
+  if (tool_calls && tool_calls->count) {
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(output, ",\"tool_calls\":"));
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_string(output, tool_calls));
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_tool_calls_write_json(tool_calls, false, output));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, "},\"finish_reason\":"));
