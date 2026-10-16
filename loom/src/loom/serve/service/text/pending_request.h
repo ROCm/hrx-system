@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVICE_TEXT_PENDING_REQUEST_H_
 
 #include "loom/serve/service/text/checkpoint_registry.h"
+#include "loom/serve/service/text/consumer.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/telemetry.h"
@@ -17,11 +18,11 @@ extern "C" {
 #endif
 
 // A queued request owns no device reservation. Only the selected attempt may
-// borrow an idle row/cache; body/name/tool views borrow its immutable HTTP
-// claim.
+// borrow an idle row/cache; body/name/tool views borrow its consumer-owned
+// immutable input storage.
 typedef struct loom_serve_text_pending_request_t {
-  // Claimed transport identity, relinquished by admission, rejection or abort.
-  loom_serve_http_connection_t* connection;
+  // Input lifetime and output delivery, moved at admission or consumed on end.
+  loom_serve_text_consumer_t consumer;
   // Raw JSON retained until source rendering completes.
   iree_string_view_t body;
   // Canonical prompt/tool descriptors; null policy means not yet rendered.
@@ -34,7 +35,7 @@ typedef struct loom_serve_text_pending_request_t {
   iree_host_size_t reservation;
   // Cumulative CPU preparation time, excluding unchanged admission retries.
   iree_duration_t prepare_duration;
-  // Validated local session key borrowing the claimed request headers.
+  // Validated local session key borrowing immutable consumer input.
   iree_string_view_t name;
   // Borrowed explicit endpoint through admission or queue cancellation.
   loom_serve_text_checkpoint_entry_t* checkpoint;
@@ -53,7 +54,7 @@ iree_status_t loom_serve_text_pending_request_prepare(
     iree_allocator_t host_allocator);
 
 // Terminal request ownership, after CPU borrows retire and projector jobs have
-// detached. Both paths release all host/image state and the transport claim.
+// detached. Both paths release host/image state before the consumer receipt.
 // Queue ordering and checkpoint pending counts remain with the pending queue.
 void loom_serve_text_pending_request_cancel(
     loom_serve_text_pending_request_t* request,

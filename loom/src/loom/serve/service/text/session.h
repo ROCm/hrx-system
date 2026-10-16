@@ -10,10 +10,10 @@
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/service/inspection.h"
 #include "loom/serve/service/text/chat.h"
+#include "loom/serve/service/text/consumer.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/telemetry/record.h"
-#include "loom/serve/transport/http/server.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,14 +70,11 @@ typedef struct loom_serve_text_session_t {
   int32_t* tokens;
   // Accumulated decoded response, preserving the original model text.
   iree_string_builder_t response;
-  // Copied SSE or complete JSON bytes waiting for one carrier credit; no
-  // unbounded send queue. Nonstreaming requests publish only at completion.
-  iree_string_builder_t packet;
-  // Active request and its borrowed HTTP storage. A null connection means idle.
+  // Active request and its input/output receipt. A null consumer means idle.
   struct {
-    // Application claim, relinquished exactly once by finish or abort.
-    loom_serve_http_connection_t* connection;
-    // Validated chat borrowing the claimed request body.
+    // Input lifetime and output delivery, consumed after request borrowers.
+    loom_serve_text_consumer_t consumer;
+    // Validated chat borrowing the consumer-owned request body.
     loom_serve_text_chat_t chat;
     // Owned device features, released as their consuming prefill retires.
     loom_serve_text_media_request_t* media;
@@ -94,8 +91,8 @@ typedef struct loom_serve_text_session_t {
     iree_host_size_t retained_count;
     // Selected output tokens, including EOS.
     iree_host_size_t output_count;
-    // Terminal wire literal: stop, length, tool_calls, or error. NULL until
-    // translation establishes a terminal response.
+    // Terminal reason: stop, length, tool_calls, or error. NULL until
+    // translation establishes a terminal result.
     const char* finish_reason;
     // Monotonic application admission time; network framing is not included.
     iree_time_t start_time;
@@ -107,10 +104,10 @@ typedef struct loom_serve_text_session_t {
     iree_host_size_t reserved_tokens;
     // First selected token time, including a possible immediate EOS.
     iree_time_t first_token_time;
-    // CPU-produced packet metadata consumed only after its borrow returns.
+    // CPU-produced publication metadata consumed after its borrow returns.
     struct {
-      // The staged packet contains content, reasoning, or tool calls. Cleared
-      // when the carrier copies the packet or translation discards it.
+      // The staged output contains content, reasoning, or tool calls. Cleared
+      // after successful consumer publication or translation failure.
       bool pending;
       // The owner already recorded this request's first accepted output.
       bool recorded;
@@ -148,31 +145,29 @@ iree_status_t loom_serve_text_session_initialize(
     loom_serve_text_session_t* out_session);
 
 // Releases host storage only. The caller has retired CPU borrowers and released
-// every HTTP claim; native row/reservation ownership remains with the service.
-// Zero-initialized or partially initialized state is accepted.
+// every consumer receipt; native row/reservation ownership remains with the
+// service. Zero-initialized or partially initialized state is accepted.
 void loom_serve_text_session_deinitialize(loom_serve_text_session_t* session);
 
 // Starts output for the request already transferred into session->request.
 // Discards the previous canonical completion and initializes the
-// shared-tokenizer decoder. Streaming requests also produce the initial SSE
-// packet; nonstreaming headers remain unpublished until completion. Failure
-// leaves request cleanup to the owner.
+// shared-tokenizer decoder, then starts the consumer with admission metadata.
+// Failure leaves request and receipt cleanup to the owner.
 iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
                                             const iree_tokenizer_t* tokenizer,
                                             iree_string_view_t model_name);
 
-// Releases request-owned host state after finish or abort. The canonical
-// completion and reusable host buffers survive for retained continuation.
+// Releases request-owned host state before the owner ends the consumer receipt.
+// Canonical completion and reusable host buffers survive retained continuation.
 void loom_serve_text_session_release_request(
     loom_serve_text_session_t* session);
 
-// Decodes selected tokens and produces bounded SSE or final JSON output. Source
-// VM calls use the request's policy; scratch/tool_calls are exclusive shared
-// model storage, not per-row caches. scratch_allocator owns call-local VM
-// wrappers and may be reset when this function returns. No transport send or
-// native release occurs. On failure, the caller translates the error and
-// invalidates the continuation; the partially modified packet is not a valid
-// complete response.
+// Decodes selected tokens and stages semantic output through the consumer.
+// Source VM calls use the request policy; scratch/tool_calls are exclusive
+// shared CPU storage, not per-row caches. scratch_allocator owns call-local
+// VM wrappers and may be reset after return. Translation failures invalidate the
+// continuation and stage a terminal consumer error. Encoding allocation failure
+// propagates. No transport send or receipt release occurs on this CPU loan.
 iree_status_t loom_serve_text_session_append_tokens(
     loom_serve_text_session_t* session, iree_string_view_t model_name,
     iree_host_size_t count, const int32_t* tokens,
