@@ -54,9 +54,12 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
 void loom_serve_jit_retain(loom_serve_jit_t* jit);
 
 // Releases caller ownership without waiting or closing the host compiler queue.
-// Accepted jobs retain the catalog through their callbacks; release does not
-// cancel them. The host and caller-owned root/config storage still outlive all
-// accepted completions. Release from a completion callback is permitted.
+// Accepted jobs retain the catalog until their compiler/native work and result
+// binding retire. Ordered callback state then survives independently, allowing
+// catalog/device ownership to retire before completion becomes externally
+// visible. Release does not cancel jobs. The host, originating device owner and
+// caller-owned root/config storage still outlive all accepted completions. A
+// callback may release a separately retained caller reference.
 void loom_serve_jit_release(loom_serve_jit_t* jit);
 
 // Borrowed evidence accumulator for VM/parameter preparation while no stage
@@ -83,11 +86,13 @@ typedef void (*loom_serve_jit_completion_fn_t)(void* user_data,
 // Completion joins all accepted native work even when parent construction
 // fails, retaining successfully loaded natives for subsequent compilations.
 // Success invokes completion exactly once, possibly before return. Rejection
-// invokes no callback. The job retains jit; the caller keeps root, config and
-// its referenced storage alive through completion. Compilations may overlap on
-// the same catalog, including exact-input requests whose native work is still
-// pending. Callbacks publish in submission order, after their borrowed compiler
-// inputs retire. Different catalogs share workers and progress independently.
+// invokes no callback. The job retains jit through compiler retirement, while
+// callback publication has an independent lifetime. The caller keeps root,
+// config and its referenced storage alive through completion. Compilations may
+// overlap on the same catalog, including exact-input requests whose native work
+// is still pending. Callbacks publish in submission order, after their borrowed
+// compiler inputs and catalog ownership retire. Different catalogs share
+// workers and progress independently.
 iree_status_t loom_serve_jit_compile_async(
     loom_serve_jit_t* jit, iree_string_view_t root,
     const loomc_config_options_t* config,
