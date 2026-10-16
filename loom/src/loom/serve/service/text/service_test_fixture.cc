@@ -14,8 +14,8 @@
 namespace loom_serve::testing::text {
 
 void SourceTextServiceTest::SetUp() {
-  const auto application_options =
-      loom_serve_test_application_options_default();
+  auto application_options = loom_serve_test_application_options_default();
+  application_options.worker_count = WorkerCount();
   loom_serve_test_application_t* application = nullptr;
   IREE_ASSERT_OK(loom_serve_test_application_acquire(
       &application_options, host_allocator_, &application));

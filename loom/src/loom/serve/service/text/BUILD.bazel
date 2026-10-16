@@ -225,6 +225,7 @@ loom_cc_library(
         "managed_media_service_test.cc",
         "media_execution_test.cc",
         "media_service_test.cc",
+        "native_service_test.cc",
         "projector_execution_test.cc",
         "source_execution_test.cc",
     ],
@@ -236,6 +237,7 @@ loom_cc_library(
         ":model",
         ":readiness",
         ":source_service_fixture",
+        ":stream",
         "//loom/src/loom/serve/media:image_codec",
         "//loom/src/loom/serve/media:image_codecs",
         "//loom/src/loom/serve/media:image_request",
@@ -244,6 +246,7 @@ loom_cc_library(
         "//loom/src/loom/serve/service/finite:result",
         "//loom/src/loom/serve/service/finite/embedding:protocol",
         "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/tooling:flags",
     ],
     alwayslink = True,
 )
@@ -529,6 +532,30 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "stream",
+    srcs = ["stream.c"],
+    hdrs = ["stream.h"],
+    deps = [
+        ":chat",
+        ":consumer",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "stream_test",
+    srcs = ["stream_test.cc"],
+    deps = [
+        ":chat",
+        ":consumer",
+        ":stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "session",
     srcs = ["session.c"],
     hdrs = ["session.h"],
@@ -781,6 +808,7 @@ loom_cc_library(
         ":schedule",
         ":session",
         ":session_cache",
+        ":stream",
         ":telemetry",
         "//loom/src/loom/serve/media:image_codec",
         "//loom/src/loom/serve/media:image_codecs",

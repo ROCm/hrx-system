@@ -155,6 +155,43 @@ request storage. HTTP encoders consume those records directly, adding delta
 indexes for streaming output. A later invalid record leaves no partial call
 set, and retained session/checkpoint histories do not keep this output table.
 
+## Native text consumers
+
+An in-process serving owner uses `loom_serve_registry_try_open_text` with a
+deployment name and a [native request](stream.h). The request contains the same
+supported chat JSON document as HTTP, in an owning string builder, plus optional
+session and checkpoint selectors. Acceptance moves the builder and copies the
+selectors; pressure or immediate failure leaves all caller ownership intact.
+Source validation, image preparation, canonical history, and packed model
+execution use the existing pending queue and shared workers. Constructing a
+large conversation or image payload can happen before entering the owner turn;
+admission never copies the complete JSON body.
+
+With `stream:true`, `loom_serve_text_stream_peek` borrows an ordered block of
+content and reasoning spans. `loom_serve_text_stream_block_count` and
+`loom_serve_text_stream_block_at` traverse those spans without parsing output
+JSON. Consuming the block returns delivery credit. The CPU output task may
+prepare the next block while the first is unread, then only this request waits
+for credit. An empty final block also requires consumption. With `stream:false`,
+the handle retains the complete result without incremental spans.
+
+After execution retires, `loom_serve_text_stream_result` exposes the complete
+content, reasoning, validated tool calls, finish reason, request identity, and
+committed token usage. Those allocations move from the completed source
+transaction; they do not retain a model row or its source VM. Canonical history
+remains separately owned by the session and can resume through HTTP or native
+admission. The final result remains valid through model removal, same-name
+replacement, and registry destruction until the caller closes the handle.
+
+The caller serializes handle operations with registry advancement. Closing
+immediately cancels output interest, while accepted CPU/device borrowers retain
+execution ownership until retirement. Source rejection and generation failure
+publish an owned terminal status. A stop discards undelivered publication but
+preserves previously borrowed bytes until consume or close. Holding a final
+result does not prevent graceful model removal.
+
+## Source request policy
+
 Source `request_defaults(options)` validates deployment policy once. Each
 `request_options(defaults, request, nonce)` call validates overrides and returns
 an owned opaque buffer retained by the chat through completion. Both inputs

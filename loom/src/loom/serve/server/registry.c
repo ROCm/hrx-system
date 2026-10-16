@@ -214,6 +214,23 @@ iree_status_t loom_serve_registry_try_open_recognition(
   return service->try_open_recognition(service->self, request, out_stream);
 }
 
+iree_status_t loom_serve_registry_try_open_text(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    loom_serve_text_request_t* request, loom_serve_text_stream_t** out_stream) {
+  *out_stream = NULL;
+  loom_serve_service_t* service = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
+      registry, name, IREE_SV("text"), &service));
+  if (!service) {
+    return iree_ok_status();
+  }
+  if (!service->try_open_text) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "text service has no native admission");
+  }
+  return service->try_open_text(service->self, request, out_stream);
+}
+
 iree_status_t loom_serve_registry_register(
     loom_serve_registry_t* registry,
     loom_serve_model_configuration_t* configuration,
