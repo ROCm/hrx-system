@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "loom/serve/service/text/response.h"
+#include "loom/serve/service/text/http.h"
 
 iree_status_t loom_serve_text_pending_queue_initialize(
     loom_serve_text_model_t* model, loom_serve_text_telemetry_t* telemetry,
@@ -56,7 +56,7 @@ iree_status_t loom_serve_text_pending_queue_enqueue(
   loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Session"),
                                         &name);
   if (!loom_serve_text_session_name_valid(name)) {
-    return loom_serve_text_response_reject(
+    return loom_serve_text_http_reject(
         queue->telemetry, connection, receipt, 400, "Bad Request",
         iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -69,7 +69,7 @@ iree_status_t loom_serve_text_pending_queue_enqueue(
           request, IREE_SV("X-Loom-Checkpoint"), &checkpoint_name)) {
     if (!checkpoint_name.size ||
         !loom_serve_text_session_name_valid(checkpoint_name)) {
-      return loom_serve_text_response_reject(
+      return loom_serve_text_http_reject(
           queue->telemetry, connection, receipt, 400, "Bad Request",
           iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
@@ -79,7 +79,7 @@ iree_status_t loom_serve_text_pending_queue_enqueue(
     checkpoint =
         loom_serve_text_checkpoint_registry_find(checkpoints, checkpoint_name);
     if (!checkpoint) {
-      return loom_serve_text_response_reject(
+      return loom_serve_text_http_reject(
           queue->telemetry, connection, receipt, 404, "Not Found",
           iree_make_status(IREE_STATUS_NOT_FOUND, "checkpoint is not pinned"),
           queue->host_allocator);
@@ -87,29 +87,37 @@ iree_status_t loom_serve_text_pending_queue_enqueue(
   }
   loom_serve_text_session_t* session =
       loom_serve_text_session_select(row_count, sessions, name, NULL);
-  bool busy = session && session->request.connection;
+  bool busy = session && session->request.consumer.self;
   for (iree_host_size_t i = 0; name.size && i < queue->count; ++i) {
     busy |= iree_string_view_equal(name, queue->values[i]->name);
   }
   if (busy) {
-    return loom_serve_text_response_reject(
+    return loom_serve_text_http_reject(
         queue->telemetry, connection, receipt, 409, "Conflict",
         iree_make_status(IREE_STATUS_ALREADY_EXISTS,
                          "session already has an active or queued request"),
         queue->host_allocator);
   }
   if (queue->count == queue->capacity) {
-    return loom_serve_text_response_reject(
+    return loom_serve_text_http_reject(
         queue->telemetry, connection, receipt, 503, "Service Unavailable",
         iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                          "pending request queue is full"),
         queue->host_allocator);
   }
+  loom_serve_text_consumer_t consumer;
+  iree_status_t status = loom_serve_text_http_consumer_allocate(
+      connection, queue->telemetry, receipt, queue->host_allocator, &consumer);
+  if (!iree_status_is_ok(status)) {
+    return loom_serve_text_http_reject(
+        queue->telemetry, connection, receipt, 503, "Service Unavailable",
+        status, queue->host_allocator);
+  }
   if (checkpoint) {
     ++checkpoint->pending;
   }
   *queue->values[queue->count++] = (loom_serve_text_pending_request_t){
-      .connection = connection,
+      .consumer = consumer,
       .body = request->body,
       .name = name,
       .checkpoint = checkpoint,
@@ -221,7 +229,7 @@ bool loom_serve_text_pending_queue_cancel_failed(
   for (iree_host_size_t i = 0; i < queue->count;) {
     loom_serve_text_pending_request_t* request = queue->values[i];
     if (request != borrowed &&
-        loom_serve_http_connection_failed(request->connection) &&
+        !request->consumer.vtable->is_open(request->consumer.self) &&
         loom_serve_text_media_projector_cancel(projector, request->media)) {
       loom_serve_text_pending_queue_cancel(queue, i, projector);
       progress = true;

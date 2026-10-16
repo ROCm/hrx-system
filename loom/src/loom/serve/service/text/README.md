@@ -15,8 +15,8 @@ model, not separate VM instances. [Source preparation](source.h) and
 The shared [program runtime](../../runtime/program/program.h) accepts text or
 bytecode source inputs through the same compilation path.
 
-The [service](service.h) is the serialized owner of HTTP claims, admission and
-epoch completion. Finite CPU preparation/output tasks borrow its model and
+The [service](service.h) is the serialized owner of request receipts, admission,
+and epoch completion. Finite CPU preparation/output tasks borrow its model and
 session storage. Device readiness and CPU release callbacks publish completion
 and wake the owner; they do not mutate sessions or destroy the model. Input
 preparation can overlap an accepted epoch on other rows. No service creates a
@@ -133,9 +133,19 @@ request asynchronous pool trim.
 
 [Chat policy](chat.h) calls the model's source VM to render input, classify output
 and retain canonical conversation state. [Session output](session.h) owns
-incremental decoding, bounded JSON/SSE packets and output credit. Shared error
-[responses](response.h) consume diagnostic status at the wire boundary without
-borrowing scratch used by a CPU output task.
+incremental decoding and source classification. A request's [consumer
+receipt](consumer.h) preserves input storage and owns bounded output delivery
+independently of the model row. The [HTTP adapter](http.h) encodes JSON/SSE in
+the existing CPU output task, then publishes its staged packet on the serving
+owner. An empty stage permits another epoch while the previous copied send is
+in flight; a full stage behind a stalled reader pauses only that row.
+
+Pending requests move their receipt into the admitted row without changing
+input storage. Rejection, cancellation, and completion release it only after
+accepted CPU/device borrowers and request-local views retire. HTTP rejection
+uses independent scratch and can overlap another row's output task. Translation
+failure discards the incomplete staged response, invalidates canonical reuse,
+and publishes the terminal protocol error.
 
 Generated function calls form one completed transaction. Source parsing and
 canonical history formatting must both succeed before the owned
