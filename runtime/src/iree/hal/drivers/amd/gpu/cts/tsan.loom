@@ -1,0 +1,37 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.def export("report_race") @report_race() {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%two, %one, %one) : index
+} launch() {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %bytes = index.constant 4 : offset
+  %value = scalar.constant 1 : i32
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<1xi32>
+  sanitizer.race.access<write> %view[%index] : view<1xi32>
+  view.store %value, %view[%index] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def export("safe_write") @safe_write() {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%two, %one, %one) : index
+} launch() {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %value = scalar.constant 1 : i32
+  %lane = kernel.workitem.id<x> : index
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<2xi32>
+  sanitizer.race.access<write> %view[%lane] : view<2xi32>
+  view.store %value, %view[%lane] : i32, view<2xi32>
+  kernel.return
+}

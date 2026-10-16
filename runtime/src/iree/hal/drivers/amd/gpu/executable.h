@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amd/gpu/feedback.h"
 #include "iree/hal/drivers/amd/gpu/kernarg.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
+#include "iree/hal/drivers/amd/gpu/tsan.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,6 +39,10 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   iree_hal_amd_gpu_feedback_t* feedback;
   // Optional shadow namespace used by code-object globals and data ranges.
   iree_hal_amd_fabric_asan_t* asan;
+  // Number of provisioned queue shadow records; zero when TSAN is disabled.
+  uint32_t tsan_count;
+  // Borrowed device-owned queue records, consumed during image placement.
+  const iree_hal_amd_gpu_tsan_t* tsan;
 } iree_hal_amd_gpu_executable_options_t;
 
 // Copies the public artifact, admits its image, and loads native backing for
@@ -66,6 +71,20 @@ iree_status_t iree_hal_amd_gpu_executable_create(
 iree_status_t iree_hal_amd_gpu_executable_lookup_pm4(
     iree_hal_executable_t* executable, iree_hal_executable_function_t token,
     const iree_hal_amd_gpu_pm4_function_t** out_function);
+
+// Selects the prepared placement for a provisioned queue in this exact family.
+// The owning queue supplies its construction ordinal; only the external
+// function token requires validation. Ordinary images share one placement.
+iree_status_t iree_hal_amd_gpu_executable_lookup_pm4_for_queue(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t token,
+    uint32_t queue_ordinal,
+    const iree_hal_amd_gpu_pm4_function_t** out_function);
+
+// Borrows queue-indexed image bases for recording native address relocations.
+// NULL means the image is shared. The recording retains the executable through
+// every invocation, so no per-dispatch copy of this table is necessary.
+const uint64_t* iree_hal_amd_gpu_executable_queue_image_addresses(
+    iree_hal_executable_t* executable);
 
 #ifdef __cplusplus
 }  // extern "C"

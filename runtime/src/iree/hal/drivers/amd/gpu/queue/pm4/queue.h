@@ -23,6 +23,10 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   // Exact native family selected independently of the compiler target.
   uint32_t family_ordinal;
+  // Stable ordinal in the parent's provisioned queue array.
+  uint32_t queue_ordinal;
+  // Power-of-two sanitizer dispatch window, or zero without TSAN.
+  uint32_t tsan_shadow_slot_count;
   // One admitted USER or KERNEL publication mode.
   amdf_queue_publication_modes_t publication_mode;
   // Power-of-two command storage capacity in bytes.

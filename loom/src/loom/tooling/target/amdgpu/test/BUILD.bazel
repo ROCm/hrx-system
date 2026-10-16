@@ -32,6 +32,8 @@ load(
     "AMDGPU_TSAN_PROFILE",
     "RDNA_ASAN_PROFILE",
     "RDNA_HARDWARE_PROFILE",
+    "RDNA_TSAN_BYTE_GRANULE_PROFILE",
+    "RDNA_TSAN_PROFILE",
 )
 
 package(
@@ -363,7 +365,11 @@ loom_test(
 loom_test(
     name = "tsan_test",
     srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom"],
-    execution_profiles = [AMDGPU_TSAN_PROFILE],
+    execution_profiles = [
+        AMDGPU_TSAN_PROFILE,
+        RDNA_TSAN_BYTE_GRANULE_PROFILE,
+        RDNA_TSAN_PROFILE,
+    ],
 )
 
 loom_test(

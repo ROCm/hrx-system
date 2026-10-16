@@ -244,8 +244,10 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
     const iree_hal_amd_gpu_feedback_packet_t* packet) {
   const iree_host_size_t length = packet->record_length - packet->header_length;
   const uint8_t* payload = (const uint8_t*)packet + packet->header_length;
-  if ((packet->kind != 1 && packet->kind != 5) || length < 64 ||
-      iree_unaligned_load_le_u32(payload) < 64 ||
+  const uint32_t minimum_length = packet->kind == 4 ? 120u : 64u;
+  if ((packet->kind != 1 && packet->kind != 4 && packet->kind != 5) ||
+      length < minimum_length ||
+      iree_unaligned_load_le_u32(payload) < minimum_length ||
       iree_unaligned_load_le_u32(payload) > length ||
       iree_unaligned_load_le_u32(payload + 4) != 0) {
     return iree_make_status(
@@ -258,6 +260,7 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
   // Device publication is the handoff from the executable-loading thread.
   IREE_TSAN_ACQUIRE((void*)source);
   iree_hal_device_asan_report_t asan = {0};
+  iree_hal_device_tsan_report_t tsan = {0};
   iree_hal_device_ubsan_report_t ubsan = {0};
   uint64_t site_id = 0;
   iree_const_byte_span_t report;
@@ -281,6 +284,50 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
     };
     site_id = asan.site_id;
     report = iree_make_const_byte_span(&asan, sizeof(asan));
+  } else if (packet->kind == 4) {
+    const uint32_t check_kind = iree_unaligned_load_le_u32(payload + 8);
+    const uint32_t memory_space = iree_unaligned_load_le_u32(payload + 16);
+    const uint32_t current_access = iree_unaligned_load_le_u32(payload + 20);
+    const uint32_t prior_access = iree_unaligned_load_le_u32(payload + 24);
+    tsan = (iree_hal_device_tsan_report_t){
+        .record_length = sizeof(tsan),
+        .abi_version = IREE_HAL_DEVICE_TSAN_REPORT_ABI_VERSION_0,
+        .check_kind = check_kind <= IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE
+                          ? check_kind
+                          : IREE_HAL_DEVICE_TSAN_CHECK_KIND_UNKNOWN,
+        .flags = iree_unaligned_load_le_u32(payload + 12),
+        .memory_space =
+            memory_space <= IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_PRIVATE
+                ? memory_space
+                : IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_UNKNOWN,
+        .current_access_kind =
+            current_access <= IREE_HAL_DEVICE_TSAN_ACCESS_KIND_ATOMIC
+                ? current_access
+                : IREE_HAL_DEVICE_TSAN_ACCESS_KIND_UNKNOWN,
+        .prior_access_kind =
+            prior_access <= IREE_HAL_DEVICE_TSAN_ACCESS_KIND_ATOMIC
+                ? prior_access
+                : IREE_HAL_DEVICE_TSAN_ACCESS_KIND_UNKNOWN,
+        .access_length = iree_unaligned_load_le_u32(payload + 28),
+        .current_site_id = iree_unaligned_load_le_u64(payload + 32),
+        .prior_site_id = iree_unaligned_load_le_u64(payload + 40),
+        .memory_address = iree_unaligned_load_le_u64(payload + 48),
+        .shadow_address = iree_unaligned_load_le_u64(payload + 56),
+        .shadow_value = iree_unaligned_load_le_u64(payload + 64),
+        .source_dispatch_ptr = packet->source_dispatch_ptr,
+    };
+    for (uint32_t i = 0; i < 3; ++i) {
+      tsan.current_workgroup_id[i] =
+          iree_unaligned_load_le_u32(payload + 72 + i * 4);
+      tsan.current_workitem_id[i] =
+          iree_unaligned_load_le_u32(payload + 84 + i * 4);
+      tsan.prior_workgroup_id[i] =
+          iree_unaligned_load_le_u32(payload + 96 + i * 4);
+      tsan.prior_workitem_id[i] =
+          iree_unaligned_load_le_u32(payload + 108 + i * 4);
+    }
+    site_id = tsan.current_site_id;
+    report = iree_make_const_byte_span(&tsan, sizeof(tsan));
   } else {
     const uint32_t check_kind = iree_unaligned_load_le_u32(payload + 8);
     ubsan = (iree_hal_device_ubsan_report_t){
@@ -301,8 +348,9 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
     report = iree_make_const_byte_span(&ubsan, sizeof(ubsan));
   }
   iree_hal_device_event_t event = iree_hal_device_event_default();
-  event.type = packet->kind == 1 ? IREE_HAL_DEVICE_EVENT_TYPE_ASAN_REPORT
-                                 : IREE_HAL_DEVICE_EVENT_TYPE_UBSAN_REPORT;
+  event.type = packet->kind == 1   ? IREE_HAL_DEVICE_EVENT_TYPE_ASAN_REPORT
+               : packet->kind == 4 ? IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT
+                                   : IREE_HAL_DEVICE_EVENT_TYPE_UBSAN_REPORT;
   event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
   event.sequence = packet->sequence;
   event.source.device = feedback->device;
@@ -319,10 +367,15 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
   event.implementation_payload =
       iree_make_const_byte_span(packet, packet->record_length);
   iree_hal_device_event_sink_publish(feedback->context->event_sink, &event);
-  if (packet->kind == 1 &&
-      feedback->asan_report_policy ==
-          IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE) {
-    iree_hal_amd_gpu_feedback_fail(feedback, IREE_STATUS_ABORTED);
+  if ((packet->kind == 1 &&
+       feedback->asan_report_policy ==
+           IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE) ||
+      (packet->kind == 4 &&
+       feedback->tsan_report_policy ==
+           IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE)) {
+    iree_hal_amd_gpu_feedback_fail(feedback, packet->kind == 4
+                                                 ? IREE_STATUS_DATA_LOSS
+                                                 : IREE_STATUS_ABORTED);
   }
   return iree_ok_status();
 }

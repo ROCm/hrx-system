@@ -50,6 +50,12 @@ class FeedbackTest : public ::testing::Test {
       self.asan_reports_.push_back(
           *reinterpret_cast<const iree_hal_device_asan_report_t*>(
               event->payload.data));
+    } else if (event->type == IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT) {
+      EXPECT_EQ(event->source.executable_id,
+                iree_hal_amd_gpu_source_context_executable_id(self.source_));
+      self.tsan_reports_.push_back(
+          *reinterpret_cast<const iree_hal_device_tsan_report_t*>(
+              event->payload.data));
     } else {
       EXPECT_EQ(event->type, IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE);
       self.failures_.push_back(
@@ -80,6 +86,15 @@ class FeedbackTest : public ::testing::Test {
     iree_unaligned_store_le_u64(payload + 32, 29);
     return packet;
   }
+  iree_hal_amd_gpu_feedback_packet_t* TsanPacket(uint64_t position) {
+    auto* packet = Packet(position);
+    packet->kind = 4;
+    packet->record_length = 192;
+    auto* payload = reinterpret_cast<uint8_t*>(packet + 1);
+    std::memset(payload, 0, 128);
+    iree_unaligned_store_le_u32(payload, 120);
+    return packet;
+  }
   // Public event destination supplied by the owning device.
   iree_hal_amd_gpu_context_t context_ = {};
   // Production consumer; the test supplies bytes at its producer boundary.
@@ -97,9 +112,86 @@ class FeedbackTest : public ::testing::Test {
   std::vector<iree_hal_device_ubsan_report_t> reports_;
   // Access reports copied from the shared consumer.
   std::vector<iree_hal_device_asan_report_t> asan_reports_;
+  // Race reports copied before the native packet storage is reclaimed.
+  std::vector<iree_hal_device_tsan_report_t> tsan_reports_;
   // Channel errors, distinct from authored diagnostic events.
   std::vector<iree_status_code_t> failures_;
 };
+
+TEST_F(FeedbackTest, TsanReportsPreserveBothAccessesAndWorkitemCoordinates) {
+  auto* packet = TsanPacket(0);
+  auto* payload = reinterpret_cast<uint8_t*>(packet + 1);
+  iree_unaligned_store_le_u32(payload + 8,
+                              IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE);
+  iree_unaligned_store_le_u32(payload + 12,
+                              IREE_HAL_DEVICE_TSAN_REPORT_FLAG_PRIOR_ATOMIC);
+  iree_unaligned_store_le_u32(payload + 16,
+                              IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_WORKGROUP);
+  iree_unaligned_store_le_u32(payload + 20,
+                              IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE);
+  iree_unaligned_store_le_u32(payload + 24,
+                              IREE_HAL_DEVICE_TSAN_ACCESS_KIND_ATOMIC);
+  iree_unaligned_store_le_u32(payload + 28, 8);
+  for (uint32_t i = 0; i < 5; ++i) {
+    iree_unaligned_store_le_u64(payload + 32 + i * 8,
+                                UINT64_C(0x123400000000) + i);
+  }
+  for (uint32_t i = 0; i < 12; ++i) {
+    iree_unaligned_store_le_u32(payload + 72 + i * 4, 17 + i);
+  }
+  control_.reservation_head = 192;
+  iree_hal_amd_gpu_feedback_drain(&feedback_);
+  ASSERT_EQ(tsan_reports_.size(), 1u);
+  const auto& report = tsan_reports_[0];
+  EXPECT_EQ(report.record_length, 128u);
+  EXPECT_EQ(report.abi_version, 0u);
+  EXPECT_EQ(report.check_kind, IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE);
+  EXPECT_EQ(report.flags, IREE_HAL_DEVICE_TSAN_REPORT_FLAG_PRIOR_ATOMIC);
+  EXPECT_EQ(report.memory_space, IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_WORKGROUP);
+  EXPECT_EQ(report.current_access_kind, IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE);
+  EXPECT_EQ(report.prior_access_kind, IREE_HAL_DEVICE_TSAN_ACCESS_KIND_ATOMIC);
+  EXPECT_EQ(report.access_length, 8u);
+  EXPECT_EQ(report.current_site_id, UINT64_C(0x123400000000));
+  EXPECT_EQ(report.prior_site_id, UINT64_C(0x123400000001));
+  EXPECT_EQ(report.memory_address, UINT64_C(0x123400000002));
+  EXPECT_EQ(report.shadow_address, UINT64_C(0x123400000003));
+  EXPECT_EQ(report.shadow_value, UINT64_C(0x123400000004));
+  for (uint32_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(report.current_workgroup_id[i], 17 + i);
+    EXPECT_EQ(report.current_workitem_id[i], 20 + i);
+    EXPECT_EQ(report.prior_workgroup_id[i], 23 + i);
+    EXPECT_EQ(report.prior_workitem_id[i], 26 + i);
+  }
+  EXPECT_EQ(report.source_dispatch_ptr, 0x1200000040u);
+  EXPECT_EQ(control_.read_tail, 192u);
+  EXPECT_EQ(
+      iree_atomic_load(&feedback_.failure_code, iree_memory_order_acquire),
+      IREE_STATUS_OK);
+}
+
+TEST_F(FeedbackTest, TsanFailDeviceRetainsAllReadyReports) {
+  feedback_.tsan_report_policy =
+      IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE;
+  TsanPacket(0);
+  TsanPacket(192);
+  control_.reservation_head = 384;
+  iree_hal_amd_gpu_feedback_drain(&feedback_);
+  EXPECT_EQ(tsan_reports_.size(), 2u);
+  EXPECT_EQ(control_.read_tail, 384u);
+  EXPECT_EQ(
+      iree_atomic_load(&feedback_.failure_code, iree_memory_order_acquire),
+      IREE_STATUS_DATA_LOSS);
+}
+
+TEST_F(FeedbackTest, RejectsTruncatedTsanPayloadBeforeReadingCoordinates) {
+  Packet(0)->kind = 4;
+  control_.reservation_head = 128;
+  iree_hal_amd_gpu_feedback_drain(&feedback_);
+  EXPECT_TRUE(tsan_reports_.empty());
+  ASSERT_EQ(failures_.size(), 1u);
+  EXPECT_EQ(failures_[0], IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(control_.read_tail, 0u);
+}
 
 TEST_F(FeedbackTest, AsanReportsPreserveAccessAndSourceFields) {
   auto* packet = Packet(0);

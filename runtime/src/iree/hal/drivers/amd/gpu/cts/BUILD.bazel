@@ -88,6 +88,42 @@ iree_runtime_cc_test(
     ],
 )
 
+[
+    loom_kernel_binary(
+        name = "tsan_" + target,
+        testonly = True,
+        srcs = ["tsan.loom"],
+        out = "tsan_" + target + ".hsaco",
+        target = ":feedback_profile_" + target,
+        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    )
+    for target in _FEEDBACK_TARGETS
+]
+
+iree_c_embed_data(
+    name = "tsan_images",
+    testonly = True,
+    srcs = [":tsan_" + target for target in _FEEDBACK_TARGETS],
+    c_file_output = "tsan_images.c",
+    h_file_output = "tsan_images.h",
+    identifier = "iree_hal_amd_gpu_tsan_images",
+    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_test(
+    name = "tsan_test",
+    srcs = ["tsan_test.cc"],
+    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    deps = [
+        ":test_device",
+        ":tsan_images",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "backends",
     testonly = True,

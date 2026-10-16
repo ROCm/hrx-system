@@ -57,7 +57,7 @@ AMDGPU_HARDWARE_PROFILE = amdgpu_execution_profile(
     name = "amdgpu_hardware",
 )
 
-def rdna_execution_profile(name, runner_args = [], tags = []):
+def rdna_execution_profile(name, runner_args = [], tags = [], device = "rdna"):
     """Defines native AMD GPU execution with libamdf hardware requirements."""
     return loom_execution_profile(
         name = name,
@@ -72,7 +72,7 @@ def rdna_execution_profile(name, runner_args = [], tags = []):
         executor = "hardware",
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
         run_requirements = [LIBAMDF_AMDGPU_RESOURCE],
-        runner_args = ["--device=rdna"] + runner_args,
+        runner_args = ["--device=" + device] + runner_args,
         tags = tags,
         target_class = "gpu",
         target_family = "amdgpu",
@@ -84,6 +84,18 @@ RDNA_ASAN_PROFILE = rdna_execution_profile(
     name = "rdna_asan",
     runner_args = ["--sanitizer=asan", "--sanitizer-reporting=report-only"],
     tags = ["notsan"],
+)
+
+RDNA_TSAN_PROFILE = rdna_execution_profile(
+    name = "rdna_tsan",
+    device = "rdna://?tsan_report_policy=report-only",
+    runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
+)
+
+RDNA_TSAN_BYTE_GRANULE_PROFILE = rdna_execution_profile(
+    name = "rdna_tsan_byte_granule",
+    device = "rdna://?tsan_report_policy=report-only&tsan_memory_granule_shift=0",
+    runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 
 AMDGPU_ACCESS_PROFILE = amdgpu_execution_profile(

@@ -38,6 +38,7 @@ iree_runtime_cc_library(
         ":context",
         ":executable",
         ":feedback",
+        ":tsan",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -74,6 +75,7 @@ iree_runtime_cc_library(
         ":feedback",
         ":kernarg",
         ":source_context",
+        ":tsan",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
@@ -96,6 +98,22 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "tsan",
+    srcs = ["tsan.c"],
+    hdrs = ["tsan.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":context",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "source_context",
     srcs = ["source_context.c"],
     hdrs = ["source_context.h"],
@@ -103,6 +121,18 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "tsan_test",
+    srcs = ["tsan_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":tsan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

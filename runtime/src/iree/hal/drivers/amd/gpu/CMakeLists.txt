@@ -22,6 +22,7 @@ iree_cc_library(
     ::context
     ::executable
     ::feedback
+    ::tsan
     amdf::headers
     iree::async
     iree::async::util::proactor_pool
@@ -61,6 +62,7 @@ iree_cc_library(
     ::feedback
     ::kernarg
     ::source_context
+    ::tsan
     amdf::headers
     iree::base
     iree::base::core_headers
@@ -83,6 +85,26 @@ iree_cc_library(
 )
 endif()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    tsan
+  HDRS
+    "tsan.h"
+  SRCS
+    "tsan.c"
+  DEPS
+    ::context
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
 iree_cc_library(
   NAME
     source_context
@@ -96,6 +118,20 @@ iree_cc_library(
     iree::hal
   PUBLIC
 )
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    tsan_test
+  SRCS
+    "tsan_test.cc"
+  DEPS
+    ::tsan
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
 
 iree_cc_test(
   NAME

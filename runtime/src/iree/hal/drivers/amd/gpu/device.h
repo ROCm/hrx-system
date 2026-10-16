@@ -11,6 +11,7 @@
 #include "iree/hal/drivers/amd/fabric/asan.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/feedback.h"
+#include "iree/hal/drivers/amd/gpu/tsan.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,6 +59,13 @@ typedef struct iree_hal_amd_gpu_device_options_t {
     // Shadow geometry, redzone policy, and freed-backing retention.
     iree_hal_amd_fabric_asan_options_t memory;
   } asan;
+  // Provisioning used when the device's runtime features enable TSAN.
+  struct {
+    // Effect of a shader race report on subsequent device use.
+    iree_hal_amd_gpu_sanitizer_report_policy_t report_policy;
+    // Queue-local workgroup shadow geometry.
+    iree_hal_amd_gpu_tsan_options_t memory;
+  } tsan;
 } iree_hal_amd_gpu_device_options_t;
 
 // Initializes ordinary provisioning sizes and automatic PM4 family selection.

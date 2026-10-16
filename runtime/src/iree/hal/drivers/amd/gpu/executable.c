@@ -22,15 +22,8 @@
 // Native image ownership
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_hal_amd_gpu_executable_t {
-  // Exact-family HAL resource retained by captured dispatches.
-  iree_hal_executable_t base;
-  // Allocator for this object and its inline cold tables.
-  iree_allocator_t host_allocator;
-  // Borrowed native owner, dominated by the parent HAL device.
-  const iree_hal_amd_gpu_context_t* context;
-  // Owned parsed artifact, including reflection and retained source bytes.
-  iree_hal_amd_gpu_image_t image;
+// One native placement. Only queue-scoped shader globals require more than one.
+typedef struct iree_hal_amd_gpu_executable_variant_t {
   // Owned code/global backing and persistent upload/global mapping.
   iree_hal_amd_fabric_memory_t memory;
   // Borrowed shadow owner when this image published precise global ranges.
@@ -45,6 +38,29 @@ typedef struct iree_hal_amd_gpu_executable_t {
   iree_hal_amd_gpu_pm4_function_t* functions;
   // Inline prepared conversion program, or NULL when no function needs packets.
   iree_hal_amd_gpu_pm4_launch_t* packet_program;
+} iree_hal_amd_gpu_executable_variant_t;
+
+typedef struct iree_hal_amd_gpu_executable_t {
+  // Exact-family HAL resource retained by captured dispatches.
+  iree_hal_executable_t base;
+  // Allocator for this object and its inline cold tables.
+  iree_allocator_t host_allocator;
+  // Borrowed native owner, dominated by the parent HAL device.
+  const iree_hal_amd_gpu_context_t* context;
+  // Owned parsed artifact, including reflection and retained source bytes.
+  iree_hal_amd_gpu_image_t image;
+  // Number of physical placements; instrumented images have one per queue.
+  uint32_t variant_count;
+  // Kernel count for queue-scoped indexing, or zero for one shared placement.
+  uint32_t function_variant_stride;
+  // Dense variant-major functions; dispatch selection needs no placement walk.
+  iree_hal_amd_gpu_pm4_function_t* functions;
+  // Inline placements sharing one parsed image and argument layout.
+  iree_hal_amd_gpu_executable_variant_t* variants;
+  // Queue-indexed image bases for recorded relocations, or NULL without TSAN.
+  uint64_t* queue_image_addresses;
+  // Device-retained source identity shared by every placement's reports.
+  const iree_hal_amd_gpu_source_context_t* source;
   // Contracts indexed by READ/WRITE permissions; only used classes exist.
   iree_hal_memory_contract_t* contracts[4];
   // Cold global-view publication lock; never acquired during dispatch.
@@ -72,17 +88,21 @@ static void iree_hal_amd_gpu_executable_free(void* user_data) {
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(executable->contracts); ++i) {
     iree_hal_memory_contract_release(executable->contracts[i]);
   }
-  if (executable->asan) {
-    iree_hal_amd_fabric_asan_advise_range(
-        executable->asan, executable->bindings[1].device_address,
-        executable->memory.info.byte_length, 0, 0);
+  for (uint32_t i = 0; i < executable->variant_count; ++i) {
+    iree_hal_amd_gpu_executable_variant_t* variant = &executable->variants[i];
+    if (variant->asan) {
+      iree_hal_amd_fabric_asan_advise_range(
+          variant->asan, variant->bindings[1].device_address,
+          variant->memory.info.byte_length, 0, 0);
+    }
+    iree_hal_amd_fabric_memory_deinitialize(executable->context->api,
+                                            executable->context->event_sink,
+                                            &variant->memory);
   }
-  iree_hal_amd_fabric_memory_deinitialize(executable->context->api,
-                                          executable->context->event_sink,
-                                          &executable->memory);
   for (iree_host_size_t i = 0; i < executable->image.metadata.kernel_count;
        ++i) {
-    iree_hal_amd_gpu_kernarg_layout_free(executable->functions[i].kernarg);
+    iree_hal_amd_gpu_kernarg_layout_free(
+        executable->variants[0].functions[i].kernarg);
   }
   iree_hal_amd_gpu_image_deinitialize(&executable->image);
   iree_allocator_free_aligned(executable->host_allocator, executable);
@@ -160,6 +180,7 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
     }
     iree_host_size_t required_length =
         i == 0 && options->asan ? sizeof(iree_hal_amd_fabric_asan_config_t)
+        : i == 1 && options->tsan_count ? sizeof(iree_hal_amd_gpu_tsan_config_t)
         : i == 2 && options->feedback
             ? sizeof(iree_hal_amd_gpu_feedback_config_t)
             : 0;
@@ -242,6 +263,7 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
 
 static iree_status_t iree_hal_amd_gpu_executable_publish_feedback(
     iree_hal_amd_gpu_executable_t* executable,
+    iree_hal_amd_gpu_executable_variant_t* variant,
     iree_hal_amd_gpu_feedback_t* feedback) {
   const iree_hal_amd_gpu_image_symbol_t* config_symbol =
       iree_hal_amd_gpu_image_find_symbol(&executable->image,
@@ -257,30 +279,32 @@ static iree_status_t iree_hal_amd_gpu_executable_publish_feedback(
     if (sites->kind != IREE_HAL_AMD_GPU_IMAGE_SYMBOL_DATA ||
         sites->address.kind != IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMAGE ||
         !sites->length ||
-        sites->address.offset > executable->memory.contents.data_length ||
+        sites->address.offset > variant->memory.contents.data_length ||
         sites->length >
-            executable->memory.contents.data_length - sites->address.offset) {
+            variant->memory.contents.data_length - sites->address.offset) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "GPU sanitizer site table is outside the loaded image");
     }
     site_table = iree_make_const_byte_span(
-        executable->memory.contents.data + sites->address.offset,
-        sites->length);
+        variant->memory.contents.data + sites->address.offset, sites->length);
   }
-  const iree_hal_amd_gpu_source_context_t* source = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_source_context_registry_register(
-      &feedback->sources, site_table, &source));
+  if (!executable->source) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_source_context_registry_register(
+        &feedback->sources, site_table, &executable->source));
+  }
+  const iree_hal_amd_gpu_source_context_t* source = executable->source;
   iree_hal_amd_gpu_feedback_config_t config = feedback->config;
   config.source_context = (uint64_t)(uintptr_t)source;
   IREE_TSAN_RELEASE((void*)source);
-  memcpy(executable->memory.contents.data + config_symbol->address.offset,
-         &config, sizeof(config));
+  memcpy(variant->memory.contents.data + config_symbol->address.offset, &config,
+         sizeof(config));
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_executable_publish_asan(
     iree_hal_amd_gpu_executable_t* executable,
+    iree_hal_amd_gpu_executable_variant_t* variant,
     iree_hal_amd_fabric_asan_t* asan) {
   const iree_hal_amd_gpu_image_t* image = &executable->image;
   const iree_hal_amd_gpu_image_symbol_t* config =
@@ -289,12 +313,12 @@ static iree_status_t iree_hal_amd_gpu_executable_publish_asan(
     return iree_ok_status();
   }
   if (image->asan_data_object_count) {
-    const uint64_t address = executable->bindings[1].device_address;
+    const uint64_t address = variant->bindings[1].device_address;
     IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_asan_map_range(
-        asan, address, executable->memory.info.byte_length));
-    executable->asan = asan;
+        asan, address, variant->memory.info.byte_length));
+    variant->asan = asan;
     iree_hal_amd_fabric_asan_advise_range(
-        asan, address, executable->memory.info.byte_length, 0, 0);
+        asan, address, variant->memory.info.byte_length, 0, 0);
     iree_status_t status = iree_ok_status();
     for (iree_host_size_t i = 0;
          i < image->asan_data_object_count && iree_status_is_ok(status); ++i) {
@@ -305,8 +329,8 @@ static iree_status_t iree_hal_amd_gpu_executable_publish_asan(
     }
     IREE_RETURN_IF_ERROR(status);
   }
-  memcpy(executable->memory.contents.data + config->address.offset,
-         &asan->config, sizeof(asan->config));
+  memcpy(variant->memory.contents.data + config->address.offset, &asan->config,
+         sizeof(asan->config));
   return iree_ok_status();
 }
 
@@ -375,7 +399,7 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
       IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
   };
   const iree_hal_buffer_binding_layout_t layout = {
-      .byte_length = sizeof(executable->bindings),
+      .byte_length = sizeof(executable->variants[0].bindings),
       .binding_count = IREE_ARRAYSIZE(types),
       .host_binding_index = 0,
       .types = types,
@@ -389,7 +413,7 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
                   .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
                   .structure_size = sizeof(amdf_memory_site_t),
                   .kind = AMDF_MEMORY_SITE_KIND_HOST,
-                  .value.host.mapping = executable->memory.mapping,
+                  .value.host.mapping = executable->variants[0].memory.mapping,
               },
               {
                   .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
@@ -397,7 +421,7 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
                   .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
                   .value.device =
                       {
-                          .memory = executable->memory.handle,
+                          .memory = executable->variants[0].memory.handle,
                           .access_ordinal = 0,
                           .queue_family_ordinal =
                               options->native_family_ordinal,
@@ -452,7 +476,7 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
         (host_access ? IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
                            IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT
                      : 0) |
-        (executable->memory.exports.class_count
+        (executable->variants[0].memory.exports.class_count
              ? IREE_HAL_BUFFER_USAGE_SHARING_EXPORT
              : 0);
     contract->host = (iree_hal_pool_host_access_t){
@@ -460,7 +484,7 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
         .modes = host_access ? IREE_HAL_MAPPING_MODE_SCOPED |
                                    IREE_HAL_MAPPING_MODE_PERSISTENT
                              : 0,
-        .cacheability = executable->memory.host_cacheability,
+        .cacheability = executable->variants[0].memory.host_cacheability,
     };
     if (host_access) {
       contract->scopes[1].interfaces = 1u << IREE_HAL_BUFFER_INTERFACE_HOST;
@@ -475,13 +499,17 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
     status = iree_hal_memory_contract_initialize_transitions(
         contract, iree_hal_amd_gpu_executable_query_transition, &query);
   }
-  executable->backing.maintenance_alignment = query.maintenance_alignment;
+  executable->variants[0].backing.maintenance_alignment =
+      query.maintenance_alignment;
   return status;
 }
 
 static iree_status_t iree_hal_amd_gpu_executable_load_image(
     iree_hal_amd_gpu_executable_t* executable,
-    const iree_hal_amd_gpu_executable_options_t* options) {
+    const iree_hal_amd_gpu_executable_options_t* options,
+    uint32_t variant_ordinal) {
+  iree_hal_amd_gpu_executable_variant_t* variant =
+      &executable->variants[variant_ordinal];
   const iree_hal_amd_gpu_image_t* image = &executable->image;
   // Three speculative 64-byte fetch lines beyond the complete linked image,
   // plus each descriptor's entry-relative 128-byte instruction prefetch range.
@@ -506,7 +534,7 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
   }
   iree_hal_amd_gpu_pm4_dispatch_program_t packet_program = {0};
   uint64_t packet_program_offset = 0;
-  if (executable->packet_program) {
+  if (variant->packet_program) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_dispatch_program_query(
         options->target->version, &packet_program));
     if (!iree_checked_add_u64(
@@ -521,49 +549,47 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocate(
       executable->context->api, options->memory, byte_length, image->alignment,
-      executable->context->event_sink, &executable->memory));
-  executable->bindings[0].host_pointer = executable->memory.contents.data;
+      executable->context->event_sink, &variant->memory));
+  variant->bindings[0].host_pointer = variant->memory.contents.data;
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       executable->context->api->memory_query_address(
-          executable->memory.handle, 0, AMDF_MEMORY_ADDRESS_GPU,
-          &executable->bindings[1].device_address),
+          variant->memory.handle, 0, AMDF_MEMORY_ADDRESS_GPU,
+          &variant->bindings[1].device_address),
       "memory_query_address(code)"));
   amdf_memory_access_info_t access_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
       .structure_size = sizeof(access_info),
   };
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
-      executable->context->api->memory_query_access_info(
-          executable->memory.handle, 0, &access_info),
+      executable->context->api->memory_query_access_info(variant->memory.handle,
+                                                         0, &access_info),
       "memory_query_access_info(code)"));
-  executable->memory_type =
+  variant->memory_type =
       IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE |
       (iree_any_bit_set(access_info.flags, AMDF_MEMORY_FLAG_HOST_COHERENT)
            ? IREE_HAL_MEMORY_TYPE_HOST_COHERENT
            : 0) |
-      (iree_any_bit_set(executable->memory.info.flags,
+      (iree_any_bit_set(variant->memory.info.flags,
                         AMDF_MEMORY_FLAG_DEVICE_LOCAL)
            ? IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL
            : 0);
-  executable->backing = (iree_hal_buffer_backing_facts_t){
-      .maintenance_range = executable->memory.maintenance_range,
-      .host_cacheability = executable->memory.host_cacheability,
+  variant->backing = (iree_hal_buffer_backing_facts_t){
+      .maintenance_range = variant->memory.maintenance_range,
+      .host_cacheability = variant->memory.host_cacheability,
       .physical_backing_id =
           {
               {
-                  executable->memory.info.physical_backing_id.words[0],
-                  executable->memory.info.physical_backing_id.words[1],
+                  variant->memory.info.physical_backing_id.words[0],
+                  variant->memory.info.physical_backing_id.words[1],
               },
           },
       .native_allocation =
           {
-              .byte_length =
-                  executable->memory.info.native_allocation_byte_length,
-              .byte_offset = executable->memory.info.source_byte_offset,
-              .granularity =
-                  executable->memory.info.native_allocation_granularity,
+              .byte_length = variant->memory.info.native_allocation_byte_length,
+              .byte_offset = variant->memory.info.source_byte_offset,
+              .granularity = variant->memory.info.native_allocation_granularity,
           },
-      .allocation_alignment = executable->memory.info.alignment,
+      .allocation_alignment = variant->memory.info.alignment,
   };
   iree_host_size_t storage_length = 0, mappings_offset = 0, imports_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
@@ -581,65 +607,78 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
   iree_byte_span_t* mappings = (iree_byte_span_t*)(storage + mappings_offset);
   for (iree_host_size_t i = 0; i < image->segment_count; ++i) {
     mappings[i] = iree_make_byte_span(
-        executable->memory.contents.data + image->segments[i].offset,
+        variant->memory.contents.data + image->segments[i].offset,
         image->segments[i].length);
   }
   // Padding and linked gaps are owned instruction-fetch storage too. Segment
   // contents and zero-fill tails are initialized by image_load, once each.
   uint64_t cursor = 0;
   for (iree_host_size_t i = 0; i < image->segment_count; ++i) {
-    memset(executable->memory.contents.data + cursor, 0,
+    memset(variant->memory.contents.data + cursor, 0,
            image->segments[i].offset - cursor);
     cursor = image->segments[i].offset + image->segments[i].length;
   }
-  memset(executable->memory.contents.data + cursor, 0,
-         executable->memory.contents.data_length - cursor);
+  memset(variant->memory.contents.data + cursor, 0,
+         variant->memory.contents.data_length - cursor);
   iree_status_t status = iree_hal_amd_gpu_image_load(
-      image, executable->bindings[1].device_address, image->import_count,
+      image, variant->bindings[1].device_address, image->import_count,
       (const iree_hal_amd_gpu_image_import_binding_t*)(storage +
                                                        imports_offset),
       image->segment_count, mappings);
   iree_allocator_free(executable->host_allocator, storage);
-  if (executable->packet_program && iree_status_is_ok(status)) {
-    memcpy(executable->memory.contents.data + packet_program_offset,
+  if (variant->packet_program && iree_status_is_ok(status)) {
+    memcpy(variant->memory.contents.data + packet_program_offset,
            packet_program.code.data, packet_program.code.data_length);
     packet_program.kernel.entry_offset = packet_program_offset;
     status = iree_hal_amd_gpu_pm4_launch_initialize(
         options->target->version, &packet_program.kernel,
-        executable->bindings[1].device_address, executable->packet_program);
+        variant->bindings[1].device_address, variant->packet_program);
   }
   for (iree_host_size_t i = 0;
        i < image->metadata.kernel_count && iree_status_is_ok(status); ++i) {
-    iree_hal_amd_gpu_pm4_function_t* function = &executable->functions[i];
+    iree_hal_amd_gpu_pm4_function_t* function = &variant->functions[i];
     function->metadata = &image->metadata.kernels[i];
-    status = iree_hal_amd_gpu_kernarg_layout_allocate(
-        function->metadata, executable->host_allocator, &function->kernarg);
+    if (!variant_ordinal) {
+      status = iree_hal_amd_gpu_kernarg_layout_allocate(
+          function->metadata, executable->host_allocator, &function->kernarg);
+    } else {
+      function->kernarg = executable->variants[0].functions[i].kernarg;
+    }
     if (iree_status_is_ok(status)) {
       status = iree_hal_amd_gpu_pm4_launch_initialize(
           options->target->version, &image->kernels[i],
-          executable->bindings[1].device_address, &function->launch);
+          variant->bindings[1].device_address, &function->launch);
       if (function->packet) {
         iree_hal_amd_gpu_pm4_dispatch_packet_info_t* packet =
             (iree_hal_amd_gpu_pm4_dispatch_packet_info_t*)function->packet;
-        packet->kernel_object = executable->bindings[1].device_address +
+        packet->kernel_object = variant->bindings[1].device_address +
                                 image->kernels[i].descriptor_offset;
-        packet->prepare = executable->packet_program;
+        packet->prepare = variant->packet_program;
       }
     }
   }
   if (iree_status_is_ok(status) && options->asan) {
-    status =
-        iree_hal_amd_gpu_executable_publish_asan(executable, options->asan);
+    status = iree_hal_amd_gpu_executable_publish_asan(executable, variant,
+                                                      options->asan);
   }
   if (iree_status_is_ok(status) && options->feedback) {
-    status = iree_hal_amd_gpu_executable_publish_feedback(executable,
+    status = iree_hal_amd_gpu_executable_publish_feedback(executable, variant,
                                                           options->feedback);
+  }
+  if (iree_status_is_ok(status) && executable->queue_image_addresses) {
+    const iree_hal_amd_gpu_image_symbol_t* config =
+        iree_hal_amd_gpu_image_find_symbol(image, IREE_SV("iree_tsan_config"));
+    memcpy(variant->memory.contents.data + config->address.offset,
+           &options->tsan[variant_ordinal].config,
+           sizeof(options->tsan[variant_ordinal].config));
+    executable->queue_image_addresses[variant_ordinal] =
+        variant->bindings[1].device_address;
   }
   if (iree_status_is_ok(status)) {
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
         executable->context->api->host_mapping_cache_control(
-            executable->memory.mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
-            executable->memory.contents.data_length),
+            variant->memory.mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
+            variant->memory.contents.data_length),
         "host_mapping_cache_control(code upload)");
   }
   return status;
@@ -658,10 +697,14 @@ typedef struct iree_hal_amd_gpu_executable_prepare_t {
 
 static void iree_hal_amd_gpu_executable_prepare(void* user_data) {
   iree_hal_amd_gpu_executable_prepare_t* prepare = user_data;
-  prepare->status = iree_hal_amd_gpu_executable_load_image(prepare->executable,
-                                                           prepare->options);
+  for (uint32_t i = 0; i < prepare->executable->variant_count &&
+                       iree_status_is_ok(prepare->status);
+       ++i) {
+    prepare->status = iree_hal_amd_gpu_executable_load_image(
+        prepare->executable, prepare->options, i);
+  }
   if (iree_status_is_ok(prepare->status)) {
-    prepare->executable->memory.exports.classes = prepare->classes;
+    prepare->executable->variants[0].memory.exports.classes = prepare->classes;
     prepare->status = iree_hal_amd_gpu_executable_initialize_contracts(
         prepare->executable, prepare->options);
   }
@@ -686,23 +729,40 @@ iree_status_t iree_hal_amd_gpu_executable_create(
       params->executable_data, host_allocator, &image));
   iree_status_t status = iree_hal_amd_gpu_executable_admit(&image, options);
   iree_host_size_t byte_length = 0, functions_offset = 0, globals_offset = 0;
-  iree_host_size_t exports_offset = 0;
+  const bool queue_scoped = iree_hal_amd_gpu_image_find_symbol(
+                                &image, IREE_SV("iree_tsan_config")) != NULL;
+  const uint32_t variant_count = queue_scoped ? options->tsan_count : 1;
+  iree_host_size_t exports_offset = 0, variants_offset = 0,
+                   addresses_offset = 0;
+  iree_host_size_t function_count = 0, total_packet_count = 0;
   iree_host_size_t packet_count = 0, packets_offset = 0, program_offset = 0;
   for (iree_host_size_t i = 0; i < image.metadata.kernel_count; ++i) {
     packet_count += (image.kernels[i].code_properties >> 1) & 1u;
   }
+  if (iree_status_is_ok(status) &&
+      (!iree_host_size_checked_mul_add(0, image.metadata.kernel_count,
+                                       variant_count, &function_count) ||
+       !iree_host_size_checked_mul_add(0, packet_count, variant_count,
+                                       &total_packet_count))) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "GPU executable variant tables overflow");
+  }
   if (iree_status_is_ok(status)) {
     status = IREE_STRUCT_LAYOUT(
         sizeof(iree_hal_amd_gpu_executable_t), &byte_length,
-        IREE_STRUCT_FIELD_ALIGNED(image.metadata.kernel_count,
+        IREE_STRUCT_FIELD(variant_count, iree_hal_amd_gpu_executable_variant_t,
+                          &variants_offset),
+        IREE_STRUCT_FIELD(queue_scoped ? variant_count : 0, uint64_t,
+                          &addresses_offset),
+        IREE_STRUCT_FIELD_ALIGNED(function_count,
                                   iree_hal_amd_gpu_pm4_function_t, 64,
                                   &functions_offset),
         IREE_STRUCT_FIELD_ALIGNED(
-            packet_count, iree_hal_amd_gpu_pm4_dispatch_packet_info_t,
+            total_packet_count, iree_hal_amd_gpu_pm4_dispatch_packet_info_t,
             iree_alignof(iree_hal_amd_gpu_pm4_dispatch_packet_info_t),
             &packets_offset),
         IREE_STRUCT_FIELD_ALIGNED(
-            packet_count ? 1 : 0, iree_hal_amd_gpu_pm4_launch_t,
+            packet_count ? variant_count : 0, iree_hal_amd_gpu_pm4_launch_t,
             iree_alignof(iree_hal_amd_gpu_pm4_launch_t), &program_offset),
         IREE_STRUCT_FIELD_ALIGNED(image.symbol_count, iree_hal_buffer_t*,
                                   iree_alignof(iree_hal_buffer_t*),
@@ -726,20 +786,36 @@ iree_status_t iree_hal_amd_gpu_executable_create(
     executable->cleanup.entry.fn = iree_hal_amd_gpu_executable_cleanup;
     executable->image = image;
     memset(&image, 0, sizeof(image));
-    executable->functions =
-        (iree_hal_amd_gpu_pm4_function_t*)((uint8_t*)executable +
-                                           functions_offset);
-    if (packet_count) {
-      executable->packet_program =
-          (iree_hal_amd_gpu_pm4_launch_t*)((uint8_t*)executable +
-                                           program_offset);
-      iree_hal_amd_gpu_pm4_dispatch_packet_info_t* packet =
-          (iree_hal_amd_gpu_pm4_dispatch_packet_info_t*)((uint8_t*)executable +
-                                                         packets_offset);
-      for (iree_host_size_t i = 0; i < executable->image.metadata.kernel_count;
-           ++i) {
-        if (executable->image.kernels[i].code_properties & 2u) {
-          executable->functions[i].packet = packet++;
+    executable->variant_count = variant_count;
+    executable->function_variant_stride =
+        queue_scoped ? (uint32_t)executable->image.metadata.kernel_count : 0;
+    executable->functions = (void*)((uint8_t*)executable + functions_offset);
+    executable->variants = (void*)((uint8_t*)executable + variants_offset);
+    if (queue_scoped) {
+      executable->queue_image_addresses =
+          (void*)((uint8_t*)executable + addresses_offset);
+    }
+    for (uint32_t v = 0; v < variant_count; ++v) {
+      iree_hal_amd_gpu_executable_variant_t* variant = &executable->variants[v];
+      variant->functions =
+          (iree_hal_amd_gpu_pm4_function_t*)((uint8_t*)executable +
+                                             functions_offset) +
+          (iree_host_size_t)v * executable->image.metadata.kernel_count;
+      if (packet_count) {
+        variant->packet_program =
+            (iree_hal_amd_gpu_pm4_launch_t*)((uint8_t*)executable +
+                                             program_offset) +
+            v;
+        iree_hal_amd_gpu_pm4_dispatch_packet_info_t* packet =
+            (iree_hal_amd_gpu_pm4_dispatch_packet_info_t*)((uint8_t*)
+                                                               executable +
+                                                           packets_offset) +
+            (iree_host_size_t)v * packet_count;
+        for (iree_host_size_t i = 0;
+             i < executable->image.metadata.kernel_count; ++i) {
+          if (executable->image.kernels[i].code_properties & 2u) {
+            variant->functions[i].packet = packet++;
+          }
         }
       }
     }
@@ -776,9 +852,9 @@ iree_status_t iree_hal_amd_gpu_executable_create(
 // Immutable function reflection
 //===----------------------------------------------------------------------===//
 
-iree_status_t iree_hal_amd_gpu_executable_lookup_pm4(
+iree_status_t iree_hal_amd_gpu_executable_lookup_pm4_for_queue(
     iree_hal_executable_t* base_executable,
-    iree_hal_executable_function_t token,
+    iree_hal_executable_function_t token, uint32_t queue_ordinal,
     const iree_hal_amd_gpu_pm4_function_t** out_function) {
   iree_hal_amd_gpu_executable_t* executable =
       (iree_hal_amd_gpu_executable_t*)base_executable;
@@ -788,8 +864,23 @@ iree_status_t iree_hal_amd_gpu_executable_lookup_pm4(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "invalid GPU executable function token");
   }
-  *out_function = &executable->functions[token.value];
+  *out_function =
+      &executable->functions[(iree_host_size_t)queue_ordinal *
+                                 executable->function_variant_stride +
+                             token.value];
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_executable_lookup_pm4(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t token,
+    const iree_hal_amd_gpu_pm4_function_t** out_function) {
+  return iree_hal_amd_gpu_executable_lookup_pm4_for_queue(executable, token, 0,
+                                                          out_function);
+}
+
+const uint64_t* iree_hal_amd_gpu_executable_queue_image_addresses(
+    iree_hal_executable_t* executable) {
+  return ((iree_hal_amd_gpu_executable_t*)executable)->queue_image_addresses;
 }
 
 static iree_host_size_t iree_hal_amd_gpu_executable_function_count(
@@ -921,6 +1012,11 @@ static iree_status_t iree_hal_amd_gpu_executable_global_buffer(
     iree_hal_buffer_t** out_buffer) {
   iree_hal_amd_gpu_executable_t* executable =
       (iree_hal_amd_gpu_executable_t*)base_executable;
+  if (executable->queue_image_addresses) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "queue-scoped GPU executable globals have no "
+                            "single public buffer");
+  }
   const iree_hal_amd_gpu_image_symbol_t* symbol = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_executable_lookup_global(executable, global, &symbol));
@@ -940,17 +1036,17 @@ static iree_status_t iree_hal_amd_gpu_executable_global_buffer(
         },
         executable->context->api,
         (iree_hal_amd_fabric_buffer_storage_t){
-            .memory = &executable->memory,
-            .bindings = executable->bindings,
+            .memory = &executable->variants[0].memory,
+            .bindings = executable->variants[0].bindings,
             .host_binding_index = 0,
             .offset = symbol->address.offset,
         },
-        symbol->length, executable->memory_type, access,
+        symbol->length, executable->variants[0].memory_type, access,
         contract->allowed_usage, iree_hal_buffer_release_callback_null(),
         executable->host_allocator, &buffer);
     if (iree_status_is_ok(status)) {
       buffer->memory.contract = contract;
-      buffer->memory.backing = &executable->backing;
+      buffer->memory.backing = &executable->variants[0].backing;
       buffer->memory.offset = symbol->address.offset;
       executable->globals[global.value] = buffer;
     }

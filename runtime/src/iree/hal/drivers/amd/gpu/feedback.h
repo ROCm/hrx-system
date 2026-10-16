@@ -123,6 +123,8 @@ typedef struct iree_hal_amd_gpu_feedback_t {
   iree_hal_amd_gpu_source_context_registry_t sources;
   // ASAN report behavior selected during device construction.
   iree_hal_amd_gpu_sanitizer_report_policy_t asan_report_policy;
+  // Logical failure policy for race reports, independent of native retirement.
+  iree_hal_amd_gpu_sanitizer_report_policy_t tsan_report_policy;
   // First logical device failure, independent of native retirement ownership.
   iree_atomic_int32_t failure_code;
   // Wakes device queue continuations after the first logical failure.

@@ -750,6 +750,12 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     // Instruction upload and host argument publication remain mandatory even
     // when the caller supplies an empty optional payload boundary.
     before.cache_control |= 1u | queue->options.barriers.acquire;
+    if (queue->options.tsan_shadow_slot_count &&
+        !(queue->producer.dispatch_count &
+          (queue->options.tsan_shadow_slot_count - 1))) {
+      before.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+      before.cache_control |= queue->options.barriers.shader;
+    }
   }
   const uint16_t indirect_copy_count =
       dispatch && indirect_parameters && !indirect
@@ -1373,8 +1379,7 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
     iree_status_t status =
         completion_code == IREE_STATUS_OK
             ? iree_ok_status()
-            : iree_make_status(completion_code,
-                               "native queue dependency failed");
+            : iree_make_status(completion_code, "GPU queue execution failed");
     for (iree_host_size_t i = 0;
          action->terminal && i < submission->signals.count &&
          iree_status_is_ok(status);
@@ -1502,8 +1507,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
   const iree_hal_amd_gpu_pm4_function_t* function = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_executable_lookup_pm4(executable, token, &function));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_executable_lookup_pm4_for_queue(
+      executable, token, queue->options.queue_ordinal, &function));
   iree_hal_amd_gpu_pm4_dispatch_t dispatch;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_dispatch_prepare(
       function,
@@ -1844,6 +1849,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_execute(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_execute(
       &queue->captures, waits, signals, command_buffer, bindings,
       &queue->options.barriers, flags, &submission));
+  submission->execute.queue_ordinal = queue->options.queue_ordinal;
+  submission->execute.tsan_shadow_slot_count =
+      queue->options.tsan_shadow_slot_count;
   iree_hal_amd_gpu_pm4_submit(queue, submission);
   return iree_ok_status();
 }

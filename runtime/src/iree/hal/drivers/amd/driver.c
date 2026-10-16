@@ -212,6 +212,27 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
   iree_hal_amd_gpu_device_options_t options;
   iree_hal_amd_gpu_device_options_initialize(&options);
   for (iree_host_size_t i = 0; i < param_count; ++i) {
+    if (iree_string_view_equal(params[i].key, IREE_SV("asan_report_policy")) ||
+        iree_string_view_equal(params[i].key, IREE_SV("tsan_report_policy"))) {
+      iree_hal_amd_gpu_sanitizer_report_policy_t policy;
+      if (iree_string_view_equal(params[i].value, IREE_SV("report-only"))) {
+        policy = IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_REPORT_ONLY;
+      } else if (iree_string_view_equal(params[i].value,
+                                        IREE_SV("fail-device"))) {
+        policy = IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE;
+      } else {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "GPU sanitizer report policy must be "
+                                "report-only or fail-device");
+      }
+      if (iree_string_view_equal(params[i].key,
+                                 IREE_SV("asan_report_policy"))) {
+        options.asan.report_policy = policy;
+      } else {
+        options.tsan.report_policy = policy;
+      }
+      continue;
+    }
     uint32_t* value = NULL;
     if (iree_string_view_equal(params[i].key, IREE_SV("queue_count"))) {
       value = &options.queue_count;
@@ -220,12 +241,24 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
     } else if (iree_string_view_equal(params[i].key,
                                       IREE_SV("host_numa_node"))) {
       value = &options.host_numa_node;
+    } else if (iree_string_view_equal(params[i].key,
+                                      IREE_SV("tsan_memory_granule_shift"))) {
+      value = &options.tsan.memory.memory_granule_shift;
+    } else if (iree_string_view_equal(
+                   params[i].key,
+                   IREE_SV("tsan_workgroup_local_memory_size"))) {
+      value = &options.tsan.memory.workgroup_local_memory_size;
+    } else if (iree_string_view_equal(params[i].key,
+                                      IREE_SV("tsan_workgroup_capacity"))) {
+      value = &options.tsan.memory.workgroup_capacity;
+    } else if (iree_string_view_equal(params[i].key,
+                                      IREE_SV("tsan_shadow_slot_count"))) {
+      value = &options.tsan.memory.shadow_slot_count;
     }
     if (!value || !iree_string_view_atoi_uint32(params[i].value, value)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "GPU device parameter '%.*s' must be queue_count, queue_family, "
-          "or host_numa_node with an unsigned integer value",
+          "unknown GPU device parameter or invalid unsigned integer '%.*s'",
           (int)params[i].key.size, params[i].key.data);
     }
   }

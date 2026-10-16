@@ -21,6 +21,7 @@ enum {
   IREE_HAL_AMD_GPU_PM4_RECORD_INDIRECT_ARGUMENTS = 1u << 3,
   IREE_HAL_AMD_GPU_PM4_SITE_QUEUE = 0,
   IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM = 1,
+  IREE_HAL_AMD_GPU_PM4_SITE_IMAGE = 2,
   IREE_HAL_AMD_GPU_PM4_PATCH_ARGUMENT = 1u << 31,
 };
 
@@ -76,11 +77,15 @@ static_assert(IREE_HAL_AMD_GPU_PM4_DISPATCH_MAX_WORDS + 17 < UINT8_MAX,
               "launch and preceding barrier offsets fit byte relocations");
 
 typedef struct iree_hal_amd_gpu_pm4_patch_t {
-  // Direct recorded buffer, or NULL for an invocation binding-table slot.
-  iree_hal_buffer_t* buffer;
-  // Byte offset relative to the recorded buffer or invocation binding.
+  union {
+    // Direct recorded buffer, or NULL for an invocation binding-table slot.
+    iree_hal_buffer_t* buffer;
+    // Executable-owned queue bases when site is IMAGE; no binding is read.
+    const uint64_t* image_addresses;
+  };
+  // Byte offset relative to the source buffer, binding, or image base.
   uint64_t offset;
-  // Exactly one source is active, selected by buffer presence.
+  // Buffer source selected by buffer presence; unused for IMAGE sites.
   union {
     // Qualified device-address slot for a direct buffer.
     iree_hal_buffer_native_binding_slot_t slot;
@@ -89,9 +94,13 @@ typedef struct iree_hal_amd_gpu_pm4_patch_t {
   } source;
   // Byte destination; PATCH_ARGUMENT selects argument instead of command bytes.
   uint32_t target_offset;
-  // Required power-of-two address alignment, one for ordinary shader bindings.
-  uint32_t alignment;
-  // Queue or program site selecting the captured native address slot.
+  union {
+    // Required power-of-two alignment for a public buffer address.
+    uint32_t alignment;
+    // Native register address scaling for an IMAGE relocation.
+    uint32_t right_shift;
+  };
+  // Queue/program native address slot, or executable IMAGE relocation.
   uint32_t site;
 } iree_hal_amd_gpu_pm4_patch_t;
 static_assert(sizeof(iree_hal_amd_gpu_pm4_patch_t) == 32,
@@ -534,7 +543,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
               !function->packet
           ? 0
           : (uint16_t)bindings.count;
-  const uint32_t patch_count = binding_patch_count + indirect_parameters;
+  const uint64_t* image_addresses =
+      iree_hal_amd_gpu_executable_queue_image_addresses(executable);
+  const uint32_t image_patch_count =
+      image_addresses ? 1u + !!function->packet + prepare_packet : 0u;
+  const uint32_t patch_count =
+      binding_patch_count + indirect_parameters + image_patch_count;
   if (patch_count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "recorded dispatch has too many native references");
@@ -579,6 +593,44 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_dispatch(
     record->flags |= IREE_HAL_AMD_GPU_PM4_RECORD_JOIN_DMA;
   }
   iree_hal_amd_gpu_pm4_patch_t* patches = (void*)(record + 1);
+  if (image_addresses) {
+    iree_hal_amd_gpu_pm4_patch_t* patch =
+        patches + binding_patch_count + indirect_parameters;
+    const uint64_t program_address =
+        ((uint64_t)function->launch.program[0] << 8) |
+        ((uint64_t)function->launch.program[1] << 40);
+    *patch++ = (iree_hal_amd_gpu_pm4_patch_t){
+        .image_addresses = image_addresses,
+        .offset = program_address - image_addresses[0],
+        .target_offset = (launch_offset + 2) * 4,
+        .right_shift = 8,
+        .site = IREE_HAL_AMD_GPU_PM4_SITE_IMAGE,
+    };
+    if (function->packet) {
+      *patch++ = (iree_hal_amd_gpu_pm4_patch_t){
+          .image_addresses = image_addresses,
+          .offset = function->packet->kernel_object - image_addresses[0],
+          .target_offset =
+              IREE_HAL_AMD_GPU_PM4_PATCH_ARGUMENT |
+              (storage.packet_offset +
+               offsetof(iree_hal_amd_gpu_pm4_dispatch_packet_t, kernel_object)),
+          .site = IREE_HAL_AMD_GPU_PM4_SITE_IMAGE,
+      };
+      if (prepare_packet) {
+        const iree_hal_amd_gpu_pm4_launch_t* prepare =
+            function->packet->prepare;
+        const uint64_t prepare_address = ((uint64_t)prepare->program[0] << 8) |
+                                         ((uint64_t)prepare->program[1] << 40);
+        *patch = (iree_hal_amd_gpu_pm4_patch_t){
+            .image_addresses = image_addresses,
+            .offset = prepare_address - image_addresses[0],
+            .target_offset = (barrier_words + 2) * 4,
+            .right_shift = 8,
+            .site = IREE_HAL_AMD_GPU_PM4_SITE_IMAGE,
+        };
+      }
+    }
+  }
   uint16_t kernarg_word = iree_hal_amd_gpu_pm4_launch_user_data_word_offset(
       function->launch.user_data.kernarg_pointer);
   if (kernarg_word != UINT16_MAX) {
@@ -916,13 +968,29 @@ iree_status_t iree_hal_amd_gpu_pm4_command_prepare_chunk(
         iree_align_uint64(argument_address + out_chunk->argument_length,
                           record->argument_alignment) -
         argument_address;
-    if (record->word_count > word_capacity - out_chunk->word_count ||
+    iree_hal_amd_gpu_pm4_barrier_t shadow_join = {0};
+    if (invocation->tsan_shadow_slot_count &&
+        (record->flags & IREE_HAL_AMD_GPU_PM4_RECORD_DISPATCH) &&
+        !((dispatch_id + out_chunk->dispatch_count) &
+          (invocation->tsan_shadow_slot_count - 1))) {
+      const iree_hal_amd_gpu_pm4_command_buffer_t* buffer =
+          (const void*)invocation->command_buffer;
+      shadow_join.execution = IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+      shadow_join.cache_control = buffer->profile.shader;
+    }
+    const uint32_t shadow_join_words =
+        iree_hal_amd_gpu_pm4_barrier_word_count(shadow_join);
+    if (record->word_count + shadow_join_words >
+            word_capacity - out_chunk->word_count ||
         (record->argument_length &&
          argument_offset + record->argument_length > arguments.data_length)) {
       break;
     }
     const iree_hal_amd_gpu_pm4_patch_t* patches = (const void*)(record + 1);
     uint32_t* words = out_chunk->words + out_chunk->word_count;
+    if (shadow_join_words) {
+      words = iree_hal_amd_gpu_pm4_barrier_emit(words, shadow_join);
+    }
     memcpy(words, patches + record->patch_count, record->word_count * 4);
     uint8_t* target_arguments =
         record->argument_length ? arguments.data + argument_offset : NULL;
@@ -936,8 +1004,14 @@ iree_status_t iree_hal_amd_gpu_pm4_command_prepare_chunk(
          ++i) {
       const iree_hal_amd_gpu_pm4_patch_t* patch = &patches[i];
       uint64_t address = 0;
-      status = iree_hal_amd_gpu_pm4_command_resolve_address(invocation, patch,
-                                                            &address);
+      if (patch->site == IREE_HAL_AMD_GPU_PM4_SITE_IMAGE) {
+        address =
+            patch->image_addresses[invocation->queue_ordinal] + patch->offset;
+        address >>= patch->right_shift;
+      } else {
+        status = iree_hal_amd_gpu_pm4_command_resolve_address(invocation, patch,
+                                                              &address);
+      }
       if (iree_status_is_ok(status)) {
         uint8_t* target =
             patch->target_offset & IREE_HAL_AMD_GPU_PM4_PATCH_ARGUMENT
@@ -1003,7 +1077,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_prepare_chunk(
       }
       out_chunk->dispatch_count +=
           !!(record->flags & IREE_HAL_AMD_GPU_PM4_RECORD_DISPATCH);
-      out_chunk->word_count += record->word_count;
+      out_chunk->word_count += record->word_count + shadow_join_words;
       if (record->flags & IREE_HAL_AMD_GPU_PM4_RECORD_JOIN_DMA) {
         out_chunk->pending_dma = false;
       }

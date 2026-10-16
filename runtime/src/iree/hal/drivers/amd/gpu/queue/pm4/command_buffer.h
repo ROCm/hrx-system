@@ -62,6 +62,10 @@ typedef struct iree_hal_amd_gpu_pm4_command_invocation_t {
   iree_hal_amd_gpu_pm4_command_binding_t* bindings;
   // Exclusively owned unpublished suffix; retirement never modifies it.
   iree_hal_amd_gpu_pm4_command_cursor_t cursor;
+  // Provisioned queue selecting executable-owned native image relocations.
+  uint32_t queue_ordinal;
+  // Power-of-two dispatch shadow window, or zero without TSAN.
+  uint32_t tsan_shadow_slot_count;
   // First publication owns external wait packets and a single-record budget.
   bool first;
   // Binding buffers are borrowed; table entries themselves are always copied.
