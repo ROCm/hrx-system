@@ -12,7 +12,7 @@ global.rodata.def @vision_count_key = bytes("7177656e33382e766973696f6e2e696d616
 
 // Cold preparation and request cohorts share one declaration contract. Native
 // serving owns compilation, bounded executable reuse, and checkpoint residency.
-func.def @qwen38_vision_stage(%height: i64, %width: i64, %count: i64) -> (i32) {
+func.def public @qwen38_vision_stage(%height: i64, %width: i64, %count: i64) -> (i32) {
   %root = global.load @vision_root : buffer
   %stage = func.call @stage(%root, %count) : (buffer, i64) -> (i32)
   %height_key = global.load @vision_height_key : buffer
