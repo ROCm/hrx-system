@@ -99,8 +99,8 @@ func.def @vector4_contract(%a: vector<4xf32>, %b: vector<4xf32>, %c: vector<4xf3
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = (vector<4xf32>, vector<4xf32>, vector<4xf32>) -> (vector<4xf32>)}) @vector4_contract(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
-  %product = vmulps.xmm %a, %b
-  %result = vaddps.xmm %product, %c
+  %11 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
+  %result = vfmadd231ps.xmm %11, %a, %b
   return %result
 }
 
@@ -141,4 +141,26 @@ low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({s
   %11 = copy %c : reg<x86.zmm> -> reg<x86.zmm>
   %result = vfmadd231ps %11, %a, %b
   return %result
+}
+
+// ====
+
+// RUN: emit source-low target=x86:avx512 output=low
+
+// Contraction still needs both permissions and a single-use product.
+func.def @vector_contract_boundaries(%a: vector<8xf32>, %b: vector<8xf32>, %c: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %shared = vector.mulf<contract> %a, %b : vector<8xf32>
+  %multiuse = vector.addf<contract> %shared, %c : vector<8xf32>
+  %product = vector.mulf<contract> %b, %c : vector<8xf32>
+  %strict = vector.addf %product, %a : vector<8xf32>
+  func.return %shared, %multiuse, %strict : vector<8xf32>, vector<8xf32>, vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>)}) @vector_contract_boundaries(%a: reg<x86.ymm>, %b: reg<x86.ymm>, %c: reg<x86.ymm>) -> (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
+  %shared = vmulps.ymm %a, %b
+  %multiuse = vaddps.ymm %shared, %c
+  %product = vmulps.ymm %b, %c
+  %strict = vaddps.ymm %product, %a
+  return %shared, %multiuse, %strict
 }

@@ -1,0 +1,125 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @avx2_low_f32(%a: vector<2xf32>, %b: vector<2xf32>, %c: vector<2xf32>) -> (vector<2xf32>) {
+  %product = vector.mulf<contract> %a, %b : vector<2xf32>
+  %result = vector.addf<contract> %product, %c : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xf32>, vector<2xf32>, vector<2xf32>) -> (vector<2xf32>)}) @avx2_low_f32(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %11 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
+  %result = vfmadd231ps.xmm %11, %a, %b
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @avx2_low_f64(%a: vector<1xf64>, %b: vector<1xf64>, %c: vector<1xf64>) -> (vector<1xf64>) {
+  %product = vector.mulf<contract> %a, %b : vector<1xf64>
+  %result = vector.addf<contract> %product, %c : vector<1xf64>
+  func.return %result : vector<1xf64>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<1xf64>, vector<1xf64>, vector<1xf64>) -> (vector<1xf64>)}) @avx2_low_f64(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %11 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
+  %result = vfmadd231pd.xmm %11, %a, %b
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @avx512_ymm_f32(%a: vector<8xf32>, %b: vector<8xf32>, %c: vector<8xf32>) -> (vector<8xf32>) {
+  %product = vector.mulf<contract> %a, %b : vector<8xf32>
+  %result = vector.addf<contract> %product, %c : vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>)}) @avx512_ymm_f32(%a: reg<x86.ymm>, %b: reg<x86.ymm>, %c: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %11 = copy %c : reg<x86.ymm> -> reg<x86.ymm>
+  %result = vfmadd231ps.ymm %11, %a, %b
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @avx512_ymm_f64(%a: vector<4xf64>, %b: vector<4xf64>, %c: vector<4xf64>) -> (vector<4xf64>) {
+  %product = vector.mulf<contract> %a, %b : vector<4xf64>
+  %result = vector.addf<contract> %product, %c : vector<4xf64>
+  func.return %result : vector<4xf64>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<4xf64>, vector<4xf64>, vector<4xf64>) -> (vector<4xf64>)}) @avx512_ymm_f64(%a: reg<x86.ymm>, %b: reg<x86.ymm>, %c: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %11 = copy %c : reg<x86.ymm> -> reg<x86.ymm>
+  %result = vfmadd231pd.ymm %11, %a, %b
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @avx512_zmm_f64(%a: vector<8xf64>, %b: vector<8xf64>, %c: vector<8xf64>) -> (vector<8xf64>) {
+  %product = vector.mulf<contract> %a, %b : vector<8xf64>
+  %result = vector.addf<contract> %product, %c : vector<8xf64>
+  func.return %result : vector<8xf64>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<8xf64>, vector<8xf64>, vector<8xf64>) -> (vector<8xf64>)}) @avx512_zmm_f64(%a: reg<x86.zmm>, %b: reg<x86.zmm>, %c: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+  %11 = copy %c : reg<x86.zmm> -> reg<x86.zmm>
+  %result = vfmadd231pd %11, %a, %b
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+
+func.def target(@target) @avx512_low_f16(%a: vector<2xf16>, %b: vector<2xf16>, %c: vector<2xf16>) -> (vector<2xf16>) {
+  %product = vector.mulf<contract> %a, %b : vector<2xf16>
+  %result = vector.addf<contract> %product, %c : vector<2xf16>
+  func.return %result : vector<2xf16>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<2xf16>, vector<2xf16>, vector<2xf16>) -> (vector<2xf16>)}) @avx512_low_f16(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %11 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
+  %result = vfmadd231ph.xmm %11, %a, %b
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+// Scalar and full-width half arithmetic do not require AVX512-VL.
+x86.target<avx512_packed_dot> @target {contract_feature_bits = 128, contract_set_key = "x86.avx512_features.core"}
+
+func.def target(@target) @avx512_fp16_without_vl(%a: f16, %b: f16, %c: f16, %x: vector<32xf16>, %y: vector<32xf16>, %z: vector<32xf16>) -> (f16, vector<32xf16>) {
+  %product = scalar.mulf<contract> %a, %b : f16
+  %result = scalar.addf<contract> %product, %c : f16
+  %wide_product = vector.mulf<contract> %x, %y : vector<32xf16>
+  %wide_result = vector.addf<contract> %wide_product, %z : vector<32xf16>
+  func.return %result, %wide_result : f16, vector<32xf16>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (f16, f16, f16, vector<32xf16>, vector<32xf16>, vector<32xf16>) -> (f16, vector<32xf16>)}) @avx512_fp16_without_vl(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>, %x: reg<x86.zmm>, %y: reg<x86.zmm>, %z: reg<x86.zmm>) -> (reg<x86.xmm>, reg<x86.zmm>) asm {
+  %22 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
+  %result = vfmadd231sh.xmm %22, %a, %b
+  %24 = copy %z : reg<x86.zmm> -> reg<x86.zmm>
+  %wide_result = vfmadd231ph %24, %x, %y
+  return %result, %wide_result
+}

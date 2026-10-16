@@ -69,6 +69,25 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    math_policy_test
+  SRCS
+    "math_policy_test.cc"
+  DEPS
+    ::feature_bits
+    ::math_policy
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::target::math_policy
+    loom::target::types
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
     register_classes
@@ -261,6 +280,7 @@ loom_check_test_suite(
     "test/source_low/licm_index_arithmetic.loom-test"
     "test/source_low/loop_counter_offset.loom-test"
     "test/source_low/math_contraction.loom-test"
+    "test/source_low/math_contraction_forms.loom-test"
     "test/source_low/memory_access_flags.loom-test"
     "test/source_low/memory_biased_offsets.loom-test"
     "test/source_low/memory_float8.loom-test"
