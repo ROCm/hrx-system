@@ -25,7 +25,7 @@ addition to the service's device-independent lifecycle tests.
 From the repository root:
 
 ```sh
-moonshine_assets="$HOME/.cache/loom/models/moonshine-streaming-tiny/default"
+moonshine_assets="$HOME/models/loom-prepared/moonshine-streaming-tiny/default"
 uv run --python 3.12 experimental/loom_serve/models/moonshine/prepare_assets.py \
   --output "$moonshine_assets"
 
@@ -79,12 +79,12 @@ Select the OpenAI speech-to-text engine in Open WebUI's audio settings:
 | Language | Empty or `en` |
 
 Use the codec-enabled server for the ordinary microphone workflow: Open WebUI
-preprocesses recordings into MP3 before uploading them. Its authenticated backend
-path has been exercised with this model, including concurrent recordings.
-Browser microphone capture and combined realtime voice are separate integration
-checks. The finite transcription endpoint receives the complete upload before
-feeding its decoded quanta into the continuing recognition service; it does not
-expose a live microphone transport by itself.
+preprocesses recordings into MP3 before uploading them. Browser dictation through
+the authenticated backend has been exercised with this model, including the
+captured audio's independent F32 reference. The finite transcription endpoint
+receives the complete upload before feeding its decoded quanta into the
+continuing recognition service; it does not expose a live microphone transport
+by itself.
 
 ## State, batching, and bounds
 
