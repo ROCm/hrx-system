@@ -148,6 +148,48 @@ func.def @widen_f32_packets(%input: buffer, %output: buffer) {
   func.return
 }
 
+// Scalar, native-register, and oversized packet widths consume the same
+// runtime values. The scalar path is an independent component of the target
+// family, while the vector paths exercise native conversion and packetization.
+func.def @narrow_f64_packets(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %base2 = index.constant 256 : offset
+  %base4 = index.constant 512 : offset
+  %base8 = index.constant 768 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step1 = index.constant 1 : index
+  %step2 = index.constant 2 : index
+  %step4 = index.constant 4 : index
+  %step8 = index.constant 8 : index
+  %source = buffer.view %input[%base] : buffer -> view<64xf64>
+  %destination1 = buffer.view %output[%base] : buffer -> view<64xf32>
+  %destination2 = buffer.view %output[%base2] : buffer -> view<64xf32>
+  %destination4 = buffer.view %output[%base4] : buffer -> view<64xf32>
+  %destination8 = buffer.view %output[%base8] : buffer -> view<64xf32>
+  scf.for %i = [%begin to %end step %step1] {
+    %value = view.load %source[%i] : view<64xf64> -> f64
+    %narrow = scalar.fptrunc %value : f64 to f32
+    view.store %narrow, %destination1[%i] : f32, view<64xf32>
+  }
+  scf.for %i = [%begin to %end step %step2] {
+    %value = vector.load %source[%i] : view<64xf64> -> vector<2xf64>
+    %narrow = vector.fptrunc %value : vector<2xf64> to vector<2xf32>
+    vector.store %narrow, %destination2[%i] : vector<2xf32>, view<64xf32>
+  }
+  scf.for %i = [%begin to %end step %step4] {
+    %value = vector.load %source[%i] : view<64xf64> -> vector<4xf64>
+    %narrow = vector.fptrunc %value : vector<4xf64> to vector<4xf32>
+    vector.store %narrow, %destination4[%i] : vector<4xf32>, view<64xf32>
+  }
+  scf.for %i = [%begin to %end step %step8] {
+    %value = vector.load %source[%i] : view<64xf64> -> vector<8xf64>
+    %narrow = vector.fptrunc %value : vector<8xf64> to vector<8xf32>
+    vector.store %narrow, %destination8[%i] : vector<8xf32>, view<64xf32>
+  }
+  func.return
+}
+
 func.def @widen_float16_to_f32(%word_bits: buffer, %f16_output: buffer) {
   %base = index.constant 0 : offset
   %begin = index.constant 0 : index
@@ -375,6 +417,37 @@ check.scenario @packed_f32_to_f64_values {
       check.expect.close actual(%output) expected(%output) atol(0.0) rtol(0.0) nan(same) : tensor<256xf64>
       check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf64>
       check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf64>
+    }
+  }
+  check.return
+}
+
+check.scenario @packed_f64_to_f32_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-65536.0 to 65536.0) : tensor<64xf64>
+    %storage = check.generate.fill value(-123.5) : tensor<258xf32>
+    %output = check.tensor.view %storage offset(4) : tensor<258xf32> -> tensor<256xf32>
+    %guard = check.generate.fill value(-123.5) : tensor<1xf32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<258xf32> -> tensor<1xf32>
+    %suffix = check.tensor.view %storage offset(1028) : tensor<258xf32> -> tensor<1xf32>
+    check.compare<@narrow_f64_packets>(%input, %output) : (tensor<64xf64>, tensor<256xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<256xf32>
+      check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf32>
+      check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1.0000000596046377) step(2.2204460492503131e-16) : tensor<64xf64>
+    %storage = check.generate.fill value(-123.5) : tensor<258xf32>
+    %output = check.tensor.view %storage offset(4) : tensor<258xf32> -> tensor<256xf32>
+    %guard = check.generate.fill value(-123.5) : tensor<1xf32>
+    %prefix = check.tensor.view %storage offset(0) : tensor<258xf32> -> tensor<1xf32>
+    %suffix = check.tensor.view %storage offset(1028) : tensor<258xf32> -> tensor<1xf32>
+    check.compare<@narrow_f64_packets>(%input, %output) : (tensor<64xf64>, tensor<256xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<256xf32>
+      check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf32>
+      check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf32>
     }
   }
   check.return

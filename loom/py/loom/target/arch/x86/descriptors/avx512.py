@@ -117,7 +117,7 @@ from .common import (
     _zmm_operand,
     _zmm_result,
 )
-from .float_widening import float_widening_descriptors
+from .float_conversion import float_conversion_descriptors
 from .half_conversion import half_conversion_descriptors
 from .integer_float import integer_float_descriptors
 from .memory import memory_descriptors
@@ -583,7 +583,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
     descriptors=(
         *X86_AVX2_DESCRIPTORS,
         *integer_float_descriptors(unsigned=True),
-        *float_widening_descriptors(evex=True),
+        *float_conversion_descriptors(evex=True),
         *half_conversion_descriptors(evex=True),
         _evex_descriptor(
             Descriptor(

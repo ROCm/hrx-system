@@ -57,8 +57,13 @@ def half_conversion_instruction(*, narrow: bool) -> VectorMachineInstruction:
     )
 
 
-def float_widening_instruction(*, scalar: bool) -> VectorMachineInstruction:
-    mnemonic = "vcvtss2sd" if scalar else "vcvtps2pd"
+def float_conversion_instruction(
+    *, narrow: bool, scalar: bool
+) -> VectorMachineInstruction:
+    if scalar:
+        mnemonic = "vcvtsd2ss" if narrow else "vcvtss2sd"
+    else:
+        mnemonic = "vcvtpd2ps" if narrow else "vcvtps2pd"
     return VectorMachineInstruction(
         descriptor_mnemonic=mnemonic,
         encoding_mnemonic=mnemonic,
@@ -83,8 +88,10 @@ def float_widening_instruction(*, scalar: bool) -> VectorMachineInstruction:
             VectorEncoding(
                 prefix=prefix,
                 opcode_map=VectorOpcodeMap.MAP_0F,
-                mandatory_prefix=2 if scalar else 0,
-                w=0,
+                mandatory_prefix=(3 if scalar else 1)
+                if narrow
+                else (2 if scalar else 0),
+                w=int(narrow and prefix is VectorEncodingPrefix.EVEX),
                 opcode=0x5A,
                 vector_bit_widths=(128,) if scalar else widths,
             )

@@ -22,9 +22,9 @@ iree_py_library(
     "avx_ne_convert.py"
     "constants.py"
     "f16c.py"
+    "float_conversion.py"
     "float_narrowing.py"
     "float_roots.py"
-    "float_widening.py"
     "floating_extrema.py"
     "floating_reduction.py"
     "half_conversion.py"
@@ -85,14 +85,14 @@ iree_py_test(
 
 iree_py_test(
   NAME
-    float_widening_test
+    float_conversion_test
   MAIN
     "../../../../tools/pytest_style_runner.py"
   SRCS
-    "float_widening_test.py"
+    "float_conversion_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
-    "loom.target.arch.x86.contracts.float_widening_test"
+    "loom.target.arch.x86.contracts.float_conversion_test"
   DEPS
     loom::py::loom::target::arch::x86::contracts::contracts
     loom::py::loom::target::low_descriptors

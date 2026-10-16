@@ -15,11 +15,11 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.target.arch.x86.contracts.avx512_predicate import (
     avx512_predicate_rules,
 )
+from loom.target.arch.x86.contracts.float_conversion import float_conversion_rules
 from loom.target.arch.x86.contracts.float_roots import (
     scalar_float_root_rules,
     vector_float_root_rules,
 )
-from loom.target.arch.x86.contracts.float_widening import float_widening_rules
 from loom.target.arch.x86.contracts.floating_extrema import (
     avx512_float_extrema_rules,
 )
@@ -93,7 +93,7 @@ def _cases() -> Sequence[ContractCase]:
     )
     return (
         *avx512_integer_float_rules(_descriptor),
-        *float_widening_rules(_descriptor, evex=True),
+        *float_conversion_rules(_descriptor, evex=True),
         *half_conversion_rules(_descriptor, evex=True),
         *avx512_vector_construction_rules(_descriptor),
         *vector_integer_widening_rules(

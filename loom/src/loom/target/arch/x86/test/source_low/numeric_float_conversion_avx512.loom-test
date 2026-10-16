@@ -166,3 +166,78 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
   %result = avx512.vcvtps2pd.zmm.ymm %6
   return %result
 }
+
+// ====
+
+func.def @narrow_f64_f32_1(%input: f64) -> (f32) {
+  %result = scalar.fptrunc %input : f64 to f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (f64) -> (f32)}) @narrow_f64_f32_1(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %result = avx512.vcvtsd2ss.xmm %input, %input
+  return %result
+}
+
+// ====
+
+func.def @narrow_f64_f32_2(%input: vector<2xf64>) -> (vector<2xf32>) {
+  %result = vector.fptrunc %input : vector<2xf64> to vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<2xf64>) -> (vector<2xf32>)}) @narrow_f64_f32_2(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %result = avx512.vcvtpd2ps.xmm.xmm %input
+  return %result
+}
+
+// ====
+
+func.def @narrow_f64_f32_4(%input: vector<4xf64>) -> (vector<4xf32>) {
+  %result = vector.fptrunc %input : vector<4xf64> to vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<4xf64>) -> (vector<4xf32>)}) @narrow_f64_f32_4(%input: reg<x86.ymm>) -> (reg<x86.xmm>) asm {
+  %result = avx512.vcvtpd2ps.xmm.ymm %input
+  return %result
+}
+
+// ====
+
+func.def @narrow_f64_f32_8(%input: vector<8xf64>) -> (vector<8xf32>) {
+  %result = vector.fptrunc %input : vector<8xf64> to vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<8xf64>) -> (vector<8xf32>)}) @narrow_f64_f32_8(%input: reg<x86.zmm>) -> (reg<x86.ymm>) asm {
+  %result = avx512.vcvtpd2ps.ymm.zmm %input
+  return %result
+}
+
+// ====
+
+func.def @narrow_f64_f32_16_memory(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<16xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<16xf32>
+  %value = vector.load %source[0] : view<16xf64> -> vector<16xf64>
+  %result = vector.fptrunc %value : vector<16xf64> to vector<16xf32>
+  vector.store %result, %destination[0] : vector<16xf32>, view<16xf32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) @narrow_f64_f32_16_memory(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %15 = vmovdqu32.load %input {disp32 = 0}
+  %16 = avx512.vcvtpd2ps.ymm.zmm %15
+  %17 = vmovdqu32.load %input {disp32 = 64}
+  %18 = avx512.vcvtpd2ps.ymm.zmm %17
+  vmovdqu32.store.ymm %16, %output {disp32 = 0}
+  vmovdqu32.store.ymm %18, %output {disp32 = 32}
+  return
+}

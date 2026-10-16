@@ -99,7 +99,7 @@ from .common import (
     _xmm_operand,
     _xmm_result,
 )
-from .float_widening import float_widening_descriptors
+from .float_conversion import float_conversion_descriptors
 from .integer_float import integer_float_descriptors
 from .memory import memory_descriptors
 from .scalar import (
@@ -1314,7 +1314,7 @@ X86_AVX2_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
     *X86_AVX2_VECTOR_DESCRIPTORS,
     *integer_float_descriptors(unsigned=False),
-    *float_widening_descriptors(evex=False),
+    *float_conversion_descriptors(evex=False),
     *X86_SCALAR_SUFFIX_DESCRIPTORS,
 )
 

@@ -14,6 +14,7 @@ from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scf import ALL_SCF_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.view import ALL_VIEW_OPS
+from loom.target.arch.x86.contracts.float_conversion import float_conversion_rules
 from loom.target.arch.x86.contracts.float_narrowing import (
     x86_float_narrowing_rules,
 )
@@ -21,7 +22,6 @@ from loom.target.arch.x86.contracts.float_roots import (
     scalar_float_root_rules,
     vector_float_root_rules,
 )
-from loom.target.arch.x86.contracts.float_widening import float_widening_rules
 from loom.target.arch.x86.contracts.floating_extrema import (
     avx2_float_extrema_rules,
 )
@@ -99,7 +99,7 @@ def _cases() -> Sequence[ContractCase]:
         ),
         *avx2_integer_float_rules(_descriptor),
         *x86_float_narrowing_rules(_descriptor),
-        *float_widening_rules(_descriptor, evex=False),
+        *float_conversion_rules(_descriptor, evex=False),
         *avx2_vector_construction_rules(_descriptor),
         *vector_integer_widening_rules(
             _descriptor,

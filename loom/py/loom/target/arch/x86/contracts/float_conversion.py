@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Scalar and packed BF16/F32 widening without changing value carriers."""
+"""Scalar and packed float-width conversion rules."""
 
 from loom.dialect.scalar import conversion
 from loom.dialect.vector import defs as vector
@@ -17,57 +17,71 @@ from loom.target.contracts import DescriptorRule, Guard, Scalar, ValueRef, Vecto
 _REGISTER_SUFFIXES = {128: "xmm", 256: "ymm", 512: "zmm"}
 
 
-def float_widening_rules(
+def float_conversion_rules(
     descriptor_lookup: DescriptorLookup, *, evex: bool
 ) -> tuple[DescriptorRule, ...]:
     feature = "avx512" if evex else "avx2"
     priority = int(evex)
-    scalar = descriptor_lookup(f"x86.{feature}.vcvtss2sd.xmm")
-    rules = [
-        DescriptorRule(
-            source_op=conversion.scalar_extf,
-            descriptor=scalar,
-            guards=(
-                Guard.value_type("input", Scalar("f32")),
-                Guard.value_type("result", Scalar("f64")),
-            ),
-            emit=(
-                emit_descriptor_op(
-                    descriptor=scalar,
-                    operands={
-                        "passthrough": ValueRef.operand("input"),
-                        "input": ValueRef.operand("input"),
-                    },
-                    results={"dst": ValueRef.result("result")},
-                ),
-            ),
-            priority=priority,
-        )
-    ]
-    for lane_count in (2, 4, 8) if evex else (2, 4):
-        source_suffix = _REGISTER_SUFFIXES[max(128, lane_count * 32)]
-        result_suffix = _REGISTER_SUFFIXES[lane_count * 64]
-        descriptor = descriptor_lookup(
-            f"x86.{feature}.vcvtps2pd.{result_suffix}.{source_suffix}"
-        )
+    rules = []
+    lane_counts = (2, 4, 8) if evex else (2, 4)
+    for narrow in (False, True):
+        source_element, result_element = ("f64", "f32") if narrow else ("f32", "f64")
+        scalar_mnemonic = "vcvtsd2ss" if narrow else "vcvtss2sd"
+        scalar = descriptor_lookup(f"x86.{feature}.{scalar_mnemonic}.xmm")
         rules.append(
             DescriptorRule(
-                source_op=vector.vector_extf,
-                descriptor=descriptor,
+                source_op=(
+                    conversion.scalar_fptrunc if narrow else conversion.scalar_extf
+                ),
+                descriptor=scalar,
                 guards=(
-                    Guard.value_type("input", Vector("f32", lanes=lane_count)),
-                    Guard.value_type("result", Vector("f64", lanes=lane_count)),
+                    Guard.value_type("input", Scalar(source_element)),
+                    Guard.value_type("result", Scalar(result_element)),
                 ),
                 emit=(
                     emit_descriptor_op(
-                        descriptor=descriptor,
-                        operands={"input": ValueRef.operand("input")},
+                        descriptor=scalar,
+                        operands={
+                            "passthrough": ValueRef.operand("input"),
+                            "input": ValueRef.operand("input"),
+                        },
                         results={"dst": ValueRef.result("result")},
                     ),
                 ),
                 priority=priority,
             )
         )
+        mnemonic = "vcvtpd2ps" if narrow else "vcvtps2pd"
+        for lane_count in lane_counts:
+            source_width = lane_count * (64 if narrow else 32)
+            result_width = lane_count * (32 if narrow else 64)
+            source_suffix = _REGISTER_SUFFIXES[max(128, source_width)]
+            result_suffix = _REGISTER_SUFFIXES[max(128, result_width)]
+            descriptor = descriptor_lookup(
+                f"x86.{feature}.{mnemonic}.{result_suffix}.{source_suffix}"
+            )
+            rules.append(
+                DescriptorRule(
+                    source_op=(vector.vector_fptrunc if narrow else vector.vector_extf),
+                    descriptor=descriptor,
+                    guards=(
+                        Guard.value_type(
+                            "input", Vector(source_element, lanes=lane_count)
+                        ),
+                        Guard.value_type(
+                            "result", Vector(result_element, lanes=lane_count)
+                        ),
+                    ),
+                    emit=(
+                        emit_descriptor_op(
+                            descriptor=descriptor,
+                            operands={"input": ValueRef.operand("input")},
+                            results={"dst": ValueRef.result("result")},
+                        ),
+                    ),
+                    priority=priority,
+                )
+            )
     for result_element, lane_counts in (
         ("f32", (16,) if evex else (2, 4, 8)),
         ("f64", (2, 4, 8) if evex else (2, 4)),

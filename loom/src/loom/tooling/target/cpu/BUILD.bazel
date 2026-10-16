@@ -112,6 +112,7 @@ iree_executable_test(
         ("scalar_integer_float", "//loom/src/loom/test/corpus/numeric:conversion/conversion.loom", "scalar_integer_float_values"),
         ("wide_integer_conversion", "//loom/src/loom/test/corpus/numeric:vector/conversion.loom", "wide_integer_values"),
         ("packed_float_widening", "//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom", "packed_f32_to_f64_values"),
+        ("packed_float_narrowing", "//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom", "packed_f64_to_f32_values"),
         ("half_narrowing", "//loom/src/loom/test/corpus/numeric:conversion/f32_narrowing.loom", "f32_half_packet_values"),
         ("half_double_widening", "//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom", "float16_to_f64_all_bits"),
         ("half_widening", "//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom", "float16_to_f32_all_bits"),
