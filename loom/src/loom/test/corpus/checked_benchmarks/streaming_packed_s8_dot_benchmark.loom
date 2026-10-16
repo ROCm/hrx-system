@@ -1,0 +1,116 @@
+kernel.decl @streaming_packed_s8_dot_serial() launch(%record_count: index, %field_buffer: buffer, %scale_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer)
+
+kernel.decl @streaming_packed_s8_dot_pipelined() launch(%record_count: index, %field_buffer: buffer, %scale_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer)
+
+kernel.decl @streaming_packed_s8_dot_serial_unroll2() launch(%record_count: index, %field_buffer: buffer, %scale_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer)
+
+kernel.decl @streaming_packed_s8_dot_pipelined_depth4_unroll2() launch(%record_count: index, %field_buffer: buffer, %scale_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer)
+
+kernel.decl @streaming_packed_s8_dot_read_ahead() launch(%record_count: index, %field_buffer: buffer, %scale_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer)
+
+// Maps trial ordinals to counts [0, 1, 2, 3, 8, 63, 128]. These distinguish
+// startup, steady-state, and drain behavior while retaining the full count
+// sweep as opt-in benchmark work.
+func.def @streaming_packed_s8_dot_benchmark_count(%trial: index) -> (index) {
+  %count = scf.switch %trial -> (index) {
+    case 0 {
+      %value = index.constant 0 : index
+      scf.yield %value : index
+    }
+    case 1 {
+      %value = index.constant 1 : index
+      scf.yield %value : index
+    }
+    case 2 {
+      %value = index.constant 2 : index
+      scf.yield %value : index
+    }
+    case 3 {
+      %value = index.constant 3 : index
+      scf.yield %value : index
+    }
+    case 4 {
+      %value = index.constant 8 : index
+      scf.yield %value : index
+    }
+    case 5 {
+      %value = index.constant 63 : index
+      scf.yield %value : index
+    }
+    default {
+      %value = index.constant 128 : index
+      scf.yield %value : index
+    }
+  }
+  func.return %count : index
+}
+
+check.scenario @streaming_packed_s8_dot_serial_benchmark {
+  check.trial[7](%trial: index, %entropy: check.entropy) {
+    %count = check.generate<@streaming_packed_s8_dot_benchmark_count>(%trial) : (index) -> (index)
+    %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
+    %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
+    %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
+    %output = check.generate.fill value(-1.0) : tensor<2048xf32>
+    check.invoke<@streaming_packed_s8_dot_serial>(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>) -> ()
+  }
+  check.return
+}
+
+check.benchmark<@streaming_packed_s8_dot_serial_benchmark> @streaming_packed_s8_dot_serial_counts
+
+check.scenario @streaming_packed_s8_dot_pipelined_benchmark {
+  check.trial[7](%trial: index, %entropy: check.entropy) {
+    %count = check.generate<@streaming_packed_s8_dot_benchmark_count>(%trial) : (index) -> (index)
+    %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
+    %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
+    %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
+    %output = check.generate.fill value(-1.0) : tensor<2048xf32>
+    check.invoke<@streaming_packed_s8_dot_pipelined>(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>) -> ()
+  }
+  check.return
+}
+
+check.benchmark<@streaming_packed_s8_dot_pipelined_benchmark> @streaming_packed_s8_dot_pipelined_counts
+
+check.scenario @streaming_packed_s8_dot_serial_unroll2_benchmark {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(128) : index
+    %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
+    %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
+    %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
+    %output = check.generate.fill value(-1.0) : tensor<2048xf32>
+    check.invoke<@streaming_packed_s8_dot_serial_unroll2>(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>) -> ()
+  }
+  check.return
+}
+
+check.benchmark<@streaming_packed_s8_dot_serial_unroll2_benchmark> @streaming_packed_s8_dot_serial_unroll2_n128_time
+
+check.scenario @streaming_packed_s8_dot_pipelined_depth4_unroll2_benchmark {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(128) : index
+    %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
+    %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
+    %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
+    %output = check.generate.fill value(-1.0) : tensor<2048xf32>
+    check.invoke<@streaming_packed_s8_dot_pipelined_depth4_unroll2>(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>) -> ()
+  }
+  check.return
+}
+
+check.benchmark<@streaming_packed_s8_dot_pipelined_depth4_unroll2_benchmark> @streaming_packed_s8_dot_pipelined_depth4_unroll2_n128_time
+
+check.scenario @streaming_packed_s8_dot_read_ahead_benchmark {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(128) : index
+    %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
+    %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
+    %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
+    %output = check.generate.fill value(-1.0) : tensor<2048xf32>
+    check.invoke<@streaming_packed_s8_dot_read_ahead>(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>) -> ()
+  }
+  check.return
+}
+
+check.benchmark<@streaming_packed_s8_dot_read_ahead_benchmark> @streaming_packed_s8_dot_read_ahead_n128_time

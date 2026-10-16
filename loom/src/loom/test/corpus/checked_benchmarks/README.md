@@ -1,20 +1,23 @@
 # Checked Benchmark Corpus
 
-This corpus contains complete Loom programs with correctness cases and
-benchmark rows. Target providers compose these data-only sources into
-capability-coherent modules and execute them through production-facing
-infrastructure. A case belongs here when the important risk is the interaction
-between multiple compiler and runtime contracts, and that interaction cannot
-be represented faithfully by a smaller source-low, op, pass, tool, or authoring
-test.
+This corpus contains complete Loom programs with correctness scenarios and
+companion benchmark campaigns. Target providers compose these data-only
+sources into capability-coherent modules and execute them through
+production-facing infrastructure. A workload family belongs here when the
+important risk is the interaction between multiple compiler and runtime
+contracts, and that interaction cannot be represented faithfully by a smaller
+source-low, op, pass, tool, or authoring test.
 
-Each checked benchmark source is expected to contain:
+Each checked benchmark family is expected to contain:
 
 - One or more kernels or callable entry points under test.
-- One or more `check.case` records with deterministic input generation and
-  meaningful expectations.
-- One or more `check.benchmark<@case> @name` rows selecting the checked workload for
-  timing.
+- One or more `check.scenario` records that batch deterministic runtime trials
+  against an independent oracle. A focused `check.case` remains appropriate
+  when one integration program must coordinate several subjects.
+- A `_benchmark.loom` companion whose target-only scenarios select the timed
+  workload without placing benchmark scale in ordinary correctness execution.
+- One or more `check.benchmark<@scenario> @name` rows selecting those campaigns
+  for timing.
 - Comments that identify the represented behavior class and any non-obvious
   numeric, layout, target, or launch contract.
 
@@ -29,7 +32,7 @@ examples are comment-rich recipes for people and agents learning how to write
 Loom. Checked benchmark cases are regression and benchmark assets: they can
 have comments, but their main job is to preserve end-to-end signal.
 
-## Case Template
+## Scenario Template
 
 ```loom
 kernel.def @semantic_behavior_class() {
@@ -39,20 +42,26 @@ kernel.def @semantic_behavior_class() {
   kernel.return
 }
 
-check.case public @semantic_behavior_class_case {
-  // Deterministic inputs that distinguish the represented behavior.
-  kernel.launch @semantic_behavior_class(%input, %output)
-      : [](tensor<...>, tensor<...>)
-  check.expect.close actual(...) expected(...) atol(...) rtol(...) nan(...) : ...
-  check.return
+func.def @semantic_behavior_class_oracle(%input: buffer, %output: buffer) {
+  // Independent scalar reference.
+  func.return
 }
 
-check.benchmark<@semantic_behavior_class_case> @semantic_behavior_class_smoke
+check.scenario @semantic_behavior_class_values {
+  check.trial[...](%trial: index, %entropy: check.entropy) {
+    // Runtime inputs that distinguish the represented behavior.
+    check.compare<@semantic_behavior_class, @semantic_behavior_class_oracle>(%input, %output) : (tensor<...>, tensor<...>) -> () {
+      check.expect.close actual(...) expected(...) atol(...) rtol(...) nan(...) : ...
+    }
+  }
+  check.return
+}
 ```
 
-The template is intentionally small. A real case should add parameters and
-multiple benchmark rows only when those shape classes answer distinct compiler
-or runtime questions.
+The companion benchmark scenario uses `check.invoke<@semantic_behavior_class>`
+with the same production shape and no oracle execution in the timed path. The
+template is intentionally small. A real family adds trial domains only when
+those shapes answer distinct compiler or runtime questions.
 
 ## Seed Candidate Policy
 
@@ -87,10 +96,12 @@ unroll describes how many original iterations share a loop body.
 
 The depth-four form starts three records, issues a future record while
 consuming the oldest, and drains the remaining records in order. Counts below
-three take the serial path. Analytic cases use a closed-form exact result;
-the shared varied-input case changes every carried input independently and
-compares all forms bitwise across startup, steady-state remainders, and drain
-boundaries. Different output sentinels make missing stores observable.
+three take the serial path. One seven-trial scenario checks the serial
+recurrence against a closed-form exact oracle. The shared varied-input case
+changes every carried input independently and compares all forms bitwise across
+startup, steady-state remainders, and drain boundaries. Different output
+sentinels make missing stores observable. Benchmark-only count sweeps live in
+the companion source, outside ordinary correctness execution.
 
 The matched factor-two benchmark rows are
 `@streaming_packed_s8_dot_serial_unroll2_n128_time` and

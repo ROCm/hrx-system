@@ -54,104 +54,6 @@ kernel.def @streaming_packed_s8_dot_serial() {
   kernel.return
 }
 
-check.case public @streaming_packed_s8_dot_serial_n0 {
-  %count = check.literal value(0) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(0.0) step(0.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_serial_n0> @streaming_packed_s8_dot_serial_n0_time
-
-check.case public @streaming_packed_s8_dot_serial_n1 {
-  %count = check.literal value(1) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(14.5) step(10.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_serial_n1> @streaming_packed_s8_dot_serial_n1_time
-
-check.case public @streaming_packed_s8_dot_serial_n2 {
-  %count = check.literal value(2) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(669.0) step(20.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_serial_n2> @streaming_packed_s8_dot_serial_n2_time
-
-check.case public @streaming_packed_s8_dot_serial_n3 {
-  %count = check.literal value(3) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(1963.5) step(30.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_serial_n3> @streaming_packed_s8_dot_serial_n3_time
-
-check.case public @streaming_packed_s8_dot_serial_n8 {
-  %count = check.literal value(8) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(18036.0) step(80.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_serial_n8> @streaming_packed_s8_dot_serial_n8_time
-
-check.case public @streaming_packed_s8_dot_serial_n63 {
-  %count = check.literal value(63) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(1250833.5) step(630.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_serial_n63> @streaming_packed_s8_dot_serial_n63_time
-
-check.case public @streaming_packed_s8_dot_serial_n128 {
-  %count = check.literal value(128) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(5203776.0) step(1280.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_serial_n128> @streaming_packed_s8_dot_serial_n128_time
-
 kernel.def @streaming_packed_s8_dot_pipelined() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -211,104 +113,6 @@ kernel.def @streaming_packed_s8_dot_pipelined() {
   kernel.return
 }
 
-check.case public @streaming_packed_s8_dot_pipelined_n0 {
-  %count = check.literal value(0) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(0.0) step(0.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_pipelined_n0> @streaming_packed_s8_dot_pipelined_n0_time
-
-check.case public @streaming_packed_s8_dot_pipelined_n1 {
-  %count = check.literal value(1) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(14.5) step(10.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_pipelined_n1> @streaming_packed_s8_dot_pipelined_n1_time
-
-check.case public @streaming_packed_s8_dot_pipelined_n2 {
-  %count = check.literal value(2) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(669.0) step(20.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_pipelined_n2> @streaming_packed_s8_dot_pipelined_n2_time
-
-check.case public @streaming_packed_s8_dot_pipelined_n3 {
-  %count = check.literal value(3) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(1963.5) step(30.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_pipelined_n3> @streaming_packed_s8_dot_pipelined_n3_time
-
-check.case public @streaming_packed_s8_dot_pipelined_n8 {
-  %count = check.literal value(8) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(18036.0) step(80.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_pipelined_n8> @streaming_packed_s8_dot_pipelined_n8_time
-
-check.case public @streaming_packed_s8_dot_pipelined_n63 {
-  %count = check.literal value(63) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(1250833.5) step(630.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_pipelined_n63> @streaming_packed_s8_dot_pipelined_n63_time
-
-check.case public @streaming_packed_s8_dot_pipelined_n128 {
-  %count = check.literal value(128) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(5203776.0) step(1280.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_pipelined_n128> @streaming_packed_s8_dot_pipelined_n128_time
-
 // Matched-unroll control: two ordinary serial iterations share one body.
 kernel.def @streaming_packed_s8_dot_serial_unroll2() {
   %unit = index.constant 1 : index
@@ -354,20 +158,6 @@ kernel.def @streaming_packed_s8_dot_serial_unroll2() {
   view.store %total, %output[%lane] : f32, view<2048xf32>
   kernel.return
 }
-
-check.case public @streaming_packed_s8_dot_serial_unroll2_n128 {
-  %count = check.literal value(128) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(5203776.0) step(1280.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial_unroll2(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_serial_unroll2_n128> @streaming_packed_s8_dot_serial_unroll2_n128_time
 
 // Three retained records let two future records load while two older records
 // compute. Startup and drain preserve the original recurrence; fewer than
@@ -464,48 +254,6 @@ kernel.def @streaming_packed_s8_dot_pipelined_depth4_unroll2() {
   kernel.return
 }
 
-check.case public @streaming_packed_s8_dot_pipelined_depth4_unroll2_n128 {
-  %count = check.literal value(128) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(5203776.0) step(1280.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_pipelined_depth4_unroll2(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.return
-}
-
-check.benchmark<@streaming_packed_s8_dot_pipelined_depth4_unroll2_n128> @streaming_packed_s8_dot_pipelined_depth4_unroll2_n128_time
-
-// Distinct periods keep every carried input changing between records. Packed
-// fields decode to [-3, -1, 2..8, 7], scales cycle through [0.5, 1.0, 1.5], and
-// RHS elements cycle through 1..257. Products and partial sums are multiples of
-// 0.5 with magnitude below 2^20, so every arithmetic step is exact in f32. The
-// serial recurrence is a bitwise oracle for the rotated values. Different
-// output sentinels also detect missing stores.
-check.case public @streaming_packed_s8_dot_varied_inputs {
-  %count = check.param.choice values([0, 1, 2, 3, 4, 5, 7, 8, 9, 63, 64, 65, 127, 128]) : index
-  %fields = check.generate.iota offset(117637117) step(65536) period(7) : tensor<128x2048xi32>
-  %scales = check.generate.iota offset(0.5) step(0.5) period(3) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) period(257) : tensor<128x64x4xf32>
-  %serial = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %pipelined = check.generate.fill value(-2.0) : tensor<2048xf32>
-  %serial_unrolled = check.generate.fill value(-3.0) : tensor<2048xf32>
-  %depth4 = check.generate.fill value(-4.0) : tensor<2048xf32>
-  %scheduled = check.generate.fill value(-5.0) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %serial) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %pipelined) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  kernel.launch @streaming_packed_s8_dot_serial_unroll2(%count, %fields, %scales, %rhs, %serial_unrolled) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  kernel.launch @streaming_packed_s8_dot_pipelined_depth4_unroll2(%count, %fields, %scales, %rhs, %depth4) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  kernel.launch @streaming_packed_s8_dot_read_ahead(%count, %fields, %scales, %rhs, %scheduled) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.bitwise actual(%pipelined) expected(%serial) : tensor<2048xf32>
-  check.expect.bitwise actual(%serial_unrolled) expected(%serial) : tensor<2048xf32>
-  check.expect.bitwise actual(%depth4) expected(%serial) : tensor<2048xf32>
-  check.expect.bitwise actual(%scheduled) expected(%serial) : tensor<2048xf32>
-  check.return
-}
-
 // Independent policies keep the source recurrence fixed while exploring
 // read-ahead and unrolling. Depth one is the serial control at the same unroll
 // factor; the default depth four/unroll two matches the handwritten schedule.
@@ -561,16 +309,115 @@ kernel.def @streaming_packed_s8_dot_read_ahead() {
   kernel.return
 }
 
-check.case public @streaming_packed_s8_dot_read_ahead_n128 {
-  %count = check.literal value(128) : index
-  %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
-  %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
-  %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
-  %output = check.generate.fill value(-1.0) : tensor<2048xf32>
-  %expected = check.generate.iota offset(5203776.0) step(1280.0) period(64) : tensor<2048xf32>
-  kernel.launch @streaming_packed_s8_dot_read_ahead(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
+// Maps compact trial ordinals to the startup, steady-state, and drain counts
+// that distinguish the recurrence schedules without specializing the kernels.
+func.def @streaming_packed_s8_dot_trial_count(%trial: index) -> (index) {
+  %count = scf.switch %trial -> (index) {
+    case 0 {
+      %value = index.constant 0 : index
+      scf.yield %value : index
+    }
+    case 1 {
+      %value = index.constant 1 : index
+      scf.yield %value : index
+    }
+    case 2 {
+      %value = index.constant 2 : index
+      scf.yield %value : index
+    }
+    case 3 {
+      %value = index.constant 3 : index
+      scf.yield %value : index
+    }
+    case 4 {
+      %value = index.constant 8 : index
+      scf.yield %value : index
+    }
+    case 5 {
+      %value = index.constant 63 : index
+      scf.yield %value : index
+    }
+    default {
+      %value = index.constant 128 : index
+      scf.yield %value : index
+    }
+  }
+  func.return %count : index
+}
+
+// Closed-form oracle for the fixed packed fields, scales, and activation rows
+// in the analytic scenario. It computes each lane independently of the ordered
+// dot recurrence used by every kernel implementation.
+func.def @streaming_packed_s8_dot_fixed_oracle(%record_count: index, %field_buffer: buffer, %scale_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %count = index.assume %record_count [range(%record_count, 0, 128)] : index
+  %begin = index.constant 0 : index
+  %end = index.constant 2048 : index
+  %step = index.constant 1 : index
+  %period = index.constant 64 : index
+  %count_i32 = index.cast %count : index to i32
+  %count_decrement = scalar.constant 1 : i32
+  %prior_count_i32 = scalar.subi %count_i32, %count_decrement : i32
+  %count_f32 = scalar.sitofp %count_i32 : i32 to f32
+  %prior_count_f32 = scalar.sitofp %prior_count_i32 : i32 to f32
+  %record_factor = scalar.constant 320.0 : f32
+  %initial_factor = scalar.constant 14.5 : f32
+  %lane_factor = scalar.constant 10.0 : f32
+  %record_pairs = scalar.mulf %count_f32, %prior_count_f32 : f32
+  %record_offset = scalar.mulf %record_pairs, %record_factor : f32
+  %initial_offset = scalar.mulf %count_f32, %initial_factor : f32
+  %base_value = scalar.addf %record_offset, %initial_offset : f32
+  %lane_step = scalar.mulf %count_f32, %lane_factor : f32
+  %base = index.constant 0 : offset
+  %output = buffer.view %output_buffer[%base] : buffer -> view<2048xf32>
+  scf.for %lane = [%begin to %end step %step] {
+    %activation_lane = index.rem %lane, %period : index
+    %activation_lane_i32 = index.cast %activation_lane : index to i32
+    %activation_lane_f32 = scalar.sitofp %activation_lane_i32 : i32 to f32
+    %lane_offset = scalar.mulf %activation_lane_f32, %lane_step : f32
+    %value = scalar.addf %base_value, %lane_offset : f32
+    view.store %value, %output[%lane] : f32, view<2048xf32>
+  }
+  func.return
+}
+
+check.scenario @streaming_packed_s8_dot_fixed_values {
+  check.trial[7](%trial: index, %entropy: check.entropy) {
+    %count = check.generate<@streaming_packed_s8_dot_trial_count>(%trial) : (index) -> (index)
+    %fields = check.generate.fill value(117637117) : tensor<128x2048xi32>
+    %scales = check.generate.fill value(0.5) : tensor<128x2048xf16>
+    %rhs = check.generate.iota offset(1.0) step(1.0) : tensor<128x64x4xf32>
+    %output = check.generate.fill value(-1.0) : tensor<2048xf32>
+    check.compare<@streaming_packed_s8_dot_serial, @streaming_packed_s8_dot_fixed_oracle>(%count, %fields, %scales, %rhs, %output) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2048xf32>
+    }
+  }
   check.return
 }
 
-check.benchmark<@streaming_packed_s8_dot_read_ahead_n128> @streaming_packed_s8_dot_read_ahead_n128_time
+// Distinct periods keep every carried input changing between records. Packed
+// fields decode to [-3, -1, 2..8, 7], scales cycle through [0.5, 1.0, 1.5], and
+// RHS elements cycle through 1..257. Products and partial sums are multiples of
+// 0.5 with magnitude below 2^20, so every arithmetic step is exact in f32. The
+// serial recurrence is a bitwise oracle for the rotated values. Different
+// output sentinels also detect missing stores.
+check.case public @streaming_packed_s8_dot_varied_inputs {
+  %count = check.param.choice values([0, 1, 2, 3, 4, 5, 7, 8, 9, 63, 64, 65, 127, 128]) : index
+  %fields = check.generate.iota offset(117637117) step(65536) period(7) : tensor<128x2048xi32>
+  %scales = check.generate.iota offset(0.5) step(0.5) period(3) : tensor<128x2048xf16>
+  %rhs = check.generate.iota offset(1.0) step(1.0) period(257) : tensor<128x64x4xf32>
+  %serial = check.generate.fill value(-1.0) : tensor<2048xf32>
+  %pipelined = check.generate.fill value(-2.0) : tensor<2048xf32>
+  %serial_unrolled = check.generate.fill value(-3.0) : tensor<2048xf32>
+  %depth4 = check.generate.fill value(-4.0) : tensor<2048xf32>
+  %scheduled = check.generate.fill value(-5.0) : tensor<2048xf32>
+  kernel.launch @streaming_packed_s8_dot_serial(%count, %fields, %scales, %rhs, %serial) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
+  kernel.launch @streaming_packed_s8_dot_pipelined(%count, %fields, %scales, %rhs, %pipelined) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
+  kernel.launch @streaming_packed_s8_dot_serial_unroll2(%count, %fields, %scales, %rhs, %serial_unrolled) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
+  kernel.launch @streaming_packed_s8_dot_pipelined_depth4_unroll2(%count, %fields, %scales, %rhs, %depth4) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
+  kernel.launch @streaming_packed_s8_dot_read_ahead(%count, %fields, %scales, %rhs, %scheduled) : (index, tensor<128x2048xi32>, tensor<128x2048xf16>, tensor<128x64x4xf32>, tensor<2048xf32>)
+  check.expect.bitwise actual(%pipelined) expected(%serial) : tensor<2048xf32>
+  check.expect.bitwise actual(%serial_unrolled) expected(%serial) : tensor<2048xf32>
+  check.expect.bitwise actual(%depth4) expected(%serial) : tensor<2048xf32>
+  check.expect.bitwise actual(%scheduled) expected(%serial) : tensor<2048xf32>
+  check.return
+}
