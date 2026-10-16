@@ -227,8 +227,8 @@ TEST_F(SourceTextServiceTest,
       host_allocator_, &chat));
   iree_arena_allocator_t arena;
   iree_arena_initialize(loom_serve_host_block_pool(host_), &arena);
-  iree_string_builder_t tools;
-  iree_string_builder_initialize(host_allocator_, &tools);
+  loom_serve_text_tool_calls_t tools;
+  loom_serve_text_tool_calls_initialize(host_allocator_, &tools);
   loom_serve_text_chat_scratch_t scratch;
   loom_serve_text_chat_scratch_initialize(host_allocator_, &scratch);
   loom_serve_text_chat_completion_t completion = {};
@@ -246,7 +246,7 @@ TEST_F(SourceTextServiceTest,
   EXPECT_TRUE(completion.reusable);
   loom_serve_text_chat_completion_deinitialize(&completion);
   loom_serve_text_chat_scratch_deinitialize(&scratch);
-  iree_string_builder_deinitialize(&tools);
+  loom_serve_text_tool_calls_deinitialize(&tools);
   iree_arena_deinitialize(&arena);
 }
 
@@ -288,8 +288,8 @@ TEST_F(SourceTextServiceTest, CompletionFormattingReusesCapacityAcrossRows) {
   iree::vm::testing::CountingAllocator allocator;
   loom_serve_text_chat_scratch_t scratch;
   loom_serve_text_chat_scratch_initialize(allocator.allocator(), &scratch);
-  iree_string_builder_t tools;
-  iree_string_builder_initialize(allocator.allocator(), &tools);
+  loom_serve_text_tool_calls_t tools;
+  loom_serve_text_tool_calls_initialize(allocator.allocator(), &tools);
   iree_arena_allocator_t arena;
   iree_arena_initialize(loom_serve_host_block_pool(host_), &arena);
   iree_host_size_t warm_allocations = 0;
@@ -304,7 +304,8 @@ TEST_F(SourceTextServiceTest, CompletionFormattingReusesCapacityAcrossRows) {
                                                       "prior arguments"));
     IREE_ASSERT_OK(iree_string_builder_append_cstring(&scratch.rendered,
                                                       "prior tool calls"));
-    iree_string_builder_reset(&tools);
+    IREE_ASSERT_OK(loom_serve_text_tool_calls_append(
+        &tools, row + 1, IREE_SV("prior"), IREE_SV("{}")));
     loom_serve_text_chat_completion_t completion = {};
     IREE_ASSERT_OK(loom_serve_text_chat_complete(
         &chat, IREE_SV("b"), row + 1, &tools, &scratch,
@@ -314,8 +315,7 @@ TEST_F(SourceTextServiceTest, CompletionFormattingReusesCapacityAcrossRows) {
     }
     EXPECT_EQ(allocator.allocation_count(), warm_allocations);
     EXPECT_EQ(allocator.free_count(), 0u);
-    EXPECT_TRUE(iree_string_view_equal(iree_string_builder_view(&tools),
-                                       IREE_SV("[]")));
+    EXPECT_EQ(tools.count, 0u);
     EXPECT_TRUE(iree_string_view_equal(
         iree_string_builder_view(&scratch.parsed), IREE_SV("[]")));
     EXPECT_EQ(iree_string_builder_size(&scratch.rendered), 0u);
@@ -326,7 +326,7 @@ TEST_F(SourceTextServiceTest, CompletionFormattingReusesCapacityAcrossRows) {
     loom_serve_text_chat_completion_deinitialize(&completion);
   }
   loom_serve_text_chat_scratch_deinitialize(&scratch);
-  iree_string_builder_deinitialize(&tools);
+  loom_serve_text_tool_calls_deinitialize(&tools);
   iree_arena_deinitialize(&arena);
 }
 
@@ -345,8 +345,8 @@ TEST_F(SourceTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_chat_initialize(
       policy, policy->name, iree_make_cstring_view(next_body.c_str()), 2, 4,
       host_allocator_, &next));
-  iree_string_builder_t tools;
-  iree_string_builder_initialize(host_allocator_, &tools);
+  loom_serve_text_tool_calls_t tools;
+  loom_serve_text_tool_calls_initialize(host_allocator_, &tools);
   loom_serve_text_chat_scratch_t completion_scratch;
   loom_serve_text_chat_scratch_initialize(host_allocator_, &completion_scratch);
   loom_serve_text_chat_completion_t completion = {};
@@ -401,7 +401,7 @@ TEST_F(SourceTextServiceTest,
   loom_serve_text_input_deinitialize(&input, host_allocator_);
   loom_serve_text_chat_deinitialize(&next);
   loom_serve_text_chat_deinitialize(&first);
-  iree_string_builder_deinitialize(&tools);
+  loom_serve_text_tool_calls_deinitialize(&tools);
   loom_serve_text_chat_scratch_deinitialize(&completion_scratch);
 }
 
@@ -813,8 +813,8 @@ TEST_F(SourceTextServiceTest, RetainedHistoryRequiresExactOrderedMedia) {
       iree_make_cstring_view(different_placement_body.c_str()), 14, 4,
       host_allocator_, &different_placement));
 
-  iree_string_builder_t tools;
-  iree_string_builder_initialize(host_allocator_, &tools);
+  loom_serve_text_tool_calls_t tools;
+  loom_serve_text_tool_calls_initialize(host_allocator_, &tools);
   loom_serve_text_chat_scratch_t completion_scratch;
   loom_serve_text_chat_scratch_initialize(host_allocator_, &completion_scratch);
   loom_serve_text_chat_completion_t completion = {};
@@ -854,7 +854,7 @@ TEST_F(SourceTextServiceTest, RetainedHistoryRequiresExactOrderedMedia) {
 
   loom_serve_text_input_deinitialize(&input, host_allocator_);
   loom_serve_text_chat_completion_deinitialize(&retained);
-  iree_string_builder_deinitialize(&tools);
+  loom_serve_text_tool_calls_deinitialize(&tools);
   loom_serve_text_chat_scratch_deinitialize(&completion_scratch);
   loom_serve_text_chat_deinitialize(&different_placement);
   loom_serve_text_chat_deinitialize(&different_detail);
