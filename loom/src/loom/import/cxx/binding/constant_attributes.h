@@ -51,7 +51,8 @@ ConstantAttributeResult decode_constant_attribute(
     const cxx::ConstValue& source_value);
 
 // Returns an exact zero-offset string literal payload, including a literal
-// reached through a constexpr pointer. Other addresses and values return empty.
+// reached through retained array-decay steps or a constexpr pointer. Other
+// addresses and values return empty.
 std::optional<std::string_view> constant_string(
     const cxx::ConstValue& source_value);
 

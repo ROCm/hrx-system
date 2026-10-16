@@ -464,8 +464,16 @@ TEST(ConstantArchiveTest, PreservesReferenceTemplateIdentity) {
     auto address =
         std::get<std::shared_ptr<cxx::ConstAddress>>(*variable->constValue());
     ASSERT_NE(address, nullptr);
-    EXPECT_EQ(address->symbol(), *objects.begin());
+    EXPECT_EQ(address->rootSymbol(), *objects.begin());
     EXPECT_EQ(address->offset(), offsets[index]);
+    if (index < 2) {
+      EXPECT_FALSE(address->isArrayElement());
+      EXPECT_EQ(address->symbol(), *objects.begin());
+    } else {
+      EXPECT_TRUE(address->isArrayElement());
+      ASSERT_NE(address->parent(), nullptr);
+      EXPECT_EQ(address->parent()->symbol(), *objects.begin());
+    }
 
     // The independent address constant must find the restored specialization,
     // even though it has a different ConstAddress allocation from its key.

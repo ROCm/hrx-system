@@ -28,11 +28,22 @@ std::optional<std::string_view> constant_string(
   }
   auto* address =
       std::get_if<std::shared_ptr<cxx::ConstAddress>>(&source_value);
-  if (!address || !*address || (*address)->offset() != 0 ||
-      !(*address)->stringLiteral()) {
+  if (!address || !*address) {
     return std::nullopt;
   }
-  return (*address)->stringLiteral()->stringValue();
+  for (auto* current = address->get(); current;
+       current = current->parent().get()) {
+    if (current->offset() != 0) {
+      return std::nullopt;
+    }
+    if (auto* literal = current->stringLiteral()) {
+      return literal->stringValue();
+    }
+    if (current->symbol()) {
+      return std::nullopt;
+    }
+  }
+  return std::nullopt;
 }
 
 std::optional<std::string> constant_enum_name(

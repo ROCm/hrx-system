@@ -146,17 +146,6 @@ constexpr unsigned left[1] = {5}, right[1] = {5};
 static_assert(right - left == 0);
 
 // ====
-// Nested array elements need a subobject path, not a sum of element offsets.
-constexpr unsigned table[2][2] = {{3, 5}, {7, 11}};
-template <const unsigned& value>
-// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'const unsigned int&'"
-constexpr unsigned choose() { return 3; }
-unsigned entry() {
-  // ERROR@+1: PARSE/036 "no matching function for call to 'choose'"
-  return choose<table[0][1]>();
-}
-
-// ====
 // A constant address does not make the contents of a mutable global constant.
 unsigned object = 5;
 template <const unsigned& value>
