@@ -85,6 +85,7 @@ func.def @reference_gate_up_q4k(%input: buffer, %tasks: buffer, %weight: buffer,
 }
 
 check.scenario public @gate_up_q4k {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %down = check.literal value(false) : i1
     %format = check.literal value(2) : index
@@ -130,6 +131,7 @@ func.def @reference_gate_up_q5k(%input: buffer, %tasks: buffer, %weight: buffer,
 }
 
 check.scenario public @gate_up_q5k {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %down = check.literal value(false) : i1
     %format = check.literal value(3) : index
@@ -175,6 +177,7 @@ func.def @reference_gate_up_q8(%input: buffer, %tasks: buffer, %weight: buffer, 
 }
 
 check.scenario public @gate_up_q8 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %down = check.literal value(false) : i1
     %format = check.literal value(0) : index
@@ -220,6 +223,7 @@ func.def @reference_down_q51(%input: buffer, %tasks: buffer, %weight: buffer, %u
 }
 
 check.scenario public @down_q51 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %down = check.literal value(true) : i1
     %format = check.literal value(1) : index
@@ -265,6 +269,7 @@ func.def @reference_down_q8(%input: buffer, %tasks: buffer, %weight: buffer, %up
 }
 
 check.scenario public @down_q8 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %down = check.literal value(true) : i1
     %format = check.literal value(0) : index
