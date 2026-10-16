@@ -132,6 +132,15 @@ struct NativeQueue {
     info->byte_length = sizeof(self->words);
     return self->Call("memory_info");
   }
+  static amdf_status_t AMDF_CALL Address(amdf_memory_t* memory,
+                                         uint32_t access_ordinal,
+                                         amdf_memory_address_kind_t kind,
+                                         uint64_t* out_address) {
+    EXPECT_EQ(access_ordinal, 0u);
+    EXPECT_EQ(kind, AMDF_MEMORY_ADDRESS_GPU);
+    *out_address = UINT64_C(0x1234560000);
+    return reinterpret_cast<NativeQueue*>(memory)->Call("address");
+  }
   static amdf_status_t AMDF_CALL Map(amdf_memory_t* memory,
                                      const amdf_memory_map_info_t* info,
                                      amdf_host_mapping_t** mapping) {
@@ -165,6 +174,7 @@ class KernelStorageTest : public ::testing::Test {
     api_.kernel_queue_destroy = NativeQueue::Destroy;
     api_.memory_create = NativeQueue::Allocate;
     api_.memory_query_info = NativeQueue::MemoryInfo;
+    api_.memory_query_address = NativeQueue::Address;
     api_.memory_map = NativeQueue::Map;
     api_.host_mapping_query_info = NativeQueue::MappingInfo;
     api_.host_mapping_destroy = NativeQueue::Unmap;
@@ -223,6 +233,7 @@ TEST_F(KernelStorageTest, CapturesOpaquePointsWithoutInferringProgress) {
   IREE_ASSERT_OK(Allocate());
   EXPECT_EQ(ring_.words, native_.words.data());
   EXPECT_EQ(ring_.capacity, native_.words.size());
+  EXPECT_EQ(storage_->address, UINT64_C(0x1234560000));
   for (uint64_t i = 0; i < 12; ++i) {
     Prepare();
     EXPECT_EQ(iree_hal_amd_gpu_pm4_kmq_storage_submit(storage_, i),
@@ -324,7 +335,8 @@ TEST_F(KernelStorageTest, CleanupJoinsAcceptedTailBeforeReleasingCommandBytes) {
 }
 
 TEST_F(KernelStorageTest, PartialConstructionPreservesItsCleanupOwner) {
-  for (const char* operation : {"create", "query", "allocate", "memory_info"}) {
+  for (const char* operation :
+       {"create", "query", "allocate", "memory_info", "address"}) {
     SCOPED_TRACE(operation);
     native_.fail_operation = operation;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Allocate());

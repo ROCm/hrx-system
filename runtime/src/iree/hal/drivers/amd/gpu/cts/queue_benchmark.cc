@@ -618,10 +618,10 @@ BENCHMARK_CAPTURE(BM_Record, TransfersTable, BindingMode::kTable,
     ->UseRealTime();
 
 // Submit timing covers one public invocation, including its bounded initial
-// publication. Completion rows additionally include every refill and GPU work.
-// Sampled rows isolate the API call from benchmark pause/resume overhead, at
-// the cost of two clock reads. No row measures calibrated time to first
-// workgroup.
+// publication. Completion rows additionally include resident execution and
+// retirement. Sampled rows isolate the API call from benchmark pause/resume
+// overhead, at the cost of two clock reads. No row measures calibrated time to
+// first workgroup.
 static void BM_Execute(benchmark::State& state, BindingMode bindings,
                        Timing timing, Program program) {
   NativeQueue queue;

@@ -433,6 +433,7 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::drivers::amd::gpu::image::hip_images
+    iree::hal::drivers::amd::gpu::queue::pm4::command_buffer
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

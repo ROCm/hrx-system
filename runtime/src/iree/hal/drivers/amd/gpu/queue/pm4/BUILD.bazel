@@ -229,6 +229,18 @@ iree_c_embed_data(
     for target in _PROGRAM_TARGETS
 ]
 
+[
+    loom_kernel_binary(
+        name = "blit_program_" + target,
+        testonly = True,
+        srcs = ["blit.loom"],
+        out = "blit_program_" + target + ".hsaco",
+        target = ":dispatch_program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
 iree_c_embed_data(
     name = "fixup_programs",
     testonly = True,
@@ -246,6 +258,32 @@ iree_runtime_cc_test(
     deps = [
         ":fixup",
         ":fixup_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_c_embed_data(
+    name = "blit_programs",
+    testonly = True,
+    srcs = [":blit_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "blit_programs.c",
+    h_file_output = "blit_programs.h",
+    identifier = "iree_hal_amd_gpu_pm4_blit_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_test(
+    name = "blit_test",
+    srcs = ["blit_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    deps = [
+        ":blit",
+        ":blit_programs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/drivers/amd/gpu/image",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
@@ -278,17 +316,43 @@ iree_runtime_cc_library(
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":barrier",
+        ":blit",
         ":commands",
         ":dispatch",
         ":launch",
-        ":transfer",
+        ":program",
+        ":recording",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/gpu:executable",
         "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
+        "//runtime/src/iree/hal/memory:maintenance",
         "//runtime/src/iree/hal/utils:resource_set",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "recording",
+    srcs = ["recording.c"],
+    hdrs = ["recording.h"],
+    deps = [
+        ":fixup",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "blit",
+    srcs = ["blit.c"],
+    hdrs = ["blit.h"],
+    deps = [
+        ":commands",
+        ":launch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
     ],
 )
 
@@ -298,13 +362,19 @@ iree_runtime_cc_library(
     hdrs = ["program.h"],
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
+        ":barrier",
+        ":blit",
+        ":commands",
         ":fixup",
+        ":launch",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/drivers/amd/fabric:memory",
         "//runtime/src/iree/hal/drivers/amd/gpu:context",
+        "//runtime/src/iree/hal/memory:maintenance",
     ],
 )
 
@@ -328,20 +398,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu:profile",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "command_buffer_test",
-    srcs = ["command_buffer_test.cc"],
-    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
-    deps = [
-        ":barrier",
-        ":command_buffer",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -556,6 +612,7 @@ iree_runtime_cc_library(
         ":dispatch",
         ":file_transfer",
         ":launch",
+        ":program",
         ":retirement",
         ":ring",
         ":semaphore",
@@ -626,6 +683,37 @@ iree_runtime_cc_test(
     deps = [
         ":queue",
         "//libamdf:headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "program_test",
+    srcs = ["program_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":barrier",
+        ":blit",
+        ":fixup",
+        ":launch",
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "recording_test",
+    srcs = ["recording_test.cc"],
+    deps = [
+        ":commands",
+        ":fixup",
+        ":recording",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

@@ -10,11 +10,57 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/blit.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/fixup.h"
+#include "iree/hal/memory/maintenance.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
+
+typedef struct iree_hal_amd_gpu_pm4_program_t iree_hal_amd_gpu_pm4_program_t;
+
+// Device-owned native program storage. Cold preparation, registration, trim,
+// and cleanup run on the existing memory service. Submission only reads the
+// prepared launches and placement facts; no worker belongs to this pool.
+typedef struct iree_hal_amd_gpu_pm4_program_pool_t {
+  // Borrowed native device dominated by the containing HAL device.
+  const iree_hal_amd_gpu_context_t* context;
+  // Borrowed cold executor, also dominated by the HAL device.
+  iree_hal_memory_maintenance_t* service;
+  // Allocator for program metadata and recording-time storage.
+  iree_allocator_t host_allocator;
+  // Persistent access requirements borrowed by both native policies.
+  amdf_memory_device_access_t access;
+  // Cached host-visible upload and immutable builtin instruction placement.
+  iree_hal_amd_fabric_memory_options_t upload;
+  // Physical-local placement when advertised, otherwise cached system memory.
+  iree_hal_amd_fabric_memory_options_t resident;
+  // Owned instruction bytes shared by every recording and invocation.
+  iree_hal_amd_fabric_memory_t code;
+  // Prepared parallel relocation kernel.
+  iree_hal_amd_gpu_pm4_launch_t fixup;
+  // Prepared dynamic-extent copy/fill kernel.
+  iree_hal_amd_gpu_pm4_launch_t blit;
+  // Registered programs; links are accessed only on service.
+  iree_hal_amd_gpu_pm4_program_t* head;
+  // Immutable number of provisioned queues in this native domain.
+  uint32_t queue_count;
+  // KERNEL submission enters IB1 and needs an explicit exit continuation.
+  bool chain;
+} iree_hal_amd_gpu_pm4_program_pool_t;
+
+// Cold initialization; failure leaves a deinitializable partial owner.
+iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
+    const iree_hal_amd_gpu_context_t* context,
+    iree_hal_memory_maintenance_t* service, uint32_t queue_count, bool chain,
+    iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_pm4_program_pool_t* out_pool);
+void iree_hal_amd_gpu_pm4_program_pool_trim(
+    iree_hal_amd_gpu_pm4_program_pool_t* pool);
+void iree_hal_amd_gpu_pm4_program_pool_deinitialize(
+    iree_hal_amd_gpu_pm4_program_pool_t* pool);
 
 // A sealed block's native entry. Block identities and extents are independent
 // of invocation placement; successor packets and private-data pointers are
@@ -46,6 +92,8 @@ typedef struct iree_hal_amd_gpu_pm4_program_instance_t {
   // One publisher owns an unaccepted invocation. No causal proof can cover
   // that invocation until publication installs its writer coordinate.
   bool reserved;
+  // A same-FIFO predecessor may still read private data before host retirement.
+  bool join_previous;
   // Cold native ownership, following the compact invocation metadata.
   iree_hal_amd_fabric_memory_t memory;
 } iree_hal_amd_gpu_pm4_program_instance_t;
@@ -54,13 +102,22 @@ typedef struct iree_hal_amd_gpu_pm4_program_instance_t {
 // owner retains the device and all native operands; leases retain that owner.
 // Metadata selection/release is hot. Allocation, trim, and final teardown run
 // on the shared device service, outside this mutex and after native use joins.
-typedef struct iree_hal_amd_gpu_pm4_program_t {
-  // Borrowed native identity, dominated by the command buffer's device.
-  const iree_hal_amd_gpu_context_t* context;
-  // Host allocator for the bounded instance table and cold native owners.
-  iree_allocator_t host_allocator;
-  // Captured native placement policy; pointed-to accesses outlive this owner.
-  iree_hal_amd_fabric_memory_options_t memory;
+struct iree_hal_amd_gpu_pm4_program_t {
+  // Borrowed device-owned placement and builtin programs.
+  iree_hal_amd_gpu_pm4_program_pool_t* pool;
+  // Previous registered program, accessed only on the cold service.
+  iree_hal_amd_gpu_pm4_program_t* previous;
+  // Next registered program, accessed only on the cold service.
+  iree_hal_amd_gpu_pm4_program_t* next;
+  // Optional staging when physical-local storage has no host view. Retained
+  // through every initial copy reader, then released by an idle trim.
+  iree_hal_amd_fabric_memory_t upload;
+  // Host view used once by the recorder before sealing.
+  iree_byte_span_t contents;
+  // GPU source for cold initialization before the first instance retires.
+  uint64_t upload_address;
+  // Initial native immutable bytes are complete and can serve other queues.
+  iree_atomic_int32_t source_ready;
   // Protects instance selection, last-use coordinates, and lease counts only.
   iree_slim_mutex_t mutex;
   // Number of instance slots, bounded by the device's provisioned queues.
@@ -75,20 +132,68 @@ typedef struct iree_hal_amd_gpu_pm4_program_t {
   uint32_t alignment;
   // Immutable fixup count, independent of the invocation's value count.
   uint32_t fixup_count;
-  // Immutable table in the initial instance's allocation, after copied bytes.
-  uint64_t fixup_address;
-} iree_hal_amd_gpu_pm4_program_t;
+  // Immutable table offset in the initial instance and optional upload.
+  uint32_t fixup_offset;
+};
 
-// Allocates the initial placement and uploads the complete sealed program plus
-// fixup table once. The input is trusted recorder output. The initial instance
-// is also the permanent clone source; its immutable bytes never change.
-// Native failures leave a deinitializable partial owner. Runs on service.
+// Allocates an initial placement and writable upload view. The recorder writes
+// commands/data at contents.data and the immutable table at fixup_offset, then
+// seals. No native queue is blocked for upload: an unmapped local instance is
+// initialized by the first invocation's ordered device copy. Runs on service.
 iree_status_t iree_hal_amd_gpu_pm4_program_initialize(
-    const iree_hal_amd_gpu_context_t* context,
-    const iree_hal_amd_fabric_memory_options_t* memory, uint32_t queue_count,
-    uint32_t alignment, iree_const_byte_span_t contents, uint32_t fixup_count,
-    const iree_hal_amd_gpu_pm4_fixup_t* fixups, iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_pm4_program_pool_t* pool, uint32_t alignment,
+    uint32_t byte_length, uint32_t fixup_count,
     iree_hal_amd_gpu_pm4_program_t* out_program);
+
+// Flushes the completed upload and registers the immutable program. Failure
+// leaves the owner deinitializable; no invocation can observe it before
+// success.
+iree_status_t iree_hal_amd_gpu_pm4_program_seal(
+    iree_hal_amd_gpu_pm4_program_t* program);
+
+// Immutable native sources selected once for an invocation. Before the initial
+// local copy retires, other queues use the retained upload. Thereafter they
+// copy the permanent resident instance, including while its mutable words
+// change.
+typedef struct iree_hal_amd_gpu_pm4_program_source_t {
+  // Base of the initialized commands/private data.
+  uint64_t address;
+  // Shared immutable fixup table, never modified by invocation fixups.
+  uint64_t fixups;
+} iree_hal_amd_gpu_pm4_program_source_t;
+iree_hal_amd_gpu_pm4_program_source_t iree_hal_amd_gpu_pm4_program_source(
+    const iree_hal_amd_gpu_pm4_program_t* program);
+
+// Fixed invocation header followed by the dense uint64_t input vector. The
+// queue owns this upload until native retirement; program emission initializes
+// the builtin arguments after the recorder resolves the input vector.
+typedef struct iree_hal_amd_gpu_pm4_program_arguments_t {
+  // Independent full-word replacements for this instance.
+  iree_hal_amd_gpu_pm4_fixup_arguments_t fixup;
+  // Cold initialization or overlap clone, used only for a large native copy.
+  iree_hal_amd_gpu_pm4_blit_arguments_t copy;
+} iree_hal_amd_gpu_pm4_program_arguments_t;
+
+// Native invocation extent, excluding caller-owned waits, optional padding,
+// and retirement. The reservation remains exclusive through emission, so the
+// same initialized/join facts govern both sizing and encoding.
+uint32_t iree_hal_amd_gpu_pm4_program_word_count(
+    const iree_hal_amd_gpu_pm4_program_t* program,
+    const iree_hal_amd_gpu_pm4_program_instance_t* instance,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile);
+
+// Publishes host input, initializes a cold placement, applies all fixups, and
+// enters the resident block. Actual producer/consumer cache paths determine
+// visibility. Padding precedes the final entry, including terminal CHAIN.
+// No command, binding, or fixup entry is walked on the host here.
+uint32_t* iree_hal_amd_gpu_pm4_program_emit(
+    const iree_hal_amd_gpu_pm4_program_t* program,
+    const iree_hal_amd_gpu_pm4_program_instance_t* instance,
+    iree_hal_amd_gpu_pm4_program_block_t entry,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    uint64_t argument_address,
+    iree_hal_amd_gpu_pm4_program_arguments_t* arguments, uint32_t padding,
+    uint32_t* words);
 
 // Reserves an idle or causally reusable instance exclusively until acceptance
 // or rejection. Frontier includes the exact native waits to be emitted before

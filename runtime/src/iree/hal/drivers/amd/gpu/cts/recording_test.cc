@@ -14,6 +14,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -385,7 +386,7 @@ class GpuNativeRecordingSizeTest
       public ::testing::WithParamInterface<uint32_t> {};
 
 TEST_P(GpuNativeRecordingSizeTest,
-       ConcurrentTablesRetainIndependentNativePrefixes) {
+       ConcurrentTablesRetainIndependentResidentInstances) {
   const uint32_t count = GetParam();
   iree_hal_command_buffer_t* recording = nullptr;
   Record(iree_hal_make_indirect_buffer_ref(2, 4, 4), count,
@@ -406,6 +407,19 @@ TEST_P(GpuNativeRecordingSizeTest,
         queues_[i], {1, &gate, &one}, {1, &done[i], &one}, outputs[i], 0, 64,
         &zero, sizeof(zero), nullptr, IREE_HAL_FILL_FLAG_NONE));
   }
+  std::array<iree_hal_buffer_binding_t, 3> table = {};
+  table[2] = {outputs[0], 0, 64};
+  std::array<iree_hal_amd_gpu_pm4_command_binding_t, 3> captured;
+  iree_hal_amd_gpu_pm4_command_invocation_t invocation;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_invocation_initialize(
+      recording, {table.size(), table.data()}, captured.data(), 0,
+      &invocation));
+  // One buffer input, plus at most one executable base, serves every dispatch.
+  // The same bound holds for the one-, thousand-, and eight-thousand-op cases.
+  EXPECT_LE(invocation.program->value_count, 5u);
+  EXPECT_LE(invocation.program->argument_length, 104u);
+  EXPECT_EQ(invocation.program->dispatch_count, count);
+  iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
   std::array<std::thread, 2> threads;
   for (size_t i = 0; i < threads.size(); ++i) {
     threads[i] = std::thread([&, i] {
@@ -655,6 +669,104 @@ class GpuNativeInvocationTest : public GpuNativeRecordingTest {
                               decltype(&iree_hal_command_buffer_release)>>
       recordings_;
 };
+
+TEST_F(GpuNativeInvocationTest, WholeCopyConstraintsCoverTransitiveBindings) {
+  std::array<iree_hal_buffer_t*, 4> buffers;
+  const uint64_t lengths[] = {64, 80, 96, 128};
+  for (size_t i = 0; i < buffers.size(); ++i) {
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool_, iree_hal_make_pool_reservation_request(lengths[i], 4),
+        iree_infinite_timeout(), &buffers[i]));
+    buffers_.emplace_back(buffers[i], iree_hal_buffer_release);
+  }
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 2, &recording));
+  recordings_.emplace_back(recording, iree_hal_command_buffer_release);
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  std::array<uint8_t, 64> source;
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = (uint8_t)(i * 7 + 3);
+  }
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      recording, source.data(), 0, iree_hal_make_buffer_ref(buffers[0], 0, 64),
+      0));
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+  };
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory,
+  };
+  const iree_hal_buffer_ref_t references[] = {
+      iree_hal_make_buffer_ref(buffers[0], 7, IREE_HAL_WHOLE_BUFFER),
+      iree_hal_make_indirect_buffer_ref(0, 23, IREE_HAL_WHOLE_BUFFER),
+      iree_hal_make_indirect_buffer_ref(1, 39, IREE_HAL_WHOLE_BUFFER),
+      iree_hal_make_buffer_ref(buffers[3], 71, IREE_HAL_WHOLE_BUFFER),
+  };
+  for (size_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(recording, references[i],
+                                                       references[i + 1], 0));
+  }
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  std::array<iree_hal_buffer_binding_t, 2> table = {
+      {{buffers[1], 0, 80}, {buffers[2], 0, 92}}};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_queue_execute(queues_[0], {}, {}, recording,
+                             {table.size(), table.data()}, 0));
+  table[1].length = 96;
+  CreateSemaphore(&done_[0]);
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {}, {1, &done_[0], &one},
+                                        recording, {table.size(), table.data()},
+                                        0));
+  submitted_values_[0] = one;
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(done_[0], one, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  std::array<uint8_t, 57> actual;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_map_read(buffers[3], 71, actual.data(), actual.size()));
+  EXPECT_EQ(memcmp(actual.data(), source.data() + 7, actual.size()), 0);
+}
+
+TEST_F(GpuNativeInvocationTest,
+       InconsistentRecordingCannotSealPartialCommands) {
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 2, &recording));
+  recordings_.emplace_back(recording, iree_hal_command_buffer_release);
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      recording, iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER),
+      iree_hal_make_indirect_buffer_ref(1, 8, IREE_HAL_WHOLE_BUFFER), 0));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_command_buffer_copy_buffer(
+          recording,
+          iree_hal_make_indirect_buffer_ref(1, 0, IREE_HAL_WHOLE_BUFFER),
+          iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER), 0));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_command_buffer_end(recording));
+  std::array<iree_hal_amd_gpu_pm4_command_binding_t, 2> captured;
+  iree_hal_amd_gpu_pm4_command_invocation_t invocation;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_amd_gpu_pm4_command_invocation_initialize(
+                            recording, {}, captured.data(), 0, &invocation));
+  iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
+}
 
 class GpuNativeIndirectTest
     : public GpuNativeInvocationTest,
@@ -1194,5 +1306,57 @@ INSTANTIATE_TEST_SUITE_P(PacketPaths, GpuNativePacketTest,
                          ::testing::Combine(::testing::Values(0, 1, 2),
                                             ::testing::Values(0, 1, 2, 3, 4),
                                             ::testing::Values(0, 1, 2, 3)));
+
+class GpuCommandBufferTest : public GpuNativeTest,
+                             public ::testing::WithParamInterface<bool> {};
+
+TEST_P(GpuCommandBufferTest, SealedBlockPipelinesWithoutHostReplay) {
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  iree_hal_command_buffer_t* recording = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH, 0, &recording));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  if (GetParam()) {
+    const iree_hal_barrier_t barrier = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    for (uint32_t i = 0; i < 10000; ++i) {
+      IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &barrier));
+    }
+  }
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  iree_hal_amd_gpu_pm4_command_invocation_t invocation;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_invocation_initialize(
+      recording, {}, nullptr, 0, &invocation));
+  EXPECT_LE(invocation.program->entry.word_count, 24u);
+  EXPECT_EQ(invocation.program->dispatch_count, 0u);
+  EXPECT_EQ(invocation.program->operation_count, GetParam() ? 1u : 0u);
+  EXPECT_EQ(invocation.program->value_count, 3u);
+  EXPECT_EQ(invocation.program->argument_length, 88u);
+  iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
+
+  iree_hal_semaphore_t* done = nullptr;
+  CreateSemaphore(&done);
+  constexpr uint64_t kExecutions = 64;
+  for (uint64_t value = 1; value <= kExecutions; ++value) {
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queues_[0], iree_hal_semaphore_list_empty(), {1, &done, &value},
+        recording, iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+  }
+  iree_hal_command_buffer_release(recording);
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      done, kExecutions, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_semaphore_release(done);
+  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+}
+
+INSTANTIATE_TEST_SUITE_P(Recordings, GpuCommandBufferTest, ::testing::Bool());
 
 }  // namespace

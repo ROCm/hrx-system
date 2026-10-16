@@ -290,7 +290,7 @@ class GpuNativeRecordedTransferTest : public GpuNativeTransferTest {
 };
 
 TEST_P(GpuNativeRecordedTransferTest,
-       ReusableTransfersCaptureBytesAndRetireBoundedPrefixes) {
+       ReusableResidentTransfersCaptureBytesAndBindings) {
   std::vector<uint8_t> source(kLength);
   for (size_t i = 0; i < source.size(); ++i) {
     source[i] = (i * 17 + 7) & 0xff;
@@ -337,8 +337,8 @@ TEST_P(GpuNativeRecordedTransferTest,
       expected[offset + j] = (uint8_t)(pattern >> ((j % pattern_length) * 8));
     }
   }
-  // Empty remaining ranges still advance the invocation without requiring a
-  // native buffer access or an unbounded search for the next nonempty record.
+  // Empty remaining ranges execute no memory access, including when their
+  // extents are resolved from an invocation binding table.
   IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
       recording, Reference(0, kLength, IREE_HAL_WHOLE_BUFFER),
       Reference(1, kLength, IREE_HAL_WHOLE_BUFFER), 0));

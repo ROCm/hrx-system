@@ -260,7 +260,9 @@ TEST_F(GpuNativeProfileTest,
   ASSERT_EQ(executions.size(), 2u);
   for (const auto& event : executions) {
     EXPECT_EQ(event.command_buffer_id, recording_id);
-    EXPECT_EQ(event.operation_count, 2u);  // Dispatch plus terminal barrier.
+    // Count the encoded payload operations; invocation fixup and clone work
+    // belongs to native transport and contributes no additional operation.
+    EXPECT_EQ(event.operation_count, 3u);  // Acquire, dispatch, and release.
   }
 }
 

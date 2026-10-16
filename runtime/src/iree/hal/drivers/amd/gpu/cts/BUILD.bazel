@@ -269,6 +269,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hip_images",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:command_buffer",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

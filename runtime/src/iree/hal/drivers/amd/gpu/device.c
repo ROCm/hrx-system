@@ -17,6 +17,7 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
 #include "iree/hal/drivers/amd/status.h"
@@ -45,6 +46,8 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_queue_t** queues;
   // Immutable queue sources, optional feedback, and a final shutdown observer.
   iree_hal_amd_gpu_completion_source_t* sources;
+  // Resident command programs, shared builtins, and idle-instance trimming.
+  iree_hal_amd_gpu_pm4_program_pool_t programs;
   // Sole native-event completion/retirement worker.
   iree_hal_amd_gpu_completion_t completion;
   // Optional shared shader reports, drained by the same completion worker.
@@ -359,6 +362,11 @@ static bool iree_hal_amd_gpu_device_is_idle(iree_hal_amd_gpu_device_t* device) {
   return true;
 }
 
+static void iree_hal_amd_gpu_device_release_programs(void* user_data) {
+  iree_hal_amd_gpu_device_t* device = user_data;
+  iree_hal_amd_gpu_pm4_program_pool_deinitialize(&device->programs);
+}
+
 // Joins native owners before freeing any device-owned construction facts. Both
 // constructor rollback and completion-worker teardown run outside service.
 static bool iree_hal_amd_gpu_device_release_children(
@@ -383,6 +391,9 @@ static bool iree_hal_amd_gpu_device_release_children(
     device->queues[i] = NULL;
   }
   if (device->memory.service) {
+    iree_hal_memory_maintenance_call(device->memory.service,
+                                     iree_hal_amd_gpu_device_release_programs,
+                                     device);
     iree_hal_amd_gpu_allocation_context_deinitialize(
         &device->memory.allocations);
   }
@@ -511,6 +522,25 @@ iree_hal_amd_gpu_device_family_publication(
   return (modes & AMDF_QUEUE_PUBLICATION_MODE_USER)
              ? AMDF_QUEUE_PUBLICATION_MODE_USER
              : modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
+}
+
+typedef struct iree_hal_amd_gpu_device_program_prepare_t {
+  // Unpublished device whose construction waits for this service call.
+  iree_hal_amd_gpu_device_t* device;
+  // Immutable native queue count used by program instance storage.
+  uint32_t queue_count;
+  // Selected native transport needs terminal chain continuations.
+  bool chain;
+  // Native preparation result returned to device construction.
+  iree_status_t status;
+} iree_hal_amd_gpu_device_program_prepare_t;
+
+static void iree_hal_amd_gpu_device_prepare_programs(void* user_data) {
+  iree_hal_amd_gpu_device_program_prepare_t* prepare = user_data;
+  iree_hal_amd_gpu_device_t* device = prepare->device;
+  prepare->status = iree_hal_amd_gpu_pm4_program_pool_initialize(
+      device->context, device->memory.service, prepare->queue_count,
+      prepare->chain, device->host_allocator, &device->programs);
 }
 
 typedef struct iree_hal_amd_gpu_device_feedback_prepare_t {
@@ -722,6 +752,17 @@ iree_status_t iree_hal_amd_gpu_device_create(
           host_allocator, &device->memory.allocations);
     }
   }
+  if (iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_device_program_prepare_t prepare = {
+        .device = device,
+        .queue_count = options->queue_count,
+        .chain = publication_mode == AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+    };
+    iree_hal_memory_maintenance_call(device->memory.service,
+                                     iree_hal_amd_gpu_device_prepare_programs,
+                                     &prepare);
+    status = prepare.status;
+  }
   if (iree_status_is_ok(status) && feedback_enabled) {
     iree_hal_amd_gpu_device_feedback_prepare_t prepare = {
         .device = device,
@@ -816,6 +857,7 @@ static void iree_hal_amd_gpu_device_replace_channel_provider(
 static void iree_hal_amd_gpu_device_trim_caches(void* user_data) {
   iree_hal_amd_gpu_device_t* device = user_data;
   iree_arena_block_pool_trim(&device->memory.allocations.blocks);
+  iree_hal_amd_gpu_pm4_program_pool_trim(&device->programs);
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     iree_hal_amd_gpu_pm4_queue_trim(device->queues[i]);
   }
@@ -973,9 +1015,12 @@ static iree_status_t iree_hal_amd_gpu_device_create_command_buffer(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_barrier_profile_initialize(
       device->target.version, &profile));
   return iree_hal_amd_gpu_pm4_command_buffer_create(
-      family, mode, categories, binding_capacity,
+      family, &device->programs, mode, categories, binding_capacity,
       (uint32_t)
           device->context->target_info.compute.local_data_share_byte_length,
+      device->memory.tsan_count
+          ? device->memory.tsan[0].config.shadow_slot_count
+          : 0,
       &profile, device->host_allocator, out_command_buffer);
 }
 

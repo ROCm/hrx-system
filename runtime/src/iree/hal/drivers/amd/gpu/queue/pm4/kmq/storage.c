@@ -50,7 +50,8 @@ iree_status_t iree_hal_amd_gpu_pm4_kmq_storage_allocate(
                             "PM4 KERNEL queue has no compatible native wake");
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_backing_allocate(
-      context, memory_options, command_capacity, 64, &storage->memory, NULL));
+      context, memory_options, command_capacity, 64, &storage->memory,
+      &storage->address));
   iree_hal_amd_gpu_pm4_ring_initialize(
       (uint32_t*)storage->memory.contents.data,
       (uint32_t)(command_capacity / sizeof(uint32_t)), out_ring);

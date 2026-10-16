@@ -30,6 +30,8 @@ typedef struct iree_hal_amd_gpu_pm4_kmq_storage_t {
   amdf_kernel_queue_t* queue;
   // Owned executable bytes and coherent host producer mapping.
   iree_hal_amd_fabric_memory_t memory;
+  // Native command byte zero, used by resident-program continuations.
+  uint64_t address;
   // Prepared immutable command that has not yet been accepted. A zero length
   // means no prepared publication. BUSY retains the complete byte range.
   amdf_gpu_kernel_command_t pending;

@@ -1,0 +1,83 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Fixed-size launch, dynamic byte extent. Each lane owns sixteen consecutive
+// bytes; iterations stride over the whole grid. The last partial vector uses
+// byte operations and never reads or writes outside the admitted range.
+kernel.def export("blit") @blit() {
+  %one = index.constant 1 : index
+  %groups = index.constant 256 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%width, %one, %one) : index
+} launch(%source: buffer, %target: buffer, %length: offset, %pattern: i32, %fill: i32) {
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = index.constant 64 : offset
+  %group_offset = index.scale %group, %width : index, offset -> offset
+  %group_index = index.cast %group_offset : offset to index
+  %position = index.add %group_index, %lane : index
+  %vector_size = index.constant 16 : offset
+  %begin_offset = index.scale %position, %vector_size : index, offset -> offset
+  %zero = scalar.constant 0 : i32
+  %copy = scalar.cmpi eq, %fill, %zero : i32
+  %stride = index.constant 262144 : offset
+  %sixteen = index.constant 16 : offset
+  %terminal = scf.while(%offset = %begin_offset : offset) -> (offset) {
+    %active = index.cmp slt, %offset, %length : offset
+    scf.condition %active, %offset : i1, offset
+  } do(%offset: offset) {
+    %remaining = index.sub %length, %offset : offset
+    %full = index.cmp sge, %remaining, %sixteen : offset
+    scf.if %full {
+      %destination = buffer.view %target[%offset] : buffer -> view<4xi32, align(1)>
+      scf.if %copy {
+        %input = buffer.view %source[%offset] : buffer -> view<4xi32, align(1)>
+        %word0 = view.load %input[0] : view<4xi32, align(1)> -> i32
+        %word1 = view.load %input[1] : view<4xi32, align(1)> -> i32
+        %word2 = view.load %input[2] : view<4xi32, align(1)> -> i32
+        %word3 = view.load %input[3] : view<4xi32, align(1)> -> i32
+        view.store %word0, %destination[0] : i32, view<4xi32, align(1)>
+        view.store %word1, %destination[1] : i32, view<4xi32, align(1)>
+        view.store %word2, %destination[2] : i32, view<4xi32, align(1)>
+        view.store %word3, %destination[3] : i32, view<4xi32, align(1)>
+      } else {
+        view.store %pattern, %destination[0] : i32, view<4xi32, align(1)>
+        view.store %pattern, %destination[1] : i32, view<4xi32, align(1)>
+        view.store %pattern, %destination[2] : i32, view<4xi32, align(1)>
+        view.store %pattern, %destination[3] : i32, view<4xi32, align(1)>
+      }
+    } else {
+      %first = index.constant 0 : offset
+      %one = index.constant 1 : offset
+      %end = scf.while(%byte = %first : offset) -> (offset) {
+        %active_byte = index.cmp slt, %byte, %remaining : offset
+        scf.condition %active_byte, %byte : i1, offset
+      } do(%byte: offset) {
+        %absolute = index.add %offset, %byte : offset
+        %destination_byte = buffer.view %target[%absolute] : buffer -> view<1xi8>
+        scf.if %copy {
+          %input_byte = buffer.view %source[%absolute] : buffer -> view<1xi8>
+          %value = view.load %input_byte[0] : view<1xi8> -> i8
+          view.store %value, %destination_byte[0] : i8, view<1xi8>
+        } else {
+          %byte32 = index.cast %byte : offset to i32
+          %mask = scalar.constant 3 : i32
+          %three = scalar.constant 3 : i32
+          %within_word = scalar.andi %byte32, %mask : i32
+          %shift = scalar.shli %within_word, %three : i32
+          %shifted = scalar.shrui %pattern, %shift : i32
+          %value = scalar.trunci %shifted : i32 to i8
+          view.store %value, %destination_byte[0] : i8, view<1xi8>
+        }
+        %next_byte = index.add %byte, %one : offset
+        scf.yield %next_byte : offset
+      }
+    }
+    %next = index.add %offset, %stride : offset
+    scf.yield %next : offset
+  }
+  kernel.return
+}

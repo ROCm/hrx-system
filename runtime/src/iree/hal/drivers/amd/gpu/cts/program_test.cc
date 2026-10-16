@@ -59,25 +59,10 @@ class GpuProgramTest : public GpuNativeTest {
     ASSERT_NO_FATAL_FAILURE(
         SelectMemory(true, &control_access_, &control_policy_));
     ASSERT_NO_FATAL_FAILURE(
-        SelectMemory(false, &program_access_, &program_policy_));
-    ASSERT_NO_FATAL_FAILURE(
         Allocate(control_policy_, 65536, &control_, &control_address_));
     std::memset(control_.contents.data, 0, control_.contents.data_length);
-    iree_const_byte_span_t code;
-    iree_hal_amd_gpu_image_kernel_t descriptor;
-    IREE_ASSERT_OK(
-        iree_hal_amd_gpu_pm4_fixup_program_query(gfxip, &code, &descriptor));
-    uint64_t code_address = 0;
-    ASSERT_NO_FATAL_FAILURE(Allocate(program_policy_, code.data_length + 256,
-                                     &code_, &code_address));
-    std::memcpy(code_.contents.data, code.data, code.data_length);
-    IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        context_->api->host_mapping_cache_control(
-            code_.mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
-            code_.contents.data_length),
-        "publish fixup instructions"));
-    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
-        gfxip, &descriptor, code_address, &fixup_launch_));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_program_pool_initialize(
+        context_, nullptr, 3, kernel_, iree_allocator_system(), &pool_));
     for (auto& queue : queues_native_) {
       if (kernel_) {
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_kmq_storage_allocate(
@@ -130,8 +115,7 @@ class GpuProgramTest : public GpuNativeTest {
         iree_hal_amd_gpu_pm4_program_release(&program_, instance);
       }
       iree_hal_amd_gpu_pm4_program_deinitialize(&program_);
-      iree_hal_amd_fabric_memory_deinitialize(context_->api,
-                                              context_->event_sink, &code_);
+      iree_hal_amd_gpu_pm4_program_pool_deinitialize(&pool_);
       iree_hal_amd_fabric_memory_deinitialize(context_->api,
                                               context_->event_sink, &control_);
     }
@@ -263,10 +247,12 @@ class GpuProgramTest : public GpuNativeTest {
         .word_count = static_cast<uint32_t>(cursor - words.data()),
     };
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_program_initialize(
-        context_, &program_policy_, 3, 256,
-        iree_make_const_byte_span(words.data(), words.size() * 4),
-        static_cast<uint32_t>(fixups.size()), fixups.data(),
-        iree_allocator_system(), &program_));
+        &pool_, 256, static_cast<uint32_t>(words.size() * 4),
+        static_cast<uint32_t>(fixups.size()), &program_));
+    std::memcpy(program_.contents.data, words.data(), words.size() * 4);
+    std::memcpy(program_.contents.data + program_.fixup_offset, fixups.data(),
+                fixups.size() * sizeof(fixups[0]));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_program_seal(&program_));
   }
 
   void Submit(uint32_t queue_index, uint32_t slot, uint32_t value,
@@ -286,9 +272,10 @@ class GpuProgramTest : public GpuNativeTest {
     const uint64_t values[4] = {
         control_address_ + 8192 + slot * (kOutputs + 2) * 4, value,
         continuation, instance->address};
+    const auto source = iree_hal_amd_gpu_pm4_program_source(&program_);
     const iree_hal_amd_gpu_pm4_fixup_arguments_t arguments = {
-        program_.fixup_address, control_address_ + upload_offset + 32,
-        instance->address, program_.fixup_count, 0};
+        source.fixups, control_address_ + upload_offset + 32, instance->address,
+        program_.fixup_count, 0};
     std::memcpy(control_.contents.data + upload_offset, &arguments,
                 sizeof(arguments));
     std::memcpy(control_.contents.data + upload_offset + 32, values,
@@ -302,11 +289,14 @@ class GpuProgramTest : public GpuNativeTest {
     words = iree_hal_amd_gpu_pm4_emit_acquire(words, barriers_.acquire | 1u);
     if (!instance->initialized) {
       words = iree_hal_amd_gpu_pm4_emit_dma_copy(
-          words, program_.instances[0]->address, instance->address,
-          program_.byte_length);
+          words, source.address, instance->address,
+          instance->ordinal ? program_.byte_length
+                            : program_.fixup_offset +
+                                  program_.fixup_count *
+                                      sizeof(iree_hal_amd_gpu_pm4_fixup_t));
       words = iree_hal_amd_gpu_pm4_emit_dma_flush(words);
     }
-    words = iree_hal_amd_gpu_pm4_fixup_emit(words, &fixup_launch_,
+    words = iree_hal_amd_gpu_pm4_fixup_emit(words, &pool_.fixup,
                                             control_address_ + upload_offset,
                                             program_.fixup_count);
     words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
@@ -424,20 +414,14 @@ class GpuProgramTest : public GpuNativeTest {
   iree_hal_amd_gpu_pm4_barrier_profile_t barriers_ = {};
   // Native access requirements backing the two qualified policies.
   amdf_memory_device_access_t control_access_ = {};
-  // Cached instruction/program access without a coherent-control constraint.
-  amdf_memory_device_access_t program_access_ = {};
   // Host/GPU control storage policy.
   iree_hal_amd_fabric_memory_options_t control_policy_ = {};
-  // One-time upload policy for resident program/code bytes.
-  iree_hal_amd_fabric_memory_options_t program_policy_ = {};
   // Upload tables, result slots, and completion cells.
   iree_hal_amd_fabric_memory_t control_ = {};
   // Exact GPU address of control byte zero.
   uint64_t control_address_ = 0;
-  // The embedded production fixup kernel, placed once.
-  iree_hal_amd_fabric_memory_t code_ = {};
-  // Prepared resource registers for that placed kernel.
-  iree_hal_amd_gpu_pm4_launch_t fixup_launch_ = {};
+  // Production placement, shared builtins, and idle-instance policy.
+  iree_hal_amd_gpu_pm4_program_pool_t pool_ = {};
   // Independently published native queues in the same domain.
   std::array<Queue, 3> queues_native_;
   // Owning sealed program and its instance pool.
@@ -451,6 +435,22 @@ class GpuProgramTest : public GpuNativeTest {
 TEST_F(GpuProgramTest, PipelinedFixupsCloneAndCausalReuse) {
   ASSERT_NO_FATAL_FAILURE(Seal());
   uint64_t frontier[3] = {};
+  // Prove cold placement first, including the deferred copy into unmapped
+  // local memory. Subsequent overlap must clone this resident source while
+  // live, rather than relying on its initial upload.
+  auto* gates = reinterpret_cast<iree_atomic_int32_t*>(control_.contents.data);
+  iree_atomic_store(&gates[8], 1, iree_memory_order_release);
+  iree_hal_amd_gpu_pm4_program_instance_t* initial = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Submit(0, 7, 0, frontier, &initial));
+  ASSERT_NO_FATAL_FAILURE(Wait(0, 7));
+  iree_hal_amd_gpu_pm4_program_release(&program_, initial);
+  uses_.clear();
+  iree_atomic_store(&gates[8], 0, iree_memory_order_release);
+  iree_atomic_store(&gates[9], 0, iree_memory_order_release);
+  iree_hal_amd_gpu_pm4_program_trim(&program_);
+  EXPECT_EQ(iree_hal_amd_gpu_pm4_program_source(&program_).address,
+            initial->address);
+  EXPECT_EQ(program_.upload.handle, nullptr);
   // Cold allocation precedes publication. Rejected reservations do not claim
   // an initialized clone or overwrite the initial instance's causal state.
   auto* reservation =
@@ -460,7 +460,7 @@ TEST_F(GpuProgramTest, PipelinedFixupsCloneAndCausalReuse) {
   iree_hal_amd_gpu_pm4_program_cancel(&program_, reservation);
   iree_hal_amd_gpu_pm4_program_instance_t* first = nullptr;
   ASSERT_NO_FATAL_FAILURE(Submit(0, 0, 0x12345678, frontier, &first));
-  frontier[0] = 1;
+  frontier[0] = 2;
   iree_hal_amd_gpu_pm4_program_instance_t* same = nullptr;
   ASSERT_NO_FATAL_FAILURE(Submit(0, 1, 0xFEDCBA00, frontier, &same));
   EXPECT_EQ(first, same);
