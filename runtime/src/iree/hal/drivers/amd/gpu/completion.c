@@ -21,14 +21,12 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
       completion->exit_callback;
   while (iree_atomic_load(&completion->state, iree_memory_order_acquire) ==
          IREE_HAL_AMD_GPU_COMPLETION_RUNNING) {
-    IREE_TRACE_ZONE_BEGIN_NAMED(z_poll, "iree_hal_amd_gpu_completion_poll");
     bool ready = false;
     for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
       const iree_hal_amd_gpu_completion_source_t* source =
           &completion->sources[i];
       ready |= source->fn(source->user_data, AMDF_STATUS_OK);
     }
-    IREE_TRACE_ZONE_END(z_poll);
     if (ready) {
       continue;
     }
@@ -39,7 +37,6 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
 
     // Signals before entry remain pending, closing the predicate-to-wait gap.
     // A stale or coalesced wake simply causes another authoritative scan.
-    IREE_TRACE_ZONE_BEGIN_NAMED(z_wait, "iree_hal_amd_gpu_completion_wait");
     amdf_status_t status = AMDF_STATUS_OK;
     if (context->event) {
       status = context->gpu->event_wait(context->event, AMDF_TIMEOUT_INFINITE);
@@ -54,7 +51,6 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
         status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
       }
     }
-    IREE_TRACE_ZONE_END(z_wait);
     if (!amdf_status_is_ok(status)) {
       if (context->event) {
         iree_hal_amd_gpu_context_report(context, status, "gpu.event_wait");
