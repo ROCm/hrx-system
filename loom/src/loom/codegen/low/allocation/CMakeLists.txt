@@ -282,7 +282,6 @@ loom_cc_library(
     ::preference
     ::scalar_packing
     ::spill_plan
-    ::spill_traffic
     ::storage
     ::storage_lease
     ::target_constraints

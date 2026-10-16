@@ -323,7 +323,6 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
       {.store_count = 1, .store_bytes = 8},
       {.store_count = 1, .store_bytes = 8},
   };
-  uint64_t required_register_words[] = {0};
   loom_low_allocation_search_context_t context = {
       .module = module,
       .descriptor_set = &descriptor_set,
@@ -335,9 +334,8 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
       .active_set = &active_set,
       .storage_leases = &empty_storage_leases,
       .spill_traffic_by_value_ordinal = spill_traffic,
-      .required_register_values = {64, required_register_words},
   };
-  iree_bitmap_set(context.required_register_values, required_source_value);
+  assignments[0].flags |= LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;
   iree_bitmap_set(unit_liveness.values_with_incomplete_storage_segments,
                   /*bit_index=*/1);
 
@@ -547,12 +545,13 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   relations[1].cause = LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN;
   placement.tied_storage_origins_by_value_ordinal = nullptr;
 
-  iree_bitmap_set(context.required_register_values, covering_result_value);
+  assignments[1].flags |= LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;
   IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
-  iree_bitmap_reset(context.required_register_values, covering_result_value);
+  assignments[1].flags &=
+      ~LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;
 
   // A covering result already retired from the active set cannot be selected
   // as the victim that releases an active source.

@@ -1672,9 +1672,7 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   EXPECT_EQ(victim_set.assignment_indices[0], 0u);
   EXPECT_EQ(arena_.used_allocation_size, workspace_bytes);
 
-  uint64_t required_register_words[] = {0};
-  context.required_register_values = {64, required_register_words};
-  iree_bitmap_set(context.required_register_values, expensive_value);
+  assignments[0].flags |= LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;
   IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
       &context, &intervals[0], &initial_capacity,
       /*interval_requires_register=*/false, &workspace, &arena_, &victim_set));

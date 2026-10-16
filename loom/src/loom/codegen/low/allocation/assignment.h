@@ -45,6 +45,11 @@ enum loom_low_allocation_assignment_flag_bits_e {
   // survives the definition point in lanes or workers excluded by ordinary
   // sparse liveness.
   LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION = 1u << 1,
+  // Materialized spill traffic, nested-region arguments, and target-lowered
+  // helpers must stay in registers. Assignment publication retains this
+  // immutable value requirement for every subsequent victim search. Producer
+  // leases remain separate because spilling can release their reservations.
+  LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER = 1u << 2,
 };
 typedef uint16_t loom_low_allocation_assignment_flags_t;
 

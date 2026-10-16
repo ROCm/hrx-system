@@ -10,7 +10,6 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation/live_range.h"
-#include "loom/codegen/low/allocation/spill_traffic.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/write_interference.h"
 #include "loom/ir/module.h"
@@ -1092,12 +1091,8 @@ iree_status_t loom_low_allocation_search_assignment_spill_capacity(
           context->target_constraints, assignment->value_id)) {
     return iree_ok_status();
   }
-  if ((assignment->value_id < context->required_register_values.bit_count &&
-       iree_bitmap_test(context->required_register_values,
-                        assignment->value_id)) ||
-      loom_low_allocation_spill_register_requirement_for_value(
-          context->module, context->liveness->region, assignment->value_id) !=
-          LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE) {
+  if (iree_any_bit_set(assignment->flags,
+                       LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER)) {
     return iree_ok_status();
   }
   loom_low_allocation_class_capacity_t capacity = {0};
