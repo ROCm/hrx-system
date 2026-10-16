@@ -11,6 +11,7 @@
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/schedule.h"
+#include "loom/serve/service/text/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +19,7 @@ extern "C" {
 
 typedef struct loom_serve_text_service_options_t {
   // Borrowed deployment route name, outliving the service. Source identity and
-  // chat policy remain owned by the model, independently of this HTTP name.
+  // chat policy remain owned by the model, independently of this route name.
   iree_string_view_t name;
   // Optional borrowed image component, outliving this service. Text creation,
   // activation and ordinary requests do not start its preparation. Accepted
@@ -69,8 +70,17 @@ iree_status_t loom_serve_text_service_allocate(
     loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_text_service_t** out_service);
 
-// Returns borrowed callbacks for the shared owner loop. They take connection
-// claims and preserve model-local sessions/checkpoints. Each epoch gathers
+// Enqueues native chat on the same serialized owner and bounded arrival queue
+// as HTTP. Success with a stream moves request and copies its selectors; NULL
+// success is queue pressure. Pressure and failure leave request untouched and
+// do not count a receipt. Source validation occurs on a shared CPU task after
+// acceptance. The caller advances the service and owns the handle until close.
+iree_status_t loom_serve_text_service_try_open(
+    loom_serve_text_service_t* service, loom_serve_text_request_t* request,
+    loom_serve_text_stream_t** out_stream);
+
+// Returns borrowed callbacks for the shared owner loop. HTTP and native
+// admission preserve model-local sessions/checkpoints. Each epoch gathers
 // credited ready rows, executes their known/verifier spans asynchronously and
 // commits outputs after readiness
 // before reusing feedback. Other services can advance while an epoch executes.
@@ -130,14 +140,15 @@ loom_serve_service_t loom_serve_text_service_interface(
 void loom_serve_text_service_release_projector(
     loom_serve_text_service_t* service);
 
-// Relinquishes every accepted connection after readiness retirement. On
+// Relinquishes every accepted consumer receipt after readiness retirement. On
 // terminal failure, unresolved device reservations remain pinned for model
 // destruction; on ordinary completed-boundary shutdown, unused reservations are
 // released. terminal_code is the owner loop's result, including another model's
 // failure. The owner has consumed all CPU, device, compiler and heartbeat
 // callbacks, including queued selection and timer cancellation receipts, before
 // this call. Null is accepted.
-// The borrowed model and transport both outlive this call.
+// The borrowed model and any HTTP transport both outlive this call. Native
+// caller handles retain final results independently of this service.
 void loom_serve_text_service_free(loom_serve_text_service_t* service,
                                   iree_status_code_t terminal_code);
 
