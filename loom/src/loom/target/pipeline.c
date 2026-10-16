@@ -726,16 +726,6 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       builder, IREE_SV("source"),
       loom_target_pipeline_build_source_safe_normalization_after_legalize,
       user_data, &for_op));
-  // Finish reference rewrites before CFG finalization. Source-to-low owns
-  // legality verification after the remaining structural and target passes.
-  IREE_RETURN_IF_ERROR(
-      loom_target_pipeline_build_target_legalize(builder, IREE_SV("complete")));
-  // Module legalization may mutate any target function. Normalize the full
-  // target set only when it did so before function-local CFG finalization.
-  loom_op_t* if_changed_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
-      builder, loom_target_pipeline_build_cleanup_target_functions, NULL,
-      &if_changed_op));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder, IREE_SV("source"),
       loom_target_pipeline_build_source_loop_pipelining, user_data, &for_op));
@@ -745,6 +735,16 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder, IREE_SV("source"),
       loom_target_pipeline_build_source_loop_unrolling, user_data, &for_op));
+  // Finish reference rewrites after source expansion exposes static lanes and
+  // before CFG finalization. Source-to-low owns the final legality check.
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_target_legalize(builder, IREE_SV("complete")));
+  // Module legalization may mutate any target function. Normalize the full
+  // target set only when it did so before function-local CFG finalization.
+  loom_op_t* if_changed_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_cleanup_target_functions, NULL,
+      &if_changed_op));
   if (control_flow_lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG) {
     IREE_RETURN_IF_ERROR(
         loom_target_pipeline_build_run(builder, IREE_SV("sroa-vector-banks")));

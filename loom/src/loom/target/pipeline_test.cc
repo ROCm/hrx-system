@@ -41,6 +41,8 @@ typedef struct PipelineRunCounts {
   int last_source_combination_ordinal = 0;
   // First target legalization pass that selects physical representations.
   int first_target_legalization_ordinal = 0;
+  // First complete source-reference legalization, before boundary projection.
+  int first_complete_target_legalization_ordinal = 0;
   // Number of common-buffer view-transport decomposition pass runs.
   int view_transport_decomposition = 0;
   // Lexical pass position of common-buffer view-origin materialization.
@@ -193,6 +195,14 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
   } else if (iree_string_view_equal(key, IREE_SV("target-legalize"))) {
     if (counts->first_target_legalization_ordinal == 0) {
       counts->first_target_legalization_ordinal =
+          count_context->current_run_ordinal;
+    }
+    if (counts->first_complete_target_legalization_ordinal == 0 &&
+        iree_string_view_equal(
+            FindStringOption(count_context->module, loom_pass_run_options(op),
+                             IREE_SV("mode")),
+            IREE_SV("complete"))) {
+      counts->first_complete_target_legalization_ordinal =
           count_context->current_run_ordinal;
     }
   } else if (iree_string_view_equal(key,
@@ -352,6 +362,8 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_EQ(counts.sink_single_use_reads, 1);
   EXPECT_GT(counts.scf_to_cfg, 0);
   EXPECT_LT(counts.source_loop_unrolling_ordinal,
+            counts.first_complete_target_legalization_ordinal);
+  EXPECT_LT(counts.first_complete_target_legalization_ordinal,
             counts.vector_bank_sroa_ordinal);
   EXPECT_LT(counts.vector_bank_sroa_ordinal,
             counts.sink_single_use_reads_ordinal);
@@ -390,6 +402,8 @@ TEST_F(TargetPipelineTest, StructuredControlFlowExpandsSourceLoopPolicies) {
   const PipelineRunCounts counts = CountPipelineRuns(module.get(), pipeline_op);
   EXPECT_EQ(counts.source_loop_unrolling, 1);
   EXPECT_LT(counts.source_loop_unrolling_ordinal,
+            counts.first_complete_target_legalization_ordinal);
+  EXPECT_LT(counts.first_complete_target_legalization_ordinal,
             counts.boundary_projection_ordinal);
   EXPECT_LT(counts.source_loop_unrolling_ordinal, counts.source_to_low_ordinal);
   EXPECT_EQ(counts.scf_to_cfg, 0);

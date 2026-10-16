@@ -1,3 +1,57 @@
+// Required expansion makes the carried insertion and extraction positions
+// constant. Five lanes cross an ordinary packet boundary and retain a tail.
+func.def @unrolled_vector_build(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 5 : index
+  %step = index.constant 1 : index
+  %last = index.constant 4 : index
+  %source = buffer.view %input[%origin] : buffer -> view<5xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<5xf32>
+  %initial = vector.constant 0.0 : vector<5xf32>
+  %values = scf.for %position = [%begin to %end step %step](%current = %initial : vector<5xf32>) -> (vector<5xf32>) unroll {
+    %value = view.load %source[%position] : view<5xf32> -> f32
+    %next = vector.insert %value into %current[%position] : f32, vector<5xf32>
+    scf.yield %next : vector<5xf32>
+  }
+  scf.for %position = [%begin to %end step %step] unroll {
+    %value = vector.extract %values[%position] : vector<5xf32> -> f32
+    %reversed = index.sub %last, %position : index
+    view.store %value, %destination[%reversed] : f32, view<5xf32>
+  }
+  func.return
+}
+
+func.def @unrolled_vector_build_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 5 : index
+  %step = index.constant 1 : index
+  %last = index.constant 4 : index
+  %source = buffer.view %input[%origin] : buffer -> view<5xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<5xf32>
+  scf.for %position = [%begin to %end step %step] {
+    %reversed = index.sub %last, %position : index
+    %value = view.load %source[%reversed] : view<5xf32> -> f32
+    view.store %value, %destination[%position] : f32, view<5xf32>
+  }
+  func.return
+}
+
+check.scenario @unrolled_vector_build_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-256.0 to 256.0) : tensor<5xf32>
+    %storage = check.generate.fill value(-1024.0) : tensor<7xf32>
+    %output = check.tensor.view %storage offset(4) : tensor<7xf32> -> tensor<5xf32>
+    check.compare<@unrolled_vector_build, @unrolled_vector_build_oracle>(%input, %output) : (tensor<5xf32>, tensor<5xf32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<5xf32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<7xf32>
+    }
+  }
+  check.return
+}
+
 // Runtime insertion chooses each byte or word position across successive packets.
 // Scalar integer addressing is independent of the packed-vector implementation.
 func.def @dynamic_byte_lane_values(%input: buffer, %positions: buffer, %output: buffer) {
