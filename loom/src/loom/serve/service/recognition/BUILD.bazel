@@ -269,6 +269,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/testing:native_allocator",
         "//loom/src/loom/serve/testing:service_application",
+        "//loom/src/loom/serve/testing:worker_gate",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
