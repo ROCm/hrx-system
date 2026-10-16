@@ -118,7 +118,7 @@ Every epoch carries one immutable table of active token spans. Prompt chunks,
 single-token continuations, and independent sessions use the same program.
 `prefill_capacity` bounds an epoch, not a prompt: longer inputs are chunked.
 The package requires pooled cache storage, a context capacity divisible by 64,
-at most 512 tokens per epoch, and draft depth zero or three.
+at most 32,768 tokens per epoch, and draft depth zero or three.
 
 The default document provides four execution rows, a 16K per-session context
 ceiling, a shared 32K-token page pool, 32-token epochs, and four checkpoint
@@ -133,6 +133,9 @@ shape. Larger prompt batches can share more expert weights and amortize
 dispatch cost, but also keep the device occupied longer before newly ready
 requests receive their next turn. Measure first-text latency alongside total
 cohort throughput when selecting the capacity for interactive workloads.
+For large-prompt processing, set `definition.prefill_capacity` to `16384` in
+the deployment document; small requests still select their smaller prepared
+shapes.
 
 MTP has a separate tradeoff: accepted proposals save target traversals, while
 drafting and verification add work. A configuration that improves one client's
@@ -198,25 +201,49 @@ or parameter repacking is added to an epoch. The immutable epoch header bounds
 active rows, so partial tiles preserve inactive storage and cannot mix padding
 into valid results.
 
-Expert projections group routes by their selected expert. For capacities above
-four tokens, one GPU workgroup builds a histogram, scans record offsets, and
-scatters original `token * 10 + slot` identities into four-route records. Each
-record carries its expert, live row count, and original identities. A finite
-pool of workgroups visits the live records and output features, decoding each
-weight chunk once for up to four rows. Gate/up and down reuse the same records;
-the final combination still accumulates the original ten slots in order.
+Expert projections group routes by their selected expert. One GPU workgroup
+builds a histogram, scans record offsets, and scatters original
+`token * 10 + slot` identities into records. Each record carries its expert,
+live row count, and original identities. Capacity specialization chooses the
+record width and contraction schedule:
+
+| Prepared token capacity | Expert schedule |
+| --- | --- |
+| 1–4 | Direct per-route projections. |
+| 5–255 | Four-route records and packed dot products. |
+| 256–4,095 | 64-route records and matrix contractions. |
+| 4,096–32,768 | 128-route records and matrix contractions. |
+
+A finite pool of workgroups visits live records and output features. Gate/up
+and down reuse the same table, and the final combination accumulates the
+original ten slots in order. Wider records amortize packed-weight reads and
+decoding; compact records limit padded matrix work when expert populations
+are smaller. These choices specialize into the command and kernel programs,
+without a host routing decision or a distinct prefill execution path.
+
+The matrix body accepts tile and wave geometry as SSA values. It stages exact
+integer weight codes and BF16 activations in padded LDS panels, contracts them
+with BF16 matrix instructions, and applies the original scales and affine
+corrections in F32. Fused gate/up retains F32 values through SiLU and the
+product before publishing BF16. The same body covers Q4_K, Q5_K, and Q8_0
+gate/up, plus Q5_1 and Q8_0 down, without an expanded parameter bank.
 
 The producer's dispatch dependency publishes the complete table to consumers.
 The count word is an extent, and the command owns record storage until both
-consumers finish. There is no CPU route readback. Scratch occupies
-`4 + 280 * token_capacity` bytes: 8,964 bytes at the default capacity of 32.
-Only valid records are consumed, so storage reuse needs no global clear.
-Capacities of one to four tokens retain direct per-route projections.
+consumers finish. There is no CPU route readback. For capacity `C` and record
+width `R`, the allocation bounds records by
+`min(10 * C, floor(10 * C / R) + 512)`: at most one record per route, or full
+records plus one partial record per expert. Rank scratch uses `40 * C` bytes;
+the record table uses four header bytes plus `4 * (R + 2)` bytes per allocated
+record. Together they occupy 8,964 bytes at the default capacity of 32 and
+1,587,204 bytes at capacity 16,384. Only live records are consumed, and only
+their unused tail fields require initialization, so storage reuse needs no
+global clear.
 
-Grouped consumers share the original Q4_K/Q5_K affine decoding, Q5_1 decoding,
-and Q8_0 arithmetic with their direct counterparts. Original packed weights,
-BF16 activations, lane reductions, and publication boundaries remain the same;
-grouping changes work distribution and weight reuse rather than quantization.
+Both dot and matrix consumers preserve the original packed weights, BF16
+activations, and publication boundaries. Their accumulation order differs;
+independent F64 references check the original-value numerical contract instead
+of requiring identical rounding between schedules.
 
 ## Qualification
 
