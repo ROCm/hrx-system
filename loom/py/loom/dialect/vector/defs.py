@@ -3810,6 +3810,7 @@ vector_extui = _vector_cast(
     traits=[SAFE_TO_SPECULATE],
     constraints=[ElementWidthGreaterThan("result", "input")],
     facts="loom_vector_extui_facts",
+    canonicalize="loom_vector_uniform_result_canonicalize",
     eager_execution_cost=1,
 )
 

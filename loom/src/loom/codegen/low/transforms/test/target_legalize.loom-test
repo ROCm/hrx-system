@@ -545,10 +545,10 @@ func.def target(@test_target) @narrow_wrap_before_shift(%left: i8, %right: i8, %
   %10 = scalar.extui %left : i8 to i32
   %11 = scalar.extui %right : i8 to i32
   %12 = scalar.addi %10, %11 : i32
-  %sum = scalar.trunci %12 : i32 to i8
-  %6 = scalar.extui %sum : i8 to i32
+  %15 = scalar.constant 255 : i32
+  %16 = scalar.andi %12, %15 : i32
   %7 = scalar.extui %shift : i8 to i32
-  %8 = scalar.shrui %6, %7 : i32
+  %8 = scalar.shrui %16, %7 : i32
   %shifted = scalar.trunci %8 : i32 to i8
   func.return %shifted : i8
 }

@@ -22,13 +22,37 @@ kernel.def @packed_word_lookup() {
 }
 
 func.def @packed_word_lookup_oracle(%input: buffer, %table: buffer, %output: buffer) {
-  func.call @compute_packed_word_lookup(%input, %table, %output) : (buffer, buffer, buffer)
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %table_view = buffer.view %table[%base] : buffer -> view<256xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %end step %step] {
+    %byte = view.load %input_view[%lane] : view<16xi8> -> i8
+    %unsigned = scalar.extui %byte : i8 to i32
+    %position = index.cast %unsigned : i32 to index
+    %value = view.load %table_view[%position] : view<256xi32> -> i32
+    view.store %value, %output_view[%lane] : i32, view<16xi32>
+  }
   func.return
 }
 
 check.scenario @packed_word_lookup_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-128) step(17) : tensor<16xi8>
+    %table = check.generate.iota offset(7) step(3) : tensor<256xi32>
+    %output = check.generate.fill value(-99) : tensor<16xi32>
+    check.compare<@packed_word_lookup, @packed_word_lookup_oracle>(%input, %table, %output) : (tensor<16xi8>, tensor<256xi32>, tensor<16xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi8>
+      check.expect.bitwise actual(%table) expected(%table) : tensor<256xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16xi32>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<16xi8>
     %table = check.generate.iota offset(7) step(3) : tensor<256xi32>
     %output = check.generate.fill value(-99) : tensor<16xi32>
     check.compare<@packed_word_lookup, @packed_word_lookup_oracle>(%input, %table, %output) : (tensor<16xi8>, tensor<256xi32>, tensor<16xi32>) -> () {

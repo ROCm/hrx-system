@@ -358,6 +358,7 @@ loom_cc_library(
   DEPS
     ::bitstream_packet_legalization
     ::cast_packet_legalization
+    ::combine_patterns
     ::packet_legalization
     ::reduction_legalization
     ::to_scalar

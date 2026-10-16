@@ -22,6 +22,7 @@
 #include "loom/transforms/vector/bitstream_packet_legalization.h"
 #include "loom/transforms/vector/bitwise_legalization.h"
 #include "loom/transforms/vector/cast_packet_legalization.h"
+#include "loom/transforms/vector/combine_patterns.h"
 #include "loom/transforms/vector/memory_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/packet_plan.h"
@@ -392,6 +393,26 @@ static iree_status_t loom_vector_legalize_cast(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
+  if (loom_vector_trunci_isa(op) || loom_vector_extui_isa(op) ||
+      loom_vector_extsi_isa(op)) {
+    bool composed = false;
+    IREE_RETURN_IF_ERROR(
+        loom_vector_combine_conversion(op, context->rewriter, true, &composed));
+    if (composed) {
+      *out_result = (loom_target_legalizer_result_t){
+          .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+      };
+      return iree_ok_status();
+    }
+    // Scalarization would split a cast boundary into unrelated lane programs.
+    // Preserve it while eager producers expose composable carrier casts.
+    if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
+      *out_result = (loom_target_legalizer_result_t){
+          .action = LOOM_TARGET_LEGALIZER_ACTION_DEFER,
+      };
+      return iree_ok_status();
+    }
+  }
   return loom_vector_index_cast_isa(op)
              ? loom_vector_legalize_index_cast(entry, context, op, out_result)
              : loom_vector_legalize_descriptor(entry, context, op, out_result);
@@ -1241,6 +1262,19 @@ static iree_status_t loom_vector_legalize_predicate_extension(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
+  // Transport and other legalizers create casts inside this worklist. Compose
+  // them before packet/select decomposition loses their width relationship.
+  bool composed = false;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_combine_conversion(op, context->rewriter, true, &composed));
+  if (composed) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+    return iree_ok_status();
+  }
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
   if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     bool rewritten = false;
     IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_predicate_extension(

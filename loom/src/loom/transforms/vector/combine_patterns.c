@@ -19,15 +19,6 @@
 #include "loom/transforms/cleanup/patterns.h"
 #include "loom/transforms/conversion/chain.h"
 
-static loom_op_t* loom_vector_combine_defining_op(
-    const loom_rewriter_t* rewriter, loom_value_id_t value_id) {
-  loom_value_t* value = loom_module_value(rewriter->module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return NULL;
-  }
-  return loom_value_def_op(value);
-}
-
 static bool loom_vector_combine_value_is_non_negative(
     const loom_rewriter_t* rewriter, loom_value_id_t value_id) {
   if (rewriter->fact_table == NULL) {
@@ -131,6 +122,19 @@ static iree_status_t loom_vector_combine_replace_with_conversion(
                                    result_type, op->location, &replacement_op));
       break;
     }
+    case LOOM_CONVERSION_EXTRACT_SIGNED:
+    case LOOM_CONVERSION_EXTRACT_UNSIGNED: {
+      const loom_type_t intermediate_type = loom_module_value_type(
+          rewriter->module, loom_op_const_operands(op)[0]);
+      const int32_t field_width =
+          loom_scalar_type_bitwidth(loom_type_element_type(intermediate_type));
+      IREE_RETURN_IF_ERROR((replacement_kind == LOOM_CONVERSION_EXTRACT_SIGNED
+                                ? loom_vector_bitfield_extracts_build
+                                : loom_vector_bitfield_extractu_build)(
+          &rewriter->builder, input, 0, field_width, result_type, op->location,
+          &replacement_op));
+      break;
+    }
     default:
       IREE_ASSERT_UNREACHABLE("unsupported vector conversion replacement");
       IREE_BUILTIN_UNREACHABLE();
@@ -205,14 +209,17 @@ static iree_status_t loom_vector_combine_sink_conversion_through_splat(
   return loom_vector_combine_replace_with_value(rewriter, op, replacement);
 }
 
-static iree_status_t loom_vector_combine_conversion_chain(
-    loom_conversion_kind_t outer_kind, loom_op_t* op, loom_rewriter_t* rewriter,
-    bool* out_changed) {
+iree_status_t loom_vector_combine_conversion(loom_op_t* op,
+                                             loom_rewriter_t* rewriter,
+                                             bool allow_bitfield,
+                                             bool* out_changed) {
   *out_changed = false;
-  // Registered roots are verified unary conversions.
+  const loom_conversion_kind_t outer_kind =
+      loom_vector_combine_conversion_kind(op);
+  // Callers supply a verified unary width conversion.
   const loom_value_id_t outer_input = loom_op_const_operands(op)[0];
   loom_op_t* defining_op =
-      loom_vector_combine_defining_op(rewriter, outer_input);
+      loom_rewriter_value_defining_op(rewriter, outer_input);
   if (defining_op == NULL) {
     return iree_ok_status();
   }
@@ -233,6 +240,11 @@ static iree_status_t loom_vector_combine_conversion_chain(
 
   const loom_conversion_chain_match_t match =
       loom_conversion_chain_match(outer_kind, inner_kind);
+  if (!allow_bitfield &&
+      (match.candidate == LOOM_CONVERSION_EXTRACT_SIGNED ||
+       match.candidate == LOOM_CONVERSION_EXTRACT_UNSIGNED)) {
+    return iree_ok_status();
+  }
   if (match.candidate == LOOM_CONVERSION_NONE) {
     return iree_ok_status();
   }
@@ -245,49 +257,12 @@ static iree_status_t loom_vector_combine_conversion_chain(
       out_changed);
 }
 
-static iree_status_t loom_vector_extf_chain_pattern(
+static iree_status_t loom_vector_conversion_chain_pattern(
     const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
     loom_rewriter_t* rewriter, bool* out_changed) {
   (void)pattern;
   (void)context;
-  return loom_vector_combine_conversion_chain(LOOM_CONVERSION_EXTF, op,
-                                              rewriter, out_changed);
-}
-
-static iree_status_t loom_vector_fptrunc_chain_pattern(
-    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
-    loom_rewriter_t* rewriter, bool* out_changed) {
-  (void)pattern;
-  (void)context;
-  return loom_vector_combine_conversion_chain(LOOM_CONVERSION_FPTRUNC, op,
-                                              rewriter, out_changed);
-}
-
-static iree_status_t loom_vector_extsi_chain_pattern(
-    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
-    loom_rewriter_t* rewriter, bool* out_changed) {
-  (void)pattern;
-  (void)context;
-  return loom_vector_combine_conversion_chain(LOOM_CONVERSION_EXTSI, op,
-                                              rewriter, out_changed);
-}
-
-static iree_status_t loom_vector_extui_chain_pattern(
-    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
-    loom_rewriter_t* rewriter, bool* out_changed) {
-  (void)pattern;
-  (void)context;
-  return loom_vector_combine_conversion_chain(LOOM_CONVERSION_EXTUI, op,
-                                              rewriter, out_changed);
-}
-
-static iree_status_t loom_vector_trunci_chain_pattern(
-    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
-    loom_rewriter_t* rewriter, bool* out_changed) {
-  (void)pattern;
-  (void)context;
-  return loom_vector_combine_conversion_chain(LOOM_CONVERSION_TRUNCI, op,
-                                              rewriter, out_changed);
+  return loom_vector_combine_conversion(op, rewriter, false, out_changed);
 }
 
 static iree_status_t loom_vector_from_elements_combine_lanes_pattern(
@@ -424,23 +399,23 @@ static const loom_rewrite_pattern_t kVectorSourceCombinePatterns[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_EXTF,
-        .match_and_rewrite = loom_vector_extf_chain_pattern,
+        .match_and_rewrite = loom_vector_conversion_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_VECTOR_FPTRUNC,
-        .match_and_rewrite = loom_vector_fptrunc_chain_pattern,
+        .match_and_rewrite = loom_vector_conversion_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_VECTOR_EXTSI,
-        .match_and_rewrite = loom_vector_extsi_chain_pattern,
+        .match_and_rewrite = loom_vector_conversion_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_VECTOR_EXTUI,
-        .match_and_rewrite = loom_vector_extui_chain_pattern,
+        .match_and_rewrite = loom_vector_conversion_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_VECTOR_TRUNCI,
-        .match_and_rewrite = loom_vector_trunci_chain_pattern,
+        .match_and_rewrite = loom_vector_conversion_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_VECTOR_INSERT,

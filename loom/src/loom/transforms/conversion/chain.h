@@ -25,6 +25,10 @@ enum loom_conversion_kind_e {
   LOOM_CONVERSION_EXTSI,
   LOOM_CONVERSION_EXTUI,
   LOOM_CONVERSION_TRUNCI,
+  // Preserve the intermediate truncation's low-bit field while extending it
+  // to the final width. The caller supplies that intermediate field width.
+  LOOM_CONVERSION_EXTRACT_SIGNED,
+  LOOM_CONVERSION_EXTRACT_UNSIGNED,
   // Composition returns the original input without a conversion.
   LOOM_CONVERSION_IDENTITY,
   LOOM_CONVERSION_COUNT_,
@@ -59,7 +63,8 @@ loom_conversion_chain_match_t loom_conversion_chain_match(
 // Resolves a matched candidate against the original input and final result
 // types. The caller has discharged the match's fact obligations. Verified
 // conversions preserve shape; complete type identity is required for bypass.
-// Equal-width distinct float formats retain their intermediate conversion.
+// Extraction candidates retain the intermediate field even at equal endpoint
+// widths. Equal-width distinct float formats retain their conversion.
 // This query has no IR, fact, allocation, or mutation ownership.
 loom_conversion_kind_t loom_conversion_chain_resolve(
     loom_conversion_kind_t candidate, loom_type_t input_type,

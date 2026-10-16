@@ -472,14 +472,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %item = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %value = s_mov_b32 1
-  %57 = v_and_b32_src0_inline %item, 31
-  %58 = v_mov_b32_copy %value
-  %59 = v_lshlrev_b32_src0_inline %57, 2
-  %shuffle = ds_bpermute_b32 %59, %58
-  %62 = v_mov_b32 0
-  %63 = v_lshlrev_b32_src0_inline %item, 3
-  global_store_b32_saddr %63, %62, %output_view
-  global_store_b32_saddr %63, %62, %output_view {offset = 4}
+  %54 = v_and_b32_src0_inline %item, 31
+  %55 = v_mov_b32_copy %value
+  %56 = v_lshlrev_b32_src0_inline %54, 2
+  %shuffle = ds_bpermute_b32 %56, %55
+  %59 = v_mov_b32 0
+  %60 = v_lshlrev_b32_src0_inline %item, 3
+  global_store_b32_saddr %60, %59, %output_view
+  global_store_b32_saddr %60, %59, %output_view {offset = 4}
   return
 }
 

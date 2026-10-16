@@ -7,7 +7,8 @@
 #include "loom/transforms/conversion/chain.h"
 
 // Rows are the outer conversion, columns its immediate producer. Unlisted
-// pairs retain observable intermediate rounding or integer truncation.
+// pairs retain observable intermediate rounding. Extraction candidates preserve
+// the low-bit field of an intermediate integer truncation.
 static const loom_conversion_chain_match_t
     kConversionChains[LOOM_CONVERSION_COUNT_][LOOM_CONVERSION_COUNT_] = {
         [LOOM_CONVERSION_EXTF] =
@@ -22,6 +23,8 @@ static const loom_conversion_chain_match_t
             {
                 [LOOM_CONVERSION_EXTSI] = {.candidate = LOOM_CONVERSION_EXTSI},
                 [LOOM_CONVERSION_EXTUI] = {.candidate = LOOM_CONVERSION_EXTUI},
+                [LOOM_CONVERSION_TRUNCI] = {.candidate =
+                                                LOOM_CONVERSION_EXTRACT_SIGNED},
             },
         [LOOM_CONVERSION_EXTUI] =
             {
@@ -31,6 +34,8 @@ static const loom_conversion_chain_match_t
                         .flags = LOOM_CONVERSION_CHAIN_FLAG_NON_NEGATIVE,
                     },
                 [LOOM_CONVERSION_EXTUI] = {.candidate = LOOM_CONVERSION_EXTUI},
+                [LOOM_CONVERSION_TRUNCI] =
+                    {.candidate = LOOM_CONVERSION_EXTRACT_UNSIGNED},
             },
         [LOOM_CONVERSION_TRUNCI] =
             {
@@ -49,6 +54,10 @@ loom_conversion_chain_match_t loom_conversion_chain_match(
 loom_conversion_kind_t loom_conversion_chain_resolve(
     loom_conversion_kind_t candidate, loom_type_t input_type,
     loom_type_t result_type) {
+  if (candidate == LOOM_CONVERSION_EXTRACT_SIGNED ||
+      candidate == LOOM_CONVERSION_EXTRACT_UNSIGNED) {
+    return candidate;
+  }
   if (loom_type_equal(input_type, result_type)) {
     return LOOM_CONVERSION_IDENTITY;
   }

@@ -60,12 +60,8 @@ func.def target(@target) @boolean_fields(%source: vector<2xi1>) -> (vector<2xi1>
 test.target<low_core> @target
 
 func.def target(@target) @boolean_fields(%source: vector<2xi1>) -> (vector<2xi1>, vector<2xi8>, vector<2xi8>) {
-  %12 = vector.constant -1 : vector<2xi8>
-  %13 = vector.constant 0 : vector<2xi8>
-  %signed = vector.select %source, %12, %13 : vector<2xi8>
-  %8 = vector.constant 1 : vector<2xi8>
-  %9 = vector.constant 0 : vector<2xi8>
-  %unsigned = vector.select %source, %8, %9 : vector<2xi8>
+  %signed = vector.extsi %source : vector<2xi1> to vector<2xi8>
+  %unsigned = vector.extui %source : vector<2xi1> to vector<2xi8>
   func.return %source, %signed, %unsigned : vector<2xi1>, vector<2xi8>, vector<2xi8>
 }
 
