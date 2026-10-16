@@ -56,7 +56,7 @@ iree_status_t loom_serve_speech_service_try_open(
 // EOF, reset peers and shutdown release rows only at retired model cuts;
 // failed readiness leaves accepted ownership with model teardown. Validation
 // precedes the first audio response byte.
-loom_serve_http_service_t loom_serve_speech_service_interface(
+loom_serve_service_t loom_serve_speech_service_interface(
     loom_serve_speech_service_t* service);
 
 // Frees after all accepted CPU, device and timer callbacks retire. Never waits

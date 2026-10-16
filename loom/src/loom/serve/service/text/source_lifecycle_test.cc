@@ -16,7 +16,7 @@ using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
 using loom_serve::testing::text::StalledClient;
 
-uint64_t FirstOutputCount(const loom_serve_http_service_t& interface) {
+uint64_t FirstOutputCount(const loom_serve_service_t& interface) {
   uint64_t count = 0;
   for (const auto bucket : interface.telemetry.latency->first_output.buckets) {
     count += bucket;
@@ -244,7 +244,7 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
           connection, iree_infinite_timeout()));
     }
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-        interface, idle, stopping ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING : 0));
+        interface, idle, stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0));
     EXPECT_EQ(interface.telemetry.counters->completed, 1u);
     EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
     EXPECT_EQ(interface.telemetry.counters->failed, 0u);
@@ -476,7 +476,7 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
     const auto ticket = iree_notification_prepare_wait(notification);
     bool progress = false;
     IREE_ASSERT_OK(interface.advance(
-        interface.self, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING, &progress));
+        interface.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
     const auto state = interface.snapshot(interface.self);
     complete = !interface.is_pending(interface.self) &&
                !state.queued_requests && !state.active_requests;
@@ -924,7 +924,7 @@ TEST_F(SourceTextServiceTest,
   }));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       interface, [&] { return !interface.is_pending(interface.self); },
-      LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+      LOOM_SERVE_SERVICE_FLAG_STOPPING));
   const auto cancelled = interface.snapshot(interface.self);
   EXPECT_EQ(cancelled.queued_requests, 0u);
   EXPECT_EQ(cancelled.oldest_queued_age, 0);

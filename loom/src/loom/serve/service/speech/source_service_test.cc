@@ -168,7 +168,7 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
     }
     if (service_) {
       AdvanceUntil([&] { return !interface_.is_pending(interface_.self); },
-                   LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+                   LOOM_SERVE_SERVICE_FLAG_STOPPING);
       interface_.set_observer(interface_.self, {});
       loom_serve_speech_service_free(service_);
     }
@@ -232,8 +232,7 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   }
 
   template <typename Predicate>
-  void AdvanceUntil(Predicate ready,
-                    loom_serve_http_service_flags_t flags = 0) {
+  void AdvanceUntil(Predicate ready, loom_serve_service_flags_t flags = 0) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
@@ -421,7 +420,7 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   // Optional manually driven production service, joined before model teardown.
   loom_serve_speech_service_t* service_ = nullptr;
   // Borrowed service operations, used only by the serialized test owner.
-  loom_serve_http_service_t interface_ = {};
+  loom_serve_service_t interface_ = {};
   // Absolute cursor observing every numerical cohort at bounded owner turns.
   uint64_t telemetry_cursor_ = 0;
   // Largest actual source invocation observed through production telemetry.
@@ -1257,12 +1256,12 @@ class SpeechReadinessTest : public ::testing::Test {
     };
     wrapped.accept = [](void* self, loom_serve_http_connection_t* connection,
                         const loom_serve_http_request_t* request,
-                        loom_serve_http_service_flags_t flags) {
+                        loom_serve_service_flags_t flags) {
       auto* test = static_cast<SpeechReadinessTest*>(self);
       return test->actual_.accept(test->actual_.self, connection, request,
                                   flags);
     };
-    wrapped.advance = [](void* self, loom_serve_http_service_flags_t flags,
+    wrapped.advance = [](void* self, loom_serve_service_flags_t flags,
                          bool* progress) {
       auto* test = static_cast<SpeechReadinessTest*>(self);
       iree_status_t status =
@@ -1300,8 +1299,7 @@ class SpeechReadinessTest : public ::testing::Test {
   }
 
   template <typename Predicate>
-  void AdvanceUntil(Predicate ready,
-                    loom_serve_http_service_flags_t flags = 0) {
+  void AdvanceUntil(Predicate ready, loom_serve_service_flags_t flags = 0) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
@@ -1434,7 +1432,7 @@ class SpeechReadinessTest : public ::testing::Test {
       CheckStatus(http_.Join());
     } else if (service_ && !failed_) {
       AdvanceUntil([&] { return !actual_.is_pending(actual_.self); },
-                   LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+                   LOOM_SERVE_SERVICE_FLAG_STOPPING);
     }
     if (service_) {
       actual_.set_observer(actual_.self, {});
@@ -1548,9 +1546,9 @@ class SpeechReadinessTest : public ::testing::Test {
   // Production service under test, retained until router retirement.
   loom_serve_speech_service_t* service_ = nullptr;
   // Unmodified callbacks, forwarded by the observation wrapper.
-  loom_serve_http_service_t actual_ = {};
+  loom_serve_service_t actual_ = {};
   // Production operations with observational forwarding on owner turns.
-  loom_serve_http_service_t wrapped_ = {};
+  loom_serve_service_t wrapped_ = {};
   // Client readiness and the outer router thread.
   loom_serve::testing::HttpHarness http_;
 };
@@ -1664,14 +1662,14 @@ TEST_F(SpeechReadinessTest, ClosedNativeHandleRetainsAcceptedEncodingStorage) {
   }));
   stream.reset();
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(
-      actual_.self, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING, &progress));
+  IREE_ASSERT_OK(actual_.advance(actual_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING,
+                                 &progress));
   EXPECT_TRUE(actual_.is_pending(actual_.self));
   EXPECT_EQ(released_.load(), 0u);
   workers.clear();
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return !actual_.is_pending(actual_.self); },
-                   LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+                   LOOM_SERVE_SERVICE_FLAG_STOPPING));
   EXPECT_EQ(submitted_.load(), 1u);
   EXPECT_EQ(released_.load(), 1u);
   EXPECT_EQ(actual_.telemetry.counters->cancelled, 1u);
@@ -1685,16 +1683,16 @@ TEST_F(SpeechReadinessTest,
       OpenSpeech(service_, IREE_SV("abcd"), IREE_SV("positive"), 0, &stream));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return held_.load(); }));
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(
-      actual_.self, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING, &progress));
+  IREE_ASSERT_OK(actual_.advance(actual_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING,
+                                 &progress));
   EXPECT_FALSE(loom_serve_speech_stream_is_complete(stream.get()));
   ReleaseDependency(true);
   iree_status_t failure = iree_ok_status();
   auto* notification = loom_serve_http_server_notification(server_);
   while (actual_.is_pending(actual_.self)) {
     const auto ticket = iree_notification_prepare_wait(notification);
-    auto status = actual_.advance(
-        actual_.self, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING, &progress);
+    auto status = actual_.advance(actual_.self,
+                                  LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress);
     if (progress || !iree_status_is_ok(status) ||
         !actual_.is_pending(actual_.self)) {
       iree_notification_cancel_wait(notification);

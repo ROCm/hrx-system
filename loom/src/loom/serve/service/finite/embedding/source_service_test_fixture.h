@@ -53,7 +53,7 @@ struct loom_serve_test_embedding_model_lifecycle_t {
   // pressure.
   loom_serve_memory_pool_t* pool = nullptr;
   // Optional live service advanced by this same serialized pool owner.
-  loom_serve_http_service_t* service = nullptr;
+  loom_serve_service_t* service = nullptr;
   // Owned in-progress load, consumed at its terminal owner turn.
   loom_serve_finite_load_t* load = nullptr;
   // Prepared model returned by loading, or owned model consumed by retirement.
@@ -106,11 +106,11 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
   void Accept(int client,
               loom_serve_http_connection_t** out_connection = nullptr);
 
-  bool Step(loom_serve_http_service_flags_t flags = 0);
+  bool Step(loom_serve_service_flags_t flags = 0);
 
   void Drain();
 
-  void CheckAbandonedCohort(loom_serve_http_service_flags_t flags,
+  void CheckAbandonedCohort(loom_serve_service_flags_t flags,
                             const char* expected = R"("embedding":[1,1,1,1])");
 
   void StartRouter();
@@ -165,7 +165,7 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
   // Production batched protocol service.
   loom_serve_finite_service_t* service_ = nullptr;
   // Serialized callbacks used by both direct turns and the shared router.
-  loom_serve_http_service_t interface_ = {};
+  loom_serve_service_t interface_ = {};
   // Production loopback carrier, independent of scheduler turns.
   loom_serve_http_server_t* server_ = nullptr;
   // Independent binding borrowing the HTTP owner and shared host pool.

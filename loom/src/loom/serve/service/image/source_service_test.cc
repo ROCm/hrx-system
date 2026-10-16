@@ -283,7 +283,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
                          ",\"expected\":" + std::to_string(expected) + "}"));
   }
 
-  void CheckAbandonedImage(loom_serve_http_service_flags_t flags) {
+  void CheckAbandonedImage(loom_serve_service_flags_t flags) {
     ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
     const loom_serve_image_service_options_t options = {
         .name = loom_serve_image_model_name(model_),
@@ -295,7 +295,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     std::unique_ptr<loom_serve_image_service_t,
                     decltype(&loom_serve_image_service_free)>
         service(nullptr, loom_serve_image_service_free);
-    loom_serve_http_service_t interface = {};
+    loom_serve_service_t interface = {};
     auto* notification = loom_serve_http_server_notification(server_);
     auto create_service = [&] {
       loom_serve_image_service_t* value = nullptr;
@@ -318,8 +318,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       IREE_ASSERT_OK(http_.TakeRequest(client, connection, &request));
       IREE_ASSERT_OK(interface.accept(interface.self, *connection, request, 0));
     };
-    auto advance_until = [&](auto ready,
-                             loom_serve_http_service_flags_t flags = 0) {
+    auto advance_until = [&](auto ready, loom_serve_service_flags_t flags = 0) {
       while (!ready()) {
         const auto ticket = iree_notification_prepare_wait(notification);
         bool progress = false;
@@ -342,7 +341,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       return std::string(interface.snapshot(interface.self).phase) ==
              "generating";
     }));
-    if (!iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+    if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
       const linger reset = {1, 0};
       ASSERT_EQ(
           setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
@@ -366,7 +365,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
     ASSERT_NO_FATAL_FAILURE(
         advance_until([&] { return !interface.is_pending(interface.self); }));
-    if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+    if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
       EXPECT_TRUE(Read(client, /*allow_empty=*/true).empty());
       interface.set_observer(interface.self, {});
       service.reset();
@@ -725,7 +724,7 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
   }));
   struct loom_serve_test_image_selection_t {
     // Borrowed live service, accessed only on this serialized owner.
-    const loom_serve_http_service_t* interface;
+    const loom_serve_service_t* interface;
     // Terminal selection publication after the entire invocation retires.
     bool complete;
   } selection{&interface, false};
@@ -1299,7 +1298,7 @@ TEST_P(SourceImageServiceTest, CancelledDeviceImageSkipsEncoding) {
 }
 
 TEST_P(SourceImageServiceTest, StoppingDeviceImageSkipsEncoding) {
-  CheckAbandonedImage(LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+  CheckAbandonedImage(LOOM_SERVE_SERVICE_FLAG_STOPPING);
 }
 
 TEST_P(SourceImageServiceTest, FailedPartReadinessPreservesActualRetirement) {

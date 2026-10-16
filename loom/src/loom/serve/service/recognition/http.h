@@ -39,7 +39,7 @@ iree_status_t loom_serve_recognition_http_allocate(
     loom_serve_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
     loom_serve_recognition_http_t** out_service);
 
-loom_serve_http_service_t loom_serve_recognition_http_interface(
+loom_serve_service_t loom_serve_recognition_http_interface(
     loom_serve_recognition_http_t* service);
 
 // Releases after STOPPING has drained accepted CPU/device callbacks and every
