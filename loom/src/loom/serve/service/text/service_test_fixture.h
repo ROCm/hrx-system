@@ -58,6 +58,10 @@ class SourceTextServiceTest : public ::testing::Test {
   // the model from the submitted declaration.
   virtual bool NeedsStandaloneModel() const { return true; }
 
+  // One process uses one shared executor configuration; filtered qualification
+  // runs can exercise the same owner contract with additional workers.
+  virtual iree_host_size_t WorkerCount() const { return 1; }
+
   // Document ownership covers every asynchronous native load in this fixture.
   loom_serve::testing::ModelDocument document_;
 

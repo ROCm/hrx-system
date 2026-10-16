@@ -260,6 +260,15 @@ iree_status_t loom_serve_registry_try_open_recognition(
     const loom_serve_recognition_request_t* request,
     loom_serve_recognition_stream_t** out_stream);
 
+// Resolves the current text registration under the same admission policy.
+// Success with a stream moves the owning JSON request and copies its selectors;
+// pressure/failure leaves it untouched. Accepted requests use ordinary source
+// policy, retained history, and packed execution. Ordered spans and validated
+// final results belong to the caller until close, independently of removal.
+iree_status_t loom_serve_registry_try_open_text(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    loom_serve_text_request_t* request, loom_serve_text_stream_t** out_stream);
+
 // Seals admission; callers resolve held claims before the next advance.
 // Repeated removal is idempotent, with abort escalation and explicit
 // release-failure retry.

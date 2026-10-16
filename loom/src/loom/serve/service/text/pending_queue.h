@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVICE_TEXT_PENDING_QUEUE_H_
 
 #include "loom/serve/service/text/admission.h"
+#include "loom/serve/service/text/consumer.h"
 #include "loom/serve/service/text/pending_request.h"
 #include "loom/serve/service/text/prefix_cache.h"
 #include "loom/serve/service/text/session_cache.h"
@@ -67,20 +68,28 @@ iree_status_t loom_serve_text_pending_queue_initialize(
     iree_allocator_t host_allocator,
     loom_serve_text_pending_queue_t* out_queue);
 
-// All request claims and their CPU/device/media borrowers have retired.
+// All request consumers and their CPU/device/media borrowers have retired.
 void loom_serve_text_pending_queue_deinitialize(
     loom_serve_text_pending_queue_t* queue);
 
-// Takes a claimed generation request after route/content-type validation.
-// Validates session/checkpoint headers against the actual rows and registry,
-// including duplicate names in the FIFO, and accounts a checkpoint reference.
-// Immediate rejection also relinquishes the claim.
-iree_status_t loom_serve_text_pending_queue_enqueue(
-    loom_serve_text_pending_queue_t* queue,
-    loom_serve_http_connection_t* connection,
-    const loom_serve_http_request_t* request, loom_serve_text_receipt_t receipt,
-    iree_host_size_t row_count, loom_serve_text_session_t* sessions,
-    loom_serve_text_checkpoint_registry_t* checkpoints);
+// Both ingress paths validate names against the actual rows, queued requests,
+// and checkpoint registry before accepting input. The selected endpoint remains
+// borrowed on the serialized owner until push acquires its pending reference.
+iree_status_t loom_serve_text_pending_queue_select_request(
+    const loom_serve_text_pending_queue_t* queue, iree_string_view_t name,
+    iree_string_view_t checkpoint_name, iree_host_size_t row_count,
+    loom_serve_text_session_t* sessions,
+    loom_serve_text_checkpoint_registry_t* checkpoints,
+    loom_serve_text_checkpoint_entry_t** out_checkpoint);
+
+// Moves a validated request into an available stable queue slot. The caller
+// establishes capacity and owns publication/scheduling; this only transfers
+// input ownership and accounts the resolved checkpoint's pending reference.
+void loom_serve_text_pending_queue_push(
+    loom_serve_text_pending_queue_t* queue, loom_serve_text_consumer_t consumer,
+    iree_string_view_t body, iree_string_view_t name,
+    loom_serve_text_checkpoint_entry_t* checkpoint,
+    loom_serve_text_receipt_t receipt);
 
 // Resolves the selected request's exact completed frontier without acquiring
 // native ownership. Row/cache contents stay protected through preparation.
@@ -98,19 +107,19 @@ iree_status_t loom_serve_text_pending_queue_prepare(
     loom_serve_text_session_t* sessions,
     const loom_serve_text_pool_usage_t* geometry);
 
-// The caller has released or transferred request payloads and the claim.
+// The caller has released or transferred request payloads and the consumer.
 // Returns the stable slot to the free suffix, releases checkpoint accounting,
 // and preserves other borrowers while adjusting selection/policy positions.
 void loom_serve_text_pending_queue_remove(
     loom_serve_text_pending_queue_t* queue, iree_host_size_t index);
 
 // Terminal cancellation after CPU/device loans have retired and the projector
-// can detach. Releases the request payloads, transport claim, and queue slot.
+// can detach. Releases request payloads, the consumer receipt, and the queue slot.
 void loom_serve_text_pending_queue_cancel(
     loom_serve_text_pending_queue_t* queue, iree_host_size_t index,
     loom_serve_text_media_projector_t* projector);
 
-// Removes failed claims except borrowed, which the scheduler retains through
+// Removes closed consumers except borrowed, which the scheduler retains through
 // readiness release. A media borrower may similarly prevent cancellation.
 // Returns whether any request retired; it never waits for a borrower.
 bool loom_serve_text_pending_queue_cancel_failed(

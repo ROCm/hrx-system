@@ -8,8 +8,6 @@
 
 #include <string.h>
 
-#include "loom/serve/service/text/http.h"
-
 iree_status_t loom_serve_text_pending_queue_initialize(
     loom_serve_text_model_t* model, loom_serve_text_telemetry_t* telemetry,
     iree_host_size_t capacity, iree_host_size_t overtake_budget,
@@ -46,84 +44,63 @@ void loom_serve_text_pending_queue_deinitialize(
   memset(queue, 0, sizeof(*queue));
 }
 
-iree_status_t loom_serve_text_pending_queue_enqueue(
-    loom_serve_text_pending_queue_t* queue,
-    loom_serve_http_connection_t* connection,
-    const loom_serve_http_request_t* request, loom_serve_text_receipt_t receipt,
-    iree_host_size_t row_count, loom_serve_text_session_t* sessions,
-    loom_serve_text_checkpoint_registry_t* checkpoints) {
-  iree_string_view_t name;
-  loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Session"),
-                                        &name);
+// Both ingress paths resolve names on the owner before accepting input. Source
+// JSON validation remains on the finite preparation loan, after acceptance.
+iree_status_t loom_serve_text_pending_queue_select_request(
+    const loom_serve_text_pending_queue_t* queue, iree_string_view_t name,
+    iree_string_view_t checkpoint_name, iree_host_size_t row_count,
+    loom_serve_text_session_t* sessions,
+    loom_serve_text_checkpoint_registry_t* checkpoints,
+    loom_serve_text_checkpoint_entry_t** out_checkpoint) {
+  *out_checkpoint = NULL;
   if (!loom_serve_text_session_name_valid(name)) {
-    return loom_serve_text_http_reject(
-        queue->telemetry, connection, receipt, 400, "Bad Request",
-        iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "X-Loom-Session must be at most 64 ASCII identifier characters"),
-        queue->host_allocator);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "session must be at most 64 ASCII identifier characters");
   }
-  iree_string_view_t checkpoint_name;
-  loom_serve_text_checkpoint_entry_t* checkpoint = NULL;
-  if (loom_serve_http_request_lookup_header(
-          request, IREE_SV("X-Loom-Checkpoint"), &checkpoint_name)) {
-    if (!checkpoint_name.size ||
-        !loom_serve_text_session_name_valid(checkpoint_name)) {
-      return loom_serve_text_http_reject(
-          queue->telemetry, connection, receipt, 400, "Bad Request",
-          iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "X-Loom-Checkpoint requires a nonempty ASCII identifier"),
-          queue->host_allocator);
-    }
-    checkpoint =
-        loom_serve_text_checkpoint_registry_find(checkpoints, checkpoint_name);
-    if (!checkpoint) {
-      return loom_serve_text_http_reject(
-          queue->telemetry, connection, receipt, 404, "Not Found",
-          iree_make_status(IREE_STATUS_NOT_FOUND, "checkpoint is not pinned"),
-          queue->host_allocator);
+  if (!loom_serve_text_session_name_valid(checkpoint_name)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "checkpoint must be at most 64 ASCII identifier characters");
+  }
+  if (checkpoint_name.size) {
+    *out_checkpoint = loom_serve_text_checkpoint_registry_find(
+        checkpoints, checkpoint_name);
+    if (!*out_checkpoint) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "checkpoint is not pinned");
     }
   }
-  loom_serve_text_session_t* session =
-      loom_serve_text_session_select(row_count, sessions, name, NULL);
+  const loom_serve_text_session_t* session =
+      loom_serve_text_session_select(row_count, sessions,
+                                     name, NULL);
   bool busy = session && session->request.consumer.self;
   for (iree_host_size_t i = 0; name.size && i < queue->count; ++i) {
     busy |= iree_string_view_equal(name, queue->values[i]->name);
   }
   if (busy) {
-    return loom_serve_text_http_reject(
-        queue->telemetry, connection, receipt, 409, "Conflict",
-        iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                         "session already has an active or queued request"),
-        queue->host_allocator);
+    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                            "session already has an active or queued request");
   }
-  if (queue->count == queue->capacity) {
-    return loom_serve_text_http_reject(
-        queue->telemetry, connection, receipt, 503, "Service Unavailable",
-        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                         "pending request queue is full"),
-        queue->host_allocator);
-  }
-  loom_serve_text_consumer_t consumer;
-  iree_status_t status = loom_serve_text_http_consumer_allocate(
-      connection, queue->telemetry, receipt, queue->host_allocator, &consumer);
-  if (!iree_status_is_ok(status)) {
-    return loom_serve_text_http_reject(
-        queue->telemetry, connection, receipt, 503, "Service Unavailable",
-        status, queue->host_allocator);
-  }
+  return iree_ok_status();
+}
+
+void loom_serve_text_pending_queue_push(
+    loom_serve_text_pending_queue_t* queue, loom_serve_text_consumer_t consumer,
+    iree_string_view_t body, iree_string_view_t name,
+    loom_serve_text_checkpoint_entry_t* checkpoint,
+    loom_serve_text_receipt_t receipt) {
   if (checkpoint) {
     ++checkpoint->pending;
   }
-  *queue->values[queue->count++] = (loom_serve_text_pending_request_t){
-      .consumer = consumer,
-      .body = request->body,
-      .name = name,
-      .checkpoint = checkpoint,
-      .receipt = receipt,
-  };
-  return iree_ok_status();
+  *queue->values[queue->count++] =
+      (loom_serve_text_pending_request_t){
+          .consumer = consumer,
+          .body = body,
+          .name = name,
+          .checkpoint = checkpoint,
+          .receipt = receipt,
+      };
 }
 
 // Resolves the exact completed frontier without acquiring native ownership.
