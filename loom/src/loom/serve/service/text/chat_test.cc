@@ -17,8 +17,12 @@ class ChatResponseTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_string_builder_initialize(iree_allocator_system(), &output_);
+    loom_serve_text_tool_calls_initialize(iree_allocator_system(), &calls_);
   }
-  void TearDown() override { iree_string_builder_deinitialize(&output_); }
+  void TearDown() override {
+    loom_serve_text_tool_calls_deinitialize(&calls_);
+    iree_string_builder_deinitialize(&output_);
+  }
   std::string Output() const {
     const auto view = iree_string_builder_view(&output_);
     return std::string(view.data, view.size);
@@ -33,22 +37,24 @@ class ChatResponseTest : public ::testing::Test {
   };
   // Owned output from the production JSON/SSE encoder.
   iree_string_builder_t output_;
+  // Validated generated records consumed directly by the production encoder.
+  loom_serve_text_tool_calls_t calls_;
 };
 
 TEST_F(ChatResponseTest, CompleteTextIncludesUsageAndEscapesContent) {
   IREE_ASSERT_OK(loom_serve_text_chat_response(
-      &response_, IREE_SV("a\n\"λ\""), iree_string_view_empty(),
-      iree_string_view_empty(), IREE_SV("stop"), &output_));
+      &response_, IREE_SV("a\n\"λ\""), iree_string_view_empty(), nullptr,
+      IREE_SV("stop"), &output_));
   EXPECT_EQ(
       Output(),
       R"({"id":"loom-7","object":"chat.completion","created":12,"model":"local-λ","choices":[{"index":0,"message":{"role":"assistant","content":"a\n\"λ\""},"finish_reason":"stop","logprobs":null}],"usage":{"prompt_tokens":120,"completion_tokens":4,"total_tokens":124,"prompt_tokens_details":{"cached_tokens":100}}})");
 }
 
 TEST_F(ChatResponseTest, ToolOnlyMessageHasNullContent) {
+  IREE_ASSERT_OK(loom_serve_text_tool_calls_append(&calls_, 7, IREE_SV("read"),
+                                                   IREE_SV(R"({"path":"a"})")));
   IREE_ASSERT_OK(loom_serve_text_chat_response(
-      &response_, iree_string_view_empty(), iree_string_view_empty(),
-      IREE_SV(
-          R"([{"id":"call_7_0","type":"function","function":{"name":"read","arguments":"{\"path\":\"a\"}"}}])"),
+      &response_, iree_string_view_empty(), iree_string_view_empty(), &calls_,
       IREE_SV("tool_calls"), &output_));
   EXPECT_EQ(
       Output(),
@@ -57,8 +63,8 @@ TEST_F(ChatResponseTest, ToolOnlyMessageHasNullContent) {
 
 TEST_F(ChatResponseTest, ReasoningIsSeparateFromAnswerAndToolFields) {
   IREE_ASSERT_OK(loom_serve_text_chat_response(
-      &response_, IREE_SV("4"), IREE_SV("check \"λ\"\n"),
-      iree_string_view_empty(), IREE_SV("stop"), &output_));
+      &response_, IREE_SV("4"), IREE_SV("check \"λ\"\n"), nullptr,
+      IREE_SV("stop"), &output_));
   EXPECT_NE(
       Output().find(R"("content":"4","reasoning_content":"check \"λ\"\n")"),
       std::string::npos);
