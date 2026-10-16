@@ -1,0 +1,270 @@
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+func.def @mixed_f16(%uniform_word: i32, %varying: f16) -> (i32, i32) {
+  %uniform_bits = scalar.trunci %uniform_word : i32 to i16
+  %uniform = scalar.bitcast %uniform_bits : i16 to f16
+  %forward = scalar.cmpf olt, %uniform, %varying : f16
+  %reverse = scalar.cmpf uge, %varying, %uniform : f16
+  %forward_word = scalar.extui %forward : i1 to i32
+  %reverse_word = scalar.extui %reverse : i1 to i32
+  func.return %forward_word, %reverse_word : i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @mixed_f16(%uniform: reg<amdgpu.sgpr>, %varying: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %forward = v_cmp_lt_f16 %uniform, %varying
+  %reverse = v_cmp_nlt_f16 %varying, %uniform
+  %forward_word = v_cndmask_b32_src0_lit_src1_inline %forward {imm32 = 0, true_value = 1}
+  %reverse_word = v_cndmask_b32_src0_lit_src1_inline %reverse {imm32 = 0, true_value = 1}
+  return %forward_word, %reverse_word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+func.def @mixed_f32(%uniform_bits: i32, %varying: f32) -> (i32, i32) {
+  %uniform = scalar.bitcast %uniform_bits : i32 to f32
+  %forward = scalar.cmpf olt, %uniform, %varying : f32
+  %reverse = scalar.cmpf uge, %varying, %uniform : f32
+  %forward_word = scalar.extui %forward : i1 to i32
+  %reverse_word = scalar.extui %reverse : i1 to i32
+  func.return %forward_word, %reverse_word : i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @mixed_f32(%uniform: reg<amdgpu.sgpr>, %varying: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %forward = v_cmp_lt_f32 %uniform, %varying
+  %reverse = v_cmp_nlt_f32 %varying, %uniform
+  %forward_word = v_cndmask_b32_src0_lit_src1_inline %forward {imm32 = 0, true_value = 1}
+  %reverse_word = v_cndmask_b32_src0_lit_src1_inline %reverse {imm32 = 0, true_value = 1}
+  return %forward_word, %reverse_word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+func.def @mixed_f64(%uniform_bits: i64, %varying: f64) -> (i32, i32) {
+  %uniform = scalar.bitcast %uniform_bits : i64 to f64
+  %forward = scalar.cmpf olt, %uniform, %varying : f64
+  %reverse = scalar.cmpf uge, %varying, %uniform : f64
+  %forward_word = scalar.extui %forward : i1 to i32
+  %reverse_word = scalar.extui %reverse : i1 to i32
+  func.return %forward_word, %reverse_word : i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @mixed_f64(%uniform: reg<amdgpu.sgpr x2>, %varying: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %forward = v_cmp_lt_f64 %uniform, %varying
+  %reverse = v_cmp_nlt_f64 %varying, %uniform
+  %forward_word = v_cndmask_b32_src0_lit_src1_inline %forward {imm32 = 0, true_value = 1}
+  %reverse_word = v_cndmask_b32_src0_lit_src1_inline %reverse {imm32 = 0, true_value = 1}
+  return %forward_word, %reverse_word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @uniform_f64(%lhs_bits: i64, %rhs_bits: i64) -> (i32) {
+  %lhs = scalar.bitcast %lhs_bits : i64 to f64
+  %rhs = scalar.bitcast %rhs_bits : i64 to f64
+  %condition = scalar.cmpf one, %lhs, %rhs : f64
+  %result = scalar.extui %condition : i1 to i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_f64(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %13 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = v_mov_b32_copy %13
+  %15 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %15
+  %17 = concat(%14, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %condition = v_cmp_lg_f64 %lhs, %17
+  %20 = s_mov_b32 0
+  %21 = v_mov_b32_copy %20
+  %result = v_cndmask_b32_src1_inline %21, %condition {true_value = 1}
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+func.def @uniform_f64(%lhs_bits: i64, %rhs_bits: i64) -> (i32) {
+  %lhs = scalar.bitcast %lhs_bits : i64 to f64
+  %rhs = scalar.bitcast %rhs_bits : i64 to f64
+  %condition = scalar.cmpf one, %lhs, %rhs : f64
+  %result = scalar.extui %condition : i1 to i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @uniform_f64(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %condition = v_cmp_lg_f64 %lhs, %rhs
+  %result = v_cndmask_b32_src0_lit_src1_inline %condition {imm32 = 0, true_value = 1}
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @mixed_i32(%uniform: i32, %payload: vector<1xi32>) -> (i32, i32) {
+  %varying = vector.extract %payload[0] : vector<1xi32> -> i32
+  %forward = scalar.cmpi slt, %uniform, %varying : i32
+  %reverse = scalar.cmpi uge, %varying, %uniform : i32
+  %forward_word = scalar.extui %forward : i1 to i32
+  %reverse_word = scalar.extui %reverse : i1 to i32
+  func.return %forward_word, %reverse_word : i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @mixed_i32(%uniform: reg<amdgpu.sgpr>, %varying: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %forward = v_cmp_lt_i32 %uniform, %varying
+  %reverse = v_cmp_ge_u32 %varying, %uniform
+  %22 = s_mov_b32 0
+  %23 = v_mov_b32_copy %22
+  %forward_word = v_cndmask_b32_src1_inline %23, %forward {true_value = 1}
+  %reverse_word = v_cndmask_b32_src1_inline %23, %reverse {true_value = 1}
+  return %forward_word, %reverse_word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @mixed_i64(%uniform: i64, %payload: vector<1xi64>) -> (i32, i32) {
+  %varying = vector.extract %payload[0] : vector<1xi64> -> i64
+  %forward = scalar.cmpi slt, %uniform, %varying : i64
+  %reverse = scalar.cmpi uge, %varying, %uniform : i64
+  %forward_word = scalar.extui %forward : i1 to i32
+  %reverse_word = scalar.extui %reverse : i1 to i32
+  func.return %forward_word, %reverse_word : i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @mixed_i64(%uniform: reg<amdgpu.sgpr x2>, %varying: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %19 = slice %uniform[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = slice %uniform[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %varying[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %22 = slice %varying[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = v_cmp_lt_i32 %20, %22
+  %24 = v_cmp_lt_u32 %19, %21
+  %25 = v_cmp_eq_i32 %20, %22
+  %26 = s_and_b64 %25, %24
+  %forward = s_or_b64 %23, %26
+  %32 = v_cmp_gt_u32 %22, %20
+  %33 = v_cmp_ge_u32 %21, %19
+  %34 = v_cmp_eq_i32 %22, %20
+  %35 = s_and_b64 %34, %33
+  %reverse = s_or_b64 %32, %35
+  %38 = s_mov_b32 0
+  %39 = v_mov_b32_copy %38
+  %forward_word = v_cndmask_b32_src1_inline %39, %forward {true_value = 1}
+  %reverse_word = v_cndmask_b32_src1_inline %39, %reverse {true_value = 1}
+  return %forward_word, %reverse_word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @uniform_vector_sources(%input: buffer, %varying: vector<4xi32>) -> (vector<4xi32>, vector<4xi32>) {
+  %base = index.constant 0 : offset
+  %constant_input = buffer.assume.memory_space<constant> %input : buffer
+  %view = buffer.view %constant_input[%base] : buffer -> view<8xi32>
+  %uniform = vector.load %view[0] : view<8xi32> -> vector<4xi32>
+  %forward = vector.cmpi slt, %uniform, %varying : vector<4xi32> -> vector<4xi1>
+  %reverse = vector.cmpi uge, %varying, %uniform : vector<4xi32> -> vector<4xi1>
+  %forward_words = vector.extui %forward : vector<4xi1> to vector<4xi32>
+  %reverse_words = vector.extui %reverse : vector<4xi1> to vector<4xi32>
+  func.return %forward_words, %reverse_words : vector<4xi32>, vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_vector_sources(%varying: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
+  %view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = s_mov_b32 0
+  %uniform = s_load_dwordx4 %view, %22
+  %24 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %25 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_cmp_lt_i32 %24, %25
+  %27 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %28 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %29 = v_cmp_lt_i32 %27, %28
+  %30 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %31 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %32 = v_cmp_lt_i32 %30, %31
+  %33 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %34 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %35 = v_cmp_lt_i32 %33, %34
+  %39 = v_cmp_ge_u32 %25, %24
+  %42 = v_cmp_ge_u32 %28, %27
+  %45 = v_cmp_ge_u32 %31, %30
+  %48 = v_cmp_ge_u32 %34, %33
+  %55 = v_mov_b32 0
+  %62 = v_cndmask_b32_src1_inline %55, %26 {true_value = 1}
+  %65 = v_cndmask_b32_src1_inline %55, %29 {true_value = 1}
+  %68 = v_cndmask_b32_src1_inline %55, %32 {true_value = 1}
+  %71 = v_cndmask_b32_src1_inline %55, %35 {true_value = 1}
+  %forward_words = concat(%62, %65, %68, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %75 = v_cndmask_b32_src1_inline %55, %39 {true_value = 1}
+  %78 = v_cndmask_b32_src1_inline %55, %42 {true_value = 1}
+  %81 = v_cndmask_b32_src1_inline %55, %45 {true_value = 1}
+  %84 = v_cndmask_b32_src1_inline %55, %48 {true_value = 1}
+  %reverse_words = concat(%75, %78, %81, %84) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %forward_words, %reverse_words
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+func.def @uniform_vector_sources(%input: buffer, %varying: vector<4xi32>) -> (vector<4xi32>, vector<4xi32>) {
+  %base = index.constant 0 : offset
+  %constant_input = buffer.assume.memory_space<constant> %input : buffer
+  %view = buffer.view %constant_input[%base] : buffer -> view<8xi32>
+  %uniform = vector.load %view[0] : view<8xi32> -> vector<4xi32>
+  %forward = vector.cmpi slt, %uniform, %varying : vector<4xi32> -> vector<4xi1>
+  %reverse = vector.cmpi uge, %varying, %uniform : vector<4xi32> -> vector<4xi1>
+  %forward_words = vector.extui %forward : vector<4xi1> to vector<4xi32>
+  %reverse_words = vector.extui %reverse : vector<4xi1> to vector<4xi32>
+  func.return %forward_words, %reverse_words : vector<4xi32>, vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @uniform_vector_sources(%varying: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
+  %view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = s_mov_b32 0
+  %uniform = s_load_dwordx4 %view, %22
+  %24 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %25 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_cmp_lt_i32 %24, %25
+  %27 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %28 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %29 = v_cmp_lt_i32 %27, %28
+  %30 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %31 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %32 = v_cmp_lt_i32 %30, %31
+  %33 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %34 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %35 = v_cmp_lt_i32 %33, %34
+  %39 = v_cmp_ge_u32 %25, %24
+  %42 = v_cmp_ge_u32 %28, %27
+  %45 = v_cmp_ge_u32 %31, %30
+  %48 = v_cmp_ge_u32 %34, %33
+  %61 = v_cndmask_b32_src0_lit_src1_inline %26 {imm32 = 0, true_value = 1}
+  %63 = v_cndmask_b32_src0_lit_src1_inline %29 {imm32 = 0, true_value = 1}
+  %65 = v_cndmask_b32_src0_lit_src1_inline %32 {imm32 = 0, true_value = 1}
+  %67 = v_cndmask_b32_src0_lit_src1_inline %35 {imm32 = 0, true_value = 1}
+  %forward_words = concat(%61, %63, %65, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %70 = v_cndmask_b32_src0_lit_src1_inline %39 {imm32 = 0, true_value = 1}
+  %72 = v_cndmask_b32_src0_lit_src1_inline %42 {imm32 = 0, true_value = 1}
+  %74 = v_cndmask_b32_src0_lit_src1_inline %45 {imm32 = 0, true_value = 1}
+  %76 = v_cndmask_b32_src0_lit_src1_inline %48 {imm32 = 0, true_value = 1}
+  %reverse_words = concat(%70, %72, %74, %76) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %forward_words, %reverse_words
+}

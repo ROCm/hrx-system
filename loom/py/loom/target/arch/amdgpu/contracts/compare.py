@@ -16,7 +16,7 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.materializers import (
-    ADDRESS_VGPR_MATERIALIZER,
+    ADDRESS_REGISTER_MATERIALIZER,
     F32_VGPR_MATERIALIZER,
     I32_VGPR_MATERIALIZER,
     REGISTERS_VGPR_MATERIALIZER,
@@ -27,6 +27,7 @@ from loom.target.arch.amdgpu.descriptors import (
 )
 from loom.target.contracts import (
     ContractFragment,
+    DescriptorOperandMaterialization,
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
@@ -144,12 +145,10 @@ _F64 = Scalar("f64")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 _I1 = Scalar("i1")
-_I32_VGPR_LHS = ValueRef.operand("lhs", materializer=I32_VGPR_MATERIALIZER.name)
-_I32_VGPR_RHS = ValueRef.operand("rhs", materializer=I32_VGPR_MATERIALIZER.name)
-_F32_VGPR_LHS = ValueRef.operand("lhs", materializer=F32_VGPR_MATERIALIZER.name)
-_F32_VGPR_RHS = ValueRef.operand("rhs", materializer=F32_VGPR_MATERIALIZER.name)
-_ADDRESS_VGPR_LHS = ValueRef.operand("lhs", materializer=ADDRESS_VGPR_MATERIALIZER.name)
-_ADDRESS_VGPR_RHS = ValueRef.operand("rhs", materializer=ADDRESS_VGPR_MATERIALIZER.name)
+_REGISTER_LHS = ValueRef.operand("lhs")
+_REGISTER_RHS = ValueRef.operand("rhs")
+_ADDRESS_LHS = ValueRef.operand("lhs", materializer=ADDRESS_REGISTER_MATERIALIZER.name)
+_ADDRESS_RHS = ValueRef.operand("rhs", materializer=ADDRESS_REGISTER_MATERIALIZER.name)
 _SOURCE_INLINE_DIAGNOSTIC = GuardDiagnostic(
     subject_role="literal",
     subject_name="source-inline-u32",
@@ -418,6 +417,7 @@ def _mask_rule(
                     "rhs": rhs,
                 },
                 results={"mask": ValueRef.result("result")},
+                operand_materialization=DescriptorOperandMaterialization.TARGET,
             ),
         ),
     )
@@ -432,8 +432,8 @@ def _float_mask_inline_rule(
     descriptor: Descriptor,
 ) -> DescriptorRule:
     source_refs = {
-        "lhs": _F32_VGPR_LHS,
-        "rhs": _F32_VGPR_RHS,
+        "lhs": _REGISTER_LHS,
+        "rhs": _REGISTER_RHS,
     }
     return DescriptorRule(
         source_op=scalar.scalar_cmpf,
@@ -497,8 +497,8 @@ def _float_mask_rules() -> tuple[DescriptorRule, ...]:
         _mask_rule(
             scalar.scalar_cmpf,
             _F32,
-            _F32_VGPR_LHS,
-            _F32_VGPR_RHS,
+            _REGISTER_LHS,
+            _REGISTER_RHS,
             F32_VGPR_MATERIALIZER.name,
             predicate,
             _descriptor(f"amdgpu.v_cmp_{predicate}_f32"),
@@ -509,8 +509,8 @@ def _float_mask_rules() -> tuple[DescriptorRule, ...]:
         _mask_rule(
             scalar.scalar_cmpf,
             type_pattern,
-            ValueRef.operand("lhs", materializer=REGISTERS_VGPR_MATERIALIZER.name),
-            ValueRef.operand("rhs", materializer=REGISTERS_VGPR_MATERIALIZER.name),
+            _REGISTER_LHS,
+            _REGISTER_RHS,
             REGISTERS_VGPR_MATERIALIZER.name,
             predicate,
             _descriptor(f"amdgpu.v_cmp_{predicate}_f{bit_width}"),
@@ -830,23 +830,23 @@ def _rules() -> tuple[DescriptorRule | RecipeRule, ...]:
         *_typed_rules(
             scalar.scalar_cmpi,
             _I32,
-            _I32_VGPR_LHS,
-            _I32_VGPR_RHS,
+            _REGISTER_LHS,
+            _REGISTER_RHS,
             I32_VGPR_MATERIALIZER.name,
         ),
         *_typed_rules(
             index.index_cmp,
             _INDEX,
-            _ADDRESS_VGPR_LHS,
-            _ADDRESS_VGPR_RHS,
-            ADDRESS_VGPR_MATERIALIZER.name,
+            _ADDRESS_LHS,
+            _ADDRESS_RHS,
+            ADDRESS_REGISTER_MATERIALIZER.name,
         ),
         *_typed_rules(
             index.index_cmp,
             _OFFSET,
-            _ADDRESS_VGPR_LHS,
-            _ADDRESS_VGPR_RHS,
-            ADDRESS_VGPR_MATERIALIZER.name,
+            _ADDRESS_LHS,
+            _ADDRESS_RHS,
+            ADDRESS_REGISTER_MATERIALIZER.name,
         ),
     )
 
@@ -865,7 +865,7 @@ AMDGPU_COMPARE_CONTRACT_FRAGMENT = ContractFragment(
         I32_VGPR_MATERIALIZER,
         REGISTERS_VGPR_MATERIALIZER,
         F32_VGPR_MATERIALIZER,
-        ADDRESS_VGPR_MATERIALIZER,
+        ADDRESS_REGISTER_MATERIALIZER,
     ),
     cases=_rules(),
 )

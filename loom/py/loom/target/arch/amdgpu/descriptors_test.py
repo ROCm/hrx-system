@@ -3593,6 +3593,82 @@ def test_cdna_excludes_unsupported_vop3_literal_integer_forms() -> None:
         assert unsupported_keys.issubset(overlay.descriptor_key for overlay in overlays)
 
 
+def test_binary_vop3_comparisons_admit_scalar_and_vector_sources() -> None:
+    integer_predicates = (
+        "eq",
+        "ne",
+        "slt",
+        "sle",
+        "sgt",
+        "sge",
+        "ult",
+        "ule",
+        "ugt",
+        "uge",
+    )
+    floating_predicates = (
+        "oeq",
+        "ogt",
+        "oge",
+        "olt",
+        "ole",
+        "one",
+        "ord",
+        "ueq",
+        "ugt",
+        "uge",
+        "ult",
+        "ule",
+        "une",
+        "uno",
+    )
+    families = (
+        [(f"amdgpu.v_cmp_{predicate}_i32", 32) for predicate in integer_predicates[:6]]
+        + [
+            (f"amdgpu.v_cmp_{predicate}_u32", 32)
+            for predicate in integer_predicates[6:]
+        ]
+        + [
+            (f"amdgpu.v_cmp_{predicate}_f{width}", width)
+            for width in (16, 32, 64)
+            for predicate in floating_predicates
+        ]
+    )
+    for builder in (
+        _gfx940_core_overlays,
+        _gfx950_core_overlays,
+        _gfx11_core_overlays,
+        _gfx115x_core_overlays,
+        _gfx12_core_overlays,
+        _gfx125x_core_overlays,
+        _rdna4m_core_overlays,
+    ):
+        descriptors = {overlay.descriptor_key: overlay for overlay in builder()}
+        for key, width in families:
+            for suffix in ("", ".src0_inline", ".src1_inline"):
+                descriptor = descriptors.get(key + suffix)
+                if descriptor is None:
+                    assert suffix and width != 32
+                    continue
+                sources = descriptor.operands[1:]
+                assert len(sources) == (2 if not suffix else 1)
+                for source in sources:
+                    operand = source.descriptor_operand
+                    classes = {
+                        alternative.reg_class for alternative in operand.reg_alts
+                    }
+                    assert {_REG_SGPR, _REG_VGPR} <= classes
+                    assert operand.unit_count == max(1, width // 32)
+                    if width == 16:
+                        assert tuple(
+                            alternative.register_part
+                            for alternative in operand.reg_alts
+                        ) == (
+                            _REG_PART_SGPR_LOW16,
+                            _REG_PART_VGPR_LOW16,
+                        )
+
+
 def test_float_classification_descriptors_follow_target_literal_support() -> None:
     base_keys = {f"amdgpu.v_cmp_class_f{bit_width}" for bit_width in (16, 32, 64)}
     inline_keys = {f"{key}.classes_inline" for key in base_keys}

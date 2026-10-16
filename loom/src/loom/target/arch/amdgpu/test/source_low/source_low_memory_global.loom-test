@@ -1215,26 +1215,24 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %bounded_column_i64 = global_load_b64_saddr %17, %control_view
   %19 = s_mov_b32 0
   %22 = s_mov_b32 64
-  %26 = v_mov_b32_copy %19
-  %30 = slice %bounded_column_i64[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %31 = slice %bounded_column_i64[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %34 = v_cmp_gt_i32 %31, %26
-  %35 = v_cmp_ge_u32 %30, %26
-  %36 = v_cmp_eq_i32 %31, %26
-  %37 = s_and_b64 %36, %35
-  %nonnegative = s_or_b64 %34, %37
-  %40 = v_mov_b32_copy %22
-  %48 = v_cmp_lt_i32 %31, %26
-  %49 = v_cmp_lt_u32 %30, %40
-  %51 = s_and_b64 %36, %49
-  %below = s_or_b64 %48, %51
+  %25 = slice %bounded_column_i64[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %26 = slice %bounded_column_i64[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %29 = v_cmp_gt_i32 %26, %19
+  %30 = v_cmp_ge_u32 %25, %19
+  %31 = v_cmp_eq_i32 %26, %19
+  %32 = s_and_b64 %31, %30
+  %nonnegative = s_or_b64 %29, %32
+  %38 = v_cmp_lt_i32 %26, %19
+  %39 = v_cmp_lt_u32 %25, %22
+  %41 = s_and_b64 %31, %39
+  %below = s_or_b64 %38, %41
   %guard = s_and_b64 %nonnegative, %below
-  %55 = s_mov_b64_exec_read
-  %56, %57 = s_and_b64_scc %guard, %55
-  low.cond_br %57, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %45 = s_mov_b64_exec_read
+  %46, %47 = s_and_b64_scc %guard, %45
+  low.cond_br %47, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %60 = v_lshlrev_b32_src0_inline %30, 2
-  global_store_b32_saddr %60, %17, %output_view
+  %50 = v_lshlrev_b32_src0_inline %25, 2
+  global_store_b32_saddr %50, %17, %output_view
   low.br ^_bb2
 ^_bb2:
   return
@@ -2426,34 +2424,32 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 3,
   %23 = v_mov_b32 0
   %step = s_mov_b32 64
   %value = v_mov_b32_copy %pattern
-  %41 = s_mov_b64_exec_read
+  %36 = s_mov_b64_exec_read
   low.br ^loop(%lane_index: reg<amdgpu.vgpr>, %23: reg<amdgpu.vgpr>)
-^loop(%66: reg<amdgpu.vgpr>, %67: reg<amdgpu.vgpr>):
-  %27 = slice %byte_length[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = v_mov_b32_copy %27
-  %29 = slice %byte_length[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %30 = v_mov_b32_copy %29
-  %36 = v_cmp_lt_u32 %67, %30
-  %37 = v_cmp_lt_u32 %66, %28
-  %38 = v_cmp_eq_i32 %67, %30
-  %39 = s_and_b64 %38, %37
-  %inside = s_or_b64 %36, %39
-  %42, %43 = s_and_saveexec_b64 %inside
-  low.cond_br %43, ^body, ^_bb3 : reg<amdgpu.scc>
+^loop(%61: reg<amdgpu.vgpr>, %62: reg<amdgpu.vgpr>):
+  %29 = slice %byte_length[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = slice %byte_length[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = v_cmp_lt_u32 %62, %30
+  %32 = v_cmp_lt_u32 %61, %29
+  %33 = v_cmp_eq_i32 %62, %30
+  %34 = s_and_b64 %33, %32
+  %inside = s_or_b64 %31, %34
+  %37, %38 = s_and_saveexec_b64 %inside
+  low.cond_br %38, ^body, ^_bb3 : reg<amdgpu.scc>
 ^body:
-  %46 = slice %target_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %47 = slice %target_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %48, %49 = v_add_co_u32 %46, %66
-  %50 = v_mov_b32_copy %47
-  %51, %52 = v_add_co_ci_u32 %50, %67, %49
-  %53 = concat(%48, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b32_vaddr %53, %value
-  %54 = v_mov_b32_copy %step
-  %55 = v_mov_b32 0
-  %61, %62 = v_add_co_u32 %66, %54
-  %63, %64 = v_add_co_ci_u32 %67, %55, %62
-  low.br ^loop(%61: reg<amdgpu.vgpr>, %63: reg<amdgpu.vgpr>)
+  %41 = slice %target_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %42 = slice %target_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43, %44 = v_add_co_u32 %41, %61
+  %45 = v_mov_b32_copy %42
+  %46, %47 = v_add_co_ci_u32 %45, %62, %44
+  %48 = concat(%43, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b32_vaddr %48, %value
+  %49 = v_mov_b32_copy %step
+  %50 = v_mov_b32 0
+  %56, %57 = v_add_co_u32 %61, %49
+  %58, %59 = v_add_co_ci_u32 %62, %50, %57
+  low.br ^loop(%56: reg<amdgpu.vgpr>, %58: reg<amdgpu.vgpr>)
 ^_bb3:
-  s_mov_b64_exec %41
+  s_mov_b64_exec %36
   return
 }

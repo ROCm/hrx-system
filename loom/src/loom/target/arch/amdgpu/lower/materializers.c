@@ -124,6 +124,12 @@ loom_type_t loom_amdgpu_materialized_sgpr_address_type(
       LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
 }
 
+loom_type_t loom_amdgpu_materialized_address_register_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+  return loom_low_register_carrier_type_with_unit_count(
+      loom_low_lower_value_binding_type(context, source_value), 1);
+}
+
 loom_type_t loom_amdgpu_materialized_native_i1_mask_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value) {
   (void)source_value;
@@ -431,6 +437,23 @@ iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_i64(
       context, source_op, low_value, out_low_value);
 }
 
+iree_status_t loom_amdgpu_lookup_address_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t* out_low_value) {
+  const loom_value_id_t low_value =
+      loom_low_lower_lookup_value(context, source_value);
+  const loom_type_t low_type =
+      loom_module_value_type(loom_low_lower_context_module(context), low_value);
+  if (loom_low_register_type_unit_count(low_type) == 1) {
+    *out_low_value = low_value;
+    return iree_ok_status();
+  }
+  return loom_amdgpu_emit_low_slice(
+      context, source_op, low_value, 0,
+      loom_low_register_carrier_type_with_unit_count(low_type, 1),
+      out_low_value);
+}
+
 iree_status_t loom_amdgpu_emit_prepared_vgpr_address(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, const void* plan,
@@ -446,45 +469,11 @@ iree_status_t loom_amdgpu_emit_prepared_vgpr_address(
         context, source_op, source_value, LOOM_AMDGPU_REG_CLASS_ID_VGPR,
         out_low_value);
   }
-  loom_value_id_t low_value =
-      loom_low_lower_lookup_value(context, source_value);
-
-  const loom_type_t low_type = loom_module_value_type(module, low_value);
-  const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
-      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
-  if (is_vgpr) {
-    const uint32_t unit_count = loom_low_register_type_unit_count(low_type);
-    if (unit_count == 1) {
-      *out_low_value = low_value;
-      return iree_ok_status();
-    }
-    if (unit_count == 2) {
-      const loom_type_t lane_type =
-          loom_amdgpu_low_register_lane_type(module, low_value);
-      return loom_amdgpu_emit_low_slice(context, source_op, low_value,
-                                        /*offset=*/0, lane_type, out_low_value);
-    }
-    IREE_ASSERT_UNREACHABLE(
-        "AMDGPU address materializer selected a wrong-width VGPR value");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-
-  const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
-      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
-  if (is_sgpr) {
-    loom_value_id_t low_lane = low_value;
-    if (loom_low_register_type_unit_count(low_type) == 2) {
-      const loom_type_t lane_type =
-          loom_amdgpu_low_register_lane_type(module, low_value);
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
-          context, source_op, low_value, /*offset=*/0, lane_type, &low_lane));
-    }
-    return loom_amdgpu_materialize_low_vgpr_b32_registers(
-        context, source_op, low_lane, out_low_value);
-  }
-  IREE_ASSERT_UNREACHABLE(
-      "AMDGPU address materializer selected an unsupported low value");
-  IREE_BUILTIN_UNREACHABLE();
+  loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_address_register(
+      context, source_op, source_value, &low_value));
+  return loom_amdgpu_materialize_low_vgpr_b32_registers(
+      context, source_op, low_value, out_low_value);
 }
 
 iree_status_t loom_amdgpu_lookup_or_materialize_sgpr_address(
@@ -497,31 +486,8 @@ iree_status_t loom_amdgpu_lookup_or_materialize_sgpr_address(
         context, source_op, source_value, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
         out_low_value);
   }
-  loom_value_id_t low_value =
-      loom_low_lower_lookup_value(context, source_value);
-
-  const loom_type_t low_type = loom_module_value_type(module, low_value);
-  const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
-      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
-  if (!is_sgpr) {
-    IREE_ASSERT_UNREACHABLE(
-        "AMDGPU address materializer selected an incompatible SGPR value");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-  const uint32_t unit_count = loom_low_register_type_unit_count(low_type);
-  if (unit_count != 1 && unit_count != 2) {
-    IREE_ASSERT_UNREACHABLE(
-        "AMDGPU address materializer selected a wrong-width SGPR value");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-  if (unit_count == 1) {
-    *out_low_value = low_value;
-    return iree_ok_status();
-  }
-  const loom_type_t lane_type =
-      loom_amdgpu_low_register_lane_type(module, low_value);
-  return loom_amdgpu_emit_low_slice(context, source_op, low_value,
-                                    /*offset=*/0, lane_type, out_low_value);
+  return loom_amdgpu_lookup_address_register(context, source_op, source_value,
+                                             out_low_value);
 }
 
 // Materializes a subgroup-uniform scalar stored in one or two VGPRs as an

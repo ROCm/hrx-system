@@ -265,9 +265,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @tail_selected_f3
   %24 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %25 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %dot = v_fmac_f32 %23, %24, %25
-  %27 = v_mov_b32_copy %lane
-  %28 = v_mov_b32_copy %limit
-  %inside = v_cmp_lt_i32 %27, %28
+  %inside = v_cmp_lt_i32 %lane, %limit
   %selected = v_cndmask_b32 %acc, %dot, %inside
   return %selected
 }

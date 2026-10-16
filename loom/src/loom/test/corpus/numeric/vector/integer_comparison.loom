@@ -63,6 +63,96 @@ func.def @integer_comparison_packet_boundaries(%output: buffer) {
   func.return
 }
 
+func.def inline @integer_comparison_predicates(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<4xi32>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4xi32>
+  %results = buffer.view %output[%base] : buffer -> view<40xi32>
+  %lhs = vector.load %lhs_view[0] : view<4xi32> -> vector<4xi32>
+  %rhs = vector.load %rhs_view[0] : view<4xi32> -> vector<4xi32>
+  %eq = vector.cmpi eq, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %eq_words = vector.extui %eq : vector<4xi1> to vector<4xi32>
+  vector.store %eq_words, %results[0] : vector<4xi32>, view<40xi32>
+  %ne = vector.cmpi ne, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %ne_words = vector.extui %ne : vector<4xi1> to vector<4xi32>
+  vector.store %ne_words, %results[4] : vector<4xi32>, view<40xi32>
+  %slt = vector.cmpi slt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %slt_words = vector.extui %slt : vector<4xi1> to vector<4xi32>
+  vector.store %slt_words, %results[8] : vector<4xi32>, view<40xi32>
+  %sle = vector.cmpi sle, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %sle_words = vector.extui %sle : vector<4xi1> to vector<4xi32>
+  vector.store %sle_words, %results[12] : vector<4xi32>, view<40xi32>
+  %sgt = vector.cmpi sgt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %sgt_words = vector.extui %sgt : vector<4xi1> to vector<4xi32>
+  vector.store %sgt_words, %results[16] : vector<4xi32>, view<40xi32>
+  %sge = vector.cmpi sge, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %sge_words = vector.extui %sge : vector<4xi1> to vector<4xi32>
+  vector.store %sge_words, %results[20] : vector<4xi32>, view<40xi32>
+  %ult = vector.cmpi ult, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %ult_words = vector.extui %ult : vector<4xi1> to vector<4xi32>
+  vector.store %ult_words, %results[24] : vector<4xi32>, view<40xi32>
+  %ule = vector.cmpi ule, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %ule_words = vector.extui %ule : vector<4xi1> to vector<4xi32>
+  vector.store %ule_words, %results[28] : vector<4xi32>, view<40xi32>
+  %ugt = vector.cmpi ugt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %ugt_words = vector.extui %ugt : vector<4xi1> to vector<4xi32>
+  vector.store %ugt_words, %results[32] : vector<4xi32>, view<40xi32>
+  %uge = vector.cmpi uge, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %uge_words = vector.extui %uge : vector<4xi1> to vector<4xi32>
+  vector.store %uge_words, %results[36] : vector<4xi32>, view<40xi32>
+  func.return
+}
+
+func.def @integer_comparison_sources(%lhs: buffer, %rhs: buffer, %forward: buffer, %reverse: buffer, %uniform: buffer) {
+  %constant_lhs = buffer.assume.memory_space<constant> %lhs : buffer
+  %constant_rhs = buffer.assume.memory_space<constant> %rhs : buffer
+  func.call @integer_comparison_predicates(%constant_lhs, %rhs, %forward) : (buffer, buffer, buffer)
+  func.call @integer_comparison_predicates(%rhs, %constant_lhs, %reverse) : (buffer, buffer, buffer)
+  func.call @integer_comparison_predicates(%constant_lhs, %constant_rhs, %uniform) : (buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario @integer_comparison_source_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.generate.iota offset(-2) step(1) : tensor<4xi32>
+    %rhs = check.generate.iota offset(1) step(-1) : tensor<4xi32>
+    %forward = check.generate.fill value(-1) : tensor<40xi32>
+    %reverse = check.generate.fill value(-1) : tensor<40xi32>
+    %uniform = check.generate.fill value(-1) : tensor<40xi32>
+    check.compare<@integer_comparison_sources>(%lhs, %rhs, %forward, %reverse, %uniform) : (tensor<4xi32>, tensor<4xi32>, tensor<40xi32>, tensor<40xi32>, tensor<40xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<40xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<40xi32>
+      check.expect.bitwise actual(%uniform) expected(%uniform) : tensor<40xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.generate.iota offset(-2147483648) step(1) : tensor<4xi32>
+    %rhs = check.generate.iota offset(2147483647) step(-1) : tensor<4xi32>
+    %forward = check.generate.fill value(-1) : tensor<40xi32>
+    %reverse = check.generate.fill value(-1) : tensor<40xi32>
+    %uniform = check.generate.fill value(-1) : tensor<40xi32>
+    check.compare<@integer_comparison_sources>(%lhs, %rhs, %forward, %reverse, %uniform) : (tensor<4xi32>, tensor<4xi32>, tensor<40xi32>, tensor<40xi32>, tensor<40xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<40xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<40xi32>
+      check.expect.bitwise actual(%uniform) expected(%uniform) : tensor<40xi32>
+    }
+  }
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %lhs = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<4xi32>
+    %rhs = check.generate.iota offset(-1) step(1) : tensor<4xi32>
+    %forward = check.generate.fill value(-1) : tensor<40xi32>
+    %reverse = check.generate.fill value(-1) : tensor<40xi32>
+    %uniform = check.generate.fill value(-1) : tensor<40xi32>
+    check.compare<@integer_comparison_sources>(%lhs, %rhs, %forward, %reverse, %uniform) : (tensor<4xi32>, tensor<4xi32>, tensor<40xi32>, tensor<40xi32>, tensor<40xi32>) -> () {
+      check.expect.bitwise actual(%forward) expected(%forward) : tensor<40xi32>
+      check.expect.bitwise actual(%reverse) expected(%reverse) : tensor<40xi32>
+      check.expect.bitwise actual(%uniform) expected(%uniform) : tensor<40xi32>
+    }
+  }
+  check.return
+}
+
 check.scenario @integer_comparison_packet_boundary_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %storage = check.generate.fill value(-123) : tensor<16xi32>

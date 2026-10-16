@@ -12,8 +12,7 @@ func.def @select_f8e4m3_uniform(%choice: i32, %left: f8E4M3, %right: f8E4M3) -> 
 
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @select_f8e4m3_uniform(%choice: reg<amdgpu.sgpr>, %left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %18 = v_mov_b32_copy %choice
-  %condition = v_cmp_ne_i32_src1_inline %18 {rhs = 0}
+  %condition = v_cmp_ne_i32_src1_inline %choice {rhs = 0}
   %replacement = v_mov_b32 56
   %selected = v_cndmask_b32 %right, %left, %condition
   %right_constant = v_cndmask_b32 %replacement, %left, %condition
@@ -59,8 +58,7 @@ func.def @select_f8e5m2_uniform(%choice: i32, %left: f8E5M2, %right: f8E5M2) -> 
 
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @select_f8e5m2_uniform(%choice: reg<amdgpu.sgpr>, %left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %18 = v_mov_b32_copy %choice
-  %condition = v_cmp_ne_i32_src1_inline %18 {rhs = 0}
+  %condition = v_cmp_ne_i32_src1_inline %choice {rhs = 0}
   %replacement = v_mov_b32 60
   %selected = v_cndmask_b32 %right, %left, %condition
   %right_constant = v_cndmask_b32 %replacement, %left, %condition

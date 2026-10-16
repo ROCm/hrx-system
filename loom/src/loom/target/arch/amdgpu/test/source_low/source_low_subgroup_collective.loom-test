@@ -514,21 +514,20 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0
   %24 = v_lshlrev_b32_src0_inline %tid, 2
   %value = global_load_dword_saddr %24, %input_view : reg<amdgpu.vgpr>
   %26 = v_readfirstlane_b32 %value
-  %27 = v_mov_b32_copy %26
-  %28 = v_cmp_eq_i32 %value, %27
-  %29 = s_mov_b64_exec_read
-  %30 = s_and_b64 %28, %29
-  %all = s_cmp_eq_u64 %30, %29
-  %33 = s_mov_b32 0
-  %36 = slice %29[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %38 = s_cselect_b32 %36, %33, %all
-  %39 = slice %29[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %41 = s_cselect_b32 %39, %33, %all
-  %44 = v_mov_b32_copy %38
-  %46 = v_mov_b32_copy %41
-  %result = concat(%44, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %48 = v_lshlrev_b32_src0_inline %tid, 3
-  global_store_dwordx2_saddr %48, %result, %output_view
+  %27 = v_cmp_eq_i32 %value, %26
+  %28 = s_mov_b64_exec_read
+  %29 = s_and_b64 %27, %28
+  %all = s_cmp_eq_u64 %29, %28
+  %32 = s_mov_b32 0
+  %35 = slice %28[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = s_cselect_b32 %35, %32, %all
+  %38 = slice %28[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = s_cselect_b32 %38, %32, %all
+  %43 = v_mov_b32_copy %37
+  %45 = v_mov_b32_copy %40
+  %result = concat(%43, %45) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %47 = v_lshlrev_b32_src0_inline %tid, 3
+  global_store_dwordx2_saddr %47, %result, %output_view
   return
 }
 
@@ -1118,15 +1117,15 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %21 = v_add_u32 %19, %20
   %22 = v_permlanex16_b32_src12_inline %21, 0, 0
   %sum = v_add_u32 %21, %22
-  %26 = v_mov_b32 496
-  %matches = v_cmp_eq_i32 %sum, %26
-  %28 = s_mov_b64_exec_read
-  %29, %30 = s_and_b64_scc %matches, %28
-  low.cond_br %30, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %expected = s_mov_b32 496
+  %matches = v_cmp_eq_i32 %sum, %expected
+  %27 = s_mov_b64_exec_read
+  %28, %29 = s_and_b64_scc %matches, %27
+  low.cond_br %29, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %31 = v_mov_b32 1
-  %32 = v_mov_b32 0
-  global_store_b32_saddr %32, %31, %output_view
+  %30 = v_mov_b32 1
+  %31 = v_mov_b32 0
+  global_store_b32_saddr %31, %30, %output_view
   low.br ^_bb2
 ^_bb2:
   return

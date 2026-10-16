@@ -214,10 +214,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rotatin
   %begin = s_mov_b32 0
   %step = s_mov_b32 1
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %28 = v_mov_b32_copy %limit
-  %first = v_cmp_lt_i32 %lane, %28
-  %30 = v_mov_b32_copy %limit
-  %second = v_cmp_gt_i32 %lane, %30
+  %first = v_cmp_lt_i32 %lane, %limit
+  %second = v_cmp_gt_i32 %lane, %limit
   low.br ^loop(%begin: reg<amdgpu.sgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
 ^loop(%iteration: reg<amdgpu.sgpr>, %head: reg<amdgpu.sgpr x2>, %tail: reg<amdgpu.sgpr x2>):
   %again = s_cmp_lt_i32 %iteration, %limit

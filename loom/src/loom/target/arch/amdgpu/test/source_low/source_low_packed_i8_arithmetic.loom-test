@@ -47,16 +47,14 @@ func.def @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %fal
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_select_addi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %17 = v_mov_b32_copy %lhs
-  %18 = v_mov_b32_copy %rhs
-  %condition = v_cmp_lt_i32 %17, %18
+  %condition = v_cmp_lt_i32 %lhs, %rhs
   %selected = v_cndmask_b32 %false_value, %true_value, %condition
-  %21 = v_and_b32_lit %selected, 2139062143
-  %22 = v_and_b32_lit %bias, 2139062143
-  %23 = v_add_u32 %21, %22
-  %24 = v_xor_b32 %selected, %bias
-  %25 = v_and_b32_lit %24, 2155905152
-  %result = v_xor_b32 %23, %25
+  %19 = v_and_b32_lit %selected, 2139062143
+  %20 = v_and_b32_lit %bias, 2139062143
+  %21 = v_add_u32 %19, %20
+  %22 = v_xor_b32 %selected, %bias
+  %23 = v_and_b32_lit %22, 2155905152
+  %result = v_xor_b32 %21, %23
   return %result
 }
 

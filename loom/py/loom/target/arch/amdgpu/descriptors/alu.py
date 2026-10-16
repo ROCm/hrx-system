@@ -6654,6 +6654,24 @@ def _v_cvt_u32_f32_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_cmp_operand(field_name: str, bit_width: int = 32) -> Operand:
+    if bit_width == 16:
+        return Operand(
+            field_name,
+            OperandRole.OPERAND,
+            (
+                RegClassAlt(_REG_SGPR, register_part=_REG_PART_SGPR_LOW16),
+                RegClassAlt(_REG_VGPR, register_part=_REG_PART_VGPR_LOW16),
+            ),
+        )
+    return Operand(
+        field_name,
+        OperandRole.OPERAND,
+        (*_SGPR_ALT, *_VGPR_CONST_ALT),
+        unit_count=bit_width // 32,
+    )
+
+
 def _v_cmp_i32_overlay(
     *, predicate: str, instruction_suffix: str, semantic_suffix: str
 ) -> AmdgpuDescriptorOverlay:
@@ -6668,8 +6686,8 @@ def _v_cmp_i32_overlay(
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _sgpr_result("mask", units=2)),
-            AmdgpuOperandOverlay("SRC0", _vgpr_const_operand("lhs")),
-            AmdgpuOperandOverlay("SRC1", _vgpr_const_operand("rhs")),
+            AmdgpuOperandOverlay("SRC0", _v_cmp_operand("lhs")),
+            AmdgpuOperandOverlay("SRC1", _v_cmp_operand("rhs")),
         ),
         operand_forms=_v_cmp_inline_operand_forms(descriptor_key),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -6690,8 +6708,8 @@ def _v_cmp_u32_overlay(
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _sgpr_result("mask", units=2)),
-            AmdgpuOperandOverlay("SRC0", _vgpr_const_operand("lhs")),
-            AmdgpuOperandOverlay("SRC1", _vgpr_const_operand("rhs")),
+            AmdgpuOperandOverlay("SRC0", _v_cmp_operand("lhs")),
+            AmdgpuOperandOverlay("SRC1", _v_cmp_operand("rhs")),
         ),
         operand_forms=_v_cmp_inline_operand_forms(descriptor_key),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -6723,8 +6741,8 @@ def _v_cmp_source_inline_overlay(
     immediate: Immediate,
 ) -> AmdgpuDescriptorOverlay:
     source_fields = {
-        "src0": ("SRC0", "lhs", _vgpr_const_operand("lhs")),
-        "src1": ("SRC1", "rhs", _vgpr_const_operand("rhs")),
+        "src0": ("SRC0", "lhs", _v_cmp_operand("lhs")),
+        "src1": ("SRC1", "rhs", _v_cmp_operand("rhs")),
     }
     literal_field, literal_operand, _ = source_fields[literal_source]
     remaining_operands = [
@@ -6889,18 +6907,8 @@ def _v_cmp_float_overlay(
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _sgpr_result("mask", units=2)),
-            AmdgpuOperandOverlay(
-                "SRC0",
-                _f16_vgpr_operand("lhs")
-                if bit_width == 16
-                else _vgpr_const_operand("lhs", units=bit_width // 32),
-            ),
-            AmdgpuOperandOverlay(
-                "SRC1",
-                _f16_vgpr_operand("rhs")
-                if bit_width == 16
-                else _vgpr_const_operand("rhs", units=bit_width // 32),
-            ),
+            AmdgpuOperandOverlay("SRC0", _v_cmp_operand("lhs", bit_width)),
+            AmdgpuOperandOverlay("SRC1", _v_cmp_operand("rhs", bit_width)),
         ),
         operand_forms=_v_cmp_inline_operand_forms(f"amdgpu.v_cmp_{predicate}_f32")
         if bit_width == 32

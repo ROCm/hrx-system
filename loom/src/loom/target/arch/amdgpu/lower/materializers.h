@@ -62,6 +62,15 @@ loom_type_t loom_amdgpu_materialized_vgpr_address_type(
 loom_type_t loom_amdgpu_materialized_sgpr_address_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value);
 
+// Exposes the address's low word in its producer's register class.
+loom_type_t loom_amdgpu_materialized_address_register_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+
+// Projects the selected 32-bit address operand without changing register class.
+iree_status_t loom_amdgpu_lookup_address_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t* out_low_value);
+
 // Native predicates carry an EXEC-width mask in an SGPR pair.
 loom_type_t loom_amdgpu_materialized_native_i1_mask_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value);

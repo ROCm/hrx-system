@@ -59,6 +59,14 @@ ADDRESS_VGPR_MATERIALIZER = ValueMaterializer(
     header="loom/target/arch/amdgpu/lower/materializers.h",
 )
 
+ADDRESS_REGISTER_MATERIALIZER = ValueMaterializer(
+    name="address_register",
+    result_type="loom_amdgpu_materialized_address_register_type",
+    can_materialize="loom_amdgpu_value_can_materialize_as_vgpr_address",
+    materialize="loom_amdgpu_lookup_address_register",
+    header="loom/target/arch/amdgpu/lower/materializers.h",
+)
+
 ADDRESS_SGPR_MATERIALIZER = ValueMaterializer(
     name="address_sgpr",
     result_type="loom_amdgpu_materialized_sgpr_address_type",

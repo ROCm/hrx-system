@@ -37,43 +37,38 @@ amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 5, direct_arg_count = 5, direct_arg_names = {arg0 = "selector", arg1 = "first", arg2 = "second", arg3 = "begin", arg4 = "end"}, direct_arg_offsets = [0, 4, 8, 12, 16], direct_arg_parameter_indices = [0, 1, 2, 3, 4], direct_arg_sizes = [4, 4, 4, 4, 4], parameter_count = 6, resource_count = 1, resource_offsets = [24], resource_parameter_indices = [5], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_mask_selection(%selector: reg<amdgpu.sgpr>, %first: reg<amdgpu.sgpr>, %second: reg<amdgpu.sgpr>, %begin: reg<amdgpu.sgpr>, %end: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %29 = v_mov_b32_copy %selector
-  %condition = v_cmp_gt_f32_src1_inline %29 {rhs = "f32_0_0"}
-  %31 = v_mov_b32_copy %first
-  %true_value = v_cmp_gt_f32_src1_inline %31 {rhs = "f32_0_0"}
-  %33 = v_mov_b32_copy %second
-  %false_value = v_cmp_gt_f32_src1_inline %33 {rhs = "f32_0_0"}
-  %35 = v_mov_b32_copy %begin
-  %after_begin = v_cmp_ge_u32 %lane, %35
-  %37 = v_mov_b32_copy %end
-  %before_end = v_cmp_lt_u32 %lane, %37
+  %condition = v_cmp_gt_f32_src1_inline %selector {rhs = "f32_0_0"}
+  %true_value = v_cmp_gt_f32_src1_inline %first {rhs = "f32_0_0"}
+  %false_value = v_cmp_gt_f32_src1_inline %second {rhs = "f32_0_0"}
+  %after_begin = v_cmp_ge_u32 %lane, %begin
+  %before_end = v_cmp_lt_u32 %lane, %end
   %active = s_and_b64 %after_begin, %before_end
-  %40, %41 = s_and_saveexec_b64 %active
-  low.cond_br %41, ^write, ^_bb2 : reg<amdgpu.scc>
+  %35, %36 = s_and_saveexec_b64 %active
+  low.cond_br %36, ^write, ^_bb2 : reg<amdgpu.scc>
 ^write:
-  %42 = s_mov_b64_exec_read
-  %43, %44 = s_and_b64_scc %true_value, %42
-  %45 = s_mov_b32 0
-  %46 = s_mov_b32 1
-  %47 = s_cselect_b32 %46, %45, %44
-  %48 = s_mov_b64_exec_read
-  %49, %50 = s_and_b64_scc %false_value, %48
-  %51 = s_mov_b32 0
-  %52 = s_mov_b32 1
-  %53 = s_cselect_b32 %52, %51, %50
-  %54 = s_mov_b64_exec_read
-  %55, %56 = s_and_b64_scc %condition, %54
-  %selected = s_cselect_b32 %47, %53, %56
+  %37 = s_mov_b64_exec_read
+  %38, %39 = s_and_b64_scc %true_value, %37
+  %40 = s_mov_b32 0
+  %41 = s_mov_b32 1
+  %42 = s_cselect_b32 %41, %40, %39
+  %43 = s_mov_b64_exec_read
+  %44, %45 = s_and_b64_scc %false_value, %43
+  %46 = s_mov_b32 0
+  %47 = s_mov_b32 1
+  %48 = s_cselect_b32 %47, %46, %45
+  %49 = s_mov_b64_exec_read
+  %50, %51 = s_and_b64_scc %condition, %49
+  %selected = s_cselect_b32 %42, %48, %51
   %disabled = s_mov_b32 0
   %enabled = s_mov_b32 1
-  %60 = s_cmp_lg_i32_src1_inline %selected {rhs = 0}
-  %word = s_cselect_b32 %enabled, %disabled, %60
-  %62 = v_mov_b32_copy %word
-  %63 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %63, %62, %view
+  %55 = s_cmp_lg_i32_src1_inline %selected {rhs = 0}
+  %word = s_cselect_b32 %enabled, %disabled, %55
+  %57 = v_mov_b32_copy %word
+  %58 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %58, %57, %view
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %40
+  s_mov_b64_exec %35
   low.br ^exit
 ^exit:
   return
