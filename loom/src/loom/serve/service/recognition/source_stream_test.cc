@@ -19,7 +19,8 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/service/recognition/model.h"
-#include "loom/serve/service/recognition/service.h"
+#include "loom/serve/service/recognition/stream.h"
+#include "loom/serve/telemetry/record.h"
 #include "loom/serve/testing/native_allocator.h"
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/testing/worker_gate.h"
@@ -33,7 +34,7 @@ namespace {
 
 // Observes the real source generator; all preparation, numerical execution,
 // feedback, and state release still go through the production model.
-class SourceRecognitionServiceTest : public ::testing::Test {
+class SourceRecognitionStreamTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_notification_initialize(&notification_);
@@ -68,40 +69,40 @@ class SourceRecognitionServiceTest : public ::testing::Test {
     observed.prepare = [](void* self, iree_host_size_t row,
                           const loom_serve_recognition_request_t* request,
                           void** out) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       IREE_RETURN_IF_ERROR(
           test->actual_.prepare(test->actual_.self, row, request, out));
       test->invocations_[row] = *out;
       return iree_ok_status();
     };
     observed.discard = [](void* self, void* invocation) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       test->invocations_[test->Row(invocation)] = nullptr;
       test->actual_.discard(test->actual_.self, invocation);
     };
     observed.try_admit = [](void* self, void* invocation,
                             loom_serve_residency_admission_t* admission,
                             loom_serve_execution_frontier_t* frontier) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       return test->actual_.try_admit(test->actual_.self, invocation, admission,
                                      frontier);
     };
     observed.complete_admit = [](void* self, void* invocation) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       return test->actual_.complete_admit(test->actual_.self, invocation);
     };
     observed.prepare_work =
         [](void* self, void* invocation,
            const loom_serve_recognition_input_block_t* input,
            loom_serve_recognition_work_t* work) {
-          auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+          auto* test = static_cast<SourceRecognitionStreamTest*>(self);
           ++test->offers_[test->Row(invocation)];
           return test->actual_.prepare_work(test->actual_.self, invocation,
                                             input, work);
         };
     observed.prepare_batch = [](void* self, iree_host_size_t count,
                                 void* const* invocations) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       test->members_.clear();
       for (size_t i = 0; i < count; ++i) {
         test->members_.push_back(test->Row(invocations[i]));
@@ -111,7 +112,7 @@ class SourceRecognitionServiceTest : public ::testing::Test {
     };
     observed.submit = [](void* self,
                          loom_serve_execution_frontier_t* frontier) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       IREE_RETURN_IF_ERROR(test->actual_.submit(test->actual_.self, frontier));
       ++test->submitted_;
       test->largest_batch_ =
@@ -124,19 +125,19 @@ class SourceRecognitionServiceTest : public ::testing::Test {
     };
     observed.collect = [](void* self, iree_host_size_t ordinal,
                           loom_serve_recognition_result_t* out) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       IREE_RETURN_IF_ERROR(
           test->actual_.collect(test->actual_.self, ordinal, out));
       ++test->collected_[test->members_[ordinal]];
       return iree_ok_status();
     };
     observed.release_batch = [](void* self) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       test->actual_.release_batch(test->actual_.self);
     };
     observed.release = [](void* self, void* invocation, bool* out_complete,
                           loom_serve_execution_frontier_t* frontier) {
-      auto* test = static_cast<SourceRecognitionServiceTest*>(self);
+      auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       const auto row = test->Row(invocation);
       IREE_RETURN_IF_ERROR(test->actual_.release(test->actual_.self, invocation,
                                                  out_complete, frontier));
@@ -153,13 +154,13 @@ class SourceRecognitionServiceTest : public ::testing::Test {
       return iree_ok_status();
     };
     observed.weight_activity = nullptr;
-    const loom_serve_recognition_service_options_t service_options = {
+    const loom_serve_recognition_stream_service_options_t service_options = {
         .request_limit = 1024,
         .document_limit = 4096,
     };
-    IREE_ASSERT_OK(loom_serve_recognition_service_allocate(
+    IREE_ASSERT_OK(loom_serve_recognition_stream_service_allocate(
         host_, observed, &service_options, allocator_, &service_));
-    loom_serve_recognition_service_set_observer(
+    loom_serve_recognition_stream_service_set_observer(
         service_, {[](void* self) {
                      iree_notification_post(
                          static_cast<iree_notification_t*>(self),
@@ -180,8 +181,8 @@ class SourceRecognitionServiceTest : public ::testing::Test {
   void RetireModel() {
     if (service_) {
       Settle(true);
-      loom_serve_recognition_service_set_observer(service_, {});
-      loom_serve_recognition_service_free(service_);
+      loom_serve_recognition_stream_service_set_observer(service_, {});
+      loom_serve_recognition_stream_service_free(service_);
       service_ = nullptr;
     }
     IREE_EXPECT_OK(loom_serve_recognition_model_free(model_));
@@ -203,8 +204,8 @@ class SourceRecognitionServiceTest : public ::testing::Test {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = loom_serve_recognition_service_advance(service_, stopping,
-                                                           false, &progress);
+      auto status = loom_serve_recognition_stream_service_advance(
+          service_, stopping, false, &progress);
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -220,10 +221,11 @@ class SourceRecognitionServiceTest : public ::testing::Test {
     while (true) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = loom_serve_recognition_service_advance(service_, stopping,
-                                                           false, &progress);
+      auto status = loom_serve_recognition_stream_service_advance(
+          service_, stopping, false, &progress);
       const bool idle =
-          !progress && !loom_serve_recognition_service_is_pending(service_);
+          !progress &&
+          !loom_serve_recognition_stream_service_is_pending(service_);
       if (idle || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -243,8 +245,8 @@ class SourceRecognitionServiceTest : public ::testing::Test {
     while (iree_status_is_ok(status)) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      status = loom_serve_recognition_service_advance(service_, false, false,
-                                                      &progress);
+      status = loom_serve_recognition_stream_service_advance(service_, false,
+                                                             false, &progress);
       if (progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -258,8 +260,16 @@ class SourceRecognitionServiceTest : public ::testing::Test {
 
   void Open(loom_serve_recognition_stream_t** out) {
     const loom_serve_recognition_request_t request = {};
-    IREE_ASSERT_OK(
-        loom_serve_recognition_service_try_open(service_, &request, out));
+    const loom_serve_recognition_completion_t completion = {
+        this, [](void* self, loom_serve_telemetry_outcome_t outcome,
+                 const iree_status_t status) {
+          auto* test = static_cast<SourceRecognitionStreamTest*>(self);
+          ++test->end_count_;
+          test->last_end_outcome_ = outcome;
+          test->last_end_code_ = iree_status_code(status);
+        }};
+    IREE_ASSERT_OK(loom_serve_recognition_stream_service_try_open(
+        service_, &request, completion, out));
     ASSERT_NE(*out, nullptr);
     streams_.push_back(*out);
   }
@@ -316,9 +326,16 @@ class SourceRecognitionServiceTest : public ::testing::Test {
   // Unmodified source callbacks behind the observation adapter.
   loom_serve_recognition_generator_t actual_ = {};
   // Actual typed service under test.
-  loom_serve_recognition_service_t* service_ = nullptr;
+  loom_serve_recognition_stream_service_t* service_ = nullptr;
   // Caller-owned results, closed independently of service/model teardown.
   std::vector<loom_serve_recognition_stream_t*> streams_;
+  // Owner completion notifications, independent of retained caller handles.
+  size_t end_count_ = 0;
+  // Most recent producer-established outcome supplied to completion.
+  loom_serve_telemetry_outcome_t last_end_outcome_ =
+      LOOM_SERVE_TELEMETRY_COMPLETED;
+  // Borrowed completion status observed without retaining the status payload.
+  iree_status_code_t last_end_code_ = IREE_STATUS_OK;
   // Wake-driven test owner; no sleeps or deadline-based readiness guesses.
   iree_notification_t notification_;
   // Source identities, accessed only on serialized source calls.
@@ -343,7 +360,7 @@ class SourceRecognitionServiceTest : public ::testing::Test {
   bool fail_release_readiness_ = false;
 };
 
-TEST_F(SourceRecognitionServiceTest,
+TEST_F(SourceRecognitionStreamTest,
        StaggeredCohortsStalledReaderAcceptedCancellationAndReuse) {
   std::array<loom_serve_recognition_stream_t*, 4> streams = {};
   ASSERT_NO_FATAL_FAILURE(Open(&streams[0]));
@@ -376,8 +393,8 @@ TEST_F(SourceRecognitionServiceTest,
   streams[2] = nullptr;
   const loom_serve_recognition_request_t request = {};
   loom_serve_recognition_stream_t* replacement = nullptr;
-  IREE_ASSERT_OK(loom_serve_recognition_service_try_open(service_, &request,
-                                                         &replacement));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_try_open(
+      service_, &request, {}, &replacement));
   EXPECT_EQ(replacement, nullptr);
   EXPECT_EQ(released_[2], 0u);
 
@@ -408,7 +425,7 @@ TEST_F(SourceRecognitionServiceTest,
   ASSERT_NO_FATAL_FAILURE(CheckFinal(streams[0], "D"));
 }
 
-TEST_F(SourceRecognitionServiceTest, InputStarvationWaitsForNewFramesOrEof) {
+TEST_F(SourceRecognitionStreamTest, InputStarvationWaitsForNewFramesOrEof) {
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1}, 1));
@@ -417,10 +434,10 @@ TEST_F(SourceRecognitionServiceTest, InputStarvationWaitsForNewFramesOrEof) {
   const auto initial_offers = offers_[0].load();
   for (size_t i = 0; i < 4; ++i) {
     bool progress = false;
-    IREE_ASSERT_OK(loom_serve_recognition_service_advance(service_, false,
-                                                          false, &progress));
+    IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
+        service_, false, false, &progress));
     EXPECT_FALSE(progress);
-    EXPECT_FALSE(loom_serve_recognition_service_is_pending(service_));
+    EXPECT_FALSE(loom_serve_recognition_stream_service_is_pending(service_));
   }
   EXPECT_EQ(offers_[0].load(), initial_offers);
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1}, 1));
@@ -435,7 +452,7 @@ TEST_F(SourceRecognitionServiceTest, InputStarvationWaitsForNewFramesOrEof) {
   EXPECT_EQ(loom_serve_recognition_stream_credit(stream), 0u);
 }
 
-TEST_F(SourceRecognitionServiceTest, InputValidationAndIndependentCredit) {
+TEST_F(SourceRecognitionStreamTest, InputValidationAndIndependentCredit) {
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 1, 1, 1, 1, 1, 1, 1}, 7));
@@ -463,7 +480,7 @@ TEST_F(SourceRecognitionServiceTest, InputValidationAndIndependentCredit) {
   ASSERT_NO_FATAL_FAILURE(CheckFinal(stream, "H"));
 }
 
-TEST_F(SourceRecognitionServiceTest, EmptyEofCompletesOnceAndCloseReusesSlot) {
+TEST_F(SourceRecognitionStreamTest, EmptyEofCompletesOnceAndCloseReusesSlot) {
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   loom_serve_recognition_stream_finish(stream);
@@ -480,7 +497,7 @@ TEST_F(SourceRecognitionServiceTest, EmptyEofCompletesOnceAndCloseReusesSlot) {
   EXPECT_EQ(submitted_, 2u);
 }
 
-TEST_F(SourceRecognitionServiceTest, ShutdownCollectsAcceptedOriginalMembers) {
+TEST_F(SourceRecognitionStreamTest, ShutdownCollectsAcceptedOriginalMembers) {
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
@@ -489,6 +506,9 @@ TEST_F(SourceRecognitionServiceTest, ShutdownCollectsAcceptedOriginalMembers) {
   EXPECT_EQ(collected_[0].load(), 1u);
   EXPECT_EQ(released_[0], 1u);
   EXPECT_EQ(submitted_, 1u);
+  EXPECT_EQ(end_count_, 1u);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
+  EXPECT_EQ(last_end_code_, IREE_STATUS_CANCELLED);
   ASSERT_NO_FATAL_FAILURE(RetireModel());
   EXPECT_TRUE(loom_serve_recognition_stream_is_complete(stream));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
@@ -502,7 +522,7 @@ TEST_F(SourceRecognitionServiceTest, ShutdownCollectsAcceptedOriginalMembers) {
                             stream, iree_const_byte_span_empty(), &accepted));
 }
 
-TEST_F(SourceRecognitionServiceTest,
+TEST_F(SourceRecognitionStreamTest,
        FinalRevisionSurvivesRowReuseAndModelDestruction) {
   loom_serve_recognition_stream_t* first = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&first));
@@ -516,6 +536,9 @@ TEST_F(SourceRecognitionServiceTest,
   EXPECT_TRUE(retained->flags & LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL);
   ASSERT_NO_FATAL_FAILURE(Settle());
   EXPECT_EQ(released_[0], 1u);
+  EXPECT_EQ(end_count_, 1u);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_COMPLETED);
+  EXPECT_EQ(last_end_code_, IREE_STATUS_OK);
   EXPECT_FALSE(loom_serve_recognition_stream_is_complete(first));
 
   loom_serve_recognition_stream_t* replacement = nullptr;
@@ -539,7 +562,7 @@ TEST_F(SourceRecognitionServiceTest,
   ASSERT_NO_FATAL_FAILURE(CheckFinal(replacement, "J"));
 }
 
-TEST_F(SourceRecognitionServiceTest, ClosedCallerRetainsAcceptedInputBorrow) {
+TEST_F(SourceRecognitionStreamTest, ClosedCallerRetainsAcceptedInputBorrow) {
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   ASSERT_NO_FATAL_FAILURE(Settle());
@@ -552,25 +575,29 @@ TEST_F(SourceRecognitionServiceTest, ClosedCallerRetainsAcceptedInputBorrow) {
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   loom_serve_recognition_stream_finish(stream);
   bool progress = false;
-  IREE_ASSERT_OK(loom_serve_recognition_service_advance(service_, false, false,
-                                                        &progress));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
+      service_, false, false, &progress));
   EXPECT_TRUE(progress);
-  EXPECT_TRUE(loom_serve_recognition_service_is_pending(service_));
+  EXPECT_TRUE(loom_serve_recognition_stream_service_is_pending(service_));
   ASSERT_NO_FATAL_FAILURE(Close(stream));
-  IREE_ASSERT_OK(
-      loom_serve_recognition_service_advance(service_, true, false, &progress));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
+      service_, true, false, &progress));
   EXPECT_FALSE(progress);
-  EXPECT_TRUE(loom_serve_recognition_service_is_pending(service_));
+  EXPECT_TRUE(loom_serve_recognition_stream_service_is_pending(service_));
   EXPECT_EQ(offers_[0].load(), offers);
   EXPECT_EQ(released_[0], 0u);
+  EXPECT_EQ(end_count_, 0u);
   workers.clear();
   ASSERT_NO_FATAL_FAILURE(Settle(true));
   EXPECT_EQ(offers_[0].load(), offers + 1);
   EXPECT_EQ(submitted_, 0u);
   EXPECT_EQ(released_[0], 1u);
+  EXPECT_EQ(end_count_, 1u);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
+  EXPECT_EQ(last_end_code_, IREE_STATUS_CANCELLED);
 }
 
-TEST_F(SourceRecognitionServiceTest, CloseReturnsRowBeforeNativeCapacity) {
+TEST_F(SourceRecognitionStreamTest, CloseReturnsRowBeforeNativeCapacity) {
   if (!FLAG_test_elastic) {
     GTEST_SKIP() << "Requires asynchronous elastic backing";
   }
@@ -583,8 +610,8 @@ TEST_F(SourceRecognitionServiceTest, CloseReturnsRowBeforeNativeCapacity) {
                                              IREE_ALLOCATOR_COMMAND_FREE);
   ASSERT_NO_FATAL_FAILURE(Close(stream));
   bool progress = false;
-  IREE_ASSERT_OK(loom_serve_recognition_service_advance(service_, false, false,
-                                                        &progress));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
+      service_, false, false, &progress));
   EXPECT_TRUE(progress);
   gate.WaitEntered();
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return released_[0] == 1; }));
@@ -598,8 +625,8 @@ TEST_F(SourceRecognitionServiceTest, CloseReturnsRowBeforeNativeCapacity) {
   const auto previous_offers = offers_[0].load();
   ASSERT_NO_FATAL_FAILURE(Write(peer, {2}, 1));
   loom_serve_recognition_stream_finish(peer);
-  IREE_ASSERT_OK(loom_serve_recognition_service_advance(service_, false, false,
-                                                        &progress));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
+      service_, false, false, &progress));
   EXPECT_EQ(offers_[0].load(), previous_offers);
   EXPECT_EQ(released_[0], 1u);
 
@@ -616,7 +643,7 @@ TEST_F(SourceRecognitionServiceTest, CloseReturnsRowBeforeNativeCapacity) {
   EXPECT_EQ(released_[0], 3u);
 }
 
-TEST_F(SourceRecognitionServiceTest,
+TEST_F(SourceRecognitionStreamTest,
        FailedReadinessLeavesAcceptedModelOwnership) {
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
@@ -626,8 +653,8 @@ TEST_F(SourceRecognitionServiceTest,
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return submitted_ == 1; }));
   bool progress = false;
-  IREE_ASSERT_OK(
-      loom_serve_recognition_service_advance(service_, true, false, &progress));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
+      service_, true, false, &progress));
   EXPECT_FALSE(loom_serve_recognition_stream_is_complete(stream));
   iree_hal_semaphore_fail(
       failed_readiness_,
@@ -635,20 +662,25 @@ TEST_F(SourceRecognitionServiceTest,
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, AdvanceToFailure());
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         loom_serve_recognition_stream_status(stream));
-  EXPECT_FALSE(loom_serve_recognition_service_is_pending(service_));
+  EXPECT_FALSE(loom_serve_recognition_stream_service_is_pending(service_));
   EXPECT_EQ(loom_serve_recognition_stream_peek(stream), nullptr);
   EXPECT_EQ(collected_[0].load(), 0u);
   EXPECT_EQ(released_[0], 0u);
+  EXPECT_EQ(end_count_, 0u);
   ASSERT_NO_FATAL_FAILURE(Settle());
   EXPECT_TRUE(loom_serve_recognition_stream_is_complete(stream));
   EXPECT_EQ(released_[0], 0u);
+  EXPECT_EQ(end_count_, 1u);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_FAILED);
+  EXPECT_EQ(last_end_code_, IREE_STATUS_ABORTED);
   ASSERT_NO_FATAL_FAILURE(RetireModel());
+  EXPECT_EQ(end_count_, 1u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         loom_serve_recognition_stream_status(stream));
   // The failed wait does not authorize source release or feedback collection.
 }
 
-TEST_F(SourceRecognitionServiceTest,
+TEST_F(SourceRecognitionStreamTest,
        FailedFinalReleaseSurvivesModelDestruction) {
   if (!FLAG_test_elastic) {
     GTEST_SKIP() << "Requires asynchronous elastic backing";
@@ -665,11 +697,15 @@ TEST_F(SourceRecognitionServiceTest,
   EXPECT_EQ(Text(loom_serve_recognition_stream_peek(stream)), "A");
   EXPECT_EQ(pending_releases_, 1u);
   EXPECT_EQ(released_[0], 0u);
+  EXPECT_EQ(end_count_, 0u);
   iree_hal_semaphore_fail(
       failed_readiness_,
       iree_make_status(IREE_STATUS_ABORTED, "lost release readiness"));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, AdvanceToFailure());
   ASSERT_NO_FATAL_FAILURE(RetireModel());
+  EXPECT_EQ(end_count_, 1u);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_FAILED);
+  EXPECT_EQ(last_end_code_, IREE_STATUS_ABORTED);
   EXPECT_TRUE(loom_serve_recognition_stream_is_complete(stream));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         loom_serve_recognition_stream_status(stream));
