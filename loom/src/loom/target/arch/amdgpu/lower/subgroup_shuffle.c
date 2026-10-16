@@ -92,6 +92,19 @@ static bool loom_amdgpu_subgroup_shuffle_resolve_offset(
   return true;
 }
 
+bool loom_amdgpu_subgroup_shuffle_addressing_is_native(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_op_t* op, uint32_t wavefront_size, uint32_t native_width) {
+  loom_amdgpu_subgroup_shuffle_shape_t shape = {0};
+  loom_amdgpu_subgroup_shuffle_shape_failure_t failure =
+      LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_NONE;
+  return loom_amdgpu_subgroup_shuffle_resolve_width(
+             module, fact_table, op, wavefront_size, &shape, &failure) &&
+         shape.width <= native_width &&
+         loom_amdgpu_subgroup_shuffle_resolve_offset(module, fact_table, op,
+                                                     &shape, &failure);
+}
+
 static iree_string_view_t loom_amdgpu_subgroup_shuffle_shape_failure_key(
     loom_amdgpu_subgroup_shuffle_shape_failure_t failure) {
   switch (failure) {

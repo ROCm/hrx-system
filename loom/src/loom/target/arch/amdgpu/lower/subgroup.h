@@ -65,6 +65,13 @@ iree_status_t loom_amdgpu_emit_subgroup_lane_byte_offset(
     loom_value_id_t low_source_lane, loom_type_t lane_type,
     loom_value_id_t* out_low_source_byte_offset);
 
+// Returns whether source shuffle addressing satisfies the native packet
+// preconditions: an exact power-of-two width within the native partition and
+// an offset proven to lie within that width. Payload support is independent.
+bool loom_amdgpu_subgroup_shuffle_addressing_is_native(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_op_t* op, uint32_t wavefront_size, uint32_t native_width);
+
 // Selects a native AMDGPU cross-lane packet for a source subgroup shuffle.
 iree_status_t loom_amdgpu_select_kernel_subgroup_shuffle_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

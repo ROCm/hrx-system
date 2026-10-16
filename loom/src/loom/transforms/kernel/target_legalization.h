@@ -21,6 +21,15 @@ extern "C" {
 const loom_target_legalizer_provider_t* loom_kernel_target_legalizer_provider(
     void);
 
+// Normalizes logical shuffle addressing to an in-range physical indexed
+// exchange, retaining logical bounds and source participation in the validity
+// result. Targets with custom source-low selection call this when their native
+// addressing preconditions are not satisfied.
+iree_status_t loom_kernel_target_legalize_subgroup_shuffle(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result);
+
 // Rewrites a subgroup scan into portable subgroup primitives. Target
 // legalizers may call this when an otherwise legal scan violates a native
 // implementation precondition. Unsupported cluster shapes are left unchanged

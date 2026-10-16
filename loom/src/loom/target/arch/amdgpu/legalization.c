@@ -28,7 +28,9 @@
 #include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/structural.h"
+#include "loom/target/arch/amdgpu/lower/subgroup.h"
 #include "loom/target/arch/amdgpu/lower/table.h"
+#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/lower/value/vector_transform.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -82,6 +84,27 @@ static bool loom_amdgpu_match_narrow_float_to_i64(
   }
   return loom_type_element_type(loom_module_value_type(
              context->module, loom_op_results(op)[0])) == LOOM_SCALAR_TYPE_I64;
+}
+
+static bool loom_amdgpu_match_subgroup_shuffle_reference_lowering(
+    const loom_target_legalizer_entry_t* entry,
+    const loom_target_legalization_context_t* context, const loom_op_t* op) {
+  (void)entry;
+  if (!loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
+          context->descriptor_set)) {
+    return false;
+  }
+  const uint32_t wavefront_size = loom_amdgpu_target_wavefront_size(
+      loom_target_legalization_context_bundle(context));
+  const uint32_t native_width = loom_amdgpu_target_native_subgroup_width(
+      loom_amdgpu_target_facts_cast(context->target_facts), wavefront_size);
+  // The reference normal form uses a full physical subgroup exchange. A wider
+  // source wave on a partitioned target still requires cross-partition support.
+  return loom_amdgpu_wavefront_size_is_valid(wavefront_size) &&
+         native_width == wavefront_size &&
+         !loom_amdgpu_subgroup_shuffle_addressing_is_native(
+             context->module, context->fact_table, op, wavefront_size,
+             native_width);
 }
 
 static bool loom_amdgpu_match_subgroup_scan_reference_lowering(
@@ -1004,6 +1027,13 @@ static iree_status_t loom_amdgpu_legalize_kernel_subgroup_match_all(
 }
 
 static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
+        .match = loom_amdgpu_match_subgroup_shuffle_reference_lowering,
+        .legalize = loom_kernel_target_legalize_subgroup_shuffle,
+    },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_SCAN,

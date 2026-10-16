@@ -169,7 +169,7 @@ static iree_status_t loom_kernel_shuffle_build_source_lane(
   IREE_BUILTIN_UNREACHABLE();
 }
 
-static iree_status_t loom_kernel_target_legalize_subgroup_shuffle(
+iree_status_t loom_kernel_target_legalize_subgroup_shuffle(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {

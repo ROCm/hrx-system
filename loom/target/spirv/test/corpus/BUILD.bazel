@@ -172,6 +172,7 @@ _ALL_PROFILE_XFAILS = {
     "kernel/subgroup/shuffle_dynamic.loom:@subgroup_shuffle_dynamic_index": "TARGET/003",
     "kernel/subgroup/shuffle_dynamic.loom:@subgroup_shuffle_dynamic_up": "TARGET/003",
     "kernel/subgroup/shuffle_dynamic.loom:@subgroup_shuffle_dynamic_xor": "TARGET/003",
+    "kernel/subgroup/shuffle_dynamic.loom:@subgroup_shuffle_unbounded": "TARGET/003",
     "kernel/subgroup/shuffle_participation.loom:@subgroup_shuffle_participation": "TARGET/003",
     "kernel/subgroup/transport.loom:@subgroup_transport_bf16_4": "TARGET/032",
     "kernel/subgroup/transport.loom:@subgroup_transport_f16_3": "TARGET/032",
