@@ -71,10 +71,11 @@ static iree_status_t loom_vector_packet_bitcast_candidate_is_legal(
       loom_vector_packet_type(source_type, packet_lane_count);
   const loom_type_t packet_result_type =
       loom_vector_packet_type(result_type, packet_lane_count);
-  *out_legal = callback.fn(callback.user_data, context->module, NULL,
-                           LOOM_VALUE_ID_INVALID, packet_source_type) &&
-               callback.fn(callback.user_data, context->module, NULL,
-                           LOOM_VALUE_ID_INVALID, packet_result_type);
+  *out_legal =
+      callback.fn(callback.user_data, context->target_facts, context->module,
+                  NULL, LOOM_VALUE_ID_INVALID, packet_source_type) &&
+      callback.fn(callback.user_data, context->target_facts, context->module,
+                  NULL, LOOM_VALUE_ID_INVALID, packet_result_type);
   return iree_ok_status();
 }
 

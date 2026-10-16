@@ -42,14 +42,15 @@ typedef struct loom_native_contraction_facts_t loom_native_contraction_facts_t;
 typedef struct loom_local_value_domain_t loom_local_value_domain_t;
 
 // Returns true when |type| has a complete vector-carrier mapping under the
-// selected target policy. A concrete source value retains its identity and
-// optional analysis facts so targets can admit value-dependent representations.
-// Hypothetical packet types use NULL facts and LOOM_VALUE_ID_INVALID; they must
-// not inherit the representation of the aggregate they will replace.
+// selected target facts and policy. A concrete source value retains its
+// identity and optional analysis facts so targets can admit value-dependent
+// representations. Hypothetical packet types use a NULL value fact table and
+// LOOM_VALUE_ID_INVALID; they must not inherit the representation of the
+// aggregate they will replace.
 typedef bool (*loom_target_vector_carrier_supported_fn_t)(
-    void* user_data, const loom_module_t* module,
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
-    loom_type_t type);
+    void* user_data, const loom_target_facts_t* target_facts,
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_type_t type);
 
 typedef struct loom_target_vector_carrier_supported_callback_t {
   // Optional target query for complete vector-carrier admission.

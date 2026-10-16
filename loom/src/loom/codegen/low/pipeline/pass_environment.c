@@ -135,8 +135,8 @@ bool loom_low_pass_capability_source_vector_carrier_supported(
   }
   const loom_target_vector_carrier_supported_callback_t callback =
       policy->source_vector_carrier_supported;
-  return callback.fn == NULL ||
-         callback.fn(callback.user_data, module, fact_table, value_id, type);
+  return callback.fn == NULL || callback.fn(callback.user_data, target_facts,
+                                            module, fact_table, value_id, type);
 }
 
 bool loom_low_pass_capability_source_function_vector_carrier_supported(
@@ -155,6 +155,6 @@ bool loom_low_pass_capability_source_function_vector_carrier_supported(
   if (callback.fn == NULL) {
     callback = policy->source_vector_carrier_supported;
   }
-  return callback.fn == NULL ||
-         callback.fn(callback.user_data, module, fact_table, value_id, type);
+  return callback.fn == NULL || callback.fn(callback.user_data, target_facts,
+                                            module, fact_table, value_id, type);
 }
