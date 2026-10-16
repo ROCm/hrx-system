@@ -8,21 +8,21 @@ kernel.decl @qwen38_vision_key_value_cohort(%cohort: index) launch(%cohort_argum
 
 kernel.decl @qwen38_vision_attention_cohort(%cohort: index) launch(%cohort_argument: index, %residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %qkv_weight: buffer, %qkv_bias: buffer, %key: buffer, %value: buffer, %output_weight: buffer, %output_bias: buffer, %output: buffer) where [range(%cohort_argument, 0, 3)]
 
-kernel.decl @qwen38_vision_attention_output_256() launch(%context: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+kernel.decl @qwen38_vision_attention_output() launch(%context: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
 kernel.decl @qwen38_vision_statistics() launch(%residual: buffer, %statistics: buffer)
 
-kernel.decl @qwen38_vision_ffn_up_256() launch(%residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %up_weight: buffer, %up_bias: buffer, %activation: buffer)
+kernel.decl @qwen38_vision_ffn_up() launch(%residual: buffer, %statistics: buffer, %layernorm_weight: buffer, %layernorm_bias: buffer, %up_weight: buffer, %up_bias: buffer, %activation: buffer)
 
-kernel.decl @qwen38_vision_ffn_down_256() launch(%activation: buffer, %down_weight: buffer, %down_bias: buffer, %residual: buffer)
+kernel.decl @qwen38_vision_ffn_down() launch(%activation: buffer, %down_weight: buffer, %down_bias: buffer, %residual: buffer)
 
-kernel.decl @qwen38_vision_merger_up_64() launch(%input: buffer, %weight: buffer, %bias: buffer, %activation: buffer)
+kernel.decl @qwen38_vision_merger_up() launch(%input: buffer, %weight: buffer, %bias: buffer, %activation: buffer)
 
-kernel.decl @qwen38_vision_merger_down_64() launch(%activation: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+kernel.decl @qwen38_vision_merger_down() launch(%activation: buffer, %weight: buffer, %bias: buffer, %output: buffer)
 
 // Nonzero input and weights exercise both temporal patch contractions with an
 // exact analytic result: 2 * 768 * (-1) * (1 / 1024) + 1 / 4 = -1.25.
-check.case public @vision_patch_embedding_256 {
+check.case public @vision_patch_embedding_square {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %origin = check.literal value(0) : offset
   %source = check.generate.fill value(0) : tensor<196608xi8>
@@ -36,7 +36,7 @@ check.case public @vision_patch_embedding_256 {
   check.return
 }
 
-check.case public @vision_normalization_256 {
+check.case public @vision_normalization_square {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %position = check.generate.fill value(0.0) : tensor<2304x1152xf32>
   %residual = check.generate.fill value(2.0) : tensor<256x1152xf32>
@@ -55,7 +55,7 @@ check.case public @vision_normalization_256 {
 
 // Zero projections give an exact attention oracle while still traversing the
 // complete QKV, rotary, softmax, context, and output-projection memory paths.
-check.case public @vision_attention_256 {
+check.case public @vision_attention_square {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %cohort0 = check.literal value(0) : index
   %cohort1 = check.literal value(1) : index
@@ -85,7 +85,7 @@ check.case public @vision_attention_256 {
   kernel.launch @qwen38_vision_attention_cohort[%cohort2](%cohort2, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value, %output_weight, %output_bias, %context) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf16>)
   kernel.launch @qwen38_vision_key_value_cohort[%cohort3](%cohort3, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>)
   kernel.launch @qwen38_vision_attention_cohort[%cohort3](%cohort3, %residual, %statistics, %layernorm_weight, %layernorm_bias, %qkv_weight, %qkv_bias, %key, %value, %output_weight, %output_bias, %context) : [index](index, tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<3456x1152xf16>, tensor<3456xf32>, tensor<256x288xf16>, tensor<288x256xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf16>)
-  kernel.launch @qwen38_vision_attention_output_256(%context, %output_weight, %output_bias, %residual, %output) : (tensor<256x1152xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf32>, tensor<256x1152xf32>)
+  kernel.launch @qwen38_vision_attention_output(%context, %output_weight, %output_bias, %residual, %output) : (tensor<256x1152xf16>, tensor<1152x1152xf16>, tensor<1152xf32>, tensor<256x1152xf32>, tensor<256x1152xf32>)
   check.expect.close actual(%key) expected(%expected_key) atol(0.0) rtol(0.0) nan(different) : tensor<256x288xf16>
   check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(different) : tensor<288x256xf16>
   check.expect.close actual(%context) expected(%expected_context) atol(0.0) rtol(0.0) nan(different) : tensor<256x1152xf16>
@@ -93,7 +93,7 @@ check.case public @vision_attention_256 {
   check.return
 }
 
-check.case public @vision_ffn_256 {
+check.case public @vision_ffn_square {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %residual = check.generate.fill value(1.0) : tensor<256x1152xf32>
   %statistics = check.generate.fill value(99.0) : tensor<256x2xf32>
@@ -107,14 +107,14 @@ check.case public @vision_ffn_256 {
   %expected_activation = check.generate.fill value(0.0) : tensor<256x4304xf16>
   %expected_residual = check.generate.fill value(1.25) : tensor<256x1152xf32>
   kernel.launch @qwen38_vision_statistics(%residual, %statistics) : (tensor<256x1152xf32>, tensor<256x2xf32>)
-  kernel.launch @qwen38_vision_ffn_up_256(%residual, %statistics, %layernorm_weight, %layernorm_bias, %up_weight, %up_bias, %activation) : (tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<4304x1152xf16>, tensor<4304xf32>, tensor<256x4304xf16>)
-  kernel.launch @qwen38_vision_ffn_down_256(%activation, %down_weight, %down_bias, %residual) : (tensor<256x4304xf16>, tensor<1152x4304xf16>, tensor<1152xf32>, tensor<256x1152xf32>)
+  kernel.launch @qwen38_vision_ffn_up(%residual, %statistics, %layernorm_weight, %layernorm_bias, %up_weight, %up_bias, %activation) : (tensor<256x1152xf32>, tensor<256x2xf32>, tensor<1152xf32>, tensor<1152xf32>, tensor<4304x1152xf16>, tensor<4304xf32>, tensor<256x4304xf16>)
+  kernel.launch @qwen38_vision_ffn_down(%activation, %down_weight, %down_bias, %residual) : (tensor<256x4304xf16>, tensor<1152x4304xf16>, tensor<1152xf32>, tensor<256x1152xf32>)
   check.expect.close actual(%activation) expected(%expected_activation) atol(0.0) rtol(0.0) nan(different) : tensor<256x4304xf16>
   check.expect.close actual(%residual) expected(%expected_residual) atol(0.0) rtol(0.0) nan(different) : tensor<256x1152xf32>
   check.return
 }
 
-check.case public @vision_merger_64 {
+check.case public @vision_merger_square {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %input = check.generate.fill value(0.0) : tensor<64x4608xf32>
   %up_weight = check.generate.fill value(1.0) : tensor<4608x4608xf16>
@@ -125,8 +125,8 @@ check.case public @vision_merger_64 {
   %output = check.generate.fill value(99.0) : tensor<64x5120xf32>
   %expected_activation = check.generate.fill value(0.0) : tensor<64x4608xf16>
   %expected_output = check.generate.fill value(0.25) : tensor<64x5120xf32>
-  kernel.launch @qwen38_vision_merger_up_64(%input, %up_weight, %up_bias, %activation) : (tensor<64x4608xf32>, tensor<4608x4608xf16>, tensor<4608xf32>, tensor<64x4608xf16>)
-  kernel.launch @qwen38_vision_merger_down_64(%activation, %down_weight, %down_bias, %output) : (tensor<64x4608xf16>, tensor<5120x4608xf16>, tensor<5120xf32>, tensor<64x5120xf32>)
+  kernel.launch @qwen38_vision_merger_up(%input, %up_weight, %up_bias, %activation) : (tensor<64x4608xf32>, tensor<4608x4608xf16>, tensor<4608xf32>, tensor<64x4608xf16>)
+  kernel.launch @qwen38_vision_merger_down(%activation, %down_weight, %down_bias, %output) : (tensor<64x4608xf16>, tensor<5120x4608xf16>, tensor<5120xf32>, tensor<64x5120xf32>)
   check.expect.close actual(%activation) expected(%expected_activation) atol(0.0) rtol(0.0) nan(different) : tensor<64x4608xf16>
   check.expect.close actual(%output) expected(%expected_output) atol(0.0) rtol(0.0) nan(different) : tensor<64x5120xf32>
   check.return

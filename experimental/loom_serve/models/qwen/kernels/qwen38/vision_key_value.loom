@@ -1,8 +1,8 @@
 amdgpu.target<gfx11-generic> @qwen38_vision_gfx11 {subgroup_size = 32}
 
-config.decl @qwen38.vision.image_height : %value: index where [range(%value, 256, 256)]
+config.decl @qwen38.vision.image_height : %value: index where [range(%value, 32, 4096), multiple_of(%value, 32)]
 
-config.decl @qwen38.vision.image_width : %value: index where [range(%value, 256, 256)]
+config.decl @qwen38.vision.image_width : %value: index where [range(%value, 32, 4096), multiple_of(%value, 32)]
 
 func.def inline @qwen38_vision_rotate_fragment(%patch_width: index, %row_origin: index, %pair_base: index, %lane_column: index, %lane_row_parity: index, %left: vector<8xf32>, %right: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
   %c0 = index.constant 0 : index
