@@ -101,16 +101,16 @@ TEST_P(JitWorkspaceTest, UnequalPrivateWorkspacesPreservePoolPolicyAndOutput) {
   const auto statistics =
       loom_serve_device_memory_statistics(device_owner_).workspace;
   EXPECT_EQ(statistics.reservation_count, 0u);
-  EXPECT_EQ(statistics.reserve_count, 4u);
-  EXPECT_EQ(statistics.release_count, 4u);
+  EXPECT_EQ(statistics.reserve_count, workspace_baseline_.reserve_count + 4);
+  EXPECT_EQ(statistics.release_count, workspace_baseline_.release_count + 4);
   if (guarded) {
     // Sanitized deallocation retires before returning an empty frontier. These
     // reservations are fresh in HAL's dependency accounting, even on reused
     // backing; they are not frontier-dominated reuse.
-    EXPECT_EQ(statistics.reuse_count, 0u);
-    EXPECT_EQ(statistics.fresh_count, statistics.reserve_count);
+    EXPECT_EQ(statistics.reuse_count, workspace_baseline_.reuse_count);
+    EXPECT_EQ(statistics.fresh_count, workspace_baseline_.fresh_count + 4);
   } else {
-    EXPECT_GT(statistics.reuse_count, 0u);
+    EXPECT_GT(statistics.reuse_count, workspace_baseline_.reuse_count);
   }
   EXPECT_LE(statistics.bytes_quarantined, quarantine_limit);
   if (quarantine_limit) {
@@ -185,7 +185,8 @@ TEST_P(JitWorkspaceTest, UnequalPrivateWorkspacesPreservePoolPolicyAndOutput) {
   EXPECT_LE(trimmed.bytes_committed, shared.bytes_committed);
   EXPECT_LE(trimmed.bytes_quarantined, quarantine_limit);
   if (quarantine_limit) {
-    EXPECT_GT(trimmed.quarantine_eviction_count, 0u);
+    EXPECT_GT(trimmed.quarantine_eviction_count,
+              workspace_baseline_.quarantine_eviction_count);
   }
   // Feedback owns the final output independently of private workspace reuse.
   for (int32_t value : output_) {
@@ -295,8 +296,8 @@ TEST_P(JitWorkspaceTest, IndependentModelCompletesWhileSharedWorkspaceGrows) {
   // older pool generation. Trim must neither wait for it nor grow backing.
   EXPECT_LE(trimmed.bytes_committed, live.bytes_committed);
   EXPECT_EQ(trimmed.reservation_count, 0u);
-  EXPECT_EQ(trimmed.reserve_count, 2u);
-  EXPECT_EQ(trimmed.release_count, 2u);
+  EXPECT_EQ(trimmed.reserve_count, workspace_baseline_.reserve_count + 2);
+  EXPECT_EQ(trimmed.release_count, workspace_baseline_.release_count + 2);
 }
 
 TEST_P(JitWorkspaceTest, RetiredModelDoesNotJoinRawQueueAllocationCaptures) {

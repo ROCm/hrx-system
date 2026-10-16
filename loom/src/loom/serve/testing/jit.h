@@ -92,6 +92,8 @@ class JitTest : public ::testing::TestWithParam<int> {
   iree_hal_device_t* device_ = nullptr;
   // Exact dispatch queue borrowed from device.
   iree_hal_queue_t* dispatch_ = nullptr;
+  // Shared workspace counters observed before this test allocates backing.
+  iree_hal_pool_stats_t workspace_baseline_ = {};
   // Owned model submission/feedback timelines over shared device backing.
   loom_serve_execution_t* execution_ = nullptr;
   // Portable source location from runfiles.

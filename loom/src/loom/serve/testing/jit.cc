@@ -17,6 +17,82 @@ IREE_FLAG(string, jit_sources, "", "Portable test source catalog.");
 
 namespace loom_serve::testing {
 
+namespace {
+
+struct JitTestApplication {
+  // Host worker count selecting this application.
+  iree_host_size_t worker_count;
+  // Process-owned physical device group shared by matching test cases.
+  loom_serve_device_group_t* group = nullptr;
+};
+
+std::array<JitTestApplication, 2>& GetJitTestApplications() {
+  static std::array<JitTestApplication, 2> applications = {
+      JitTestApplication{1}, JitTestApplication{4}};
+  return applications;
+}
+
+iree_status_t AcquireJitTestApplication(iree_host_size_t worker_count,
+                                        iree_allocator_t host_allocator,
+                                        loom_serve_device_group_t** out_group) {
+  *out_group = nullptr;
+  JitTestApplication* selected = nullptr;
+  for (auto& application : GetJitTestApplications()) {
+    if (application.worker_count == worker_count) {
+      selected = &application;
+      break;
+    }
+  }
+  if (!selected) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported JIT test worker count: %" PRIhsz,
+                            worker_count);
+  }
+  if (selected->group) {
+    *out_group = selected->group;
+    return iree_ok_status();
+  }
+
+  loom_serve_host_t* host = nullptr;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_test_host_create(worker_count, host_allocator, &host));
+  iree_hal_driver_t* driver = nullptr;
+  iree_status_t status =
+      loom_serve_test_driver_create(host, host_allocator, &driver);
+  if (iree_status_is_ok(status)) {
+    const loom_serve_device_options_t options = {
+        .driver = driver,
+        .uri = loom_serve_test_device()->device_uri,
+    };
+    status = loom_serve_device_group_allocate(host, 1, &options, host_allocator,
+                                              &selected->group);
+  }
+  iree_hal_driver_release(driver);
+  loom_serve_host_release(host);
+  if (iree_status_is_ok(status)) {
+    *out_group = selected->group;
+  }
+  return status;
+}
+
+class JitTestEnvironment : public ::testing::Environment {
+ public:
+  void TearDown() override {
+    iree_status_t status = iree_ok_status();
+    for (auto& application : GetJitTestApplications()) {
+      status = iree_status_join(
+          status, loom_serve_device_group_free(application.group));
+      application.group = nullptr;
+    }
+    IREE_EXPECT_OK(status);
+  }
+};
+
+::testing::Environment* const jit_test_environment =
+    ::testing::AddGlobalTestEnvironment(new JitTestEnvironment);
+
+}  // namespace
+
 iree_status_t loom_serve_test_compilation_t::Drain(
     iree_task_process_t* process, const iree_task_worker_context_t* context,
     iree_task_process_drain_result_t* result) {
@@ -74,25 +150,15 @@ iree_status_t loom_serve_test_compilation_t::Await(
 }
 
 void JitTest::SetUp() {
-  loom_serve_host_t* host = nullptr;
   IREE_ASSERT_OK(
-      loom_serve_test_host_create(GetParam(), host_allocator_, &host));
-  iree_hal_driver_t* driver = nullptr;
-  auto status = loom_serve_test_driver_create(host, host_allocator_, &driver);
-  if (iree_status_is_ok(status)) {
-    const loom_serve_device_options_t options = {
-        .driver = driver,
-        .uri = loom_serve_test_device()->device_uri,
-    };
-    status = loom_serve_device_group_allocate(host, 1, &options,
-                                              host_allocator_, &group_);
-  }
-  iree_hal_driver_release(driver);
-  loom_serve_host_release(host);
-  IREE_ASSERT_OK(status);
+      AcquireJitTestApplication(GetParam(), host_allocator_, &group_));
   device_owner_ = loom_serve_device_group_at(group_, 0);
   device_ = loom_serve_device_handle(device_owner_);
   dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
+  workspace_baseline_ =
+      loom_serve_device_memory_statistics(device_owner_).workspace;
+  ASSERT_EQ(workspace_baseline_.reservation_count, 0u);
+  ASSERT_EQ(workspace_baseline_.bytes_committed, 0u);
   IREE_ASSERT_OK(
       loom_serve_device_create_execution(device_owner_, &execution_));
   directory_ = std::filesystem::path(FLAG_jit_sources).parent_path().string();
@@ -122,7 +188,13 @@ void JitTest::TearDown() {
   iree_hal_buffer_release(buffer_);
   loom_serve_jit_release(jit_);
   loom_serve_execution_release(execution_);
-  IREE_EXPECT_OK(loom_serve_device_group_free(group_));
+  if (device_owner_) {
+    IREE_EXPECT_OK(loom_serve_test_device_trim_and_drain(device_owner_, 0));
+    const auto workspace =
+        loom_serve_device_memory_statistics(device_owner_).workspace;
+    EXPECT_EQ(workspace.reservation_count, 0u);
+    EXPECT_EQ(workspace.bytes_committed, 0u);
+  }
 }
 
 iree_status_t JitTest::Compile(const char* delta, size_t index,
