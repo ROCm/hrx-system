@@ -53,7 +53,8 @@ class NativeQueue {
     iree_hal_amd_fabric_release(fabric_);
   }
 
-  iree_status_t Initialize(size_t producer_count = 1) {
+  iree_status_t Initialize(size_t producer_count = 1,
+                           size_t buffer_length = 2 * sizeof(uint32_t)) {
     lanes_.resize(producer_count);
     const amdf_api_t* api = nullptr;
     IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
@@ -136,8 +137,7 @@ class NativeQueue {
     load.executable_data = artifact;
     for (auto& lane : lanes_) {
       IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
-          pool_,
-          iree_hal_make_pool_reservation_request(2 * sizeof(uint32_t), 4),
+          pool_, iree_hal_make_pool_reservation_request(buffer_length, 4),
           iree_infinite_timeout(), &lane.output));
       lane.address = iree_hal_buffer_native_binding(lane.output, address_slot)
                          .device_address;
@@ -379,6 +379,59 @@ class NativeQueue {
                               "download did not complete before its signal");
     }
     return iree_ok_status();
+  }
+
+  iree_status_t TransferBytes(iree_hal_transfer_operation_type_t type,
+                              iree_byte_span_t bytes) {
+    auto& lane = lanes_[0];
+    uint64_t before = lane.epoch, after = before + 1;
+    iree_hal_transfer_operation_t operation = {.type = type};
+    if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
+      operation.download = {
+          .source_buffer = lane.output,
+          .target = bytes.data,
+          .length = bytes.data_length,
+      };
+    } else if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE) {
+      operation.update = {
+          .source_buffer = bytes.data,
+          .target_buffer = lane.output,
+          .length = bytes.data_length,
+      };
+    } else {
+      operation.upload = {
+          .source = bytes.data,
+          .target_buffer = lane.output,
+          .length = bytes.data_length,
+      };
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_queue_transfer(
+        queue_, {before ? 1u : 0u, &lane.timeline, &before},
+        {1, &lane.timeline, &after}, 1, &operation, nullptr));
+    lane.epoch = after;
+    return iree_hal_semaphore_wait(lane.timeline, after,
+                                   iree_infinite_timeout(),
+                                   IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+
+  iree_status_t ReadBytes(iree_byte_span_t bytes) {
+    return iree_hal_buffer_map_read(lanes_[0].output, 0, bytes.data,
+                                    bytes.data_length);
+  }
+
+  // The concrete queue advances its causal epoch once per native publication.
+  // Query only after completion; this counts real retirement units without
+  // adding counters or instrumentation to the production submission path.
+  uint64_t completed_publications() const {
+    iree_async_single_frontier_t frontier;
+    const uint8_t count = iree_async_semaphore_query_frontier(
+        reinterpret_cast<iree_async_semaphore_t*>(lanes_[0].timeline),
+        iree_async_single_frontier_as_frontier(&frontier), 1);
+    IREE_CHECK_OK(count == 1
+                      ? iree_ok_status()
+                      : iree_make_status(IREE_STATUS_DATA_LOSS,
+                                         "missing completed queue frontier"));
+    return frontier.entries[0].epoch;
   }
 
   iree_status_t Complete(size_t producer) {
@@ -793,6 +846,71 @@ TRANSFER_CASE(DownloadDefaultSubmit, DOWNLOAD, kDefault, kSubmit);
 TRANSFER_CASE(UploadDefaultCompletion, UPLOAD, kDefault, kCompletion);
 TRANSFER_CASE(DownloadDefaultCompletion, DOWNLOAD, kDefault, kCompletion);
 #undef TRANSFER_CASE
+
+// A file staging window and a larger borrowed host allocation exercise the
+// same upload/download retirement path. Exact byte checks stay outside timing;
+// both device workers are included in process CPU time. There is no extra
+// queue barrier between the measured operation and its completion wait.
+static void BM_BulkTransfer(benchmark::State& state,
+                            iree_hal_transfer_operation_type_t type) {
+  const size_t length = state.range(0);
+  NativeQueue queue;
+  iree::Status status = queue.Initialize(1, length);
+  if (!status.ok()) {
+    state.SkipWithError(status.ToString().c_str());
+    return;
+  }
+  std::vector<uint8_t> source(length), target(length);
+  for (size_t i = 0; i < length; ++i) {
+    source[i] = static_cast<uint8_t>((i * 17) ^ (i >> 9));
+  }
+  const auto source_bytes = iree_make_byte_span(source.data(), source.size());
+  const auto target_bytes = iree_make_byte_span(target.data(), target.size());
+  const bool download = type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  IREE_CHECK_OK(queue.TransferBytes(IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                                    source_bytes));
+  for (size_t i = 0; i < 2; ++i) {
+    IREE_CHECK_OK(
+        queue.TransferBytes(type, download ? target_bytes : source_bytes));
+  }
+  const uint64_t allocations_before = queue.allocation_count();
+  const uint64_t publications_before = queue.completed_publications();
+  for (auto _ : state) {
+    IREE_CHECK_OK(
+        queue.TransferBytes(type, download ? target_bytes : source_bytes));
+    state.PauseTiming();
+    if (!download) {
+      IREE_CHECK_OK(queue.ReadBytes(target_bytes));
+    }
+    IREE_CHECK_OK(
+        std::memcmp(source.data(), target.data(), length) == 0
+            ? iree_ok_status()
+            : iree_make_status(IREE_STATUS_DATA_LOSS,
+                               "bulk transfer did not preserve all bytes"));
+    std::fill(target.begin(), target.end(), 0xCD);
+    state.ResumeTiming();
+  }
+  state.SetBytesProcessed(state.iterations() * length);
+  state.counters["host_allocations"] =
+      queue.allocation_count() - allocations_before;
+  state.counters["native_publications"] =
+      static_cast<double>(queue.completed_publications() -
+                          publications_before) /
+      state.iterations();
+}
+
+#define BULK_TRANSFER_CASE(name, kind)                       \
+  BENCHMARK_CAPTURE(BM_BulkTransfer, name,                   \
+                    IREE_HAL_TRANSFER_OPERATION_TYPE_##kind) \
+      ->Arg(1024 * 1024)                                     \
+      ->Arg(32 * 1024 * 1024)                                \
+      ->Iterations(8)                                        \
+      ->MeasureProcessCPUTime()                              \
+      ->UseRealTime()
+BULK_TRANSFER_CASE(Upload, UPLOAD);
+BULK_TRANSFER_CASE(Update, UPDATE);
+BULK_TRANSFER_CASE(Download, DOWNLOAD);
+#undef BULK_TRANSFER_CASE
 
 // Persistent callers share one actual queue without a caller-side mutex.
 // Barrier rendezvous coordinate only benchmark epochs and stay outside each
