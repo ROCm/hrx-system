@@ -1229,6 +1229,45 @@ class Translator final : private Initialization::Evaluation {
                : scalars_.constant(value, ast->type, ast);
   }
 
+  std::optional<Value> fold_constant_reference_call(
+      cxx::ExpressionAST* expression, cxx::CallExpressionAST* call) {
+    auto* callee =
+        call ? cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression)
+             : nullptr;
+    auto* function = callee
+                         ? cxx::symbol_cast<cxx::FunctionSymbol>(callee->symbol)
+                         : nullptr;
+    auto* signature = function
+                          ? cxx::type_cast<cxx::FunctionType>(function->type())
+                          : nullptr;
+    if (!signature) {
+      return std::nullopt;
+    }
+    // A constant invocation has no runtime reference ABI. Fold it before
+    // reachable-function discovery so constexpr-only helpers remain source
+    // semantics rather than unsupported Loom call signatures.
+    auto traits = unit_.typeTraits();
+    bool has_reference = traits.is_reference(signature->returnType());
+    for (auto* parameter : function->parameters()) {
+      if (traits.is_reference(parameter->type())) {
+        has_reference = true;
+        break;
+      }
+    }
+    if (!has_reference || (!traits.is_arithmetic(expression->type) &&
+                           !traits.is_enum(expression->type))) {
+      return std::nullopt;
+    }
+    cxx::ASTInterpreter interpreter(&unit_);
+    auto value = interpreter.evaluate(expression);
+    if (!value ||
+        (types_.is_float(expression->type) ? !interpreter.toDouble(*value)
+                                           : !interpreter.toInt(*value))) {
+      return std::nullopt;
+    }
+    return constant(*value, expression);
+  }
+
   Value expression(cxx::ExpressionAST* ast) override {
     if (!ast) {
       throw std::runtime_error("missing expression");
@@ -1255,6 +1294,14 @@ class Translator final : private Initialization::Evaluation {
       return expression(initializer->expression);
     }
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast)) {
+      if (cast->castKind == cxx::ImplicitCastKind::kLValueToRValueConversion) {
+        if (auto* call =
+                cxx::ast_cast<cxx::CallExpressionAST>(cast->expression)) {
+          if (auto constant = fold_constant_reference_call(ast, call)) {
+            return *constant;
+          }
+        }
+      }
       if (cast->conversionFunction &&
           types_.address_domain(cast->expression->type, ast) ==
               LOOM_SCALAR_TYPE_NONE) {
@@ -1663,6 +1710,9 @@ class Translator final : private Initialization::Evaluation {
       return load(ast);
     }
     if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(ast)) {
+      if (auto constant = fold_constant_reference_call(ast, call)) {
+        return *constant;
+      }
       if (auto called = atomic_builtin(call)) {
         return *called->value;
       }

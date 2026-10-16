@@ -64,6 +64,7 @@ loom_check_test_suite(
     "constexpr_contract.cxx-test"
     "constexpr_contract_invalid.cxx-test"
     "constexpr_destruction.cxx-test"
+    "constexpr_reference_return.cxx-test"
     "constexpr_semantics.cxx-test"
     "constexpr_storage.cxx-test"
     "control_invalid.cxx-test"
