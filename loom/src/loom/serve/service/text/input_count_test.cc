@@ -33,7 +33,7 @@ class InputCountTest : public SourceTextServiceTest {
     if (service_) {
       AdvanceUntil(
           interface_, [&] { return Idle(); },
-          LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+          LOOM_SERVE_SERVICE_FLAG_STOPPING);
       interface_.set_observer(interface_.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
     }
@@ -70,7 +70,7 @@ class InputCountTest : public SourceTextServiceTest {
   // fixture.
   loom_serve_text_service_t* service_ = nullptr;
   // Borrowed production interface driven by serialized test-owner turns.
-  loom_serve_http_service_t interface_ = {};
+  loom_serve_service_t interface_ = {};
 };
 
 TEST_F(InputCountTest, FreshChatCountsWithoutActivatingOrReserving) {
@@ -168,7 +168,7 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
     // cannot have released its CPU loan. Stopping may cancel only the tail.
     bool progress = false;
     IREE_ASSERT_OK(interface_.advance(
-        interface_.self, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING, &progress));
+        interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
     EXPECT_TRUE(progress);
     EXPECT_TRUE(interface_.is_pending(interface_.self));
     EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
@@ -176,7 +176,7 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
   });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       interface_, [&] { return Idle(); },
-      LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+      LOOM_SERVE_SERVICE_FLAG_STOPPING));
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);
   EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
   EXPECT_TRUE(Read(first, true).empty());

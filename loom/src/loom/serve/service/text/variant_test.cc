@@ -327,8 +327,7 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   void TearDown() override {
     if (service_) {
       AdvanceUntil(
-          interface_, [&] { return Idle(); },
-          LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+          interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
       interface_.set_observer(interface_.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
       IREE_EXPECT_OK(TakeSelectionStatus());
@@ -384,7 +383,7 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   // Owned service; the inherited model and transport outlive its retirement.
   loom_serve_text_service_t* service_ = nullptr;
   // Borrowed owner callbacks, invoked without a concurrent router owner.
-  loom_serve_http_service_t interface_ = {};
+  loom_serve_service_t interface_ = {};
   // Borrowed modality policy; its pool has no preferred-choice field.
   loom_serve_reconfiguration_t configuration_ = {};
   // Initially preferred executable identity, used for explicit rollback.
@@ -592,7 +591,7 @@ TEST_F(ReconfigurationTextServiceTest,
         ASSERT_NO_FATAL_FAILURE(Select(original_));
         bool progress = false;
         IREE_ASSERT_OK(interface_.advance(
-            interface_.self, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING, &progress));
+            interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
         EXPECT_TRUE(selection_.called);
         EXPECT_EQ(selection_.id, original_);
         IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, TakeSelectionStatus());
@@ -603,8 +602,7 @@ TEST_F(ReconfigurationTextServiceTest,
         EXPECT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_COMPILING);
       });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return Idle(); },
-      LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+      interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING));
   loom_serve_variant_snapshot_t snapshot = {};
   ASSERT_TRUE(
       loom_serve_variant_pool_snapshot(configuration_.pool, id, &snapshot));
