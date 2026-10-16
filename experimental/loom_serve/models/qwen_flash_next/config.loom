@@ -73,8 +73,10 @@ config.def @flash_next.ple.prime_15 = 20000171 : i64
 
 config.def @flash_next.ple.offset_15 = 300001275 : i32
 
-// Bound sparse score scratch independently of the packed token capacity.
-config.def @qsa.query_tile = 4 : index
+// Score scratch is cohort * context_capacity bytes, reused after selection.
+// This bounds it to 16 MiB at 32K context or 64 MiB at 128K, independently
+// of the packed epoch capacity. Small epochs specialize to their own extent.
+config.def @qsa.query_tile = 512 : index
 
 // Zero removes speculative publication and capture from ordinary target stages.
 config.def @flash_next.verification_width = 0 : index
