@@ -251,8 +251,8 @@ loom_cc_library(
     loom::serve::service::finite::service
     loom::serve::service::image::model
     loom::serve::service::image::service
-    loom::serve::service::recognition::http
     loom::serve::service::recognition::model
+    loom::serve::service::recognition::service
     loom::serve::service::speech::model
     loom::serve::service::speech::service
     loom::serve::service::text::model
@@ -277,6 +277,7 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
     loom::serve::service
+    loom::serve::service::recognition::request
     loom::serve::service::speech::request
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
@@ -309,6 +310,39 @@ loom_cc_library(
     loom::serve::transport::http::server
     loom::util::json
     loom::util::stream
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    registry_recognition_tests
+  SRCS
+    "registry_recognition_test.cc"
+  DEPS
+    ::configuration
+    ::model_registration
+    ::registry
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::io::file_handle
+    iree::testing::gtest
+    loom::serve::runtime::host
+    loom::serve::service
+    loom::serve::service::recognition::document
+    loom::serve::service::recognition::input
+    loom::serve::service::recognition::request
+    loom::serve::service::recognition::stream
+    loom::serve::service::recognition::transcription
+    loom::serve::telemetry::record
+    loom::serve::testing::http_harness
+    loom::serve::testing::service_application
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
   TESTONLY
   ALWAYSLINK
   PUBLIC
