@@ -168,7 +168,7 @@ void loom_serve_text_session_release_request(
 
 // Decodes selected tokens and produces bounded SSE or final JSON output. Source
 // VM calls use the request's policy; scratch/tool_calls are exclusive shared
-// model builders, not per-row caches. scratch_allocator owns call-local VM
+// model storage, not per-row caches. scratch_allocator owns call-local VM
 // wrappers and may be reset when this function returns. No transport send or
 // native release occurs. On failure, the caller translates the error and
 // invalidates the continuation; the partially modified packet is not a valid
@@ -176,7 +176,7 @@ void loom_serve_text_session_release_request(
 iree_status_t loom_serve_text_session_append_tokens(
     loom_serve_text_session_t* session, iree_string_view_t model_name,
     iree_host_size_t count, const int32_t* tokens,
-    iree_string_builder_t* scratch, iree_string_builder_t* tool_calls,
+    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls,
     loom_serve_text_chat_scratch_t* completion_scratch,
     iree_allocator_t scratch_allocator);
 

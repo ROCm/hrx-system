@@ -9,6 +9,6 @@ load(":sources.bzl", "SOURCE_FILES")
 package(default_visibility = ["//visibility:private"])
 
 exports_files(
-    SOURCE_FILES,
+    SOURCE_FILES + ["portable_chat.loom"],
     visibility = ["//visibility:public"],
 )
