@@ -96,7 +96,7 @@ struct loom_serve_test_registration_dependency_t {
   };
 
   static iree_status_t Prepare(void* self, bool cancel, bool* complete,
-                               loom_serve_http_service_t* service,
+                               loom_serve_service_t* service,
                                loom_serve_compilation_report_t* out_report) {
     auto* dependency =
         static_cast<loom_serve_test_registration_operation_t*>(self)
@@ -817,7 +817,7 @@ TEST_P(HttpRouterRegistrationTest,
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_TRUE(iree_any_bit_set(b_.WaitAdmission(),
-                               LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY));
+                               LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_NE(Control("drain", "b").find(R"("queued_requests":1)"),
             std::string::npos);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
@@ -844,7 +844,7 @@ TEST_P(HttpRouterRegistrationTest,
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY));
+                                LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
   managed_.ReleaseRetirement();
@@ -979,7 +979,7 @@ TEST_P(HttpRouterRegistrationTest,
   // not park indefinitely waiting for an ownership wake that cannot arrive.
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY));
+                                LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
   while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=

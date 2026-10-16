@@ -222,7 +222,7 @@ TEST_P(PrefixCaptureRetirementTest,
         return !interface.is_pending(interface.self) &&
                !interface.is_active(interface.self);
       },
-      LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+      LOOM_SERVE_SERVICE_FLAG_STOPPING));
   EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
   EXPECT_EQ(interface.telemetry.counters->input_tokens, GetParam());
   EXPECT_EQ(interface.telemetry.counters->output_tokens, 0u);

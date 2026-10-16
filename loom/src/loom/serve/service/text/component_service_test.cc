@@ -111,7 +111,7 @@ class TextComponentServiceTest : public SourceTextServiceTest {
     if (service_) {
       AdvanceUntil(
           interface_, [&] { return !interface_.is_pending(interface_.self); },
-          LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+          LOOM_SERVE_SERVICE_FLAG_STOPPING);
       interface_.set_observer(interface_.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
     }
@@ -150,7 +150,7 @@ class TextComponentServiceTest : public SourceTextServiceTest {
   // Owned text service, released only after both preparation domains join.
   loom_serve_text_service_t* service_ = nullptr;
   // Borrowed callbacks invoked by this serialized test owner.
-  loom_serve_http_service_t interface_ = {};
+  loom_serve_service_t interface_ = {};
 };
 
 TEST_F(TextComponentServiceTest, OrdinaryTextLeavesImageDormant) {
@@ -179,7 +179,7 @@ TEST_F(TextComponentServiceTest, StoppingJoinsImagePreparation) {
   ASSERT_NO_FATAL_FAILURE(BeginImagePreparation());
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       interface_, [&] { return !interface_.is_pending(interface_.self); },
-      LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING));
+      LOOM_SERVE_SERVICE_FLAG_STOPPING));
   EXPECT_FALSE(loom_serve_finite_component_is_pending(image_));
   EXPECT_EQ(loom_serve_finite_component_report(image_)->commands, 0u);
 }

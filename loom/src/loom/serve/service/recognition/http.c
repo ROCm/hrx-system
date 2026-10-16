@@ -306,7 +306,7 @@ static void loom_serve_transcription_decode(
 static iree_status_t loom_serve_transcription_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_http_service_flags_t flags) {
+    loom_serve_service_flags_t flags) {
   loom_serve_recognition_http_t* service = self;
   loom_serve_recognition_transcription_row_t pending = {
       .connection = connection,
@@ -319,7 +319,7 @@ static iree_status_t loom_serve_transcription_accept(
         .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
     loom_serve_telemetry_stream_append(service->telemetry, &record);
   }
-  if (service->stopping || (flags & LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+  if (service->stopping || (flags & LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
     return loom_serve_transcription_reject(
         service, &pending, "503 Service Unavailable", iree_ok_status(),
         IREE_SV("transcription is stopping"));
@@ -406,10 +406,10 @@ static iree_status_t loom_serve_transcription_deliver(
 }
 
 static iree_status_t loom_serve_transcription_advance(
-    void* self, loom_serve_http_service_flags_t flags, bool* out_progress) {
+    void* self, loom_serve_service_flags_t flags, bool* out_progress) {
   loom_serve_recognition_http_t* service = self;
   *out_progress = false;
-  service->stopping |= (flags & LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING) != 0;
+  service->stopping |= (flags & LOOM_SERVE_SERVICE_FLAG_STOPPING) != 0;
   iree_slim_mutex_lock(&service->events.mutex);
   const bool ready = service->events.ready;
   iree_status_t cpu_status = iree_ok_status();
@@ -528,7 +528,7 @@ static iree_status_t loom_serve_transcription_advance(
     bool progress = false;
     status = loom_serve_recognition_service_advance(
         service->recognition, service->stopping,
-        (flags & LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY) != 0, &progress);
+        (flags & LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY) != 0, &progress);
     *out_progress |= progress;
   }
   if (iree_status_is_ok(status) && !service->stopping && !service->cpu.row) {
@@ -563,10 +563,10 @@ static bool loom_serve_transcription_is_pending(void* self) {
   return loom_serve_transcription_is_active(service);
 }
 
-static loom_serve_http_service_snapshot_t loom_serve_transcription_snapshot(
+static loom_serve_service_snapshot_t loom_serve_transcription_snapshot(
     void* self) {
   loom_serve_recognition_http_t* service = self;
-  loom_serve_http_service_snapshot_t snapshot = {.phase = "idle"};
+  loom_serve_service_snapshot_t snapshot = {.phase = "idle"};
   const iree_time_t now = iree_time_now();
   for (iree_host_size_t i = 0; i < service->capacity; ++i) {
     const loom_serve_recognition_transcription_row_t* row = &service->rows[i];
@@ -589,11 +589,11 @@ static loom_serve_http_service_snapshot_t loom_serve_transcription_snapshot(
   return snapshot;
 }
 
-loom_serve_http_service_t loom_serve_recognition_http_interface(
+loom_serve_service_t loom_serve_recognition_http_interface(
     loom_serve_recognition_http_t* service) {
   static const iree_string_view_t input[] = {IREE_SVL("audio")};
   static const iree_string_view_t output[] = {IREE_SVL("text")};
-  return (loom_serve_http_service_t){
+  return (loom_serve_service_t){
       .name = service->options.name,
       .self = service,
       .set_observer = loom_serve_transcription_set_observer,

@@ -19,21 +19,25 @@
 extern "C" {
 #endif
 
-typedef enum loom_serve_http_service_flag_bits_e {
+// Modality-owned input and detached output types used by native admission.
+typedef struct loom_serve_speech_request_t loom_serve_speech_request_t;
+typedef struct loom_serve_speech_stream_t loom_serve_speech_stream_t;
+
+typedef enum loom_serve_service_flag_bits_e {
   // Another service in the same capacity domain has accepted work or
   // maintenance that may release capacity. Admission can queue instead of
   // rejecting an idle-capacity stall.
-  LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY = 1u << 0,
+  LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY = 1u << 0,
   // Admission has stopped. Consume only already accepted asynchronous work;
   // new model submissions and queued request admission are forbidden.
-  LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING = 1u << 1,
-} loom_serve_http_service_flag_bits_t;
-typedef uint32_t loom_serve_http_service_flags_t;
+  LOOM_SERVE_SERVICE_FLAG_STOPPING = 1u << 1,
+} loom_serve_service_flag_bits_t;
+typedef uint32_t loom_serve_service_flags_t;
 
 // Copied scheduler ownership, not hardware utilization. Finite active requests
 // include preparation, capacity waiting and encoding; text active requests
 // hold admitted rows. No request content or borrowed mutable buffers escape.
-typedef struct loom_serve_http_service_snapshot_t {
+typedef struct loom_serve_service_snapshot_t {
   // Modality-owned phase label with process lifetime.
   const char* phase;
   // Requests waiting outside the active invocation/cohort.
@@ -46,12 +50,12 @@ typedef struct loom_serve_http_service_snapshot_t {
   // Nanoseconds since the oldest active request was accepted, including prior
   // queue residence; zero if empty. This is ownership age, not device time.
   iree_duration_t oldest_active_age;
-} loom_serve_http_service_snapshot_t;
+} loom_serve_service_snapshot_t;
 
 // One named service borrowing a model on serialized task-owner turns. Network
 // progress is independent; these callbacks never run concurrently. Names are
 // deployment identifiers, not source model identities or checkpoint paths.
-typedef struct loom_serve_http_service_t {
+typedef struct loom_serve_service_t {
   // Nonempty visible ASCII name, unique and borrowed through retirement. This
   // also fits the checkpoint selector's HTTP header representation.
   iree_string_view_t name;
@@ -72,12 +76,19 @@ typedef struct loom_serve_http_service_t {
   // loop. Request views remain valid until this service finishes or aborts.
   iree_status_t (*accept)(void* self, loom_serve_http_connection_t* connection,
                           const loom_serve_http_request_t* request,
-                          loom_serve_http_service_flags_t flags);
+                          loom_serve_service_flags_t flags);
+  // Optional native speech admission on this same serialized owner. Success
+  // with a stream moves the initialized request; NULL success is bounded
+  // pressure. Both pressure and failure leave request untouched. The returned
+  // handle owns copied results independently of registration retirement.
+  iree_status_t (*try_open_speech)(void* self,
+                                   loom_serve_speech_request_t* request,
+                                   loom_serve_speech_stream_t** out_stream);
   // Advances at most one bounded model unit and reports actual progress. A
   // turn can retry admission after another service released shared capacity.
   // False means awaiting service readiness or a network event, never polling.
   // STOPPING consumes accepted readiness without launching another model unit.
-  iree_status_t (*advance)(void* self, loom_serve_http_service_flags_t flags,
+  iree_status_t (*advance)(void* self, loom_serve_service_flags_t flags,
                            bool* out_progress);
   // Optional immutable input tokenizer, live through utility task release. Raw
   // utilities use independent CPU states and never call this model's methods.
@@ -104,7 +115,7 @@ typedef struct loom_serve_http_service_t {
   } capabilities;
   // Copies published ownership on the serialized owner without invoking model
   // work or reading state still borrowed by a CPU/device task.
-  loom_serve_http_service_snapshot_t (*snapshot)(void* self);
+  loom_serve_service_snapshot_t (*snapshot)(void* self);
   // Optional bounded metadata queries on the same serialized owner. No task
   // payload or model borrow escapes into an observation response.
   loom_serve_http_inspection_t inspection;
@@ -129,7 +140,7 @@ typedef struct loom_serve_http_service_t {
     // services may omit it; missing observations are never reported as zero.
     const loom_serve_telemetry_latency_t* latency;
   } telemetry;
-} loom_serve_http_service_t;
+} loom_serve_service_t;
 
 #ifdef __cplusplus
 }  // extern "C"
