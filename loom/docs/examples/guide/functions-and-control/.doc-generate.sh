@@ -37,6 +37,8 @@ cp -- "${script_dir}/guarded-read-ahead.loom" "${output_dir}/guarded-read-ahead.
 cp -- "${script_dir}/guarded-read-ahead-tests.loom" "${output_dir}/guarded-read-ahead-tests.loom"
 cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/streaming_packed_s8_dot.loom" \
   "${output_dir}/streaming-packed-dot.loom"
+cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/streaming_packed_s8_dot_benchmark.loom" \
+  "${output_dir}/streaming-packed-dot-benchmark.loom"
 # Each downloadable example includes its kernel and named benchmark workloads.
 corpus_dir="${repo_root}/loom/src/loom/test/corpus/checked_benchmarks"
 for name in routed_row_combine cooperative_paged_attention \
@@ -153,7 +155,9 @@ test -s pipeline-suggest.txt
 "${loom_report}" suggest packed-dot.report.json >packed-dot.suggest.txt
 sed -n '/^\[amdgpu.pipeline_copy_waits\]/,/^$/p' packed-dot.suggest.txt >pipeline-copy-waits.txt
 test -s pipeline-copy-waits.txt
-"${loom_benchmark}" streaming-packed-dot.loom \
+"${loom_link}" streaming-packed-dot.loom streaming-packed-dot-benchmark.loom \
+  --mode=merge --to=bc --output=streaming-packed-dot.loombc
+"${loom_benchmark}" streaming-packed-dot.loombc \
   --benchmark=@streaming_packed_s8_dot_read_ahead_n128_time \
   --config=packed_stream.depth=4 --config=packed_stream.unroll=2 \
   --dry-run --output=packed-dot.plan.json

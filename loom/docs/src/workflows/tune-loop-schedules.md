@@ -578,6 +578,8 @@ example computes 2,048 independent outputs across up to 128 records. Each record
 loads four packed signed bytes, an `f16` scale, and four `f32` activation values.
 The consumer unpacks and scales the weights, then advances an ordered dot
 accumulation. Sixty-four activation streams are shared across the output rows.
+Save its [benchmark companion](../generated/examples/guide/functions-and-control/streaming-packed-dot-benchmark.loom)
+beside it to run the named timing workloads.
 
 Its experiment entry, `@streaming_packed_s8_dot_read_ahead`, uses global config
 for schedule sweeps and defaults to depth four and factor two. A reusable
@@ -612,7 +614,9 @@ loom-compile streaming-packed-dot.loom \
 loom-compile-report show packed-dot.report.json
 loom-compile-report suggest packed-dot.report.json
 
-iree-benchmark-loom streaming-packed-dot.loom \
+loom-link streaming-packed-dot.loom streaming-packed-dot-benchmark.loom \
+  --mode=merge --to=bc --output=streaming-packed-dot.loombc
+iree-benchmark-loom streaming-packed-dot.loombc \
   --benchmark=@streaming_packed_s8_dot_read_ahead_n128_time \
   --device=amdgpu --target=amdgpu:gfx11-generic \
   --config=packed_stream.depth=4 --config=packed_stream.unroll=2 \
