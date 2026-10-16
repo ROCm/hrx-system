@@ -141,6 +141,10 @@ static void iree_hal_amd_gpu_allocation_free(
 
 static void iree_hal_amd_gpu_allocation_complete(
     iree_hal_amd_gpu_allocation_t* operation, iree_status_t status) {
+  if (operation->context->profile) {
+    iree_hal_amd_gpu_profile_operation_record(operation->context->profile,
+                                              (void*)(operation + 1), false, 0);
+  }
   iree_hal_amd_gpu_allocation_retire(operation);
   if (iree_status_is_ok(status) && operation->context->failure) {
     const iree_status_code_t code = (iree_status_code_t)iree_atomic_load(
@@ -320,6 +324,11 @@ static void iree_hal_amd_gpu_allocation_progress(
 static void iree_hal_amd_gpu_allocation_ready(void* user_data,
                                               iree_status_t status) {
   iree_hal_amd_gpu_allocation_t* operation = user_data;
+  if (operation->context->profile) {
+    iree_hal_amd_gpu_profile_operation_record(operation->context->profile,
+                                              (void*)(operation + 1),
+                                              iree_status_is_ok(status), 0);
+  }
   operation->status = status;
   iree_hal_amd_gpu_allocation_progress(&operation->entry);
 }
@@ -350,8 +359,11 @@ static iree_status_t iree_hal_amd_gpu_allocation_allocate(
   iree_arena_allocator_t arena;
   iree_arena_initialize(&context->blocks, &arena);
   iree_hal_amd_gpu_allocation_t* operation = NULL;
-  iree_status_t status =
-      iree_arena_allocate(&arena, sizeof(*operation), (void**)&operation);
+  iree_status_t status = iree_arena_allocate(
+      &arena,
+      sizeof(*operation) +
+          (context->profile ? sizeof(iree_hal_amd_gpu_profile_operation_t) : 0),
+      (void**)&operation);
   if (!iree_status_is_ok(status)) {
     iree_arena_deinitialize(&arena);
     return status;
@@ -394,7 +406,7 @@ static iree_status_t iree_hal_amd_gpu_allocation_allocate(
 }
 
 iree_status_t iree_hal_amd_gpu_queue_alloca(
-    iree_hal_amd_gpu_allocation_context_t* context,
+    iree_hal_amd_gpu_allocation_context_t* context, uint32_t queue_ordinal,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     iree_hal_pool_t* pool, iree_host_size_t count,
     const iree_hal_pool_reservation_request_t* requests,
@@ -465,6 +477,20 @@ iree_status_t iree_hal_amd_gpu_queue_alloca(
       out_buffers[i] = operation->buffers[i];
       iree_hal_buffer_retain(out_buffers[i]);
     }
+    if (context->profile) {
+      iree_hal_amd_gpu_profile_operation_t* profile_operation =
+          (void*)(operation + 1);
+      iree_hal_amd_gpu_profile_operation_initialize(
+          context->profile, queue_ordinal,
+          IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ALLOCA, waits.count, signals.count,
+          count, profile_operation);
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        profile_operation->event.payload_length +=
+            iree_min(requests[i].allocation_size,
+                     UINT64_MAX - profile_operation->event.payload_length);
+      }
+      iree_hal_amd_gpu_profile_operation_defer(profile_operation);
+    }
     iree_hal_memory_maintenance_enqueue(context->service, &operation->entry);
   } else {
     iree_hal_amd_gpu_allocation_retire(operation);
@@ -474,7 +500,7 @@ iree_status_t iree_hal_amd_gpu_queue_alloca(
 }
 
 iree_status_t iree_hal_amd_gpu_queue_dealloca(
-    iree_hal_amd_gpu_allocation_context_t* context,
+    iree_hal_amd_gpu_allocation_context_t* context, uint32_t queue_ordinal,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     iree_host_size_t count, iree_hal_buffer_t* const* buffers) {
   iree_hal_amd_gpu_allocation_t* operation = NULL;
@@ -494,6 +520,20 @@ iree_status_t iree_hal_amd_gpu_queue_dealloca(
     }
   }
   if (iree_status_is_ok(status)) {
+    if (context->profile) {
+      iree_hal_amd_gpu_profile_operation_t* profile_operation =
+          (void*)(operation + 1);
+      iree_hal_amd_gpu_profile_operation_initialize(
+          context->profile, queue_ordinal,
+          IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DEALLOCA, waits.count,
+          signals.count, count, profile_operation);
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        profile_operation->event.payload_length +=
+            iree_min(iree_hal_buffer_byte_length(buffers[i]),
+                     UINT64_MAX - profile_operation->event.payload_length);
+      }
+      iree_hal_amd_gpu_profile_operation_defer(profile_operation);
+    }
     iree_hal_memory_maintenance_enqueue(context->service, &operation->entry);
   } else {
     iree_hal_amd_gpu_allocation_retire(operation);

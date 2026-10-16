@@ -10,6 +10,7 @@
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/memory/maintenance.h"
+#include "iree/hal/profile_schema.h"
 #include "iree/hal/virtual_buffer.h"
 
 #ifdef __cplusplus
@@ -29,8 +30,18 @@ typedef struct iree_hal_amd_gpu_host_call_executor_t {
   iree_hal_memory_maintenance_t* service;
   // Queue-owned reusable CPU capture storage.
   iree_hal_amd_gpu_capture_pool_t* captures;
+  // Private native boundary. A non-NONE type identifies the public entry;
+  // the return boundary carries NONE and contributes no public queue event.
+  iree_status_t (*barrier)(iree_hal_queue_t* queue,
+                           iree_hal_semaphore_list_t waits,
+                           iree_hal_semaphore_list_t signals,
+                           const iree_hal_queue_barriers_t* barriers,
+                           iree_hal_profile_queue_event_type_t type,
+                           iree_host_size_t operation_count,
+                           iree_host_size_t public_signal_count);
 } iree_hal_amd_gpu_host_call_executor_t;
 
+// The executor is queue-owned and outlives accepted operations.
 // Captures callback state and invokes it on the existing completion worker
 // after a native release boundary. DEFERRED callbacks receive a private
 // completion list; public completion follows the return-to-device acquire.

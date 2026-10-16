@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_FILE_TRANSFER_H_
 
 #include "iree/hal/drivers/amd/gpu/context.h"
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
@@ -29,6 +30,10 @@ typedef struct iree_hal_amd_gpu_pm4_file_executor_t {
   iree_hal_amd_gpu_capture_pool_t* captures;
   // Queue-owned host dependency associations, finalized on service.
   iree_async_semaphore_wait_context_t* waits;
+  // Optional device-owned session, stable while operations are in flight.
+  iree_hal_amd_gpu_profile_t* profile;
+  // Exact stream index within the device-owned session.
+  uint32_t queue_ordinal;
   // Captures one transfer or, for NULL operation, a barrier. The caller has
   // resolved dependencies and prepared immutable cache recipes. Success owns
   // captured arguments through signals; failure retains no borrowed payload.
@@ -39,6 +44,7 @@ typedef struct iree_hal_amd_gpu_pm4_file_executor_t {
                           iree_hal_amd_gpu_pm4_barrier_t after);
 } iree_hal_amd_gpu_pm4_file_executor_t;
 
+// The executor is queue-owned and outlives accepted operations.
 // Captures a validated, nonempty queue_read/write transaction. Memory files
 // use their owned host span directly; platform files use bounded ordinary host
 // staging and their imported proactor. Device buffers need no CPU mapping.

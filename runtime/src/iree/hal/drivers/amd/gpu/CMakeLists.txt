@@ -22,6 +22,7 @@ iree_cc_library(
     ::context
     ::executable
     ::feedback
+    ::profile
     ::tsan
     amdf::headers
     iree::async
@@ -349,5 +350,34 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 endif()
+
+iree_cc_library(
+  NAME
+    profile
+  HDRS
+    "profile.h"
+  SRCS
+    "profile.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::utils::profile_event_ring
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -119,7 +119,7 @@ iree_status_t iree_hal_amd_xdna_operation_profile_capture(
           continue;
         }
         event->type = event->operation_count
-                          ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE
+                          ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER
                           : type;
         if (event->operation_count < UINT32_MAX) {
           ++event->operation_count;

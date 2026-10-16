@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_SUBMISSION_H_
 
 #include "iree/hal/drivers/amd/gpu/executable.h"
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
@@ -67,6 +68,9 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   iree_hal_amd_gpu_pm4_signal_t* signal;
   // Active payload; barriers have no payload.
   iree_hal_amd_gpu_pm4_submission_kind_t kind;
+  // Optional profile operation occupies the bytes immediately after this
+  // header.
+  bool profiled;
   // Exact initialized extent, computed once by the capture constructor.
   iree_host_size_t capture_size;
   union {
@@ -94,6 +98,16 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   };
 } iree_hal_amd_gpu_pm4_submission_t;
 
+// Borrows optional metadata owned by the capture. Its publication owner is the
+// sole writer; completion never modifies it.
+static inline iree_hal_amd_gpu_profile_operation_t*
+iree_hal_amd_gpu_pm4_submission_profile(
+    iree_hal_amd_gpu_pm4_submission_t* submission) {
+  return submission->profiled
+             ? (iree_hal_amd_gpu_profile_operation_t*)(submission + 1)
+             : NULL;
+}
+
 // Creates a refcounted capture of an admitted operation before the public API
 // returns. The pool is borrowed and outlives every retained reference.
 // Reuses one block for ordinary calls; oversized calls use the pool allocator.
@@ -102,8 +116,9 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
 // cease borrowing the caller on success. Buffer addresses remain unresolved
 // until queue-ordered allocation and dependency admission permit reading them.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create(
-    iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
+    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_hal_executable_t* executable,
     const iree_hal_amd_gpu_pm4_function_t* function,
     iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_hal_buffer_ref_t parameters,
     iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings,
@@ -116,7 +131,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
 // addresses are resolved only after dependencies permit execution. Zero-length
 // operations are omitted; an empty transaction becomes a barrier capture.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_host_size_t count,
     const iree_hal_transfer_operation_t* operations,
@@ -128,13 +143,20 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
 // semaphore ownership. Recorded barriers own payload visibility; execution adds
 // no implicit system-scope before/after boundary. Failure retains nothing.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
-    iree_hal_amd_gpu_capture_pool_t* pool, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals,
+    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     iree_hal_queue_execute_flags_t flags,
     iree_hal_amd_gpu_pm4_submission_t** out_submission);
+
+// Summarizes the already-captured nonempty transfer payload for profiling.
+// Several transfers form one TRANSFER event; a single transfer retains its
+// specific COPY/FILL/UPDATE type. Empty transactions are barriers.
+void iree_hal_amd_gpu_pm4_submission_profile_transfer(
+    iree_hal_amd_gpu_pm4_submission_t* submission,
+    iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal);
 
 // Borrows the unused, naturally aligned tail of a reusable capture block.
 // Oversized captures have no spare storage. Admission may place sidecars here

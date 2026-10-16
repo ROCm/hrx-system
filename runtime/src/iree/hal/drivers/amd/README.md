@@ -103,6 +103,43 @@ feedback/ASAN/TSAN device creation is rejected there. Enabling those services
 requires implementing and qualifying the native shader producer; ordinary
 Windows PM4 execution does not depend on it.
 
+## GPU queue profiling
+
+The native GPU backend supports `IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS`
+through the ordinary device profiling API. `LIGHTWEIGHT_STATISTICS` selects this
+family. Begin and end require an idle device and external serialization with
+submission, as specified by the HAL API:
+
+```c
+const iree_hal_device_profiling_options_t options = {
+    .data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS,
+    .sink = sink,
+};
+IREE_RETURN_IF_ERROR(iree_hal_device_profiling_begin(device, &options));
+// Submit work and wait for its completion.
+IREE_RETURN_IF_ERROR(iree_hal_device_profiling_end(device));
+```
+
+Each accepted public operation contributes one host-clock record with its queue,
+submission identity, payload size, and actual dependency admission strategy.
+Repeated command-buffer executions carry the same recording identity and distinct
+submission identities. Batched transfers use a `TRANSFER` record; internal file
+staging copies and host-call return barriers contribute no additional public
+events. Readiness denotes admission to the executor, including native entry
+barriers for host calls and mappings; it is not a GPU execution timestamp or a
+host callback start timestamp.
+
+Each queue retains up to 4096 records between flushes. Full streams count dropped
+records and report `TRUNCATED` chunks. Explicit flush can snapshot completed
+records while submissions continue; failed sink writes preserve their records
+for retry. Sink callbacks run only during begin, flush, and end, outside queue
+and completion locks. End releases the session even when the sink fails.
+
+Disabled sessions allocate no event storage or per-operation profile metadata.
+Enabled captures place metadata in the existing submission allocation and use
+bounded stream storage. GPU timestamp families, hardware counters, and capture
+filters are rejected explicitly by this producer.
+
 ## Memory construction
 
 An engine captures its native API, instance, device, storage scopes, family

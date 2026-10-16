@@ -25,6 +25,10 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     iree_allocator_t host_allocator, iree_hal_command_buffer_t** out_buffer);
 
+// Returns the encoded payload record count without walking template blocks.
+iree_host_size_t iree_hal_amd_gpu_pm4_command_buffer_record_count(
+    iree_hal_command_buffer_t* command_buffer);
+
 typedef struct iree_hal_amd_gpu_pm4_record_block_t
     iree_hal_amd_gpu_pm4_record_block_t;
 

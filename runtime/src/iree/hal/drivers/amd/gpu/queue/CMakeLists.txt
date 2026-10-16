@@ -26,6 +26,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amd::fabric::transient_buffer
     iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::profile
     iree::hal::memory::maintenance
   PUBLIC
 )

@@ -14,6 +14,7 @@
 #include "iree/base/threading/notification.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
@@ -48,6 +49,10 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_amd_gpu_completion_t completion;
   // Optional shared shader reports, drained by the same completion worker.
   iree_hal_amd_gpu_feedback_t feedback;
+  // Optional profiling session, owned until externally serialized idle end.
+  iree_hal_amd_gpu_profile_t* profile;
+  // Monotonic session identity for this device's lifetime.
+  uint64_t next_profile_session_id;
   // Retained placement-local process infrastructure, independent of the pool.
   iree_async_proactor_pool_entry_t* proactor_entry;
   // Cold lifetime handoff; submission never accesses its mutex/notification.
@@ -382,6 +387,13 @@ static bool iree_hal_amd_gpu_device_release_children(
         &device->memory.allocations);
   }
   iree_hal_memory_maintenance_release(device->memory.service);
+  iree_status_t profile_status = iree_hal_amd_gpu_profile_end(device->profile);
+  device->profile = NULL;
+  if (!iree_status_is_ok(profile_status)) {
+    iree_hal_amd_gpu_context_report_status(
+        device->context, (iree_hal_device_t*)device, profile_status);
+    iree_status_free(profile_status);
+  }
   // Final executable cleanup on service poisons its globals before shadow
   // teardown.
   for (uint32_t i = 0; i < device->memory.tsan_count; ++i) {
@@ -982,18 +994,37 @@ static iree_status_t iree_hal_amd_gpu_device_import_file(
 static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
     iree_hal_device_t* base,
     const iree_hal_device_profiling_options_t* options) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "PM4 queue profiling is unavailable");
+  iree_hal_amd_gpu_device_t* device = (void*)base;
+  if (device->profile) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "GPU profiling session is already active");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_profile_begin(
+      options, ++device->next_profile_session_id, device->queue_count,
+      device->host_allocator, &device->profile));
+  device->memory.allocations.profile = device->profile;
+  for (uint32_t i = 0; i < device->queue_count; ++i) {
+    iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[i], device->profile);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_device_profiling_flush(
     iree_hal_device_t* base) {
-  return iree_ok_status();
+  return iree_hal_amd_gpu_profile_flush(
+      ((iree_hal_amd_gpu_device_t*)base)->profile);
 }
 
 static iree_status_t iree_hal_amd_gpu_device_profiling_end(
     iree_hal_device_t* base) {
-  return iree_ok_status();
+  iree_hal_amd_gpu_device_t* device = (void*)base;
+  iree_hal_amd_gpu_profile_t* profile = device->profile;
+  device->profile = NULL;
+  device->memory.allocations.profile = NULL;
+  for (uint32_t i = 0; i < device->queue_count; ++i) {
+    iree_hal_amd_gpu_pm4_queue_set_profile(device->queues[i], NULL);
+  }
+  return iree_hal_amd_gpu_profile_end(profile);
 }
 
 static const iree_hal_device_vtable_t iree_hal_amd_gpu_device_vtable = {

@@ -9,6 +9,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
 
 #ifdef __cplusplus
@@ -30,6 +31,8 @@ typedef struct iree_hal_amd_gpu_allocation_context_t {
   iree_arena_block_pool_t blocks;
   // Dependency associations shared by this device's allocation operations.
   iree_async_semaphore_wait_context_t waits;
+  // Optional device-owned session, stable while operations are in flight.
+  iree_hal_amd_gpu_profile_t* profile;
   // Optional device failure code, borrowed through the retained device owner.
   const iree_atomic_int32_t* failure;
 } iree_hal_amd_gpu_allocation_context_t;
@@ -49,7 +52,7 @@ void iree_hal_amd_gpu_allocation_context_deinitialize(
 // limits are admitted here. Failure leaves every output untouched; success
 // transfers one root reference per request and completes through signals.
 iree_status_t iree_hal_amd_gpu_queue_alloca(
-    iree_hal_amd_gpu_allocation_context_t* context,
+    iree_hal_amd_gpu_allocation_context_t* context, uint32_t queue_ordinal,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     iree_hal_pool_t* pool, iree_host_size_t count,
     const iree_hal_pool_reservation_request_t* requests,
@@ -60,7 +63,7 @@ iree_status_t iree_hal_amd_gpu_queue_alloca(
 // or cooperating devices in the same sealed group. Pool/root grants and root
 // capability are already checked by the public queue boundary.
 iree_status_t iree_hal_amd_gpu_queue_dealloca(
-    iree_hal_amd_gpu_allocation_context_t* context,
+    iree_hal_amd_gpu_allocation_context_t* context, uint32_t queue_ordinal,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     iree_host_size_t count, iree_hal_buffer_t* const* buffers);
 

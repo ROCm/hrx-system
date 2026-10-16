@@ -16,8 +16,8 @@
 typedef struct iree_hal_amd_gpu_pm4_file_transfer_t {
   // Initial admission or terminal I/O continuation on the existing service.
   iree_hal_memory_maintenance_entry_t entry;
-  // Captured native transfer admission and its borrowed construction owners.
-  iree_hal_amd_gpu_pm4_file_executor_t executor;
+  // Borrowed queue-owned services, dominated by the retained device.
+  const iree_hal_amd_gpu_pm4_file_executor_t* executor;
   // Retained parent dominating every borrowed executor field.
   iree_hal_device_t* device;
   // Exact capture extent returned to the reusable metadata pool.
@@ -54,7 +54,7 @@ static void iree_hal_amd_gpu_pm4_file_transfer_free(
   iree_hal_semaphore_list_release(operation->waits);
   iree_hal_semaphore_list_release(operation->signals);
   iree_hal_amd_gpu_capture_pool_release(
-      operation->executor.captures,
+      operation->executor->captures,
       iree_make_byte_span(operation, operation->allocation_size));
   iree_hal_device_release(device);
 }
@@ -62,6 +62,10 @@ static void iree_hal_amd_gpu_pm4_file_transfer_free(
 static void iree_hal_amd_gpu_pm4_file_transfer_retire(void* user_data,
                                                       iree_status_t status) {
   iree_hal_amd_gpu_pm4_file_transfer_t* operation = user_data;
+  if (operation->executor->profile) {
+    iree_hal_amd_gpu_profile_operation_record(operation->executor->profile,
+                                              (void*)(operation + 1), false, 0);
+  }
   // Native copies, file requests, and the final cache boundary have retired.
   // Keep backing live until dirty cache lines can no longer refer to it.
   iree_hal_amd_fabric_file_transfer_deinitialize(&operation->transfer);
@@ -78,7 +82,7 @@ static void iree_hal_amd_gpu_pm4_file_transfer_retire(void* user_data,
         iree_async_single_frontier_as_const_frontier(&frontier));
   }
   if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_context_report_status(operation->executor.context,
+    iree_hal_amd_gpu_context_report_status(operation->executor->context,
                                            operation->device, status);
     iree_hal_semaphore_list_fail(operation->signals, status);
   }
@@ -98,7 +102,7 @@ static void iree_hal_amd_gpu_pm4_file_transfer_complete(
       .payload_values = &operation->completion.value,
   };
   status = iree_hal_amd_gpu_host_wait_begin(
-      operation->executor.waits, operation->executor.service, completion,
+      operation->executor->waits, operation->executor->service, completion,
       iree_hal_amd_gpu_pm4_file_transfer_retire, operation,
       iree_allocator_inline_arena(&operation->completion.storage),
       &operation->completion.wait);
@@ -108,8 +112,8 @@ static void iree_hal_amd_gpu_pm4_file_transfer_complete(
   }
   // The service retires captured operands before public completion. Callers
   // may then immediately destroy their pools, which buffers only borrow.
-  status = operation->executor.submit(
-      operation->executor.queue, NULL, completion,
+  status = operation->executor->submit(
+      operation->executor->queue, NULL, completion,
       (iree_hal_amd_gpu_pm4_barrier_t){0}, operation->after);
   if (!iree_status_is_ok(status)) {
     iree_hal_semaphore_fail(operation->completion.semaphore, status);
@@ -140,7 +144,7 @@ static void iree_hal_amd_gpu_pm4_file_transfer_resume(void* user_data,
   iree_hal_amd_gpu_pm4_file_transfer_t* operation = user_data;
   operation->status = status;
   operation->entry.fn = iree_hal_amd_gpu_pm4_file_transfer_io_complete;
-  iree_hal_memory_maintenance_enqueue(operation->executor.service,
+  iree_hal_memory_maintenance_enqueue(operation->executor->service,
                                       &operation->entry);
 }
 
@@ -202,7 +206,7 @@ static void iree_hal_amd_gpu_pm4_file_transfer_copy(
   // Enroll before publishing the copy. A tracker allocation failure must not
   // orphan a native user of the operation's borrowed host staging.
   iree_status_t status = iree_hal_amd_gpu_host_wait_begin(
-      operation->executor.waits, operation->executor.service, completion,
+      operation->executor->waits, operation->executor->service, completion,
       iree_hal_amd_gpu_pm4_file_transfer_copy_complete, operation,
       iree_allocator_inline_arena(&operation->completion.storage),
       &operation->completion.wait);
@@ -210,8 +214,8 @@ static void iree_hal_amd_gpu_pm4_file_transfer_copy(
     iree_hal_amd_gpu_pm4_file_transfer_complete(operation, status);
     return;
   }
-  status = operation->executor.submit(
-      operation->executor.queue, &copy, completion,
+  status = operation->executor->submit(
+      operation->executor->queue, &copy, completion,
       transfer->async.chunk.offset == 0 ? operation->before
                                         : (iree_hal_amd_gpu_pm4_barrier_t){0},
       (iree_hal_amd_gpu_pm4_barrier_t){0});
@@ -246,6 +250,10 @@ static void iree_hal_amd_gpu_pm4_file_transfer_start(void* user_data,
     iree_hal_amd_gpu_pm4_file_transfer_complete(operation, status);
     return;
   }
+  if (operation->executor->profile) {
+    iree_hal_amd_gpu_profile_operation_record(operation->executor->profile,
+                                              (void*)(operation + 1), true, 0);
+  }
   iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
   if (!transfer->async.file) {
     iree_hal_amd_gpu_pm4_file_transfer_copy(operation);
@@ -278,8 +286,8 @@ static void iree_hal_amd_gpu_pm4_file_transfer_begin(
     return;
   }
   iree_status_t status = iree_hal_amd_gpu_host_wait_begin(
-      operation->executor.waits, operation->executor.service, operation->waits,
-      iree_hal_amd_gpu_pm4_file_transfer_start, operation,
+      operation->executor->waits, operation->executor->service,
+      operation->waits, iree_hal_amd_gpu_pm4_file_transfer_start, operation,
       iree_allocator_inline_arena(&operation->completion.storage),
       &operation->completion.wait);
   if (!iree_status_is_ok(status)) {
@@ -303,7 +311,10 @@ iree_status_t iree_hal_amd_gpu_pm4_file_transfer_submit(
   iree_host_size_t signal_values_offset = 0, signal_semaphores_offset = 0;
   iree_host_size_t tracker_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      sizeof(iree_hal_amd_gpu_pm4_file_transfer_t), &total_size,
+      sizeof(iree_hal_amd_gpu_pm4_file_transfer_t) +
+          (executor->profile ? sizeof(iree_hal_amd_gpu_profile_operation_t)
+                             : 0),
+      &total_size,
       IREE_STRUCT_FIELD_ALIGNED(waits.count, uint64_t, iree_alignof(uint64_t),
                                 &wait_values_offset),
       IREE_STRUCT_FIELD_ALIGNED(waits.count, iree_hal_semaphore_t*,
@@ -323,7 +334,7 @@ iree_status_t iree_hal_amd_gpu_pm4_file_transfer_submit(
   iree_hal_amd_gpu_pm4_file_transfer_t* operation = (void*)storage.data;
   *operation = (iree_hal_amd_gpu_pm4_file_transfer_t){
       .entry = {.fn = iree_hal_amd_gpu_pm4_file_transfer_begin},
-      .executor = *executor,
+      .executor = executor,
       .device = executor->queue->queue_family->device,
       .allocation_size = storage.data_length,
       .waits = {.count = waits.count,
@@ -360,6 +371,18 @@ iree_status_t iree_hal_amd_gpu_pm4_file_transfer_submit(
         IREE_HAL_SEMAPHORE_FLAG_NONE, &operation->completion.semaphore);
   }
   if (iree_status_is_ok(status)) {
+    if (executor->profile) {
+      iree_hal_amd_gpu_profile_operation_t* profile_operation =
+          (void*)(operation + 1);
+      iree_hal_amd_gpu_profile_operation_initialize(
+          executor->profile, executor->queue_ordinal,
+          file_access == IREE_HAL_MEMORY_ACCESS_READ
+              ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ
+              : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE,
+          waits.count, signals.count, 1, profile_operation);
+      profile_operation->event.payload_length = length;
+      iree_hal_amd_gpu_profile_operation_defer(profile_operation);
+    }
     iree_hal_memory_maintenance_enqueue(executor->service, &operation->entry);
   } else {
     iree_hal_amd_fabric_file_transfer_deinitialize(&operation->transfer);

@@ -768,6 +768,9 @@ enum iree_hal_profile_queue_event_type_e {
 
   // Batched virtual address mapping submitted through a queue operation.
   IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_MAP = 15u,
+
+  // Batched buffer transfers submitted as one queue operation.
+  IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER = 16u,
 };
 
 // Bitfield specifying properties of one queue event record.

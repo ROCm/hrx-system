@@ -109,6 +109,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amd::fabric::file_transfer
     iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::host_wait
     iree::hal::memory::maintenance
@@ -383,6 +384,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::kernarg
+    iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::publisher
   PUBLIC
@@ -671,6 +673,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::feedback
+    iree::hal::drivers::amd::gpu::profile
     iree::hal::drivers::amd::gpu::queue::allocation
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::continuation

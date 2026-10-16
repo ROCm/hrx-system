@@ -138,6 +138,9 @@ typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
   iree_hal_amd_gpu_pm4_record_block_t* head;
   // Current append block, never accessed by an invocation.
   iree_hal_amd_gpu_pm4_record_block_t* tail;
+  // Encoded records, maintained during append/rollback for constant-time
+  // queries.
+  iree_host_size_t record_count;
   // Consecutive barriers are combined before the next native command.
   iree_hal_amd_gpu_pm4_barrier_t pending_barrier;
   // Inline slot requirements established once while recording.
@@ -205,6 +208,11 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     iree_hal_command_buffer_release(&buffer->base);
   }
   return status;
+}
+
+iree_host_size_t iree_hal_amd_gpu_pm4_command_buffer_record_count(
+    iree_hal_command_buffer_t* base) {
+  return ((iree_hal_amd_gpu_pm4_command_buffer_t*)base)->record_count;
 }
 
 // Native-interface admission is separate from address commitment. The public
@@ -275,6 +283,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_append(
                    : 0,
   };
   block->length += byte_length;
+  ++buffer->record_count;
   *out_record = record;
   return iree_ok_status();
 }
@@ -409,6 +418,7 @@ static void iree_hal_amd_gpu_pm4_command_buffer_rollback(
   // No invocation can observe a partially initialized native record. Any
   // already retained direct resources remain in the recording's resource set.
   buffer->tail->length -= record->byte_length;
+  --buffer->record_count;
   if (buffer->tail != previous_tail) {
     iree_allocator_free(buffer->host_allocator, buffer->tail);
     buffer->tail = previous_tail;

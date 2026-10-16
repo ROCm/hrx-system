@@ -10,6 +10,7 @@
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/feedback.h"
+#include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 
@@ -81,6 +82,10 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
 iree_status_t iree_hal_amd_gpu_pm4_queue_assign_frontier(
     iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,
     iree_async_axis_t axis);
+
+// Borrows a device-owned profiling session until idle end detaches it.
+void iree_hal_amd_gpu_pm4_queue_set_profile(
+    iree_hal_queue_t* queue, iree_hal_amd_gpu_profile_t* profile);
 
 // Borrows the queue's bounded record observer for its device's sole completion
 // worker. A native failure fails accepted work but retains unproven GPU uses.
