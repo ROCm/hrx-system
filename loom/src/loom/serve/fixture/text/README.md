@@ -148,6 +148,7 @@ format does not change this path or ownership contract.
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
   //loom/src/loom/serve/service/text:source_chat_test \
+  //loom/src/loom/serve/service/text:tool_policy_test \
   //loom/src/loom/tooling/target/cpu/serve:text_client_test \
   //loom/src/loom/tooling/target/cpu/serve:source_text_service_test \
   //loom/src/loom/tooling/target/amdgpu/serve:source_text_service_test \
@@ -162,6 +163,13 @@ dense arithmetic. Elastic virtual-memory cases run separately on AMDGPU; the
 CPU and Vulkan suites exercise fixed-backed logical pooling. The CPU-only
 request test exercises source framing, exact token IDs and rejection before any
 device or checkpoint is needed.
+
+The independent [portable chat policy](portable_chat.loom) uses plain role
+labels and JSON function records. It checks complete tool transactions,
+decoded names and arguments, stable call IDs, and failure after an earlier
+valid call through the production source-policy caller. It has no numerical
+model and is separate from the retained-text deployment above.
+
 Exact output, not compilation alone, establishes the boundary. Learned models
 need their own numerical and performance evidence.
 
