@@ -438,29 +438,27 @@ static iree_status_t loom_run_hal_testbench_scenario_product_execute(
     return iree_ok_status();
   }
 
-  loom_run_hal_testbench_scenario_results_t results = {0};
-  // Correctness calls complete and decode sequentially. Reuse one record so
-  // staging never copies an entire batch's results for each individual call.
-  iree_status_t status =
-      loom_run_hal_testbench_scenario_results_initialize(product, 1, &results);
-  for (iree_host_size_t i = 0; i < call_count && iree_status_is_ok(status);
-       ++i) {
-    loom_testbench_product_call_t* call = &calls[i];
-    const loom_testbench_invocation_plan_t* dispatch =
-        product->provider.invocation;
-    status = loom_run_hal_testbench_actual_invoke(
-        &product->provider, dispatch, dispatch->workload_count,
-        call->call_parameters, dispatch->input_count,
-        loom_run_hal_testbench_scenario_result_arguments(product, &results, 0,
-                                                         call->arguments),
-        dispatch->result_count, call->results);
-    if (iree_status_is_ok(status)) {
-      status = loom_run_hal_testbench_scenario_results_read(product, &results,
-                                                            0, call->results);
-    }
+  loom_run_hal_testbench_scenario_batch_t batch = {0};
+  iree_status_t status = loom_run_hal_testbench_scenario_batch_prepare(
+      product, call_count, calls, &batch);
+  loom_run_hal_testbench_scenario_batch_execution_t context = {
+      .product = product,
+      .batch = &batch,
+  };
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_scenario_batch_execute(&context);
   }
-  loom_run_hal_testbench_scenario_results_deinitialize(&results,
-                                                       product->host_allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_staging_readback(
+        &product->provider.context->runtime, &batch.staging);
+  }
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < call_count;
+       ++i) {
+    status = loom_run_hal_testbench_scenario_results_read(
+        product, &batch.results, i, calls[i].results);
+  }
+  status = iree_status_join(
+      status, loom_run_hal_testbench_scenario_batch_deinitialize(&batch));
   return status;
 }
 
