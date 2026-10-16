@@ -11,6 +11,8 @@ func.def @check(%condition: i1) {
   func.return
 }
 
+// The codec facade has already decoded the pixels. Projection depends on their
+// layout and geometry, independently of the encoded container format.
 func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64) {
   %origin = index.constant 0 : offset
   %expected_bytes = index.constant 196672 : offset
@@ -19,7 +21,6 @@ func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i
   func.call @check(%exact_bytes) : (i1)
   %header = buffer.view %request[%origin] : buffer -> view<16xi32>
   %version = view.load %header[0] : view<16xi32> -> i32
-  %format = view.load %header[1] : view<16xi32> -> i32
   %width = view.load %header[2] : view<16xi32> -> i32
   %height = view.load %header[3] : view<16xi32> -> i32
   %display_width = view.load %header[4] : view<16xi32> -> i32
@@ -32,15 +33,11 @@ func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i
   %pixel_length = view.load %header[11] : view<16xi32> -> i32
   %pixel_format = view.load %header[12] : view<16xi32> -> i32
   %one = scalar.constant 1 : i32
-  %four = scalar.constant 4 : i32
   %geometry = scalar.constant 256 : i32
   %row_count = scalar.constant 64 : i32
   %pixel_bytes = scalar.constant 196608 : i32
   %rgb8 = scalar.constant 3 : i32
   %version_valid = scalar.cmpi eq, %version, %one : i32
-  %format_lower = scalar.cmpi uge, %format, %one : i32
-  %format_upper = scalar.cmpi ule, %format, %four : i32
-  %format_valid = scalar.andi %format_lower, %format_upper : i1
   %width_valid = scalar.cmpi eq, %width, %geometry : i32
   %height_valid = scalar.cmpi eq, %height, %geometry : i32
   %display_width_valid = scalar.cmpi eq, %display_width, %geometry : i32
@@ -54,13 +51,12 @@ func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i
   %pixel_offset_valid = scalar.cmpi eq, %pixel_offset, %header_bytes : i32
   %pixel_length_valid = scalar.cmpi eq, %pixel_length, %pixel_bytes : i32
   %pixel_format_valid = scalar.cmpi eq, %pixel_format, %rgb8 : i32
-  %valid0 = scalar.andi %version_valid, %format_valid : i1
   %valid1 = scalar.andi %width_valid, %height_valid : i1
   %valid2 = scalar.andi %display_width_valid, %display_height_valid : i1
   %valid3 = scalar.andi %orientation_valid, %rows_valid : i1
   %valid4 = scalar.andi %metadata_offset_valid, %metadata_empty : i1
   %valid5 = scalar.andi %pixel_offset_valid, %pixel_length_valid : i1
-  %valid6 = scalar.andi %valid0, %valid1 : i1
+  %valid6 = scalar.andi %version_valid, %valid1 : i1
   %valid7 = scalar.andi %valid2, %valid3 : i1
   %valid8 = scalar.andi %valid4, %valid5 : i1
   %valid9 = scalar.andi %valid6, %valid7 : i1
