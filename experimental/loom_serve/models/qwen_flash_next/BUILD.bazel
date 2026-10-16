@@ -58,6 +58,7 @@ loom_library(
             "flash_next.context_capacity": "2112",
             "flash_next.pool_capacity": "2112",
             "flash_next.token_count": "8",
+            "qsa.query_tile": "4",
         },
         execution_profiles = [
             AMDGPU_HARDWARE_PROFILE,

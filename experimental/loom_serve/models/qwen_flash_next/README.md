@@ -121,8 +121,8 @@ The package requires pooled cache storage, a context capacity divisible by 64,
 at most 32,768 tokens per epoch, and draft depth zero or three.
 
 The default document provides four execution rows, a 16K per-session context
-ceiling, a shared 32K-token page pool, 32-token epochs, and four checkpoint
-slots. KV storage is 25,344 bytes per pool token, including compressed sparse
+ceiling, a shared 32K-token page pool, a 16K-token epoch ceiling, and four
+checkpoint slots. KV storage is 25,344 bytes per pool token, including compressed sparse
 attention indexes. A recurrent endpoint is 115,651,840 bytes: 36 GDN states,
 PLE token and convolution history, and incomplete sparse-index blocks. Endpoint
 capacity therefore matters independently of KV capacity.
@@ -133,9 +133,9 @@ shape. Larger prompt batches can share more expert weights and amortize
 dispatch cost, but also keep the device occupied longer before newly ready
 requests receive their next turn. Measure first-text latency alongside total
 cohort throughput when selecting the capacity for interactive workloads.
-For large-prompt processing, set `definition.prefill_capacity` to `16384` in
-the deployment document; small requests still select their smaller prepared
-shapes.
+The default 16K epoch ceiling allows large prompts to reuse weights across
+many tokens. A lower ceiling trades that reuse for more frequent scheduler
+turns when sharing the device with latency-sensitive requests.
 
 MTP has a separate tradeoff: accepted proposals save target traversals, while
 drafting and verification add work. A configuration that improves one client's
@@ -174,6 +174,23 @@ experts and ten selected experts plus a shared expert in each layer. Dense
 projections and embeddings use Q8_0; index projections use BF16. Accumulation is
 F32, with explicit BF16 activation publication boundaries. The output head
 projects only rows that require token selection.
+
+Sparse index scoring shares four queries and 64 pooled keys per workgroup.
+The four heads of each query form the rows of a BF16 matrix product, followed
+by F32 ReLU and head summation. A span dimension establishes common resident
+cache ownership before sharing keys. Neighboring spans that cross a query tile
+publish disjoint score rows; each query retains its own causal extent. The
+16-by-136 query panel and 64-by-136 key panel occupy 21,760 bytes of LDS.
+Capacities below 32 retain the one-wave dot-product scorer.
+
+By default, scoring and exact top-512 selection process 512 queries at a time
+while the complete epoch can contain 16K or more tokens. The score workspace consumes
+`min(epoch_capacity, qsa.query_tile) * context_capacity` bytes: 16 MiB at 32K
+context or 64 MiB at 128K with the default 512-query cohort. Selection finishes
+before that workspace is reused. Dense queries do not read scores, and masked
+cells need no clearing. Larger cohorts expose parallel selection work without
+allocating a whole-epoch score matrix. The selector preserves ordered logical
+IDs and the earliest logical block on exact score ties.
 
 Sparse attention keeps each query's exact top-512 four-token blocks and its
 incomplete causal tail. At capacities of at least 32 tokens, one workgroup
@@ -261,10 +278,10 @@ width `R`, the allocation bounds records by
 `min(10 * C, floor(10 * C / R) + 512)`: at most one record per route, or full
 records plus one partial record per expert. Rank scratch uses `40 * C` bytes;
 the record table uses four header bytes plus `4 * (R + 2)` bytes per allocated
-record. Together they occupy 8,964 bytes at the default capacity of 32 and
-1,587,204 bytes at capacity 16,384. Only live records are consumed, and only
-their unused tail fields require initialization, so storage reuse needs no
-global clear.
+record. Together they occupy 8,964 bytes at capacity 32 and
+1,587,204 bytes at the default maximum capacity of 16,384. Only live records
+are consumed, and only their unused tail fields require initialization, so
+storage reuse needs no global clear.
 
 The shared expert uses the same contraction with contiguous token rows and
 original Q8_0 gate/up weights. At capacities of 64 or more, 64-token by
