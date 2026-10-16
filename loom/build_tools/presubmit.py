@@ -341,22 +341,18 @@ def run_cmake_source_lint(*, files_from: str | None) -> bool:
     return public_lint_ok and repository_lint_ok
 
 
-def bazel_test_command(target_pattern_file: Path | None = None) -> list[str]:
-    command = [
+def bazel_test_command(target_pattern_file: Path) -> list[str]:
+    return [
         "bazel",
         "test",
         *BAZEL_TEST_CONFIGURATION_ARGS,
         *project_presubmit.bazel_config_args(),
         "--test_tag_filters=-manual",
+        # Query-expanded tests have the same compatibility selection semantics
+        # as the full suite, not user-explicit target intent.
+        "--skip_incompatible_explicit_targets",
+        f"--target_pattern_file={target_pattern_file}",
     ]
-    if target_pattern_file is None:
-        command.append(BAZEL_FULL_TEST_TARGET)
-    else:
-        # Query-expanded affected tests have the same compatibility selection
-        # semantics as the full suite, not user-explicit target intent.
-        command.append("--skip_incompatible_explicit_targets")
-        command.append(f"--target_pattern_file={target_pattern_file}")
-    return command
 
 
 def bazel_source_label(path: str) -> str | None:
@@ -405,13 +401,14 @@ class BazelDependencyQueryError(RuntimeError):
     pass
 
 
-def query_affected_bazel_test_targets(source_labels: set[str]) -> list[str]:
+def is_presubmit_test_target(label: str) -> bool:
+    package = label.partition(":")[0].removeprefix("//")
+    return ".notes" not in PurePosixPath(package).parts
+
+
+def query_bazel_test_targets() -> set[str]:
     with tempfile.TemporaryDirectory(prefix="loom-bazel-affected-") as temp_dir:
         temp_path = Path(temp_dir)
-        # Enumerating concrete test rules first keeps cquery from analyzing
-        # non-test support targets under //loom/... that are intentionally
-        # invalid outside their analysis tests. The configured graph then
-        # preserves select() decisions made by the presubmit configuration.
         test_targets_path = temp_path / "test_targets.txt"
         if not run_command(
             [
@@ -427,11 +424,21 @@ def query_affected_bazel_test_targets(source_labels: set[str]) -> list[str]:
         test_targets = {
             line.strip()
             for line in test_targets_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
+            if line.strip() and is_presubmit_test_target(line.strip())
         }
         if not test_targets:
             raise BazelDependencyQueryError("Bazel reported no Loom test targets")
+        return test_targets
 
+
+def query_affected_bazel_test_targets(source_labels: set[str]) -> list[str]:
+    # Enumerating concrete test rules first keeps cquery from analyzing
+    # non-test support targets under //loom/... that are intentionally invalid
+    # outside their analysis tests. The configured graph then preserves
+    # select() decisions made by the presubmit configuration.
+    test_targets = query_bazel_test_targets()
+    with tempfile.TemporaryDirectory(prefix="loom-bazel-affected-") as temp_dir:
+        temp_path = Path(temp_dir)
         query_path = temp_path / "test_dependencies.query"
         query_path.write_text(
             affected_bazel_test_query(test_targets, source_labels),
@@ -500,11 +507,11 @@ def selected_bazel_test_targets(paths: list[str]) -> list[str] | None:
     return query_affected_bazel_test_targets(source_labels)
 
 
-def run_affected_bazel_tests(targets: list[str]) -> bool:
+def run_bazel_test_targets(targets: list[str] | set[str]) -> bool:
     with tempfile.TemporaryDirectory(prefix="loom-bazel-test-targets-") as temp_dir:
         target_file_path = Path(temp_dir) / "targets.txt"
         target_file_path.write_text(
-            "".join(f"{target}\n" for target in targets), encoding="utf-8"
+            "".join(f"{target}\n" for target in sorted(targets)), encoding="utf-8"
         )
         return run_command(
             bazel_test_command(target_file_path),
@@ -514,22 +521,23 @@ def run_affected_bazel_tests(targets: list[str]) -> bool:
 
 
 def run_bazel_tests(files_from: str | None = None) -> bool:
-    if files_from is None:
-        return run_command(bazel_test_command(), "Bazel tests")
-
     try:
-        selected_targets = selected_bazel_test_targets(selected_files(files_from))
+        selected_targets = (
+            None
+            if files_from is None
+            else selected_bazel_test_targets(selected_files(files_from))
+        )
+        if selected_targets is None:
+            selected_targets = query_bazel_test_targets()
     except BazelDependencyQueryError as exc:
         print(f"loom presubmit: {exc}", file=sys.stderr)
         return False
-    if selected_targets is None:
-        return run_command(bazel_test_command(), "Bazel tests")
     if not selected_targets:
         print("loom presubmit: no Bazel tests depend on the selected files")
         return True
     # Bazel reports exit 4 when every selected test is excluded by the resource
     # and manual tag filters.
-    return run_affected_bazel_tests(selected_targets)
+    return run_bazel_test_targets(selected_targets)
 
 
 def run_cmake_tests() -> bool:

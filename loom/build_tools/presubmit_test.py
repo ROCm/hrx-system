@@ -47,10 +47,11 @@ class LoomPresubmitTest(unittest.TestCase):
         self.assertIn("--//loom/config/import:enable=cxx", source_options)
 
     def test_bazel_tests_preserve_manual_filter_without_hardware_blacklists(self):
-        command = self.presubmit.bazel_test_command()
+        target_pattern_file = Path("/tmp/loom-tests")
+        command = self.presubmit.bazel_test_command(target_pattern_file)
 
         self.assertEqual(command[:3], ["bazel", "test", "--config=presubmit"])
-        self.assertEqual(command[-1], "//loom/...")
+        self.assertEqual(command[-1], f"--target_pattern_file={target_pattern_file}")
         self.assertIn(
             "--//loom/config/target:enable=amdgpu,spirv,vm,wasm,xdna,x86",
             command,
@@ -61,30 +62,23 @@ class LoomPresubmitTest(unittest.TestCase):
             arg for arg in command if arg.startswith("--test_tag_filters=")
         )
         self.assertEqual(tag_filter, "--test_tag_filters=-manual")
-        self.assertNotIn("--skip_incompatible_explicit_targets", command)
-
-    def test_bazel_test_command_reads_affected_targets_from_file(self):
-        target_pattern_file = Path("/tmp/loom-affected-tests")
-        command = self.presubmit.bazel_test_command(target_pattern_file)
-
-        self.assertEqual(command[-1], f"--target_pattern_file={target_pattern_file}")
         self.assertIn("--skip_incompatible_explicit_targets", command)
         self.assertNotIn("//loom/...", command)
-        self.assertIn("--//loom/config/import:enable=cxx", command)
 
-    def test_full_suite_requires_tests(self):
-        for exit_code in (0, 1, 3, 4):
-            with (
-                self.subTest(exit_code=exit_code),
-                mock.patch.object(
-                    self.presubmit.subprocess,
-                    "run",
-                    return_value=subprocess.CompletedProcess([], exit_code),
-                ) as run,
-                contextlib.redirect_stdout(io.StringIO()),
-            ):
-                self.assertEqual(self.presubmit.run_bazel_tests(), exit_code == 0)
-                self.assertEqual(run.call_args.args[0][-1], "//loom/...")
+    def test_full_suite_runs_the_discovered_test_set(self):
+        targets = {"//loom/a:a_test", "//loom/b:b_test"}
+        with (
+            mock.patch.object(
+                self.presubmit, "query_bazel_test_targets", return_value=targets
+            ) as query_tests,
+            mock.patch.object(
+                self.presubmit, "run_bazel_test_targets", return_value=True
+            ) as run_tests,
+        ):
+            self.assertTrue(self.presubmit.run_bazel_tests())
+
+        query_tests.assert_called_once_with()
+        run_tests.assert_called_once_with(targets)
 
     def test_bazel_tests_use_selected_execution_policy(self):
         with mock.patch.dict(
@@ -96,7 +90,7 @@ class LoomPresubmitTest(unittest.TestCase):
             },
             clear=True,
         ):
-            command = self.presubmit.bazel_test_command()
+            command = self.presubmit.bazel_test_command(Path("/tmp/loom-tests"))
 
         self.assertIn("--config=remote-execution", command)
         self.assertIn("--config=local-tests", command)
@@ -117,6 +111,17 @@ class LoomPresubmitTest(unittest.TestCase):
                     ),
                     "//loom/src/loom/example:test/example.loom-test",
                 )
+
+    def test_presubmit_test_targets_exclude_notes_packages(self):
+        self.assertFalse(self.presubmit.is_presubmit_test_target("//loom/.notes:probe"))
+        self.assertFalse(
+            self.presubmit.is_presubmit_test_target(
+                "//loom/src/loom/example/.notes/probe:test"
+            )
+        )
+        self.assertTrue(
+            self.presubmit.is_presubmit_test_target("//loom/src/loom/example:.notes")
+        )
 
     def test_affected_query_filters_sources_in_the_configured_test_closure(self):
         query = self.presubmit.affected_bazel_test_query(
@@ -205,7 +210,8 @@ class LoomPresubmitTest(unittest.TestCase):
             if description == "Discover Bazel test targets":
                 output_path.write_text(
                     "//loom/src/loom/ops/vector/test:canonicalize\n"
-                    "//loom/src/loom/target/arch/amdgpu:source_low_memory_global\n",
+                    "//loom/src/loom/target/arch/amdgpu:source_low_memory_global\n"
+                    "//loom/src/loom/serve/.notes/probe:local_test\n",
                     encoding="utf-8",
                 )
             elif description == "Resolve Bazel test dependencies":
@@ -270,6 +276,7 @@ class LoomPresubmitTest(unittest.TestCase):
             "//loom/src/loom/target/arch/amdgpu:source_low_memory_global",
             observed_query,
         )
+        self.assertNotIn("/.notes/", observed_query)
 
     def test_affected_query_distinguishes_empty_and_malformed_results(self):
         for result in ("", "not a configured target\n"):
@@ -342,7 +349,7 @@ class LoomPresubmitTest(unittest.TestCase):
 
         with mock.patch.object(self.presubmit, "run_command", side_effect=run_tests):
             self.assertTrue(
-                self.presubmit.run_affected_bazel_tests(
+                self.presubmit.run_bazel_test_targets(
                     ["//loom/a:a_test", "//loom/b:b_test"]
                 )
             )
