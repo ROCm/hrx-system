@@ -30,6 +30,9 @@ static iree_status_t loom_scf_preserve_value_name(
 
 static bool loom_scf_for_has_zero_trip_count(loom_op_t* op,
                                              loom_rewriter_t* rewriter) {
+  if (loom_scf_for_lower_bound(op) == loom_scf_for_upper_bound(op)) {
+    return true;
+  }
   loom_value_facts_t lower_bound =
       loom_rewriter_value_facts(rewriter, loom_scf_for_lower_bound(op));
   loom_value_facts_t upper_bound =

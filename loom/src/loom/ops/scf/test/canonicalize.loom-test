@@ -1135,6 +1135,63 @@ func.def @for_zero_trip_returns_initial_value(%buffer: buffer, %offset: offset, 
 
 // ====
 
+// Identical runtime index bounds prove an empty domain without range facts.
+// Both carried values forward even when the body changes them and has effects.
+func.def @for_identical_runtime_index_bounds(%output: view<1xf32>, %bound: index, %step: index, %init: f32, %count: i32) -> (f32, i32) {
+  %value, %iterations = scf.for %iv = [%bound to %bound step %step](%acc = %init : f32, %n = %count : i32) -> (f32, i32) {
+    %increment = scalar.constant 1.0 : f32
+    %next = scalar.addf %acc, %increment : f32
+    %count_increment = scalar.constant 1 : i32
+    %next_count = scalar.addi %n, %count_increment : i32
+    view.store %next, %output[0] : f32, view<1xf32>
+    scf.yield %next, %next_count : f32, i32
+  }
+  func.return %value, %iterations : f32, i32
+}
+
+// ----
+func.def @for_identical_runtime_index_bounds(%output: view<1xf32>, %bound: index, %step: index, %init: f32, %count: i32) -> (f32, i32) {
+  func.return %init, %count : f32, i32
+}
+
+// ====
+
+// Physical offset domains have the same exclusive-bound identity rule.
+func.def @for_identical_runtime_offset_bounds(%output: view<1xf32>, %bound: offset, %value: f32) {
+  %step = index.constant 4 : offset
+  scf.for %iv = [%bound to %bound step %step] {
+    view.store %value, %output[0] : f32, view<1xf32>
+  }
+  func.return
+}
+
+// ----
+func.def @for_identical_runtime_offset_bounds(%output: view<1xf32>, %bound: offset, %value: f32) {
+  func.return
+}
+
+// ====
+
+// Distinct SSA bounds with the same unknown range do not establish emptiness.
+func.def @for_distinct_runtime_bounds(%output: view<1xf32>, %lower: index, %upper: index, %value: f32) {
+  %step = index.constant 1 : index
+  scf.for %iv = [%lower to %upper step %step] {
+    view.store %value, %output[0] : f32, view<1xf32>
+  }
+  func.return
+}
+
+// ----
+func.def @for_distinct_runtime_bounds(%output: view<1xf32>, %lower: index, %upper: index, %value: f32) {
+  %step = index.constant 1 : index
+  scf.for %iv = [%lower to %upper step %step] {
+    view.store %value, %output[0] : f32, view<1xf32>
+  }
+  func.return
+}
+
+// ====
+
 // A fact-proven single-trip resultless loop inlines its body once. The IV
 // substitution feeds ordinary index cleanup, so the add-by-zero address math
 // disappears after promotion.
