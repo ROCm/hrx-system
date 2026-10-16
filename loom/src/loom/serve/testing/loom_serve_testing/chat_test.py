@@ -123,6 +123,49 @@ class ChatTest(unittest.TestCase):
         self.assertEqual(len(result["output_chunk_ms"]), 3)
         self.assertTrue(requests[0]["body"]["enable_thinking"])
 
+    def test_content_observer_preserves_delta_order_and_receipt_times(self):
+        observed = []
+        payload = stream(
+            event({"role": "assistant"}),
+            event({"reasoning_content": "Check the answer."}),
+            event({"content": "héllo "}),
+            event({"content": "world"}, "stop", usage={"completion_tokens": 9}),
+        )
+        with endpoint(payload) as (address, _):
+            result = request(
+                address,
+                "agent",
+                [],
+                32,
+                model="reviewer",
+                on_content=lambda text, received: observed.append((text, received)),
+            )
+        self.assertEqual([text for text, _ in observed], ["héllo ", "world"])
+        self.assertEqual(result["text"], "héllo world")
+        self.assertLessEqual(result["started_ns"], observed[0][1])
+        self.assertLessEqual(observed[0][1], observed[1][1])
+        self.assertLessEqual(observed[1][1], result["completed_ns"])
+        self.assertEqual(
+            result["first_text_ms"],
+            (observed[0][1] - result["started_ns"]) / 1e6,
+        )
+        self.assertEqual(
+            result["output_chunk_ms"][1:],
+            [(received - result["started_ns"]) / 1e6 for _, received in observed],
+        )
+
+    def test_content_observer_failure_aborts_the_sample(self):
+        def reject(text, received):
+            raise ValueError("downstream consumer stopped")
+
+        payload = stream(
+            event({"content": "partial"}),
+            event({"content": "tail"}, "stop", usage={"completion_tokens": 2}),
+        )
+        with endpoint(payload) as (address, _):
+            with self.assertRaisesRegex(ValueError, "downstream consumer stopped"):
+                request(address, "agent", [], 32, model="reviewer", on_content=reject)
+
     def test_tool_fragments_are_joined_without_inventing_text_latency(self):
         tools = [{"type": "function", "function": {"name": "read"}}]
         usage = {"prompt_tokens": 12, "completion_tokens": 9}
