@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "loom/serve/service/text/response.h"
+#include "loom/serve/service/text/http.h"
 
 iree_status_t loom_serve_text_input_count_initialize(
     iree_host_size_t capacity, iree_allocator_t host_allocator,
@@ -43,7 +43,7 @@ iree_status_t loom_serve_text_input_count_enqueue(
                                             &header) ||
       loom_serve_http_request_lookup_header(
           request, IREE_SV("X-Loom-Checkpoint"), &header)) {
-    return loom_serve_text_response_reject(
+    return loom_serve_text_http_reject(
         telemetry, connection, receipt, 400, "Bad Request",
         iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                          "input counting is stateless; omit X-Loom-Session "
@@ -51,7 +51,7 @@ iree_status_t loom_serve_text_input_count_enqueue(
         queue->host_allocator);
   }
   if (queue->count == queue->capacity) {
-    return loom_serve_text_response_reject(
+    return loom_serve_text_http_reject(
         telemetry, connection, receipt, 503, "Service Unavailable",
         iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                          "input counting queue is full"),
@@ -118,7 +118,7 @@ iree_status_t loom_serve_text_input_count_complete(
   if (request_error) {
     const bool unsupported = iree_status_is_unimplemented(status);
     const bool exhausted = iree_status_is_resource_exhausted(status);
-    return loom_serve_text_response_reject(telemetry, request.connection,
+    return loom_serve_text_http_reject(telemetry, request.connection,
                                            request.receipt,
                                            unsupported ? 501
                                            : exhausted ? 503

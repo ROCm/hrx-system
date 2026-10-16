@@ -613,6 +613,19 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    consumer
+  HDRS
+    "consumer.h"
+  DEPS
+    ::chat
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     session
   HDRS
     "session.h"
@@ -620,6 +633,7 @@ loom_cc_library(
     "session.c"
   DEPS
     ::chat
+    ::consumer
     ::media_projector
     ::model
     iree::base
@@ -627,9 +641,6 @@ loom_cc_library(
     loom::serve::runtime::host::clock
     loom::serve::service::inspection
     loom::serve::telemetry::record
-    loom::serve::transport::http::server
-    loom::util::json
-    loom::util::stream
   PUBLIC
 )
 endif()
@@ -770,14 +781,14 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
-    response
+    http
   HDRS
-    "response.h"
+    "http.h"
   SRCS
-    "response.c"
+    "http.c"
   DEPS
     ::chat
-    ::session
+    ::consumer
     ::telemetry
     iree::base
     loom::serve::telemetry::record
@@ -785,6 +796,30 @@ loom_cc_library(
     loom::util::json
     loom::util::stream
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    http_test
+  SRCS
+    "http_test.cc"
+  DEPS
+    ::chat
+    ::consumer
+    ::http
+    ::telemetry
+    iree::async::util::proactor_pool
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::telemetry::stream
+    loom::serve::testing::http_harness
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
 )
 endif()
 
@@ -798,8 +833,8 @@ loom_cc_library(
     "checkpoint_request.c"
   DEPS
     ::checkpoint_registry
+    ::http
     ::model
-    ::response
     ::session
     ::telemetry
     iree::base
@@ -866,15 +901,14 @@ loom_cc_library(
   DEPS
     ::chat
     ::checkpoint_registry
+    ::consumer
     ::input
     ::media_projector
     ::model
-    ::response
     ::schedule
     ::telemetry
     iree::base
     loom::serve::telemetry::stream
-    loom::serve::transport::http::server
   PUBLIC
 )
 endif()
@@ -891,11 +925,11 @@ loom_cc_library(
     ::admission
     ::chat
     ::checkpoint_registry
+    ::http
     ::media_projector
     ::model
     ::pending_request
     ::prefix_cache
-    ::response
     ::session
     ::session_cache
     ::telemetry
@@ -918,7 +952,7 @@ loom_cc_library(
     "input_count.c"
   DEPS
     ::chat
-    ::response
+    ::http
     ::telemetry
     iree::base
     loom::serve::telemetry::stream
@@ -941,8 +975,10 @@ loom_cc_library(
     ::chat
     ::checkpoint_registry
     ::checkpoint_request
+    ::consumer
     ::epoch
     ::heartbeat
+    ::http
     ::input
     ::input_count
     ::media_projector
@@ -953,7 +989,6 @@ loom_cc_library(
     ::prefix_cache
     ::readiness
     ::reconfiguration
-    ::response
     ::schedule
     ::session
     ::session_cache
