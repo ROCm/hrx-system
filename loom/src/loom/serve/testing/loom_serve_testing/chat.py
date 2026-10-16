@@ -21,6 +21,7 @@ def request(
     tools=None,
     checkpoint=None,
     enable_thinking=False,
+    on_content=None,
 ):
     """Consume one greedy chat stream and measure its complete HTTP lifetime.
 
@@ -44,15 +45,20 @@ def request(
     headers = {"X-Loom-Session": session}
     if checkpoint is not None:
         headers["X-Loom-Checkpoint"] = checkpoint
-    return request_body(address, body, headers)
+    return request_body(address, body, headers, on_content=on_content)
 
 
-def request_body(address, body, headers=None):
+def request_body(address, body, headers=None, *, on_content=None):
     """Measure a complete single-choice stream without rewriting its request.
 
     Unlike the greedy convenience caller, this path preserves all model policy
     and media fields in a captured request. The address is an HTTP(S) origin;
     the caller owns its validation and any outer deadline.
+
+    on_content observes each nonempty answer delta and its absolute performance
+    clock timestamp in nanoseconds. Reasoning and tool fragments remain separate.
+    Calls are synchronous, so observer work contributes to measured request time.
+    Observer exceptions propagate after closing the connection.
     """
     connection_type = (
         http.client.HTTPSConnection
@@ -103,11 +109,14 @@ def request_body(address, body, headers=None):
                 content = delta.get("content", "")
                 thought = delta.get("reasoning_content", "")
                 if content or thought or delta.get("tool_calls"):
-                    chunks.append((time.perf_counter_ns() - start) / 1e6)
+                    received = time.perf_counter_ns()
+                    chunks.append((received - start) / 1e6)
                 if content:
                     if first is None:
-                        first = time.perf_counter_ns()
+                        first = received
                     text.append(content)
+                    if on_content is not None:
+                        on_content(content, received)
                 if thought:
                     reasoning.append(thought)
                 for fragment in delta.get("tool_calls", []):
