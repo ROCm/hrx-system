@@ -57,7 +57,7 @@ func.def @qwen38_vision_minimum_tiles(%axis: i32, %other: i32) -> (i32) {
 // ceils sqrt(64 * axis / other). These are the processor's continuous scale
 // formulas evaluated directly on the integer grid. The 4096-pixel axis ceiling
 // additionally bounds enlargement near a rounded-area reduction boundary.
-func.def @qwen38_vision_geometry(%width: i32, %height: i32, %maximum_tokens: i32) -> (i32, i32) {
+func.def public @qwen38_vision_geometry(%width: i32, %height: i32, %maximum_tokens: i32) -> (i32, i32) {
   %rounded_width = func.call @qwen38_vision_nearest_tiles(%width) : (i32) -> (i32)
   %rounded_height = func.call @qwen38_vision_nearest_tiles(%height) : (i32) -> (i32)
   %rounded_tokens = scalar.muli %rounded_width, %rounded_height : i32
