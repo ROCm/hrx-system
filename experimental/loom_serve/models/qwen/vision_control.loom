@@ -1,88 +1,52 @@
-func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
-
 func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
 
-global.rodata.def @invalid_request = bytes("5177656e20766973696f6e2070726f6a6563746f72207265717569726573206f6e652075707269676874203235367832353620696d616765")
+func.decl @qwen38_vision_pixel_packet(%request: buffer) -> (buffer)
 
-func.def @check(%condition: i1) {
-  %condition32 = scalar.extui %condition : i1 to i32
-  %diagnostic = global.load @invalid_request : buffer
-  func.call @require(%condition32, %diagnostic) : (i32, buffer)
-  func.return
-}
+func.decl @qwen38_vision_stage(%height: i64, %width: i64, %count: i64) -> (i32)
 
-// The codec facade has already decoded the pixels. Projection depends on their
-// layout and geometry, independently of the encoded container format.
+// Chat policy owns the selected geometry. Native admission owns codec bounds;
+// only images with the same selected shape share a projection cohort.
 func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64) {
   %origin = index.constant 0 : offset
-  %expected_bytes = index.constant 196672 : offset
-  %request_bytes = buffer.length %request
-  %exact_bytes = index.cmp eq, %request_bytes, %expected_bytes : offset
-  func.call @check(%exact_bytes) : (i1)
   %header = buffer.view %request[%origin] : buffer -> view<16xi32>
-  %version = view.load %header[0] : view<16xi32> -> i32
-  %width = view.load %header[2] : view<16xi32> -> i32
-  %height = view.load %header[3] : view<16xi32> -> i32
-  %display_width = view.load %header[4] : view<16xi32> -> i32
-  %display_height = view.load %header[5] : view<16xi32> -> i32
-  %orientation = view.load %header[6] : view<16xi32> -> i32
-  %rows = view.load %header[7] : view<16xi32> -> i32
-  %metadata_offset = view.load %header[8] : view<16xi32> -> i32
-  %metadata_length = view.load %header[9] : view<16xi32> -> i32
-  %pixel_offset = view.load %header[10] : view<16xi32> -> i32
-  %pixel_length = view.load %header[11] : view<16xi32> -> i32
-  %pixel_format = view.load %header[12] : view<16xi32> -> i32
-  %one = scalar.constant 1 : i32
-  %geometry = scalar.constant 256 : i32
-  %row_count = scalar.constant 64 : i32
-  %pixel_bytes = scalar.constant 196608 : i32
-  %rgb8 = scalar.constant 3 : i32
-  %version_valid = scalar.cmpi eq, %version, %one : i32
-  %width_valid = scalar.cmpi eq, %width, %geometry : i32
-  %height_valid = scalar.cmpi eq, %height, %geometry : i32
-  %display_width_valid = scalar.cmpi eq, %display_width, %geometry : i32
-  %display_height_valid = scalar.cmpi eq, %display_height, %geometry : i32
-  %orientation_valid = scalar.cmpi eq, %orientation, %one : i32
-  %rows_valid = scalar.cmpi eq, %rows, %row_count : i32
-  %header_bytes = scalar.constant 64 : i32
-  %metadata_offset_valid = scalar.cmpi eq, %metadata_offset, %header_bytes : i32
-  %zero = scalar.constant 0 : i32
-  %metadata_empty = scalar.cmpi eq, %metadata_length, %zero : i32
-  %pixel_offset_valid = scalar.cmpi eq, %pixel_offset, %header_bytes : i32
-  %pixel_length_valid = scalar.cmpi eq, %pixel_length, %pixel_bytes : i32
-  %pixel_format_valid = scalar.cmpi eq, %pixel_format, %rgb8 : i32
-  %valid1 = scalar.andi %width_valid, %height_valid : i1
-  %valid2 = scalar.andi %display_width_valid, %display_height_valid : i1
-  %valid3 = scalar.andi %orientation_valid, %rows_valid : i1
-  %valid4 = scalar.andi %metadata_offset_valid, %metadata_empty : i1
-  %valid5 = scalar.andi %pixel_offset_valid, %pixel_length_valid : i1
-  %valid6 = scalar.andi %version_valid, %valid1 : i1
-  %valid7 = scalar.andi %valid2, %valid3 : i1
-  %valid8 = scalar.andi %valid4, %valid5 : i1
-  %valid9 = scalar.andi %valid6, %valid7 : i1
-  %geometry_valid = scalar.andi %valid9, %valid8 : i1
-  %valid = scalar.andi %geometry_valid, %pixel_format_valid : i1
-  func.call @check(%valid) : (i1)
+  %metadata_word = view.load %header[8] : view<16xi32> -> i32
+  %metadata_offset = index.cast %metadata_word : i32 to offset
+  %metadata = buffer.view %request[%metadata_offset] : buffer -> view<2xi32>
+  %width = view.load %metadata[0] : view<2xi32> -> i32
+  %height = view.load %metadata[1] : view<2xi32> -> i32
+  %width64 = scalar.extui %width : i32 to i64
+  %height64 = scalar.extui %height : i32 to i64
+  %shift = scalar.constant 32 : i64
+  %width_bits = scalar.shli %width64, %shift : i64
+  %tag = scalar.ori %width_bits, %height64 : i64
+  %packet = func.call @qwen38_vision_pixel_packet(%request) : (buffer) -> (buffer)
   %units = scalar.constant 1 : i64
-  %tag = scalar.constant 0 : i64
-  func.return %request, %units, %tag : buffer, i64, i64
+  func.return %packet, %units, %tag : buffer, i64, i64
 }
 
-// Native admission supplies one through four already validated packets in
-// stable request order. Every image has the same byte extent and 64 output rows,
-// so the upload can retain that packed storage without a second pixel copy.
+// The native packer transfers ownership of its exact upload. Fill the reserved
+// directory in place; the original decoded planes need no further cohort copy.
 func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
   %range_bytes = buffer.length %ranges
   %range_bytes64 = index.cast %range_bytes : offset to i64
   %sixteen = scalar.constant 16 : i64
   %count_value = scalar.divui %range_bytes64, %sixteen : i64
   %count64 = scalar.assume %count_value [range(%count_value, 1, 4)] : i64
   %count = index.cast %count64 : i64 to index
-  %row_count = index.mul %count, %c64 : index
+  %tag_words = buffer.view %tags[%origin] : buffer -> view<[%count]xi64>
+  %tag = view.load %tag_words[0] : view<[%count]xi64> -> i64
+  %shift = scalar.constant 32 : i64
+  %mask = scalar.constant 4294967295 : i64
+  %width64 = scalar.shrui %tag, %shift : i64
+  %height64 = scalar.andi %tag, %mask : i64
+  %pixels = scalar.muli %width64, %height64 : i64
+  %token_pixels = scalar.constant 1024 : i64
+  %image_rows = scalar.divui %pixels, %token_pixels : i64
+  %image_row_count = index.cast %image_rows : i64 to index
+  %row_count = index.mul %count, %image_row_count : index
   %rows64 = index.cast %row_count : index to i64
   %header_bytes = index.constant 32 : offset
   %request_stride = index.constant 24 : offset
@@ -93,15 +57,24 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
   %plan_bytes = index.add %row_offset, %row_bytes : offset
   %plan = buffer.alloca<private> align(8) %plan_bytes : buffer
   %header = buffer.view %plan[%origin] : buffer -> view<4xi64>
-  %image_bytes = scalar.constant 1310720 : i64
+  %feature_bytes = scalar.constant 20480 : i64
+  %image_bytes = scalar.muli %image_rows, %feature_bytes : i64
   %output_bytes = scalar.muli %count64, %image_bytes : i64
   view.store %output_bytes, %header[0] : i64, view<4xi64>
   view.store %output_bytes, %header[1] : i64, view<4xi64>
   view.store %count64, %header[2] : i64, view<4xi64>
   view.store %rows64, %header[3] : i64, view<4xi64>
   %requests = buffer.view %plan[%header_bytes] : buffer -> view<[%count]x3xi64>
-  %image_rows = scalar.constant 64 : i64
+  %ranges_view = buffer.view %ranges[%origin] : buffer -> view<[%count]x2xi64>
+  %directory = buffer.view %packed[%origin] : buffer -> view<4x2xi64>
+  %prefix_bytes = scalar.constant 64 : i64
   scf.for %i = [%c0 to %count step %c1] {
+    %packet_offset = view.load %ranges_view[%i, 0] : view<[%count]x2xi64> -> i64
+    %packet_length = view.load %ranges_view[%i, 1] : view<[%count]x2xi64> -> i64
+    %header_offset = scalar.addi %packet_offset, %prefix_bytes : i64
+    %header_length = scalar.subi %packet_length, %prefix_bytes : i64
+    view.store %header_offset, %directory[%i, 0] : i64, view<4x2xi64>
+    view.store %header_length, %directory[%i, 1] : i64, view<4x2xi64>
     %i64 = index.cast %i : index to i64
     %first = scalar.muli %i64, %image_rows : i64
     view.store %first, %requests[%i, 0] : i64, view<[%count]x3xi64>
@@ -109,7 +82,6 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
     view.store %image_rows, %requests[%i, 2] : i64, view<[%count]x3xi64>
   }
   %records = buffer.view %plan[%row_offset] : buffer -> view<[%row_count]x2xi64>
-  %feature_bytes = scalar.constant 20480 : i64
   %elements = scalar.constant 5120 : i64
   scf.for %i = [%c0 to %row_count step %c1] {
     %i64 = index.cast %i : index to i64
@@ -117,10 +89,7 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
     view.store %offset, %records[%i, 0] : i64, view<[%row_count]x2xi64>
     view.store %elements, %records[%i, 1] : i64, view<[%row_count]x2xi64>
   }
-  // Preparation declares the exact cohort sizes in increasing order.
-  %one = scalar.constant 1 : i64
-  %stage64 = scalar.subi %count64, %one : i64
-  %stage = scalar.trunci %stage64 : i64 to i32
+  %stage = func.call @qwen38_vision_stage(%height64, %width64, %count64) : (i64, i64, i64) -> (i32)
   func.return %stage, %packed, %plan : i32, buffer, buffer
 }
 

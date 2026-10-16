@@ -69,14 +69,19 @@ the source policy formats and parses the model's XML tool-call protocol.
 
 ## Image chat
 
-This projector accepts upright 256×256 RGB images, up to four in the complete
-conversation, with at most 1 MiB of compressed data per image. Other dimensions,
-orientation transforms and alpha channels are rejected; the package does not
-resize or convert them implicitly. PAM input is built in; PNG, JPEG, GIF and
-WebP availability follows the server's enabled codecs. Projection consumes the
-decoded RGB pixels independently of their original container format.
+Send images at their original size. The projector applies orientation, composites
+alpha over white, and performs antialiased resizing on the device before feature
+extraction. It preserves aspect ratio subject to 32-pixel alignment, using at most
+1,024 image tokens per image by default. Selected shapes compile on demand and
+reuse cached executables; different image sizes need no separate model package.
 
-For an RGB PNG named `image.png`, send an ordinary OpenAI-style image part:
+The complete conversation can contain up to four images. Each input may be up to
+4096×4096 pixels and 64 MiB compressed, with an aspect ratio no greater than 200:1.
+PAM input is built in; PNG, JPEG, GIF and WebP availability follows the server's
+enabled codecs. RGB and RGBA pixels use the same projection path independently
+of their original container format.
+
+For a PNG named `image.png`, send an ordinary OpenAI-style image part:
 
 ```sh
 base64 < image.png | tr -d '\n' | jq -Rs '{
@@ -91,6 +96,12 @@ base64 < image.png | tr -d '\n' | jq -Rs '{
   -H 'Content-Type: application/json' -H 'X-Loom-Session: image-example' \
   --data-binary @-
 ```
+
+Set `"model_options": {"max_image_tokens": 4096}` in the request when finer detail
+is needed. The per-image budget accepts integers from 128 through 16,384; larger
+budgets use more projector memory and language-model context. Small images are
+enlarged to the checkpoint's minimum processing area. Image tokens and text must
+together fit the deployment's context capacity.
 
 Multiple image parts preserve their order relative to text. Follow-up turns
 send the complete conversation, including the original images and the assistant
