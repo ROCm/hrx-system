@@ -309,10 +309,11 @@ global.rodata.def @input_capacity_error = bytes("736f7572636520696e70757420746f6
 
 global.rodata.def @input_overflow_error = bytes("636f6d706c65746520696e707574206578636565647320746f6b656e206361706163697479")
 
-// Request-cold framing shared by HTTP, CLI and fixed-trajectory replay. Format
+// Request-cold framing shared by HTTP, CLI, and fixed-trajectory replay. Format
 // is rendered text (0) or one user message (1). Boundary is fresh (0), open (1),
 // or already terminated (2). The caller preserves the original pending ID.
-func.def public @prepare_input(%text: buffer, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64) {
+// Image admission is disabled, so the returned media span plan is empty.
+func.def public @prepare_input(%text: buffer, %markers: buffer, %marker_count: i64, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64, buffer) {
   %zero32 = scalar.constant 0 : i32
   %one32 = scalar.constant 1 : i32
   %two32 = scalar.constant 2 : i32
@@ -376,7 +377,7 @@ func.def public @prepare_input(%text: buffer, %format: i32, %boundary: i32, %cap
   %fits32 = scalar.extui %fits : i1 to i32
   %overflow_error = global.load @input_overflow_error : buffer
   func.call @require(%fits32, %overflow_error) : (i32, buffer)
-  func.return %tokens, %count : buffer, i64
+  func.return %tokens, %count, %empty : buffer, i64, buffer
 }
 
 global.rodata.def @tool_open = bytes("3c746f6f6c5f63616c6c3e0a3c66756e6374696f6e3d")
@@ -813,6 +814,13 @@ func.def public @model_name() -> (buffer) {
   func.return %name : buffer
 }
 
+// This text policy disables image admission before message rendering. Native
+// content decoding concatenates accepted text parts in their original order.
+func.def public @chat_image_limits() -> (i64, i64, i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  func.return %c0, %c0, %c0, %c0, %c0 : i64, i64, i64, i64, i64
+}
+
 func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
   %calls = func.call @parse_xml(%schemas, %response) : (buffer, buffer) -> (buffer)
   func.return %calls : buffer
@@ -1219,7 +1227,7 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
 // Low two bits hold the preceding role; bits 2/3 retain system/user presence,
 // and bit 4 selects thinking for this generation.
 // This is source-private state. Native code carries it without interpreting it.
-func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64) -> (buffer, i64) {
+func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64, buffer) {
   %zero64 = scalar.constant 0 : i64
   %one64 = scalar.constant 1 : i64
   %two64 = scalar.constant 2 : i64
@@ -1324,7 +1332,7 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %re
   %user_bit = scf.select %user, %eight64, %zero64 : i64
   %new_bits = scalar.ori %retained_bits, %user_bit : i64
   %next = scalar.ori %new_bits, %new_role : i64
-  func.return %result, %next : buffer, i64
+  func.return %result, %next, %empty : buffer, i64, buffer
 }
 
 func.def public @chat_end(%state: i64) -> (buffer, i64) {
