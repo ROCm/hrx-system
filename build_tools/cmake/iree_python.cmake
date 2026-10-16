@@ -451,7 +451,7 @@ endfunction()
 #     File paths use the same {{file}} locators as iree_native_test.
 # DATA: Additional files or targets required by the test.
 # LABELS: Additional labels to apply to the test. The package path is added
-#     automatically.
+#     automatically. All Python tests receive the python-test label.
 # RESOURCE_GROUP: If set, tests sharing the same RESOURCE_GROUP name will not
 #     run concurrently under CTest. Maps to CTest's RESOURCE_LOCK property.
 # GENERATED_IN_BINARY_DIR: If present, indicates that the srcs have been
@@ -488,7 +488,7 @@ function(iree_local_py_test)
   iree_package_ns(_PACKAGE_NS)
   string(REPLACE "::" "/" _PACKAGE_PATH ${_PACKAGE_NS})
   set(_NAME_PATH "${_PACKAGE_PATH}/${_RULE_NAME}")
-  list(APPEND _RULE_LABELS "${_PACKAGE_PATH}")
+  list(APPEND _RULE_LABELS "${_PACKAGE_PATH}" "python-test")
   if(NOT DEFINED _RULE_TIMEOUT)
     set(_RULE_TIMEOUT 60)
   endif()
@@ -600,7 +600,7 @@ endfunction()
 #     File paths use the same {{file}} locators as iree_native_test.
 # DATA: Additional files or targets required by the test.
 # LABELS: Additional labels to apply to the test. The package path is added
-#     automatically.
+#     automatically. All Python tests receive the python-test label.
 # IMPORTS: List of package import directories relative to the current package.
 # DEPS: List of iree_py_library targets needed by the test.
 # RESOURCE_GROUP: If set, tests sharing the same RESOURCE_GROUP name will not

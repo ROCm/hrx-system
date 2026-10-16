@@ -329,14 +329,17 @@ def bazel_test_step(
     targets: tuple[str, ...],
     config: str | None = None,
     test_tag_filters: tuple[str, ...] = (),
+    test_language_filters: tuple[str, ...] = (),
     test_env: tuple[tuple[str, str], ...] = (),
     bazel_options: tuple[str, ...] = (),
     available_resources: tuple[str, ...] = (),
 ) -> CiStep:
-    if any(option.split("=", 1)[0] == "--test_tag_filters" for option in bazel_options):
-        raise ValueError(
-            "Use test_tag_filters to compose test focus with resource admission"
-        )
+    for option_name, argument_name in (
+        ("--test_tag_filters", "test_tag_filters"),
+        ("--test_lang_filters", "test_language_filters"),
+    ):
+        if any(option.split("=", 1)[0] == option_name for option in bazel_options):
+            raise ValueError(f"Use {argument_name} to compose Bazel test filters")
     options = list(ci_config.BAZEL_DEFAULT_OPTIONS)
     if config is not None:
         options.append(f"--config={config}")
@@ -351,6 +354,8 @@ def bazel_test_step(
     )
     if test_tag_filters:
         options.append("--test_tag_filters=" + ",".join(test_tag_filters))
+    if test_language_filters:
+        options.append("--test_lang_filters=" + ",".join(test_language_filters))
     command = ["bazel", "test", *options]
     if any(target.startswith("-") for target in targets):
         command.append("--")
@@ -528,7 +533,9 @@ def repository_build_steps() -> list[CiStep]:
     ]
 
 
-def repository_integration_steps(amdgpu_target_selector: str) -> list[CiStep]:
+def repository_integration_steps(
+    amdgpu_target_selector: str, *, include_python_tests: bool
+) -> list[CiStep]:
     if not os.environ.get("HRX_ROCM_ROOT"):
         raise ValueError(
             "iree-bazel-repository-integration requires HRX_ROCM_ROOT so the "
@@ -546,6 +553,11 @@ def repository_integration_steps(amdgpu_target_selector: str) -> list[CiStep]:
             "Test repository",
             ci_config.BAZEL_REPOSITORY_TEST_TARGETS,
             test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
+            test_language_filters=(
+                ()
+                if include_python_tests
+                else ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS
+            ),
             bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS,
         ),
         CiStep(
@@ -582,6 +594,7 @@ def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
                 scoped_targets + ci_config.CPU_SANITIZERS_XFAIL_TARGETS,
                 config=config,
                 test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
+                test_language_filters=ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS,
             )
         ]
     if config in ci_config.SANITIZER_BUILD_CONFIGS:
@@ -797,6 +810,11 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
                 label_exclude_regex=combine_ctest_regex(
                     ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX,
                     ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
+                    (
+                        ci_config.PYTHON_TEST_CTEST_LABEL_REGEX
+                        if sanitizer is not None
+                        else ""
+                    ),
                 ),
             )
         )
@@ -1153,6 +1171,11 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         raise ValueError(
             "--loom-importer is only supported for AMDGPU Bazel CI commands"
         )
+    if args.exclude_python_tests and bazel_target_group != "repository-integration":
+        raise ValueError(
+            "--exclude-python-tests is only supported for repository-integration "
+            "CI commands"
+        )
     amdgpu_target_selector = (
         args.amdgpu_target or ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR
     )
@@ -1209,7 +1232,10 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
             raise ValueError(
                 "--target is not supported by the repository-wide integration command"
             )
-        return repository_integration_steps(amdgpu_target_selector)
+        return repository_integration_steps(
+            amdgpu_target_selector,
+            include_python_tests=not args.exclude_python_tests,
+        )
     targets = command_targets(args.target)
     if bazel_target == "cpu":
         if sanitizer == "all":
@@ -1472,6 +1498,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Loom importer to enable for AMDGPU Bazel CI commands. May be "
             "specified more than once."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-python-tests",
+        action="store_true",
+        help=(
+            "Exclude Python tests from a duplicate repository-integration lane. "
+            "Only supported for repository-integration CI commands."
         ),
     )
     parser.add_argument(

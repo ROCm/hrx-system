@@ -154,6 +154,14 @@ class CMakeTestArgumentsTest(unittest.TestCase):
                 ),
                 ["shared-device"],
             )
+            self.assertIn(
+                "python-test",
+                next(
+                    prop["value"]
+                    for prop in converted["properties"]
+                    if prop["name"] == "LABELS"
+                ),
+            )
 
             generated = [build / "generated.py", build / "generated.txt"]
             timestamps = [path.stat().st_mtime_ns for path in generated]

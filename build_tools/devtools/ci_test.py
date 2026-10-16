@@ -95,6 +95,7 @@ class CiTest(unittest.TestCase):
                 "Test",
                 ("//suite/...",),
                 test_tag_filters=("focus",),
+                test_language_filters=("-py",),
                 available_resources=("device.a",),
             )
             cmake_step = ci.cmake_test_step(
@@ -110,6 +111,7 @@ class CiTest(unittest.TestCase):
         self.assertEqual(
             bazel_filter, "--test_tag_filters=focus,-iree-run-requirement=device.b"
         )
+        self.assertIn("--test_lang_filters=-py", bazel_step.argv)
         ctest_filter = cmake_step.argv[cmake_step.argv.index("-LE") + 1]
         self.assertIsNotNone(re.search(ctest_filter, "iree-run-requirement=device.b"))
         self.assertIsNotNone(re.search(ctest_filter, "manual"))
@@ -135,6 +137,11 @@ class CiTest(unittest.TestCase):
             )
             for option in ("--test_tag_filters", "--test_tag_filters=focus"):
                 with self.assertRaisesRegex(ValueError, "Use test_tag_filters"):
+                    ci.bazel_test_step(
+                        "Test", ("//suite:test",), bazel_options=(option,)
+                    )
+            for option in ("--test_lang_filters", "--test_lang_filters=-py"):
+                with self.assertRaisesRegex(ValueError, "Use test_language_filters"):
                     ci.bazel_test_step(
                         "Test", ("//suite:test",), bazel_options=(option,)
                     )
@@ -507,6 +514,12 @@ class CiTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "repository-wide"):
+            ci.steps_from_args(args)
+
+    def test_python_test_exclusion_rejects_non_repository_commands(self):
+        args = ci.parse_arguments(["iree-bazel-cpu", "--exclude-python-tests"])
+
+        with self.assertRaisesRegex(ValueError, "repository-integration"):
             ci.steps_from_args(args)
 
     def test_cmake_repository_build_covers_supported_graph_with_prebuilts(self):

@@ -515,10 +515,12 @@ jobs:
             kind: repository
             host_toolchain: clang-cl
             runner: azure-windows-scale-rocm
+            run_python_tests: true
           - name: MSVC / Fastbuild
             kind: repository
             host_toolchain: msvc
             runner: azure-windows-scale-rocm
+            run_python_tests: false
           - name: Clang CL / Fastbuild / AMD gfx1151 NPU5
             kind: amd_client
             host_toolchain: clang-cl
@@ -718,7 +720,13 @@ jobs:
             $env:CXX = $env:CC
             $env:AR = Join-Path $env:BAZEL_LLVM 'bin\llvm-lib.exe'
           }
-          python build_tools/devtools/ci.py iree-bazel-repository-integration --amdgpu-target gfx11-generic --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles" --keep-going
+          $pythonTestArgs = @()
+          if ("${{ matrix.run_python_tests }}" -eq 'false') {
+            $pythonTestArgs += '--exclude-python-tests'
+          }
+          python build_tools/devtools/ci.py iree-bazel-repository-integration `
+            @pythonTestArgs --amdgpu-target gfx11-generic `
+            --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles" --keep-going
           exit $LASTEXITCODE
 
       - name: Build and test the AMD client
