@@ -61,6 +61,7 @@ func.def @geometry(%trial: index) -> (index, index, index, index) {
 }
 
 check.scenario public @original_q8_matrix {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   check.trial[4](%trial: index, %entropy: check.entropy) {
     %capacity, %count, %inputs, %outputs = check.generate<@geometry>(%trial) : (index) -> (index, index, index, index)
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
