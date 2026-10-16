@@ -173,9 +173,9 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %14 = cmd.constant.u64 -1
   %15 = cmd.constant.u64 12
   %16 = cmd.buffer.ref.binding %7, %13, %15
-  cmd.dispatch.indirect.static<%9, %11>[%16](%8, %13, %14)
+  cmd.dispatch.indirect.dynamic<%9, %11>[%16](%8, %13, %14)
   %17 = cmd.buffer.ref.binding %7, %13, %15
-  cmd.dispatch.indirect.static<%10, %12>[%17](%8, %13, %14)
+  cmd.dispatch.indirect.dynamic<%10, %12>[%17](%8, %13, %14)
   %18 = cmd.constant.u32 1
   cmd.dispatch.direct.barrier<%9, %11>[%18, %18, %18](%8, %13, %14)
   return

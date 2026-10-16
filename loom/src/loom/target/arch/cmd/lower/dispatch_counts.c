@@ -114,8 +114,9 @@ static iree_status_t loom_cmd_dispatch_count_record_direct(
 
 typedef enum loom_cmd_dispatch_count_indirect_origin_e {
   LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_UNRESOLVED = 0,
-  LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_STATIC = 1,
-  LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_DYNAMIC = 2,
+  LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_IMMUTABLE = 1,
+  LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_INVOCATION = 2,
+  LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_TRANSIENT = 3,
 } loom_cmd_dispatch_count_indirect_origin_t;
 
 static loom_cmd_dispatch_count_indirect_origin_t
@@ -126,7 +127,7 @@ loom_cmd_dispatch_count_classify_indirect_origin(
   const loom_value_t* source = loom_module_value(build->module, source_value);
   if (!loom_value_is_block_arg(source) &&
       loom_command_parameter_isa(loom_value_def_op(source))) {
-    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_STATIC;
+    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_IMMUTABLE;
   }
 
   const loom_value_facts_t facts =
@@ -154,14 +155,17 @@ loom_cmd_dispatch_count_classify_indirect_origin(
   const loom_value_t* root_value =
       loom_module_value(build->module, reference.root_value_id);
   if (loom_value_is_block_arg(root_value)) {
-    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_STATIC;
+    // Caller-owned storage may be written by any command in this invocation.
+    // Its placement does not promise the lifetime immutability required for
+    // a HAL static-indirect fetch.
+    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_INVOCATION;
   }
   const loom_op_t* defining_op = loom_value_def_op(root_value);
   if (defining_op && loom_command_parameter_isa(defining_op)) {
-    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_STATIC;
+    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_IMMUTABLE;
   }
   if (defining_op && loom_buffer_alloca_isa(defining_op)) {
-    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_DYNAMIC;
+    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_TRANSIENT;
   }
   return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_UNRESOLVED;
 }
@@ -204,7 +208,7 @@ static iree_status_t loom_cmd_dispatch_count_record_indirect(
     return loom_cmd_dispatch_count_emit_indirect_error(
         build, command, LOOM_ERR_LOWERING_054, params, IREE_ARRAYSIZE(params));
   }
-  if (origin == LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_DYNAMIC &&
+  if (origin == LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_TRANSIENT &&
       !has_preceding_wave) {
     const loom_diagnostic_param_t params[] = {
         loom_param_string(kernel_name),
@@ -213,9 +217,9 @@ static iree_status_t loom_cmd_dispatch_count_record_indirect(
         build, command, LOOM_ERR_LOWERING_053, params, IREE_ARRAYSIZE(params));
   }
   *out_count = (loom_cmd_dispatch_count_t){
-      .kind = origin == LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_DYNAMIC
-                  ? LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_DYNAMIC
-                  : LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_STATIC,
+      .kind = origin == LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_IMMUTABLE
+                  ? LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_STATIC
+                  : LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_DYNAMIC,
       .payload.indirect_source_value = source_value,
   };
   return iree_ok_status();

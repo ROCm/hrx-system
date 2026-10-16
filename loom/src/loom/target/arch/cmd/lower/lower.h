@@ -92,11 +92,12 @@ typedef struct loom_cmd_lower_plan_t {
 //
 // The portable issue-time ABI accepts buffer roots and explicitly resolved
 // view ranges plus workgroup counts classified by |plan->dispatch_counts|.
-// Exact tuples become direct dispatches. Stable source views remain static
-// indirect, while transient source views become dynamic indirect after a
-// preceding execution barrier. Buffer and view arguments become
-// resolved ranges; exact scalar arguments preserve their logical kind and
-// bits. Address scalars remain target-width-independent until materialization.
+// Exact tuples become direct dispatches. Immutable source views remain static
+// indirect, while mutable source views use dynamic indirect fetches. Schedule
+// barriers order any count producers before their consumers. Buffer and view
+// arguments become resolved ranges; exact scalar arguments preserve their
+// logical kind and bits. Address scalars remain target-width-independent until
+// materialization.
 // Unsupported kernel-argument forms fail without changing the source program.
 // On success the replacement keeps the source symbol identity and is returned
 // in |out_low_function|.

@@ -55,8 +55,9 @@ A command program is not a pure function: launching a kernel and ordering work
 are its purpose. Those observable effects must nevertheless be represented by
 explicit command operations such as `kernel.launch`, `command.program.launch`,
 `command.serial`, and `command.concurrent`. Ordinary SSA computation around
-them is effect-free. Calls used to derive launch workloads therefore carry a
-`pure` contract, just as calls in a kernel launch-configuration region do.
+them is pure or deterministic read-only computation. Calls used to derive
+launch workloads carry the corresponding `pure` or `readonly` contract, just
+as calls in a kernel launch-configuration region do.
 
 The distinction keeps planning movable. The compiler can inline and fold
 pure shape arithmetic at its real caller-owned control-flow site. When a count
@@ -118,11 +119,16 @@ ordinary scalar arithmetic can fold freely, while loads retain their explicit
 buffer/view identities and schedule ordering.
 
 Exact scalar results become direct dispatch commands. An exact aligned
-`view<3xi32>` rooted in an immutable parameter or command input becomes a
-static indirect dispatch. The same view in transient command storage becomes
-a dynamic indirect dispatch when an earlier execution wave writes it. Any
-other residual count is diagnosed because the portable artifact has no hidden
-place to evaluate or store it.
+`view<3xi32>` rooted in an immutable parameter becomes a static indirect
+dispatch, allowing the device to fetch counts early. Invocation buffers and
+transient command storage use dynamic indirect dispatch: the device reads the
+tuple immediately before issuing that dispatch. A count-producing kernel must
+precede its consumer in the command schedule. Invocation buffers may instead
+arrive initialized by the caller, so they can drive the first dispatch.
+
+Read-only launch expressions that still depend on device data become generated
+device kernels writing transient XYZ tuples. The command program orders those
+producers before their indirect consumers without a host readback.
 
 Each configured entry contributes one atomic executable-entry requirement.
 The embedding may satisfy it with a Loom-compiled executable, a cached object,

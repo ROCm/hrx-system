@@ -94,9 +94,9 @@ typedef enum loom_cmd_program_command_kind_e {
   LOOM_CMD_PROGRAM_COMMAND_KIND_COPY = 2,
   // Dispatch with exact workgroup counts embedded in the program.
   LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT = 3,
-  // Dispatch with indirect counts stable before command execution begins.
+  // Dispatch with indirect counts stable throughout command execution.
   LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC = 4,
-  // Dispatch with indirect counts produced within the command program.
+  // Dispatch with mutable indirect counts fetched immediately before issue.
   LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC = 5,
   // Order all earlier commands before all later commands.
   LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_EXECUTION = 6,
@@ -117,8 +117,8 @@ typedef enum loom_cmd_program_command_kind_e {
   LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC_BARRIER =
       LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_BIT |
       LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC,
-  // Perform a full execution barrier, then dispatch with dynamically produced
-  // indirect counts.
+  // Perform a full execution barrier, then dispatch with issue-time indirect
+  // counts.
   LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC_BARRIER =
       LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_BIT |
       LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC,

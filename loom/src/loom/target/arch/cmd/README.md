@@ -169,15 +169,19 @@ launch evaluator or result-compaction pass.
 Configured dispatch counts have three portable placements:
 
 - Exact counts are embedded in a direct dispatch command.
-- An exact aligned `view<3xi32>` rooted in command inputs or immutable
-  parameters becomes a static indirect dispatch.
-- An exact aligned `view<3xi32>` rooted in transient command storage becomes a
-  dynamic indirect dispatch after a preceding execution wave.
+- An exact aligned `view<3xi32>` rooted in immutable parameters becomes a
+  static indirect dispatch: its contents stay unchanged throughout execution.
+- An exact aligned `view<3xi32>` rooted in invocation buffers or transient
+  command storage becomes a dynamic indirect dispatch. The device fetches its
+  counts immediately before dispatch issue, after any preceding producer wave.
+  Invocation buffers may already contain valid counts at program entry;
+  transient storage requires a preceding execution wave.
 
-A residual scalar count is not silently outlined or stored. Portable command
-planning diagnoses it and requires the caller to specialize it to an exact
-value or represent it through explicit indirect storage. The serialized
-artifact therefore remains independent of invocation-time scalar values.
+Residual deterministic read-only count expressions become explicit generated
+device producers writing transient XYZ tuples. Compatible consumers can share
+a producer, while intervening possible writes separate their observations.
+The serialized artifact contains those producers and indirect consumers; it
+never delegates count evaluation to an implicit host callback.
 
 ## Storage
 

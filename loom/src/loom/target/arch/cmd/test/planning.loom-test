@@ -686,19 +686,19 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // ====
 
-// RUN: emit command-program @stable_indirect_dispatch
+// RUN: emit command-program @invocation_indirect_dispatch
 
-kernel.entry.decl @stable_count_entry(%output: buffer)
+kernel.entry.decl @invocation_count_entry(%output: buffer)
 
-command.program.def public @stable_indirect_dispatch() launch(%count_storage: buffer, %output: buffer) {
+command.program.def public @invocation_indirect_dispatch() launch(%count_storage: buffer, %output: buffer) {
   %c0 = index.constant 0 : offset
   %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
-  kernel.dispatch @stable_count_entry[%counts](%output) : [view<3xi32>](buffer)
+  kernel.dispatch @invocation_count_entry[%counts](%output) : [view<3xi32>](buffer)
   command.return
 }
 
 // ----
-low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 2}) @stable_indirect_dispatch() asm {
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 2}) @invocation_indirect_dispatch() asm {
   %5 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
   %6 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
   %7 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
@@ -707,7 +707,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %10 = cmd.constant.u64 -1
   %11 = cmd.constant.u64 12
   %12 = cmd.buffer.ref.binding %5, %9, %11
-  cmd.dispatch.indirect.static<%7, %8>[%12](%6, %9, %10)
+  cmd.dispatch.indirect.dynamic<%7, %8>[%12](%6, %9, %10)
   return
 }
 
@@ -924,4 +924,45 @@ command.program.def public target(@construction) @dispatch() launch() {
   // ERROR@+1: LOWERING/051 {kernel_name="configured", dimension="0", requirement="an exact unsigned 32-bit value"}
   kernel.launch @configured() : ()
   command.return
+}
+
+// ====
+
+// A caller-owned count buffer can be updated between dispatches. A subview
+// retains that mutable storage contract and the producer-to-consumer barrier.
+// RUN: emit command-program @updated_invocation_counts
+
+kernel.entry.decl @produce_counts(%counts: view<3xi32>)
+
+kernel.entry.decl @consume_counts(%output: buffer)
+
+command.program.def public @updated_invocation_counts() launch(%storage: buffer, %output: buffer) {
+  %offset = index.constant 4 : offset
+  %c1 = index.constant 1 : index
+  %table = buffer.view %storage[%offset] : buffer -> view<8xi32>
+  %counts = view.subview %table[1] : view<8xi32> -> view<3xi32>
+  kernel.dispatch @produce_counts[%c1](%counts) : [index](view<3xi32>)
+  kernel.dispatch @consume_counts[%counts](%output) : [view<3xi32>](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 2}) @updated_invocation_counts() asm {
+  %8 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %9 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %10 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %11 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %12 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %13 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %14 = cmd.constant.u64 0
+  %15 = cmd.constant.u64 -1
+  %16 = cmd.constant.u64 4
+  %17 = cmd.constant.u64 32
+  %18 = cmd.constant.u64 8
+  %19 = cmd.constant.u64 12
+  %20 = cmd.constant.u32 1
+  cmd.dispatch.direct<%10, %12>[%20, %20, %20](%8, %18, %19)
+  %21 = cmd.buffer.ref.binding %8, %18, %19
+  cmd.dispatch.indirect.dynamic.barrier<%11, %13>[%21](%9, %14, %15)
+  return
 }

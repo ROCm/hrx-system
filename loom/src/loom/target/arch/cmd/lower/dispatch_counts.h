@@ -25,9 +25,9 @@ extern "C" {
 typedef enum loom_cmd_dispatch_count_kind_e {
   // All dimensions are exact unsigned 32-bit artifact values.
   LOOM_CMD_DISPATCH_COUNT_KIND_DIRECT = 0,
-  // A stable source view supplies the tuple before command execution.
+  // An immutable parameter view supplies a tuple stable throughout execution.
   LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_STATIC = 1,
-  // A transient source view receives the tuple during command execution.
+  // An invocation or transient view supplies the tuple at dispatch issue.
   LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_DYNAMIC = 2,
 } loom_cmd_dispatch_count_kind_t;
 
@@ -47,10 +47,12 @@ typedef struct loom_cmd_dispatch_count_t {
 //
 // The schedule must contain only configured kernel.dispatch commands. Exact
 // scalar tuples become direct artifact metadata. Exactly placed views rooted in
-// command inputs or immutable parameters remain static indirect, while views
-// rooted in command buffer.alloca storage become dynamic indirect and require
-// an earlier execution wave. No kernel implementation or launch-configuration
-// body is inspected or cloned.
+// immutable parameters remain static indirect. Views rooted in caller-supplied
+// buffers or command buffer.alloca storage use dynamic indirect fetches because
+// commands may write them during execution. Only command buffer.alloca storage
+// requires an earlier execution wave: caller-supplied counts may already be
+// initialized before the program begins. No kernel implementation or
+// launch-configuration body is inspected or cloned.
 //
 // Rows are allocated from |arena| in schedule command order. User-authored
 // contract failures emit diagnostics, set |out_valid| to false, and return OK.
