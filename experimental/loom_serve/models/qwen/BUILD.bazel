@@ -24,6 +24,7 @@ filegroup(
         "control.loom",
         "epoch_control.loom",
         "epoch_media.loom",
+        "vision_geometry.loom",
     ],
     visibility = ["//visibility:public"],
 )
@@ -77,6 +78,7 @@ filegroup(
             "control.loom",
             "epoch_control.loom",
             "epoch_media.loom",
+            "vision_geometry.loom",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -149,6 +151,7 @@ loom_library(
         "kernels/qwen38/vision_merger.loom",
         "kernels/qwen38/vision_normalization.loom",
         "kernels/qwen38/vision_patch_embedding.loom",
+        "kernels/qwen38/vision_resize.loom",
     ],
 )
 
@@ -159,10 +162,45 @@ loom_library(
 )
 
 loom_test(
+    name = "vision_pixels_test",
+    srcs = [
+        "tests/vision_pixels.loom",
+        "vision_pixels.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
+)
+
+loom_test(
+    name = "vision_geometry_test",
+    srcs = [
+        "tests/vision_geometry.loom",
+        "vision_geometry.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
+)
+
+loom_test(
+    name = "vision_resize_test",
+    srcs = [
+        "tests/vision_resize.loom",
+        "vision_pixels.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    deps = [":vision_kernels"],
+)
+
+loom_test(
     name = "vision_control_test",
     srcs = [
         "tests/vision_control.loom",
         "vision_control.loom",
+        "vision_pixels.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
@@ -510,14 +548,25 @@ loom_test(
     ],
 )
 
+loom_library(
+    name = "request_control",
+    srcs = [
+        "control.loom",
+        "vision_geometry.loom",
+    ],
+)
+
 py_test(
     name = "request_check_test",
     size = "small",
     srcs = ["request_check_test.py"],
-    args = ["$(rootpath //loom/src/loom/serve/testing:text_request_check)"],
+    args = [
+        "$(rootpath //loom/src/loom/serve/testing:text_request_check)",
+        "$(rootpath :request_control)",
+    ],
     data = [
-        "control.loom",
         "testdata/portable_chat.loom",
+        ":request_control",
         "//loom/src/loom/serve/testing:text_request_check",
     ],
     target_compatible_with = loom_config_compatible_with([

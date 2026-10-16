@@ -1,0 +1,251 @@
+// Antialiased bicubic coefficients for the trained image processor. Coefficients
+// and reductions use F32; sampling-center arithmetic retains its F64 evaluation
+// before each explicit F32 rounding. Pixel filtering stays on the device.
+func.def @qwen38_vision_cubic(%position: f32) -> (f32) {
+  %x = scalar.absf %position : f32
+  %zero = scalar.constant 0.0 : f32
+  %one = scalar.constant 1.0 : f32
+  %two = scalar.constant 2.0 : f32
+  %inner = scalar.cmpf olt, %x, %one : f32
+  %value = scf.if %inner -> (f32) {
+    %a = scalar.constant 1.5 : f32
+    %b = scalar.constant 2.5 : f32
+    %ax = scalar.mulf %a, %x : f32
+    %difference = scalar.subf %ax, %b : f32
+    %quadratic = scalar.mulf %difference, %x : f32
+    %cubic = scalar.mulf %quadratic, %x : f32
+    %result = scalar.addf %cubic, %one : f32
+    scf.yield %result : f32
+  } else {
+    %outer = scalar.cmpf olt, %x, %two : f32
+    %result = scf.if %outer -> (f32) {
+      %a = scalar.constant -0.5 : f32
+      %b = scalar.constant 2.5 : f32
+      %four = scalar.constant 4.0 : f32
+      %ax = scalar.mulf %a, %x : f32
+      %sum = scalar.addf %ax, %b : f32
+      %quadratic = scalar.mulf %sum, %x : f32
+      %difference = scalar.subf %quadratic, %four : f32
+      %cubic = scalar.mulf %difference, %x : f32
+      %value = scalar.addf %cubic, %two : f32
+      scf.yield %value : f32
+    } else {
+      scf.yield %zero : f32
+    }
+    scf.yield %result : f32
+  }
+  func.return %value : f32
+}
+
+// A compact axis plan contains output_size I32 source starts, output_size + 1
+// I32 coefficient offsets, then contiguous normalized F32 coefficients. The
+// returned count identifies the live prefix of the bounded coefficient storage.
+// Input extents come from codec admission; output extents come from chat policy.
+func.def @qwen38_vision_axis_plan(%input_size: i32, %output_size: i32) -> (buffer, i32) {
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %two32 = scalar.constant 2 : i32
+  %input_float = scalar.uitofp %input_size : i32 to f32
+  %output_float = scalar.uitofp %output_size : i32 to f32
+  %scale = scalar.divf %input_float, %output_float : f32
+  %one = scalar.constant 1.0 : f32
+  %two = scalar.constant 2.0 : f32
+  %downsampling = scalar.cmpf oge, %scale, %one : f32
+  %support_value = scalar.mulf %scale, %two : f32
+  %support = scf.select %downsampling, %support_value, %two : f32
+  %scale_wide = scalar.extf %scale : f32 to f64
+  %one_wide = scalar.constant 1.0 : f64
+  %inverse_wide = scalar.divf %one_wide, %scale_wide : f64
+  %inverse_value = scalar.fptrunc %inverse_wide : f64 to f32
+  %inverse = scf.select %downsampling, %inverse_value, %one : f32
+  %inverse_scale = scalar.extf %inverse : f32 to f64
+  %ceil_support = scalar.ceilf %support : f32
+  %support_integer = scalar.fptoui %ceil_support : f32 to i32
+  %diameter = scalar.muli %support_integer, %two32 : i32
+  %maximum_taps = scalar.addi %diameter, %one32 : i32
+  %capacity32 = scalar.muli %output_size, %maximum_taps : i32
+  %capacity = index.cast %capacity32 : i32 to index
+  %outputs = index.cast %output_size : i32 to index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  %word_bytes = index.constant 4 : offset
+  %offsets_count = index.add %outputs, %c1 : index
+  %offsets_offset = index.scale %outputs, %word_bytes : index, offset -> offset
+  %table_words = index.madd %outputs, %c2, %c1 : index
+  %weights_offset = index.scale %table_words, %word_bytes : index, offset -> offset
+  %coefficient_bytes = index.scale %capacity, %word_bytes : index, offset -> offset
+  %plan_bytes = index.add %weights_offset, %coefficient_bytes : offset
+  %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
+  %starts = buffer.view %plan[%origin] : buffer -> view<[%outputs]xi32>
+  %offsets = buffer.view %plan[%offsets_offset] : buffer -> view<[%offsets_count]xi32>
+  %weights = buffer.view %plan[%weights_offset] : buffer -> view<[%capacity]xf32>
+  view.store %zero32, %offsets[0] : i32, view<[%offsets_count]xi32>
+  %half = scalar.constant 0.5 : f64
+  %zero = scalar.constant 0.0 : f32
+  %weight_count = scf.for %output = [%c0 to %outputs step %c1](%begin = %c0 : index) -> (index) {
+    %output_word = index.cast %output : index to i32
+    %output_wide = scalar.uitofp %output_word : i32 to f64
+    %center_index = scalar.addf %output_wide, %half : f64
+    %center_value = scalar.mulf %scale_wide, %center_index : f64
+    %center = scalar.fptrunc %center_value : f64 to f32
+    %lower = scalar.subf %center, %support : f32
+    %upper = scalar.addf %center, %support : f32
+    %lower_wide = scalar.extf %lower : f32 to f64
+    %upper_wide = scalar.extf %upper : f32 to f64
+    %lower_center = scalar.addf %lower_wide, %half : f64
+    %upper_center = scalar.addf %upper_wide, %half : f64
+    %lower_integer = scalar.fptosi %lower_center : f64 to i32
+    %upper_integer = scalar.fptosi %upper_center : f64 to i32
+    %start = scalar.maxsi %lower_integer, %zero32 : i32
+    %limit = scalar.minsi %upper_integer, %input_size : i32
+    %span = scalar.subi %limit, %start : i32
+    %nonnegative = scalar.maxsi %span, %zero32 : i32
+    %count32 = scalar.minsi %nonnegative, %maximum_taps : i32
+    %count = index.cast %count32 : i32 to index
+    %end = index.add %begin, %count : index
+    %end32 = index.cast %end : index to i32
+    %next = index.add %output, %c1 : index
+    view.store %start, %starts[%output] : i32, view<[%outputs]xi32>
+    view.store %end32, %offsets[%next] : i32, view<[%offsets_count]xi32>
+    %center_wide = scalar.extf %center : f32 to f64
+    %total = scf.for %tap = [%begin to %end step %c1](%sum = %zero : f32) -> (f32) {
+      %relative = index.sub %tap, %begin : index
+      %relative32 = index.cast %relative : index to i32
+      %source = scalar.addi %start, %relative32 : i32
+      %source_wide = scalar.uitofp %source : i32 to f64
+      %distance = scalar.subf %source_wide, %center_wide : f64
+      %shifted = scalar.addf %distance, %half : f64
+      %scaled = scalar.mulf %shifted, %inverse_scale : f64
+      %position = scalar.fptrunc %scaled : f64 to f32
+      %weight = func.call @qwen38_vision_cubic(%position) : (f32) -> (f32)
+      %weight_index = index.assume %tap [ge(%tap, 0), lt(%tap, %capacity)] : index
+      view.store %weight, %weights[%weight_index] : f32, view<[%capacity]xf32>
+      %accumulated = scalar.addf %sum, %weight : f32
+      scf.yield %accumulated : f32
+    }
+    scf.for %tap = [%begin to %end step %c1] {
+      %weight_index = index.assume %tap [ge(%tap, 0), lt(%tap, %capacity)] : index
+      %weight = view.load %weights[%weight_index] : view<[%capacity]xf32> -> f32
+      %normalized = scalar.divf %weight, %total : f32
+      view.store %normalized, %weights[%weight_index] : f32, view<[%capacity]xf32>
+    }
+    scf.yield %end : index
+  }
+  %count = index.cast %weight_count : index to i32
+  func.return %plan, %count : buffer, i32
+}
+
+global.rodata.def @qwen38_orientation_layouts = bytes("00040c0802060e0a")
+
+// The native image packet supplies checked display geometry, orientation, and
+// decoded RGB/RGBA storage. Its source-owned metadata is the two I32 dimensions
+// selected while rendering the chat. This packet preserves the decoded plane
+// and appends the filter plans; it never materializes resized pixels on the host.
+//
+// The first 64 bytes reserve a four-image cohort directory. Batch preparation
+// fills the first packet's directory in the native packed upload. All offsets in
+// the following 64-byte resize header are relative to that header, not the cohort.
+func.def @qwen38_vision_pixel_packet(%request: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %request[%origin] : buffer -> view<16xi32>
+  %source_width = view.load %header[4] : view<16xi32> -> i32
+  %source_height = view.load %header[5] : view<16xi32> -> i32
+  %orientation = view.load %header[6] : view<16xi32> -> i32
+  %metadata_word = view.load %header[8] : view<16xi32> -> i32
+  %source_word = view.load %header[10] : view<16xi32> -> i32
+  %source_bytes = view.load %header[11] : view<16xi32> -> i32
+  %channels = view.load %header[12] : view<16xi32> -> i32
+  %metadata_offset = index.cast %metadata_word : i32 to offset
+  %metadata = buffer.view %request[%metadata_offset] : buffer -> view<2xi32>
+  %width = view.load %metadata[0] : view<2xi32> -> i32
+  %height = view.load %metadata[1] : view<2xi32> -> i32
+  %horizontal, %horizontal_count = func.call @qwen38_vision_axis_plan(%source_width, %width) : (i32, i32) -> (buffer, i32)
+  %vertical, %vertical_count = func.call @qwen38_vision_axis_plan(%source_height, %height) : (i32, i32) -> (buffer, i32)
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %fifteen = scalar.constant 15 : i32
+  %alignment_mask = scalar.constant -16 : i32
+  %prefix_bytes = scalar.constant 64 : i32
+  %directory_bytes = index.constant 64 : offset
+  %width_bytes = scalar.muli %width, %four : i32
+  %height_bytes = scalar.muli %height, %four : i32
+  %horizontal_starts = scalar.constant 64 : i32
+  %horizontal_offsets = scalar.addi %horizontal_starts, %width_bytes : i32
+  %horizontal_weights_base = scalar.addi %horizontal_offsets, %width_bytes : i32
+  %horizontal_weights = scalar.addi %horizontal_weights_base, %four : i32
+  %horizontal_weight_bytes = scalar.muli %horizontal_count, %four : i32
+  %vertical_starts = scalar.addi %horizontal_weights, %horizontal_weight_bytes : i32
+  %vertical_offsets = scalar.addi %vertical_starts, %height_bytes : i32
+  %vertical_weights_base = scalar.addi %vertical_offsets, %height_bytes : i32
+  %vertical_weights = scalar.addi %vertical_weights_base, %four : i32
+  %vertical_weight_bytes = scalar.muli %vertical_count, %four : i32
+  %plan_end = scalar.addi %vertical_weights, %vertical_weight_bytes : i32
+  %rounded_plan_end = scalar.addi %plan_end, %fifteen : i32
+  %pixels = scalar.andi %rounded_plan_end, %alignment_mask : i32
+  %pixel_end = scalar.addi %pixels, %source_bytes : i32
+  %rounded_pixel_end = scalar.addi %pixel_end, %fifteen : i32
+  %packet_end = scalar.andi %rounded_pixel_end, %alignment_mask : i32
+  %packet_bytes_word = scalar.addi %prefix_bytes, %packet_end : i32
+  %packet_bytes = index.cast %packet_bytes_word : i32 to offset
+  %packet = buffer.alloca<private> align(16) %packet_bytes : buffer
+  buffer.fill %zero, %packet[%origin], %directory_bytes : i32
+  %resize_header = buffer.view %packet[%directory_bytes] : buffer -> view<16xi32>
+  view.store %source_height, %resize_header[0] : i32, view<16xi32>
+  view.store %source_width, %resize_header[1] : i32, view<16xi32>
+  view.store %height, %resize_header[2] : i32, view<16xi32>
+  view.store %width, %resize_header[3] : i32, view<16xi32>
+  view.store %horizontal_count, %resize_header[4] : i32, view<16xi32>
+  view.store %vertical_count, %resize_header[5] : i32, view<16xi32>
+  view.store %source_bytes, %resize_header[6] : i32, view<16xi32>
+  %pixel_count = scalar.muli %width, %height : i32
+  %output_bytes = scalar.muli %pixel_count, %three : i32
+  view.store %output_bytes, %resize_header[7] : i32, view<16xi32>
+  view.store %pixels, %resize_header[8] : i32, view<16xi32>
+  view.store %horizontal_starts, %resize_header[9] : i32, view<16xi32>
+  view.store %horizontal_offsets, %resize_header[10] : i32, view<16xi32>
+  view.store %horizontal_weights, %resize_header[11] : i32, view<16xi32>
+  view.store %vertical_starts, %resize_header[12] : i32, view<16xi32>
+  view.store %vertical_offsets, %resize_header[13] : i32, view<16xi32>
+  view.store %vertical_weights, %resize_header[14] : i32, view<16xi32>
+  %orientation_word = scalar.subi %orientation, %one : i32
+  %orientation_index0 = index.cast %orientation_word : i32 to index
+  %orientation_index = index.assume %orientation_index0 [range(%orientation_index0, 0, 7)] : index
+  %layouts = global.load @qwen38_orientation_layouts : buffer
+  %layout_view = buffer.view %layouts[%origin] : buffer -> view<8xi8>
+  %axes_byte = view.load %layout_view[%orientation_index] : view<8xi8> -> i8
+  %axes = scalar.extui %axes_byte : i8 to i32
+  %alpha = scalar.subi %channels, %three : i32
+  %layout = scalar.ori %axes, %alpha : i32
+  view.store %layout, %resize_header[15] : i32, view<16xi32>
+  %horizontal_length = scalar.subi %vertical_starts, %horizontal_starts : i32
+  %vertical_length = scalar.subi %plan_end, %vertical_starts : i32
+  %horizontal_position = scalar.addi %prefix_bytes, %horizontal_starts : i32
+  %vertical_position = scalar.addi %prefix_bytes, %vertical_starts : i32
+  %horizontal_destination = index.cast %horizontal_position : i32 to offset
+  %vertical_destination = index.cast %vertical_position : i32 to offset
+  %horizontal_bytes = index.cast %horizontal_length : i32 to offset
+  %vertical_bytes = index.cast %vertical_length : i32 to offset
+  buffer.copy %horizontal[%origin], %packet[%horizontal_destination], %horizontal_bytes
+  buffer.copy %vertical[%origin], %packet[%vertical_destination], %vertical_bytes
+  %padding_position = scalar.addi %prefix_bytes, %plan_end : i32
+  %padding_length = scalar.subi %pixels, %plan_end : i32
+  %padding_offset = index.cast %padding_position : i32 to offset
+  %padding_bytes = index.cast %padding_length : i32 to offset
+  %zero_byte = scalar.constant 0 : i8
+  buffer.fill %zero_byte, %packet[%padding_offset], %padding_bytes : i8
+  %pixel_position = scalar.addi %prefix_bytes, %pixels : i32
+  %pixel_destination = index.cast %pixel_position : i32 to offset
+  %pixel_source = index.cast %source_word : i32 to offset
+  %pixel_bytes = index.cast %source_bytes : i32 to offset
+  buffer.copy %request[%pixel_source], %packet[%pixel_destination], %pixel_bytes
+  %tail_position = scalar.addi %prefix_bytes, %pixel_end : i32
+  %tail_length = scalar.subi %packet_end, %pixel_end : i32
+  %tail_offset = index.cast %tail_position : i32 to offset
+  %tail_bytes = index.cast %tail_length : i32 to offset
+  buffer.fill %zero_byte, %packet[%tail_offset], %tail_bytes : i8
+  func.return %packet : buffer
+}

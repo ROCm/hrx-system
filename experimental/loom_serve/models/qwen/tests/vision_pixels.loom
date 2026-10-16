@@ -1,0 +1,416 @@
+func.decl @qwen38_vision_axis_plan(%input_size: i32, %output_size: i32) -> (buffer, i32)
+
+// Independent F32 bicubic oracle at a nonintegral 97/31 scale. Opposite edges
+// deliberately differ: sampling centers round independently, not by reflection.
+func.def @irregular_axis_observation() -> (i32, i32, i32, i32, i32, f32, f32, f32, f32) {
+  %input = scalar.constant 97 : i32
+  %output = scalar.constant 31 : i32
+  %plan, %count = func.call @qwen38_vision_axis_plan(%input, %output) : (i32, i32) -> (buffer, i32)
+  %origin = index.constant 0 : offset
+  %offsets_position = index.constant 124 : offset
+  %weights_position = index.constant 252 : offset
+  %starts = buffer.view %plan[%origin] : buffer -> view<31xi32>
+  %offsets = buffer.view %plan[%offsets_position] : buffer -> view<32xi32>
+  %weights = buffer.view %plan[%weights_position] : buffer -> view<374xf32>
+  %first_start = view.load %starts[0] : view<31xi32> -> i32
+  %last_start = view.load %starts[30] : view<31xi32> -> i32
+  %first_end = view.load %offsets[1] : view<32xi32> -> i32
+  %last_begin = view.load %offsets[30] : view<32xi32> -> i32
+  %first_peak = view.load %weights[0] : view<374xf32> -> f32
+  %first_tail = view.load %weights[7] : view<374xf32> -> f32
+  %last_tail = view.load %weights[366] : view<374xf32> -> f32
+  %last_peak = view.load %weights[373] : view<374xf32> -> f32
+  func.return %count, %first_start, %last_start, %first_end, %last_begin, %first_peak, %first_tail, %last_tail, %last_peak : i32, i32, i32, i32, i32, f32, f32, f32, f32
+}
+
+check.case public @axis_irregular_scale_coefficients {
+  %count, %first_start, %last_start, %first_end, %last_begin, %first_peak, %first_tail, %last_tail, %last_peak = func.call @irregular_axis_observation() : () -> (i32, i32, i32, i32, i32, f32, f32, f32, f32)
+  %expected_count = check.literal value(374) : i32
+  %expected_first_start = check.literal value(0) : i32
+  %expected_last_start = check.literal value(89) : i32
+  %expected_first_end = check.literal value(8) : i32
+  %expected_last_begin = check.literal value(366) : i32
+  %expected_first_peak = check.literal value(0.2659088969230652) : f32
+  %expected_first_tail = check.literal value(-0.0016464825021103024) : f32
+  %expected_last_tail = check.literal value(-0.0016466479282826185) : f32
+  %expected_last_peak = check.literal value(0.2659092843532562) : f32
+  check.expect.equal actual(%count) expected(%expected_count) : i32
+  check.expect.equal actual(%first_start) expected(%expected_first_start) : i32
+  check.expect.equal actual(%last_start) expected(%expected_last_start) : i32
+  check.expect.equal actual(%first_end) expected(%expected_first_end) : i32
+  check.expect.equal actual(%last_begin) expected(%expected_last_begin) : i32
+  check.expect.equal actual(%first_peak) expected(%expected_first_peak) : f32
+  check.expect.equal actual(%first_tail) expected(%expected_first_tail) : f32
+  check.expect.equal actual(%last_tail) expected(%expected_last_tail) : f32
+  check.expect.equal actual(%last_peak) expected(%expected_last_peak) : f32
+  check.return
+}
+
+// These small complete plans have rational cubic weights. Comparing every field
+// covers clipped support, normalization, negative lobes, and degenerate axes.
+
+func.def @axis_identity() -> (i32) {
+  %input = scalar.constant 4 : i32
+  %output = scalar.constant 4 : i32
+  %plan, %count = func.call @qwen38_vision_axis_plan(%input, %output) : (i32, i32) -> (buffer, i32)
+  %expected_count = scalar.constant 12 : i32
+  %valid0 = scalar.cmpi eq, %count, %expected_count : i32
+  %origin = index.constant 0 : offset
+  %table = buffer.view %plan[%origin] : buffer -> view<9xi32>
+  %field0 = view.load %table[0] : view<9xi32> -> i32
+  %expected0 = scalar.constant 0 : i32
+  %field_valid0 = scalar.cmpi eq, %field0, %expected0 : i32
+  %valid1 = scalar.andi %valid0, %field_valid0 : i1
+  %field1 = view.load %table[1] : view<9xi32> -> i32
+  %expected1 = scalar.constant 0 : i32
+  %field_valid1 = scalar.cmpi eq, %field1, %expected1 : i32
+  %valid2 = scalar.andi %valid1, %field_valid1 : i1
+  %field2 = view.load %table[2] : view<9xi32> -> i32
+  %expected2 = scalar.constant 1 : i32
+  %field_valid2 = scalar.cmpi eq, %field2, %expected2 : i32
+  %valid3 = scalar.andi %valid2, %field_valid2 : i1
+  %field3 = view.load %table[3] : view<9xi32> -> i32
+  %expected3 = scalar.constant 2 : i32
+  %field_valid3 = scalar.cmpi eq, %field3, %expected3 : i32
+  %valid4 = scalar.andi %valid3, %field_valid3 : i1
+  %field4 = view.load %table[4] : view<9xi32> -> i32
+  %expected4 = scalar.constant 0 : i32
+  %field_valid4 = scalar.cmpi eq, %field4, %expected4 : i32
+  %valid5 = scalar.andi %valid4, %field_valid4 : i1
+  %field5 = view.load %table[5] : view<9xi32> -> i32
+  %expected5 = scalar.constant 3 : i32
+  %field_valid5 = scalar.cmpi eq, %field5, %expected5 : i32
+  %valid6 = scalar.andi %valid5, %field_valid5 : i1
+  %field6 = view.load %table[6] : view<9xi32> -> i32
+  %expected6 = scalar.constant 7 : i32
+  %field_valid6 = scalar.cmpi eq, %field6, %expected6 : i32
+  %valid7 = scalar.andi %valid6, %field_valid6 : i1
+  %field7 = view.load %table[7] : view<9xi32> -> i32
+  %expected7 = scalar.constant 10 : i32
+  %field_valid7 = scalar.cmpi eq, %field7, %expected7 : i32
+  %valid8 = scalar.andi %valid7, %field_valid7 : i1
+  %field8 = view.load %table[8] : view<9xi32> -> i32
+  %expected8 = scalar.constant 12 : i32
+  %field_valid8 = scalar.cmpi eq, %field8, %expected8 : i32
+  %valid9 = scalar.andi %valid8, %field_valid8 : i1
+  %weights_offset = index.constant 36 : offset
+  %weights = buffer.view %plan[%weights_offset] : buffer -> view<12xf32>
+  %reference0 = scalar.constant 1.0 : f32
+  %weight0 = view.load %weights[0] : view<12xf32> -> f32
+  %weight_valid0 = scalar.cmpf oeq, %weight0, %reference0 : f32
+  %valid10 = scalar.andi %valid9, %weight_valid0 : i1
+  %reference1 = scalar.constant 0.0 : f32
+  %weight1 = view.load %weights[1] : view<12xf32> -> f32
+  %weight_valid1 = scalar.cmpf oeq, %weight1, %reference1 : f32
+  %valid11 = scalar.andi %valid10, %weight_valid1 : i1
+  %reference2 = scalar.constant 0.0 : f32
+  %weight2 = view.load %weights[2] : view<12xf32> -> f32
+  %weight_valid2 = scalar.cmpf oeq, %weight2, %reference2 : f32
+  %valid12 = scalar.andi %valid11, %weight_valid2 : i1
+  %reference3 = scalar.constant 0.0 : f32
+  %weight3 = view.load %weights[3] : view<12xf32> -> f32
+  %weight_valid3 = scalar.cmpf oeq, %weight3, %reference3 : f32
+  %valid13 = scalar.andi %valid12, %weight_valid3 : i1
+  %reference4 = scalar.constant 1.0 : f32
+  %weight4 = view.load %weights[4] : view<12xf32> -> f32
+  %weight_valid4 = scalar.cmpf oeq, %weight4, %reference4 : f32
+  %valid14 = scalar.andi %valid13, %weight_valid4 : i1
+  %reference5 = scalar.constant 0.0 : f32
+  %weight5 = view.load %weights[5] : view<12xf32> -> f32
+  %weight_valid5 = scalar.cmpf oeq, %weight5, %reference5 : f32
+  %valid15 = scalar.andi %valid14, %weight_valid5 : i1
+  %reference6 = scalar.constant 0.0 : f32
+  %weight6 = view.load %weights[6] : view<12xf32> -> f32
+  %weight_valid6 = scalar.cmpf oeq, %weight6, %reference6 : f32
+  %valid16 = scalar.andi %valid15, %weight_valid6 : i1
+  %reference7 = scalar.constant 0.0 : f32
+  %weight7 = view.load %weights[7] : view<12xf32> -> f32
+  %weight_valid7 = scalar.cmpf oeq, %weight7, %reference7 : f32
+  %valid17 = scalar.andi %valid16, %weight_valid7 : i1
+  %reference8 = scalar.constant 1.0 : f32
+  %weight8 = view.load %weights[8] : view<12xf32> -> f32
+  %weight_valid8 = scalar.cmpf oeq, %weight8, %reference8 : f32
+  %valid18 = scalar.andi %valid17, %weight_valid8 : i1
+  %reference9 = scalar.constant 0.0 : f32
+  %weight9 = view.load %weights[9] : view<12xf32> -> f32
+  %weight_valid9 = scalar.cmpf oeq, %weight9, %reference9 : f32
+  %valid19 = scalar.andi %valid18, %weight_valid9 : i1
+  %reference10 = scalar.constant 0.0 : f32
+  %weight10 = view.load %weights[10] : view<12xf32> -> f32
+  %weight_valid10 = scalar.cmpf oeq, %weight10, %reference10 : f32
+  %valid20 = scalar.andi %valid19, %weight_valid10 : i1
+  %reference11 = scalar.constant 1.0 : f32
+  %weight11 = view.load %weights[11] : view<12xf32> -> f32
+  %weight_valid11 = scalar.cmpf oeq, %weight11, %reference11 : f32
+  %valid21 = scalar.andi %valid20, %weight_valid11 : i1
+  %result = scalar.extui %valid21 : i1 to i32
+  func.return %result : i32
+}
+
+check.case public @axis_identity_coefficients {
+  %actual = func.call @axis_identity() : () -> (i32)
+  %expected = check.literal value(1) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+func.def @axis_reduction() -> (i32) {
+  %input = scalar.constant 4 : i32
+  %output = scalar.constant 2 : i32
+  %plan, %count = func.call @qwen38_vision_axis_plan(%input, %output) : (i32, i32) -> (buffer, i32)
+  %expected_count = scalar.constant 8 : i32
+  %valid0 = scalar.cmpi eq, %count, %expected_count : i32
+  %origin = index.constant 0 : offset
+  %table = buffer.view %plan[%origin] : buffer -> view<5xi32>
+  %field0 = view.load %table[0] : view<5xi32> -> i32
+  %expected0 = scalar.constant 0 : i32
+  %field_valid0 = scalar.cmpi eq, %field0, %expected0 : i32
+  %valid1 = scalar.andi %valid0, %field_valid0 : i1
+  %field1 = view.load %table[1] : view<5xi32> -> i32
+  %expected1 = scalar.constant 0 : i32
+  %field_valid1 = scalar.cmpi eq, %field1, %expected1 : i32
+  %valid2 = scalar.andi %valid1, %field_valid1 : i1
+  %field2 = view.load %table[2] : view<5xi32> -> i32
+  %expected2 = scalar.constant 0 : i32
+  %field_valid2 = scalar.cmpi eq, %field2, %expected2 : i32
+  %valid3 = scalar.andi %valid2, %field_valid2 : i1
+  %field3 = view.load %table[3] : view<5xi32> -> i32
+  %expected3 = scalar.constant 4 : i32
+  %field_valid3 = scalar.cmpi eq, %field3, %expected3 : i32
+  %valid4 = scalar.andi %valid3, %field_valid3 : i1
+  %field4 = view.load %table[4] : view<5xi32> -> i32
+  %expected4 = scalar.constant 8 : i32
+  %field_valid4 = scalar.cmpi eq, %field4, %expected4 : i32
+  %valid5 = scalar.andi %valid4, %field_valid4 : i1
+  %weights_offset = index.constant 20 : offset
+  %weights = buffer.view %plan[%weights_offset] : buffer -> view<8xf32>
+  %numerator0 = scalar.constant 111.0 : f32
+  %denominator0 = scalar.constant 242.0 : f32
+  %reference0 = scalar.divf %numerator0, %denominator0 : f32
+  %weight0 = view.load %weights[0] : view<8xf32> -> f32
+  %weight_valid0 = scalar.cmpf oeq, %weight0, %reference0 : f32
+  %valid6 = scalar.andi %valid5, %weight_valid0 : i1
+  %numerator1 = scalar.constant 111.0 : f32
+  %denominator1 = scalar.constant 242.0 : f32
+  %reference1 = scalar.divf %numerator1, %denominator1 : f32
+  %weight1 = view.load %weights[1] : view<8xf32> -> f32
+  %weight_valid1 = scalar.cmpf oeq, %weight1, %reference1 : f32
+  %valid7 = scalar.andi %valid6, %weight_valid1 : i1
+  %numerator2 = scalar.constant 29.0 : f32
+  %denominator2 = scalar.constant 242.0 : f32
+  %reference2 = scalar.divf %numerator2, %denominator2 : f32
+  %weight2 = view.load %weights[2] : view<8xf32> -> f32
+  %weight_valid2 = scalar.cmpf oeq, %weight2, %reference2 : f32
+  %valid8 = scalar.andi %valid7, %weight_valid2 : i1
+  %numerator3 = scalar.constant -9.0 : f32
+  %denominator3 = scalar.constant 242.0 : f32
+  %reference3 = scalar.divf %numerator3, %denominator3 : f32
+  %weight3 = view.load %weights[3] : view<8xf32> -> f32
+  %weight_valid3 = scalar.cmpf oeq, %weight3, %reference3 : f32
+  %valid9 = scalar.andi %valid8, %weight_valid3 : i1
+  %numerator4 = scalar.constant -9.0 : f32
+  %denominator4 = scalar.constant 242.0 : f32
+  %reference4 = scalar.divf %numerator4, %denominator4 : f32
+  %weight4 = view.load %weights[4] : view<8xf32> -> f32
+  %weight_valid4 = scalar.cmpf oeq, %weight4, %reference4 : f32
+  %valid10 = scalar.andi %valid9, %weight_valid4 : i1
+  %numerator5 = scalar.constant 29.0 : f32
+  %denominator5 = scalar.constant 242.0 : f32
+  %reference5 = scalar.divf %numerator5, %denominator5 : f32
+  %weight5 = view.load %weights[5] : view<8xf32> -> f32
+  %weight_valid5 = scalar.cmpf oeq, %weight5, %reference5 : f32
+  %valid11 = scalar.andi %valid10, %weight_valid5 : i1
+  %numerator6 = scalar.constant 111.0 : f32
+  %denominator6 = scalar.constant 242.0 : f32
+  %reference6 = scalar.divf %numerator6, %denominator6 : f32
+  %weight6 = view.load %weights[6] : view<8xf32> -> f32
+  %weight_valid6 = scalar.cmpf oeq, %weight6, %reference6 : f32
+  %valid12 = scalar.andi %valid11, %weight_valid6 : i1
+  %numerator7 = scalar.constant 111.0 : f32
+  %denominator7 = scalar.constant 242.0 : f32
+  %reference7 = scalar.divf %numerator7, %denominator7 : f32
+  %weight7 = view.load %weights[7] : view<8xf32> -> f32
+  %weight_valid7 = scalar.cmpf oeq, %weight7, %reference7 : f32
+  %valid13 = scalar.andi %valid12, %weight_valid7 : i1
+  %result = scalar.extui %valid13 : i1 to i32
+  func.return %result : i32
+}
+
+check.case public @axis_reduction_coefficients {
+  %actual = func.call @axis_reduction() : () -> (i32)
+  %expected = check.literal value(1) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+func.def @axis_magnification() -> (i32) {
+  %input = scalar.constant 2 : i32
+  %output = scalar.constant 4 : i32
+  %plan, %count = func.call @qwen38_vision_axis_plan(%input, %output) : (i32, i32) -> (buffer, i32)
+  %expected_count = scalar.constant 8 : i32
+  %valid0 = scalar.cmpi eq, %count, %expected_count : i32
+  %origin = index.constant 0 : offset
+  %table = buffer.view %plan[%origin] : buffer -> view<9xi32>
+  %field0 = view.load %table[0] : view<9xi32> -> i32
+  %expected0 = scalar.constant 0 : i32
+  %field_valid0 = scalar.cmpi eq, %field0, %expected0 : i32
+  %valid1 = scalar.andi %valid0, %field_valid0 : i1
+  %field1 = view.load %table[1] : view<9xi32> -> i32
+  %expected1 = scalar.constant 0 : i32
+  %field_valid1 = scalar.cmpi eq, %field1, %expected1 : i32
+  %valid2 = scalar.andi %valid1, %field_valid1 : i1
+  %field2 = view.load %table[2] : view<9xi32> -> i32
+  %expected2 = scalar.constant 0 : i32
+  %field_valid2 = scalar.cmpi eq, %field2, %expected2 : i32
+  %valid3 = scalar.andi %valid2, %field_valid2 : i1
+  %field3 = view.load %table[3] : view<9xi32> -> i32
+  %expected3 = scalar.constant 0 : i32
+  %field_valid3 = scalar.cmpi eq, %field3, %expected3 : i32
+  %valid4 = scalar.andi %valid3, %field_valid3 : i1
+  %field4 = view.load %table[4] : view<9xi32> -> i32
+  %expected4 = scalar.constant 0 : i32
+  %field_valid4 = scalar.cmpi eq, %field4, %expected4 : i32
+  %valid5 = scalar.andi %valid4, %field_valid4 : i1
+  %field5 = view.load %table[5] : view<9xi32> -> i32
+  %expected5 = scalar.constant 2 : i32
+  %field_valid5 = scalar.cmpi eq, %field5, %expected5 : i32
+  %valid6 = scalar.andi %valid5, %field_valid5 : i1
+  %field6 = view.load %table[6] : view<9xi32> -> i32
+  %expected6 = scalar.constant 4 : i32
+  %field_valid6 = scalar.cmpi eq, %field6, %expected6 : i32
+  %valid7 = scalar.andi %valid6, %field_valid6 : i1
+  %field7 = view.load %table[7] : view<9xi32> -> i32
+  %expected7 = scalar.constant 6 : i32
+  %field_valid7 = scalar.cmpi eq, %field7, %expected7 : i32
+  %valid8 = scalar.andi %valid7, %field_valid7 : i1
+  %field8 = view.load %table[8] : view<9xi32> -> i32
+  %expected8 = scalar.constant 8 : i32
+  %field_valid8 = scalar.cmpi eq, %field8, %expected8 : i32
+  %valid9 = scalar.andi %valid8, %field_valid8 : i1
+  %weights_offset = index.constant 36 : offset
+  %weights = buffer.view %plan[%weights_offset] : buffer -> view<8xf32>
+  %numerator0 = scalar.constant 111.0 : f32
+  %denominator0 = scalar.constant 102.0 : f32
+  %reference0 = scalar.divf %numerator0, %denominator0 : f32
+  %weight0 = view.load %weights[0] : view<8xf32> -> f32
+  %weight_valid0 = scalar.cmpf oeq, %weight0, %reference0 : f32
+  %valid10 = scalar.andi %valid9, %weight_valid0 : i1
+  %numerator1 = scalar.constant -9.0 : f32
+  %denominator1 = scalar.constant 102.0 : f32
+  %reference1 = scalar.divf %numerator1, %denominator1 : f32
+  %weight1 = view.load %weights[1] : view<8xf32> -> f32
+  %weight_valid1 = scalar.cmpf oeq, %weight1, %reference1 : f32
+  %valid11 = scalar.andi %valid10, %weight_valid1 : i1
+  %numerator2 = scalar.constant 111.0 : f32
+  %denominator2 = scalar.constant 140.0 : f32
+  %reference2 = scalar.divf %numerator2, %denominator2 : f32
+  %weight2 = view.load %weights[2] : view<8xf32> -> f32
+  %weight_valid2 = scalar.cmpf oeq, %weight2, %reference2 : f32
+  %valid12 = scalar.andi %valid11, %weight_valid2 : i1
+  %numerator3 = scalar.constant 29.0 : f32
+  %denominator3 = scalar.constant 140.0 : f32
+  %reference3 = scalar.divf %numerator3, %denominator3 : f32
+  %weight3 = view.load %weights[3] : view<8xf32> -> f32
+  %weight_valid3 = scalar.cmpf oeq, %weight3, %reference3 : f32
+  %valid13 = scalar.andi %valid12, %weight_valid3 : i1
+  %numerator4 = scalar.constant 29.0 : f32
+  %denominator4 = scalar.constant 140.0 : f32
+  %reference4 = scalar.divf %numerator4, %denominator4 : f32
+  %weight4 = view.load %weights[4] : view<8xf32> -> f32
+  %weight_valid4 = scalar.cmpf oeq, %weight4, %reference4 : f32
+  %valid14 = scalar.andi %valid13, %weight_valid4 : i1
+  %numerator5 = scalar.constant 111.0 : f32
+  %denominator5 = scalar.constant 140.0 : f32
+  %reference5 = scalar.divf %numerator5, %denominator5 : f32
+  %weight5 = view.load %weights[5] : view<8xf32> -> f32
+  %weight_valid5 = scalar.cmpf oeq, %weight5, %reference5 : f32
+  %valid15 = scalar.andi %valid14, %weight_valid5 : i1
+  %numerator6 = scalar.constant -9.0 : f32
+  %denominator6 = scalar.constant 102.0 : f32
+  %reference6 = scalar.divf %numerator6, %denominator6 : f32
+  %weight6 = view.load %weights[6] : view<8xf32> -> f32
+  %weight_valid6 = scalar.cmpf oeq, %weight6, %reference6 : f32
+  %valid16 = scalar.andi %valid15, %weight_valid6 : i1
+  %numerator7 = scalar.constant 111.0 : f32
+  %denominator7 = scalar.constant 102.0 : f32
+  %reference7 = scalar.divf %numerator7, %denominator7 : f32
+  %weight7 = view.load %weights[7] : view<8xf32> -> f32
+  %weight_valid7 = scalar.cmpf oeq, %weight7, %reference7 : f32
+  %valid17 = scalar.andi %valid16, %weight_valid7 : i1
+  %result = scalar.extui %valid17 : i1 to i32
+  func.return %result : i32
+}
+
+check.case public @axis_magnification_coefficients {
+  %actual = func.call @axis_magnification() : () -> (i32)
+  %expected = check.literal value(1) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+func.def @axis_single_pixel() -> (i32) {
+  %input = scalar.constant 1 : i32
+  %output = scalar.constant 3 : i32
+  %plan, %count = func.call @qwen38_vision_axis_plan(%input, %output) : (i32, i32) -> (buffer, i32)
+  %expected_count = scalar.constant 3 : i32
+  %valid0 = scalar.cmpi eq, %count, %expected_count : i32
+  %origin = index.constant 0 : offset
+  %table = buffer.view %plan[%origin] : buffer -> view<7xi32>
+  %field0 = view.load %table[0] : view<7xi32> -> i32
+  %expected0 = scalar.constant 0 : i32
+  %field_valid0 = scalar.cmpi eq, %field0, %expected0 : i32
+  %valid1 = scalar.andi %valid0, %field_valid0 : i1
+  %field1 = view.load %table[1] : view<7xi32> -> i32
+  %expected1 = scalar.constant 0 : i32
+  %field_valid1 = scalar.cmpi eq, %field1, %expected1 : i32
+  %valid2 = scalar.andi %valid1, %field_valid1 : i1
+  %field2 = view.load %table[2] : view<7xi32> -> i32
+  %expected2 = scalar.constant 0 : i32
+  %field_valid2 = scalar.cmpi eq, %field2, %expected2 : i32
+  %valid3 = scalar.andi %valid2, %field_valid2 : i1
+  %field3 = view.load %table[3] : view<7xi32> -> i32
+  %expected3 = scalar.constant 0 : i32
+  %field_valid3 = scalar.cmpi eq, %field3, %expected3 : i32
+  %valid4 = scalar.andi %valid3, %field_valid3 : i1
+  %field4 = view.load %table[4] : view<7xi32> -> i32
+  %expected4 = scalar.constant 1 : i32
+  %field_valid4 = scalar.cmpi eq, %field4, %expected4 : i32
+  %valid5 = scalar.andi %valid4, %field_valid4 : i1
+  %field5 = view.load %table[5] : view<7xi32> -> i32
+  %expected5 = scalar.constant 2 : i32
+  %field_valid5 = scalar.cmpi eq, %field5, %expected5 : i32
+  %valid6 = scalar.andi %valid5, %field_valid5 : i1
+  %field6 = view.load %table[6] : view<7xi32> -> i32
+  %expected6 = scalar.constant 3 : i32
+  %field_valid6 = scalar.cmpi eq, %field6, %expected6 : i32
+  %valid7 = scalar.andi %valid6, %field_valid6 : i1
+  %weights_offset = index.constant 28 : offset
+  %weights = buffer.view %plan[%weights_offset] : buffer -> view<3xf32>
+  %numerator0 = scalar.constant 1.0 : f32
+  %denominator0 = scalar.constant 1.0 : f32
+  %reference0 = scalar.divf %numerator0, %denominator0 : f32
+  %weight0 = view.load %weights[0] : view<3xf32> -> f32
+  %weight_valid0 = scalar.cmpf oeq, %weight0, %reference0 : f32
+  %valid8 = scalar.andi %valid7, %weight_valid0 : i1
+  %numerator1 = scalar.constant 1.0 : f32
+  %denominator1 = scalar.constant 1.0 : f32
+  %reference1 = scalar.divf %numerator1, %denominator1 : f32
+  %weight1 = view.load %weights[1] : view<3xf32> -> f32
+  %weight_valid1 = scalar.cmpf oeq, %weight1, %reference1 : f32
+  %valid9 = scalar.andi %valid8, %weight_valid1 : i1
+  %numerator2 = scalar.constant 1.0 : f32
+  %denominator2 = scalar.constant 1.0 : f32
+  %reference2 = scalar.divf %numerator2, %denominator2 : f32
+  %weight2 = view.load %weights[2] : view<3xf32> -> f32
+  %weight_valid2 = scalar.cmpf oeq, %weight2, %reference2 : f32
+  %valid10 = scalar.andi %valid9, %weight_valid2 : i1
+  %result = scalar.extui %valid10 : i1 to i32
+  func.return %result : i32
+}
+
+check.case public @axis_single_pixel_coefficients {
+  %actual = func.call @axis_single_pixel() : () -> (i32)
+  %expected = check.literal value(1) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
