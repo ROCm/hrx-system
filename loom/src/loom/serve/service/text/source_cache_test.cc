@@ -31,8 +31,8 @@ TEST_F(SourceTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_chat_initialize(
       policy, policy->name, iree_make_cstring_view(next_body.c_str()), 2, 4,
       host_allocator_, &next));
-  iree_string_builder_t tools;
-  iree_string_builder_initialize(host_allocator_, &tools);
+  loom_serve_text_tool_calls_t tools;
+  loom_serve_text_tool_calls_initialize(host_allocator_, &tools);
   loom_serve_text_chat_completion_t completion = {};
   IREE_ASSERT_OK(loom_serve_text_chat_complete(&first, IREE_SV("b"), 1, &tools,
                                                &completion));
@@ -84,7 +84,7 @@ TEST_F(SourceTextServiceTest,
   loom_serve_text_input_deinitialize(&input, host_allocator_);
   loom_serve_text_chat_deinitialize(&next);
   loom_serve_text_chat_deinitialize(&first);
-  iree_string_builder_deinitialize(&tools);
+  loom_serve_text_tool_calls_deinitialize(&tools);
 }
 
 TEST_F(RegisteredSourceTextServiceTest,
@@ -495,8 +495,8 @@ TEST_F(SourceTextServiceTest, RetainedHistoryRequiresExactOrderedMedia) {
       iree_make_cstring_view(different_placement_body.c_str()), 14, 4,
       host_allocator_, &different_placement));
 
-  iree_string_builder_t tools;
-  iree_string_builder_initialize(host_allocator_, &tools);
+  loom_serve_text_tool_calls_t tools;
+  loom_serve_text_tool_calls_initialize(host_allocator_, &tools);
   loom_serve_text_chat_completion_t completion = {};
   IREE_ASSERT_OK(loom_serve_text_chat_complete(&first, IREE_SV("b"), 10, &tools,
                                                &completion));
@@ -533,7 +533,7 @@ TEST_F(SourceTextServiceTest, RetainedHistoryRequiresExactOrderedMedia) {
 
   loom_serve_text_input_deinitialize(&input, host_allocator_);
   loom_serve_text_chat_completion_deinitialize(&retained);
-  iree_string_builder_deinitialize(&tools);
+  loom_serve_text_tool_calls_deinitialize(&tools);
   loom_serve_text_chat_deinitialize(&different_placement);
   loom_serve_text_chat_deinitialize(&different_detail);
   loom_serve_text_chat_deinitialize(&different_image);

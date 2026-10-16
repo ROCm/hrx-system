@@ -11,6 +11,7 @@
 #include "iree/vm/buffer.h"
 #include "loom/serve/runtime/program/program.h"
 #include "loom/serve/service/text/media.h"
+#include "loom/serve/service/text/tool_calls.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -269,8 +270,6 @@ typedef struct loom_serve_text_chat_completion_t {
   bool reusable;
   // Exact ordered media identity contributing to this completed history.
   loom_serve_text_chat_media_identity_t media;
-  // Number of validated structured tool calls.
-  iree_host_size_t tool_count;
 } loom_serve_text_chat_completion_t;
 
 // Releases a completed checkpoint; zero-initialized values are accepted.
@@ -290,19 +289,19 @@ bool loom_serve_text_chat_completion_is_prefix(
     const loom_serve_text_chat_t* chat);
 
 // Invokes source parsing of the generated suffix into typed function calls.
-// Returns the source-owned canonical completed transcript and appends an OpenAI
-// tool_calls array to tool_calls. IDs are stable across both output forms;
-// streaming calls also carry their delta indexes.
+// Returns the source-owned canonical completed transcript and replaces the
+// reusable tool_calls table with owned validated records. Transport encoding
+// consumes that table only after this entire transaction succeeds.
 // Finishes output parsing before translating the remaining structured suffix.
 // Plain text responses produce an empty array. Source parser failures never
 // submit a partial executable call to the agent.
 // Replaces completion only on success, releasing its prior storage. Failure
-// leaves completion unchanged and may leave partial tool_calls bytes, which
-// the caller must not publish. The checkpoint validates subsequent client
-// history; it does not replace original generated tokens in device state.
+// leaves completion unchanged and tool_calls empty. The checkpoint validates
+// subsequent client history; it does not replace original generated tokens in
+// device state.
 iree_status_t loom_serve_text_chat_complete(
     loom_serve_text_chat_t* chat, iree_string_view_t response,
-    uint64_t request_id, iree_string_builder_t* tool_calls,
+    uint64_t request_id, loom_serve_text_tool_calls_t* tool_calls,
     loom_serve_text_chat_completion_t* completion);
 
 // Borrowed wire metadata copied from a session at each publication. Identity
@@ -340,11 +339,12 @@ iree_status_t loom_serve_text_chat_usage(
 
 // Appends a complete JSON chat response, without HTTP headers. Content is
 // decoded answer text; reasoning is independently decoded thought text and is
-// omitted from the wire when empty. tool_calls is a serialized array or empty
+// omitted from the wire when empty. tool_calls is the validated table or NULL
 // when no tools were produced. Nonstreamed completions always include usage.
 iree_status_t loom_serve_text_chat_response(
     const loom_serve_text_chat_response_t* response, iree_string_view_t content,
-    iree_string_view_t reasoning, iree_string_view_t tool_calls,
+    iree_string_view_t reasoning,
+    const loom_serve_text_tool_calls_t* tool_calls,
     iree_string_view_t finish_reason, iree_string_builder_t* output);
 
 #ifdef __cplusplus

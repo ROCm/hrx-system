@@ -37,7 +37,7 @@ iree_status_t loom_serve_text_response_reject(
 iree_status_t loom_serve_text_response_tokens(
     loom_serve_text_session_t* session, iree_string_view_t name,
     iree_host_size_t count, const int32_t* tokens,
-    iree_string_builder_t* scratch, iree_string_builder_t* tool_calls);
+    iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls);
 
 #ifdef __cplusplus
 }  // extern "C"
