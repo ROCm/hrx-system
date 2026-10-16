@@ -4,10 +4,24 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/hal/drivers/amd/fabric/virtual_buffer.h"
+
+#include "iree/base/threading/mutex.h"
 #include "iree/hal/device_group.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/status.h"
+
+// One installed range. Source metadata is borrowed under the same lifetime
+// contract as the native mapping; the index never keeps physical storage live.
+typedef struct iree_hal_amd_fabric_virtual_mapping_t {
+  // Native source coordinates and exact target range.
+  amdf_memory_mapping_update_t native;
+  // Provider-owned consumer array, live through the source's final alias.
+  const amdf_memory_device_access_t* accesses;
+  // Number of exact consumers in accesses.
+  uint32_t access_count;
+} iree_hal_amd_fabric_virtual_mapping_t;
 
 // A native consumer and its canonical shared page-table projection. Distinct
 // consumers may alias one projection but still require exact source accesses.
@@ -20,6 +34,12 @@ typedef struct iree_hal_amd_fabric_reservation_access_t {
   amdf_memory_reservation_access_info_t info;
   // Dense HAL projection identity, shared by native aliases.
   uint32_t projection;
+  // Sorted nonoverlapping source runs, owned only by the canonical access.
+  iree_hal_amd_fabric_virtual_mapping_t* mappings;
+  // Number of installed runs; holes have no entry.
+  iree_host_size_t mapping_count;
+  // First failed native mutation; failed groups never expose stale sources.
+  amdf_status_t mapping_failure;
 } iree_hal_amd_fabric_reservation_access_t;
 
 typedef struct iree_hal_amd_fabric_virtual_buffer_t {
@@ -47,7 +67,127 @@ typedef struct iree_hal_amd_fabric_virtual_buffer_t {
   iree_hal_buffer_native_binding_t* bindings;
   // Virtual geometry and borrowed progress services for child pools.
   iree_hal_buffer_backing_facts_t backing;
+  // Protects source-index publication and lookup, never native mutation or I/O.
+  iree_slim_mutex_t mapping_mutex;
 } iree_hal_amd_fabric_virtual_buffer_t;
+
+// Appends a nonempty run, coalescing identical adjacent source coordinates.
+static void iree_hal_amd_fabric_virtual_mapping_append(
+    iree_hal_amd_fabric_virtual_mapping_t value,
+    iree_hal_amd_fabric_virtual_mapping_t* mappings, iree_host_size_t* count) {
+  if (*count) {
+    iree_hal_amd_fabric_virtual_mapping_t* previous = &mappings[*count - 1];
+    if (previous->native.memory == value.native.memory &&
+        previous->native.access == value.native.access &&
+        previous->accesses == value.accesses &&
+        previous->native.target_byte_offset + previous->native.byte_length ==
+            value.native.target_byte_offset &&
+        previous->native.source_byte_offset + previous->native.byte_length ==
+            value.native.source_byte_offset) {
+      previous->native.byte_length += value.native.byte_length;
+      return;
+    }
+  }
+  mappings[(*count)++] = value;
+}
+
+static iree_hal_amd_fabric_virtual_mapping_t
+iree_hal_amd_fabric_virtual_mapping_tail(
+    iree_hal_amd_fabric_virtual_mapping_t value, uint64_t offset) {
+  value.native.target_byte_offset += offset;
+  value.native.source_byte_offset += offset;
+  value.native.byte_length -= offset;
+  return value;
+}
+
+// Mapping mutations on a reservation are caller-serialized. Build the new
+// index before touching native state so allocation failure cannot leave the
+// index behind the page tables. Readers retain neither array nor source owner.
+static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare_mappings(
+    iree_hal_amd_fabric_virtual_buffer_t* reservation,
+    const iree_hal_amd_fabric_reservation_access_t* access,
+    iree_host_size_t update_count,
+    const iree_hal_memory_mapping_update_t* updates,
+    const amdf_memory_mapping_update_t* native_updates,
+    iree_hal_amd_fabric_virtual_mapping_t** out_mappings,
+    iree_host_size_t* out_count) {
+  *out_mappings = NULL;
+  *out_count = 0;
+  iree_host_size_t capacity = 0;
+  if (!iree_host_size_checked_mul_add(access->mapping_count, update_count, 2,
+                                      &capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "mapping index capacity overflow");
+  }
+  iree_hal_amd_fabric_virtual_mapping_t* mappings = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
+      reservation->base.host_allocator, capacity, sizeof(*mappings),
+      (void**)&mappings));
+  iree_host_size_t count = 0, old_index = 0;
+  uint64_t old_offset = 0;
+  for (iree_host_size_t i = 0; i < update_count; ++i) {
+    const amdf_memory_mapping_update_t* update = &native_updates[i];
+    const uint64_t end = update->target_byte_offset + update->byte_length;
+    // Preserve complete old runs and a prefix preceding this replacement.
+    while (old_index < access->mapping_count) {
+      iree_hal_amd_fabric_virtual_mapping_t old =
+          iree_hal_amd_fabric_virtual_mapping_tail(access->mappings[old_index],
+                                                   old_offset);
+      if (old.native.target_byte_offset >= update->target_byte_offset) {
+        break;
+      }
+      const uint64_t length =
+          iree_min(old.native.byte_length,
+                   update->target_byte_offset - old.native.target_byte_offset);
+      old.native.byte_length = length;
+      iree_hal_amd_fabric_virtual_mapping_append(old, mappings, &count);
+      old_offset += length;
+      if (old_offset < access->mappings[old_index].native.byte_length) {
+        break;
+      }
+      ++old_index;
+      old_offset = 0;
+    }
+    // Discard replaced portions, retaining any suffix for the next iteration.
+    while (old_index < access->mapping_count) {
+      const amdf_memory_mapping_update_t* old =
+          &access->mappings[old_index].native;
+      if (old->target_byte_offset + old_offset >= end) {
+        break;
+      }
+      if (old->target_byte_offset + old->byte_length > end) {
+        old_offset = end - old->target_byte_offset;
+        break;
+      }
+      ++old_index;
+      old_offset = 0;
+    }
+    if (update->memory) {
+      const iree_hal_amd_fabric_mapping_source_t* source =
+          updates[i].source.mapping_source.descriptor;
+      const iree_hal_amd_fabric_virtual_mapping_t value = {
+          .native = *update,
+          .accesses = source->accesses,
+          .access_count = source->access_count,
+      };
+      iree_hal_amd_fabric_virtual_mapping_append(value, mappings, &count);
+    }
+  }
+  for (; old_index < access->mapping_count; ++old_index) {
+    iree_hal_amd_fabric_virtual_mapping_append(
+        iree_hal_amd_fabric_virtual_mapping_tail(access->mappings[old_index],
+                                                 old_offset),
+        mappings, &count);
+    old_offset = 0;
+  }
+  *out_mappings = mappings;
+  *out_count = count;
+  if (!count) {
+    iree_allocator_free(reservation->base.host_allocator, mappings);
+    *out_mappings = NULL;
+  }
+  return iree_ok_status();
+}
 
 static void iree_hal_amd_fabric_virtual_buffer_destroy(
     iree_hal_buffer_t* base) {
@@ -67,6 +207,11 @@ static void iree_hal_amd_fabric_virtual_buffer_destroy(
     iree_hal_amd_report_failure(buffer->event_sink, IREE_SV("amd"), status,
                                 "memory_reservation_destroy");
   }
+  for (uint32_t i = 0; i < buffer->access_count; ++i) {
+    iree_allocator_free(buffer->base.host_allocator,
+                        buffer->accesses[i].mappings);
+  }
+  iree_slim_mutex_deinitialize(&buffer->mapping_mutex);
   iree_hal_memory_contract_release(base->memory.contract);
   iree_allocator_free(buffer->base.host_allocator, buffer);
 }
@@ -75,10 +220,21 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_detach(
     iree_hal_buffer_t* base, uint32_t scope_id) {
   iree_hal_amd_fabric_virtual_buffer_t* buffer =
       (iree_hal_amd_fabric_virtual_buffer_t*)base;
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(
-      buffer->api->memory_reservation_detach(buffer->native,
-                                             buffer->scope_accesses[scope_id]),
-      "memory_reservation_detach");
+  const uint32_t ordinal = buffer->accesses[buffer->scope_accesses[scope_id]]
+                               .info.mapping_access_ordinal;
+  iree_hal_amd_fabric_reservation_access_t* access = &buffer->accesses[ordinal];
+  const amdf_status_t status =
+      buffer->api->memory_reservation_detach(buffer->native, ordinal);
+  iree_slim_mutex_lock(&buffer->mapping_mutex);
+  iree_hal_amd_fabric_virtual_mapping_t* previous = access->mappings;
+  access->mappings = NULL;
+  access->mapping_count = 0;
+  if (access->mapping_failure == AMDF_STATUS_OK) {
+    access->mapping_failure = status;
+  }
+  iree_slim_mutex_unlock(&buffer->mapping_mutex);
+  iree_allocator_free(buffer->base.host_allocator, previous);
+  return IREE_HAL_AMD_STATUS_FROM_AMDF(status, "memory_reservation_detach");
 }
 
 static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
@@ -101,7 +257,7 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
   const uint32_t ordinal =
       reservation->accesses[reservation->scope_accesses[updates[0].scope_id]]
           .info.mapping_access_ordinal;
-  const iree_hal_amd_fabric_reservation_access_t* access =
+  iree_hal_amd_fabric_reservation_access_t* access =
       &reservation->accesses[ordinal];
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < update_count && iree_status_is_ok(status);
@@ -143,17 +299,95 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
                                      : 0,
     };
   }
+  iree_hal_amd_fabric_virtual_mapping_t* mappings = NULL;
+  iree_host_size_t mapping_count = 0;
   if (iree_status_is_ok(status)) {
-    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+    status = iree_hal_amd_fabric_virtual_buffer_prepare_mappings(
+        reservation, access, update_count, updates, native_updates, &mappings,
+        &mapping_count);
+  }
+  if (iree_status_is_ok(status)) {
+    const amdf_status_t native_status =
         reservation->api->memory_reservation_update(
             reservation->native, ordinal, (uint32_t)update_count,
-            native_updates),
-        "memory_reservation_update");
+            native_updates);
+    iree_slim_mutex_lock(&reservation->mapping_mutex);
+    if (native_status == AMDF_STATUS_OK) {
+      iree_hal_amd_fabric_virtual_mapping_t* previous = access->mappings;
+      access->mappings = mappings;
+      access->mapping_count = mapping_count;
+      access->mapping_failure = AMDF_STATUS_OK;
+      mappings = previous;
+    } else if (access->mapping_failure == AMDF_STATUS_OK) {
+      access->mapping_failure = native_status;
+    }
+    iree_slim_mutex_unlock(&reservation->mapping_mutex);
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(native_status,
+                                           "memory_reservation_update");
   }
+  iree_allocator_free(reservation->base.host_allocator, mappings);
   if (native_updates != inline_updates) {
     iree_allocator_free(reservation->base.host_allocator, native_updates);
   }
   return status;
+}
+
+iree_status_t iree_hal_amd_fabric_virtual_buffer_query_source(
+    iree_hal_virtual_buffer_view_t view, uint32_t scope_id,
+    iree_device_size_t offset, iree_device_size_t length,
+    amdf_memory_mapping_update_t* out_source) {
+  *out_source = (amdf_memory_mapping_update_t){0};
+  iree_hal_amd_fabric_virtual_buffer_t* reservation = (void*)view.root;
+  const uint32_t consumer = reservation->scope_accesses[scope_id];
+  const uint32_t ordinal =
+      reservation->accesses[consumer].info.mapping_access_ordinal;
+  const iree_hal_amd_fabric_reservation_access_t* access =
+      &reservation->accesses[ordinal];
+  const uint64_t position = view.byte_offset + offset;
+  iree_hal_amd_fabric_virtual_mapping_t mapping = {0};
+  iree_slim_mutex_lock(&reservation->mapping_mutex);
+  const amdf_status_t failure = access->mapping_failure;
+  iree_host_size_t low = 0, high = access->mapping_count;
+  while (low < high) {
+    const iree_host_size_t middle = low + (high - low) / 2;
+    const amdf_memory_mapping_update_t* range =
+        &access->mappings[middle].native;
+    if (range->target_byte_offset + range->byte_length <= position) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  if (low < access->mapping_count &&
+      access->mappings[low].native.target_byte_offset <= position) {
+    mapping = access->mappings[low];
+  }
+  iree_slim_mutex_unlock(&reservation->mapping_mutex);
+  IREE_RETURN_IF_ERROR(
+      IREE_HAL_AMD_STATUS_FROM_AMDF(failure, "memory_reservation_update"));
+  if (!mapping.native.memory) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "file range includes unmapped virtual byte %" PRIu64, position);
+  }
+  mapping = iree_hal_amd_fabric_virtual_mapping_tail(
+      mapping, position - mapping.native.target_byte_offset);
+  mapping.native.byte_length = iree_min(mapping.native.byte_length, length);
+  // Shared page tables do not imply shared consumer ordinals. Source accesses
+  // were qualified at mapping admission; select this queue's exact consumer.
+  if (consumer != ordinal) {
+    uint32_t i = 0;
+    for (; i < mapping.access_count; ++i) {
+      if (mapping.accesses[i].device ==
+          reservation->accesses[consumer].native.device) {
+        break;
+      }
+    }
+    IREE_ASSERT_LT(i, mapping.access_count);
+    mapping.native.memory_access_ordinal = i;
+  }
+  *out_source = mapping.native;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_fabric_virtual_buffer_invalidate_range(
@@ -637,6 +871,7 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
         IREE_HAL_MEMORY_BACKEND_AMDF,
         &iree_hal_amd_fabric_virtual_buffer_vtable, host_allocator,
         &reservation->base);
+    iree_slim_mutex_initialize(&reservation->mapping_mutex);
     reservation->base.projection_count = projection_count;
     reservation->base.projections = reservation->projections;
     *out_buffer = &reservation->base.buffer;

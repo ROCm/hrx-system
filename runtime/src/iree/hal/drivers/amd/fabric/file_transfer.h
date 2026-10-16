@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_FABRIC_FILE_TRANSFER_H_
 #define IREE_HAL_DRIVERS_AMD_FABRIC_FILE_TRANSFER_H_
 
+#include "amdf/amdf.h"
 #include "iree/async/operations/file.h"
 #include "iree/hal/api.h"
 
@@ -23,6 +24,9 @@ typedef struct iree_hal_amd_fabric_file_transfer_callback_t {
   // Borrowed engine operation owning the transfer storage.
   void* user_data;
 } iree_hal_amd_fabric_file_transfer_callback_t;
+
+typedef struct iree_hal_amd_fabric_file_host_range_t
+    iree_hal_amd_fabric_file_host_range_t;
 
 // Placed state for a file transfer through a host execution binding or an
 // engine's native buffer copy. The engine owns dependency resolution, staging,
@@ -48,6 +52,20 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
   iree_byte_span_t file_contents;
   // Host execution view resolved only after producer dependencies complete.
   iree_byte_span_t buffer_contents;
+  // Private views of physical sources underlying an execution-only virtual
+  // buffer. These views borrow the application's installed backing lifetimes.
+  struct {
+    // Borrowed native API, dominated by the engine's retained device.
+    const amdf_api_t* api;
+    // Borrowed destination for native view cleanup diagnostics.
+    iree_hal_device_event_sink_t event_sink;
+    // Owned host views in logical file order; no physical backing is retained.
+    iree_hal_amd_fabric_file_host_range_t* ranges;
+    // Number of initialized ranges, including any partially prepared tail.
+    iree_host_size_t count;
+    // Current I/O range; advances only after its complete extent retires.
+    iree_host_size_t index;
+  } host;
   // Platform I/O state, unused for memory files.
   struct {
     // Native handle retained through |file|; its proactor remains borrowed.
@@ -88,6 +106,28 @@ iree_status_t iree_hal_amd_fabric_file_transfer_initialize(
 // Releases captured operands after all native I/O and host work have retired,
 // or when an operation is rejected before starting. Does not free placed state.
 void iree_hal_amd_fabric_file_transfer_deinitialize(
+    iree_hal_amd_fabric_file_transfer_t* transfer);
+
+// Prepares direct buffered I/O through the physical sources of an AMDF virtual
+// buffer, after mapping dependencies complete and before executing barriers.
+// Queue visibility is combined over the entire operation; CPU actions are
+// qualified against each physical source and performed only when required.
+// Unsupported backing returns OK with available=false and no acquired views.
+// Mapping failures, holes, native errors, and allocation failures propagate.
+// Success with available=true retains host views until deinitialization,
+// without adding source ownership or public host-mapping permissions to the
+// buffer.
+iree_status_t iree_hal_amd_fabric_file_transfer_prepare_virtual(
+    iree_hal_amd_fabric_file_transfer_t* transfer, const amdf_api_t* api,
+    const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
+    iree_hal_device_event_sink_t event_sink,
+    iree_hal_memory_effects_t* out_before, iree_hal_memory_effects_t* out_after,
+    bool* out_available);
+
+// Publishes the complete direct-host read after every native file request has
+// retired. Private physical views use their exact pair recipes; ordinary host
+// bindings use the buffer's public host cache contract.
+iree_status_t iree_hal_amd_fabric_file_transfer_flush(
     iree_hal_amd_fabric_file_transfer_t* transfer);
 
 // Resolves committed buffer storage and acquires source bytes on the host

@@ -1957,6 +1957,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .captures = &queue->captures,
       .waits = &queue->wait_context,
       .queue_ordinal = options->queue_ordinal,
+      .native_family_ordinal = options->family_ordinal,
       .barrier_size = sizeof(iree_hal_amd_gpu_pm4_barrier_t),
       .add_effects = iree_hal_amd_gpu_pm4_file_add_effects,
       .submit = iree_hal_amd_gpu_pm4_file_submit};

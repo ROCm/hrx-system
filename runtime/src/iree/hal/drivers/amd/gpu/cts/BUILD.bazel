@@ -186,10 +186,12 @@ iree_runtime_cc_test(
     srcs = ["file_transfer_test.cc"],
     deps = [
         ":test_device",
+        "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hip_images",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",

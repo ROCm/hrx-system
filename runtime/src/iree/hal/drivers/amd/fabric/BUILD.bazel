@@ -100,9 +100,13 @@ iree_runtime_cc_library(
     hdrs = ["file_transfer.h"],
     deps = [
         ":buffer",
+        ":memory_backend",
+        ":memory_transition",
+        "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/utils:files",
     ],
 )
@@ -210,7 +214,10 @@ iree_runtime_cc_library(
         "memory_backend.c",
         "virtual_buffer.c",
     ],
-    hdrs = ["memory_backend.h"],
+    hdrs = [
+        "memory_backend.h",
+        "virtual_buffer.h",
+    ],
     deps = [
         ":asan",
         ":memory",
@@ -219,6 +226,7 @@ iree_runtime_cc_library(
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/memory:passthrough_pool",

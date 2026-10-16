@@ -34,6 +34,8 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   iree_hal_amd_gpu_profile_t* profile;
   // Exact stream index within the device-owned session.
   uint32_t queue_ordinal;
+  // Exact native family for physical-source host/device visibility queries.
+  uint32_t native_family_ordinal;
   // Size of one immutable native barrier value copied into each operation.
   // The executor defines its representation; the file pipeline never reads it.
   iree_host_size_t barrier_size;

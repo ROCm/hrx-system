@@ -316,10 +316,12 @@ iree_cc_test(
     "file_transfer_test.cc"
   DEPS
     ::test_device
+    amdf::headers
     iree::async
     iree::base
     iree::hal
     iree::hal::cts::util::test_base
+    iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::image::hip_images
     iree::io::file_handle
     iree::testing::gtest

@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/hal/drivers/amd/fabric/virtual_buffer.h"
+
 #include "iree/hal/drivers/amd/fabric/memory_backend_test_base.h"
 
 namespace iree::hal::amd::fabric {
@@ -161,6 +163,15 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
   EXPECT_EQ(native_.last_updates[0].source_byte_offset, 12288u);
   EXPECT_EQ(native_.last_updates[0].target_byte_offset, 4096u);
   EXPECT_EQ(native_.last_updates[0].byte_length, 8192u);
+  amdf_memory_mapping_update_t source;
+  for (uint32_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+        iree_hal_buffer_virtual_view(reservations[i]), i ? second.id : first.id,
+        5000, 8000, &source));
+    EXPECT_EQ(source.source_byte_offset, 12288u + 904u);
+    EXPECT_EQ(source.byte_length, 8192u - 904u);
+    EXPECT_EQ(source.memory_access_ordinal, i);
+  }
 
   // ANY expands distinct projections while deduplicating native aliases.
   mappings[0].scope = {first.domain, IREE_HAL_MEMORY_SCOPE_ANY};
@@ -169,6 +180,10 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
   IREE_ASSERT_OK(
       iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
   EXPECT_EQ(native_.update_count, native_.alias_projections ? 3 : 4);
+  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+      iree_hal_buffer_virtual_view(reservations[0]), second.id, 4096, 8192,
+      &source));
+  EXPECT_EQ(source.memory_access_ordinal, 1u);
   mappings[0].scope = first;
 
   // Distinct consumers of one page table still produce a single native vector.
@@ -207,6 +222,61 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
       iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
   EXPECT_EQ(native_.last_updates[0].memory, nullptr);
   EXPECT_EQ(native_.last_updates[0].access, 0u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_amd_fabric_virtual_buffer_query_source(
+                            iree_hal_buffer_virtual_view(reservations[0]),
+                            first.id, 4096, 1, &source));
+  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+      iree_hal_buffer_virtual_view(reservations[0]), first.id, 0, 16384,
+      &source));
+  EXPECT_EQ(source.byte_length, 4096u);
+  // Exercise source-index splits, holes, and coalescing through real queue_map
+  // admission. A page assignment oracle is independent of the run
+  // representation.
+  const uint32_t changes[][3] = {
+      {0, 4, 0},          {1, 2, 4},          {0, 1, UINT32_MAX},
+      {2, 2, 5},          {1, 3, UINT32_MAX}, {0, 4, 0},
+      {1, 1, UINT32_MAX}, {1, 1, 1},          {0, 4, UINT32_MAX},
+  };
+  std::array<uint32_t, 4> pages;
+  pages.fill(UINT32_MAX);
+  for (const auto& change : changes) {
+    const bool bind = change[2] != UINT32_MAX;
+    const iree_hal_memory_mapping_t mapping = {
+        .target = reservations[0],
+        .scope = first,
+        .target_range = {change[0] * 4096u, change[1] * 4096u},
+        .source = bind ? backing : nullptr,
+        .source_offset = bind ? change[2] * 4096u : 0,
+        .access = static_cast<iree_hal_memory_access_t>(
+            bind ? IREE_HAL_MEMORY_ACCESS_ALL : 0),
+        .operation = bind ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
+                          : IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
+    };
+    ++value;
+    IREE_ASSERT_OK(iree_hal_queue_map(queue, {}, signals, 1, &mapping, 0));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
+    for (uint32_t p = 0; p < change[1]; ++p) {
+      pages[change[0] + p] = bind ? change[2] + p : UINT32_MAX;
+    }
+    for (uint32_t p = 0; p < pages.size(); ++p) {
+      auto result = iree_hal_amd_fabric_virtual_buffer_query_source(
+          iree_hal_buffer_virtual_view(reservations[0]), first.id,
+          p * 4096u + 123, (4 - p) * 4096u - 123, &source);
+      if (pages[p] == UINT32_MAX) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, result);
+      } else {
+        IREE_ASSERT_OK(result);
+        EXPECT_EQ(source.source_byte_offset, pages[p] * 4096u + 123);
+        uint32_t end = p + 1;
+        while (end < pages.size() && pages[end] == pages[p] + end - p) {
+          ++end;
+        }
+        EXPECT_EQ(source.byte_length, (end - p) * 4096u - 123);
+      }
+    }
+  }
   for (auto* reservation : reservations) {
     iree_hal_buffer_release(reservation);
   }
@@ -242,6 +312,11 @@ TEST_F(MemoryBackendTest, NativeMappingFailureReachesQueueCompletion) {
       iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
   EXPECT_EQ(native_.update_count, 1);
   EXPECT_EQ(native_.reservation_count, 1);
+  amdf_memory_mapping_update_t source;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        iree_hal_amd_fabric_virtual_buffer_query_source(
+                            iree_hal_buffer_virtual_view(reservation),
+                            mapping.scope.id, 0, 1, &source));
   iree_hal_buffer_release(reservation);
   EXPECT_EQ(native_.reservation_count, 0);
   iree_hal_semaphore_release(done);

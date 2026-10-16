@@ -237,8 +237,7 @@ static void iree_hal_amd_gpu_file_transfer_advance(
         transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
       // Publish the complete host write once, after all I/O has retired and
       // before the native consumer acquire. No GPU work occurs per file chunk.
-      status = iree_hal_amd_fabric_buffer_flush_host_range(
-          transfer->buffer, transfer->buffer_offset, transfer->length);
+      status = iree_hal_amd_fabric_file_transfer_flush(transfer);
     }
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
     return;
@@ -339,6 +338,25 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
   iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
   operation->host_transfer =
       iree_hal_amd_gpu_file_transfer_prepare_host(operation);
+  if (!operation->host_transfer) {
+    iree_hal_memory_effects_t before = {0}, after = {0};
+    status = iree_hal_amd_fabric_file_transfer_prepare_virtual(
+        transfer, operation->executor->context->api,
+        operation->executor->queue->queue_family,
+        operation->executor->native_family_ordinal,
+        operation->executor->context->event_sink, &before, &after,
+        &operation->host_transfer);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_amd_gpu_file_transfer_complete(operation, status);
+      return;
+    }
+    if (operation->host_transfer) {
+      operation->executor->add_effects(operation->executor->queue, before,
+                                       operation->before);
+      operation->executor->add_effects(operation->executor->queue, after,
+                                       operation->after);
+    }
+  }
   if (operation->host_transfer) {
     ++operation->completion.value;
     const iree_hal_semaphore_list_t completion = {

@@ -11,6 +11,7 @@
 #include "iree/async/semaphore.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/io/file_contents.h"
@@ -23,7 +24,10 @@ namespace {
 using iree::hal::amd::gpu::cts::GpuNativeTest;
 using iree::hal::cts::Ref;
 
-class GpuNativeFileTest : public GpuNativeTest {
+enum class FileBacking { kPhysicalHost, kVirtualHost, kVirtualPrivate };
+
+class GpuNativeFileTest : public GpuNativeTest,
+                          public ::testing::WithParamInterface<FileBacking> {
  protected:
   void SetUp() override {
     GpuNativeTest::SetUp();
@@ -41,8 +45,12 @@ class GpuNativeFileTest : public GpuNativeTest {
     const iree_hal_pool_family_access_t family = {
         .family = iree_hal_queue_family(queues_[0]),
         .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
+        .interfaces = GetParam() != FileBacking::kPhysicalHost
+                          ? UINT64_C(1)
+                                << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE
+                          : 0,
     };
-    const iree_hal_pool_scope_t scope = {
+    iree_hal_pool_scope_t scope = {
         .family_count = 1,
         .families = &family,
         .host =
@@ -52,6 +60,9 @@ class GpuNativeFileTest : public GpuNativeTest {
                 .modes = IREE_HAL_MAPPING_MODE_SCOPED,
             },
     };
+    if (GetParam() == FileBacking::kVirtualPrivate) {
+      scope.host = {};
+    }
     iree_hal_slab_pool_options_t options;
     iree_hal_slab_pool_options_initialize(&options);
     IREE_ASSERT_OK(iree_hal_slab_pool_create(
@@ -79,9 +90,102 @@ class GpuNativeFileTest : public GpuNativeTest {
   void TearDown() override {
     executable_.reset();
     timeline_.reset();
+    sources_.clear();
     pool_.reset();
     EXPECT_TRUE(path_.Remove());
     GpuNativeTest::TearDown();
+  }
+
+  void Allocate(size_t length, iree_hal_buffer_t** out_buffer) {
+    if (GetParam() == FileBacking::kPhysicalHost) {
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          pool_, iree_hal_make_pool_reservation_request(length, 64),
+          iree_infinite_timeout(), out_buffer));
+      return;
+    }
+    const iree_hal_pool_family_access_t family = {
+        .family = iree_hal_queue_family(queues_[0]),
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
+    };
+    const iree_hal_pool_scope_t scope = {1, &family, {}};
+    iree_hal_virtual_buffer_capabilities_t capabilities;
+    IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+        group_, scope, iree_allocator_system(), &capabilities));
+    ASSERT_NE(capabilities.max_byte_length, 0u);
+    const auto source = iree_hal_pool_query_mapping_requirements(pool_);
+    const uint64_t unit =
+        iree_max(source.minimum_granularity,
+                 iree_max(capabilities.mapping_granularity,
+                          capabilities.reservation_granularity));
+    const uint64_t mapped_length = iree_device_align(length, unit);
+    const iree_hal_virtual_buffer_options_t options = {
+        .byte_length = mapped_length + 2 * unit,
+        .mapping_granularity = unit,
+    };
+    Ref<iree_hal_buffer_t> root;
+    IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+        group_, scope, &options, iree_allocator_system(), root.out()));
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(
+        root, unit, mapped_length, iree_allocator_system(), out_buffer));
+    EXPECT_EQ((*out_buffer)->host_binding_index,
+              IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE);
+    EXPECT_EQ((*out_buffer)->memory.contract->host.access, 0u);
+    iree_hal_memory_scope_t program_scope;
+    IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+        group_, {IREE_HAL_MEMORY_SITE_PROGRAM, family.family}, &program_scope));
+    const uint64_t chunk = iree_device_align(4 * 1024 * 1024, unit);
+    for (uint64_t offset = 0; offset < mapped_length; offset += chunk) {
+      const uint64_t count = iree_min(chunk, mapped_length - offset);
+      sources_.emplace_back();
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          pool_, iree_hal_make_pool_reservation_request(chunk + 2 * unit, unit),
+          iree_infinite_timeout(), sources_.back().out()));
+      iree_hal_buffer_native_binding_slot_t slot;
+      IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
+          pool_, program_scope, IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+          &slot));
+      const auto binding =
+          iree_hal_buffer_native_binding(sources_.back(), slot);
+      const auto* native_source =
+          static_cast<const iree_hal_amd_fabric_mapping_source_t*>(
+              binding.mapping_source.descriptor);
+      amdf_memory_info_t native_info = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+          .structure_size = sizeof(native_info),
+      };
+      ASSERT_EQ(
+          fabric_->api->memory_query_info(native_source->memory, &native_info),
+          AMDF_STATUS_OK);
+      direct_ &= (native_info.flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) != 0;
+      mappings_.push_back({
+          .target = *out_buffer,
+          .scope = program_scope,
+          .target_range = {offset, count},
+          .source = sources_.back(),
+          .source_offset = unit,
+          .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+          .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+      });
+    }
+    Ref<iree_hal_semaphore_t> mapped;
+    CreateSemaphore(mapped.out());
+    auto* semaphore = mapped.get();
+    uint64_t value = 1;
+    IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {}, {1, &semaphore, &value},
+                                      mappings_.size(), mappings_.data(), 0));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(mapped, value, iree_infinite_timeout(), 0));
+    RecordProperty("physical_sources_host_visible", direct_);
+  }
+
+  void ReleaseSources() {
+    // The final captured virtual-buffer reference has already been released.
+    // Physical sources remain application-owned until that native detach.
+    sources_.clear();
+    iree_hal_pool_stats_t stats;
+    iree_hal_pool_query_stats(pool_, &stats);
+    EXPECT_EQ(stats.reservation_count, 0u);
+    pool_.reset();
   }
 
   void Open(const std::vector<uint32_t>& contents, iree_hal_file_t** out_file) {
@@ -153,6 +257,12 @@ class GpuNativeFileTest : public GpuNativeTest {
   iree::testing::TempFilePath path_{"iree_gpu_file_transfer"};
   // Explicit host/device backing contract, released after captured uses end.
   Ref<iree_hal_pool_t> pool_;
+  // Explicit backing owners for the execution-only virtual-buffer variant.
+  std::vector<Ref<iree_hal_buffer_t>> sources_;
+  // Installed source coordinates, reused for explicit replacement and removal.
+  std::vector<iree_hal_memory_mapping_t> mappings_;
+  // Native backing admits direct I/O even if the virtual view has no CPU grant.
+  bool direct_ = true;
   // Public operation timeline, independent of private native handoff points.
   Ref<iree_hal_semaphore_t> timeline_;
   // Real shader that leaves dirty lines before file access.
@@ -165,11 +275,9 @@ class GpuNativeFileTest : public GpuNativeTest {
   const iree_hal_queue_barriers_t barriers_ = {&empty_, &empty_};
 };
 
-TEST_F(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
+TEST_P(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
   Ref<iree_hal_buffer_t> buffer;
-  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      pool_, iree_hal_make_pool_reservation_request(kLength + 256, 64),
-      iree_infinite_timeout(), buffer.out()));
+  ASSERT_NO_FATAL_FAILURE(Allocate(kLength + 256, buffer.out()));
   std::vector<uint32_t> expected(kLength / 4 + 32);
   for (size_t i = 0; i < expected.size(); ++i) {
     expected[i] = uint32_t(i * 37 + 3);
@@ -189,7 +297,9 @@ TEST_F(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
                                      {1, &semaphore, &three}, file, 64, buffer,
                                      kBufferOffset, kLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(three));
-  EXPECT_EQ(Publications() - before_read, 2u);
+  if (direct_) {
+    EXPECT_EQ(Publications() - before_read, 2u);
+  }
   ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, three, four, 19));
   ASSERT_NO_FATAL_FAILURE(Wait(four));
   const uint64_t before_write = Publications();
@@ -198,7 +308,9 @@ TEST_F(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
       queues_[0], {1, &semaphore, &four}, {1, &semaphore, &five}, buffer,
       kBufferOffset, file, 64, kLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
-  EXPECT_EQ(Publications() - before_write, 2u);
+  if (direct_) {
+    EXPECT_EQ(Publications() - before_write, 2u);
+  }
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 
   // Check both allocation guards through the public GPU transfer path.
@@ -214,13 +326,52 @@ TEST_F(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
                   : sentinel)
         << i;
   }
+  if (!mappings_.empty()) {
+    // Rebind the same virtual coordinates to different physical sources and
+    // offsets. A file implementation using stale source metadata would modify
+    // the old slabs while this shader and write-back use the new page tables.
+    uint64_t seven = 7, eight = 8, nine = 9, ten = 10, eleven = 11, twelve = 12;
+    for (size_t i = 0; i < mappings_.size(); ++i) {
+      mappings_[i].source = sources_[(i + 1) % sources_.size()];
+      mappings_[i].source_offset *= 2;
+      mappings_[i].operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE;
+    }
+    IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {1, &semaphore, &six},
+                                      {1, &semaphore, &seven}, mappings_.size(),
+                                      mappings_.data(), 0));
+    IREE_ASSERT_OK(iree_hal_queue_read(
+        queues_[0], {1, &semaphore, &seven}, {1, &semaphore, &eight}, file, 64,
+        buffer, kBufferOffset, kLength, &barriers_, 0));
+    ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, eight, nine, 11));
+    IREE_ASSERT_OK(iree_hal_queue_write(
+        queues_[0], {1, &semaphore, &nine}, {1, &semaphore, &ten}, buffer,
+        kBufferOffset, file, 64, kLength, &barriers_, 0));
+    ASSERT_NO_FATAL_FAILURE(Wait(ten));
+    expected[16] += 11;
+    ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
+
+    // An unmapped middle range rejects the whole operation during preparation,
+    // before an earlier readable prefix can alter the destination file.
+    auto hole = mappings_[1];
+    hole.source = nullptr;
+    hole.source_offset = 0;
+    hole.access = 0;
+    hole.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+    IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {1, &semaphore, &ten},
+                                      {1, &semaphore, &eleven}, 1, &hole, 0));
+    IREE_ASSERT_OK(iree_hal_queue_write(
+        queues_[0], {1, &semaphore, &eleven}, {1, &semaphore, &twelve}, buffer,
+        kBufferOffset, file, 64, kLength, &barriers_, 0));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        iree_hal_semaphore_wait(timeline_, twelve, iree_infinite_timeout(), 0));
+    ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
+  }
 }
 
-TEST_F(GpuNativeFileTest, PendingWriteRetiresCapturedBufferBeforeSignal) {
+TEST_P(GpuNativeFileTest, PendingWriteRetiresCapturedBufferBeforeSignal) {
   Ref<iree_hal_buffer_t> buffer;
-  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      pool_, iree_hal_make_pool_reservation_request(kLength + 256, 64),
-      iree_infinite_timeout(), buffer.out()));
+  ASSERT_NO_FATAL_FAILURE(Allocate(kLength + 256, buffer.out()));
   std::vector<uint32_t> expected(kLength / 4, 0);
   Ref<iree_hal_file_t> file;
   ASSERT_NO_FATAL_FAILURE(Open(expected, file.out()));
@@ -247,20 +398,15 @@ TEST_F(GpuNativeFileTest, PendingWriteRetiresCapturedBufferBeforeSignal) {
   EXPECT_EQ(observed, 0u);
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, one, nullptr));
   ASSERT_NO_FATAL_FAILURE(Wait(three));
-  iree_hal_pool_stats_t stats;
-  iree_hal_pool_query_stats(pool_, &stats);
-  EXPECT_EQ(stats.reservation_count, 0u);
-  pool_.reset();
+  ReleaseSources();
   std::fill(expected.begin(), expected.end(), value);
   expected[0] += 7;
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 }
 
-TEST_F(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
+TEST_P(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
   Ref<iree_hal_buffer_t> buffer;
-  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      pool_, iree_hal_make_pool_reservation_request(kLength, 64),
-      iree_infinite_timeout(), buffer.out()));
+  ASSERT_NO_FATAL_FAILURE(Allocate(kLength, buffer.out()));
   Ref<iree_hal_file_t> file;
   std::vector<uint32_t> contents(kLength / 4, 0xABCDu);
   ASSERT_NO_FATAL_FAILURE(Open(contents, file.out()));
@@ -283,10 +429,12 @@ TEST_F(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
       iree_hal_semaphore_wait(timeline_, one, iree_infinite_timeout(), 0));
-  iree_hal_pool_stats_t stats;
-  iree_hal_pool_query_stats(pool_, &stats);
-  EXPECT_EQ(stats.reservation_count, 0u);
-  pool_.reset();
+  ReleaseSources();
 }
+
+INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeFileTest,
+                         ::testing::Values(FileBacking::kPhysicalHost,
+                                           FileBacking::kVirtualHost,
+                                           FileBacking::kVirtualPrivate));
 
 }  // namespace

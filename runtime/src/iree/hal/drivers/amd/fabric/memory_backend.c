@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/fabric/memory_transition.h"
 #include "iree/hal/drivers/amd/fabric/slab_provider.h"
+#include "iree/hal/drivers/amd/fabric/virtual_buffer.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/memory/passthrough_pool.h"
 
