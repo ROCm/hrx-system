@@ -328,6 +328,7 @@ loom_check_test_suite(
     "test/source_low/numeric_signed_unary.loom-test"
     "test/source_low/numeric_unsigned_constant_division.loom-test"
     "test/source_low/numeric_unsigned_word_offsets.loom-test"
+    "test/source_low/numeric_vector_bitfield.loom-test"
     "test/source_low/packed_bitstream_words.loom-test"
     "test/source_low/packed_memory_alignment.loom-test"
     "test/source_low/packed_memory_values.loom-test"

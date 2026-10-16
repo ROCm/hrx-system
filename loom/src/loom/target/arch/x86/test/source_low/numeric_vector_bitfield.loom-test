@@ -1,0 +1,106 @@
+// RUN: emit source-low output=low
+
+x86.target<avx2> @target
+
+func.def target(@target) @same_width_bitfields(%values: vector<8xi32>) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>) {
+  %unsigned_middle = vector.bitfield.extractu %values {offset = 8, width = 8} : vector<8xi32> -> vector<8xi32>
+  %signed_middle = vector.bitfield.extracts %values {offset = 16, width = 8} : vector<8xi32> -> vector<8xi32>
+  %signed_top = vector.bitfield.extracts %values {offset = 24, width = 8} : vector<8xi32> -> vector<8xi32>
+  func.return %unsigned_middle, %signed_middle, %signed_top : vector<8xi32>, vector<8xi32>, vector<8xi32>
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi32>) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>)}) @same_width_bitfields(%values: reg<x86.ymm>) -> (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
+  %21 = vpslld.ymm %values, 16
+  %unsigned_middle = vpsrld.ymm %21, 24
+  %23 = vpslld.ymm %values, 8
+  %signed_middle = vpsrad.ymm %23, 24
+  %signed_top = vpsrad.ymm %values, 24
+  return %unsigned_middle, %signed_middle, %signed_top
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def public target(@target) @widened_byte_packets(%input: buffer, %output_unsigned: buffer, %output_signed: buffer) {
+  %c0 = index.constant 0 : offset
+  %input_view = buffer.view %input[%c0] : buffer -> view<32xi8>
+  %unsigned_view = buffer.view %output_unsigned[%c0] : buffer -> view<32xi16>
+  %signed_view = buffer.view %output_signed[%c0] : buffer -> view<32xi16>
+  %values = vector.load %input_view[0] : view<32xi8> -> vector<32xi8>
+  %unsigned = vector.bitfield.extractu %values {offset = 1, width = 6} : vector<32xi8> -> vector<32xi16>
+  %signed_top = vector.bitfield.extracts %values {offset = 4, width = 4} : vector<32xi8> -> vector<32xi16>
+  vector.store %unsigned, %unsigned_view[0] : vector<32xi16>, view<32xi16>
+  vector.store %signed_top, %signed_view[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+// ----
+low.func.def public target<x86.avx2.core>(@target) abi(object_function) @widened_byte_packets(%input: reg<x86.gpr64>, %output_unsigned: reg<x86.gpr64>, %output_signed: reg<x86.gpr64>) asm {
+  %37 = vmovdqu32.load.xmm %input {disp32 = 0}
+  %38 = vmovdqu32.load.xmm %input {disp32 = 16}
+  %39 = vpmovzxbw.ymm %37
+  %40 = vpsllw.ymm %39, 9
+  %41 = vpsrlw.ymm %40, 10
+  vmovdqu32.store.ymm %41, %output_unsigned {disp32 = 0}
+  %42 = vpmovzxbw.ymm %38
+  %43 = vpsllw.ymm %42, 9
+  %44 = vpsrlw.ymm %43, 10
+  vmovdqu32.store.ymm %44, %output_unsigned {disp32 = 32}
+  %45 = vpmovsxbw.ymm %37
+  %46 = vpsraw.ymm %45, 4
+  vmovdqu32.store.ymm %46, %output_signed {disp32 = 0}
+  %47 = vpmovsxbw.ymm %38
+  %48 = vpsraw.ymm %47, 4
+  vmovdqu32.store.ymm %48, %output_signed {disp32 = 32}
+  return
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @narrowed_word_bitfields(%values: vector<8xi32>) -> (vector<8xi16>, vector<8xi16>) {
+  %unsigned = vector.bitfield.extractu %values {offset = 8, width = 12} : vector<8xi32> -> vector<8xi16>
+  %signed_top = vector.bitfield.extracts %values {offset = 20, width = 12} : vector<8xi32> -> vector<8xi16>
+  func.return %unsigned, %signed_top : vector<8xi16>, vector<8xi16>
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi32>) -> (vector<8xi16>, vector<8xi16>)}) @narrowed_word_bitfields(%values: reg<x86.ymm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %16 = vpslld.ymm %values, 12
+  %17 = vpsrld.ymm %16, 20
+  %18 = avx2.vmovdqu.rodata.ymm @__low_rodata_6e7103bf
+  %19 = vpshufb.ymm %17, %18
+  %20 = vextractf128.xmm %19, 0
+  %21 = vextractf128.xmm %19, 1
+  %unsigned = vpunpcklqdq.xmm %20, %21
+  %23 = vpsrad.ymm %values, 20
+  %25 = vpshufb.ymm %23, %18
+  %26 = vextractf128.xmm %25, 0
+  %27 = vextractf128.xmm %25, 1
+  %signed_top = vpunpcklqdq.xmm %26, %27
+  return %unsigned, %signed_top
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @signed_wide_bitfields(%zmm_values: vector<8xi64>, %ymm_values: vector<4xi64>) -> (vector<8xi64>, vector<8xi64>, vector<4xi64>) {
+  %middle = vector.bitfield.extracts %zmm_values {offset = 16, width = 32} : vector<8xi64> -> vector<8xi64>
+  %top = vector.bitfield.extracts %zmm_values {offset = 48, width = 16} : vector<8xi64> -> vector<8xi64>
+  %vl_middle = vector.bitfield.extracts %ymm_values {offset = 8, width = 48} : vector<4xi64> -> vector<4xi64>
+  func.return %middle, %top, %vl_middle : vector<8xi64>, vector<8xi64>, vector<4xi64>
+}
+
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi64>, vector<4xi64>) -> (vector<8xi64>, vector<8xi64>, vector<4xi64>)}) @signed_wide_bitfields(%zmm_values: reg<x86.zmm>, %ymm_values: reg<x86.ymm>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.ymm>) asm {
+  %23 = avx512.vpsllq.zmm %zmm_values, 16
+  %middle = avx512.vpsraq.zmm %23, 32
+  %top = avx512.vpsraq.zmm %zmm_values, 48
+  %26 = vpsllq.ymm %ymm_values, 8
+  %vl_middle = avx512.vpsraq.ymm %26, 16
+  return %middle, %top, %vl_middle
+}
