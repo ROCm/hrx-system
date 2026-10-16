@@ -35,7 +35,7 @@ func.def inline @qsa_matrix_store(%token: index, %head_base: index, %channel: in
   %lane_column = index.rem %lane, %tile : index
   %column = index.add %channel, %lane_column : index
   %gate_column = index.add %width, %column : index
-  %one = scalar.constant 1.0 : f32
+  %sigmoid_bias = scalar.constant 1.0 : f32
   scf.for %component = [%c0 to %c6 step %c1] unroll {
     %relative = index.madd %component, %c2, %head_parity : index
     %head = index.add %head_base, %relative : index
@@ -48,7 +48,7 @@ func.def inline @qsa_matrix_store(%token: index, %head_base: index, %channel: in
     %gate_value = scalar.extf %gate_packed : bf16 to f32
     %negative = scalar.negf %gate_value : f32
     %exponential = scalar.expf<afn> %negative : f32
-    %denominator = scalar.addf %one, %exponential : f32
+    %denominator = scalar.addf %sigmoid_bias, %exponential : f32
     %gated = scalar.divf %attention, %denominator : f32
     %result = scalar.fptrunc %gated : f32 to bf16
     view.store %result, %outputs[%token, %head, %column] : bf16, view<[%tokens]x24x256xbf16>
@@ -66,8 +66,8 @@ kernel.def target(@qsa_matrix_wave32) @qsa_matrix_attention() {
   %heads = index.constant 2 : index
   %tokens = config.get @flash_next.token_count : index
   %threads = index.constant 128 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%heads, %tokens, %one) workgroup_size(%threads, %one, %one) : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %capacity = config.get @flash_next.context_capacity : index
@@ -131,11 +131,11 @@ kernel.def target(@qsa_matrix_wave32) @qsa_matrix_attention() {
     %stage_row_base = index.div %thread, %tile : index
     %stage_packet = index.rem %thread, %tile : index
     %stage_channel = index.mul %stage_packet, %tile : index
-    %zeros = vector.constant 0.0 : vector<8xf32>
+    %accumulator_identity = vector.constant 0.0 : vector<8xf32>
     %lowest = vector.constant -1e+30 : vector<8xf32>
     %scale = vector.constant 0.0625 : vector<8xf32>
     %packed_zeros = vector.constant 0.0 : vector<16xbf16>
-    %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xf32>
+    %initial = vector.fragment<init> %accumulator_identity shape [%tile, %tile] : vector<8xf32>
     %shuffle_width = scalar.constant 16 : i32
     %offset0 = index.constant 0 : index
     %channel0 = index.add %channel_origin, %offset0 : index
@@ -177,7 +177,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_matrix_attention() {
       scf.yield %packed_zeros : vector<16xbf16>
     }
     %query_fragment3 = vector.fragment<lhs> %query_values3 shape [%tile, %tile] : vector<16xbf16>
-    %final_max, %final_sum, %final0, %final1, %final2, %final3 = scf.for %key_begin = [%c0 to %count step %tile](%current_max = %lowest : vector<8xf32>, %current_sum = %zeros : vector<8xf32>, %output0 = %initial : vector<8xf32>, %output1 = %initial : vector<8xf32>, %output2 = %initial : vector<8xf32>, %output3 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %final_max, %final_sum, %final0, %final1, %final2, %final3 = scf.for %key_begin = [%c0 to %count step %tile](%current_max = %lowest : vector<8xf32>, %current_sum = %accumulator_identity : vector<8xf32>, %output0 = %initial : vector<8xf32>, %output1 = %initial : vector<8xf32>, %output2 = %initial : vector<8xf32>, %output3 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
       // Each selected K/V is published once for all twelve heads. Padding
       // executes no page-table or external operand reads.
       scf.for %round = [%c0 to %c2 step %c1] unroll {
@@ -220,7 +220,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_matrix_attention() {
       %partial3 = vector.mma %query_fragment3, %key_fragment3, %partial2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
       vector.fragment.store<result> %partial3, %score_stage[%c0, %c0] shape [%tile, %tile] : vector<8xf32>, view<16x24xf32>
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      %raw = scf.for %peer = [%c0 to %c4 step %c1](%sum = %zeros : vector<8xf32>) -> (vector<8xf32>) unroll {
+      %raw = scf.for %peer = [%c0 to %c4 step %c1](%sum = %accumulator_identity : vector<8xf32>) -> (vector<8xf32>) unroll {
         %relative = index.scale %peer, %score_plane_bytes : index, offset -> offset
         %peer_offset = index.add %score_offset, %relative : offset
         %peer_scores = buffer.view %shared[%peer_offset] : buffer -> view<16x24xf32>
@@ -248,7 +248,7 @@ kernel.def target(@qsa_matrix_wave32) @qsa_matrix_attention() {
       %raw_delta = vector.subf %scores, %next_max : vector<8xf32>
       %delta = vector.mulf %raw_delta, %scale : vector<8xf32>
       %exponential = vector.expf<afn> %delta : vector<8xf32>
-      %probability = vector.select %valid, %exponential, %zeros : vector<8xf32>
+      %probability = vector.select %valid, %exponential, %accumulator_identity : vector<8xf32>
       %old_raw_delta = vector.subf %current_max, %next_max : vector<8xf32>
       %old_delta = vector.mulf %old_raw_delta, %scale : vector<8xf32>
       %old_scale = vector.expf<afn> %old_delta : vector<8xf32>
