@@ -371,6 +371,36 @@ loom_module(
   STRICT_DEPS
 )
 
+loom_module(
+  NAME
+    vision_geometry
+  SRCS
+    "vision_geometry.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
+loom_module(
+  NAME
+    vision_pixels
+  SRCS
+    "vision_pixels.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
+loom_module(
+  NAME
+    vision_stages
+  SRCS
+    "vision_stages.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
 loom_test_module(
   NAME
     vision_pixels_test_module
@@ -400,7 +430,8 @@ loom_test_module(
     vision_geometry_test_module
   SRCS
     "tests/vision_geometry.loom"
-    "vision_geometry.loom"
+  LIBRARIES
+    "::vision_geometry"
 )
 
 if(LOOM_TARGET_ARCH_VM)
@@ -424,9 +455,9 @@ loom_test_module(
     vision_resize_test_module
   SRCS
     "tests/vision_resize.loom"
-    "vision_pixels.loom"
   LIBRARIES
     "::vision_kernels"
+    "::vision_pixels"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -487,7 +518,8 @@ loom_test_module(
   SRCS
     "tests/vision_control.loom"
     "vision_control.loom"
-    "vision_pixels.loom"
+  LIBRARIES
+    "::vision_pixels"
 )
 
 if(LOOM_TARGET_ARCH_VM)
@@ -1862,9 +1894,50 @@ loom_module(
     request_control
   SRCS
     "control.loom"
-    "vision_geometry.loom"
-  MODE merge
-  OUTPUT_FORMAT bc
+  LIBRARIES
+    "::vision_geometry"
+  MODE
+    "link"
+  OUTPUT
+    "request_control.loombc"
+  OUTPUT_FORMAT
+    "bc"
+  INCLUDE_INPUT_EXPORTS
+  STRICT_DEPS
+)
+
+loom_module(
+  NAME
+    vision_preparation
+  SRCS
+    "vision_prepare.loom"
+  LIBRARIES
+    "::vision_stages"
+  MODE
+    "link"
+  OUTPUT
+    "vision_preparation.loombc"
+  OUTPUT_FORMAT
+    "bc"
+  INCLUDE_INPUT_EXPORTS
+  STRICT_DEPS
+)
+
+loom_module(
+  NAME
+    vision_request_control
+  SRCS
+    "vision_control.loom"
+  LIBRARIES
+    "::vision_pixels"
+    "::vision_stages"
+  MODE
+    "link"
+  OUTPUT
+    "vision_request_control.loombc"
+  OUTPUT_FORMAT
+    "bc"
+  INCLUDE_INPUT_EXPORTS
   STRICT_DEPS
 )
 
