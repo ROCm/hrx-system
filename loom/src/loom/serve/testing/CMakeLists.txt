@@ -28,6 +28,20 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    worker_gate
+  HDRS
+    "worker_gate.h"
+  DEPS
+    iree::task
+    iree::testing::gtest
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     compiler
   HDRS
     "compiler.h"

@@ -27,6 +27,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "worker_gate",
+    testonly = True,
+    hdrs = ["worker_gate.h"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_library(
     name = "compiler",
     testonly = True,
     srcs = ["compiler.c"],
