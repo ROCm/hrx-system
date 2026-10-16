@@ -164,7 +164,7 @@ check.scenario public @paged_matrix_index_scores {
     %begin = check.generate<@fixture>(%trial, %epoch, %mapping, %rows) : (index, tensor<83xi32>, tensor<32x4xi32>, tensor<4160xi8>) -> (index)
     %scores = check.generate.fill value(-99.0) : tensor<13x528xf32>
     check.compare<@qsa_score_tiled, @reference>(%begin, %index_origin, %epoch, %mapping, %rows, %queries, %arena, %scores) : (index, offset, tensor<83xi32>, tensor<32x4xi32>, tensor<4160xi8>, tensor<32x4x128xbf16>, tensor<203072xbf16>, tensor<13x528xf32>) -> () {
-      check.expect.close actual(%scores) expected(%scores) atol(3e-05) rtol(1e-05) nan(different) : tensor<13x528xf32>
+      check.expect.close actual(%scores) expected(%scores) atol(3.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(different) : tensor<13x528xf32>
     }
   }
   check.return
@@ -184,7 +184,7 @@ check.scenario public @paged_scalar_index_scores {
     %begin = check.generate<@fixture>(%trial, %epoch, %mapping, %rows) : (index, tensor<83xi32>, tensor<32x4xi32>, tensor<4160xi8>) -> (index)
     %scores = check.generate.fill value(-99.0) : tensor<13x528xf32>
     check.compare<@qsa_score_blocks, @reference>(%begin, %index_origin, %epoch, %mapping, %rows, %queries, %arena, %scores) : (index, offset, tensor<83xi32>, tensor<32x4xi32>, tensor<4160xi8>, tensor<32x4x128xbf16>, tensor<203072xbf16>, tensor<13x528xf32>) -> () {
-      check.expect.close actual(%scores) expected(%scores) atol(3e-05) rtol(1e-05) nan(different) : tensor<13x528xf32>
+      check.expect.close actual(%scores) expected(%scores) atol(3.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(different) : tensor<13x528xf32>
     }
   }
   check.return
