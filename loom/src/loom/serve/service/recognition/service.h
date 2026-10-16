@@ -46,11 +46,16 @@ void loom_serve_recognition_service_set_observer(
 
 // Opens a bounded host stream and copies its options. Success with NULL means
 // all source slots are occupied; the caller retains its own queue position.
-// A non-NULL handle is live until close, including after request completion.
+// A non-NULL handle belongs to the caller until close, independently of service
+// and model lifetime. Final results need no model slot or input-ring storage.
 iree_status_t loom_serve_recognition_service_try_open(
     loom_serve_recognition_service_t* service,
     const loom_serve_recognition_request_t* request,
     loom_serve_recognition_stream_t** out_stream);
+
+// Immutable normalized sample geometry, copied from the admitted model.
+loom_serve_recognition_format_t loom_serve_recognition_stream_format(
+    const loom_serve_recognition_stream_t* stream);
 
 // Appends whole finite F32LE frames in the generator's declared geometry.
 // Copies only the available credit; zero accepted frames is normal pressure.
@@ -77,7 +82,8 @@ const loom_serve_recognition_transcript_t* loom_serve_recognition_stream_peek(
 void loom_serve_recognition_stream_consume(
     loom_serve_recognition_stream_t* stream);
 
-// Completion becomes visible after the final pending revision is consumed.
+// Completion becomes visible after accepted work retires and the final pending
+// revision is consumed. A stopped service leaves a cancelled terminal result.
 bool loom_serve_recognition_stream_is_complete(
     const loom_serve_recognition_stream_t* stream);
 
@@ -87,8 +93,8 @@ iree_status_t loom_serve_recognition_stream_status(
     const loom_serve_recognition_stream_t* stream);
 
 // Borrows the finalized document after successful completion, or NULL before
-// then. Its views remain immutable until close and need no feedback-buffer
-// copy.
+// then. Its views remain immutable until close, including after service/model
+// destruction, and need no feedback-buffer copy.
 const loom_serve_recognition_document_t* loom_serve_recognition_stream_document(
     const loom_serve_recognition_stream_t* stream);
 
@@ -100,10 +106,10 @@ void loom_serve_recognition_stream_close(
 // Advances one bounded owner turn. Input starvation, output pressure, and
 // recoverable shared-capacity admission are non-error states. A true progress
 // result asks the owning scheduler to rotate and return; false awaits a wake
-// or a caller write/consume/close. stopping closes all caller handles and
-// drains accepted callbacks. Errors stop the service, retaining accepted model
-// handles for model teardown; a failed readiness notification is not actual
-// retirement.
+// or a caller write/consume/close. stopping cancels unfinished streams without
+// consuming caller ownership, and drains accepted callbacks. Errors stop the
+// service, retaining accepted model handles for model teardown; a failed
+// readiness notification is not actual retirement.
 iree_status_t loom_serve_recognition_service_advance(
     loom_serve_recognition_service_t* service, bool stopping,
     bool shared_activity, bool* out_progress);
