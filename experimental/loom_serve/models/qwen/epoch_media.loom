@@ -19,9 +19,9 @@ func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: 
   %ids = buffer.view %inputs[%origin] : buffer -> view<1024xi32>
   %media = buffer.view %media_plan[%origin] : buffer -> view<[%media_end]x7xi32>
   %records = buffer.view %tokens[%origin] : buffer -> view<1024x8xi32>
-  %zero = scalar.constant 0 : i32
-  %one = scalar.constant 1 : i32
-  %eight = scalar.constant 8 : i32
+  %token_placeholder = scalar.constant 0 : i32
+  %position_step = scalar.constant 1 : i32
+  %grid_extent = scalar.constant 8 : i32
   %primary = index.cmp eq, %first, %c0 : index
   %last_input, %last_media = scf.for %span = [%c0 to %count step %c1](%begin = %packet_begin : index, %media_cursor = %media_begin : index) -> (index, index) {
     %plan_index_value = index.add %first, %span : index
@@ -41,7 +41,7 @@ func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: 
       %first_begin = view.load %descriptors[%first_span, 2] : view<64x5xi32> -> i32
       %first_length = view.load %descriptors[%first_span, 0] : view<64x5xi32> -> i32
       %first_end = scalar.addi %first_begin, %first_length : i32
-      %last_word = scalar.subi %first_end, %one : i32
+      %last_word = scalar.subi %first_end, %position_step : i32
       %last_value = index.cast %last_word : i32 to index
       %last = index.assume %last_value [range(%last_value, 0, 511)] : index
       %position = view.load %records[%last, 5] : view<1024x8xi32> -> i32
@@ -61,7 +61,7 @@ func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: 
         %id = view.load %ids[%input] : view<1024xi32> -> i32
         scf.yield %id : i32
       } else {
-        scf.yield %zero : i32
+        scf.yield %token_placeholder : i32
       }
       view.store %id, %records[%record, 0] : i32, view<1024x8xi32>
       %has_media = index.cmp ult, %cursor, %media_end : index
@@ -82,11 +82,11 @@ func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: 
         %media_index = index.assume %cursor [range(%cursor, 0, 1023), lt(%cursor, %media_end)] : index
         %feature_offset = view.load %media[%media_index, 2] : view<[%media_end]x7xi32> -> i32
         %feature_index = view.load %media[%media_index, 6] : view<[%media_end]x7xi32> -> i32
-        %in_first_row = scalar.cmpi ult, %feature_index, %eight : i32
-        %prefix_extent = scf.select %in_first_row, %feature_index, %eight : i32
+        %in_first_row = scalar.cmpi ult, %feature_index, %grid_extent : i32
+        %prefix_extent = scf.select %in_first_row, %feature_index, %grid_extent : i32
         %base = scalar.subi %source, %prefix_extent : i32
-        %height = scalar.divui %feature_index, %eight : i32
-        %width = scalar.remui %feature_index, %eight : i32
+        %height = scalar.divui %feature_index, %grid_extent : i32
+        %width = scalar.remui %feature_index, %grid_extent : i32
         %height_position = scalar.addi %base, %height : i32
         %width_position = scalar.addi %base, %width : i32
         %advance = scalar.extui %in_first_row : i1 to i32
@@ -101,7 +101,7 @@ func.def public @encode_media_plan(%plan: buffer, %inputs: buffer, %media_plan: 
         view.store %source, %records[%record, 2] : i32, view<1024x8xi32>
         view.store %source, %records[%record, 3] : i32, view<1024x8xi32>
         view.store %source, %records[%record, 4] : i32, view<1024x8xi32>
-        %following = scalar.addi %source, %one : i32
+        %following = scalar.addi %source, %position_step : i32
         scf.yield %following, %cursor : i32, index
       }
       view.store %following, %records[%record, 5] : i32, view<1024x8xi32>
@@ -122,14 +122,14 @@ func.def public @publish_media_positions(%plan: buffer, %media_plan: buffer, %co
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c16 = index.constant 16 : index
-  %one = scalar.constant 1 : i32
-  %eight = scalar.constant 8 : i32
+  %position_step = scalar.constant 1 : i32
+  %grid_extent = scalar.constant 8 : i32
   %requests = buffer.view %plan[%origin] : buffer -> view<32x9xi32>
   %media = buffer.view %media_plan[%origin] : buffer -> view<[%count]x7xi32>
   %published = buffer.view %progress[%origin] : buffer -> view<16x21xi32>
   scf.for %i = [%c0 to %count step %c1] {
     %feature_index = view.load %media[%i, 6] : view<[%count]x7xi32> -> i32
-    %compressed = scalar.cmpi uge, %feature_index, %eight : i32
+    %compressed = scalar.cmpi uge, %feature_index, %grid_extent : i32
     scf.if %compressed {
       %plan_word = view.load %media[%i, 0] : view<[%count]x7xi32> -> i32
       %plan_value = index.cast %plan_word : i32 to index
@@ -144,7 +144,7 @@ func.def public @publish_media_positions(%plan: buffer, %media_plan: buffer, %co
       }
       %slot = index.assume %owner [range(%owner, 0, 15)] : index
       %position = view.load %published[%slot, 4] : view<16x21xi32> -> i32
-      %corrected = scalar.subi %position, %one : i32
+      %corrected = scalar.subi %position, %position_step : i32
       view.store %corrected, %published[%slot, 4] : i32, view<16x21xi32>
     }
   }
