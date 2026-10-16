@@ -1,0 +1,191 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qsa_score_blocks() launch(%query_begin: index, %index_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %arena: buffer, %scores: buffer)
+
+kernel.decl @qsa_score_tiled() launch(%query_begin: index, %index_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %arena: buffer, %scores: buffer)
+
+// Three packed spans have unrelated histories, cache origins, and page maps.
+// Their boundaries cut across matrix query tiles. The second span crosses the
+// dense/sparse boundary; the third ends inside the final padded query tile.
+func.def @fixture(%trial: index, %epoch: buffer, %mapping: buffer, %rows: buffer) -> (index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c7 = index.constant 7 : index
+  %c10 = index.constant 10 : index
+  %pages = index.constant 33 : index
+  %origin = index.constant 0 : offset
+  %header_bytes = index.constant 12 : offset
+  %map_base = index.constant 2048 : offset
+  %c3_i32 = scalar.constant 3 : i32
+  %c17_i32 = scalar.constant 17 : i32
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  view.store %c17_i32, %header[0] : i32, view<3xi32>
+  view.store %c3_i32, %header[1] : i32, view<3xi32>
+  %records = buffer.view %epoch[%header_bytes] : buffer -> view<16x5xi32>
+  %positions = buffer.view %mapping[%origin] : buffer -> view<32x4xi32>
+  %entries = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
+  %maps = buffer.view %rows[%map_base] : buffer -> view<16x33xi32>
+  %cache_base = scalar.constant 512 : i64
+  %cache_bytes = scalar.constant 135168 : i64
+  %boundary = index.constant 2048 : index
+  %long_history = index.constant 2100 : index
+  scf.for %span = [%c0 to %c3 step %c1] {
+    %first_span = index.cmp eq, %span, %c0 : index
+    %second_span = index.cmp eq, %span, %c1 : index
+    %length = scf.select %first_span, %c3, %c7 : index
+    %later_begin = scf.select %second_span, %c3, %c10 : index
+    %begin = scf.select %first_span, %c0, %later_begin : index
+    %later_position = scf.select %second_span, %boundary, %long_history : index
+    %position = scf.select %first_span, %c0, %later_position : index
+    %row = index.madd %span, %c4, %c1 : index
+    %length_word = index.cast %length : index to i32
+    %begin_word = index.cast %begin : index to i32
+    %position_word = index.cast %position : index to i32
+    %row_word = index.cast %row : index to i32
+    view.store %length_word, %records[%span, 0] : i32, view<16x5xi32>
+    view.store %position_word, %records[%span, 1] : i32, view<16x5xi32>
+    view.store %begin_word, %records[%span, 2] : i32, view<16x5xi32>
+    view.store %row_word, %records[%span, 3] : i32, view<16x5xi32>
+    %ordinal = index.cast %span : index to i64
+    %relative = scalar.muli %ordinal, %cache_bytes : i64
+    %base = scalar.addi %cache_base, %relative : i64
+    view.store %base, %entries[%row, 2] : i64, view<16x4xi64>
+    scf.for %page = [%c0 to %pages step %c1] {
+      %biased = index.madd %page, %c7, %row : index
+      %physical = index.rem %biased, %pages : index
+      %word = index.cast %physical : index to i32
+      view.store %word, %maps[%row, %page] : i32, view<16x33xi32>
+    }
+    scf.for %relative = [%c0 to %length step %c1] {
+      %token = index.add %begin, %relative : index
+      %absolute = index.add %position, %relative : index
+      %word = index.cast %absolute : index to i32
+      view.store %word, %positions[%token, 0] : i32, view<32x4xi32>
+      view.store %row_word, %positions[%token, 1] : i32, view<32x4xi32>
+      view.store %begin_word, %positions[%token, 2] : i32, view<32x4xi32>
+      view.store %position_word, %positions[%token, 3] : i32, view<32x4xi32>
+    }
+  }
+  %first_trial = index.cmp eq, %trial, %c0 : index
+  %second_trial = index.cmp eq, %trial, %c1 : index
+  %last_token = index.constant 16 : index
+  %later_start = scf.select %second_trial, %last_token, %c0 : index
+  %query_begin = scf.select %first_trial, %c2, %later_start : index
+  func.return %query_begin : index
+}
+
+// Full F64 scalar products provide an independent numerical oracle. Addressing
+// follows the fixture's permutation directly, without the production page or
+// span helpers. Future blocks, dense queries, and inactive rows retain -99.
+func.def @reference(%query_begin_arg: index, %index_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %arena: buffer, %scores: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c7 = index.constant 7 : index
+  %c10 = index.constant 10 : index
+  %query_capacity = index.constant 13 : index
+  %blocks_per_page = index.constant 16 : index
+  %active = index.constant 17 : index
+  %pages = index.constant 33 : index
+  %channels = index.constant 128 : index
+  %budget = index.constant 512 : index
+  %origin = index.constant 0 : offset
+  %key_base = index.constant 640 : offset
+  %query_begin = index.assume %query_begin_arg [range(%query_begin_arg, 0, 16)] : index
+  %positions = buffer.view %mapping[%origin] : buffer -> view<32x4xi32>
+  %query = buffer.view %queries[%origin] : buffer -> view<32x4x128xbf16>
+  %key = buffer.view %arena[%key_base] : buffer -> view<3x528x128xbf16>
+  %output = buffer.view %scores[%origin] : buffer -> view<13x528xf32>
+  %zero = scalar.constant 0.0 : f64
+  scf.for %local_query = [%c0 to %query_capacity step %c1] {
+    %token = index.add %query_begin, %local_query : index
+    %live = index.cmp ult, %token, %active : index
+    scf.if %live {
+      %position_word = view.load %positions[%token, 0] : view<32x4xi32> -> i32
+      %position_value = index.cast %position_word : i32 to index
+      %position = index.assume %position_value [range(%position_value, 0, 2111)] : index
+      %visible = index.add %position, %c1 : index
+      %complete = index.div %visible, %c4 : index
+      %sparse = index.cmp ugt, %complete, %budget : index
+      scf.if %sparse {
+        %middle = index.cmp ult, %token, %c10 : index
+        %first = index.cmp ult, %token, %c3 : index
+        %c2 = index.constant 2 : index
+        %later_cache = scf.select %middle, %c1, %c2 : index
+        %cache = scf.select %first, %c0, %later_cache : index
+        %row = index.madd %cache, %c4, %c1 : index
+        scf.for %block = [%c0 to %complete step %c1] {
+          %page = index.div %block, %blocks_per_page : index
+          %within = index.rem %block, %blocks_per_page : index
+          %biased = index.madd %page, %c7, %row : index
+          %physical_page = index.rem %biased, %pages : index
+          %physical = index.madd %physical_page, %blocks_per_page, %within : index
+          %score = scf.for %head = [%c0 to %c4 step %c1](%sum = %zero : f64) -> (f64) {
+            %dot = scf.for %channel = [%c0 to %channels step %c1](%product = %zero : f64) -> (f64) {
+              %q_packed = view.load %query[%token, %head, %channel] : view<32x4x128xbf16> -> bf16
+              %k_packed = view.load %key[%cache, %physical, %channel] : view<3x528x128xbf16> -> bf16
+              %q = scalar.extf %q_packed : bf16 to f64
+              %k = scalar.extf %k_packed : bf16 to f64
+              %term = scalar.mulf %q, %k : f64
+              %next = scalar.addf %product, %term : f64
+              scf.yield %next : f64
+            }
+            %positive = scalar.maxnumf %dot, %zero : f64
+            %next = scalar.addf %sum, %positive : f64
+            scf.yield %next : f64
+          }
+          %rounded = scalar.fptrunc %score : f64 to f32
+          view.store %rounded, %output[%local_query, %block] : f32, view<13x528xf32>
+        }
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @paged_matrix_index_scores {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %index_origin = check.literal value(128) : offset
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %query_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %key_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %epoch = check.generate.fill value(0) : tensor<83xi32>
+    %mapping = check.generate.fill value(-99) : tensor<32x4xi32>
+    %rows = check.generate.fill value(0) : tensor<4160xi8>
+    %queries = check.generate.random.uniform seed(%query_seed) range(-2.0 to 2.0) : tensor<32x4x128xbf16>
+    %arena = check.generate.random.uniform seed(%key_seed) range(-2.0 to 2.0) : tensor<203072xbf16>
+    %begin = check.generate<@fixture>(%trial, %epoch, %mapping, %rows) : (index, tensor<83xi32>, tensor<32x4xi32>, tensor<4160xi8>) -> (index)
+    %scores = check.generate.fill value(-99.0) : tensor<13x528xf32>
+    check.compare<@qsa_score_tiled, @reference>(%begin, %index_origin, %epoch, %mapping, %rows, %queries, %arena, %scores) : (index, offset, tensor<83xi32>, tensor<32x4xi32>, tensor<4160xi8>, tensor<32x4x128xbf16>, tensor<203072xbf16>, tensor<13x528xf32>) -> () {
+      check.expect.close actual(%scores) expected(%scores) atol(3e-05) rtol(1e-05) nan(different) : tensor<13x528xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @paged_scalar_index_scores {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %index_origin = check.literal value(128) : offset
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %query_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %key_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %epoch = check.generate.fill value(0) : tensor<83xi32>
+    %mapping = check.generate.fill value(-99) : tensor<32x4xi32>
+    %rows = check.generate.fill value(0) : tensor<4160xi8>
+    %queries = check.generate.random.uniform seed(%query_seed) range(-2.0 to 2.0) : tensor<32x4x128xbf16>
+    %arena = check.generate.random.uniform seed(%key_seed) range(-2.0 to 2.0) : tensor<203072xbf16>
+    %begin = check.generate<@fixture>(%trial, %epoch, %mapping, %rows) : (index, tensor<83xi32>, tensor<32x4xi32>, tensor<4160xi8>) -> (index)
+    %scores = check.generate.fill value(-99.0) : tensor<13x528xf32>
+    check.compare<@qsa_score_blocks, @reference>(%begin, %index_origin, %epoch, %mapping, %rows, %queries, %arena, %scores) : (index, offset, tensor<83xi32>, tensor<32x4xi32>, tensor<4160xi8>, tensor<32x4x128xbf16>, tensor<203072xbf16>, tensor<13x528xf32>) -> () {
+      check.expect.close actual(%scores) expected(%scores) atol(3e-05) rtol(1e-05) nan(different) : tensor<13x528xf32>
+    }
+  }
+  check.return
+}
