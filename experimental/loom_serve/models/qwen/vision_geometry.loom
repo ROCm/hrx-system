@@ -1,0 +1,103 @@
+// Whole-tile geometry needs only an integer square root. The admitted source
+// axes and aspect ratio bound every root below 256, including a rounded area
+// just above the requested budget. The fixed eight steps avoid floating-point
+// rounding at exact patch boundaries.
+func.def @qwen38_vision_root(%value: i32) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %zero = scalar.constant 0 : i32
+  %high_bit = scalar.constant 128 : i32
+  %root = scf.for %step = [%c0 to %c8 step %c1](%root = %zero : i32) -> (i32) {
+    %shift = index.cast %step : index to i32
+    %bit = scalar.shrui %high_bit, %shift : i32
+    %candidate = scalar.ori %root, %bit : i32
+    %square = scalar.muli %candidate, %candidate : i32
+    %fits = scalar.cmpi ule, %square, %value : i32
+    %next = scf.select %fits, %candidate, %root : i32
+    scf.yield %next : i32
+  }
+  func.return %root : i32
+}
+
+func.def @qwen38_vision_nearest_tiles(%pixels: i32) -> (i32) {
+  %tile = scalar.constant 32 : i32
+  %half = scalar.constant 16 : i32
+  %one = scalar.constant 1 : i32
+  %zero = scalar.constant 0 : i32
+  %whole = scalar.divui %pixels, %tile : i32
+  %remainder = scalar.remui %pixels, %tile : i32
+  %above = scalar.cmpi ugt, %remainder, %half : i32
+  %tie = scalar.cmpi eq, %remainder, %half : i32
+  %low_bit = scalar.andi %whole, %one : i32
+  %odd = scalar.cmpi ne, %low_bit, %zero : i32
+  %odd_tie = scalar.andi %tie, %odd : i1
+  %round_up = scalar.ori %above, %odd_tie : i1
+  %increment = scalar.extui %round_up : i1 to i32
+  %rounded = scalar.addi %whole, %increment : i32
+  func.return %rounded : i32
+}
+
+func.def @qwen38_vision_minimum_tiles(%axis: i32, %other: i32) -> (i32) {
+  %minimum = scalar.constant 64 : i32
+  %one = scalar.constant 1 : i32
+  %numerator = scalar.muli %minimum, %axis : i32
+  %quotient = scalar.divui %numerator, %other : i32
+  %floor = func.call @qwen38_vision_root(%quotient) : (i32) -> (i32)
+  %square = scalar.muli %floor, %floor : i32
+  %represented = scalar.muli %square, %other : i32
+  %exact = scalar.cmpi eq, %represented, %numerator : i32
+  %ceil = scalar.addi %floor, %one : i32
+  %result = scf.select %exact, %floor, %ceil : i32
+  func.return %result : i32
+}
+
+// Aspect-preserving smart resize in merged-patch units. Nearest alignment uses
+// ties to even; reduction floors sqrt(budget * axis / other), and enlargement
+// ceils sqrt(64 * axis / other). These are the processor's continuous scale
+// formulas evaluated directly on the integer grid. The 4096-pixel axis ceiling
+// additionally bounds enlargement near a rounded-area reduction boundary.
+func.def @qwen38_vision_geometry(%width: i32, %height: i32, %maximum_tokens: i32) -> (i32, i32) {
+  %rounded_width = func.call @qwen38_vision_nearest_tiles(%width) : (i32) -> (i32)
+  %rounded_height = func.call @qwen38_vision_nearest_tiles(%height) : (i32) -> (i32)
+  %rounded_tokens = scalar.muli %rounded_width, %rounded_height : i32
+  %minimum_tokens = scalar.constant 64 : i32
+  %one = scalar.constant 1 : i32
+  %maximum_axis = scalar.constant 128 : i32
+  %too_large = scalar.cmpi ugt, %rounded_tokens, %maximum_tokens : i32
+  %columns, %rows = scf.if %too_large -> (i32, i32) {
+    %width_numerator = scalar.muli %maximum_tokens, %width : i32
+    %height_numerator = scalar.muli %maximum_tokens, %height : i32
+    %width_ratio = scalar.divui %width_numerator, %height : i32
+    %height_ratio = scalar.divui %height_numerator, %width : i32
+    %width_root = func.call @qwen38_vision_root(%width_ratio) : (i32) -> (i32)
+    %height_root = func.call @qwen38_vision_root(%height_ratio) : (i32) -> (i32)
+    %width_exceeds = scalar.cmpi ugt, %width_root, %maximum_axis : i32
+    %height_exceeds = scalar.cmpi ugt, %height_root, %maximum_axis : i32
+    %width_limited_numerator = scalar.muli %maximum_axis, %height : i32
+    %height_limited_numerator = scalar.muli %maximum_axis, %width : i32
+    %width_limited_height = scalar.divui %width_limited_numerator, %width : i32
+    %height_limited_width = scalar.divui %height_limited_numerator, %height : i32
+    %capped_width = scalar.minui %width_root, %maximum_axis : i32
+    %capped_height = scalar.minui %height_root, %maximum_axis : i32
+    %selected_width = scf.select %height_exceeds, %height_limited_width, %capped_width : i32
+    %selected_height = scf.select %width_exceeds, %width_limited_height, %capped_height : i32
+    %result_width = scalar.maxui %selected_width, %one : i32
+    %result_height = scalar.maxui %selected_height, %one : i32
+    scf.yield %result_width, %result_height : i32, i32
+  } else {
+    %too_small = scalar.cmpi ult, %rounded_tokens, %minimum_tokens : i32
+    %result_width, %result_height = scf.if %too_small -> (i32, i32) {
+      %minimum_width = func.call @qwen38_vision_minimum_tiles(%width, %height) : (i32, i32) -> (i32)
+      %minimum_height = func.call @qwen38_vision_minimum_tiles(%height, %width) : (i32, i32) -> (i32)
+      scf.yield %minimum_width, %minimum_height : i32, i32
+    } else {
+      scf.yield %rounded_width, %rounded_height : i32, i32
+    }
+    scf.yield %result_width, %result_height : i32, i32
+  }
+  %tile = scalar.constant 32 : i32
+  %result_width = scalar.muli %columns, %tile : i32
+  %result_height = scalar.muli %rows, %tile : i32
+  func.return %result_width, %result_height : i32, i32
+}

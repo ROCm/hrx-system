@@ -4,6 +4,8 @@ config.decl @qwen38.vision.image_height : %value: index where [range(%value, 32,
 
 config.decl @qwen38.vision.image_width : %value: index where [range(%value, 32, 4096), multiple_of(%value, 32)]
 
+kernel.decl @qwen38_vision_resize(%groups_x: index, %groups_y: index) launch(%image: index, %input: buffer, %output: buffer) where [range(%image, 0, 3)]
+
 kernel.decl @qwen38_vision_patch_embedding() launch(%source_offset: offset, %source: buffer, %weight0: buffer, %weight1: buffer, %bias: buffer, %output: buffer)
 
 kernel.decl @qwen38_vision_position_layernorm_statistics() launch(%position_table: buffer, %residual: buffer, %statistics: buffer)
@@ -66,7 +68,6 @@ template.def<@qwen38_vision_block> @qwen38_vision_block_impl(%layer: index, %row
 // live for the downstream language consumer.
 command.program.def public @qwen38_vision_projector() launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
-  %header_bytes = index.constant 64 : offset
   %c4 = index.constant 4 : index
   %c16 = index.constant 16 : index
   %image_height = config.get @qwen38.vision.image_height : index
@@ -75,10 +76,9 @@ command.program.def public @qwen38_vision_projector() launch(%parameters: buffer
   %patch_width = index.div %image_width, %c16 : index
   %rows = index.mul %patch_height, %patch_width : index
   %merged_rows = index.div %rows, %c4 : index
-  %pixels = index.mul %image_height, %image_width : index
-  %pixel_stride = index.constant 3 : offset
-  %pixel_bytes = index.scale %pixels, %pixel_stride : index, offset -> offset
-  %input_stride = index.add %header_bytes, %pixel_bytes : offset
+  %c32 = index.constant 32 : index
+  %resize_x = index.div %image_width, %c32 : index
+  %resize_y = index.div %image_height, %c16 : index
   %feature_stride = index.constant 20480 : offset
   %output_stride = index.scale %merged_rows, %feature_stride : index, offset -> offset
   %c0 = index.constant 0 : index
@@ -103,8 +103,8 @@ command.program.def public @qwen38_vision_projector() launch(%parameters: buffer
   %value = buffer.view %activation[%value_offset] : buffer -> view<288x[%rows]xf16>
 
   scf.for %image = [%c0 to %image_count step %c1] unroll {
-    %input_offset = index.scale %image, %input_stride : index, offset -> offset
-    %pixel_offset = index.add %input_offset, %header_bytes : offset
+    // Final RGB occupies the idle activation bank only until patch embedding.
+    kernel.launch @qwen38_vision_resize[%resize_x, %resize_y](%image, %input, %activation) : [index, index](index, buffer, buffer)
     %output_offset = index.scale %image, %output_stride : index, offset -> offset
     %output_view = buffer.view %output[%output_offset] : buffer -> view<[%rows]x1152xf32>
     %result_view = buffer.view %output[%output_offset] : buffer -> view<[%merged_rows]x5120xf32>
@@ -112,7 +112,7 @@ command.program.def public @qwen38_vision_projector() launch(%parameters: buffer
     %patch_weight1 = command.parameter %parameters, "v.patch_embd.weight.1" : view<1152x768xf16>
     %patch_bias = command.parameter %parameters, "v.patch_embd.bias" : view<1152xf32>
     %position = command.parameter %parameters, "v.position_embd.weight" : view<2304x1152xf32>
-    kernel.launch @qwen38_vision_patch_embedding(%pixel_offset, %input, %patch_weight0, %patch_weight1, %patch_bias, %state) : (offset, buffer, view<1152x768xf16>, view<1152x768xf16>, view<1152xf32>, buffer)
+    kernel.launch @qwen38_vision_patch_embedding(%origin, %activation, %patch_weight0, %patch_weight1, %patch_bias, %state) : (offset, buffer, view<1152x768xf16>, view<1152x768xf16>, view<1152xf32>, buffer)
     kernel.launch @qwen38_vision_position_layernorm_statistics(%position, %state, %statistics) : (view<2304x1152xf32>, buffer, buffer)
 
     %layer0 = index.constant 0 : index

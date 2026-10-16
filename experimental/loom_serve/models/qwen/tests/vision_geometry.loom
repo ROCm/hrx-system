@@ -1,0 +1,169 @@
+func.decl @qwen38_vision_geometry(%width: i32, %height: i32, %maximum_tokens: i32) -> (i32, i32)
+
+check.case public @unchanged {
+  %width = check.literal value(256) : i32
+  %height = check.literal value(256) : i32
+  %budget = check.literal value(1024) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(256) : i32
+  %expected_height = check.literal value(256) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @landscape {
+  %width = check.literal value(320) : i32
+  %height = check.literal value(224) : i32
+  %budget = check.literal value(1024) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(320) : i32
+  %expected_height = check.literal value(224) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @portrait {
+  %width = check.literal value(224) : i32
+  %height = check.literal value(320) : i32
+  %budget = check.literal value(1024) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(224) : i32
+  %expected_height = check.literal value(320) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @odd_dimensions {
+  %width = check.literal value(333) : i32
+  %height = check.literal value(257) : i32
+  %budget = check.literal value(1024) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(320) : i32
+  %expected_height = check.literal value(256) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @nearest_even_down {
+  %width = check.literal value(272) : i32
+  %height = check.literal value(256) : i32
+  %budget = check.literal value(1024) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(256) : i32
+  %expected_height = check.literal value(256) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @nearest_even_up {
+  %width = check.literal value(304) : i32
+  %height = check.literal value(256) : i32
+  %budget = check.literal value(1024) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(320) : i32
+  %expected_height = check.literal value(256) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @budget_reduction {
+  %width = check.literal value(1024) : i32
+  %height = check.literal value(768) : i32
+  %budget = check.literal value(128) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(416) : i32
+  %expected_height = check.literal value(288) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @full_budget {
+  %width = check.literal value(4096) : i32
+  %height = check.literal value(4096) : i32
+  %budget = check.literal value(16384) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(4096) : i32
+  %expected_height = check.literal value(4096) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @square_reduction {
+  %width = check.literal value(4096) : i32
+  %height = check.literal value(4096) : i32
+  %budget = check.literal value(1024) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(1024) : i32
+  %expected_height = check.literal value(1024) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @single_pixel {
+  %width = check.literal value(1) : i32
+  %height = check.literal value(1) : i32
+  %budget = check.literal value(128) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(256) : i32
+  %expected_height = check.literal value(256) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @minimum_alignment {
+  %width = check.literal value(63) : i32
+  %height = check.literal value(1) : i32
+  %budget = check.literal value(128) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(2048) : i32
+  %expected_height = check.literal value(64) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @maximum_aspect {
+  %width = check.literal value(1) : i32
+  %height = check.literal value(200) : i32
+  %budget = check.literal value(128) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(32) : i32
+  %expected_height = check.literal value(3648) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @width_ceiling {
+  %width = check.literal value(4096) : i32
+  %height = check.literal value(49) : i32
+  %budget = check.literal value(200) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(4096) : i32
+  %expected_height = check.literal value(32) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}
+
+check.case public @height_ceiling {
+  %width = check.literal value(49) : i32
+  %height = check.literal value(4096) : i32
+  %budget = check.literal value(200) : i32
+  %actual_width, %actual_height = func.call @qwen38_vision_geometry(%width, %height, %budget) : (i32, i32, i32) -> (i32, i32)
+  %expected_width = check.literal value(32) : i32
+  %expected_height = check.literal value(4096) : i32
+  check.expect.equal actual(%actual_width) expected(%expected_width) : i32
+  check.expect.equal actual(%actual_height) expected(%expected_height) : i32
+  check.return
+}

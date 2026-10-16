@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 CHECKER = Path(sys.argv.pop(1)).resolve()
+QWEN_CONTROL = Path(sys.argv.pop(1)).resolve()
 PACKAGE = Path(__file__).parent
 TOOLS = [
     {
@@ -76,7 +77,12 @@ class RequestCheckTest(unittest.TestCase):
     def execute(
         self, source, request, response=None, capacity=4096, chunk_size=0, defaults=None
     ):
-        (self.model / "control.loom").write_bytes(source.read_bytes())
+        if source == PACKAGE / "control.loom":
+            control_path = self.model / "control.loombc"
+            control_path.write_bytes(QWEN_CONTROL.read_bytes())
+        else:
+            control_path = self.model / "control.loom"
+            control_path.write_bytes(source.read_bytes())
         request_path = self.directory / "request.json"
         request_path.write_text(
             request if isinstance(request, str) else json.dumps(request),
@@ -88,7 +94,7 @@ class RequestCheckTest(unittest.TestCase):
         )
         command = [
             str(CHECKER),
-            f"--control={self.model / 'control.loom'}",
+            f"--control={control_path}",
             f"--tokenizer={self.tokenizer}",
             f"--request={request_path}",
             f"--capacity={capacity}",
@@ -119,11 +125,11 @@ class RequestCheckTest(unittest.TestCase):
         )
         return value
 
-    def image(self, color):
+    def image(self, color, width=256, height=256):
         pam = (
-            b"P7\nWIDTH 256\nHEIGHT 256\nDEPTH 3\nMAXVAL 255\n"
-            b"TUPLTYPE RGB\nENDHDR\n" + bytes(color) * (256 * 256)
-        )
+            f"P7\nWIDTH {width}\nHEIGHT {height}\nDEPTH 3\nMAXVAL 255\n"
+            "TUPLTYPE RGB\nENDHDR\n"
+        ).encode("ascii") + bytes(color) * (width * height)
         url = "data:image/x-portable-arbitrarymap;base64," + base64.b64encode(
             pam
         ).decode("ascii")
@@ -233,6 +239,54 @@ class RequestCheckTest(unittest.TestCase):
         result = self.execute(PACKAGE / "control.loom", request)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
+
+    def test_general_image_shapes_and_request_budget(self):
+        for width, height, budget, expected_rows in (
+            (320, 224, 1024, 70),
+            (224, 320, 1024, 70),
+            (333, 257, 1024, 80),
+            (1024, 768, 128, 117),
+            (1024, 768, 1024, 768),
+            (1, 1, 1024, 64),
+        ):
+            with self.subTest(width=width, height=height, budget=budget):
+                request = self.request(
+                    model_options={"max_image_tokens": budget},
+                    messages=[
+                        {"role": "user", "content": "Look carefully."},
+                        {"role": "assistant", "content": "Ready."},
+                        {
+                            "role": "user",
+                            "content": [self.image((3, 17, 29), width, height)],
+                        },
+                    ],
+                )
+                value = self.success(self.execute(PACKAGE / "control.loom", request))
+                self.assertEqual(len(value["media_spans"]), 1)
+                image, offset, count = value["media_spans"][0]
+                self.assertEqual((image, count), (0, expected_rows))
+                self.assertEqual(
+                    value["tokens"][offset : offset + count], [131] * count
+                )
+
+    def test_image_budget_validation(self):
+        for options in (
+            {"max_image_tokens": 0},
+            {"max_image_tokens": 127},
+            {"max_image_tokens": 16385},
+            {"max_image_tokens": -1},
+            {"max_image_tokens": 1024.5},
+            {"max_image_tokens": True},
+            {"max_image_tokens": "1024"},
+            {"unknown": 1024},
+            [],
+        ):
+            with self.subTest(options=options):
+                result = self.execute(
+                    PACKAGE / "control.loom", self.request(model_options=options)
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
 
     def test_production_xml_completion(self):
         call = "<tool_call>\n<function=read>\n<parameter=path>\na.txt\n</parameter>\n</function>\n</tool_call>"
