@@ -108,8 +108,6 @@ typedef struct loom_vector_bank_sroa_loop_plan_t {
   loom_vector_bank_sroa_bank_plan_t* banks;
   // Number of entries in banks.
   uint32_t bank_count;
-  // Whether all active banks can be projected atomically.
-  bool eligible;
 } loom_vector_bank_sroa_loop_plan_t;
 
 struct loom_vector_bank_sroa_bank_plan_t {
@@ -188,6 +186,9 @@ typedef struct loom_vector_bank_sroa_source_plan_t {
   // Whether newly extracted components receive source-derived names.
   bool name_components;
 } loom_vector_bank_sroa_source_plan_t;
+
+static bool loom_vector_bank_sroa_bank_uses_supported(
+    const loom_vector_bank_sroa_bank_plan_t* bank);
 
 static loom_vector_bank_sroa_function_state_t*
 loom_vector_bank_sroa_function_state(
@@ -474,6 +475,7 @@ static iree_status_t loom_vector_bank_sroa_scan_endpoint(
                                    loom_vector_extract_result(user)),
             allow_activation, &component, &supported));
         if (!supported) {
+          endpoint->uses_supported = false;
           *out_invalid_access = true;
           return iree_ok_status();
         }
@@ -493,6 +495,7 @@ static iree_status_t loom_vector_bank_sroa_scan_endpoint(
                                    loom_vector_insert_value(user)),
             allow_activation, &component, &supported));
         if (!supported) {
+          endpoint->uses_supported = false;
           *out_invalid_access = true;
           return iree_ok_status();
         }
@@ -567,7 +570,6 @@ static iree_status_t loom_vector_bank_sroa_require_projected_destination(
   }
   if (destination_candidate == IREE_HOST_SIZE_MAX) {
     source_node->endpoint->uses_supported = false;
-    source_node->bank->loop->eligible = false;
     return iree_ok_status();
   }
   const iree_host_size_t source_candidate = source_node->endpoint->candidate;
@@ -629,7 +631,6 @@ static iree_status_t loom_vector_bank_sroa_prepare_loop(
     loom_vector_bank_sroa_function_state_t* function_state,
     loom_vector_bank_sroa_loop_plan_t* loop_plan) {
   loom_boundary_projection_loop_t* loop = loop_plan->loop;
-  loop_plan->eligible = true;
   loop_plan->bank_count =
       (uint32_t)loop->result_count +
       (loop->condition_terminator ? (uint32_t)loop->header_count : 0u);
@@ -723,7 +724,6 @@ static iree_status_t loom_vector_bank_sroa_prepare_loop(
           plan, function, function_state, &bank->endpoints[endpoint_index],
           /*allow_activation=*/true, &invalid_access));
       if (invalid_access) {
-        loop_plan->eligible = false;
         break;
       }
     }
@@ -733,31 +733,16 @@ static iree_status_t loom_vector_bank_sroa_prepare_loop(
     IREE_RETURN_IF_ERROR(loom_vector_bank_sroa_scan_endpoint(
         plan, function, function_state, &bank->endpoints[0],
         /*allow_activation=*/false, &invalid_access));
-    if (invalid_access) {
-      loop_plan->eligible = false;
-      continue;
-    }
-  }
-
-  for (uint32_t bank_index = 0; bank_index < loop_plan->bank_count;
-       ++bank_index) {
-    loom_vector_bank_sroa_bank_plan_t* bank = &loop_plan->banks[bank_index];
-    for (uint8_t endpoint_index = 0; endpoint_index < bank->endpoint_count;
-         ++endpoint_index) {
-      if (!bank->endpoints[endpoint_index].uses_supported) {
-        loop_plan->eligible = false;
-      }
-    }
   }
   IREE_RETURN_IF_ERROR(loom_vector_bank_sroa_plan_loop_edge_dependencies(
       plan, function, function_state, loop_plan));
-  if (loop_plan->eligible) {
-    for (uint32_t bank_index = 0; bank_index < loop_plan->bank_count;
-         ++bank_index) {
-      loom_vector_bank_sroa_bank_plan_t* bank = &loop_plan->banks[bank_index];
-      if (!bank->active) {
-        continue;
-      }
+  // Leave independent unsupported or target-native recurrence columns intact.
+  // The shared projection plan propagates rejection only across actual SSA
+  // dependencies between columns.
+  for (uint32_t bank_index = 0; bank_index < loop_plan->bank_count;
+       ++bank_index) {
+    loom_vector_bank_sroa_bank_plan_t* bank = &loop_plan->banks[bank_index];
+    if (bank->active && loom_vector_bank_sroa_bank_uses_supported(bank)) {
       IREE_RETURN_IF_ERROR(
           loom_vector_bank_sroa_prepare_bank_schema(plan, bank));
     }
@@ -844,7 +829,8 @@ static iree_status_t loom_vector_bank_sroa_plan_slot(
   loom_vector_bank_sroa_state_node_t* node =
       loom_vector_bank_sroa_lookup_node(function, state, value_id);
   if (!node || node->parent || node->endpoint != &node->bank->endpoints[0] ||
-      !node->bank->active || !node->bank->loop->eligible) {
+      !node->bank->active ||
+      !loom_vector_bank_sroa_bank_uses_supported(node->bank)) {
     return iree_ok_status();
   }
 
@@ -1164,8 +1150,6 @@ static void loom_vector_bank_sroa_report_decision(
       *out_reason = loom_vector_bank_sroa_blocker_name(bank->blocker);
     } else if (!uses_supported) {
       *out_reason = IREE_SV("unsupported_value_use");
-    } else if (!bank->loop->eligible) {
-      *out_reason = IREE_SV("peer_bank_rejected");
     } else {
       *out_reason = IREE_SV("boundary_projection_rejected");
     }
