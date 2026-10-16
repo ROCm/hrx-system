@@ -1,18 +1,22 @@
 // Runtime pitches combine with uniform, varying, and predicate coordinates.
 // A lane-selected buffer also exercises full-width pointer arithmetic around
-// the bounded products. Inputs cross the kernel boundary without specialization.
+// the bounded products. One coordinate carries an affine prefix and constant
+// suffix across a two-factor runtime pitch. Inputs cross the kernel boundary
+// without specialization.
 kernel.def @runtime_address_factors() {
   %unit = index.constant 1 : index
   %lanes = index.constant 8 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
-} launch(%input: buffer, %alternate: buffer, %output: buffer, %row_input: index, %columns_input: offset) {
+} launch(%input: buffer, %alternate: buffer, %output: buffer, %major_input: index, %row_input: index, %columns_input: offset) {
+  %major = index.assume %major_input [range(%major_input, 0, 1)] : index
   %row = index.assume %row_input [range(%row_input, 0, 7)] : index
-  %columns_offset = index.assume %columns_input [range(%columns_input, 1, 8)] : offset
+  %columns_offset = index.assume %columns_input [range(%columns_input, 8, 262144)] : offset
   %columns = index.cast %columns_offset : offset to index
   %lane = kernel.workitem.id<x> : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
+  %major_scale = index.constant 8192 : index
   %pitch = index.add %row, %c1 : index
   %lane_pitch = index.add %lane, %c1 : index
   %parity = index.rem %lane, %c2 : index
@@ -25,36 +29,42 @@ kernel.def @runtime_address_factors() {
   %varying_layout = encoding.layout.strided [%lane_pitch, 1] : encoding<layout>
   %scalar_view = buffer.view %input[%base] : buffer -> view<8x1xi32, %scalar_layout>
   %varying_view = buffer.view %input[%base] : buffer -> view<8x1xi32, %varying_layout>
-  %cube = buffer.view %input[%base] : buffer -> view<8x[%pitch]x[%columns]xi32>
+  %cube = buffer.view %input[%base] : buffer -> view<8195x[%pitch]x[%columns]xi32>
   %selected = scf.select %even, %input, %alternate : buffer
   %selected_view = buffer.view %selected[%base] : buffer -> view<8x1xi32, %scalar_layout>
   %vector_scalar = view.load %scalar_view[%lane, 0] : view<8x1xi32, %scalar_layout> -> i32
   %scalar_vector = view.load %varying_view[%row, 0] : view<8x1xi32, %varying_layout> -> i32
   %vector_vector = view.load %varying_view[%lane, 0] : view<8x1xi32, %varying_layout> -> i32
-  %multiple_factors = view.load %cube[%lane, 0, 0] : view<8x[%pitch]x[%columns]xi32> -> i32
+  %multiple_factors = view.load %cube[%lane, 0, 0] : view<8195x[%pitch]x[%columns]xi32> -> i32
   %predicate_scalar = view.load %scalar_view[%predicate_coordinate, 0] : view<8x1xi32, %scalar_layout> -> i32
   %predicate_vector = view.load %varying_view[%uniform_predicate_coordinate, 0] : view<8x1xi32, %varying_layout> -> i32
   %flat_product = view.load %selected_view[%lane, 0] : view<8x1xi32, %scalar_layout> -> i32
-  %destination = buffer.view %output[%base] : buffer -> view<7x8xi32>
-  view.store %vector_scalar, %destination[0, %lane] : i32, view<7x8xi32>
-  view.store %scalar_vector, %destination[1, %lane] : i32, view<7x8xi32>
-  view.store %vector_vector, %destination[2, %lane] : i32, view<7x8xi32>
-  view.store %multiple_factors, %destination[3, %lane] : i32, view<7x8xi32>
-  view.store %predicate_scalar, %destination[4, %lane] : i32, view<7x8xi32>
-  view.store %predicate_vector, %destination[5, %lane] : i32, view<7x8xi32>
-  view.store %flat_product, %destination[6, %lane] : i32, view<7x8xi32>
+  %major_row = index.mul %major, %major_scale : index
+  %affine_prefix = index.add %major_row, %predicate_coordinate : index
+  %affine_coordinate = index.add %affine_prefix, %c1 : index
+  %affine_suffix = view.load %cube[%affine_coordinate, 0, 0] : view<8195x[%pitch]x[%columns]xi32> -> i32
+  %destination = buffer.view %output[%base] : buffer -> view<8x8xi32>
+  view.store %vector_scalar, %destination[0, %lane] : i32, view<8x8xi32>
+  view.store %scalar_vector, %destination[1, %lane] : i32, view<8x8xi32>
+  view.store %vector_vector, %destination[2, %lane] : i32, view<8x8xi32>
+  view.store %multiple_factors, %destination[3, %lane] : i32, view<8x8xi32>
+  view.store %predicate_scalar, %destination[4, %lane] : i32, view<8x8xi32>
+  view.store %predicate_vector, %destination[5, %lane] : i32, view<8x8xi32>
+  view.store %flat_product, %destination[6, %lane] : i32, view<8x8xi32>
+  view.store %affine_suffix, %destination[7, %lane] : i32, view<8x8xi32>
   kernel.return
 }
 
 // The scalar oracle uses flat element indices, with no dynamic layout or
-// multidimensional view expansion shared with the subject.
-func.def @runtime_address_factors_oracle(%input: buffer, %alternate: buffer, %output: buffer, %row_input: index, %columns_input: offset) {
+// multidimensional view expansion shared with the subject. The test domain
+// fixes major_input at zero, so the oracle intentionally omits its broad term.
+func.def @runtime_address_factors_oracle(%input: buffer, %alternate: buffer, %output: buffer, %major_input: index, %row_input: index, %columns_input: offset) {
   %row = index.assume %row_input [range(%row_input, 0, 7)] : index
-  %columns_offset = index.assume %columns_input [range(%columns_input, 1, 8)] : offset
+  %columns_offset = index.assume %columns_input [range(%columns_input, 8, 8)] : offset
   %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<512xi32>
+  %source = buffer.view %input[%base] : buffer -> view<640xi32>
   %other = buffer.view %alternate[%base] : buffer -> view<512xi32>
-  %destination = buffer.view %output[%base] : buffer -> view<7x8xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<8x8xi32>
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -72,38 +82,45 @@ func.def @runtime_address_factors_oracle(%input: buffer, %alternate: buffer, %ou
     %multiple_index = index.mul %vector_scalar_index, %columns : index
     %predicate_scalar_index = scf.select %even, %pitch, %c0 : index
     %predicate_vector_index = scf.select %row_nonzero, %lane_pitch, %c0 : index
-    %vector_scalar = view.load %source[%vector_scalar_index] : view<512xi32> -> i32
-    %scalar_vector = view.load %source[%scalar_vector_index] : view<512xi32> -> i32
-    %vector_vector = view.load %source[%vector_vector_index] : view<512xi32> -> i32
-    %multiple = view.load %source[%multiple_index] : view<512xi32> -> i32
-    %predicate_scalar = view.load %source[%predicate_scalar_index] : view<512xi32> -> i32
-    %predicate_vector = view.load %source[%predicate_vector_index] : view<512xi32> -> i32
+    %predicate_coordinate = scf.select %even, %c1, %c0 : index
+    %affine_coordinate = index.add %predicate_coordinate, %c1 : index
+    %affine_row_offset = index.mul %affine_coordinate, %pitch : index
+    %affine_index = index.mul %affine_row_offset, %columns : index
+    %vector_scalar = view.load %source[%vector_scalar_index] : view<640xi32> -> i32
+    %scalar_vector = view.load %source[%scalar_vector_index] : view<640xi32> -> i32
+    %vector_vector = view.load %source[%vector_vector_index] : view<640xi32> -> i32
+    %multiple = view.load %source[%multiple_index] : view<640xi32> -> i32
+    %predicate_scalar = view.load %source[%predicate_scalar_index] : view<640xi32> -> i32
+    %predicate_vector = view.load %source[%predicate_vector_index] : view<640xi32> -> i32
+    %affine_suffix = view.load %source[%affine_index] : view<640xi32> -> i32
     %alternate_value = view.load %other[%vector_scalar_index] : view<512xi32> -> i32
     %selected = scf.select %even, %vector_scalar, %alternate_value : i32
-    view.store %vector_scalar, %destination[0, %lane] : i32, view<7x8xi32>
-    view.store %scalar_vector, %destination[1, %lane] : i32, view<7x8xi32>
-    view.store %vector_vector, %destination[2, %lane] : i32, view<7x8xi32>
-    view.store %multiple, %destination[3, %lane] : i32, view<7x8xi32>
-    view.store %predicate_scalar, %destination[4, %lane] : i32, view<7x8xi32>
-    view.store %predicate_vector, %destination[5, %lane] : i32, view<7x8xi32>
-    view.store %selected, %destination[6, %lane] : i32, view<7x8xi32>
+    view.store %vector_scalar, %destination[0, %lane] : i32, view<8x8xi32>
+    view.store %scalar_vector, %destination[1, %lane] : i32, view<8x8xi32>
+    view.store %vector_vector, %destination[2, %lane] : i32, view<8x8xi32>
+    view.store %multiple, %destination[3, %lane] : i32, view<8x8xi32>
+    view.store %predicate_scalar, %destination[4, %lane] : i32, view<8x8xi32>
+    view.store %predicate_vector, %destination[5, %lane] : i32, view<8x8xi32>
+    view.store %selected, %destination[6, %lane] : i32, view<8x8xi32>
+    view.store %affine_suffix, %destination[7, %lane] : i32, view<8x8xi32>
   }
   func.return
 }
 
 check.scenario @runtime_factor_values {
   check.trial[8](%trial: index, %entropy: check.entropy) {
+    %major = check.literal value(0) : index
     %columns = check.literal value(8) : offset
-    %input_storage = check.generate.iota offset(101) step(7) : tensor<520xi32>
+    %input_storage = check.generate.iota offset(101) step(7) : tensor<648xi32>
     %alternate_storage = check.generate.iota offset(-701) step(-11) : tensor<520xi32>
-    %output_storage = check.generate.fill value(-889275714) : tensor<64xi32>
-    %input = check.tensor.view %input_storage offset(16) : tensor<520xi32> -> tensor<512xi32>
+    %output_storage = check.generate.fill value(-889275714) : tensor<72xi32>
+    %input = check.tensor.view %input_storage offset(16) : tensor<648xi32> -> tensor<640xi32>
     %alternate = check.tensor.view %alternate_storage offset(16) : tensor<520xi32> -> tensor<512xi32>
-    %output = check.tensor.view %output_storage offset(16) : tensor<64xi32> -> tensor<56xi32>
-    check.compare<@runtime_address_factors, @runtime_address_factors_oracle>(%input, %alternate, %output, %trial, %columns) : (tensor<512xi32>, tensor<512xi32>, tensor<56xi32>, index, offset) -> () {
-      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<520xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<72xi32> -> tensor<64xi32>
+    check.compare<@runtime_address_factors, @runtime_address_factors_oracle>(%input, %alternate, %output, %major, %trial, %columns) : (tensor<640xi32>, tensor<512xi32>, tensor<64xi32>, index, index, offset) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<648xi32>
       check.expect.bitwise actual(%alternate_storage) expected(%alternate_storage) : tensor<520xi32>
-      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<64xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<72xi32>
     }
   }
   check.return

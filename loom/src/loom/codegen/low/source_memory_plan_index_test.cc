@@ -487,7 +487,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadClassifiesMultipleIndices) {
       &plan, /*static_byte_offset=*/plan.static_byte_offset, 32));
 }
 
-TEST_F(SourceMemoryPlanTest, DynamicDenseLoadRetainsOffsetAcrossDynamicStride) {
+TEST_F(SourceMemoryPlanTest, DynamicDenseLoadSplitsOffsetAcrossDynamicStride) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t row = DefineIndexArg();
   loom_value_id_t row_component = DefineIndexArg();
@@ -552,16 +552,31 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadRetainsOffsetAcrossDynamicStride) {
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 0);
   EXPECT_FALSE(plan.source_index_static_offset_extracted);
-  ASSERT_EQ(plan.dynamic_term_count, 2u);
-  EXPECT_EQ(plan.dynamic_terms[0].index, loom_index_add_result(offset_row_op));
-  EXPECT_EQ(plan.dynamic_terms[0].axis, 0u);
+  ASSERT_EQ(plan.dynamic_term_count, 4u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, row);
+  EXPECT_EQ(plan.dynamic_terms[0].axis,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE);
   EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 2);
   ASSERT_EQ(plan.dynamic_terms[0].stride_value_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].stride_values[0], column_count);
-  EXPECT_EQ(plan.dynamic_terms[1].index, column);
-  EXPECT_EQ(plan.dynamic_terms[1].axis, 1u);
+  EXPECT_EQ(plan.dynamic_terms[1].index, row_component);
+  EXPECT_EQ(plan.dynamic_terms[1].axis,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE);
   EXPECT_EQ(plan.dynamic_terms[1].byte_stride, 2);
-  EXPECT_EQ(plan.dynamic_terms[1].stride_value_count, 0u);
+  ASSERT_EQ(plan.dynamic_terms[1].stride_value_count, 1u);
+  EXPECT_EQ(plan.dynamic_terms[1].stride_values[0], column_count);
+  EXPECT_EQ(plan.dynamic_terms[2].index, column_count);
+  EXPECT_EQ(plan.dynamic_terms[2].axis,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE);
+  EXPECT_EQ(plan.dynamic_terms[2].byte_stride, 2);
+  EXPECT_EQ(plan.dynamic_terms[2].stride_value_count, 0u);
+  EXPECT_EQ(plan.dynamic_terms[3].index, column);
+  EXPECT_EQ(plan.dynamic_terms[3].axis, 1u);
+  EXPECT_EQ(plan.dynamic_terms[3].byte_stride, 2);
+  EXPECT_EQ(plan.dynamic_terms[3].stride_value_count, 0u);
+  ASSERT_EQ(plan.dynamic_realization_count, 1u);
+  EXPECT_EQ(plan.dynamic_realizations[0].term.index, row);
+  EXPECT_EQ(plan.dynamic_realizations[0].term_mask, 0b1);
 
   loom_low_source_memory_access_plan_t scaled_plan = {};
   ASSERT_TRUE(BuildPlan(&facts, scaled_load_op, &scaled_plan, &diagnostic));
@@ -572,6 +587,109 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadRetainsOffsetAcrossDynamicStride) {
   EXPECT_EQ(scaled_plan.dynamic_terms[0].byte_stride, 4);
   ASSERT_EQ(scaled_plan.dynamic_terms[0].stride_value_count, 1u);
   EXPECT_EQ(scaled_plan.dynamic_terms[0].stride_values[0], column_count);
+}
+
+TEST_F(SourceMemoryPlanTest,
+       DynamicDenseLoadRetainsSignedOffsetAcrossRuntimeStrideProduct) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t row_count =
+      BuildIndexAssumeRange(DefineIndexArg(), 2, 4);
+  const loom_value_id_t column_count =
+      BuildIndexAssumeRange(DefineIndexArg(), 8, 16);
+  const loom_value_id_t block = BuildIndexAssumeRange(DefineIndexArg(), 1, 3);
+  const loom_value_id_t layout = BuildDenseLayout();
+  const loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+
+  const loom_type_t view_type =
+      ViewType3D(loom_dim_pack_static(8), loom_dim_pack_dynamic(row_count),
+                 loom_dim_pack_dynamic(column_count), layout);
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        view_type, LOOM_LOCATION_UNKNOWN,
+                                        &view_op));
+
+  const loom_value_id_t one = loom_index_constant_result(BuildIndexConstant(1));
+  const loom_value_id_t two = loom_index_constant_result(BuildIndexConstant(2));
+  loom_op_t* advanced_block_op = nullptr;
+  IREE_ASSERT_OK(loom_index_madd_build(
+      &builder_, block, two, one, LOOM_LOCATION_UNKNOWN, &advanced_block_op));
+  loom_op_t* retreated_block_op = nullptr;
+  IREE_ASSERT_OK(loom_index_sub_build(
+      &builder_, block, one, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      LOOM_LOCATION_UNKNOWN, &retreated_block_op));
+
+  const int64_t static_indices[] = {INT64_MIN, 0, 0};
+  const loom_value_id_t advanced_block =
+      loom_index_madd_result(advanced_block_op);
+  const loom_value_id_t advanced_indices[] = {advanced_block};
+  loom_op_t* advanced_load_op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      advanced_indices, IREE_ARRAYSIZE(advanced_indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN,
+      &advanced_load_op));
+  const loom_value_id_t retreated_block =
+      loom_index_sub_result(retreated_block_op);
+  const loom_value_id_t retreated_indices[] = {retreated_block};
+  loom_op_t* retreated_load_op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      retreated_indices, IREE_ARRAYSIZE(retreated_indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN,
+      &retreated_load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  loom_low_source_memory_access_plan_t advanced_plan = {};
+  ASSERT_TRUE(BuildPlan(&facts, advanced_load_op, &advanced_plan, &diagnostic));
+  EXPECT_EQ(advanced_plan.static_byte_offset, 0);
+  EXPECT_FALSE(advanced_plan.source_index_static_offset_extracted);
+  ASSERT_EQ(advanced_plan.dynamic_term_count, 2u);
+  EXPECT_EQ(advanced_plan.dynamic_terms[0].index, block);
+  EXPECT_EQ(advanced_plan.dynamic_terms[0].byte_stride, 8);
+  ASSERT_EQ(advanced_plan.dynamic_terms[0].stride_value_count, 2u);
+  EXPECT_EQ(advanced_plan.dynamic_terms[0].stride_values[0], row_count);
+  EXPECT_EQ(advanced_plan.dynamic_terms[0].stride_values[1], column_count);
+  EXPECT_EQ(advanced_plan.dynamic_terms[0].byte_facts.range_lo, 128);
+  EXPECT_EQ(advanced_plan.dynamic_terms[0].byte_facts.range_hi, 1536);
+  EXPECT_EQ(advanced_plan.dynamic_terms[1].index, row_count);
+  EXPECT_EQ(advanced_plan.dynamic_terms[1].byte_stride, 4);
+  ASSERT_EQ(advanced_plan.dynamic_terms[1].stride_value_count, 1u);
+  EXPECT_EQ(advanced_plan.dynamic_terms[1].stride_values[0], column_count);
+  EXPECT_EQ(advanced_plan.dynamic_terms[1].byte_facts.range_lo, 64);
+  EXPECT_EQ(advanced_plan.dynamic_terms[1].byte_facts.range_hi, 256);
+  const loom_value_facts_t advanced_facts =
+      loom_low_source_memory_dynamic_offset_facts(&advanced_plan, 0);
+  EXPECT_EQ(advanced_facts.range_lo, 192);
+  EXPECT_EQ(advanced_facts.range_hi, 1792);
+
+  loom_low_source_memory_access_plan_t retreated_plan = {};
+  ASSERT_TRUE(
+      BuildPlan(&facts, retreated_load_op, &retreated_plan, &diagnostic));
+  EXPECT_EQ(retreated_plan.static_byte_offset, 0);
+  EXPECT_FALSE(retreated_plan.source_index_static_offset_extracted);
+  ASSERT_EQ(retreated_plan.dynamic_term_count, 2u);
+  EXPECT_EQ(retreated_plan.dynamic_terms[0].index, block);
+  EXPECT_EQ(retreated_plan.dynamic_terms[0].byte_stride, 4);
+  ASSERT_EQ(retreated_plan.dynamic_terms[0].stride_value_count, 2u);
+  EXPECT_EQ(retreated_plan.dynamic_terms[0].stride_values[0], row_count);
+  EXPECT_EQ(retreated_plan.dynamic_terms[0].stride_values[1], column_count);
+  EXPECT_EQ(retreated_plan.dynamic_terms[1].index, row_count);
+  EXPECT_EQ(retreated_plan.dynamic_terms[1].byte_stride, -4);
+  EXPECT_EQ(retreated_plan.dynamic_terms[1].byte_shift,
+            LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE);
+  ASSERT_EQ(retreated_plan.dynamic_terms[1].stride_value_count, 1u);
+  EXPECT_EQ(retreated_plan.dynamic_terms[1].stride_values[0], column_count);
+  EXPECT_EQ(retreated_plan.dynamic_terms[1].byte_facts.range_lo, -256);
+  EXPECT_EQ(retreated_plan.dynamic_terms[1].byte_facts.range_hi, -64);
+  const loom_value_facts_t retreated_facts =
+      loom_low_source_memory_dynamic_offset_facts(&retreated_plan, 0);
+  EXPECT_LE(retreated_facts.range_lo, 0);
+  EXPECT_GE(retreated_facts.range_hi, 512);
 }
 
 TEST_F(SourceMemoryPlanTest, ScalarViewAccessClassifiesCoordinateAxes) {

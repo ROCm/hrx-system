@@ -80,3 +80,61 @@ check.scenario public @fragment_numeric_coordinates_values {
   }
   check.return
 }
+
+// A broad uniform row prefix and constant suffix cross the same runtime row
+// stride as a subgroup-relative fragment origin. The physical allocation stays
+// small because the exercised major coordinate is zero.
+kernel.def target(@fragment_numeric_coordinates_gfx11) @fragment_affine_stride_suffix() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%width_input: index, %major_input: index, %output: buffer) {
+  %width = index.assume %width_input [range(%width_input, 16, 262144), multiple_of(%width_input, 16)] : index
+  %major = index.assume %major_input [range(%major_input, 0, 1)] : index
+  %base = index.constant 0 : offset
+  %major_scale = index.constant 8192 : index
+  %fragment_extent = index.constant 16 : index
+  %subgroup = kernel.subgroup.id : index
+  %major_row = index.mul %major, %major_scale : index
+  %subgroup_row = index.mul %subgroup, %fragment_extent : index
+  %row_prefix = index.add %major_row, %subgroup_row : index
+  %row = index.add %row_prefix, %fragment_extent : index
+  %global = buffer.assume.memory_space<global> %output : buffer
+  %view = buffer.view %global[%base] : buffer -> view<8336x[%width]xbf16>
+  %values = vector.constant 0.0 : vector<8xf32>
+  %fragment = vector.fragment<result> %values shape [%fragment_extent, %fragment_extent] : vector<8xf32>
+  vector.fragment.store<result> %fragment, %view[%row, 0] shape [%fragment_extent, %fragment_extent] : vector<8xf32>, view<8336x[%width]xbf16>
+  kernel.return
+}
+
+// The scenario fixes the broad coordinate to zero. A static scalar view keeps
+// the oracle independent of dynamic-stride and fragment address planning.
+func.def @fragment_affine_stride_suffix_oracle(%width_input: index, %major_input: index, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %row_count = index.constant 128 : index
+  %column_count = index.constant 16 : index
+  %row_bias = index.constant 16 : index
+  %step = index.constant 1 : index
+  %fill_value = scalar.constant 0.0 : bf16
+  %view = buffer.view %output[%base] : buffer -> view<144x16xbf16>
+  scf.for %source_row = [%begin to %row_count step %step] {
+    %row = index.add %source_row, %row_bias : index
+    scf.for %column = [%begin to %column_count step %step] {
+      view.store %fill_value, %view[%row, %column] : bf16, view<144x16xbf16>
+    }
+  }
+  func.return
+}
+
+check.scenario public @fragment_affine_stride_suffix_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %width = check.literal value(16) : index
+    %major = check.literal value(0) : index
+    %output = check.generate.fill value(-1.0) : tensor<144x16xbf16>
+    check.compare<@fragment_affine_stride_suffix, @fragment_affine_stride_suffix_oracle>(%width, %major, %output) : (index, index, tensor<144x16xbf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<144x16xbf16>
+    }
+  }
+  check.return
+}

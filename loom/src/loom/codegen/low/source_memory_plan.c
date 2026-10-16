@@ -587,6 +587,48 @@ static void loom_low_source_memory_dynamic_term_compute_byte_facts(
       out_facts);
 }
 
+// Appends the dynamic byte contribution of a constant coordinate whose axis
+// stride contains runtime factors. Products are commutative, so the first
+// runtime factor becomes the term index and the coordinate scales the static
+// byte coefficient. This keeps the contribution independently selectable
+// without adding a constant-only variant to the dynamic-term representation.
+static bool loom_low_source_memory_access_append_dynamic_stride_constant(
+    const loom_value_fact_table_t* fact_table, int64_t coordinate,
+    int64_t static_byte_coefficient, const loom_value_id_t* stride_values,
+    uint8_t stride_value_count, loom_low_source_memory_access_plan_t* plan,
+    loom_low_source_memory_access_diagnostic_t* diagnostic) {
+  IREE_ASSERT_NE(coordinate, 0);
+  IREE_ASSERT_GT(stride_value_count, 0u);
+
+  int64_t byte_stride = 0;
+  if (!iree_checked_mul_i64(static_byte_coefficient, coordinate,
+                            &byte_stride)) {
+    diagnostic->rejection_bits |=
+        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DYNAMIC_STRIDE;
+    return false;
+  }
+  loom_low_source_memory_dynamic_term_t term = {
+      .index = stride_values[0],
+      .axis = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE,
+      .byte_stride = byte_stride,
+      .byte_facts = loom_value_facts_unknown(),
+      .byte_shift = LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE,
+      .stride_value_count = (uint8_t)(stride_value_count - 1u),
+  };
+  loom_low_source_memory_access_dynamic_index_source(
+      fact_table, term.index, &term.source, &term.dimension);
+  for (uint8_t i = 1; i < stride_value_count; ++i) {
+    term.stride_values[i - 1] = stride_values[i];
+  }
+  (void)loom_low_source_memory_query_byte_shift(term.byte_stride,
+                                                &term.byte_shift);
+  loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
+      fact_table, term.index, term.byte_stride, term.stride_values,
+      term.stride_value_count, &term.byte_facts);
+  return loom_low_source_memory_access_append_dynamic_term(plan, &term,
+                                                           diagnostic);
+}
+
 static bool loom_low_source_memory_access_single_term_dynamic_facts(
     const loom_symbolic_expr_t* expression, loom_value_facts_t* out_facts) {
   *out_facts = loom_value_facts_unknown();
@@ -817,13 +859,16 @@ static bool loom_low_source_memory_access_apply_static_index_offset(
 }
 
 static bool loom_low_source_memory_access_can_expand_index_expression(
-    const loom_symbolic_expr_t* expression,
+    const loom_symbolic_expr_t* expression, bool has_dynamic_stride_constant,
     iree_host_size_t available_term_count) {
+  const iree_host_size_t required_term_count =
+      expression->term_count + (has_dynamic_stride_constant ? 1u : 0u);
   if (!loom_symbolic_expr_is_linear(expression) ||
-      expression->term_count <= 1 ||
-      expression->term_count > available_term_count ||
-      !loom_low_source_memory_access_can_extract_static_index_offset(
-          expression->constant)) {
+      expression->term_count == 0 || required_term_count <= 1 ||
+      required_term_count > available_term_count ||
+      (!has_dynamic_stride_constant &&
+       !loom_low_source_memory_access_can_extract_static_index_offset(
+           expression->constant))) {
     return false;
   }
   for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
@@ -1319,8 +1364,7 @@ static bool loom_low_source_memory_access_plan_from_components(
   }
 
   // A nonzero static coordinate crossing a runtime physical stride is still a
-  // dynamic byte-address term. Use the first stride factor as the term source
-  // and retain the remaining factors on its byte stride.
+  // dynamic byte-address term.
   for (uint8_t i = 0; i < dynamic_stride_axis_count; ++i) {
     const uint8_t axis = dynamic_stride_axes[i];
     const int64_t coordinate = static_indices.i64_array[axis];
@@ -1329,36 +1373,10 @@ static bool loom_low_source_memory_access_plan_from_components(
         loom_low_source_memory_access_axis_stride(
             fact_table, &vector_access, axis_byte_strides, axis, &scratch);
     IREE_ASSERT_GT(axis_stride->dynamic_factor_count, 0u);
-    int64_t byte_stride = 0;
-    if (!iree_checked_mul_i64(axis_stride->static_byte_coefficient, coordinate,
-                              &byte_stride)) {
-      out_diagnostic->rejection_bits |=
-          LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_DYNAMIC_STRIDE;
-      return false;
-    }
-    loom_low_source_memory_dynamic_term_t term = {
-        .index = axis_stride->dynamic_factors[0],
-        .source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
-        .dimension = LOOM_KERNEL_DIMENSION_COUNT_,
-        .axis = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE,
-        .byte_stride = byte_stride,
-        .byte_facts = loom_value_facts_unknown(),
-        .byte_shift = LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE,
-        .stride_value_count = (uint8_t)(axis_stride->dynamic_factor_count - 1),
-    };
-    loom_low_source_memory_access_dynamic_index_source(
-        fact_table, term.index, &term.source, &term.dimension);
-    for (uint8_t factor = 1; factor < axis_stride->dynamic_factor_count;
-         ++factor) {
-      term.stride_values[factor - 1] = axis_stride->dynamic_factors[factor];
-    }
-    (void)loom_low_source_memory_query_byte_shift(term.byte_stride,
-                                                  &term.byte_shift);
-    loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
-        fact_table, term.index, term.byte_stride, term.stride_values,
-        term.stride_value_count, &term.byte_facts);
-    if (!loom_low_source_memory_access_append_dynamic_term(out_plan, &term,
-                                                           out_diagnostic)) {
+    if (!loom_low_source_memory_access_append_dynamic_stride_constant(
+            fact_table, coordinate, axis_stride->static_byte_coefficient,
+            axis_stride->dynamic_factors, axis_stride->dynamic_factor_count,
+            out_plan, out_diagnostic)) {
       return false;
     }
   }
@@ -1433,11 +1451,9 @@ static bool loom_low_source_memory_access_plan_from_components(
     }
     loom_value_facts_t expression_facts = index_expression->facts;
 
-    // A coordinate suffix cannot become a static byte offset when its axis
-    // stride contains a dynamic extent: the suffix is multiplied by that
-    // extent and remains part of the dynamic address. A multiplier-only
-    // decomposition remains safe because every dynamic stride value stays on
-    // the term.
+    // A coordinate suffix can become a static byte offset only when its
+    // complete axis stride is static. Canonical expansion below retains a
+    // suffix crossing runtime extents as an independent dynamic-stride term.
     const int64_t unscaled_static_byte_offset = static_byte_offset;
     if (loom_symbolic_expr_is_linear(index_expression) &&
         index_expression->term_count == 1 &&
@@ -1471,12 +1487,14 @@ static bool loom_low_source_memory_access_plan_from_components(
     const iree_host_size_t available_term_count =
         LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY -
         out_plan->dynamic_term_count;
+    const bool has_dynamic_stride_constant =
+        index_expression->constant != 0 && stride_value_count != 0;
     bool expression_expanded =
         loom_low_source_memory_access_can_expand_index_expression(
-            index_expression, available_term_count) &&
-        (index_expression->constant == 0 || stride_value_count == 0);
+            index_expression, has_dynamic_stride_constant,
+            available_term_count);
     int64_t expanded_static_byte_offset = unscaled_static_byte_offset;
-    if (expression_expanded) {
+    if (expression_expanded && !has_dynamic_stride_constant) {
       if (!loom_low_source_memory_access_apply_static_index_offset(
               index_expression->constant, expression_byte_stride,
               unscaled_static_byte_offset, &expanded_static_byte_offset)) {
@@ -1530,11 +1548,11 @@ static bool loom_low_source_memory_access_plan_from_components(
           return false;
         }
       }
-      // Preserve the largest reusable source spelling. A complete expression
-      // already consumed more than once is the best realization. When the
-      // complete expression is private to this access, prefer the shared
-      // strict component retained by symbolic analysis so sibling accesses can
-      // reuse it with their distinct canonical suffixes.
+      // Preserve the largest reusable spelling of the nonconstant expression.
+      // An expression already consumed more than once is the best realization.
+      // When it is private to this access, prefer the shared strict component
+      // retained by symbolic analysis so sibling accesses can reuse it with
+      // their distinct canonical suffixes.
       loom_symbolic_expr_summary_t component_summary = {0};
       uint16_t component_mask = 0;
       if (index_summary.materialized_component_value_id !=
@@ -1560,8 +1578,9 @@ static bool loom_low_source_memory_access_plan_from_components(
             component_summary.expression.constant, expression_byte_stride,
             LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE, stride_values,
             stride_value_count, component_mask);
-      } else if (index_summary.materialized_dynamic_value_id !=
-                 LOOM_VALUE_ID_INVALID) {
+      } else if (index_expression->term_count > 1 &&
+                 index_summary.materialized_dynamic_value_id !=
+                     LOOM_VALUE_ID_INVALID) {
         const uint8_t expression_term_count =
             (uint8_t)(out_plan->dynamic_term_count - first_expression_term);
         const uint16_t expression_term_mask =
@@ -1573,6 +1592,15 @@ static bool loom_low_source_memory_access_plan_from_components(
             index_expression->facts, index_expression->constant,
             expression_byte_stride, dynamic_axis, stride_values,
             stride_value_count, expression_term_mask);
+      }
+      // The retained materialized value excludes expression.constant. Append
+      // its dynamic-stride contribution after forming realization masks so no
+      // realization claims to replace the suffix.
+      if (has_dynamic_stride_constant &&
+          !loom_low_source_memory_access_append_dynamic_stride_constant(
+              fact_table, index_expression->constant, expression_byte_stride,
+              stride_values, stride_value_count, out_plan, out_diagnostic)) {
+        return false;
       }
       continue;
     }
