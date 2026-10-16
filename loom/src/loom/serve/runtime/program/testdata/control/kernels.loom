@@ -17,12 +17,13 @@ kernel.def @geometry_fill_tiles(%count: index) {
   %item = index.add %base, %local : index
   %in_bounds = index.cmp slt, %item, %count : index
   scf.if %in_bounds {
-    %value = index.cast %item : index to i32
+    %bounded_item = index.assume %item [range(%item, 0, 126)] : index
+    %value = index.cast %bounded_item : index to i32
     %c7 = scalar.constant 7 : i32
     %c3 = scalar.constant 3 : i32
     %scaled = scalar.muli %value, %c7 : i32
     %result = scalar.addi %scaled, %c3 : i32
-    view.store %result, %output_view[%item] : i32, view<129xi32>
+    view.store %result, %output_view[%bounded_item] : i32, view<129xi32>
   }
   kernel.return
 }
@@ -108,31 +109,16 @@ command.program.def public @decode_transition() launch(%control: buffer, %token_
   command.return
 }
 
-// The schedule alternates disabled and live grids. State contains the producer,
+// The schedule alternates disabled and live grids. State contains the advance,
 // consumer, and heartbeat counts followed by a canary.
-kernel.def @continuation_counts() {
+kernel.def @continuation_advance() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%schedule: buffer, %state: buffer, %counts: buffer) {
+} launch(%state: buffer) {
   %c0_offset = index.constant 0 : offset
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %c3 = index.constant 3 : index
   %c1_i32 = scalar.constant 1 : i32
-  %c7_i32 = scalar.constant 7 : i32
-  %schedule_view = buffer.view %schedule[%c0_offset] : buffer -> view<24xi32>
   %state_view = buffer.view %state[%c0_offset] : buffer -> view<4xi32>
-  %counts_view = buffer.view %counts[%c0_offset] : buffer -> view<3xi32>
   %iteration = view.load %state_view[0] : view<4xi32> -> i32
-  %phase_word = scalar.andi %iteration, %c7_i32 : i32
-  %phase_value = index.cast %phase_word : i32 to index
-  %phase = index.assume %phase_value [range(%phase_value, 0, 7)] : index
-  %base = index.mul %phase, %c3 : index
-  scf.for %axis = [%c0 to %c3 step %c1] unroll {
-    %source = index.add %base, %axis : index
-    %count = view.load %schedule_view[%source] : view<24xi32> -> i32
-    view.store %count, %counts_view[%axis] : i32, view<3xi32>
-  }
   %next = scalar.addi %iteration, %c1_i32 : i32
   view.store %next, %state_view[0] : i32, view<4xi32>
   kernel.return
@@ -151,10 +137,37 @@ kernel.def @continuation_heartbeat() {
   kernel.return
 }
 
-// This entry has no internal mask: only the indirect grid suppresses mutation.
-kernel.def @continuation_consume(%count: index) {
+// This entry has no internal mask: only its configured grid suppresses mutation.
+kernel.def @continuation_consume(%schedule: buffer, %state: buffer) {
+  %c0_offset = index.constant 0 : offset
+  %c1_i32 = scalar.constant 1 : i32
+  %c3 = index.constant 3 : index
+  %c7_i32 = scalar.constant 7 : i32
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  %schedule_view = buffer.view %schedule[%c0_offset] : buffer -> view<24xi32>
+  %state_view = buffer.view %state[%c0_offset] : buffer -> view<4xi32>
+  %iteration = view.load %state_view[0] : view<4xi32> -> i32
+  %completed_iteration = scalar.subi %iteration, %c1_i32 : i32
+  %phase_word = scalar.andi %completed_iteration, %c7_i32 : i32
+  %phase_value = index.cast %phase_word : i32 to index
+  %phase = index.assume %phase_value [range(%phase_value, 0, 7)] : index
+  %base = index.mul %phase, %c3 : index
+  %x_raw = view.load %schedule_view[%base] : view<24xi32> -> i32
+  %y_index = index.add %base, %c1 : index
+  %y_raw = view.load %schedule_view[%y_index] : view<24xi32> -> i32
+  %c2 = index.constant 2 : index
+  %z_index = index.add %base, %c2 : index
+  %z_raw = view.load %schedule_view[%z_index] : view<24xi32> -> i32
+  %x_wide = scalar.extui %x_raw : i32 to i64
+  %y_wide = scalar.extui %y_raw : i32 to i64
+  %z_wide = scalar.extui %z_raw : i32 to i64
+  %x_count = scalar.assume %x_wide [range(%x_wide, 0, 1)] : i64
+  %y_count = scalar.assume %y_wide [range(%y_wide, 0, 1)] : i64
+  %z_count = scalar.assume %z_wide [range(%z_wide, 0, 1)] : i64
+  %x = index.cast %x_count : i64 to index
+  %y = index.cast %y_count : i64 to index
+  %z = index.cast %z_count : i64 to index
+  kernel.launch.config workgroups(%x, %y, %z) workgroup_size(%c1, %c1, %c1) : index
 } launch(%state: buffer) {
   %c0 = index.constant 0 : offset
   %c1 = scalar.constant 1 : i32
@@ -166,19 +179,15 @@ kernel.def @continuation_consume(%count: index) {
 }
 
 command.program.def public @device_continuation() launch(%schedule: buffer, %state: buffer) {
-  %c0_offset = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
-  %count_bytes = index.constant 12 : offset
-  %counts = buffer.alloca<global> align(16) %count_bytes : buffer
-  %counts_view = buffer.view %counts[%c0_offset] : buffer -> view<3xi32>
   scf.for %iteration = [%c0 to %c8 step %c1] unroll {
     command.serial {
-      kernel.launch @continuation_counts(%schedule, %state, %counts) : (buffer, buffer, buffer)
+      kernel.launch @continuation_advance(%state) : (buffer)
       command.concurrent {
         kernel.launch @continuation_heartbeat(%state) : (buffer)
-        kernel.dispatch @continuation_consume[%counts_view](%state) : [view<3xi32>](buffer)
+        kernel.launch @continuation_consume[%schedule, %state](%state) : [buffer, buffer](buffer)
       }
     }
   }

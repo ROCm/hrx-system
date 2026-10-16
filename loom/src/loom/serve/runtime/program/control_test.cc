@@ -101,9 +101,15 @@ class ControlTest
     IREE_ASSERT_OK(loom_serve_jit_create(device_, dispatch, host_, &sources,
                                          nullptr, &compilation_,
                                          host_allocator_, &jit_));
-    IREE_ASSERT_OK(Prepare(family, "prefill_to_decode", &commands_[0]));
-    IREE_ASSERT_OK(Prepare(family, "decode_transition", &commands_[1]));
-    IREE_ASSERT_OK(Prepare(family, "device_continuation", &commands_[2]));
+    IREE_ASSERT_OK(
+        Prepare(family, "prefill_to_decode", nullptr, &commands_[0]));
+    IREE_ASSERT_OK(
+        Prepare(family, "decode_transition", nullptr, &commands_[1]));
+    IREE_ASSERT_OK(Prepare(family, "device_continuation",
+                           &continuation_.transient, &commands_[2]));
+    ASSERT_GT(continuation_.transient.required_byte_length, 0u);
+    ASSERT_LT(continuation_.transient.binding_index,
+              continuation_.buffers.size());
     for (auto& row : buffers_) {
       for (size_t i = 0; i < row.size(); ++i) {
         IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
@@ -113,9 +119,12 @@ class ControlTest
       }
     }
     for (size_t i = 0; i < continuation_.buffers.size(); ++i) {
+      const iree_device_size_t length =
+          i < kContinuationLengths.size()
+              ? kContinuationLengths[i]
+              : continuation_.transient.required_byte_length;
       IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-          storage_pool_,
-          iree_hal_make_pool_reservation_request(kContinuationLengths[i], 0),
+          storage_pool_, iree_hal_make_pool_reservation_request(length, 0),
           iree_infinite_timeout(), &continuation_.buffers[i]));
     }
     IREE_ASSERT_OK(CreateModel());
@@ -184,11 +193,16 @@ class ControlTest
   }
 
   iree_status_t Prepare(const iree_hal_queue_family_t* family, const char* root,
+                        loom_cmd_program_transient_requirement_t* out_transient,
                         iree_hal_command_buffer_t** out_command) {
     const loomc_config_options_t config = {};
     loom_serve_jit_stage_t* stage = nullptr;
     auto status = loom_serve_jit_compile(jit_, iree_make_cstring_view(root),
                                          &config, &stage);
+    if (iree_status_is_ok(status) && out_transient) {
+      *out_transient =
+          loom_serve_jit_stage_program(stage)->requirements.transient;
+    }
     if (iree_status_is_ok(status)) {
       status = loom_serve_jit_stage_record(stage, family, GetParam(), nullptr,
                                            nullptr, out_command);
@@ -330,8 +344,8 @@ class ControlTest
 
   // Exact byte extents of the three generation-state buffers.
   static constexpr std::array<size_t, 3> kLengths = {12, 516, 32};
-  // Schedule, counters/canary, and the command product's transient count slab.
-  static constexpr std::array<size_t, 3> kContinuationLengths = {96, 16, 16};
+  // Schedule and counters/canary supplied to the continuation command.
+  static constexpr std::array<size_t, 2> kContinuationLengths = {96, 16};
   // Host allocation policy used for all runtime objects.
   iree_allocator_t host_allocator_ = iree_allocator_system();
   // Copied compiler evidence retained beyond individual results.
@@ -365,8 +379,10 @@ class ControlTest
   std::array<State, 2> outputs_;
   // Device-produced grids and all host payloads retained until the final drain.
   struct {
-    // Schedule, state, and reusable transient storage in command binding order.
+    // Source schedule/state followed by compiler-owned transient storage.
     std::array<iree_hal_buffer_t*, 3> buffers = {};
+    // Private workspace requirement retained from the command product.
+    loom_cmd_program_transient_requirement_t transient = {};
     // Disabled X/Y/Z/all-axis grids, each followed by one live grid.
     std::array<int32_t, 24> schedule = {0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1,
                                         1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1};
@@ -398,7 +414,7 @@ class ControlTest
 TEST_P(ControlTest, TargetFactsConfigureWorkgroupCounts) {
   const auto* family = iree_hal_queue_family(
       SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH));
-  IREE_ASSERT_OK(Prepare(family, "geometry_fill", &commands_[3]));
+  IREE_ASSERT_OK(Prepare(family, "geometry_fill", nullptr, &commands_[3]));
   inputs_[0].tokens.fill(-12345);
   uint64_t completion = 0;
   IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
@@ -666,11 +682,18 @@ TEST_P(ControlTest, DeviceProducedCountsGateConcurrentContinuation) {
   IREE_ASSERT_OK(loom_serve_execution_transfer(execution_, uploads.size(),
                                                uploads.data(), &completion));
   std::array<iree_hal_buffer_binding_t, 3> bindings = {};
-  for (size_t i = 0; i < bindings.size(); ++i) {
-    bindings[i] = {continuation_.buffers[i], 0, kContinuationLengths[i]};
+  ASSERT_LT(continuation_.transient.binding_index, bindings.size());
+  for (size_t i = 0; i < kContinuationLengths.size(); ++i) {
+    const size_t target =
+        i + (i >= continuation_.transient.binding_index ? 1 : 0);
+    bindings[target] = {continuation_.buffers[i], 0, kContinuationLengths[i]};
   }
-  // Every replay contains eight producer/consumer epochs sharing one count
-  // tuple. Submission dependencies order replays; no host result gates them.
+  bindings[continuation_.transient.binding_index] = {
+      continuation_.buffers.back(), 0,
+      continuation_.transient.required_byte_length};
+  // Every replay contains eight compiler-generated producer/consumer epochs.
+  // The private transient binding is reused across serial epochs. Submission
+  // dependencies order replays; no host result gates them.
   for (int i = 0; i < 16; ++i) {
     IREE_ASSERT_OK(loom_serve_execution_execute(
         execution_, commands_[2], {bindings.size(), bindings.data()},

@@ -62,6 +62,50 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "control_test",
+    srcs = ["//loom/src/loom/serve/runtime/program:control_test.cc"],
+    args = ["--control_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/control/kernels.loom)"],
+    data = [
+        "//loom/src/loom/serve/runtime/program:testdata/control/control.loom",
+        "//loom/src/loom/serve/runtime/program:testdata/control/kernels.loom",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=vulkan.resource.device",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:spirv_vulkan_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:workspace",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/program:jit",
+        "//loom/src/loom/serve/runtime/program:module",
+        "//loom/src/loom/serve/testing:compiler",
+        "//loom/src/loom/serve/testing:device",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+loom_cc_test(
     name = "source_image_service_test",
     data = IMAGE_SOURCES,
     env = {
