@@ -96,28 +96,23 @@ iree_status_t iree_hal_amd_gpu_pm4_program_initialize(
 
 static bool iree_hal_amd_gpu_pm4_program_instance_available(
     const iree_hal_amd_gpu_pm4_program_instance_t* instance,
-    const iree_async_frontier_t* frontier) {
+    const uint64_t* frontier) {
   if (instance->reserved) {
     return false;
   }
   if (!instance->use_count) {
     return true;
   }
-  // Frontiers are sorted; only the last writer is needed because every reuse
-  // is ordered after that writer. Clone reads of the initial instance do not
-  // constrain its mutable words and cannot release its permanent ownership.
-  for (uint8_t i = 0; i < frontier->entry_count; ++i) {
-    if (frontier->entries[i].axis == instance->last_use.axis) {
-      return frontier->entries[i].epoch >= instance->last_use.epoch;
-    }
-  }
-  return false;
+  // Only the last writer is needed because every reuse is ordered after that
+  // writer. Clone reads of the initial instance do not constrain its mutable
+  // words and cannot release its permanent ownership.
+  return frontier[instance->last_queue_ordinal] >= instance->last_epoch;
 }
 
 iree_hal_amd_gpu_pm4_program_instance_t*
 iree_hal_amd_gpu_pm4_program_try_acquire(
     iree_hal_amd_gpu_pm4_program_t* program, uint32_t queue_ordinal,
-    const iree_async_frontier_t* frontier) {
+    const uint64_t* frontier) {
   iree_slim_mutex_lock(&program->mutex);
   iree_hal_amd_gpu_pm4_program_instance_t* instance =
       program->preferred[queue_ordinal];
@@ -172,11 +167,12 @@ iree_status_t iree_hal_amd_gpu_pm4_program_grow(
 
 void iree_hal_amd_gpu_pm4_program_publish(
     iree_hal_amd_gpu_pm4_program_t* program,
-    iree_hal_amd_gpu_pm4_program_instance_t* instance,
-    iree_async_frontier_entry_t next_use) {
+    iree_hal_amd_gpu_pm4_program_instance_t* instance, uint32_t queue_ordinal,
+    uint64_t epoch) {
   iree_slim_mutex_lock(&program->mutex);
   instance->initialized = true;
-  instance->last_use = next_use;
+  instance->last_queue_ordinal = queue_ordinal;
+  instance->last_epoch = epoch;
   instance->reserved = false;
   iree_slim_mutex_unlock(&program->mutex);
 }

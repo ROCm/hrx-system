@@ -21,14 +21,14 @@ namespace {
 using Signal = iree_hal_amd_gpu_pm4_signal_t;
 using Pool = iree_hal_amd_gpu_pm4_signal_pool_t;
 
-template <size_t Capacity>
+template <size_t Capacity, size_t QueueCount = 1>
 struct Storage {
   explicit Storage(
       iree_hal_amd_gpu_pm4_signal_pool_notification_t notification = {}) {
     values.fill(UINT64_MAX);
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(this, values.data(),
-                                                0x1234fffffff8, signals.data(),
-                                                Capacity, notification, &pool);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize(
+        this, values.data(), 0x1234fffffff8, signals.data(), Capacity,
+        QueueCount, frontiers.data(), notification, &pool);
   }
   ~Storage() { iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool); }
 
@@ -36,7 +36,9 @@ struct Storage {
   std::array<uint64_t, Capacity> values;
   // Ordinary host metadata, independent of the native allocation.
   std::array<Signal, Capacity> signals;
-  // Finite bookkeeping borrowing both extents.
+  // Immutable native-domain vectors belonging to retained signals.
+  std::array<uint64_t, Capacity * QueueCount> frontiers;
+  // Finite bookkeeping borrowing all extents.
   Pool pool;
 };
 
@@ -76,6 +78,55 @@ TEST(SignalTest, ExhaustionAndIndependentReuse) {
   for (auto* signal : acquired) {
     iree_hal_amd_gpu_pm4_signal_release(signal);
   }
+}
+
+TEST(SignalTest, TransitiveFrontierDoesNotReadLaterProducerState) {
+  Storage<2, 3> storage;
+  auto* first = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage.pool);
+  auto* second = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage.pool);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  uint64_t producer[3] = {4, 0, 0};
+  iree_hal_amd_gpu_pm4_signal_publish_frontier(first, producer);
+  uint64_t intermediate[3] = {0, 7, 0};
+  iree_hal_amd_gpu_pm4_signal_join_frontier(first, intermediate);
+  iree_hal_amd_gpu_pm4_signal_publish_frontier(second, intermediate);
+  producer[0] = 99;
+  intermediate[1] = 101;
+  uint64_t consumer[3] = {1, 0, 12};
+  iree_hal_amd_gpu_pm4_signal_join_frontier(second, consumer);
+  EXPECT_EQ(consumer[0], 4u);
+  EXPECT_EQ(consumer[1], 7u);
+  EXPECT_EQ(consumer[2], 12u);
+  iree_hal_amd_gpu_pm4_signal_release(first);
+  iree_hal_amd_gpu_pm4_signal_release(second);
+}
+
+TEST(SignalTest, CompleteQueueSetAndRecycledSnapshots) {
+  Storage<1, 256> storage;
+  std::array<uint64_t, 256> producer;
+  std::array<uint64_t, 256> consumer;
+  for (size_t i = 0; i < producer.size(); ++i) {
+    producer[i] = i + 1;
+    consumer[i] = i % 2 ? 1000 : 0;
+  }
+  auto* first = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage.pool);
+  ASSERT_NE(first, nullptr);
+  iree_hal_amd_gpu_pm4_signal_publish_frontier(first, producer.data());
+  iree_hal_amd_gpu_pm4_signal_join_frontier(first, consumer.data());
+  for (size_t i = 0; i < producer.size(); ++i) {
+    EXPECT_EQ(consumer[i], i % 2 ? 1000 : i + 1);
+  }
+  iree_hal_amd_gpu_pm4_signal_release(first);
+  auto* second = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage.pool);
+  ASSERT_EQ(first, second);
+  producer.fill(0);
+  producer[255] = 512;
+  iree_hal_amd_gpu_pm4_signal_publish_frontier(second, producer.data());
+  consumer.fill(0);
+  iree_hal_amd_gpu_pm4_signal_join_frontier(second, consumer.data());
+  EXPECT_EQ(producer, consumer);
+  iree_hal_amd_gpu_pm4_signal_release(second);
 }
 
 TEST(SignalTest, EveryOwnerCanBeTheLastUse) {

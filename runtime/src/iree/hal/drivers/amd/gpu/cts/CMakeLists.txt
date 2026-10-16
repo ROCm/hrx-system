@@ -454,7 +454,6 @@ iree_cc_test(
   DEPS
     ::test_device
     amdf::headers
-    iree::async
     iree::base
     iree::base::internal
     iree::hal

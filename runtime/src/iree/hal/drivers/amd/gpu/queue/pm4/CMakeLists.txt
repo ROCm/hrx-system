@@ -510,7 +510,6 @@ iree_cc_library(
   DEPS
     ::fixup
     amdf::headers
-    iree::async
     iree::base
     iree::base::threading
     iree::hal::drivers::amd::fabric::memory

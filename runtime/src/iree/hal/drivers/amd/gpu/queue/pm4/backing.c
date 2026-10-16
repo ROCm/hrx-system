@@ -63,14 +63,19 @@ void iree_hal_amd_gpu_pm4_argument_storage_free(
 iree_status_t iree_hal_amd_gpu_pm4_signal_storage_allocate(
     const iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_fabric_memory_options_t* options, uint32_t capacity,
-    iree_allocator_t host_allocator,
+    uint32_t queue_count, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_signal_storage_t** out_storage) {
   *out_storage = NULL;
   iree_hal_amd_gpu_pm4_signal_storage_t* storage = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator,
-      sizeof(*storage) + capacity * sizeof(iree_hal_amd_gpu_pm4_signal_t),
-      (void**)&storage));
+  iree_host_size_t total_size = 0, signals_offset = 0, frontiers_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(*storage), &total_size,
+      IREE_STRUCT_FIELD(capacity, iree_hal_amd_gpu_pm4_signal_t,
+                        &signals_offset),
+      IREE_STRUCT_FIELD((iree_host_size_t)capacity * queue_count, uint64_t,
+                        &frontiers_offset)));
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, total_size, (void**)&storage));
   uint64_t address = 0;
   iree_status_t status = iree_hal_amd_gpu_pm4_backing_allocate(
       context, options, capacity * sizeof(uint64_t), 8, &storage->memory,
@@ -78,7 +83,8 @@ iree_status_t iree_hal_amd_gpu_pm4_signal_storage_allocate(
   if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_pm4_signal_pool_initialize(
         context, (uint64_t*)storage->memory.contents.data, address,
-        (iree_hal_amd_gpu_pm4_signal_t*)(storage + 1), capacity,
+        (void*)((uint8_t*)storage + signals_offset), capacity, queue_count,
+        (void*)((uint8_t*)storage + frontiers_offset),
         (iree_hal_amd_gpu_pm4_signal_pool_notification_t){0}, &storage->pool);
     *out_storage = storage;
   } else {

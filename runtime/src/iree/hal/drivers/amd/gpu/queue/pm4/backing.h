@@ -67,13 +67,14 @@ void iree_hal_amd_gpu_pm4_argument_storage_free(
     const iree_hal_amd_gpu_context_t* context, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_argument_storage_t* storage);
 
-// Allocates coherent native cells and inline host reference metadata. Capacity
-// is already admitted by queue construction. No cell is initially acquired.
+// Allocates coherent native cells, inline host reference metadata, and a dense
+// queue_count-entry frontier per cell. Both counts are already admitted by
+// device/queue construction. No cell is initially acquired.
 // Success returns the unique owner; failure leaves out_storage NULL.
 iree_status_t iree_hal_amd_gpu_pm4_signal_storage_allocate(
     const iree_hal_amd_gpu_context_t* context,
     const iree_hal_amd_fabric_memory_options_t* options, uint32_t capacity,
-    iree_allocator_t host_allocator,
+    uint32_t queue_count, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_signal_storage_t** out_storage);
 
 // Frees inactive backing after every cell reader has released its reference.

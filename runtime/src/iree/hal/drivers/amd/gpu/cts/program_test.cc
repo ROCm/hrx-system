@@ -10,7 +10,6 @@
 #include <cstring>
 #include <vector>
 
-#include "iree/async/frontier.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
@@ -271,7 +270,7 @@ class GpuProgramTest : public GpuNativeTest {
   }
 
   void Submit(uint32_t queue_index, uint32_t slot, uint32_t value,
-              const iree_async_frontier_t* frontier,
+              const uint64_t* frontier,
               iree_hal_amd_gpu_pm4_program_instance_t** out_instance,
               uint32_t wait_slot = UINT32_MAX,
               uint32_t release_slot = UINT32_MAX) {
@@ -355,8 +354,8 @@ class GpuProgramTest : public GpuNativeTest {
           static_cast<uint32_t>(queue.ring.words + position + 160 - words));
     }
     queue.ring.reserved_words += 160;
-    iree_hal_amd_gpu_pm4_program_publish(
-        &program_, instance, {.axis = queue_index + 1, .epoch = ++queue.epoch});
+    iree_hal_amd_gpu_pm4_program_publish(&program_, instance, queue_index,
+                                         ++queue.epoch);
     uses_.push_back(instance);
     if (!kernel_) {
       iree_atomic_store(reinterpret_cast<iree_atomic_int64_t*>(
@@ -451,34 +450,33 @@ class GpuProgramTest : public GpuNativeTest {
 
 TEST_F(GpuProgramTest, PipelinedFixupsCloneAndCausalReuse) {
   ASSERT_NO_FATAL_FAILURE(Seal());
-  iree_async_single_frontier_t frontier = {};
-  auto* view = iree_async_single_frontier_as_frontier(&frontier);
+  uint64_t frontier[3] = {};
   // Cold allocation precedes publication. Rejected reservations do not claim
   // an initialized clone or overwrite the initial instance's causal state.
   auto* reservation =
-      iree_hal_amd_gpu_pm4_program_try_acquire(&program_, 0, view);
+      iree_hal_amd_gpu_pm4_program_try_acquire(&program_, 0, frontier);
   ASSERT_NE(reservation, nullptr);
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_program_grow(&program_));
   iree_hal_amd_gpu_pm4_program_cancel(&program_, reservation);
   iree_hal_amd_gpu_pm4_program_instance_t* first = nullptr;
-  ASSERT_NO_FATAL_FAILURE(Submit(0, 0, 0x12345678, view, &first));
-  iree_async_single_frontier_initialize(&frontier, 1, 1);
+  ASSERT_NO_FATAL_FAILURE(Submit(0, 0, 0x12345678, frontier, &first));
+  frontier[0] = 1;
   iree_hal_amd_gpu_pm4_program_instance_t* same = nullptr;
-  ASSERT_NO_FATAL_FAILURE(Submit(0, 1, 0xFEDCBA00, view, &same));
+  ASSERT_NO_FATAL_FAILURE(Submit(0, 1, 0xFEDCBA00, frontier, &same));
   EXPECT_EQ(first, same);
-  frontier.entry_count = 0;
+  frontier[0] = 0;
   iree_hal_amd_gpu_pm4_program_instance_t* clone = nullptr;
   // Queue 1 waits until queue 0 is executing the initial resident IB, copies
   // it while live, fully fixes up its own instance, and releases queue 0's
   // device-side gate. No host timing assumption establishes the overlap.
-  ASSERT_NO_FATAL_FAILURE(Submit(1, 2, 0x76543210, view, &clone, 9, 8));
+  ASSERT_NO_FATAL_FAILURE(Submit(1, 2, 0x76543210, frontier, &clone, 9, 8));
   EXPECT_NE(first, clone);
   EXPECT_NE(first->address, clone->address);
   // A device wait covers the last writer on queue 1, so queue 2 can acquire
   // that same instance while every host lease remains outstanding.
-  iree_async_single_frontier_initialize(&frontier, 2, 1);
+  frontier[1] = 1;
   iree_hal_amd_gpu_pm4_program_instance_t* joined = nullptr;
-  ASSERT_NO_FATAL_FAILURE(Submit(2, 3, 0xABCDE000, view, &joined, 2));
+  ASSERT_NO_FATAL_FAILURE(Submit(2, 3, 0xABCDE000, frontier, &joined, 2));
   EXPECT_EQ(clone, joined);
   iree_hal_amd_gpu_pm4_program_trim(&program_);
   EXPECT_EQ(program_.instances[1], clone);

@@ -8,16 +8,25 @@
 
 static_assert(sizeof(iree_hal_amd_gpu_pm4_signal_t) <= 32,
               "two signal owners must fit in one cache line");
+static_assert(sizeof(iree_hal_amd_gpu_pm4_signal_pool_t) -
+                      offsetof(iree_hal_amd_gpu_pm4_signal_pool_t,
+                               live_count) <=
+                  64,
+              "non-mutex pool bookkeeping fits in one cache line");
 
 void iree_hal_amd_gpu_pm4_signal_pool_initialize(
     const void* domain, uint64_t* values, uint64_t device_address,
     iree_hal_amd_gpu_pm4_signal_t* signals, uint32_t capacity,
+    uint32_t queue_count, uint64_t* frontiers,
     iree_hal_amd_gpu_pm4_signal_pool_notification_t notification,
     iree_hal_amd_gpu_pm4_signal_pool_t* out_pool) {
   *out_pool = (iree_hal_amd_gpu_pm4_signal_pool_t){
+      .queue_count = queue_count,
       .free_head = capacity ? signals : NULL,
       .domain = domain,
       .notification = notification,
+      .signals = signals,
+      .frontiers = frontiers,
   };
   iree_slim_mutex_initialize(&out_pool->mutex);
   for (uint32_t i = 0; i < capacity; ++i) {
@@ -54,6 +63,24 @@ iree_hal_amd_gpu_pm4_signal_t* iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
     *signal->host_value = 0;
   }
   return signal;
+}
+
+void iree_hal_amd_gpu_pm4_signal_publish_frontier(
+    iree_hal_amd_gpu_pm4_signal_t* signal, const uint64_t* frontier) {
+  const iree_hal_amd_gpu_pm4_signal_pool_t* pool = signal->pool;
+  uint64_t* target =
+      pool->frontiers + (signal - pool->signals) * pool->queue_count;
+  memcpy(target, frontier, pool->queue_count * sizeof(*target));
+}
+
+void iree_hal_amd_gpu_pm4_signal_join_frontier(
+    const iree_hal_amd_gpu_pm4_signal_t* signal, uint64_t* frontier) {
+  const iree_hal_amd_gpu_pm4_signal_pool_t* pool = signal->pool;
+  const uint64_t* source =
+      pool->frontiers + (signal - pool->signals) * pool->queue_count;
+  for (uint32_t i = 0; i < pool->queue_count; ++i) {
+    frontier[i] = iree_max(frontier[i], source[i]);
+  }
 }
 
 void iree_hal_amd_gpu_pm4_signal_retain(iree_hal_amd_gpu_pm4_signal_t* signal) {

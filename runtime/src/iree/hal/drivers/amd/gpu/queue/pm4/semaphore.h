@@ -44,8 +44,9 @@ typedef struct iree_hal_amd_gpu_pm4_semaphore_wait_t {
   // Owned native reader reference, released after execution or quiescence.
   iree_hal_amd_gpu_pm4_signal_t* signal;
   // Producer coordinate proven by waiting on signal. This is a causal lower
-  // bound, not the producer's complete transitive frontier. An epoch of zero
-  // means no topology coordinate is assigned and cannot justify wait elision.
+  // bound, not the producer's complete transitive frontier. The retained
+  // signal separately owns its full native-domain publication snapshot. An
+  // epoch of zero means no topology coordinate is assigned.
   iree_async_frontier_entry_t producer;
 } iree_hal_amd_gpu_pm4_semaphore_wait_t;
 

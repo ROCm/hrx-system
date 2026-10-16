@@ -19,8 +19,9 @@ struct Storage {
         &proactor));
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_create(
         proactor, 0, 16, iree_allocator_system(), &semaphore));
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(
-        this, values.data(), 0x1000, signals.data(), signals.size(), {}, &pool);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize(this, values.data(), 0x1000,
+                                                signals.data(), signals.size(),
+                                                1, frontiers.data(), {}, &pool);
   }
   ~Storage() {
     iree_hal_semaphore_release(semaphore);
@@ -37,6 +38,8 @@ struct Storage {
   std::array<iree_hal_amd_gpu_pm4_signal_t, 4> signals;
   // Finite backing shared by publication and independent readers.
   iree_hal_amd_gpu_pm4_signal_pool_t pool;
+  // One-queue causal vector per native signal.
+  std::array<uint64_t, 4> frontiers;
 };
 
 void BM_CompletedWait(benchmark::State& state) {
@@ -55,6 +58,8 @@ BENCHMARK(BM_CompletedWait);
 void BM_NativeWait(benchmark::State& state) {
   Storage storage;
   auto* signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage.pool);
+  const uint64_t frontier = 1;
+  iree_hal_amd_gpu_pm4_signal_publish_frontier(signal, &frontier);
   IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_publish_signal(
       storage.semaphore, 1, {1, 1}, signal));
   for (auto _ : state) {
@@ -85,6 +90,7 @@ void BM_Lifecycle(benchmark::State& state) {
   for (auto _ : state) {
     ++value;
     auto* signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage.pool);
+    iree_hal_amd_gpu_pm4_signal_publish_frontier(signal, &value);
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_publish_signal(
         storage.semaphore, value, {1, value}, signal));
     iree_hal_amd_gpu_pm4_semaphore_wait_t wait;

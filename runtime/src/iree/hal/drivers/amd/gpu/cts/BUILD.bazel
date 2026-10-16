@@ -281,7 +281,6 @@ iree_runtime_cc_test(
     deps = [
         ":test_device",
         "//libamdf:headers",
-        "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",

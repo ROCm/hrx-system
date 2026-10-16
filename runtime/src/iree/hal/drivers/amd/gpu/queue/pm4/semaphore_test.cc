@@ -74,9 +74,9 @@ class SemaphoreTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(this, values_.data(), 0x1000,
-                                                signals_.data(),
-                                                signals_.size(), {}, &pool_);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize(
+        this, values_.data(), 0x1000, signals_.data(), signals_.size(), 3,
+        frontiers_.data(), {}, &pool_);
   }
   void TearDown() override {
     for (auto* semaphore : semaphores_) {
@@ -97,6 +97,8 @@ class SemaphoreTest : public ::testing::Test {
   }
   void Publish(iree_hal_semaphore_t* semaphore, uint64_t value, Signal* signal,
                iree_async_axis_t axis = 1) {
+    const uint64_t frontier[3] = {value, 0, 0};
+    iree_hal_amd_gpu_pm4_signal_publish_frontier(signal, frontier);
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_publish_signal(
         semaphore, value, {axis, value}, signal));
   }
@@ -124,6 +126,8 @@ class SemaphoreTest : public ::testing::Test {
   std::array<uint64_t, 8> values_;
   // Independently retained native signal metadata.
   std::array<Signal, 8> signals_;
+  // Three-queue causal snapshots retained by their native signals.
+  std::array<uint64_t, 8 * 3> frontiers_;
   // Finite producer storage, reclaimed only after all uses join.
   iree_hal_amd_gpu_pm4_signal_pool_t pool_;
   // Test-owned references, released before native backing.
@@ -168,6 +172,36 @@ TEST_F(SemaphoreTest, SubmittedProducerDoesNotBecomeCompletedHistory) {
   EXPECT_EQ(frontier.entries[0].epoch, 10u);
   iree_hal_amd_gpu_pm4_signal_release(wait.signal);
   iree_hal_amd_gpu_pm4_signal_release(signal);
+}
+
+TEST_F(SemaphoreTest, ReplacingProducerPreservesRetainedCausalSnapshot) {
+  auto* semaphore = Semaphore();
+  auto* first = AcquireSignal();
+  const uint64_t earlier[3] = {4, 2, 0};
+  iree_hal_amd_gpu_pm4_signal_publish_frontier(first, earlier);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_semaphore_publish_signal(semaphore, 1,
+                                                               {7, 4}, first));
+  auto earlier_wait = AcquireWait(semaphore, 1);
+  auto* second = AcquireSignal();
+  const uint64_t later[3] = {8, 3, 5};
+  iree_hal_amd_gpu_pm4_signal_publish_frontier(second, later);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_semaphore_publish_signal(semaphore, 2,
+                                                               {7, 8}, second));
+  iree_hal_amd_gpu_pm4_signal_release(first);
+  auto later_wait = AcquireWait(semaphore, 2);
+  uint64_t earlier_consumer[3] = {};
+  uint64_t later_consumer[3] = {};
+  iree_hal_amd_gpu_pm4_signal_join_frontier(earlier_wait.signal,
+                                            earlier_consumer);
+  iree_hal_amd_gpu_pm4_signal_join_frontier(later_wait.signal, later_consumer);
+  for (size_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(earlier_consumer[i], earlier[i]);
+    EXPECT_EQ(later_consumer[i], later[i]);
+  }
+  EXPECT_EQ(Value(semaphore), 0u);
+  iree_hal_amd_gpu_pm4_signal_release(earlier_wait.signal);
+  iree_hal_amd_gpu_pm4_signal_release(later_wait.signal);
+  iree_hal_amd_gpu_pm4_signal_release(second);
 }
 
 TEST_F(SemaphoreTest, ReaderOutlivesProducerAndSemaphore) {

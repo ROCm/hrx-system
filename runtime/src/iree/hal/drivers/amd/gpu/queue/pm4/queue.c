@@ -147,6 +147,17 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     iree_atomic_int64_t count;
     // Next native dispatch ID, independent of publication chunk boundaries.
     uint64_t dispatch_count;
+    // Dense causal epochs over the device's immutable native queue set.
+    struct {
+      // Number of provisioned queues in this context's signal domain.
+      uint32_t count;
+      // Accepted FIFO prefix, indexed by native queue ordinal.
+      uint64_t* published;
+      // Current candidate, aliasing published when no waits are added.
+      uint64_t* pending;
+      // Second inline vector for candidates containing new native waits.
+      uint64_t* scratch;
+    } frontier;
   } producer;
   // Single completion observer's release-published capacity credit.
   struct {
@@ -246,7 +257,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_grow_signals(
   iree_hal_amd_gpu_pm4_signal_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_signal_storage_allocate(
       queue->context, queue->options.memory, queue->options.retirement_capacity,
-      queue->host_allocator, &storage));
+      queue->producer.frontier.count, queue->host_allocator, &storage));
   storage->next = queue->producer.signal_storage;
   queue->producer.signal_storage = storage;
   queue->producer.signals = storage;
@@ -315,6 +326,16 @@ iree_hal_amd_gpu_pm4_publish_accepted(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission, uint64_t position,
     bool terminal) {
+  if (queue->producer.frontier.pending != queue->producer.frontier.published) {
+    queue->producer.frontier.scratch = queue->producer.frontier.published;
+    queue->producer.frontier.published = queue->producer.frontier.pending;
+  }
+  queue->producer.frontier.published[queue->options.queue_ordinal] =
+      position + 1;
+  if (submission->signal) {
+    iree_hal_amd_gpu_pm4_signal_publish_frontier(
+        submission->signal, queue->producer.frontier.published);
+  }
   if (submission->profiled) {
     iree_hal_amd_gpu_profile_operation_record(
         queue->profile, iree_hal_amd_gpu_pm4_submission_profile(submission),
@@ -682,6 +703,34 @@ static iree_status_t iree_hal_amd_gpu_pm4_check_failure(
              : iree_make_status(code, "GPU sanitizer failure");
 }
 
+// A candidate contains only waits emitted in this native piece. It becomes
+// the accepted FIFO prefix after native acceptance; a rejected KERNEL piece
+// cannot claim its dependencies for a later operation. Retained signals carry
+// exact immutable snapshots, never a producer queue's newer mutable state.
+static void iree_hal_amd_gpu_pm4_prepare_frontier(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    const iree_hal_amd_gpu_pm4_submission_t* submission) {
+  queue->producer.frontier.pending = queue->producer.frontier.published;
+  bool first = true;
+  if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER) {
+    first = !submission->transfer.cursor.index &&
+            !submission->transfer.cursor.offset;
+  } else if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE) {
+    first = submission->execute.first;
+  }
+  if (first && submission->native_wait_count) {
+    queue->producer.frontier.pending = queue->producer.frontier.scratch;
+    memcpy(queue->producer.frontier.pending, queue->producer.frontier.published,
+           queue->producer.frontier.count * sizeof(uint64_t));
+    for (iree_host_size_t i = 0; i < submission->wait_count; ++i) {
+      if (submission->waits[i].signal) {
+        iree_hal_amd_gpu_pm4_signal_join_frontier(
+            submission->waits[i].signal, queue->producer.frontier.pending);
+      }
+    }
+  }
+}
+
 void iree_hal_amd_gpu_pm4_queue_notify_failure(iree_hal_queue_t* base) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   iree_hal_amd_gpu_continuation_notify(&queue->continuation);
@@ -717,6 +766,7 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     queue->kernel->rollback.words = queue->producer.ring.reserved_words;
     queue->kernel->rollback.arguments = queue->producer.arguments->end;
   }
+  iree_hal_amd_gpu_pm4_prepare_frontier(queue, submission);
   if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER) {
     return iree_hal_amd_gpu_pm4_publish_transfer(queue, submission, position);
   }
@@ -1829,9 +1879,12 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
                             minimum_capture_size);
   }
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_pm4_queue_t);
+  const uint32_t queue_count = family->spec->provisioned_queue_count;
   if (!iree_host_size_checked_mul_add(total_size, options->retirement_capacity,
                                       sizeof(iree_hal_amd_gpu_pm4_retirement_t),
                                       &total_size) ||
+      !iree_host_size_checked_mul_add(total_size, 2 * queue_count,
+                                      sizeof(uint64_t), &total_size) ||
       !iree_host_size_checked_mul_add(
           total_size, params->execution_resources.count,
           sizeof(iree_hal_queue_execution_resource_ordinal_t), &total_size)) {
@@ -1861,11 +1914,17 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .queue_ordinal = options->queue_ordinal,
       .submit = iree_hal_amd_gpu_pm4_file_submit};
   queue->issued = (iree_hal_amd_gpu_pm4_retirement_t*)(queue + 1);
+  queue->producer.frontier.count = queue_count;
+  queue->producer.frontier.published =
+      (uint64_t*)(queue->issued + options->retirement_capacity);
+  queue->producer.frontier.pending = queue->producer.frontier.published;
+  queue->producer.frontier.scratch =
+      queue->producer.frontier.published + queue_count;
   iree_hal_queue_params_t achieved = *params;
   iree_hal_queue_execution_resource_ordinal_t* ordinals =
-      (iree_hal_queue_execution_resource_ordinal_t*)(queue->issued +
-                                                     options
-                                                         ->retirement_capacity);
+      (iree_hal_queue_execution_resource_ordinal_t*)(queue->producer.frontier
+                                                         .scratch +
+                                                     queue_count);
   if (params->execution_resources.count) {
     memcpy(ordinals, params->execution_resources.ordinals,
            params->execution_resources.count * sizeof(*ordinals));

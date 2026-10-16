@@ -91,10 +91,12 @@ TEST_P(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
       iree_make_const_byte_span(&constant, sizeof(constant)), {1, &reference},
       &profile_, nullptr, 0, &capture));
   uint64_t native_value = 0;
+  uint64_t native_frontier = 0;
   iree_hal_amd_gpu_pm4_signal_t native_signal;
   iree_hal_amd_gpu_pm4_signal_pool_t signal_pool;
   iree_hal_amd_gpu_pm4_signal_pool_initialize(
-      this, &native_value, 0x1000, &native_signal, 1, {}, &signal_pool);
+      this, &native_value, 0x1000, &native_signal, 1, 1, &native_frontier, {},
+      &signal_pool);
   capture->signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&signal_pool);
   iree_hal_amd_gpu_pm4_submission_t* consumer = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
@@ -181,11 +183,12 @@ TEST_P(SubmissionTest, FailedDependencyStillJoinsOtherProducers) {
   }
   std::array<uint64_t, 2> values = {1, 1};
   std::array<uint64_t, 2> native_values = {};
+  std::array<uint64_t, 2> native_frontiers = {};
   std::array<iree_hal_amd_gpu_pm4_signal_t, 2> native_signals;
   iree_hal_amd_gpu_pm4_signal_pool_t signal_pool;
   iree_hal_amd_gpu_pm4_signal_pool_initialize(
       this, native_values.data(), 0x1000, native_signals.data(),
-      native_signals.size(), {}, &signal_pool);
+      native_signals.size(), 1, native_frontiers.data(), {}, &signal_pool);
   std::array<iree_hal_amd_gpu_pm4_submission_t*, 2> producers = {};
   for (size_t i = 0; i < producers.size(); ++i) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(

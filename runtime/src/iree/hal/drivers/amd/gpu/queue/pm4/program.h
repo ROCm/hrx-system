@@ -7,7 +7,6 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_PROGRAM_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_PROGRAM_H_
 
-#include "iree/async/frontier.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
@@ -33,17 +32,19 @@ typedef struct iree_hal_amd_gpu_pm4_program_block_t {
 typedef struct iree_hal_amd_gpu_pm4_program_instance_t {
   // Native address of instance byte zero.
   uint64_t address;
-  // Last ordered writer, protected by the program's metadata mutex.
-  iree_async_frontier_entry_t last_use;
+  // Last ordered writer's accepted publication epoch, protected by mutex.
+  uint64_t last_epoch;
   // Number of accepted or preparing invocations, including causal reuses.
   uint32_t use_count;
   // Stable slot in the program's small instance table.
   uint32_t ordinal;
+  // Native-domain queue index of the last ordered writer.
+  uint32_t last_queue_ordinal;
   // Immutable bytes are initialized, or a causal predecessor will initialize
   // them before this instance is next entered.
   bool initialized;
   // One publisher owns an unaccepted invocation. No causal proof can cover
-  // that invocation until publication installs its last_use coordinate.
+  // that invocation until publication installs its writer coordinate.
   bool reserved;
   // Cold native ownership, following the compact invocation metadata.
   iree_hal_amd_fabric_memory_t memory;
@@ -91,14 +92,16 @@ iree_status_t iree_hal_amd_gpu_pm4_program_initialize(
 
 // Reserves an idle or causally reusable instance exclusively until acceptance
 // or rejection. Frontier includes the exact native waits to be emitted before
-// this invocation, plus the queue's published FIFO prefix.
+// this invocation, plus the queue's published FIFO prefix. It contains capacity
+// publication epochs indexed by the device's immutable queue ordinals, so
+// dominance of the last writer is a single indexed comparison.
 // NULL requests cold growth; it never waits for completion or allocates. The
 // caller retains its lease across native publication retries and releases it
 // on rejection or proven completion. Copied mutable bytes need no source wait.
 iree_hal_amd_gpu_pm4_program_instance_t*
 iree_hal_amd_gpu_pm4_program_try_acquire(
     iree_hal_amd_gpu_pm4_program_t* program, uint32_t queue_ordinal,
-    const iree_async_frontier_t* frontier);
+    const uint64_t* frontier);
 
 // Allocates one unused instance on service. Publication later copies the
 // initial instance device-to-device and runs all fixups before entry. No native
@@ -106,13 +109,13 @@ iree_hal_amd_gpu_pm4_program_try_acquire(
 iree_status_t iree_hal_amd_gpu_pm4_program_grow(
     iree_hal_amd_gpu_pm4_program_t* program);
 
-// Marks the first copy as ordered before the leased instance's last_use. The
+// Marks the first copy as ordered before the leased instance's last writer. The
 // caller has passed every fallible admission step and publishes this state
 // before exposing native completion. This does not claim host completion.
 void iree_hal_amd_gpu_pm4_program_publish(
     iree_hal_amd_gpu_pm4_program_t* program,
-    iree_hal_amd_gpu_pm4_program_instance_t* instance,
-    iree_async_frontier_entry_t next_use);
+    iree_hal_amd_gpu_pm4_program_instance_t* instance, uint32_t queue_ordinal,
+    uint64_t epoch);
 
 // Cancels an unaccepted reservation, preserving the last published coordinate
 // and initialization state. No later invocation can depend on rejected work.

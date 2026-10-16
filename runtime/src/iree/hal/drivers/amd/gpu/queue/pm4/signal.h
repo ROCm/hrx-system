@@ -66,6 +66,8 @@ typedef struct iree_hal_amd_gpu_pm4_signal_pool_t {
   iree_slim_mutex_t mutex;
   // Number of slots with at least one live use, protected by mutex.
   uint32_t live_count;
+  // Complete immutable native-domain queue count, including inactive queues.
+  uint32_t queue_count;
   // Available metadata slots, protected by mutex.
   iree_hal_amd_gpu_pm4_signal_t* free_head;
   // Borrowed qualified address/visibility/atomic domain. Matching identities
@@ -73,6 +75,11 @@ typedef struct iree_hal_amd_gpu_pm4_signal_pool_t {
   const void* domain;
   // Immutable wake target for capacity recovery, invoked outside mutex.
   iree_hal_amd_gpu_pm4_signal_pool_notification_t notification;
+  // Borrowed metadata base for constant-time signal-to-frontier indexing.
+  iree_hal_amd_gpu_pm4_signal_t* signals;
+  // Signal-major publication epochs, capacity * queue_count host entries.
+  // Each retained signal's vector is immutable after native acceptance.
+  uint64_t* frontiers;
 } iree_hal_amd_gpu_pm4_signal_pool_t;
 
 // Initializes exclusively owned backing to zero and links the host metadata.
@@ -80,10 +87,13 @@ typedef struct iree_hal_amd_gpu_pm4_signal_pool_t {
 // The native storage is eight-byte aligned with qualified host/device
 // visibility and atomicity for the producer's and readers' chosen 32- or 64-bit
 // width. The DWORD form uses the low word and leaves its high word zero.
-// Metadata and values do not overlap. A zero capacity produces an empty pool.
+// Metadata, values, and frontiers do not overlap. Frontiers has
+// capacity * queue_count entries; publication initializes a complete vector
+// before exposing a signal. A zero capacity produces an empty pool.
 void iree_hal_amd_gpu_pm4_signal_pool_initialize(
     const void* domain, uint64_t* values, uint64_t device_address,
     iree_hal_amd_gpu_pm4_signal_t* signals, uint32_t capacity,
+    uint32_t queue_count, uint64_t* frontiers,
     iree_hal_amd_gpu_pm4_signal_pool_notification_t notification,
     iree_hal_amd_gpu_pm4_signal_pool_t* out_pool);
 
@@ -104,6 +114,21 @@ void iree_hal_amd_gpu_pm4_signal_pool_deinitialize(
 // or retains a reference before exposing the signal to another owner.
 iree_hal_amd_gpu_pm4_signal_t* iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
     iree_hal_amd_gpu_pm4_signal_pool_t* pool);
+
+// Captures an accepted producer's complete native-domain frontier before the
+// signal is exposed to readers or completion. The vector has pool->queue_count
+// entries and includes the producer's own accepted publication epoch. Exactly
+// one publisher writes it; every subsequent retained reader sees that immutable
+// snapshot, even after the producer queue advances or disappears.
+void iree_hal_amd_gpu_pm4_signal_publish_frontier(
+    iree_hal_amd_gpu_pm4_signal_t* signal, const uint64_t* frontier);
+
+// Joins the retained producer's immutable snapshot into an invocation's
+// candidate frontier. Domain compatibility and equal queue counts are proven
+// at admission. This does not change the accepted FIFO frontier; rejection
+// discards the candidate without claiming that its native waits executed.
+void iree_hal_amd_gpu_pm4_signal_join_frontier(
+    const iree_hal_amd_gpu_pm4_signal_t* signal, uint64_t* frontier);
 
 // Adds a use from an existing live reference. A cache must pin the reference
 // under the same lock that protects removal; raw pointer loads cannot retain a
