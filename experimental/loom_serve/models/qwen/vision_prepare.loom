@@ -8,7 +8,7 @@ func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
-global.rodata.def @root = bytes("7177656e33385f766973696f6e5f70726f6a6563746f725f323536")
+global.rodata.def @root = bytes("7177656e33385f766973696f6e5f70726f6a6563746f72")
 
 global.rodata.def @height_key = bytes("7177656e33382e766973696f6e2e696d6167655f686569676874")
 

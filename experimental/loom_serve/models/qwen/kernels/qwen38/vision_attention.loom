@@ -1,8 +1,8 @@
 amdgpu.target<gfx11-generic> @qwen38_vision_gfx11 {subgroup_size = 32}
 
-config.decl @qwen38.vision.image_height : %value: index where [range(%value, 256, 256)]
+config.decl @qwen38.vision.image_height : %value: index where [range(%value, 32, 4096), multiple_of(%value, 32)]
 
-config.decl @qwen38.vision.image_width : %value: index where [range(%value, 256, 256)]
+config.decl @qwen38.vision.image_width : %value: index where [range(%value, 32, 4096), multiple_of(%value, 32)]
 
 // Loads one transposed value tile without requiring padded global storage.
 // Every full tile remains one vector load; only the final partial tile takes
@@ -575,12 +575,22 @@ func.def inline @qwen38_vision_attention_output_weight_fragment(%stage: buffer, 
 // cohorts publish their disjoint columns. The context occupies the beginning
 // of the FFN activation workspace and is overwritten by the following FFN-up
 // launch, so this separation adds no command-level allocation.
-kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_output_256() {
+kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_output() {
   %c1 = index.constant 1 : index
-  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height = index.div %image_height, %c16 : index
+  %patch_width = index.div %image_width, %c16 : index
+  %rows0 = index.mul %patch_height, %patch_width : index
+  %rows = index.assume %rows0 [range(%rows0, 4, 65536), multiple_of(%rows0, 4)] : index
+  %rounded_rows = index.add %rows, %c63 : index
+  %row_tiles = index.div %rounded_rows, %c64 : index
   %c9 = index.constant 9 : index
   %c256 = index.constant 256 : index
-  kernel.launch.config workgroups(%c4, %c9, %c1) workgroup_size(%c256, %c1, %c1) : index
+  kernel.launch.config workgroups(%row_tiles, %c9, %c1) workgroup_size(%c256, %c1, %c1) : index
 } launch(%context: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
@@ -596,6 +606,15 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_output_256() {
   %input_stage_bytes = index.constant 8192 : offset
   %weight_stage_bytes = index.constant 16384 : offset
   %c0_f32x8 = vector.constant 0.0 : vector<8xf32>
+
+  %image_height = config.get @qwen38.vision.image_height : index
+  %image_width = config.get @qwen38.vision.image_width : index
+  %patch_height = index.div %image_height, %c16 : index
+  %patch_width = index.div %image_width, %c16 : index
+  %rows0 = index.mul %patch_height, %patch_width : index
+  %rows = index.assume %rows0 [range(%rows0, 4, 65536), multiple_of(%rows0, 4)] : index
+  %tail_rows = index.rem %rows, %c64 : index
+  %all_tiles_full = index.cmp eq, %tail_rows, %c0 : index
 
   %row_tile = kernel.workgroup.id<x> : index
   %output_tile = kernel.workgroup.id<y> : index
@@ -620,11 +639,11 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_output_256() {
   %result_column3 = index.add %result_column2, %c16 : index
 
   %context_noalias, %weight_noalias, %bias_noalias, %residual_noalias, %output_noalias = buffer.assume.noalias %context, %weight, %bias, %residual, %output : buffer, buffer, buffer, buffer, buffer
-  %context_view = buffer.view %context_noalias[%origin] : buffer -> view<256x1152xf16>
+  %context_view = buffer.view %context_noalias[%origin] : buffer -> view<[%rows]x1152xf16>
   %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<1152x1152xf16>
   %bias_view = buffer.view %bias_noalias[%origin] : buffer -> view<1152xf32>
-  %residual_view = buffer.view %residual_noalias[%origin] : buffer -> view<256x1152xf32>
-  %output_view = buffer.view %output_noalias[%origin] : buffer -> view<256x1152xf32>
+  %residual_view = buffer.view %residual_noalias[%origin] : buffer -> view<[%rows]x1152xf32>
+  %output_view = buffer.view %output_noalias[%origin] : buffer -> view<[%rows]x1152xf32>
   %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
   %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
   %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<64x64xf16>
@@ -639,7 +658,15 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_output_256() {
       %input_stage_column = index.mul %input_stage_packet, %c4 : index
       %global_input_row = index.add %row_origin, %input_stage_row : index
       %global_input_column = index.add %column_origin, %input_stage_column : index
-      %input_values = vector.load %context_view[%global_input_row, %global_input_column] : view<256x1152xf16> -> vector<4xf16>
+      %input_row_valid = index.cmp ult, %global_input_row, %rows : index
+      %input_available = scalar.ori %all_tiles_full, %input_row_valid : i1
+      %input_values = scf.if %input_available -> (vector<4xf16>) {
+        %loaded = vector.load %context_view[%global_input_row, %global_input_column] : view<[%rows]x1152xf16> -> vector<4xf16>
+        scf.yield %loaded : vector<4xf16>
+      } else {
+        %zero = vector.constant 0.0 : vector<4xf16>
+        scf.yield %zero : vector<4xf16>
+      }
       vector.store %input_values, %input_stage_view[%input_stage_row, %input_stage_column] : vector<4xf16>, view<64x64xf16>
     }
 
@@ -696,17 +723,47 @@ kernel.def target(@qwen38_vision_gfx11) @qwen38_vision_attention_output_256() {
   %biased1 = vector.addf %accumulated1, %bias_vector1 : vector<8xf32>
   %biased2 = vector.addf %accumulated2, %bias_vector2 : vector<8xf32>
   %biased3 = vector.addf %accumulated3, %bias_vector3 : vector<8xf32>
-  %residual_values0 = vector.fragment.load<result> %residual_view[%result_row, %result_column0] shape [%c16, %c16] : view<256x1152xf32> -> vector<8xf32>
-  %residual_values1 = vector.fragment.load<result> %residual_view[%result_row, %result_column1] shape [%c16, %c16] : view<256x1152xf32> -> vector<8xf32>
-  %residual_values2 = vector.fragment.load<result> %residual_view[%result_row, %result_column2] shape [%c16, %c16] : view<256x1152xf32> -> vector<8xf32>
-  %residual_values3 = vector.fragment.load<result> %residual_view[%result_row, %result_column3] shape [%c16, %c16] : view<256x1152xf32> -> vector<8xf32>
-  %result0 = vector.addf %residual_values0, %biased0 : vector<8xf32>
-  %result1 = vector.addf %residual_values1, %biased1 : vector<8xf32>
-  %result2 = vector.addf %residual_values2, %biased2 : vector<8xf32>
-  %result3 = vector.addf %residual_values3, %biased3 : vector<8xf32>
-  vector.fragment.store<result> %result0, %output_view[%result_row, %result_column0] shape [%c16, %c16] : vector<8xf32>, view<256x1152xf32>
-  vector.fragment.store<result> %result1, %output_view[%result_row, %result_column1] shape [%c16, %c16] : vector<8xf32>, view<256x1152xf32>
-  vector.fragment.store<result> %result2, %output_view[%result_row, %result_column2] shape [%c16, %c16] : vector<8xf32>, view<256x1152xf32>
-  vector.fragment.store<result> %result3, %output_view[%result_row, %result_column3] shape [%c16, %c16] : vector<8xf32>, view<256x1152xf32>
+  %result_end = index.add %result_row, %c16 : index
+  %fragment_full = index.cmp ule, %result_end, %rows : index
+  %output_full = scalar.ori %all_tiles_full, %fragment_full : i1
+  scf.if %output_full {
+    %residual_values0 = vector.fragment.load<result> %residual_view[%result_row, %result_column0] shape [%c16, %c16] : view<[%rows]x1152xf32> -> vector<8xf32>
+    %residual_values1 = vector.fragment.load<result> %residual_view[%result_row, %result_column1] shape [%c16, %c16] : view<[%rows]x1152xf32> -> vector<8xf32>
+    %residual_values2 = vector.fragment.load<result> %residual_view[%result_row, %result_column2] shape [%c16, %c16] : view<[%rows]x1152xf32> -> vector<8xf32>
+    %residual_values3 = vector.fragment.load<result> %residual_view[%result_row, %result_column3] shape [%c16, %c16] : view<[%rows]x1152xf32> -> vector<8xf32>
+    %result0 = vector.addf %residual_values0, %biased0 : vector<8xf32>
+    %result1 = vector.addf %residual_values1, %biased1 : vector<8xf32>
+    %result2 = vector.addf %residual_values2, %biased2 : vector<8xf32>
+    %result3 = vector.addf %residual_values3, %biased3 : vector<8xf32>
+    vector.fragment.store<result> %result0, %output_view[%result_row, %result_column0] shape [%c16, %c16] : vector<8xf32>, view<[%rows]x1152xf32>
+    vector.fragment.store<result> %result1, %output_view[%result_row, %result_column1] shape [%c16, %c16] : vector<8xf32>, view<[%rows]x1152xf32>
+    vector.fragment.store<result> %result2, %output_view[%result_row, %result_column2] shape [%c16, %c16] : vector<8xf32>, view<[%rows]x1152xf32>
+    vector.fragment.store<result> %result3, %output_view[%result_row, %result_column3] shape [%c16, %c16] : vector<8xf32>, view<[%rows]x1152xf32>
+  } else {
+    %lane_row_parity = index.div %lane, %c16 : index
+    scf.for %element = [%c0 to %c8 step %c1] unroll {
+      %row_delta = index.madd %element, %c2, %lane_row_parity : index
+      %row = index.add %result_row, %row_delta : index
+      %row_valid = index.cmp ult, %row, %rows : index
+      scf.if %row_valid {
+        %residual0 = view.load %residual_view[%row, %bias_column0] : view<[%rows]x1152xf32> -> f32
+        %value0 = vector.extract %biased0[%element] : vector<8xf32> -> f32
+        %result0 = scalar.addf %residual0, %value0 : f32
+        view.store %result0, %output_view[%row, %bias_column0] : f32, view<[%rows]x1152xf32>
+        %residual1 = view.load %residual_view[%row, %bias_column1] : view<[%rows]x1152xf32> -> f32
+        %value1 = vector.extract %biased1[%element] : vector<8xf32> -> f32
+        %result1 = scalar.addf %residual1, %value1 : f32
+        view.store %result1, %output_view[%row, %bias_column1] : f32, view<[%rows]x1152xf32>
+        %residual2 = view.load %residual_view[%row, %bias_column2] : view<[%rows]x1152xf32> -> f32
+        %value2 = vector.extract %biased2[%element] : vector<8xf32> -> f32
+        %result2 = scalar.addf %residual2, %value2 : f32
+        view.store %result2, %output_view[%row, %bias_column2] : f32, view<[%rows]x1152xf32>
+        %residual3 = view.load %residual_view[%row, %bias_column3] : view<[%rows]x1152xf32> -> f32
+        %value3 = vector.extract %biased3[%element] : vector<8xf32> -> f32
+        %result3 = scalar.addf %residual3, %value3 : f32
+        view.store %result3, %output_view[%row, %bias_column3] : f32, view<[%rows]x1152xf32>
+      }
+    }
+  }
   kernel.return
 }
