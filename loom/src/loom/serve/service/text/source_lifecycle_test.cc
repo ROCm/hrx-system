@@ -12,6 +12,7 @@
 namespace {
 
 using loom_serve::testing::text::Oracle;
+using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
 using loom_serve::testing::text::StalledClient;
 
@@ -270,7 +271,8 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
   }
 }
 
-TEST_F(SourceTextServiceTest, FailedTextSourceLeavesPeerAndDiagnosticsUsable) {
+TEST_F(RegisteredSourceTextServiceTest,
+       FailedTextSourceLeavesPeerAndDiagnosticsUsable) {
   const auto package = iree::testing::MakeTempFilePath("failed_text_source");
   ASSERT_TRUE(std::filesystem::create_directory(package));
   for (const char* file :

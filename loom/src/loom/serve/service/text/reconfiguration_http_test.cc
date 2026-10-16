@@ -150,7 +150,13 @@ class ReconfigurationHttpTextTest : public SourceTextServiceTest {
   }
 };
 
-TEST_F(ReconfigurationHttpTextTest,
+class RegisteredReconfigurationHttpTextTest
+    : public ReconfigurationHttpTextTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
+};
+
+TEST_F(RegisteredReconfigurationHttpTextTest,
        UploadedRegistrationOwnsDeferredVmAndMetadata) {
   StartManaged();
   {

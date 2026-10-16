@@ -11,6 +11,7 @@
 namespace {
 
 using loom_serve::testing::text::Oracle;
+using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
 using loom_serve::testing::text::StalledClient;
 
@@ -85,7 +86,7 @@ TEST_F(SourceTextServiceTest,
   iree_string_builder_deinitialize(&tools);
 }
 
-TEST_F(SourceTextServiceTest,
+TEST_F(RegisteredSourceTextServiceTest,
        DynamicTextAdmissionCheckpointRetirementAndReuse) {
   StartManaged();
   EXPECT_NE(Read(Send("", "", "/v1/models", "GET")).find(R"("data":[])"),
@@ -158,7 +159,8 @@ TEST_F(SourceTextServiceTest,
   EXPECT_EQ(Content(Read(Send(peer))), Oracle::Complete("ab", 2));
 }
 
-TEST_F(SourceTextServiceTest, IdleCacheExchangesFullRowsAndSharesExplicitPins) {
+TEST_F(RegisteredSourceTextServiceTest,
+       IdleCacheExchangesFullRowsAndSharesExplicitPins) {
   StartManaged();
   std::string declaration = Declaration("fixture-text", directory_, "open",
                                         R"(,"session_cache_capacity":2)");
@@ -233,7 +235,8 @@ TEST_F(SourceTextServiceTest, CancelledRowExchangePreservesDetachedHistory) {
   CheckRetentionCancellation(OverlapAction::kDisconnect);
 }
 
-TEST_F(SourceTextServiceTest, InventoryTracksRetainedLifetimesAcrossRowReuse) {
+TEST_F(RegisteredSourceTextServiceTest,
+       InventoryTracksRetainedLifetimesAcrossRowReuse) {
   StartManaged();
   const std::string headers = "X-Loom-Model: fixture-text\r\n";
   const auto inspect = [&](const char* target, const std::string& extra = "") {
@@ -293,7 +296,7 @@ TEST_F(SourceTextServiceTest, InventoryTracksRetainedLifetimesAcrossRowReuse) {
   EXPECT_EQ(retained.find("abxa"), std::string::npos);
   StalledClient inspector;
   ASSERT_NO_FATAL_FAILURE(inspector.Send(server_, "", "/v1/sessions", "GET"));
-  inspector.WaitResponse();
+  inspector.WaitUntilSendCreditExhausted();
   // Copied HTTP bytes may outlive the entire registration. The inspector has
   // not polled its carrier and therefore has not consumed the pending send.
   ASSERT_EQ(
@@ -323,7 +326,8 @@ TEST_F(SourceTextServiceTest, ShutdownRetiresAcceptedRowExchange) {
   CheckRetentionCancellation(OverlapAction::kStop);
 }
 
-TEST_F(SourceTextServiceTest, IdleCacheEvictsLruButPreservesRejectedHistory) {
+TEST_F(RegisteredSourceTextServiceTest,
+       IdleCacheEvictsLruButPreservesRejectedHistory) {
   StartManaged();
   std::string declaration = Declaration("fixture-text", directory_, "open",
                                         R"(,"session_cache_capacity":1)");
@@ -369,7 +373,8 @@ TEST_F(SourceTextServiceTest, IdleCacheEvictsLruButPreservesRejectedHistory) {
   EXPECT_NE(rewind.find("\"cached_tokens\":5}"), std::string::npos);
 }
 
-TEST_F(SourceTextServiceTest, IdleCacheYieldsLogicalBlocksToAdmission) {
+TEST_F(RegisteredSourceTextServiceTest,
+       IdleCacheYieldsLogicalBlocksToAdmission) {
   StartManaged();
   std::string declaration = Declaration("fixture-text", directory_, "open",
                                         R"(,"session_cache_capacity":2)");

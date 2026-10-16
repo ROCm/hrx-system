@@ -185,6 +185,11 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
   }
 };
 
+class RegisteredElasticTextServiceTest : public ElasticTextServiceTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
+};
+
 TEST_F(ElasticTextServiceTest,
        PrefixNativeBackingRetiresBeforeNextReservation) {
   CheckPrefixBackingRetirement(/*trim_first=*/false);
@@ -194,17 +199,17 @@ TEST_F(ElasticTextServiceTest, PrefixNativeBackingRetiresBeforeTrim) {
   CheckPrefixBackingRetirement(/*trim_first=*/true);
 }
 
-TEST_F(ElasticTextServiceTest,
+TEST_F(RegisteredElasticTextServiceTest,
        ColdStateCommitDoesNotBlockWarmHttpInferenceOnOneWorker) {
   CheckColdStateAdmission(/*cancel=*/false);
 }
 
-TEST_F(ElasticTextServiceTest,
+TEST_F(RegisteredElasticTextServiceTest,
        UnregisterJoinsPendingStateWithoutBlockingWarmInference) {
   CheckColdStateAdmission(/*cancel=*/true);
 }
 
-TEST_F(ElasticTextServiceTest,
+TEST_F(RegisteredElasticTextServiceTest,
        IdleParametersReleaseWithoutBlockingPeersOrDiscardingHistory) {
   StartManaged({.parameter_timeout = iree_make_duration_ms(1)});
   for (const char* name : {"fixture-text", "warm"}) {

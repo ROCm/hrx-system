@@ -143,6 +143,22 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "stalled_http_client",
+    testonly = True,
+    hdrs = ["stalled_http_client.h"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/net:carrier",
+        "//runtime/src/iree/net/carrier/loopback",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
 loom_cc_test(
     name = "http_harness_test",
     srcs = ["http_harness_test.cc"],

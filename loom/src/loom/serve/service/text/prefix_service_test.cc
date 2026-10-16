@@ -34,6 +34,11 @@ class PrefixServiceTest : public SourceTextServiceTest {
   }
 };
 
+class RegisteredPrefixServiceTest : public PrefixServiceTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
+};
+
 TEST_F(PrefixServiceTest, SharesActiveSourceWithIndependentDivergentRequests) {
   Start(4);
   StalledClient source;
@@ -113,7 +118,8 @@ TEST_F(PrefixServiceTest, PressureReplaysWhenSelectedPrefixCannotFit) {
                  "abxabxabab", 7, 0);
 }
 
-TEST_F(PrefixServiceTest, DynamicDeclarationReservesIndependentEndpointQuotas) {
+TEST_F(RegisteredPrefixServiceTest,
+       DynamicDeclarationReservesIndependentEndpointQuotas) {
   StartManaged();
   std::string declaration =
       Declaration("fixture-text", directory_, "open",

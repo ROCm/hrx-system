@@ -76,17 +76,13 @@ loom_cc_library(
     "owner_turn_test_util.h"
     "service_test_fixture.h"
     "source_test_oracle.h"
-    "stalled_client_test_util.h"
   SRCS
     "service_test_fixture.cc"
   DEPS
     iree::async
-    iree::async::platform
     iree::base
     iree::base::internal::json
     iree::base::threading
-    iree::net::carrier
-    iree::net::carrier::loopback
     iree::task
     iree::testing::gtest
     iree::testing::temp_file
@@ -109,6 +105,7 @@ loom_cc_library(
     loom::serve::testing::model
     loom::serve::testing::package
     loom::serve::testing::service_application
+    loom::serve::testing::stalled_http_client
     loom::serve::testing::stalled_stderr
     loom::serve::transport::http::listener
     loom::serve::transport::http::server

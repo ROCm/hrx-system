@@ -30,17 +30,34 @@
 #include "loom/serve/service/text/owner_turn_test_util.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/serve/service/text/source_test_oracle.h"
-#include "loom/serve/service/text/stalled_client_test_util.h"
 #include "loom/serve/telemetry/stream.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
+#include "loom/serve/testing/stalled_http_client.h"
 #include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace loom_serve::testing::text {
 
+// Credit-controlled client carrying the ordinary text routing headers.
+class StalledClient : public loom_serve::testing::StalledHttpClient {
+ public:
+  void Send(loom_serve_http_server_t* server, const std::string& body,
+            const char* target = "/v1/chat/completions",
+            const char* method = "POST") {
+    StalledHttpClient::Send(
+        server, target, body, method,
+        "X-Loom-Session: stalled\r\nX-Loom-Model: fixture-text\r\n");
+  }
+};
+
 class SourceTextServiceTest : public ::testing::Test {
  protected:
+  // Whether this fixture owns a standalone model before the test body runs.
+  // Registry-owned tests override this because their production path creates
+  // the model from the submitted declaration.
+  virtual bool NeedsStandaloneModel() const { return true; }
+
   // Document ownership covers every asynchronous native load in this fixture.
   loom_serve::testing::ModelDocument document_;
 
@@ -126,8 +143,7 @@ class SourceTextServiceTest : public ::testing::Test {
   }
 
   void StartManaged(loom_serve_device_idle_policy_t idle = {}) {
-    IREE_ASSERT_OK(loom_serve_text_model_free(model_));
-    model_ = nullptr;
+    ASSERT_EQ(model_, nullptr);
     http_.Start([this, idle]() -> iree_status_t {
       const loom_serve_model_registration_options_t options = {
           .device_group = group_, .heartbeat_interval = 0};
@@ -637,6 +653,12 @@ class SourceTextServiceTest : public ::testing::Test {
   loom_serve_http_listener_t* listener_ = nullptr;
   // HTTP readiness and optional outer owner, joined before model destruction.
   loom_serve::testing::HttpHarness http_;
+};
+
+// Source-service fixture whose model is created by the registration owner.
+class RegisteredSourceTextServiceTest : public SourceTextServiceTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
 };
 
 }  // namespace loom_serve::testing::text

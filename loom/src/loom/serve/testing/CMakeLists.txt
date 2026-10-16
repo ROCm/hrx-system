@@ -167,6 +167,25 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    stalled_http_client
+  HDRS
+    "stalled_http_client.h"
+  DEPS
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::net::carrier
+    iree::net::carrier::loopback
+    iree::testing::gtest
+    loom::serve::transport::http::server
+  TESTONLY
+  PUBLIC
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME

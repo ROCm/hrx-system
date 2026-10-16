@@ -147,6 +147,7 @@ loom_cc_library(
     loom::serve::testing::model
     loom::serve::testing::package
     loom::serve::testing::service_application
+    loom::serve::testing::stalled_http_client
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
   TESTONLY

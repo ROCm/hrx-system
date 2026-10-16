@@ -30,9 +30,11 @@ void SourceTextServiceTest::SetUp() {
   tokenizer_ = directory_ + "/tokenizer.json";
   weights_ = iree::testing::MakeTempFilePath("text_fixture", ".safetensors");
   ASSERT_NO_FATAL_FAILURE(WriteWeights(2));
-  auto options = ModelOptions();
-  IREE_ASSERT_OK(loom_serve_text_model_allocate(device_, &options,
-                                                host_allocator_, &model_));
+  if (NeedsStandaloneModel()) {
+    auto options = ModelOptions();
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(device_, &options,
+                                                  host_allocator_, &model_));
+  }
   auto server_options = loom_serve_http_server_options_default();
   IREE_ASSERT_OK(loom_serve_http_server_allocate(
       loom_serve_host_proactor_pool(host_), &server_options, host_allocator_,
