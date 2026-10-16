@@ -1,0 +1,819 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+subgroup32+reductions+hal
+
+// Encoded scalar floats use their existing physical carriers. No numerical
+// conversion is needed for either FP8 encoding or software BF16.
+kernel.def @encoded_scalar_transport() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %selector = index.cast %lane : index to i32
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<32x3xi32>
+  %bits = view.load %source[%lane] : view<32xi32> -> i32
+  %byte = scalar.trunci %bits : i32 to i8
+  %half = scalar.trunci %bits : i32 to i16
+  %e4 = scalar.bitcast %byte : i8 to f8E4M3
+  %e5 = scalar.bitcast %byte : i8 to f8E5M2
+  %bfloat = scalar.bitcast %half : i16 to bf16
+  %named = kernel.subgroup.broadcast %e4 from %selector : f8E4M3, i32
+  %first = kernel.subgroup.broadcast.first %e5 : f8E5M2
+  %distance = scalar.constant 1 : i32
+  %width = scalar.constant 32 : i32
+  %shuffled, %valid = kernel.subgroup.shuffle<xor> %bfloat, %distance, %width : bf16, i32, i32
+  %named_bits = scalar.bitcast %named : f8E4M3 to i8
+  %first_bits = scalar.bitcast %first : f8E5M2 to i8
+  %shuffled_bits = scalar.bitcast %shuffled : bf16 to i16
+  %named_word = scalar.extui %named_bits : i8 to i32
+  %first_word = scalar.extui %first_bits : i8 to i32
+  %shuffled_word = scalar.extui %shuffled_bits : i16 to i32
+  view.store %named_word, %destination[%lane, 0] : i32, view<32x3xi32>
+  view.store %first_word, %destination[%lane, 1] : i32, view<32x3xi32>
+  view.store %shuffled_word, %destination[%lane, 2] : i32, view<32x3xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @encoded_scalar_transport() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lane = OpLoadBuiltin.subgroup_local_invocation_id
+  %selector = OpCopyObject.i32 %lane
+  %44 = OpSConvert.i32.offset64 %lane
+  %45 = OpConstant.offset64 4
+  %46 = OpIMul.offset64 %44, %45
+  %47 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %46
+  %bits = OpLoad.storage_buffer.i32 %47
+  %e5 = OpSConvert.i32.i8 %bits
+  %half = OpSConvert.i32.i16 %bits
+  %51 = OpBitcast.i16.u16 %half
+  %52 = OpUConvert.u16.u32 %51
+  %bfloat = OpBitcast.u32.i32 %52
+  %54 = OpBitcast.i32.u32 %selector
+  %named_bits = OpGroupNonUniformShuffle.i8 %e5, %54
+  %first_bits = OpGroupNonUniformBroadcastFirst.i8 %e5
+  %distance = OpConstant.i32 1
+  %58 = OpBitcast.i32.u32 %distance
+  %shuffled = OpGroupNonUniformShuffleXor.i32 %bfloat, %58
+  %shuffled_bits = OpSConvert.i32.i16 %shuffled
+  %61 = OpBitcast.i8.u8 %named_bits
+  %62 = OpUConvert.u8.u32 %61
+  %named_word = OpBitcast.u32.i32 %62
+  %64 = OpBitcast.i8.u8 %first_bits
+  %65 = OpUConvert.u8.u32 %64
+  %first_word = OpBitcast.u32.i32 %65
+  %67 = OpBitcast.i16.u16 %shuffled_bits
+  %68 = OpUConvert.u16.u32 %67
+  %shuffled_word = OpBitcast.u32.i32 %68
+  %70 = OpSConvert.i32.offset64 %lane
+  %71 = OpConstant.offset64 12
+  %72 = OpIMul.offset64 %70, %71
+  %73 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %72
+  OpStore.storage_buffer.i32 %73, %named_word
+  %77 = OpConstant.offset64 4
+  %78 = OpIAdd.offset64 %72, %77
+  %79 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %78
+  OpStore.storage_buffer.i32 %79, %first_word
+  %83 = OpConstant.offset64 8
+  %84 = OpIAdd.offset64 %72, %83
+  %85 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %84
+  OpStore.storage_buffer.i32 %85, %shuffled_word
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=BFLOAT16_TYPE_KHR,-INT16,-SUBGROUP_EXTENDED_TYPES,GROUP_NON_UNIFORM,GROUP_NON_UNIFORM_SHUFFLE,GROUP_NON_UNIFORM_SHUFFLE_RELATIVE,GROUP_NON_UNIFORM_BALLOT,STORAGE_BUFFER_16BIT_ACCESS limits=SUBGROUP_SIZE:32
+
+// Native BF16 permits composites and bitcasts, but forbids group operations.
+// Pair packing covers scalar, even, and odd vectors without Int16. Every
+// component is stored, including the odd tail whose padding is unobservable.
+kernel.def @native_bfloat_transport() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %selector = index.cast %lane : index to i32
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32x4xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<32x10xbf16>
+  %a = view.load %source[%lane, 0] : view<32x4xbf16> -> bf16
+  %b = view.load %source[%lane, 1] : view<32x4xbf16> -> bf16
+  %c = view.load %source[%lane, 2] : view<32x4xbf16> -> bf16
+  %d = view.load %source[%lane, 3] : view<32x4xbf16> -> bf16
+  %pair = vector.from_elements %a, %b : vector<2xbf16>
+  %triple = vector.from_elements %a, %b, %c : vector<3xbf16>
+  %quad = vector.from_elements %a, %b, %c, %d : vector<4xbf16>
+  %distance = scalar.constant 1 : i32
+  %width = scalar.constant 32 : i32
+  %single_result, %single_valid = kernel.subgroup.shuffle<xor> %a, %distance, %width : bf16, i32, i32
+  %pair_result, %pair_valid = kernel.subgroup.shuffle<up> %pair, %distance, %width : vector<2xbf16>, i32, i32
+  %triple_result = kernel.subgroup.broadcast %triple from %selector : vector<3xbf16>, i32
+  %quad_result = kernel.subgroup.broadcast.first %quad : vector<4xbf16>
+  view.store %single_result, %destination[%lane, 0] : bf16, view<32x10xbf16>
+  vector.store %pair_result, %destination[%lane, 1] : vector<2xbf16>, view<32x10xbf16>
+  vector.store %triple_result, %destination[%lane, 3] : vector<3xbf16>, view<32x10xbf16>
+  vector.store %quad_result, %destination[%lane, 6] : vector<4xbf16>, view<32x10xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @native_bfloat_transport() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lane = OpLoadBuiltin.subgroup_local_invocation_id
+  %selector = OpCopyObject.i32 %lane
+  %107 = OpSConvert.i32.offset64 %lane
+  %108 = OpConstant.offset64 8
+  %109 = OpIMul.offset64 %107, %108
+  %110 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %109
+  %111 = OpLoad.storage_buffer.bf16 %110
+  %115 = OpConstant.offset64 2
+  %116 = OpIAdd.offset64 %109, %115
+  %117 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %116
+  %118 = OpLoad.storage_buffer.bf16 %117
+  %119 = OpCompositeConstruct.v2bf16 %111, %118
+  %123 = OpConstant.offset64 4
+  %124 = OpIAdd.offset64 %109, %123
+  %125 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %124
+  %126 = OpLoad.storage_buffer.bf16 %125
+  %130 = OpConstant.offset64 6
+  %131 = OpIAdd.offset64 %109, %130
+  %132 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %131
+  %133 = OpLoad.storage_buffer.bf16 %132
+  %triple = OpCompositeConstruct.v3bf16 %111, %118, %126
+  %quad = OpCompositeConstruct.v4bf16 %111, %118, %126, %133
+  %distance = OpConstant.i32 1
+  %137 = OpCompositeConstruct.v2bf16 %111, %111 : reg<spirv.id>
+  %138 = OpBitcast.v2bf16.i32 %137 : reg<spirv.id>
+  %139 = OpBitcast.i32.u32 %distance
+  %140 = OpGroupNonUniformShuffleXor.i32 %138, %139 : reg<spirv.id>
+  %141 = OpBitcast.i32.v2bf16 %140 : reg<spirv.id>
+  %single_result = OpCompositeExtract.v2bf16.bf16 %141, 0
+  %143 = OpBitcast.v2bf16.i32 %119 : reg<spirv.id>
+  %144 = OpBitcast.i32.u32 %distance
+  %145 = OpGroupNonUniformShuffleUp.i32 %143, %144 : reg<spirv.id>
+  %pair_result = OpBitcast.i32.v2bf16 %145
+  %147 = OpCompositeExtract.v3bf16.bf16 %triple, 0 : reg<spirv.id>
+  %148 = OpCompositeExtract.v3bf16.bf16 %triple, 1 : reg<spirv.id>
+  %149 = OpCompositeExtract.v3bf16.bf16 %triple, 2 : reg<spirv.id>
+  %150 = OpCompositeConstruct.v4bf16 %147, %148, %149, %149 : reg<spirv.id>
+  %151 = OpBitcast.v4bf16.v2i32 %150 : reg<spirv.id>
+  %152 = OpBitcast.i32.u32 %selector
+  %153 = OpGroupNonUniformShuffle.v2i32 %151, %152 : reg<spirv.id>
+  %154 = OpBitcast.v2i32.v4bf16 %153 : reg<spirv.id>
+  %155 = OpCompositeExtract.v4bf16.bf16 %154, 0 : reg<spirv.id>
+  %156 = OpCompositeExtract.v4bf16.bf16 %154, 1 : reg<spirv.id>
+  %157 = OpCompositeExtract.v4bf16.bf16 %154, 2 : reg<spirv.id>
+  %triple_result = OpCompositeConstruct.v3bf16 %155, %156, %157
+  %159 = OpBitcast.v4bf16.v2i32 %quad : reg<spirv.id>
+  %160 = OpGroupNonUniformBroadcastFirst.v2i32 %159 : reg<spirv.id>
+  %quad_result = OpBitcast.v2i32.v4bf16 %160
+  %162 = OpSConvert.i32.offset64 %lane
+  %163 = OpConstant.offset64 20
+  %164 = OpIMul.offset64 %162, %163
+  %165 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %164
+  OpStore.storage_buffer.bf16 %165, %single_result
+  %166 = OpCompositeExtract.v2bf16.bf16 %pair_result, 0
+  %167 = OpCompositeExtract.v2bf16.bf16 %pair_result, 1
+  %171 = OpConstant.offset64 2
+  %172 = OpIAdd.offset64 %164, %171
+  %173 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %172
+  OpStore.storage_buffer.bf16 %173, %166
+  %177 = OpConstant.offset64 4
+  %178 = OpIAdd.offset64 %164, %177
+  %179 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %178
+  OpStore.storage_buffer.bf16 %179, %167
+  %180 = OpCompositeExtract.v3bf16.bf16 %triple_result, 0
+  %181 = OpCompositeExtract.v3bf16.bf16 %triple_result, 1
+  %182 = OpCompositeExtract.v3bf16.bf16 %triple_result, 2
+  %186 = OpConstant.offset64 6
+  %187 = OpIAdd.offset64 %164, %186
+  %188 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %187
+  OpStore.storage_buffer.bf16 %188, %180
+  %192 = OpConstant.offset64 8
+  %193 = OpIAdd.offset64 %164, %192
+  %194 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %193
+  OpStore.storage_buffer.bf16 %194, %181
+  %198 = OpConstant.offset64 10
+  %199 = OpIAdd.offset64 %164, %198
+  %200 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %199
+  OpStore.storage_buffer.bf16 %200, %182
+  %201 = OpCompositeExtract.v4bf16.bf16 %quad_result, 0
+  %202 = OpCompositeExtract.v4bf16.bf16 %quad_result, 1
+  %203 = OpCompositeExtract.v4bf16.bf16 %quad_result, 2
+  %204 = OpCompositeExtract.v4bf16.bf16 %quad_result, 3
+  %208 = OpConstant.offset64 12
+  %209 = OpIAdd.offset64 %164, %208
+  %210 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %209
+  OpStore.storage_buffer.bf16 %210, %201
+  %214 = OpConstant.offset64 14
+  %215 = OpIAdd.offset64 %164, %214
+  %216 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %215
+  OpStore.storage_buffer.bf16 %216, %202
+  %220 = OpConstant.offset64 16
+  %221 = OpIAdd.offset64 %164, %220
+  %222 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %221
+  OpStore.storage_buffer.bf16 %222, %203
+  %226 = OpConstant.offset64 18
+  %227 = OpIAdd.offset64 %164, %226
+  %228 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %227
+  OpStore.storage_buffer.bf16 %228, %204
+  return
+}
+
+// ====
+// RUN: emit source-low target=spirv:vulkan1.3+bda+subgroup32+reductions+hal output=low control-flow=structured-low
+
+// The first packet carries sixteen bytes, the second carries one. Packing
+// consumes the captured volatile value without reading beyond its footprint.
+kernel.def @wide_encoded_transport() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %selector = index.cast %lane : index to i32
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32x17xf8E4M3>
+  %destination = buffer.view %output[%base] : buffer -> view<32x17xf8E4M3>
+  %value = vector.load<volatile> %source[%lane, 0] : view<32x17xf8E4M3> -> vector<17xf8E4M3>
+  %width = scalar.constant 32 : i32
+  %result, %valid = kernel.subgroup.shuffle<index> %value, %selector, %width : vector<17xf8E4M3>, i32, i32
+  scf.if %valid {
+    vector.store %result, %destination[%lane, 0] : vector<17xf8E4M3>, view<32x17xf8E4M3>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wide_encoded_transport() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lane = OpLoadBuiltin.subgroup_local_invocation_id
+  %selector = OpCopyObject.i32 %lane
+  %1150 = OpSConvert.i32.offset64 %lane
+  %1151 = OpConstant.offset64 17
+  %1152 = OpIMul.offset64 %1150, %1151
+  %1153 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1152
+  %1154 = OpLoad.storage_buffer.i8<volatile> %1153
+  %1158 = OpConstant.offset64 1
+  %1159 = OpIAdd.offset64 %1152, %1158
+  %1160 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1159
+  %1161 = OpLoad.storage_buffer.i8<volatile> %1160
+  %1165 = OpConstant.offset64 2
+  %1166 = OpIAdd.offset64 %1152, %1165
+  %1167 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1166
+  %1168 = OpLoad.storage_buffer.i8<volatile> %1167
+  %1172 = OpConstant.offset64 3
+  %1173 = OpIAdd.offset64 %1152, %1172
+  %1174 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1173
+  %1175 = OpLoad.storage_buffer.i8<volatile> %1174
+  %1179 = OpConstant.offset64 4
+  %1180 = OpIAdd.offset64 %1152, %1179
+  %1181 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1180
+  %1182 = OpLoad.storage_buffer.i8<volatile> %1181
+  %1186 = OpConstant.offset64 5
+  %1187 = OpIAdd.offset64 %1152, %1186
+  %1188 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1187
+  %1189 = OpLoad.storage_buffer.i8<volatile> %1188
+  %1193 = OpConstant.offset64 6
+  %1194 = OpIAdd.offset64 %1152, %1193
+  %1195 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1194
+  %1196 = OpLoad.storage_buffer.i8<volatile> %1195
+  %1200 = OpConstant.offset64 7
+  %1201 = OpIAdd.offset64 %1152, %1200
+  %1202 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1201
+  %1203 = OpLoad.storage_buffer.i8<volatile> %1202
+  %1207 = OpConstant.offset64 8
+  %1208 = OpIAdd.offset64 %1152, %1207
+  %1209 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1208
+  %1210 = OpLoad.storage_buffer.i8<volatile> %1209
+  %1214 = OpConstant.offset64 9
+  %1215 = OpIAdd.offset64 %1152, %1214
+  %1216 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1215
+  %1217 = OpLoad.storage_buffer.i8<volatile> %1216
+  %1221 = OpConstant.offset64 10
+  %1222 = OpIAdd.offset64 %1152, %1221
+  %1223 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1222
+  %1224 = OpLoad.storage_buffer.i8<volatile> %1223
+  %1228 = OpConstant.offset64 11
+  %1229 = OpIAdd.offset64 %1152, %1228
+  %1230 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1229
+  %1231 = OpLoad.storage_buffer.i8<volatile> %1230
+  %1235 = OpConstant.offset64 12
+  %1236 = OpIAdd.offset64 %1152, %1235
+  %1237 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1236
+  %1238 = OpLoad.storage_buffer.i8<volatile> %1237
+  %1242 = OpConstant.offset64 13
+  %1243 = OpIAdd.offset64 %1152, %1242
+  %1244 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1243
+  %1245 = OpLoad.storage_buffer.i8<volatile> %1244
+  %1249 = OpConstant.offset64 14
+  %1250 = OpIAdd.offset64 %1152, %1249
+  %1251 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1250
+  %1252 = OpLoad.storage_buffer.i8<volatile> %1251
+  %1256 = OpConstant.offset64 15
+  %1257 = OpIAdd.offset64 %1152, %1256
+  %1258 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1257
+  %1259 = OpLoad.storage_buffer.i8<volatile> %1258
+  %1263 = OpConstant.offset64 16
+  %1264 = OpIAdd.offset64 %1152, %1263
+  %1265 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %1264
+  %1266 = OpLoad.storage_buffer.i8<volatile> %1265
+  %width = OpConstant.i32 32
+  %1268 = OpBitcast.i8.u8 %1154
+  %1269 = OpUConvert.u8.u32 %1268
+  %1270 = OpBitcast.u32.i32 %1269
+  %1271 = OpBitcast.i8.u8 %1161
+  %1272 = OpUConvert.u8.u32 %1271
+  %1273 = OpBitcast.u32.i32 %1272
+  %1274 = OpConstant.i32 8
+  %1275 = OpShiftLeftLogical %1273, %1274
+  %1276 = OpBitwiseOr %1270, %1275
+  %1277 = OpBitcast.i8.u8 %1168
+  %1278 = OpUConvert.u8.u32 %1277
+  %1279 = OpBitcast.u32.i32 %1278
+  %1280 = OpConstant.i32 16
+  %1281 = OpShiftLeftLogical %1279, %1280
+  %1282 = OpBitwiseOr %1276, %1281
+  %1283 = OpBitcast.i8.u8 %1175
+  %1284 = OpUConvert.u8.u32 %1283
+  %1285 = OpBitcast.u32.i32 %1284
+  %1286 = OpConstant.i32 24
+  %1287 = OpShiftLeftLogical %1285, %1286
+  %1288 = OpBitwiseOr %1282, %1287
+  %1289 = OpBitcast.i8.u8 %1182
+  %1290 = OpUConvert.u8.u32 %1289
+  %1291 = OpBitcast.u32.i32 %1290
+  %1292 = OpBitcast.i8.u8 %1189
+  %1293 = OpUConvert.u8.u32 %1292
+  %1294 = OpBitcast.u32.i32 %1293
+  %1295 = OpShiftLeftLogical %1294, %1274
+  %1296 = OpBitwiseOr %1291, %1295
+  %1297 = OpBitcast.i8.u8 %1196
+  %1298 = OpUConvert.u8.u32 %1297
+  %1299 = OpBitcast.u32.i32 %1298
+  %1300 = OpShiftLeftLogical %1299, %1280
+  %1301 = OpBitwiseOr %1296, %1300
+  %1302 = OpBitcast.i8.u8 %1203
+  %1303 = OpUConvert.u8.u32 %1302
+  %1304 = OpBitcast.u32.i32 %1303
+  %1305 = OpShiftLeftLogical %1304, %1286
+  %1306 = OpBitwiseOr %1301, %1305
+  %1307 = OpBitcast.i8.u8 %1210
+  %1308 = OpUConvert.u8.u32 %1307
+  %1309 = OpBitcast.u32.i32 %1308
+  %1310 = OpBitcast.i8.u8 %1217
+  %1311 = OpUConvert.u8.u32 %1310
+  %1312 = OpBitcast.u32.i32 %1311
+  %1313 = OpShiftLeftLogical %1312, %1274
+  %1314 = OpBitwiseOr %1309, %1313
+  %1315 = OpBitcast.i8.u8 %1224
+  %1316 = OpUConvert.u8.u32 %1315
+  %1317 = OpBitcast.u32.i32 %1316
+  %1318 = OpShiftLeftLogical %1317, %1280
+  %1319 = OpBitwiseOr %1314, %1318
+  %1320 = OpBitcast.i8.u8 %1231
+  %1321 = OpUConvert.u8.u32 %1320
+  %1322 = OpBitcast.u32.i32 %1321
+  %1323 = OpShiftLeftLogical %1322, %1286
+  %1324 = OpBitwiseOr %1319, %1323
+  %1325 = OpBitcast.i8.u8 %1238
+  %1326 = OpUConvert.u8.u32 %1325
+  %1327 = OpBitcast.u32.i32 %1326
+  %1328 = OpBitcast.i8.u8 %1245
+  %1329 = OpUConvert.u8.u32 %1328
+  %1330 = OpBitcast.u32.i32 %1329
+  %1331 = OpShiftLeftLogical %1330, %1274
+  %1332 = OpBitwiseOr %1327, %1331
+  %1333 = OpBitcast.i8.u8 %1252
+  %1334 = OpUConvert.u8.u32 %1333
+  %1335 = OpBitcast.u32.i32 %1334
+  %1336 = OpShiftLeftLogical %1335, %1280
+  %1337 = OpBitwiseOr %1332, %1336
+  %1338 = OpBitcast.i8.u8 %1259
+  %1339 = OpUConvert.u8.u32 %1338
+  %1340 = OpBitcast.u32.i32 %1339
+  %1341 = OpShiftLeftLogical %1340, %1286
+  %1342 = OpBitwiseOr %1337, %1341
+  %1343 = OpCompositeConstruct.v4i32 %1288, %1306, %1324, %1342
+  %1344 = OpBitcast.i32.u32 %selector
+  %1345 = OpGroupNonUniformShuffle.v4i32 %1343, %1344
+  %1346 = OpLoadBuiltin.subgroup_local_invocation_id : reg<spirv.id>
+  %1347 = OpBitcast.i32.u32 %width
+  %1348 = OpULessThan.u32 %1344, %1347 : reg<spirv.id>
+  %1349 = OpSelect %1348, %selector, %1346 : reg<spirv.id>
+  %1350 = OpBitcast.i32.u32 %1349
+  %1351 = OpConstantTrue.bool : reg<spirv.id>
+  %1352 = OpGroupNonUniformBallot.v4u32 %1351
+  %1353 = OpGroupNonUniformBallotBitExtract.bool %1352, %1350 : reg<spirv.id>
+  %valid = OpLogicalAnd.bool %1348, %1353
+  %1355 = OpCompositeExtract.v4i32.i32 %1345, 0
+  %1356 = OpConstant.i32 255
+  %1357 = OpBitwiseAnd %1355, %1356
+  %1358 = OpSConvert.i32.i8 %1357
+  %1359 = OpShiftRightLogical %1355, %1274
+  %1360 = OpBitwiseAnd %1359, %1356
+  %1361 = OpSConvert.i32.i8 %1360
+  %1362 = OpShiftRightLogical %1355, %1280
+  %1363 = OpBitwiseAnd %1362, %1356
+  %1364 = OpSConvert.i32.i8 %1363
+  %1365 = OpShiftRightLogical %1355, %1286
+  %1366 = OpSConvert.i32.i8 %1365
+  %1367 = OpCompositeExtract.v4i32.i32 %1345, 1
+  %1368 = OpBitwiseAnd %1367, %1356
+  %1369 = OpSConvert.i32.i8 %1368
+  %1370 = OpShiftRightLogical %1367, %1274
+  %1371 = OpBitwiseAnd %1370, %1356
+  %1372 = OpSConvert.i32.i8 %1371
+  %1373 = OpShiftRightLogical %1367, %1280
+  %1374 = OpBitwiseAnd %1373, %1356
+  %1375 = OpSConvert.i32.i8 %1374
+  %1376 = OpShiftRightLogical %1367, %1286
+  %1377 = OpSConvert.i32.i8 %1376
+  %1378 = OpCompositeExtract.v4i32.i32 %1345, 2
+  %1379 = OpBitwiseAnd %1378, %1356
+  %1380 = OpSConvert.i32.i8 %1379
+  %1381 = OpShiftRightLogical %1378, %1274
+  %1382 = OpBitwiseAnd %1381, %1356
+  %1383 = OpSConvert.i32.i8 %1382
+  %1384 = OpShiftRightLogical %1378, %1280
+  %1385 = OpBitwiseAnd %1384, %1356
+  %1386 = OpSConvert.i32.i8 %1385
+  %1387 = OpShiftRightLogical %1378, %1286
+  %1388 = OpSConvert.i32.i8 %1387
+  %1389 = OpCompositeExtract.v4i32.i32 %1345, 3
+  %1390 = OpBitwiseAnd %1389, %1356
+  %1391 = OpSConvert.i32.i8 %1390
+  %1392 = OpShiftRightLogical %1389, %1274
+  %1393 = OpBitwiseAnd %1392, %1356
+  %1394 = OpSConvert.i32.i8 %1393
+  %1395 = OpShiftRightLogical %1389, %1280
+  %1396 = OpBitwiseAnd %1395, %1356
+  %1397 = OpSConvert.i32.i8 %1396
+  %1398 = OpShiftRightLogical %1389, %1286
+  %1399 = OpSConvert.i32.i8 %1398
+  %1400 = OpBitcast.i8.u8 %1266
+  %1401 = OpUConvert.u8.u32 %1400
+  %1402 = OpBitcast.u32.i32 %1401
+  %1403 = OpShiftLeftLogical %1402, %1274
+  %1404 = OpBitwiseOr %1402, %1403
+  %1405 = OpShiftLeftLogical %1402, %1280
+  %1406 = OpBitwiseOr %1404, %1405
+  %1407 = OpShiftLeftLogical %1402, %1286
+  %1408 = OpBitwiseOr %1406, %1407
+  %1409 = OpBitcast.i32.u32 %selector
+  %1410 = OpGroupNonUniformShuffle.i32 %1408, %1409
+  %1411 = OpBitwiseAnd %1410, %1356
+  %1412 = OpSConvert.i32.i8 %1411
+  low.scf.if %valid {
+    %1413 = OpSConvert.i32.offset64 %lane
+    %1414 = OpConstant.offset64 17
+    %1415 = OpIMul.offset64 %1413, %1414
+    %1416 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1415
+    OpStore.storage_buffer.i8 %1416, %1358
+    %1420 = OpConstant.offset64 1
+    %1421 = OpIAdd.offset64 %1415, %1420
+    %1422 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1421
+    OpStore.storage_buffer.i8 %1422, %1361
+    %1426 = OpConstant.offset64 2
+    %1427 = OpIAdd.offset64 %1415, %1426
+    %1428 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1427
+    OpStore.storage_buffer.i8 %1428, %1364
+    %1432 = OpConstant.offset64 3
+    %1433 = OpIAdd.offset64 %1415, %1432
+    %1434 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1433
+    OpStore.storage_buffer.i8 %1434, %1366
+    %1438 = OpConstant.offset64 4
+    %1439 = OpIAdd.offset64 %1415, %1438
+    %1440 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1439
+    OpStore.storage_buffer.i8 %1440, %1369
+    %1444 = OpConstant.offset64 5
+    %1445 = OpIAdd.offset64 %1415, %1444
+    %1446 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1445
+    OpStore.storage_buffer.i8 %1446, %1372
+    %1450 = OpConstant.offset64 6
+    %1451 = OpIAdd.offset64 %1415, %1450
+    %1452 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1451
+    OpStore.storage_buffer.i8 %1452, %1375
+    %1456 = OpConstant.offset64 7
+    %1457 = OpIAdd.offset64 %1415, %1456
+    %1458 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1457
+    OpStore.storage_buffer.i8 %1458, %1377
+    %1462 = OpConstant.offset64 8
+    %1463 = OpIAdd.offset64 %1415, %1462
+    %1464 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1463
+    OpStore.storage_buffer.i8 %1464, %1380
+    %1468 = OpConstant.offset64 9
+    %1469 = OpIAdd.offset64 %1415, %1468
+    %1470 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1469
+    OpStore.storage_buffer.i8 %1470, %1383
+    %1474 = OpConstant.offset64 10
+    %1475 = OpIAdd.offset64 %1415, %1474
+    %1476 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1475
+    OpStore.storage_buffer.i8 %1476, %1386
+    %1480 = OpConstant.offset64 11
+    %1481 = OpIAdd.offset64 %1415, %1480
+    %1482 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1481
+    OpStore.storage_buffer.i8 %1482, %1388
+    %1486 = OpConstant.offset64 12
+    %1487 = OpIAdd.offset64 %1415, %1486
+    %1488 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1487
+    OpStore.storage_buffer.i8 %1488, %1391
+    %1492 = OpConstant.offset64 13
+    %1493 = OpIAdd.offset64 %1415, %1492
+    %1494 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1493
+    OpStore.storage_buffer.i8 %1494, %1394
+    %1498 = OpConstant.offset64 14
+    %1499 = OpIAdd.offset64 %1415, %1498
+    %1500 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1499
+    OpStore.storage_buffer.i8 %1500, %1397
+    %1504 = OpConstant.offset64 15
+    %1505 = OpIAdd.offset64 %1415, %1504
+    %1506 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1505
+    OpStore.storage_buffer.i8 %1506, %1399
+    %1510 = OpConstant.offset64 16
+    %1511 = OpIAdd.offset64 %1415, %1510
+    %1512 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %1511
+    OpStore.storage_buffer.i8 %1512, %1412
+  }
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+subgroup32+reductions+hal
+
+// Address vectors retain native i32/offset64 packets, including scalar tails.
+// Logical-width normalization applies to address payloads as to fixed integers.
+kernel.def @address_vector_transport() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32x5xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<32x10xi32>
+  %words = vector.load %source[%lane, 0] : view<32x5xi32> -> vector<5xi32>
+  %indices = vector.index_cast %words : vector<5xi32> to vector<5xindex>
+  %offsets = vector.index_cast %words : vector<5xi32> to vector<5xoffset>
+  %selector = scalar.constant 1 : i32
+  %width = scalar.constant 16 : i32
+  %named = kernel.subgroup.broadcast %indices from %selector : vector<5xindex>, i32
+  %shuffled, %valid = kernel.subgroup.shuffle<index> %offsets, %selector, %width : vector<5xoffset>, i32, i32
+  %named_words = vector.index_cast %named : vector<5xindex> to vector<5xi32>
+  %shuffled_words = vector.index_cast %shuffled : vector<5xoffset> to vector<5xi32>
+  vector.store %named_words, %destination[%lane, 0] : vector<5xi32>, view<32x10xi32>
+  vector.store %shuffled_words, %destination[%lane, 5] : vector<5xi32>, view<32x10xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @address_vector_transport() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lane = OpLoadBuiltin.subgroup_local_invocation_id
+  %329 = OpSConvert.i32.offset64 %lane
+  %330 = OpConstant.offset64 20
+  %331 = OpIMul.offset64 %329, %330
+  %332 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %331
+  %333 = OpLoad.storage_buffer.i32 %332
+  %337 = OpConstant.offset64 4
+  %338 = OpIAdd.offset64 %331, %337
+  %339 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %338
+  %340 = OpLoad.storage_buffer.i32 %339
+  %344 = OpConstant.offset64 8
+  %345 = OpIAdd.offset64 %331, %344
+  %346 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %345
+  %347 = OpLoad.storage_buffer.i32 %346
+  %351 = OpConstant.offset64 12
+  %352 = OpIAdd.offset64 %331, %351
+  %353 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %352
+  %354 = OpLoad.storage_buffer.i32 %353
+  %358 = OpConstant.offset64 16
+  %359 = OpIAdd.offset64 %331, %358
+  %360 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %359
+  %361 = OpLoad.storage_buffer.i32 %360
+  %362 = OpCopyObject.i32 %333 : reg<spirv.id : index>
+  %363 = OpCopyObject.i32 %340 : reg<spirv.id : index>
+  %364 = OpCopyObject.i32 %347 : reg<spirv.id : index>
+  %365 = OpCopyObject.i32 %354 : reg<spirv.id : index>
+  %366 = OpCopyObject.i32 %361 : reg<spirv.id : index>
+  %367 = OpCompositeConstruct.v4i32 %362, %362, %362, %362 : reg<spirv.id : vector<4xindex>>
+  %368 = OpCompositeInsert.i32.v4i32 %363, %367, 1 : reg<spirv.id : vector<4xindex>>
+  %369 = OpCompositeInsert.i32.v4i32 %364, %368, 2 : reg<spirv.id : vector<4xindex>>
+  %370 = OpCompositeInsert.i32.v4i32 %365, %369, 3 : reg<spirv.id : vector<4xindex>>
+  %371 = OpBitcast.i32.u32 %333
+  %372 = OpUConvert.u32.offset64 %371
+  %373 = OpBitcast.i32.u32 %340
+  %374 = OpUConvert.u32.offset64 %373
+  %375 = OpBitcast.i32.u32 %347
+  %376 = OpUConvert.u32.offset64 %375
+  %377 = OpBitcast.i32.u32 %354
+  %378 = OpUConvert.u32.offset64 %377
+  %379 = OpBitcast.i32.u32 %361
+  %380 = OpUConvert.u32.offset64 %379
+  %381 = OpCompositeConstruct.v4offset64 %372, %372, %372, %372
+  %382 = OpCompositeInsert.offset64.v4offset64 %374, %381, 1
+  %383 = OpCompositeInsert.offset64.v4offset64 %376, %382, 2
+  %384 = OpCompositeInsert.offset64.v4offset64 %378, %383, 3
+  %selector = OpConstant.i32 1
+  %386 = OpBitcast.i32.u32 %selector
+  %387 = OpGroupNonUniformShuffle.v4i32 %370, %386 : reg<spirv.id : vector<4xindex>>
+  %388 = OpBitcast.i32.u32 %selector
+  %389 = OpGroupNonUniformShuffle.i32 %366, %388 : reg<spirv.id : index>
+  %390 = OpCopyObject.i32 %lane
+  %391 = OpConstant.i32 4
+  %392 = OpShiftRightLogical %390, %391
+  %393 = OpShiftLeftLogical %392, %391
+  %394 = OpIAdd %393, %selector
+  %395 = OpShiftRightLogical %394, %391
+  %396 = OpIEqual %395, %392
+  %397 = OpSelect %396, %394, %390
+  %398 = OpBitcast.i32.u32 %397
+  %399 = OpGroupNonUniformShuffle.v4offset64 %384, %398
+  %400 = OpBitcast.i32.u32 %397
+  %401 = OpGroupNonUniformShuffle.offset64 %380, %400
+  %402 = OpCompositeExtract.v4i32.i32 %387, 0 : reg<spirv.id : index>
+  %403 = OpCopyObject.i32 %402
+  %404 = OpCompositeExtract.v4i32.i32 %387, 1 : reg<spirv.id : index>
+  %405 = OpCopyObject.i32 %404
+  %406 = OpCompositeExtract.v4i32.i32 %387, 2 : reg<spirv.id : index>
+  %407 = OpCopyObject.i32 %406
+  %408 = OpCompositeExtract.v4i32.i32 %387, 3 : reg<spirv.id : index>
+  %409 = OpCopyObject.i32 %408
+  %410 = OpCopyObject.i32 %389
+  %411 = OpCompositeExtract.v4offset64.offset64 %399, 0
+  %412 = OpUConvert.offset64.u32 %411
+  %413 = OpBitcast.u32.i32 %412
+  %414 = OpCompositeExtract.v4offset64.offset64 %399, 1
+  %415 = OpUConvert.offset64.u32 %414
+  %416 = OpBitcast.u32.i32 %415
+  %417 = OpCompositeExtract.v4offset64.offset64 %399, 2
+  %418 = OpUConvert.offset64.u32 %417
+  %419 = OpBitcast.u32.i32 %418
+  %420 = OpCompositeExtract.v4offset64.offset64 %399, 3
+  %421 = OpUConvert.offset64.u32 %420
+  %422 = OpBitcast.u32.i32 %421
+  %423 = OpUConvert.offset64.u32 %401
+  %424 = OpBitcast.u32.i32 %423
+  %425 = OpSConvert.i32.offset64 %lane
+  %426 = OpConstant.offset64 40
+  %427 = OpIMul.offset64 %425, %426
+  %428 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %427
+  OpStore.storage_buffer.i32 %428, %403
+  %432 = OpConstant.offset64 4
+  %433 = OpIAdd.offset64 %427, %432
+  %434 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %433
+  OpStore.storage_buffer.i32 %434, %405
+  %438 = OpConstant.offset64 8
+  %439 = OpIAdd.offset64 %427, %438
+  %440 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %439
+  OpStore.storage_buffer.i32 %440, %407
+  %444 = OpConstant.offset64 12
+  %445 = OpIAdd.offset64 %427, %444
+  %446 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %445
+  OpStore.storage_buffer.i32 %446, %409
+  %450 = OpConstant.offset64 16
+  %451 = OpIAdd.offset64 %427, %450
+  %452 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %451
+  OpStore.storage_buffer.i32 %452, %410
+  %456 = OpConstant.offset64 20
+  %457 = OpIAdd.offset64 %427, %456
+  %458 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %457
+  OpStore.storage_buffer.i32 %458, %413
+  %462 = OpConstant.offset64 24
+  %463 = OpIAdd.offset64 %427, %462
+  %464 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %463
+  OpStore.storage_buffer.i32 %464, %416
+  %468 = OpConstant.offset64 28
+  %469 = OpIAdd.offset64 %427, %468
+  %470 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %469
+  OpStore.storage_buffer.i32 %470, %419
+  %474 = OpConstant.offset64 32
+  %475 = OpIAdd.offset64 %427, %474
+  %476 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %475
+  OpStore.storage_buffer.i32 %476, %422
+  %480 = OpConstant.offset64 36
+  %481 = OpIAdd.offset64 %427, %480
+  %482 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %481
+  OpStore.storage_buffer.i32 %482, %424
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=BFLOAT16_TYPE_KHR,-INT16,-SUBGROUP_EXTENDED_TYPES,GROUP_NON_UNIFORM,GROUP_NON_UNIFORM_SHUFFLE,GROUP_NON_UNIFORM_SHUFFLE_RELATIVE,GROUP_NON_UNIFORM_BALLOT,STORAGE_BUFFER_16BIT_ACCESS limits=SUBGROUP_SIZE:32
+
+// Wider native BF16 payloads reuse the four-element composite representation.
+// The final singleton has defined padding and shares the first packet's validity.
+kernel.def @wide_native_bfloat_transport() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %validity: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32x5xbf16>
+  %destination = buffer.view %output[%base] : buffer -> view<32x5xbf16>
+  %validity_view = buffer.view %validity[%base] : buffer -> view<32xi32>
+  %value = vector.load<volatile> %source[%lane, 0] : view<32x5xbf16> -> vector<5xbf16>
+  %distance = scalar.constant 1 : i32
+  %width = scalar.constant 32 : i32
+  %result, %valid = kernel.subgroup.shuffle<xor> %value, %distance, %width : vector<5xbf16>, i32, i32
+  vector.store %result, %destination[%lane, 0] : vector<5xbf16>, view<32x5xbf16>
+  %valid_integer = scalar.extui %valid : i1 to i32
+  view.store %valid_integer, %validity_view[%lane] : i32, view<32xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wide_native_bfloat_transport() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %validity = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lane = OpLoadBuiltin.subgroup_local_invocation_id
+  %108 = OpSConvert.i32.offset64 %lane
+  %109 = OpConstant.offset64 10
+  %110 = OpIMul.offset64 %108, %109
+  %111 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %110
+  %112 = OpLoad.storage_buffer.bf16<volatile> %111
+  %116 = OpConstant.offset64 2
+  %117 = OpIAdd.offset64 %110, %116
+  %118 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %117
+  %119 = OpLoad.storage_buffer.bf16<volatile> %118
+  %123 = OpConstant.offset64 4
+  %124 = OpIAdd.offset64 %110, %123
+  %125 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %124
+  %126 = OpLoad.storage_buffer.bf16<volatile> %125
+  %130 = OpConstant.offset64 6
+  %131 = OpIAdd.offset64 %110, %130
+  %132 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %131
+  %133 = OpLoad.storage_buffer.bf16<volatile> %132
+  %137 = OpConstant.offset64 8
+  %138 = OpIAdd.offset64 %110, %137
+  %139 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %138
+  %140 = OpLoad.storage_buffer.bf16<volatile> %139
+  %141 = OpCompositeConstruct.v4bf16 %112, %112, %112, %112
+  %142 = OpCompositeInsert.bf16.v4bf16 %119, %141, 1
+  %143 = OpCompositeInsert.bf16.v4bf16 %126, %142, 2
+  %144 = OpCompositeInsert.bf16.v4bf16 %133, %143, 3
+  %distance = OpConstant.i32 1
+  %width = OpConstant.i32 32
+  %147 = OpBitcast.v4bf16.v2i32 %144 : reg<spirv.id>
+  %148 = OpBitcast.i32.u32 %distance
+  %149 = OpGroupNonUniformShuffleXor.v2i32 %147, %148 : reg<spirv.id>
+  %150 = OpBitcast.v2i32.v4bf16 %149
+  %151 = OpLoadBuiltin.subgroup_local_invocation_id : reg<spirv.id>
+  %152 = OpBitwiseXor %151, %distance : reg<spirv.id>
+  %153 = OpBitcast.i32.u32 %width
+  %154 = OpULessThan.u32 %148, %153 : reg<spirv.id>
+  %155 = OpBitcast.i32.u32 %152
+  %156 = OpULessThan.u32 %155, %153 : reg<spirv.id>
+  %157 = OpLogicalAnd.bool %154, %156 : reg<spirv.id>
+  %158 = OpSelect %157, %152, %151 : reg<spirv.id>
+  %159 = OpBitcast.i32.u32 %158
+  %160 = OpConstantTrue.bool : reg<spirv.id>
+  %161 = OpGroupNonUniformBallot.v4u32 %160
+  %162 = OpGroupNonUniformBallotBitExtract.bool %161, %159 : reg<spirv.id>
+  %valid = OpLogicalAnd.bool %157, %162
+  %164 = OpCompositeConstruct.v2bf16 %140, %140 : reg<spirv.id>
+  %165 = OpBitcast.v2bf16.i32 %164 : reg<spirv.id>
+  %166 = OpBitcast.i32.u32 %distance
+  %167 = OpGroupNonUniformShuffleXor.i32 %165, %166 : reg<spirv.id>
+  %168 = OpBitcast.i32.v2bf16 %167 : reg<spirv.id>
+  %169 = OpCompositeExtract.v2bf16.bf16 %168, 0
+  %170 = OpCompositeExtract.v4bf16.bf16 %150, 0
+  %171 = OpCompositeExtract.v4bf16.bf16 %150, 1
+  %172 = OpCompositeExtract.v4bf16.bf16 %150, 2
+  %173 = OpCompositeExtract.v4bf16.bf16 %150, 3
+  %174 = OpSConvert.i32.offset64 %lane
+  %175 = OpConstant.offset64 10
+  %176 = OpIMul.offset64 %174, %175
+  %177 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %176
+  OpStore.storage_buffer.bf16 %177, %170
+  %181 = OpConstant.offset64 2
+  %182 = OpIAdd.offset64 %176, %181
+  %183 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %182
+  OpStore.storage_buffer.bf16 %183, %171
+  %187 = OpConstant.offset64 4
+  %188 = OpIAdd.offset64 %176, %187
+  %189 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %188
+  OpStore.storage_buffer.bf16 %189, %172
+  %193 = OpConstant.offset64 6
+  %194 = OpIAdd.offset64 %176, %193
+  %195 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %194
+  OpStore.storage_buffer.bf16 %195, %173
+  %199 = OpConstant.offset64 8
+  %200 = OpIAdd.offset64 %176, %199
+  %201 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %200
+  OpStore.storage_buffer.bf16 %201, %169
+  %202 = OpConstant.i32 0
+  %valid_integer = OpSelect %valid, %distance, %202
+  %206 = OpIMul.offset64 %174, %187
+  %207 = OpPtrAccessChain.storage_buffer.i32.byte_offset %validity, %206
+  OpStore.storage_buffer.i32 %207, %valid_integer
+  return
+}

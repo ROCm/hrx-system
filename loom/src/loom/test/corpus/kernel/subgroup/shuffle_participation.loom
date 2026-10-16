@@ -101,6 +101,100 @@ kernel.def @subgroup_shuffle_predicate_participation() {
   kernel.return
 }
 
+// Encoded floats are observed as object bits, including NaN payloads. Each
+// encoding uses the same sparse, partial-subgroup participation geometry.
+kernel.def @subgroup_shuffle_encoded_participation() {
+  %unit = index.constant 1 : index
+  %items = index.constant 54 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%distance: index, %input: buffer, %bfloat_output: buffer, %e4m3_output: buffer, %e5m2_output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<54xi32>
+  %word = view.load %input_view[%item] : view<54xi32> -> i32
+  %half_bits = scalar.trunci %word : i32 to i16
+  %byte_bits = scalar.trunci %word : i32 to i8
+  %bfloat = scalar.bitcast %half_bits : i16 to bf16
+  %e4m3 = scalar.bitcast %byte_bits : i8 to f8E4M3
+  %e5m2 = scalar.bitcast %byte_bits : i8 to f8E5M2
+  %period = index.constant 4 : index
+  %excluded = index.constant 3 : index
+  %relative = index.rem %item, %period : index
+  %active = index.cmp ne, %relative, %excluded : index
+  %bounded_distance = index.assume %distance [range(%distance, 0, 15)] : index
+  %source = index.cast %bounded_distance : index to i32
+  %width = scalar.constant 16 : i32
+  scf.if %active {
+    %index_plane = index.constant 0 : index
+    %bfloat_index, %bfloat_index_valid = kernel.subgroup.shuffle<index> %bfloat, %source, %width : bf16, i32, i32
+    %bfloat_index_bits = scalar.bitcast %bfloat_index : bf16 to i16
+    %bfloat_index_word = scalar.extui %bfloat_index_bits : i16 to i32
+    func.call @store_subgroup_participation_result(%item, %index_plane, %bfloat_index_word, %bfloat_index_valid, %bfloat_output) : (index, index, i32, i1, buffer)
+    %e4m3_index, %e4m3_index_valid = kernel.subgroup.shuffle<index> %e4m3, %source, %width : f8E4M3, i32, i32
+    %e4m3_index_bits = scalar.bitcast %e4m3_index : f8E4M3 to i8
+    %e4m3_index_word = scalar.extui %e4m3_index_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %index_plane, %e4m3_index_word, %e4m3_index_valid, %e4m3_output) : (index, index, i32, i1, buffer)
+    %e5m2_index, %e5m2_index_valid = kernel.subgroup.shuffle<index> %e5m2, %source, %width : f8E5M2, i32, i32
+    %e5m2_index_bits = scalar.bitcast %e5m2_index : f8E5M2 to i8
+    %e5m2_index_word = scalar.extui %e5m2_index_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %index_plane, %e5m2_index_word, %e5m2_index_valid, %e5m2_output) : (index, index, i32, i1, buffer)
+    %xor_plane = index.constant 1 : index
+    %bfloat_xor, %bfloat_xor_valid = kernel.subgroup.shuffle<xor> %bfloat, %source, %width : bf16, i32, i32
+    %bfloat_xor_bits = scalar.bitcast %bfloat_xor : bf16 to i16
+    %bfloat_xor_word = scalar.extui %bfloat_xor_bits : i16 to i32
+    func.call @store_subgroup_participation_result(%item, %xor_plane, %bfloat_xor_word, %bfloat_xor_valid, %bfloat_output) : (index, index, i32, i1, buffer)
+    %e4m3_xor, %e4m3_xor_valid = kernel.subgroup.shuffle<xor> %e4m3, %source, %width : f8E4M3, i32, i32
+    %e4m3_xor_bits = scalar.bitcast %e4m3_xor : f8E4M3 to i8
+    %e4m3_xor_word = scalar.extui %e4m3_xor_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %xor_plane, %e4m3_xor_word, %e4m3_xor_valid, %e4m3_output) : (index, index, i32, i1, buffer)
+    %e5m2_xor, %e5m2_xor_valid = kernel.subgroup.shuffle<xor> %e5m2, %source, %width : f8E5M2, i32, i32
+    %e5m2_xor_bits = scalar.bitcast %e5m2_xor : f8E5M2 to i8
+    %e5m2_xor_word = scalar.extui %e5m2_xor_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %xor_plane, %e5m2_xor_word, %e5m2_xor_valid, %e5m2_output) : (index, index, i32, i1, buffer)
+    %up_plane = index.constant 2 : index
+    %bfloat_up, %bfloat_up_valid = kernel.subgroup.shuffle<up> %bfloat, %source, %width : bf16, i32, i32
+    %bfloat_up_bits = scalar.bitcast %bfloat_up : bf16 to i16
+    %bfloat_up_word = scalar.extui %bfloat_up_bits : i16 to i32
+    func.call @store_subgroup_participation_result(%item, %up_plane, %bfloat_up_word, %bfloat_up_valid, %bfloat_output) : (index, index, i32, i1, buffer)
+    %e4m3_up, %e4m3_up_valid = kernel.subgroup.shuffle<up> %e4m3, %source, %width : f8E4M3, i32, i32
+    %e4m3_up_bits = scalar.bitcast %e4m3_up : f8E4M3 to i8
+    %e4m3_up_word = scalar.extui %e4m3_up_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %up_plane, %e4m3_up_word, %e4m3_up_valid, %e4m3_output) : (index, index, i32, i1, buffer)
+    %e5m2_up, %e5m2_up_valid = kernel.subgroup.shuffle<up> %e5m2, %source, %width : f8E5M2, i32, i32
+    %e5m2_up_bits = scalar.bitcast %e5m2_up : f8E5M2 to i8
+    %e5m2_up_word = scalar.extui %e5m2_up_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %up_plane, %e5m2_up_word, %e5m2_up_valid, %e5m2_output) : (index, index, i32, i1, buffer)
+    %down_plane = index.constant 3 : index
+    %bfloat_down, %bfloat_down_valid = kernel.subgroup.shuffle<down> %bfloat, %source, %width : bf16, i32, i32
+    %bfloat_down_bits = scalar.bitcast %bfloat_down : bf16 to i16
+    %bfloat_down_word = scalar.extui %bfloat_down_bits : i16 to i32
+    func.call @store_subgroup_participation_result(%item, %down_plane, %bfloat_down_word, %bfloat_down_valid, %bfloat_output) : (index, index, i32, i1, buffer)
+    %e4m3_down, %e4m3_down_valid = kernel.subgroup.shuffle<down> %e4m3, %source, %width : f8E4M3, i32, i32
+    %e4m3_down_bits = scalar.bitcast %e4m3_down : f8E4M3 to i8
+    %e4m3_down_word = scalar.extui %e4m3_down_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %down_plane, %e4m3_down_word, %e4m3_down_valid, %e4m3_output) : (index, index, i32, i1, buffer)
+    %e5m2_down, %e5m2_down_valid = kernel.subgroup.shuffle<down> %e5m2, %source, %width : f8E5M2, i32, i32
+    %e5m2_down_bits = scalar.bitcast %e5m2_down : f8E5M2 to i8
+    %e5m2_down_word = scalar.extui %e5m2_down_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %down_plane, %e5m2_down_word, %e5m2_down_valid, %e5m2_output) : (index, index, i32, i1, buffer)
+    %unit_distance = scalar.constant 1 : i32
+    %fixed_plane = index.constant 4 : index
+    %bfloat_fixed, %bfloat_fixed_valid = kernel.subgroup.shuffle<xor> %bfloat, %unit_distance, %width : bf16, i32, i32
+    %bfloat_fixed_bits = scalar.bitcast %bfloat_fixed : bf16 to i16
+    %bfloat_fixed_word = scalar.extui %bfloat_fixed_bits : i16 to i32
+    func.call @store_subgroup_participation_result(%item, %fixed_plane, %bfloat_fixed_word, %bfloat_fixed_valid, %bfloat_output) : (index, index, i32, i1, buffer)
+    %e4m3_fixed, %e4m3_fixed_valid = kernel.subgroup.shuffle<xor> %e4m3, %unit_distance, %width : f8E4M3, i32, i32
+    %e4m3_fixed_bits = scalar.bitcast %e4m3_fixed : f8E4M3 to i8
+    %e4m3_fixed_word = scalar.extui %e4m3_fixed_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %fixed_plane, %e4m3_fixed_word, %e4m3_fixed_valid, %e4m3_output) : (index, index, i32, i1, buffer)
+    %e5m2_fixed, %e5m2_fixed_valid = kernel.subgroup.shuffle<xor> %e5m2, %unit_distance, %width : f8E5M2, i32, i32
+    %e5m2_fixed_bits = scalar.bitcast %e5m2_fixed : f8E5M2 to i8
+    %e5m2_fixed_word = scalar.extui %e5m2_fixed_bits : i8 to i32
+    func.call @store_subgroup_participation_result(%item, %fixed_plane, %e5m2_fixed_word, %e5m2_fixed_valid, %e5m2_output) : (index, index, i32, i1, buffer)
+  }
+  kernel.return
+}
+
 func.def inline @store_subgroup_participation_oracle_result(%item: index, %source: i32, %plane: index, %input: buffer, %output: buffer, %value_mask: i32) {
   %base = index.constant 0 : offset
   %fields = index.constant 2 : index
@@ -189,6 +283,15 @@ func.def @subgroup_shuffle_predicate_participation_oracle(%distance: index, %inp
   func.return
 }
 
+func.def @subgroup_shuffle_encoded_participation_oracle(%distance: index, %input: buffer, %bfloat_output: buffer, %e4m3_output: buffer, %e5m2_output: buffer) {
+  %half_mask = scalar.constant 65535 : i32
+  %byte_mask = scalar.constant 255 : i32
+  func.call @subgroup_shuffle_participation_masked_oracle(%distance, %input, %bfloat_output, %half_mask) : (index, buffer, buffer, i32)
+  func.call @subgroup_shuffle_participation_masked_oracle(%distance, %input, %e4m3_output, %byte_mask) : (index, buffer, buffer, i32)
+  func.call @subgroup_shuffle_participation_masked_oracle(%distance, %input, %e5m2_output, %byte_mask) : (index, buffer, buffer, i32)
+  func.return
+}
+
 check.scenario @subgroup_shuffle_participation_values {
   check.trial[16](%distance: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[0] : check.entropy -> i64
@@ -219,6 +322,26 @@ check.scenario @subgroup_shuffle_predicate_participation_values {
       check.expect.bitwise actual(%output) expected(%output) : tensor<540xi32>
       check.expect.bitwise actual(%prefix) expected(%prefix) : tensor<16xi32>
       check.expect.bitwise actual(%suffix) expected(%suffix) : tensor<16xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @subgroup_shuffle_encoded_participation_values {
+  check.trial[16](%distance: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<54xi32>
+    %bfloat_storage = check.generate.fill value(-123) : tensor<572xi32>
+    %e4m3_storage = check.generate.fill value(-123) : tensor<572xi32>
+    %e5m2_storage = check.generate.fill value(-123) : tensor<572xi32>
+    %bfloat_output = check.tensor.view %bfloat_storage offset(64) : tensor<572xi32> -> tensor<540xi32>
+    %e4m3_output = check.tensor.view %e4m3_storage offset(64) : tensor<572xi32> -> tensor<540xi32>
+    %e5m2_output = check.tensor.view %e5m2_storage offset(64) : tensor<572xi32> -> tensor<540xi32>
+    check.compare<@subgroup_shuffle_encoded_participation, @subgroup_shuffle_encoded_participation_oracle>(%distance, %input, %bfloat_output, %e4m3_output, %e5m2_output) : (index, tensor<54xi32>, tensor<540xi32>, tensor<540xi32>, tensor<540xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<54xi32>
+      check.expect.bitwise actual(%bfloat_storage) expected(%bfloat_storage) : tensor<572xi32>
+      check.expect.bitwise actual(%e4m3_storage) expected(%e4m3_storage) : tensor<572xi32>
+      check.expect.bitwise actual(%e5m2_storage) expected(%e5m2_storage) : tensor<572xi32>
     }
   }
   check.return

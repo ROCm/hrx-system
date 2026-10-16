@@ -13,6 +13,7 @@ from loom.target.contracts import (
     GuardKind,
     RecipeRule,
     SourceValueKind,
+    ValueRef,
 )
 
 
@@ -146,6 +147,16 @@ def test_shuffle_family_covers_native_types_shapes_and_modes() -> None:
         assert cell not in cells, cell
         cells.add(cell)
         emit_keys = tuple(emit.descriptor.key for emit in rule.emit)
+        if pattern.elements == ("bf16",):
+            # Native BF16 transport is a pair-packed integer exchange. Its
+            # payload recipe is checked independently below; validity is the
+            # same source-lane calculation as ordinary native payloads.
+            prefix_count = {None: 2, 1: 2, 2: 1, 3: 5, 4: 1}[pattern.lanes]
+            suffix_count = {None: 2, 1: 2, 2: 1, 3: 5, 4: 1}[pattern.lanes]
+            emit_keys = (
+                *emit_keys[prefix_count : prefix_count + 2],
+                *emit_keys[prefix_count + 2 + suffix_count :],
+            )
         assert emit_keys[:2] == (
             "spirv.op_bitcast.i32.u32",
             f"spirv.op_group_non_uniform_shuffle.{mode}."
@@ -188,7 +199,15 @@ def test_shuffle_family_covers_native_types_shapes_and_modes() -> None:
             )
 
     expected = {
-        (elements, lanes, mode)
+        (
+            (*elements, "f8E4M3", "f8E5M2")
+            if elements == ("i8",) and lanes in (None, 1)
+            else (*elements, "bf16")
+            if elements == ("i32", "index") and lanes in (None, 1)
+            else elements,
+            lanes,
+            mode,
+        )
         for elements in (
             ("i1",),
             ("i8",),
@@ -235,13 +254,112 @@ def test_shuffle_contracts_require_the_matching_device_capability() -> None:
             relative if mode in ("up", "down") else indexed
         )
         assert bool(required_bits & extended) == (
-            pattern.elements[0] in ("i8", "i16", "i64", "offset", "f16", "bf16")
+            pattern.elements[0] in ("i8", "i16", "i64", "offset", "f16")
         )
         discards_valid = any(
             guard.kind is GuardKind.VALUE_NO_USES and guard.field == "valid"
             for guard in rule.guards
         )
         assert bool(required_bits & ballot) == (not discards_valid)
+
+
+def test_broadcasts_share_transport_admission_and_preserve_lane_semantics() -> None:
+    shapes = {}
+    for operation in (
+        kernel.kernel_subgroup_shuffle,
+        kernel.kernel_subgroup_broadcast,
+        kernel.kernel_subgroup_broadcast_first,
+    ):
+        shapes[operation] = set()
+        for rule in SPIRV_SUBGROUP_CONTRACT_CASES:
+            if rule.source_op is not operation:
+                continue
+            rule.validate(SPIRV_LOGICAL_CORE_DESCRIPTOR_SET)
+            pattern = next(
+                guard.type_pattern
+                for guard in rule.guards
+                if guard.kind is GuardKind.VALUE_TYPE and guard.field == "value"
+            )
+            shapes[operation].add((pattern.elements, pattern.lanes))
+            if operation is kernel.kernel_subgroup_shuffle:
+                continue
+            exchanges = [
+                emit for emit in rule.emit if "group_non_uniform" in emit.descriptor.key
+            ]
+            assert len(exchanges) == 1
+            exchange = exchanges[0]
+            if operation is kernel.kernel_subgroup_broadcast_first:
+                assert (
+                    ".op_group_non_uniform_broadcast_first." in exchange.descriptor.key
+                )
+                assert set(exchange.operands) == {"value"}
+                assert exchange.descriptor.feature_mask_words[0] & feature_bits_value(
+                    ("group_non_uniform_ballot",)
+                )
+            else:
+                # The selector may vary per invocation. OpBroadcast's dynamic
+                # uniformity requirement is stronger than the High contract.
+                assert ".op_group_non_uniform_shuffle.index." in exchange.descriptor.key
+                selector = next(
+                    emit
+                    for emit in rule.emit
+                    if emit.descriptor.key == "spirv.op_bitcast.i32.u32"
+                )
+                assert selector.operands["input"] == ValueRef.operand("lane")
+                assert exchange.operands["offset"] == selector.results["dst"]
+    assert (
+        shapes[kernel.kernel_subgroup_shuffle]
+        == shapes[kernel.kernel_subgroup_broadcast]
+    )
+    assert (
+        shapes[kernel.kernel_subgroup_shuffle]
+        == shapes[kernel.kernel_subgroup_broadcast_first]
+    )
+
+
+def test_native_bfloat_carriers_need_neither_int16_nor_extended_subgroup_types() -> (
+    None
+):
+    observed = set()
+    for rule in SPIRV_SUBGROUP_CONTRACT_CASES:
+        if rule.source_op not in (
+            kernel.kernel_subgroup_shuffle,
+            kernel.kernel_subgroup_broadcast,
+            kernel.kernel_subgroup_broadcast_first,
+        ):
+            continue
+        pattern = next(
+            guard.type_pattern
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_TYPE and guard.field == "value"
+        )
+        if pattern.elements != ("bf16",):
+            continue
+        observed.add(pattern.lanes)
+        required = 0
+        for guard in rule.guards:
+            if guard.kind is GuardKind.DESCRIPTOR_AVAILABLE:
+                required |= guard.descriptor.feature_mask_words[0]
+        assert required & feature_bits_value(("bfloat16_type_khr",))
+        assert not required & feature_bits_value(("int16", "subgroup_extended_types"))
+        suffix = "v2i32" if pattern.lanes in (3, 4) else "i32"
+        assert rule.descriptor.key.endswith("." + suffix)
+        bitcasts = [
+            emit
+            for emit in rule.emit
+            if "bf16" in emit.descriptor.key and ".op_bitcast." in emit.descriptor.key
+        ]
+        padded = "v4bf16" if pattern.lanes in (3, 4) else "v2bf16"
+        assert [emit.descriptor.key for emit in bitcasts] == [
+            f"spirv.op_bitcast.{padded}.{suffix}",
+            f"spirv.op_bitcast.{suffix}.{padded}",
+        ]
+        exchange = next(
+            emit for emit in rule.emit if emit.descriptor == rule.descriptor
+        )
+        assert exchange.operands["value"] == bitcasts[0].results["dst"]
+        assert bitcasts[1].operands["input"] == exchange.results["dst"]
+    assert observed == {None, 1, 2, 3, 4}
 
 
 def test_reduction_family_covers_native_types_shapes_and_modes() -> None:

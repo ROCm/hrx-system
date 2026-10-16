@@ -1487,8 +1487,9 @@ static const loom_target_legalizer_rule_t kKernelLegalizerRules[] = {
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
-        .first_operand_element_types =
-            LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_ADDRESS |
+                                       LOOM_SCALAR_TYPE_SET_INTEGER |
+                                       LOOM_SCALAR_TYPE_SET_FLOAT,
         .match = loom_kernel_match_subgroup_shuffle,
         .legalize = loom_kernel_target_legalize_subgroup_shuffle,
     },

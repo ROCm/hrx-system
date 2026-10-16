@@ -245,6 +245,44 @@ kernel.def @subgroup_carrier_i1x4() {
   kernel.return
 }
 
+// Seven predicates require bit packing beyond the native four-lane bool type.
+kernel.def @subgroup_carrier_i1x7() {
+  %unit = index.constant 1 : index
+  %items = index.constant 96 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %cluster = index.constant 32 : index
+  %relative_lane = index.rem %item, %cluster : index
+  %input_view = buffer.view %input[%base] : buffer -> view<32x7xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<3x96x7xi32>
+  %source = vector.load<volatile> %input_view[%relative_lane, 0] : view<32x7xi32> -> vector<7xi32>
+  %predicate = vector.trunci %source : vector<7xi32> to vector<7xi1>
+  %bounded = index.assume %selected [range(%selected, 0, 31)] : index
+  %lane = index.cast %bounded : index to i32
+  %named = kernel.subgroup.broadcast %predicate from %lane : vector<7xi1>, i32
+  %named_bits = vector.extui %named : vector<7xi1> to vector<7xi32>
+  vector.store %named_bits, %output_view[0, %item, 0] : vector<7xi32>, view<3x96x7xi32>
+  %width = scalar.constant 32 : i32
+  %shuffled, %valid = kernel.subgroup.shuffle<index> %predicate, %lane, %width : vector<7xi1>, i32, i32
+  scf.if %valid {
+    %shuffled_bits = vector.extui %shuffled : vector<7xi1> to vector<7xi32>
+    vector.store %shuffled_bits, %output_view[1, %item, 0] : vector<7xi32>, view<3x96x7xi32>
+  }
+  %first_lane = index.constant 5 : index
+  %end_lane = index.constant 10 : index
+  %above = index.cmp uge, %relative_lane, %first_lane : index
+  %below = index.cmp ult, %relative_lane, %end_lane : index
+  %active = scalar.andi %above, %below : i1
+  scf.if %active {
+    %first = kernel.subgroup.broadcast.first %predicate : vector<7xi1>
+    %first_bits = vector.extui %first : vector<7xi1> to vector<7xi32>
+    vector.store %first_bits, %output_view[2, %item, 0] : vector<7xi32>, view<3x96x7xi32>
+  }
+  kernel.return
+}
+
 func.def inline @subgroup_predicate_carrier_oracle(%selected: index, %components: index, %input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %c0 = index.constant 0 : index
@@ -314,6 +352,26 @@ check.scenario @subgroup_carrier_i1_values {
       check.expect.bitwise actual(%output) expected(%output) : tensor<288xi32>
       check.expect.bitwise actual(%prefix) expected(%prefix) : tensor<16xi32>
       check.expect.bitwise actual(%suffix) expected(%suffix) : tensor<16xi32>
+    }
+  }
+  check.return
+}
+
+func.def @subgroup_carrier_i1x7_oracle(%selected: index, %input: buffer, %output: buffer) {
+  %components = index.constant 7 : index
+  func.call @subgroup_predicate_carrier_oracle(%selected, %components, %input, %output) : (index, index, buffer, buffer)
+  func.return
+}
+
+check.scenario @subgroup_carrier_i1x7_values {
+  check.trial[32](%selected: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<224xi32>
+    %storage = check.generate.fill value(-123) : tensor<2048xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<2048xi32> -> tensor<2016xi32>
+    check.compare<@subgroup_carrier_i1x7, @subgroup_carrier_i1x7_oracle>(%selected, %input, %output) : (index, tensor<224xi32>, tensor<2016xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<224xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<2048xi32>
     }
   }
   check.return

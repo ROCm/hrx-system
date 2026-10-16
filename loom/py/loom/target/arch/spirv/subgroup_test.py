@@ -11,6 +11,7 @@ from loom.target.arch.spirv.subgroup import (
     SPIRV_SUBGROUP_BALLOT_BIT_EXTRACT_INSTRUCTION,
     SPIRV_SUBGROUP_BALLOT_INSTRUCTION,
     SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,
+    SPIRV_SUBGROUP_BROADCAST_FIRST_INSTRUCTIONS,
     SPIRV_SUBGROUP_SHUFFLES,
     SPIRV_SUBGROUP_U32_TYPE,
     SPIRV_SUBGROUP_U64_TYPE,
@@ -116,7 +117,6 @@ def test_shuffle_rows_cover_every_native_type_shape_and_mode() -> None:
             "i64",
             "offset64",
             "f16",
-            "bf16",
             "f32",
             "f64",
         )
@@ -135,7 +135,35 @@ def test_shuffle_extended_payloads_require_device_admission() -> None:
             else value_type
         )
         assert bool(row.instruction.feature_bits & extended_types) == (
-            component.suffix in ("i8", "i16", "i64", "offset64", "f16", "bf16")
+            component.suffix in ("i8", "i16", "i64", "offset64", "f16")
+        )
+
+
+def test_bfloat_payloads_never_claim_native_group_instructions() -> None:
+    assert all("bf16" not in row.instruction.key for row in SPIRV_SUBGROUP_SHUFFLES)
+    assert all(
+        "bf16" not in row.key for row in SPIRV_SUBGROUP_BROADCAST_FIRST_INSTRUCTIONS
+    )
+
+
+def test_first_active_broadcast_covers_native_payloads_with_ballot_capability() -> None:
+    indexed = {
+        row.instruction.result_type: row.instruction
+        for row in SPIRV_SUBGROUP_SHUFFLES
+        if row.mode == "index"
+    }
+    assert len(SPIRV_SUBGROUP_BROADCAST_FIRST_INSTRUCTIONS) == len(indexed)
+    for row in SPIRV_SUBGROUP_BROADCAST_FIRST_INSTRUCTIONS:
+        assert row.opcode == "LOOM_SPIRV_OP_GROUP_NON_UNIFORM_BROADCAST_FIRST"
+        assert row.packet_form == "LOOM_SPIRV_PACKET_FORM_GROUP_NON_UNIFORM_UNARY"
+        assert row.operand_names == ("value",)
+        assert row.operand_types == (row.result_type,)
+        assert row.feature_bits == (
+            feature_bits_value(("group_non_uniform_ballot",))
+            | (
+                indexed[row.result_type].feature_bits
+                & ~feature_bits_value(("group_non_uniform_shuffle",))
+            )
         )
 
 

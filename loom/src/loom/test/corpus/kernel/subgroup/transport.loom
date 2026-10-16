@@ -471,6 +471,81 @@ kernel.def @subgroup_transport_uniform() {
   kernel.return
 }
 
+// A seventeen-byte payload crosses a four-word exchange boundary. Both the
+// source read and the result write have an exact, unpadded memory footprint.
+kernel.def @subgroup_transport_f8e4m3_17() {
+  %unit = index.constant 1 : index
+  %items = index.constant 96 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %cluster = index.constant 32 : index
+  %relative_lane = index.rem %item, %cluster : index
+  %bounded = index.assume %selected [range(%selected, 0, 31)] : index
+  %source_lane = index.cast %bounded : index to i32
+  %input_view = buffer.view %input[%base] : buffer -> view<32x17xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<3x96x17xf8E4M3>
+  %value = vector.load<volatile> %input_view[%relative_lane, 0] : view<32x17xf8E4M3> -> vector<17xf8E4M3>
+  %named = kernel.subgroup.broadcast %value from %source_lane : vector<17xf8E4M3>, i32
+  vector.store %named, %output_view[0, %item, 0] : vector<17xf8E4M3>, view<3x96x17xf8E4M3>
+  %width = scalar.constant 32 : i32
+  %shuffled, %valid = kernel.subgroup.shuffle<index> %value, %source_lane, %width : vector<17xf8E4M3>, i32, i32
+  scf.if %valid {
+    vector.store %shuffled, %output_view[1, %item, 0] : vector<17xf8E4M3>, view<3x96x17xf8E4M3>
+  }
+  %first_lane = index.constant 5 : index
+  %end_lane = index.constant 10 : index
+  %above = index.cmp uge, %relative_lane, %first_lane : index
+  %below = index.cmp ult, %relative_lane, %end_lane : index
+  %active = scalar.andi %above, %below : i1
+  scf.if %active {
+    %first = kernel.subgroup.broadcast.first %value : vector<17xf8E4M3>
+    vector.store %first, %output_view[2, %item, 0] : vector<17xf8E4M3>, view<3x96x17xf8E4M3>
+  }
+  kernel.return
+}
+
+// Address elements preserve their target-selected carriers across native
+// packet boundaries. Both address domains round-trip the source word bits.
+kernel.def @subgroup_transport_address_5() {
+  %unit = index.constant 1 : index
+  %items = index.constant 96 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%selected: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %item = kernel.workitem.id<x> : index
+  %cluster = index.constant 32 : index
+  %relative_lane = index.rem %item, %cluster : index
+  %bounded = index.assume %selected [range(%selected, 0, 31)] : index
+  %source_lane = index.cast %bounded : index to i32
+  %input_view = buffer.view %input[%base] : buffer -> view<32x5xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<3x96x5xi32>
+  %words = vector.load<volatile> %input_view[%relative_lane, 0] : view<32x5xi32> -> vector<5xi32>
+  %indices = vector.index_cast %words : vector<5xi32> to vector<5xindex>
+  %offsets = vector.index_cast %words : vector<5xi32> to vector<5xoffset>
+  %named = kernel.subgroup.broadcast %indices from %source_lane : vector<5xindex>, i32
+  %named_words = vector.index_cast %named : vector<5xindex> to vector<5xi32>
+  vector.store %named_words, %output_view[0, %item, 0] : vector<5xi32>, view<3x96x5xi32>
+  %width = scalar.constant 32 : i32
+  %shuffled, %valid = kernel.subgroup.shuffle<index> %offsets, %source_lane, %width : vector<5xoffset>, i32, i32
+  scf.if %valid {
+    %shuffled_words = vector.index_cast %shuffled : vector<5xoffset> to vector<5xi32>
+    vector.store %shuffled_words, %output_view[1, %item, 0] : vector<5xi32>, view<3x96x5xi32>
+  }
+  %first_lane = index.constant 5 : index
+  %end_lane = index.constant 10 : index
+  %above = index.cmp uge, %relative_lane, %first_lane : index
+  %below = index.cmp ult, %relative_lane, %end_lane : index
+  %active = scalar.andi %above, %below : i1
+  scf.if %active {
+    %first = kernel.subgroup.broadcast.first %offsets : vector<5xoffset>
+    %first_words = vector.index_cast %first : vector<5xoffset> to vector<5xi32>
+    vector.store %first_words, %output_view[2, %item, 0] : vector<5xi32>, view<3x96x5xi32>
+  }
+  kernel.return
+}
+
 // Reproduce named, indexed, and first-active exchange as byte copies from the
 // same 32-lane input block consumed by each target cluster.
 func.def inline @subgroup_transport_bytes_oracle(%selected: index, %record_byte_count: index, %input: buffer, %output: buffer) {
@@ -555,6 +630,32 @@ func.def @subgroup_transport_f8e5m2_8_oracle(%selected: index, %input: buffer, %
   func.return
 }
 
+func.def @subgroup_transport_f8e4m3_17_oracle(%selected: index, %input: buffer, %output: buffer) {
+  %record_byte_count = index.constant 17 : index
+  func.call @subgroup_transport_bytes_oracle(%selected, %record_byte_count, %input, %output) : (index, index, buffer, buffer)
+  func.return
+}
+
+func.def @subgroup_transport_address_5_oracle(%selected: index, %input: buffer, %output: buffer) {
+  %record_byte_count = index.constant 20 : index
+  func.call @subgroup_transport_bytes_oracle(%selected, %record_byte_count, %input, %output) : (index, index, buffer, buffer)
+  func.return
+}
+
+check.scenario @subgroup_transport_address_5_values {
+  check.trial[32](%selected: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<160xi32>
+    %storage = check.generate.fill value(-123) : tensor<1472xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<1472xi32> -> tensor<1440xi32>
+    check.compare<@subgroup_transport_address_5, @subgroup_transport_address_5_oracle>(%selected, %input, %output) : (index, tensor<160xi32>, tensor<1440xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<160xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1472xi32>
+    }
+  }
+  check.return
+}
+
 func.def @subgroup_transport_f64_2_oracle(%selected: index, %input: buffer, %output: buffer) {
   %record_byte_count = index.constant 16 : index
   func.call @subgroup_transport_bytes_oracle(%selected, %record_byte_count, %input, %output) : (index, index, buffer, buffer)
@@ -600,6 +701,19 @@ check.scenario @subgroup_transport_i8_values {
       check.expect.bitwise actual(%output) expected(%output) : tensor<2016xi8>
       check.expect.bitwise actual(%prefix) expected(%prefix) : tensor<16xi8>
       check.expect.bitwise actual(%suffix) expected(%suffix) : tensor<16xi8>
+    }
+  }
+  check.return
+}
+
+check.scenario @subgroup_transport_f8e4m3_wide_values {
+  check.trial[32](%selected: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) period(256) : tensor<544xi8>
+    %storage = check.generate.fill value(-123) : tensor<4928xi8>
+    %output = check.tensor.view %storage offset(16) : tensor<4928xi8> -> tensor<4896xi8>
+    check.compare<@subgroup_transport_f8e4m3_17, @subgroup_transport_f8e4m3_17_oracle>(%selected, %input, %output) : (index, tensor<544xi8>, tensor<4896xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<544xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<4928xi8>
     }
   }
   check.return

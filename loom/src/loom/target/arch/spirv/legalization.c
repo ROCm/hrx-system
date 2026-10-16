@@ -12,6 +12,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
+#include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/value_types.h"
 #include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/packet_insert_legalization.h"
@@ -25,6 +26,183 @@ static bool loom_spirv_legalizer_descriptor_set_is_spirv(
   return descriptor_set != NULL &&
          descriptor_set->target_stable_id ==
              loom_spirv_logical_core_descriptor_set()->target_stable_id;
+}
+
+static loom_type_t loom_spirv_subgroup_packet_type(
+    loom_scalar_type_t element_type, uint32_t lane_count) {
+  return loom_type_shaped_1d(LOOM_TYPE_VECTOR, element_type,
+                             loom_dim_pack_static(lane_count), 0);
+}
+
+static iree_status_t loom_spirv_build_subgroup_exchange(
+    loom_builder_t* builder, const loom_op_t* source_op, loom_value_id_t value,
+    loom_type_t type, loom_op_t** out_op) {
+  switch (source_op->kind) {
+    case LOOM_OP_KERNEL_SUBGROUP_SHUFFLE:
+      return loom_kernel_subgroup_shuffle_build(
+          builder, loom_kernel_subgroup_shuffle_mode(source_op), value,
+          loom_kernel_subgroup_shuffle_offset(source_op),
+          loom_kernel_subgroup_shuffle_width(source_op), type,
+          source_op->location, out_op);
+    case LOOM_OP_KERNEL_SUBGROUP_BROADCAST:
+      return loom_kernel_subgroup_broadcast_build(
+          builder, value, loom_kernel_subgroup_broadcast_lane(source_op), type,
+          source_op->location, out_op);
+    case LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST:
+      return loom_kernel_subgroup_broadcast_first_build(
+          builder, value, type, source_op->location, out_op);
+    default:
+      IREE_ASSERT_UNREACHABLE("expected a subgroup transport operation");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+static iree_status_t loom_spirv_legalize_subgroup_payload(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (!loom_spirv_legalizer_descriptor_set_is_spirv(context->descriptor_set)) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t source = loom_op_operands(op)[0];
+  const loom_type_t source_type =
+      loom_module_value_type(context->module, source);
+  const bool is_vector = loom_type_is_vector(source_type);
+  if (is_vector && loom_type_dim_is_dynamic_at(source_type, 0)) {
+    return iree_ok_status();
+  }
+  const int64_t source_lane_count =
+      is_vector ? loom_type_dim_static_size_at(source_type, 0) : 1;
+  const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+  const bool is_address = element_type == LOOM_SCALAR_TYPE_INDEX ||
+                          element_type == LOOM_SCALAR_TYPE_OFFSET;
+  const bool native_bfloat =
+      element_type == LOOM_SCALAR_TYPE_BF16 &&
+      iree_all_bits_set(loom_target_legalization_context_bundle(context)
+                            ->config->contract_feature_bits,
+                        LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR);
+  // Address packets preserve their target-selected width. Native BF16 packets
+  // use the descriptor's pair packing, which needs no Int16 capability.
+  const bool preserve_element_type = is_address || native_bfloat;
+  // Rejected native packets have no further payload representation.
+  if ((element_type == LOOM_SCALAR_TYPE_I32 || preserve_element_type) &&
+      source_lane_count <= 4) {
+    return iree_ok_status();
+  }
+  const uint32_t element_bits = loom_scalar_type_bitwidth(element_type);
+  if (source_lane_count <= 0) {
+    return iree_ok_status();
+  }
+  const uint32_t packet_lanes =
+      preserve_element_type ? 4u : 128u / element_bits;
+  const uint64_t packet_count =
+      ((uint64_t)source_lane_count - 1u) / packet_lanes + 1u;
+  // The resulting concatenation has one operand per packet.
+  if (packet_count > UINT16_MAX) {
+    return iree_ok_status();
+  }
+  loom_value_id_t single_packet = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t* packets = &single_packet;
+  if (packet_count > 1) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->arena, packet_count, sizeof(*packets), (void**)&packets));
+  }
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  loom_value_id_t valid = LOOM_VALUE_ID_INVALID;
+  const int64_t zero = 0;
+  for (uint32_t i = 0; i < packet_count; ++i) {
+    const int64_t offset = (int64_t)i * packet_lanes;
+    const uint32_t lanes = iree_min(source_lane_count - offset, packet_lanes);
+    const uint32_t word_count = (lanes * element_bits + 31u) / 32u;
+    const uint32_t padded_lanes =
+        preserve_element_type ? lanes : word_count * 32u / element_bits;
+    const loom_type_t packet_type =
+        loom_spirv_subgroup_packet_type(element_type, lanes);
+    const loom_type_t padded_type =
+        loom_spirv_subgroup_packet_type(element_type, padded_lanes);
+    const loom_type_t carrier_type =
+        preserve_element_type
+            ? packet_type
+            : loom_spirv_subgroup_packet_type(LOOM_SCALAR_TYPE_I32, word_count);
+    loom_value_id_t packet = source;
+    loom_op_t* current = NULL;
+    if (!is_vector) {
+      IREE_RETURN_IF_ERROR(loom_vector_splat_build(builder, source, packet_type,
+                                                   op->location, &current));
+      packet = loom_vector_splat_result(current);
+    } else if (packet_count > 1) {
+      IREE_RETURN_IF_ERROR(loom_vector_slice_build(builder, source, NULL, 0,
+                                                   &offset, 1, packet_type,
+                                                   op->location, &current));
+      packet = loom_vector_slice_result(current);
+    }
+    if (lanes != padded_lanes) {
+      // Padding repeats captured bits; it neither reads past a source memory
+      // footprint nor contributes to the observable result.
+      IREE_RETURN_IF_ERROR(loom_vector_extract_build(
+          builder, packet, NULL, 0, &zero, 1, loom_type_scalar(element_type),
+          op->location, &current));
+      const loom_value_id_t fill = loom_vector_extract_result(current);
+      IREE_RETURN_IF_ERROR(loom_vector_splat_build(
+          builder, fill,
+          loom_spirv_subgroup_packet_type(element_type, padded_lanes - lanes),
+          op->location, &current));
+      const loom_value_id_t pieces[] = {packet,
+                                        loom_vector_splat_result(current)};
+      IREE_RETURN_IF_ERROR(
+          loom_vector_concat_build(builder, 0, pieces, IREE_ARRAYSIZE(pieces),
+                                   padded_type, op->location, &current));
+      packet = loom_vector_concat_result(current);
+    }
+    if (!preserve_element_type) {
+      IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+          builder, packet, padded_type, carrier_type, op->location, &current));
+      packet = loom_vector_bitcast_result(current);
+    }
+    IREE_RETURN_IF_ERROR(loom_spirv_build_subgroup_exchange(
+        builder, op, packet, carrier_type, &current));
+    if (i == 0 && loom_kernel_subgroup_shuffle_isa(op)) {
+      valid = loom_kernel_subgroup_shuffle_valid(current);
+    }
+    packet = loom_op_results(current)[0];
+    if (!preserve_element_type) {
+      IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+          builder, packet, carrier_type, padded_type, op->location, &current));
+      packet = loom_vector_bitcast_result(current);
+    }
+    if (!is_vector) {
+      IREE_RETURN_IF_ERROR(loom_vector_extract_build(builder, packet, NULL, 0,
+                                                     &zero, 1, source_type,
+                                                     op->location, &current));
+      packet = loom_vector_extract_result(current);
+    } else if (lanes != padded_lanes) {
+      IREE_RETURN_IF_ERROR(loom_vector_slice_build(builder, packet, NULL, 0,
+                                                   &zero, 1, packet_type,
+                                                   op->location, &current));
+      packet = loom_vector_slice_result(current);
+    }
+    packets[i] = packet;
+  }
+  loom_value_id_t replacements[2] = {packets[0], valid};
+  if (packet_count > 1) {
+    loom_op_t* concat = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_concat_build(
+        builder, 0, packets, packet_count, source_type, op->location, &concat));
+    replacements[0] = loom_vector_concat_result(concat);
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, replacements, op->result_count, checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, replacements, op->result_count));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_spirv_legalize_vector_to_scalar(
@@ -325,6 +503,21 @@ static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
         .root_kind = LOOM_OP_KERNEL_WORKGROUP_REDUCE,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
         .legalize = loom_spirv_legalize_bfloat_collective,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
+        .legalize = loom_spirv_legalize_subgroup_payload,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_BROADCAST,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
+        .legalize = loom_spirv_legalize_subgroup_payload,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
+        .legalize = loom_spirv_legalize_subgroup_payload,
     },
     {
         .root_kind = LOOM_OP_VECTOR_INSERT,

@@ -160,6 +160,10 @@ def _shuffle_rows() -> tuple[SpirvSubgroupShuffle, ...]:
     )
     rows = []
     for component in ORDINARY_VECTOR_COMPONENT_TYPES:
+        # SPV_KHR_bfloat16 permits composite and bitcast operations, but not
+        # subgroup instructions. BF16 transport uses integer payload words.
+        if component.suffix == "bf16":
+            continue
         extended = (
             component.kind
             in (
@@ -207,6 +211,30 @@ def _shuffle_rows() -> tuple[SpirvSubgroupShuffle, ...]:
 
 
 SPIRV_SUBGROUP_SHUFFLES = _shuffle_rows()
+
+# First-active broadcast has the same payload family as indexed shuffle, but
+# consumes no selector and belongs to the ballot capability.
+SPIRV_SUBGROUP_BROADCAST_FIRST_INSTRUCTIONS = tuple(
+    SpirvSubgroupInstruction(
+        key=f"spirv.op_group_non_uniform_broadcast_first.{row.instruction.result_type.suffix}",
+        mnemonic=f"OpGroupNonUniformBroadcastFirst.{row.instruction.result_type.suffix}",
+        opcode="LOOM_SPIRV_OP_GROUP_NON_UNIFORM_BROADCAST_FIRST",
+        packet_form="LOOM_SPIRV_PACKET_FORM_GROUP_NON_UNIFORM_UNARY",
+        result_type=row.instruction.result_type,
+        operand_names=("value",),
+        operand_types=(row.instruction.result_type,),
+        feature_atoms=(
+            "group_non_uniform_ballot",
+            *(
+                atom
+                for atom in row.instruction.feature_atoms
+                if atom == "subgroup_extended_types"
+            ),
+        ),
+    )
+    for row in SPIRV_SUBGROUP_SHUFFLES
+    if row.mode == "index"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,6 +394,7 @@ SPIRV_SUBGROUP_INSTRUCTIONS = (
     SPIRV_SUBGROUP_BALLOT_BIT_EXTRACT_INSTRUCTION,
     *SPIRV_SUBGROUP_VOTE_INSTRUCTIONS,
     *(row.instruction for row in SPIRV_SUBGROUP_SHUFFLES),
+    *SPIRV_SUBGROUP_BROADCAST_FIRST_INSTRUCTIONS,
     *(row.instruction for row in SPIRV_SUBGROUP_ARITHMETIC),
 )
 

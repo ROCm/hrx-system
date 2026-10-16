@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from loom.dialect.kernel import defs as kernel
 from loom.target.arch.spirv.contracts.descriptor_rule import (
     IntegerRecipe,
@@ -44,6 +46,8 @@ from loom.target.contracts import (
     Guard,
     RecipeRule,
     Scalar,
+    SourceValueKind,
+    TypePattern,
     ValueRef,
     Vector,
 )
@@ -237,42 +241,65 @@ def _vote_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _TransportPayload:
+    # Authored scalar or rank-one vector value admitted by this carrier.
+    pattern: TypePattern
+    # Native subgroup operand/result type, independent of the source encoding.
+    suffix: str
+    # Bit-preserving preparation ending in the temporary named payload.
+    pack: tuple[EmitDescriptorOp, ...] = ()
+    # Bit-preserving reconstruction from the exchanged_payload temporary.
+    unpack: tuple[EmitDescriptorOp, ...] = ()
+
+
+def _transport_emits(
+    payload: _TransportPayload, descriptor: Descriptor, selector: str | None
+) -> list[EmitDescriptorOp]:
+    emits = list(payload.pack)
+    operands = {
+        "value": ValueRef.temporary("payload")
+        if payload.pack
+        else ValueRef.operand("value")
+    }
+    if selector is not None:
+        unsigned_offset = ValueRef.temporary("unsigned_offset")
+        emits.append(
+            emit_descriptor_op(
+                descriptor=_BITCAST_I32_TO_U32,
+                operands={"input": ValueRef.operand(selector)},
+                results={"dst": unsigned_offset},
+                result_types={"dst": DescriptorResultType()},
+            )
+        )
+        operands["offset"] = unsigned_offset
+    emits.append(
+        emit_descriptor_op(
+            descriptor=descriptor,
+            operands=operands,
+            results={
+                "dst": (
+                    ValueRef.temporary("exchanged_payload")
+                    if payload.unpack
+                    else ValueRef.result("result")
+                )
+            },
+            result_types={"dst": DescriptorResultType()} if payload.unpack else None,
+        )
+    )
+    emits.extend(payload.unpack)
+    return emits
+
+
 def _shuffle_rule(
     row: SpirvSubgroupShuffle,
-    source_lanes: int,
+    payload: _TransportPayload,
     *,
     preserve_valid: bool,
 ) -> DescriptorRule:
-    instruction = row.instruction
-    value_type = instruction.result_type
-    component = (
-        value_type.component_type
-        if isinstance(value_type, OrdinaryVectorType)
-        else value_type
-    )
-    pattern = (
-        Scalar(component.source_types)
-        if source_lanes == 0
-        else Vector(component.source_types, lanes=source_lanes)
-    )
-    descriptor = logical_core_descriptor(instruction.key)
+    descriptor = logical_core_descriptor(row.instruction.key)
+    emits = _transport_emits(payload, descriptor, "offset")
     unsigned_offset = ValueRef.temporary("unsigned_offset")
-    emits: list[EmitDescriptorOp] = [
-        emit_descriptor_op(
-            descriptor=_BITCAST_I32_TO_U32,
-            operands={"input": ValueRef.operand("offset")},
-            results={"dst": unsigned_offset},
-            result_types={"dst": DescriptorResultType()},
-        ),
-        emit_descriptor_op(
-            descriptor=descriptor,
-            operands={
-                "value": ValueRef.operand("value"),
-                "offset": unsigned_offset,
-            },
-            results={"dst": ValueRef.result("result")},
-        ),
-    ]
     if preserve_valid:
         lane_i32 = ValueRef.temporary("lane_i32")
         source_i32 = ValueRef.temporary("source_i32")
@@ -405,7 +432,7 @@ def _shuffle_rule(
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("mode", row.mode),
-            Guard.value_type("value", pattern),
+            Guard.value_type("value", payload.pattern),
             Guard.value_type("offset", Scalar("i32")),
             Guard.value_i64_equals_target_subgroup_size("width"),
             *((Guard.value_no_uses("valid"),) if not preserve_valid else ()),
@@ -415,18 +442,185 @@ def _shuffle_rule(
     )
 
 
-def _shuffle_rules() -> tuple[DescriptorRule, ...]:
-    rules = []
+def _native_bfloat_transport(
+    source_lanes: int,
+) -> tuple[str, tuple[EmitDescriptorOp, ...], tuple[EmitDescriptorOp, ...]]:
+    """Packs BF16 pairs into integer words without requiring Int16."""
+    lanes = max(1, source_lanes)
+    padded_lanes = 2 if lanes <= 2 else 4
+    carrier_suffix = "i32" if padded_lanes == 2 else "v2i32"
+    pack: list[EmitDescriptorOp] = []
+    unpack: list[EmitDescriptorOp] = []
+    source = ValueRef.operand("value")
+    padded = source
+
+    def emit(
+        steps: list[EmitDescriptorOp],
+        key: str,
+        operands: dict[str, ValueRef],
+        result: ValueRef,
+        **immediates: int,
+    ) -> None:
+        steps.append(
+            emit_descriptor_op(
+                descriptor=logical_core_descriptor(f"spirv.op_{key}"),
+                operands=operands,
+                results={"dst": result},
+                result_types=(
+                    {"dst": DescriptorResultType()}
+                    if result.kind is SourceValueKind.TEMPORARY
+                    else None
+                ),
+                immediates=immediates,
+            )
+        )
+
+    if lanes in (1, 3):
+        elements = [source]
+        if lanes == 3:
+            elements = [ValueRef.temporary(f"element{index}") for index in range(3)]
+            for index, element in enumerate(elements):
+                emit(
+                    pack,
+                    "composite_extract.v3bf16.bf16",
+                    {"composite": source},
+                    element,
+                    component_index=index,
+                )
+        padded = ValueRef.temporary("padded_bfloat")
+        emit(
+            pack,
+            f"composite_construct.v{padded_lanes}bf16",
+            {
+                f"component{index}": elements[min(index, lanes - 1)]
+                for index in range(padded_lanes)
+            },
+            padded,
+        )
+    emit(
+        pack,
+        f"bitcast.v{padded_lanes}bf16.{carrier_suffix}",
+        {"input": padded},
+        ValueRef.temporary("payload"),
+    )
+    restored = (
+        ValueRef.result("result")
+        if lanes in (2, 4)
+        else ValueRef.temporary("restored_bfloat")
+    )
+    emit(
+        unpack,
+        f"bitcast.{carrier_suffix}.v{padded_lanes}bf16",
+        {"input": ValueRef.temporary("exchanged_payload")},
+        restored,
+    )
+    if lanes == 1:
+        emit(
+            unpack,
+            "composite_extract.v2bf16.bf16",
+            {"composite": restored},
+            ValueRef.result("result"),
+            component_index=0,
+        )
+    elif lanes == 3:
+        elements = [ValueRef.temporary(f"restored{index}") for index in range(3)]
+        for index, element in enumerate(elements):
+            emit(
+                unpack,
+                "composite_extract.v4bf16.bf16",
+                {"composite": restored},
+                element,
+                component_index=index,
+            )
+        emit(
+            unpack,
+            "composite_construct.v3bf16",
+            {f"component{index}": element for index, element in enumerate(elements)},
+            ValueRef.result("result"),
+        )
+    return carrier_suffix, tuple(pack), tuple(unpack)
+
+
+def _transport_payloads() -> tuple[_TransportPayload, ...]:
+    payloads = []
+    # Native BF16 must precede the scalar software-carrier alternative.
+    for source_lanes in (0, 1, 2, 3, 4):
+        suffix, pack, unpack = _native_bfloat_transport(source_lanes)
+        pattern = (
+            Scalar("bf16") if source_lanes == 0 else Vector("bf16", lanes=source_lanes)
+        )
+        payloads.append(_TransportPayload(pattern, suffix, pack, unpack))
     for row in SPIRV_SUBGROUP_SHUFFLES:
+        if row.mode != "index":
+            continue
         value_type = row.instruction.result_type
+        component = (
+            value_type.component_type
+            if isinstance(value_type, OrdinaryVectorType)
+            else value_type
+        )
         lane_counts = (
             (value_type.lane_count,)
             if isinstance(value_type, OrdinaryVectorType)
             else (0, 1)
         )
         for source_lanes in lane_counts:
-            rules.append(_shuffle_rule(row, source_lanes, preserve_valid=False))
-            rules.append(_shuffle_rule(row, source_lanes, preserve_valid=True))
+            source_types = component.source_types
+            if source_lanes in (0, 1):
+                if component.suffix == "i8":
+                    source_types = (*source_types, "f8E4M3", "f8E5M2")
+                elif component.suffix == "i32":
+                    source_types = (*source_types, "bf16")
+            pattern = (
+                Scalar(source_types)
+                if source_lanes == 0
+                else Vector(source_types, lanes=source_lanes)
+            )
+            payloads.append(_TransportPayload(pattern, value_type.suffix))
+    return tuple(payloads)
+
+
+def _broadcast_rule(payload: _TransportPayload, *, first: bool) -> DescriptorRule:
+    # A named source lane can vary across invocations in High. Indexed shuffle
+    # preserves that contract; SPIR-V Broadcast requires a uniform selector.
+    descriptor = logical_core_descriptor(
+        f"spirv.op_group_non_uniform_broadcast_first.{payload.suffix}"
+        if first
+        else f"spirv.op_group_non_uniform_shuffle.index.{payload.suffix}"
+    )
+    emits = _transport_emits(payload, descriptor, None if first else "lane")
+    return DescriptorRule(
+        source_op=kernel.kernel_subgroup_broadcast_first
+        if first
+        else kernel.kernel_subgroup_broadcast,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("value", payload.pattern),
+            *((Guard.value_type("lane", Scalar("i32")),) if not first else ()),
+            *descriptor_feature_guards(*(step.descriptor for step in emits)),
+        ),
+        emit=tuple(emits),
+    )
+
+
+def _transport_rules() -> tuple[DescriptorRule, ...]:
+    rules = []
+    rows = {
+        (row.mode, row.instruction.result_type.suffix): row
+        for row in SPIRV_SUBGROUP_SHUFFLES
+    }
+    for payload in _transport_payloads():
+        for mode in ("index", "xor", "up", "down"):
+            rules.extend(
+                _shuffle_rule(
+                    rows[mode, payload.suffix],
+                    payload,
+                    preserve_valid=preserve_valid,
+                )
+                for preserve_valid in (False, True)
+            )
+        rules.append(_broadcast_rule(payload, first=False))
+        rules.append(_broadcast_rule(payload, first=True))
     return tuple(rules)
 
 
@@ -640,7 +834,7 @@ SPIRV_SUBGROUP_CONTRACT_CASES: tuple[ContractCase, ...] = (
     _ballot_rule("i32", 32, active_mask=True),
     _ballot_rule("i64", 64, active_mask=True),
     *_vote_rules(),
-    *_shuffle_rules(),
+    *_transport_rules(),
     *_arithmetic_rules(),
     *_extrema_rules(),
     *_workgroup_rules(),
