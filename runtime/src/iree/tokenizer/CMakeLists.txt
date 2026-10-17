@@ -232,6 +232,20 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    tokenizer_offsets_test
+  SRCS
+    "tokenizer_offsets_test.cc"
+  DEPS
+    ::model
+    ::tokenizer
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer::format::huggingface::tokenizer_json
+)
+
+iree_cc_test(
+  NAME
     tokenizer_input_tokens_test
   SRCS
     "tokenizer_input_tokens_test.cc"

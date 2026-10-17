@@ -184,65 +184,21 @@ static inline void iree_tokenizer_ring_fixup_write_wrap(
   }
 }
 
-// Returns a contiguous view of data from segmenter_view_start to
-// write_position.
-//
-// DOUBLE-BUFFER MODE (current implementation):
-// If data spans the wrap boundary, the wrap-around portion [0, physical_write)
-// is copied to the mirror region [capacity, capacity + physical_write) to
-// provide contiguous access. The allocation must be 2x logical capacity.
-//
-// Future modes (compile-time selection, not yet implemented):
-// - MEMMOVE: Shift data to buffer start instead of copying to mirror.
-//   Trades 2x allocation for occasional data movement.
-// - MAGIC: Use MMU page mapping for zero-copy contiguous access.
-//   Requires platform-specific support, best for large persistent buffers.
-//
-// The returned view is valid until the next ring write operation.
-static iree_string_view_t iree_tokenizer_ring_get_segment_view(
-    iree_tokenizer_encode_state_t* state) {
-  // Guard against invariant violation: segmenter_view_start must not exceed
-  // write_position. Check BEFORE subtraction to avoid underflow.
-  if (state->segmenter_view_start >= state->write_position) {
-    return iree_make_string_view(NULL, 0);
-  }
-  iree_host_size_t total_length =
-      state->write_position - state->segmenter_view_start;
-
+// Returns a contiguous view of [start, end) in logical ring coordinates.
+// The mirrored bytes remain valid until the next write to their source region.
+static iree_string_view_t iree_tokenizer_ring_get_view(
+    iree_tokenizer_encode_state_t* state, iree_host_size_t start,
+    iree_host_size_t end) {
+  iree_host_size_t length = end - start;
   iree_host_size_t capacity = state->capacity_mask + 1;
-  iree_host_size_t physical_segment = iree_tokenizer_ring_to_physical(
-      state->segmenter_view_start, state->capacity_mask);
-  iree_host_size_t physical_write = iree_tokenizer_ring_to_physical(
-      state->write_position, state->capacity_mask);
-
-  // If data doesn't wrap (write is strictly after segment), return direct view.
-  if (physical_write > physical_segment) {
-    return iree_make_string_view(
-        (const char*)state->transform_buffer.data + physical_segment,
-        total_length);
-  }
-
-  // Data wraps around buffer end. Copy wrap-around portion to mirror region
-  // to provide contiguous access. Mirror region is at [capacity, 2*capacity).
-  //
-  // Before: [wrap_data...][...main_data]
-  //         ^             ^
-  //         0             physical_segment
-  //
-  // After:  [wrap_data...][...main_data][wrap_copy...]
-  //         ^             ^             ^
-  //         0             physical_segment  capacity (mirror)
-  //
-  // View starts at physical_segment and extends into mirror region.
-  iree_host_size_t wrap_length = physical_write;
-  if (wrap_length > 0) {
+  iree_host_size_t physical_start = start & state->capacity_mask;
+  if (physical_start + length > capacity) {
+    iree_host_size_t wrap_length = physical_start + length - capacity;
     memcpy(state->transform_buffer.data + capacity,
            state->transform_buffer.data, wrap_length);
   }
-
   return iree_make_string_view(
-      (const char*)state->transform_buffer.data + physical_segment,
-      total_length);
+      (const char*)state->transform_buffer.data + physical_start, length);
 }
 
 //===----------------------------------------------------------------------===//
@@ -994,7 +950,7 @@ iree_status_t iree_tokenizer_encode_state_initialize(
   // Allocation must be a power of two. Logical capacity is half the allocation:
   // first half is the working buffer, second half is the mirror region for
   // contiguous wrap-spanning access (see
-  // iree_tokenizer_ring_get_segment_view).
+  // iree_tokenizer_ring_get_view).
   //
   // Minimum allocation is 2 * IREE_UNICODE_UTF8_MAX_BYTE_LENGTH = 8 bytes,
   // ensuring the logical capacity can hold at least one complete UTF-8
@@ -1216,33 +1172,22 @@ static iree_status_t iree_tokenizer_encode_ring_as_segment(
 
   // An empty final span still retires model state after all accepted bytes
   // have been reclaimed. Storage ownership and span lifetime are independent.
-  iree_host_size_t data_length = end_position - state->read_position;
-  iree_host_size_t capacity = state->capacity_mask + 1;
-  iree_host_size_t physical_read = state->read_position & state->capacity_mask;
-  iree_host_size_t physical_write = end_position & state->capacity_mask;
-
-  // Mirror copy if data wraps around the physical buffer end.
-  if (data_length > 0 && physical_write <= physical_read &&
-      physical_write > 0) {
-    memcpy(state->transform_buffer.data + capacity,
-           state->transform_buffer.data, physical_write);
-  }
-
+  iree_string_view_t view =
+      iree_tokenizer_ring_get_view(state, state->read_position, end_position);
   iree_tokenizer_segment_t segment = {
-      .start = physical_read,
-      .end = physical_read + data_length,
+      .start = state->read_position,
+      .end = end_position,
   };
   iree_tokenizer_segment_list_t segment_list = {
       .count = 1,
       .values = &segment,
       .last_is_partial = is_partial,
+      .buffer_offset = state->read_position,
   };
 
   iree_host_size_t segments_consumed = 0;
   IREE_RETURN_IF_ERROR(iree_tokenizer_model_state_encode(
-      state->model_state,
-      iree_make_const_byte_span(state->transform_buffer.data,
-                                state->transform_buffer.data_length),
+      state->model_state, iree_make_const_byte_span(view.data, view.size),
       segment_list, sub_output, &segments_consumed, out_tokens_written));
   *out_segment_complete = (segments_consumed > 0);
   return iree_ok_status();
@@ -1382,8 +1327,8 @@ iree_tokenizer_encode_state_match_post_norm_special_tokens(
   }
 
   // Get the normalized text view (segmenter_view_start to write_position).
-  iree_string_view_t normalized_text =
-      iree_tokenizer_ring_get_segment_view(state);
+  iree_string_view_t normalized_text = iree_tokenizer_ring_get_view(
+      state, state->segmenter_view_start, state->write_position);
   if (normalized_text.size == 0) {
     return IREE_TOKENIZER_POST_NORM_NO_MATCH;
   }
@@ -1592,25 +1537,13 @@ static iree_status_t iree_tokenizer_encode_state_pump(
   const iree_tokenizer_t* tokenizer = state->tokenizer;
   *out_made_progress = false;
 
-  // Reclaim ring bytes consumed by the segmenter when no segments are pending.
-  // The main reclamation path (below) only runs when segment_count >
-  // segments_consumed, but when both are 0 the segmenter may have consumed
-  // bytes (advancing segmenter_view_start) without producing segments. Those
-  // bytes are dead space that prevents ring position reset, which can leave
-  // the write position near the physical wrap boundary with insufficient
-  // contiguous space for the normalizer to write multi-byte codepoints.
+  // Reclaim bytes consumed without producing segments (for example whitespace).
+  // Logical positions continue across an empty ring; only stream reset starts
+  // a new coordinate space. Mirrored storage permits a full-capacity write at
+  // any physical position.
   if (state->segment_count == state->segments_consumed &&
       state->segmenter_view_start > state->read_position) {
     state->read_position = state->segmenter_view_start;
-    // Reset ring positions to 0 when empty for full contiguous write space.
-    if (state->read_position == state->write_position &&
-        state->segmenter_view_start == state->write_position &&
-        !(state->segmenter_state &&
-          iree_tokenizer_segmenter_state_has_pending(state->segmenter_state))) {
-      state->read_position = 0;
-      state->segmenter_view_start = 0;
-      state->write_position = 0;
-    }
   }
 
   // Tokenize pending segments. Segments are produced by the segmenter and
@@ -1618,21 +1551,16 @@ static iree_status_t iree_tokenizer_encode_state_pump(
   // buffer.
   if (state->segment_count > state->segments_consumed &&
       output->capacity > *total_tokens) {
-    // Convert segment positions from logical to physical for model access.
-    // Segments are guaranteed not to span the wrap boundary (contiguity).
+    // Keep logical segment positions intact across output backpressure. The
+    // segmenter's contiguous view has already prepared any mirrored bytes.
     iree_host_size_t pending_count =
         state->segment_count - state->segments_consumed;
     iree_tokenizer_segment_t* pending_base =
         &state->segments[state->segments_consumed];
-    for (iree_host_size_t i = 0; i < pending_count; ++i) {
-      iree_host_size_t length = pending_base[i].end - pending_base[i].start;
-      pending_base[i].start = pending_base[i].start & state->capacity_mask;
-      pending_base[i].end = pending_base[i].start + length;
-    }
-
     iree_tokenizer_segment_list_t pending_segments = {
         .count = pending_count,
         .values = pending_base,
+        .buffer_offset = state->read_position & ~state->capacity_mask,
     };
     iree_tokenizer_token_output_t sub_output = {
         .capacity = output->capacity - *total_tokens,
@@ -1645,9 +1573,8 @@ static iree_status_t iree_tokenizer_encode_state_pump(
 
     iree_host_size_t segments_consumed = 0;
     iree_host_size_t tokens_written = 0;
-    // Pass full physical allocation - model accesses physical positions,
-    // which may extend into the mirror region [capacity, 2*capacity) for
-    // segments that span the logical wrap boundary.
+    // The allocation's logical origin maps segments to storage, including the
+    // mirror region for segments crossing the physical wrap boundary.
     IREE_RETURN_IF_ERROR(iree_tokenizer_model_state_encode(
         state->model_state,
         iree_make_const_byte_span(state->transform_buffer.data,
@@ -1677,27 +1604,6 @@ static iree_status_t iree_tokenizer_encode_state_pump(
       // that were converted to segments and bytes consumed by the segmenter
       // without producing segments (buffering for word boundaries, etc.).
       state->read_position = state->segmenter_view_start;
-
-      // If the ring is now empty AND the segmenter has no pending state,
-      // reset all positions to 0. This ensures we always have full
-      // contiguous write space available, avoiding deadlock when write
-      // position approaches the physical boundary with less than 4 bytes
-      // remaining (not enough for a UTF-8 codepoint).
-      //
-      // The segmenter check is critical: when the segmenter holds a pending
-      // regex match, its finalize will produce segments relative to
-      // bytes_processed. The adjustment (+= segmenter_view_start) must cancel
-      // the chunk_base subtraction, which requires segmenter_view_start to
-      // equal bytes_processed (not 0).
-      if (state->read_position == state->write_position &&
-          state->segmenter_view_start == state->write_position &&
-          !(state->segmenter_state &&
-            iree_tokenizer_segmenter_state_has_pending(
-                state->segmenter_state))) {
-        state->read_position = 0;
-        state->segmenter_view_start = 0;
-        state->write_position = 0;
-      }
     }
   }
 
@@ -1813,8 +1719,8 @@ static iree_status_t iree_tokenizer_encode_state_pump(
   // being fed directly to the model. Continuing to feed the segmenter would
   // cause it to produce segments for bytes already processed, with positions
   // referencing reclaimed ring buffer space.
-  iree_string_view_t normalized_text =
-      iree_tokenizer_ring_get_segment_view(state);
+  iree_string_view_t normalized_text = iree_tokenizer_ring_get_view(
+      state, state->segmenter_view_start, state->write_position);
   if (normalized_text.size > 0) {
     normalized_text.size -= iree_unicode_utf8_incomplete_tail_length(
         normalized_text.data, normalized_text.size);
@@ -1868,7 +1774,7 @@ static iree_status_t iree_tokenizer_encode_state_pump(
     iree_host_size_t view_start = state->segmenter_view_start;
 
     // Convert segment offsets from relative to absolute (logical cumulative).
-    // These will be converted to physical when passed to model.
+    // Models receive these unchanged with the logical origin of their buffer.
     for (iree_host_size_t i = 0; i < segments_produced; ++i) {
       state->segments[state->segment_count + i].start += view_start;
       state->segments[state->segment_count + i].end += view_start;
@@ -2393,7 +2299,9 @@ static iree_status_t iree_tokenizer_encode_state_finalize_internal(
         };
         iree_host_size_t segments_produced = 0;
         status = iree_tokenizer_segmenter_state_finalize(
-            state->segmenter_state, iree_tokenizer_ring_get_segment_view(state),
+            state->segmenter_state,
+            iree_tokenizer_ring_get_view(state, state->segmenter_view_start,
+                                         state->write_position),
             segment_output, &segments_produced);
         if (iree_status_is_ok(status)) {
           for (iree_host_size_t i = 0; i < segments_produced; ++i) {

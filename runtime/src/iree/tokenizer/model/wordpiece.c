@@ -428,16 +428,19 @@ static iree_status_t iree_tokenizer_wordpiece_state_encode(
     const iree_tokenizer_segment_t* segment = &segments.values[segment_index];
 
     // Validate segment bounds.
-    if (segment->end > transform_buffer.data_length ||
-        segment->start > segment->end) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "segment bounds out of range: [%" PRIhsz
-                              ", %" PRIhsz ") in buffer of %" PRIhsz " bytes",
-                              segment->start, segment->end,
-                              transform_buffer.data_length);
+    if (segment->start < segments.buffer_offset ||
+        segment->start > segment->end ||
+        segment->end - segments.buffer_offset > transform_buffer.data_length) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "segment bounds out of range: [%" PRIhsz ", %" PRIhsz
+          ") in buffer at %" PRIhsz " of %" PRIhsz " bytes",
+          segment->start, segment->end, segments.buffer_offset,
+          transform_buffer.data_length);
     }
 
-    const uint8_t* segment_data = transform_buffer.data + segment->start;
+    const uint8_t* segment_data =
+        transform_buffer.data + (segment->start - segments.buffer_offset);
     iree_host_size_t segment_length = segment->end - segment->start;
 
     // Pre-compute all sub-tokens for this segment.
