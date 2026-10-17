@@ -274,9 +274,10 @@ a copyable curl request and accepted fields.
 
 With audio codecs enabled, upload WAV, MP3, or FLAC directly; the server
 converts sample rate and channel layout to the model's requirements. A PCM-only
-build accepts signed PCM16LE with explicit matching `rate` and `channels` in
-the file part's `Content-Type`. Changing the filename or MIME label does not
-convert unsupported bytes into an accepted format.
+build accepts signed PCM16LE with explicit `rate` and `channels` in the file
+part's `Content-Type`. It converts the sample rate; channels must match the model.
+Changing the filename or MIME label does not convert unsupported bytes into an
+accepted format.
 
 For a prepared recognition deployment named `recognizer`, set these values
 under **Admin Settings → Audio → Speech-to-Text** in Open WebUI:
