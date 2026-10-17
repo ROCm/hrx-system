@@ -271,6 +271,45 @@ TEST_F(TokenizerJsonTest, InferUnigramFromUnkId) {
   iree_tokenizer_builder_deinitialize(&builder);
 }
 
+TEST_F(TokenizerJsonTest, UnigramScorePrecision) {
+  // Exact IDs from tokenizers 0.23.3. The first case loses the winning path if
+  // imported scores narrow to float; the second loses it if sums use float.
+  const struct {
+    // Serialized model with the score boundary under test.
+    const char* json;
+    // Input whose competing paths differ at that boundary.
+    const char* text;
+    // Complete expected token sequence.
+    std::vector<int32_t> expected;
+  } cases[] = {
+      {R"({"model":{"type":"Unigram","unk_id":0,"vocab":[
+        ["<unk>",0],["a",-1],["b",-1],["ab",-2.00000001]]}})",
+       "ab",
+       {1, 2}},
+      {R"({"model":{"type":"Unigram","unk_id":0,"vocab":[
+        ["<unk>",0],["a",-16777216],["b",-1],["c",-1],["bc",-2]]}})",
+       "abc",
+       {1, 4}},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.text);
+    iree_tokenizer_t* tokenizer = nullptr;
+    IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+        iree_make_cstring_view(test.json), allocator_, &tokenizer));
+    std::unique_ptr<iree_tokenizer_t, decltype(&iree_tokenizer_free)> owner(
+        tokenizer, iree_tokenizer_free);
+    int32_t tokens[3];
+    iree_host_size_t count = 0;
+    IREE_ASSERT_OK(iree_tokenizer_encode(
+        tokenizer, iree_make_cstring_view(test.text),
+        IREE_TOKENIZER_ENCODE_FLAG_NONE,
+        iree_tokenizer_make_token_output(tokens, nullptr, nullptr,
+                                         IREE_ARRAYSIZE(tokens)),
+        allocator_, &count));
+    EXPECT_EQ(std::vector<int32_t>(tokens, tokens + count), test.expected);
+  }
+}
+
 TEST_F(TokenizerJsonTest, CannotInferTypeError) {
   // No type field and cannot infer from structure.
   iree_string_view_t json = IREE_SV(R"({

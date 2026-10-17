@@ -36,7 +36,7 @@ class UnigramModelTest : public ::testing::Test {
   // Helper to create model from vocab builder with default settings.
   void CreateModel(
       ScopedVocabBuilder& builder, iree_tokenizer_token_id_t unk_token_id,
-      float unk_score = -10.0f,
+      double unk_score = -10.0f,
       iree_tokenizer_unigram_flags_t flags = IREE_TOKENIZER_UNIGRAM_FLAG_NONE) {
     vocab_ = ScopedVocab(builder.Build());
     iree_tokenizer_model_t* raw_model = nullptr;

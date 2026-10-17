@@ -74,13 +74,13 @@ TEST(VocabTest, TokenTextOutOfRange) {
 
 TEST(VocabTest, TokenScore) {
   auto vocab = BuildTestVocab({"a", "b", "c"});
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, 0), 0.0f);
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, 1), 1.0f);
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, 2), 2.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, 0), 0.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, 1), 1.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, 2), 2.0f);
 
   // Out of range returns 0.
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, -1), 0.0f);
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, 999), 0.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, -1), 0.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, 999), 0.0f);
 
   iree_tokenizer_vocab_free(vocab);
 }
@@ -134,7 +134,7 @@ TEST(VocabTest, NullVocabAccessors) {
   // All accessors should handle null gracefully.
   EXPECT_EQ(iree_tokenizer_vocab_lookup(nullptr, IREE_SVL("x")), -1);
   EXPECT_EQ(iree_tokenizer_vocab_token_text(nullptr, 0).size, 0u);
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(nullptr, 0), 0.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(nullptr, 0), 0.0f);
   EXPECT_EQ(iree_tokenizer_vocab_capacity(nullptr), 0u);
 
   iree_tokenizer_special_ids_t ids = iree_tokenizer_vocab_special_ids(nullptr);
