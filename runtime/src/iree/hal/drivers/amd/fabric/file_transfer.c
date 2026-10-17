@@ -36,8 +36,12 @@ static void iree_hal_amd_fabric_file_transfer_release_host(
     if (!mapping) {
       continue;
     }
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf.host_mapping_destroy");
+    IREE_TRACE_ZONE_APPEND_VALUE_I64(
+        z0, transfer->host.ranges[i].contents.data_length);
     const amdf_status_t status =
         transfer->host.api->host_mapping_destroy(mapping);
+    IREE_TRACE_ZONE_END(z0);
     if (status != AMDF_STATUS_OK) {
       iree_hal_amd_report_failure(transfer->host.event_sink, IREE_SV("amd"),
                                   status, "host_mapping_destroy");
@@ -132,8 +136,11 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_map_source(
                     ? AMDF_MEMORY_MAP_FLAG_READ
                     : 0),
   };
+  IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf.memory_map");
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, map_info.byte_length);
   const amdf_status_t status =
       api->memory_map(source->memory, &map_info, &range->mapping);
+  IREE_TRACE_ZONE_END(z0);
   if (amdf_status_code(status) == AMDF_STATUS_CODE_UNSUPPORTED) {
     *available = false;
     return iree_ok_status();
@@ -311,11 +318,14 @@ iree_status_t iree_hal_amd_fabric_file_transfer_flush(
     const iree_hal_amd_fabric_file_host_range_t* range =
         &transfer->host.ranges[i];
     if (range->flush) {
+      IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf.host_mapping_flush");
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, range->contents.data_length);
       status = IREE_HAL_AMD_STATUS_FROM_AMDF(
           transfer->host.api->host_mapping_cache_control(
               range->mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
               range->mapping_offset, range->contents.data_length),
           "host_mapping_cache_control(FLUSH)");
+      IREE_TRACE_ZONE_END(z0);
     }
   }
   return status;
@@ -356,12 +366,16 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare(
       range = &transfer->host.ranges[++transfer->host.index];
     }
     if (position == range->offset && range->invalidate) {
+      IREE_TRACE_ZONE_BEGIN_NAMED(z1, "amdf.host_mapping_invalidate");
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(z1, range->contents.data_length);
+      const amdf_status_t status =
+          transfer->host.api->host_mapping_cache_control(
+              range->mapping, AMDF_HOST_CACHE_OPERATION_INVALIDATE,
+              range->mapping_offset, range->contents.data_length);
+      IREE_TRACE_ZONE_END(z1);
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, IREE_HAL_AMD_STATUS_FROM_AMDF(
-                  transfer->host.api->host_mapping_cache_control(
-                      range->mapping, AMDF_HOST_CACHE_OPERATION_INVALIDATE,
-                      range->mapping_offset, range->contents.data_length),
-                  "host_mapping_cache_control(INVALIDATE)"));
+                  status, "host_mapping_cache_control(INVALIDATE)"));
     }
     const iree_host_size_t offset =
         (iree_host_size_t)(position - range->offset);

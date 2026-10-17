@@ -191,6 +191,8 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare_mappings(
 
 static void iree_hal_amd_fabric_virtual_buffer_destroy(
     iree_hal_buffer_t* base) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, iree_hal_buffer_byte_length(base));
   iree_hal_amd_fabric_virtual_buffer_t* buffer =
       (iree_hal_amd_fabric_virtual_buffer_t*)base;
   if (buffer->host_mapping) {
@@ -214,10 +216,13 @@ static void iree_hal_amd_fabric_virtual_buffer_destroy(
   iree_slim_mutex_deinitialize(&buffer->mapping_mutex);
   iree_hal_memory_contract_release(base->memory.contract);
   iree_allocator_free(buffer->base.host_allocator, buffer);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 static iree_status_t iree_hal_amd_fabric_virtual_buffer_detach(
     iree_hal_buffer_t* base, uint32_t scope_id) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, iree_hal_buffer_byte_length(base));
   iree_hal_amd_fabric_virtual_buffer_t* buffer =
       (iree_hal_amd_fabric_virtual_buffer_t*)base;
   const uint32_t ordinal = buffer->accesses[buffer->scope_accesses[scope_id]]
@@ -234,6 +239,7 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_detach(
   }
   iree_slim_mutex_unlock(&buffer->mapping_mutex);
   iree_allocator_free(buffer->base.host_allocator, previous);
+  IREE_TRACE_ZONE_END(z0);
   return IREE_HAL_AMD_STATUS_FROM_AMDF(status, "memory_reservation_detach");
 }
 
@@ -246,13 +252,16 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "mapping vector exceeds native count capacity");
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, update_count);
   (void)projection;
   amdf_memory_mapping_update_t inline_updates[16];
   amdf_memory_mapping_update_t* native_updates = inline_updates;
   if (update_count > IREE_ARRAYSIZE(inline_updates)) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
-        reservation->base.host_allocator, update_count, sizeof(*native_updates),
-        (void**)&native_updates));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_allocator_malloc_array_uninitialized(
+                reservation->base.host_allocator, update_count,
+                sizeof(*native_updates), (void**)&native_updates));
   }
   const uint32_t ordinal =
       reservation->accesses[reservation->scope_accesses[updates[0].scope_id]]
@@ -307,10 +316,13 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
         &mapping_count);
   }
   if (iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_BEGIN_NAMED(z1, "amdf.memory_reservation_update");
+    IREE_TRACE_ZONE_APPEND_VALUE_I64(z1, update_count);
     const amdf_status_t native_status =
         reservation->api->memory_reservation_update(
             reservation->native, ordinal, (uint32_t)update_count,
             native_updates);
+    IREE_TRACE_ZONE_END(z1);
     iree_slim_mutex_lock(&reservation->mapping_mutex);
     if (native_status == AMDF_STATUS_OK) {
       iree_hal_amd_fabric_virtual_mapping_t* previous = access->mappings;
@@ -329,6 +341,7 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
   if (native_updates != inline_updates) {
     iree_allocator_free(reservation->base.host_allocator, native_updates);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -393,25 +406,33 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_query_source(
 static iree_status_t iree_hal_amd_fabric_virtual_buffer_invalidate_range(
     iree_hal_buffer_t* base, iree_device_size_t offset,
     iree_device_size_t length) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, length);
   iree_hal_amd_fabric_virtual_buffer_t* buffer =
       (iree_hal_amd_fabric_virtual_buffer_t*)base;
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(
+  iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       buffer->api->host_mapping_cache_control(
           buffer->host_mapping, AMDF_HOST_CACHE_OPERATION_INVALIDATE, offset,
           length),
       "host_mapping_cache_control(INVALIDATE)");
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static iree_status_t iree_hal_amd_fabric_virtual_buffer_flush_range(
     iree_hal_buffer_t* base, iree_device_size_t offset,
     iree_device_size_t length) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, length);
   iree_hal_amd_fabric_virtual_buffer_t* buffer =
       (iree_hal_amd_fabric_virtual_buffer_t*)base;
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(
+  iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       buffer->api->host_mapping_cache_control(buffer->host_mapping,
                                               AMDF_HOST_CACHE_OPERATION_FLUSH,
                                               offset, length),
       "host_mapping_cache_control(FLUSH)");
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static const iree_hal_buffer_vtable_t
@@ -747,6 +768,8 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
   if (!plan.reservation) {
     return iree_ok_status();
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, options->byte_length);
   iree_hal_amd_fabric_virtual_buffer_t* reservation = plan.reservation;
   iree_hal_memory_contract_t* contract = plan.contract;
   const iree_device_size_t granularity = iree_max(
@@ -893,5 +916,6 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
     iree_allocator_free(host_allocator, reservation);
   }
   iree_hal_memory_contract_release(contract);
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }

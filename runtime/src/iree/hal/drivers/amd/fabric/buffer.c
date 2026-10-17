@@ -60,25 +60,33 @@ static iree_status_t iree_hal_amd_fabric_buffer_unmap_range(
 static iree_status_t iree_hal_amd_fabric_buffer_invalidate_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t offset,
     iree_device_size_t length) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, length);
   iree_hal_amd_fabric_buffer_t* buffer =
       (iree_hal_amd_fabric_buffer_t*)base_buffer;
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(
+  iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       buffer->api->host_mapping_cache_control(
           buffer->memory->mapping, AMDF_HOST_CACHE_OPERATION_INVALIDATE,
           buffer->storage_offset + offset, length),
       "host_mapping_cache_control(INVALIDATE)");
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static iree_status_t iree_hal_amd_fabric_buffer_flush_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t offset,
     iree_device_size_t length) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, length);
   iree_hal_amd_fabric_buffer_t* buffer =
       (iree_hal_amd_fabric_buffer_t*)base_buffer;
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(
+  iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       buffer->api->host_mapping_cache_control(
           buffer->memory->mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
           buffer->storage_offset + offset, length),
       "host_mapping_cache_control(FLUSH)");
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 typedef struct iree_hal_amd_fabric_external_storage_t {
@@ -106,6 +114,8 @@ static iree_status_t iree_hal_amd_fabric_buffer_export_native(
   iree_hal_amd_fabric_external_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       buffer->host_allocator, sizeof(*storage), (void**)&storage));
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, buffer->memory->info.byte_length);
   storage->host_allocator = buffer->host_allocator;
   const amdf_memory_export_info_t export_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO,
@@ -150,6 +160,7 @@ static iree_status_t iree_hal_amd_fabric_buffer_export_native(
   } else {
     iree_allocator_free(buffer->host_allocator, storage);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
