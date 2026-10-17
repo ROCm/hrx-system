@@ -50,6 +50,8 @@ static bool iree_benchmark_loom_sample_attr_equal(loom_attribute_t lhs,
       return loom_attr_as_bool(lhs) == loom_attr_as_bool(rhs);
     case LOOM_ATTR_STRING:
       return loom_attr_as_string_id(lhs) == loom_attr_as_string_id(rhs);
+    case LOOM_ATTR_STRING_ARRAY:
+      return loom_attribute_equal(&lhs, &rhs);
     default:
       return lhs.raw == rhs.raw;
   }

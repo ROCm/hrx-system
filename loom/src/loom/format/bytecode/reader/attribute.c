@@ -351,6 +351,30 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
       }
       return iree_ok_status();
     }
+    case LOOM_BYTECODE_ATTR_STRING_ARRAY: {
+      const uint64_t count_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
+      uint64_t count = 0;
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(validator->decoder,
+                                                             cursor, &count));
+      if (count > UINT16_MAX) {
+        return loom_bytecode_reader_emit_count_exceeds(
+            validator->decoder, IREE_SV("string_array"), count, UINT16_MAX,
+            count_offset);
+      }
+      for (uint64_t i = 0; i < count; ++i) {
+        const uint64_t string_offset =
+            loom_bytecode_reader_cursor_absolute_position(cursor);
+        uint64_t string_id = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+            validator->decoder, cursor, &string_id));
+        iree_string_view_t unused = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_string_ref(
+            validator, string_id, IREE_SV("string_array_element"),
+            string_offset, &unused));
+      }
+      return iree_ok_status();
+    }
     case LOOM_BYTECODE_ATTR_ENUM_ARRAY: {
       const uint64_t count_offset =
           loom_bytecode_reader_cursor_absolute_position(cursor);

@@ -478,6 +478,7 @@ def generate_ops_h(
                 "i64": "LOOM_DEFINE_ATTR_I64",
                 "f64": "LOOM_DEFINE_ATTR_F64",
                 "string": "LOOM_DEFINE_ATTR_STRING",
+                "string_array": "LOOM_DEFINE_ATTR_STRING_ARRAY",
                 "bool": "LOOM_DEFINE_ATTR_BOOL",
                 "i64_array": "LOOM_DEFINE_ATTR_I64_ARRAY",
                 "bytes": "LOOM_DEFINE_ATTR_BYTES",

@@ -2713,6 +2713,34 @@ static iree_status_t loom_module_canonicalize_attr_value(
       }
       *out_value = loom_attr_string(value.string_id);
       return iree_ok_status();
+    case LOOM_ATTR_STRING_ARRAY: {
+      if (value.count == 0) {
+        *out_value = loom_attr_string_array(NULL, 0);
+        return iree_ok_status();
+      }
+      if (value.string_ids == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty string array attribute has a NULL payload");
+      }
+      loom_string_id_t* values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &module->arena, value.count, sizeof(*values), (void**)&values));
+      for (uint16_t i = 0; i < value.count; ++i) {
+        if (value.string_ids[i] == LOOM_STRING_ID_INVALID ||
+            value.string_ids[i] >= module->strings.count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "string array attribute element %u id %u is out of range "
+              "(module has %" PRIhsz " strings)",
+              (unsigned)i, (unsigned)value.string_ids[i],
+              module->strings.count);
+        }
+        values[i] = value.string_ids[i];
+      }
+      *out_value = loom_attr_string_array(values, value.count);
+      return iree_ok_status();
+    }
     case LOOM_ATTR_BOOL: {
       if (value.raw > 1) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -3220,6 +3248,27 @@ static iree_status_t loom_module_verify_canonical_attr_value(
                                 "attribute string value id %u is out of range "
                                 "(module has %" PRIhsz " strings)",
                                 value->string_id, module->strings.count);
+      }
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_STRING_ARRAY: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("string array attribute")));
+      if ((value->count > 0) != (value->string_ids != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "string array attribute pointer does not match its element count");
+      }
+      for (uint16_t i = 0; i < value->count; ++i) {
+        if (value->string_ids[i] == LOOM_STRING_ID_INVALID ||
+            value->string_ids[i] >= module->strings.count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "string array attribute element %u id %u is out of range "
+              "(module has %" PRIhsz " strings)",
+              (unsigned)i, (unsigned)value->string_ids[i],
+              module->strings.count);
+        }
       }
       return iree_ok_status();
     }

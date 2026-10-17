@@ -132,6 +132,11 @@ iree_status_t loom_testbench_requirement_read_string_attr(
     const loom_module_t* module, loom_named_attr_slice_t attrs,
     iree_string_view_t name, iree_string_view_t* out_value);
 
+// Reads a required string-array attribute from |attrs|.
+iree_status_t loom_testbench_requirement_read_string_array_attr(
+    const loom_module_t* module, loom_named_attr_slice_t attrs,
+    iree_string_view_t name, loom_string_id_array_t* out_value);
+
 // Reads an optional i64 attribute from |attrs|.
 iree_status_t loom_testbench_requirement_read_optional_i64_attr(
     const loom_module_t* module, loom_named_attr_slice_t attrs,

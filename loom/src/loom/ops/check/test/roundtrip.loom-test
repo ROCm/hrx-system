@@ -48,6 +48,7 @@ check.benchmark<@fixture_case> @fixture_m16_n24 {m = 16, n = 24}
 // Open provider spaces are still cold structural dispatch points.
 check.case @provider_case {
   check.requires<target.feature> {feature = "test.feature"}
+  check.requires<hal.amdgpu.target> {targets = ["gfx11-generic", "gfx12-generic"]}
   check.skip_if<device.memory> {max_bytes = 1024} reason("tiny device")
   %actual = check.literal value(1) : i32
   %expected = check.literal value(1) : i32

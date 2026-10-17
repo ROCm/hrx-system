@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 40
+#define LOOM_BYTECODE_FORMAT_VERSION 41
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -885,8 +885,7 @@ typedef enum loom_bytecode_section_kind_e {
 // 7=TYPE, 8=PREDICATE_LIST, 9=DICT, 10=ENCODING, 11=BYTES,
 // 12=SCOPED_ENUM, 13=ENUM_ARRAY, 14=PARAMETERIZED,
 // 15=PARAMETERIZED_ARRAY, 16=SIGNED_ENUM_SET, 17=SYMBOL_ARRAY,
-// 18=SYMBOL_SET. ABSENT is never
-// encoded as a payload value.
+// 18=SYMBOL_SET, 19=STRING_ARRAY. ABSENT is never encoded as a payload value.
 // TYPE value_data follows the Scoped type uses contract above: a complete type
 // use in SSA scopes, a completed child reference inside a scoped record, or an
 // untagged TYPES index in module-level metadata.
@@ -935,6 +934,10 @@ typedef enum loom_bytecode_section_kind_e {
 // MUST be stored in strict decoded UTF-8 byte order with no duplicates.
 // Readers reject noncanonical order; writers trust canonical IR and emit
 // references as-is.
+// STRING_ARRAY value_data:
+//       [count: varint]
+//       [string_id: varint] repeated count times
+// Ordering and duplicate strings are preserved.
 //       [region_count: varint]
 //       For each region:
 //         (recursive: source_flags, block_count, blocks...)
@@ -963,6 +966,7 @@ typedef enum loom_bytecode_attr_kind_e {
   LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET = 16,
   LOOM_BYTECODE_ATTR_SYMBOL_ARRAY = 17,
   LOOM_BYTECODE_ATTR_SYMBOL_SET = 18,
+  LOOM_BYTECODE_ATTR_STRING_ARRAY = 19,
   LOOM_BYTECODE_ATTR_COUNT,
 } loom_bytecode_attr_kind_t;
 

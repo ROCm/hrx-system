@@ -355,7 +355,7 @@ static void loom_symbol_reference_count_template_provider(
   ++builder->template_provider_count;
 }
 
-static_assert(LOOM_ATTR_COUNT_ == 21,
+static_assert(LOOM_ATTR_COUNT_ == 22,
               "update symbol-bearing attr classification for new kinds");
 
 static bool loom_symbol_reference_attr_may_contain_ref(loom_attribute_t attr) {

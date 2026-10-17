@@ -79,6 +79,7 @@ from loom.ir import (
     StaticDim,
     StorageSpace,
     StorageType,
+    StringArrayAttr,
     StringTable,
     Symbol,
     SymbolKind,
@@ -1001,6 +1002,22 @@ class TestOperations:
             with pytest.raises(ValueError, match="enum array element"):
                 EnumArrayAttr(values)  # type: ignore[arg-type]
 
+    def test_string_array_attribute_preserves_order_and_duplicates(self) -> None:
+        op = Operation(
+            kind=4,
+            name="test.string_array_attrs",
+            attributes={"targets": ["gfx12-generic", "gfx1250", "gfx12-generic"]},
+        )
+
+        values = op.attributes["targets"]
+        assert isinstance(values, StringArrayAttr)
+        assert values.values == ("gfx12-generic", "gfx1250", "gfx12-generic")
+        assert len(StringArrayAttr()) == 0
+
+    def test_string_array_attribute_rejects_non_string_elements(self) -> None:
+        with pytest.raises(TypeError, match="string array element 1"):
+            StringArrayAttr(["gfx1250", 12])  # type: ignore[list-item]
+
     def test_signed_enum_set_is_canonical_and_distinguishes_polarity(self) -> None:
         value = SignedEnumSetAttr([255, 1], [7])
 
@@ -1396,6 +1413,16 @@ class TestEncodingInstance:
             params=(("group_size", 128), ("block", 32)),
         )
         assert enc.params == (("block", 32), ("group_size", 128))
+
+    def test_string_array_params_use_the_canonical_wrapper(self) -> None:
+        enc = EncodingInstance(
+            name="portable",
+            params=(("targets", ["gfx12-generic", "gfx1250"]),),
+        )
+
+        assert enc.params == (
+            ("targets", StringArrayAttr(["gfx12-generic", "gfx1250"])),
+        )
 
     def test_duplicate_params_rejected(self) -> None:
         with pytest.raises(ValueError, match="duplicate encoding parameter"):

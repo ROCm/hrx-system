@@ -558,6 +558,60 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
+  loom_module_t* CreateStringArrayModule() {
+    loom_module_t* module = CreateModule("reader_string_array");
+    loom_region_t* body = AddVoidFunction(module, "string_arrays");
+    loom_builder_t body_builder;
+    loom_builder_initialize(module, &module->arena,
+                            loom_region_entry_block(body), &body_builder);
+
+    loom_string_id_t gfx12_id = LOOM_STRING_ID_INVALID;
+    loom_string_id_t gfx1250_id = LOOM_STRING_ID_INVALID;
+    loom_string_id_t gfx11_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(
+        &body_builder, IREE_SV("gfx12-generic"), &gfx12_id));
+    IREE_CHECK_OK(loom_builder_intern_string(&body_builder, IREE_SV("gfx1250"),
+                                             &gfx1250_id));
+    IREE_CHECK_OK(loom_builder_intern_string(
+        &body_builder, IREE_SV("gfx11-generic"), &gfx11_id));
+
+    const loom_string_id_t required_values[] = {
+        gfx12_id,
+        gfx1250_id,
+        gfx12_id,
+    };
+    const loom_string_id_t optional_values[] = {gfx11_id};
+    loom_op_t* populated_op = nullptr;
+    IREE_CHECK_OK(loom_test_string_array_attrs_build(
+        &body_builder,
+        LOOM_TEST_STRING_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+        loom_make_string_id_array(required_values,
+                                  IREE_ARRAYSIZE(required_values)),
+        loom_make_string_id_array(optional_values,
+                                  IREE_ARRAYSIZE(optional_values)),
+        loom_named_attr_slice_empty(), LOOM_LOCATION_UNKNOWN, &populated_op));
+
+    loom_op_t* present_empty_op = nullptr;
+    IREE_CHECK_OK(loom_test_string_array_attrs_build(
+        &body_builder,
+        LOOM_TEST_STRING_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+        loom_make_string_id_array(&gfx1250_id, 1), loom_string_id_array_empty(),
+        loom_named_attr_slice_empty(), LOOM_LOCATION_UNKNOWN,
+        &present_empty_op));
+
+    loom_op_t* absent_op = nullptr;
+    IREE_CHECK_OK(loom_test_string_array_attrs_build(
+        &body_builder, /*build_flags=*/0,
+        loom_make_string_id_array(&gfx1250_id, 1), loom_string_id_array_empty(),
+        loom_named_attr_slice_empty(), LOOM_LOCATION_UNKNOWN, &absent_op));
+
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
   loom_module_t* CreateSignedEnumSetModule() {
     loom_module_t* module = CreateModule("reader_signed_enum_set");
     loom_region_t* body = AddVoidFunction(module, "f");
@@ -3960,6 +4014,70 @@ TEST_F(ReaderTest, EnumArraysPreserveStableValuesAndOrder) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, StringArraysPreserveValuesPresenceAndOrder) {
+  loom_module_t* module = CreateStringArrayModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_STRING_ARRAY);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+
+  EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
+  ASSERT_NE(read_module, nullptr);
+  const loom_string_id_t function_name_id =
+      loom_module_lookup_string(read_module, IREE_SV("string_arrays"));
+  const uint16_t function_symbol_id =
+      loom_module_find_symbol(read_module, function_name_id);
+  ASSERT_NE(function_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  loom_op_t* func_op =
+      read_module->symbols.entries[function_symbol_id].defining_op;
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* entry = loom_region_entry_block(loom_test_func_body(func_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 4u);
+
+  const loom_string_id_t gfx12_id =
+      loom_module_lookup_string(read_module, IREE_SV("gfx12-generic"));
+  const loom_string_id_t gfx1250_id =
+      loom_module_lookup_string(read_module, IREE_SV("gfx1250"));
+  const loom_string_id_t gfx11_id =
+      loom_module_lookup_string(read_module, IREE_SV("gfx11-generic"));
+  ASSERT_NE(gfx12_id, LOOM_STRING_ID_INVALID);
+  ASSERT_NE(gfx1250_id, LOOM_STRING_ID_INVALID);
+  ASSERT_NE(gfx11_id, LOOM_STRING_ID_INVALID);
+
+  loom_op_t* populated_op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_test_string_array_attrs_isa(populated_op));
+  loom_string_id_array_t required =
+      loom_test_string_array_attrs_required_values(populated_op);
+  ASSERT_EQ(required.count, 3u);
+  EXPECT_EQ(required.values[0], gfx12_id);
+  EXPECT_EQ(required.values[1], gfx1250_id);
+  EXPECT_EQ(required.values[2], gfx12_id);
+  loom_string_id_array_t optional =
+      loom_test_string_array_attrs_optional_values(populated_op);
+  ASSERT_EQ(optional.count, 1u);
+  EXPECT_EQ(optional.values[0], gfx11_id);
+
+  loom_op_t* present_empty_op = loom_block_op(entry, 1);
+  ASSERT_TRUE(loom_test_string_array_attrs_isa(present_empty_op));
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(present_empty_op)[1]));
+  EXPECT_EQ(
+      loom_test_string_array_attrs_optional_values(present_empty_op).count, 0u);
+
+  loom_op_t* absent_op = loom_block_op(entry, 2);
+  ASSERT_TRUE(loom_test_string_array_attrs_isa(absent_op));
+  EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(absent_op)[1]));
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, SignedEnumSetsPreserveAssertionsAndPresence) {
   loom_module_t* module = CreateSignedEnumSetModule();
   auto bytes = WriteModule(module);
@@ -5241,6 +5359,38 @@ TEST_F(ReaderTest, RejectsSymbolArrayNestedInGenericDictionary) {
       LOOM_BYTECODE_ATTR_SYMBOL_ARRAY;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsOversizedStringArray) {
+  loom_module_t* module = CreateStringArrayModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_STRING_ARRAY);
+  ASSERT_EQ(bytes[value_offsets.payload], 3u);
+  ASSERT_LT(value_offsets.payload + 2, bytes.size());
+  bytes[value_offsets.payload] = 0x80;
+  bytes[value_offsets.payload + 1] = 0x80;
+  bytes[value_offsets.payload + 2] = 0x04;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_009");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsOutOfRangeStringArrayElement) {
+  loom_module_t* module = CreateStringArrayModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_STRING_ARRAY);
+  ASSERT_EQ(bytes[value_offsets.payload], 3u);
+  ASSERT_LT(value_offsets.payload + 1, bytes.size());
+  bytes[value_offsets.payload + 1] = 0x7F;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_010");
 
   loom_module_free(module);
 }

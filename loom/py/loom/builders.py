@@ -28,6 +28,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SIGNED_ENUM_SET,
+    ATTR_TYPE_STRING_ARRAY,
     ATTR_TYPE_SYMBOL_ARRAY,
     ATTR_TYPE_SYMBOL_SET,
     AttrDef,
@@ -47,6 +48,7 @@ from loom.ir import (
     ParameterizedAttrArray,
     Region,
     SignedEnumSetAttr,
+    StringArrayAttr,
     SymbolName,
     SymbolNameArray,
     SymbolNameSet,
@@ -236,6 +238,13 @@ class OpCallable:
                             and param.attr_def.attr_type == ATTR_TYPE_SIGNED_ENUM_SET
                         ):
                             value = _normalize_signed_enum_set_attr(
+                                op.name, param.attr_def, value
+                            )
+                        elif (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type == ATTR_TYPE_STRING_ARRAY
+                        ):
+                            value = _normalize_string_array_attr(
                                 op.name, param.attr_def, value
                             )
                         elif (
@@ -690,6 +699,21 @@ def _normalize_symbol_collection_attr(
         return SymbolNameSet(names)
     except ValueError as exc:
         raise ValueError(f"{op_name}: symbol set '{attr_def.name}' {exc}") from exc
+
+
+def _normalize_string_array_attr(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> StringArrayAttr:
+    """Normalizes an ordered string array."""
+    values = value.values if isinstance(value, StringArrayAttr) else value
+    if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
+        raise TypeError(
+            f"{op_name}: string array '{attr_def.name}' must be an iterable of strings"
+        )
+    try:
+        return StringArrayAttr(values)
+    except (TypeError, ValueError) as exc:
+        raise type(exc)(f"{op_name}: string array '{attr_def.name}' {exc}") from exc
 
 
 def _normalize_result_names(

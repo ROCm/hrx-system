@@ -349,6 +349,7 @@ ATTR_KIND_MAP: dict[str, str] = {
     "i64": "LOOM_ATTR_I64",
     "f64": "LOOM_ATTR_F64",
     "string": "LOOM_ATTR_STRING",
+    "string_array": "LOOM_ATTR_STRING_ARRAY",
     "bool": "LOOM_ATTR_BOOL",
     "enum": "LOOM_ATTR_ENUM",
     "enum_array": "LOOM_ATTR_ENUM_ARRAY",

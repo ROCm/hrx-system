@@ -337,6 +337,37 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
       *out_attr = loom_attr_i64_array(values, (uint16_t)count);
       return iree_ok_status();
     }
+    case LOOM_BYTECODE_ATTR_STRING_ARRAY: {
+      const uint64_t count_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
+      uint64_t count = 0;
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+          materializer->decoder, cursor, &count));
+      if (count > UINT16_MAX || count > IREE_HOST_SIZE_MAX) {
+        return loom_bytecode_reader_emit_count_exceeds(
+            materializer->decoder, IREE_SV("string_array"), count, UINT16_MAX,
+            count_offset);
+      }
+      loom_string_id_t* values = NULL;
+      if (count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            materializer->scratch_arena, (iree_host_size_t)count,
+            sizeof(*values), (void**)&values));
+      }
+      for (uint64_t i = 0; i < count; ++i) {
+        const uint64_t string_offset =
+            loom_bytecode_reader_cursor_absolute_position(cursor);
+        uint64_t source_string_id = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+            materializer->decoder, cursor, &source_string_id));
+        iree_string_view_t source_string = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(loom_bytecode_attribute_impl_target_string(
+            materializer, source_string_id, IREE_SV("string_array_element"),
+            string_offset, &source_string, &values[i]));
+      }
+      *out_attr = loom_attr_string_array(values, (uint16_t)count);
+      return iree_ok_status();
+    }
     case LOOM_BYTECODE_ATTR_ENUM_ARRAY: {
       const uint64_t count_offset =
           loom_bytecode_reader_cursor_absolute_position(cursor);

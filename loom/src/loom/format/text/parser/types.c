@@ -1072,6 +1072,7 @@ static bool loom_parse_type_parameter_token_is_present(
              token.kind == LOOM_TOKEN_OP_NAME ||
              token.kind == LOOM_TOKEN_LANGLE;
     case LOOM_ATTR_I64_ARRAY:
+    case LOOM_ATTR_STRING_ARRAY:
     case LOOM_ATTR_ENUM_ARRAY:
     case LOOM_ATTR_SIGNED_ENUM_SET:
     case LOOM_ATTR_SYMBOL_ARRAY:

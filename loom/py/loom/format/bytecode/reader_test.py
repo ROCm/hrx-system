@@ -24,6 +24,7 @@ from loom.dialect.test.defs import (
     test_parameterized_attr,
     test_parameterized_attr_array,
     test_signed_enum_set_attrs,
+    test_string_array_attrs,
     test_symbol_array_attrs,
     test_symbol_set_attrs,
 )
@@ -94,6 +95,7 @@ from loom.ir import (
     StaticDim,
     StorageSpace,
     StorageType,
+    StringArrayAttr,
     Symbol,
     SymbolKind,
     SymbolName,
@@ -2202,6 +2204,34 @@ class TestEnumArrayAttributeWireFormat:
 
         with pytest.raises(BytecodeError, match="descriptor-backed"):
             reader._read_attr_value(data, 0)
+
+
+class TestStringArrayAttributeWireFormat:
+    def _read_string_array(self, data: bytes) -> tuple[StringArrayAttr, int]:
+        reader = BytecodeReader(b"", op_decls=[test_string_array_attrs])
+        reader._strings = ["", "gfx12-generic", "gfx1250"]
+        attr_def = reader._attr_def_for_op_attr(
+            "test.string_array_attrs", "required_values"
+        )
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+        assert isinstance(value, StringArrayAttr)
+        return value, offset
+
+    def test_reads_ordered_duplicate_strings(self) -> None:
+        value, offset = self._read_string_array(bytes([19, 3, 1, 2, 1]))
+
+        assert value == StringArrayAttr(["gfx12-generic", "gfx1250", "gfx12-generic"])
+        assert offset == 5
+
+    def test_rejects_oversized_array(self) -> None:
+        data = bytes([19]) + encode_varint(0x10000)
+
+        with pytest.raises(BytecodeError, match="exceeds UINT16_MAX"):
+            self._read_string_array(data)
+
+    def test_rejects_out_of_range_string(self) -> None:
+        with pytest.raises(BytecodeError, match="string_id 3 out of range"):
+            self._read_string_array(bytes([19, 1, 3]))
 
 
 class TestSignedEnumSetAttributeWireFormat:

@@ -119,6 +119,7 @@ from loom.ir import (
     StaticDim,
     StorageSpace,
     StorageType,
+    StringArrayAttr,
     Symbol,
     SymbolKind,
     SymbolName,
@@ -1658,6 +1659,30 @@ class TestCrossFormatRoundTrip:
         assert body_ops[0].attributes["optional_values"] == EnumArrayAttr([7, 42, 7])
         assert body_ops[1].attributes["optional_values"] == EnumArrayAttr()
         assert "optional_values" not in body_ops[2].attributes
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_string_arrays_survive_bytecode_with_presence_and_order(self) -> None:
+        text = (
+            "test.func @string_arrays() {\n"
+            '  test.string_array_attrs ["gfx12-generic", "gfx1250", '
+            '"gfx12-generic"] using [] '
+            '{fallbacks = ["gfx11-generic", "gfx12-generic"]}\n'
+            '  test.string_array_attrs ["gfx1250"]\n'
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        function = loaded.symbols[0].op
+        assert function is not None
+        first, second, _yield = function.regions[0].blocks[0].ops
+        assert first.attributes["required_values"] == StringArrayAttr(
+            ["gfx12-generic", "gfx1250", "gfx12-generic"]
+        )
+        assert first.attributes["optional_values"] == StringArrayAttr()
+        assert first.attributes["dict"]["fallbacks"] == StringArrayAttr(
+            ["gfx11-generic", "gfx12-generic"]
+        )
+        assert "optional_values" not in second.attributes
         assert _roundtrip_text_through_bytecode(text) == text
 
     def test_signed_enum_sets_survive_bytecode_with_presence(self) -> None:

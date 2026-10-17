@@ -53,6 +53,7 @@ from loom.ir import (
     RegisterType,
     ShapedType,
     SignedEnumSetAttr,
+    StringArrayAttr,
     SymbolName,
     SymbolNameArray,
     SymbolNameSet,
@@ -119,6 +120,9 @@ def _interop_module() -> tuple[Module, RegisterType]:
         "#test.feature_set<[low, -middle, high]>] "
         "using [#test.tile<width = 4>]\n"
         "  test.signed_enum_set_attrs [low, -middle, high] using []\n"
+        '  test.string_array_attrs ["gfx12-generic", "gfx1250", '
+        '"gfx12-generic"] using [] '
+        '{fallbacks = ["gfx11-generic", "gfx12-generic"]}\n'
         "  test.yield\n"
         "}\n"
         "test.record @parameterized_record "
@@ -335,6 +339,20 @@ def _assert_parameterized_arrays(entry_block: Block) -> None:
         raise AssertionError("signed enum set did not survive C bytecode")
     if signed_set_op.attributes["optional_features"] != SignedEnumSetAttr():
         raise AssertionError("present empty signed enum set changed")
+
+    string_array_op = next(
+        op for op in entry_block.ops if op.name == "test.string_array_attrs"
+    )
+    if string_array_op.attributes["required_values"] != StringArrayAttr(
+        ["gfx12-generic", "gfx1250", "gfx12-generic"]
+    ):
+        raise AssertionError("string array lost order or duplicate values")
+    if string_array_op.attributes["optional_values"] != StringArrayAttr():
+        raise AssertionError("present empty string array changed")
+    if string_array_op.attributes["dict"]["fallbacks"] != StringArrayAttr(
+        ["gfx11-generic", "gfx12-generic"]
+    ):
+        raise AssertionError("generic dict string array changed")
 
 
 def _assert_symbol_payloads(module: Module) -> None:

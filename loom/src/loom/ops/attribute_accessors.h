@@ -85,6 +85,12 @@ extern "C" {
     return loom_attr_as_string_id(loom_op_attrs(op)[(index)]);    \
   }
 
+// Defines a function that reads a string-array attribute by index.
+#define LOOM_DEFINE_ATTR_STRING_ARRAY(func_name, index)                 \
+  static inline loom_string_id_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_string_array(loom_op_attrs(op)[(index)]);       \
+  }
+
 // Defines a function that reads a bool attribute by index.
 #define LOOM_DEFINE_ATTR_BOOL(func_name, index)           \
   static inline bool func_name(const loom_op_t* op) {     \

@@ -50,6 +50,7 @@ from loom.ir import (
     ShapedType,
     SignedEnumSetAttr,
     StaticDim,
+    StringArrayAttr,
     SymbolName,
     SymbolNameArray,
     TypeKind,
@@ -180,6 +181,30 @@ def test_dynamic_builder_resolves_enum_array_values_and_presence() -> None:
     assert second["required_values"] == EnumArrayAttr()
     assert second["optional_values"] == EnumArrayAttr()
     assert "optional_values" not in block.ops[2].attributes
+
+
+def test_dynamic_builder_normalizes_string_arrays_and_presence() -> None:
+    block, builder = _builder()
+
+    builder.test.string_array_attrs(
+        required_values=["gfx12-generic", "gfx1250", "gfx12-generic"],
+        optional_values=[],
+    )
+    builder.test.string_array_attrs(required_values=["gfx11-generic"])
+
+    first = block.ops[0].attributes
+    assert first["required_values"] == StringArrayAttr(
+        ["gfx12-generic", "gfx1250", "gfx12-generic"]
+    )
+    assert first["optional_values"] == StringArrayAttr()
+    assert "optional_values" not in block.ops[1].attributes
+
+
+def test_dynamic_builder_rejects_non_string_array_elements() -> None:
+    _block, builder = _builder()
+
+    with pytest.raises(TypeError, match="string array element 1"):
+        builder.test.string_array_attrs(required_values=["gfx1250", 12])
 
 
 def test_dynamic_builder_normalizes_symbol_arrays_and_presence() -> None:

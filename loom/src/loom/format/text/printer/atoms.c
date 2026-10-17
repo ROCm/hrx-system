@@ -1068,6 +1068,29 @@ static iree_status_t loom_print_attr_impl(
       }
       return loom_print_string_literal(stream, attr_string);
     }
+    case LOOM_ATTR_STRING_ARRAY: {
+      if (attr->count > 0 && !attr->string_ids) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "STRING_ARRAY attr has count %u but NULL values", attr->count);
+      }
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (i > 0) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
+        }
+        if (!module || attr->string_ids[i] >= module->strings.count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "STRING_ARRAY attr element %u has invalid string id %u",
+              (unsigned)i, (unsigned)attr->string_ids[i]);
+        }
+        IREE_RETURN_IF_ERROR(loom_print_string_literal(
+            stream,
+            loom_string_table_get(&module->strings, attr->string_ids[i])));
+      }
+      return loom_output_stream_write_char(stream, ']');
+    }
     case LOOM_ATTR_BOOL:
       return loom_output_stream_write_cstring(stream,
                                               attr->raw ? "true" : "false");

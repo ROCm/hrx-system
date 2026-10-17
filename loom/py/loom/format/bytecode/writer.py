@@ -67,6 +67,7 @@ from loom.ir import (
     SignedEnumSetAttr,
     StaticDim,
     StorageType,
+    StringArrayAttr,
     Symbol,
     SymbolKind,
     SymbolName,
@@ -160,6 +161,7 @@ ATTR_KIND_PARAMETERIZED_ARRAY = 15
 ATTR_KIND_SIGNED_ENUM_SET = 16
 ATTR_KIND_SYMBOL_ARRAY = 17
 ATTR_KIND_SYMBOL_SET = 18
+ATTR_KIND_STRING_ARRAY = 19
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -187,7 +189,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 40
+FORMAT_VERSION = 41
 PRODUCER = "loom-py"
 
 SYMBOL_INTERFACE_FLAG_MASK = (1 << 14) - 1
@@ -816,7 +818,14 @@ class BytecodeWriter:
     ) -> Iterator[Any]:
         """Intern strings referenced by attribute values."""
         attr_type = getattr(attr_def, "attr_type", None)
-        if isinstance(value, SymbolNameArray):
+        if isinstance(value, StringArrayAttr):
+            if attr_type not in (None, "any", "string_array"):
+                raise ValueError(
+                    "string arrays require a string-array or generic field"
+                )
+            for string in value:
+                self._ctx.intern_string(string)
+        elif isinstance(value, SymbolNameArray):
             if attr_type != "symbol_array":
                 raise ValueError("symbol arrays require a descriptor-backed field")
             for name in value:
@@ -1699,6 +1708,21 @@ class BytecodeWriter:
             buf.write_u8(ATTR_KIND_BYTES)
             buf.write_varint(len(data))
             buf.write_bytes(data)
+            return
+        if attr_type == "string_array" or isinstance(value, StringArrayAttr):
+            if not isinstance(value, StringArrayAttr):
+                raise TypeError(
+                    "string-array attribute value must be StringArrayAttr, "
+                    f"got {value!r}"
+                )
+            if attr_type not in (None, "any", "string_array"):
+                raise TypeError(
+                    f"string-array attribute does not match field kind {attr_type!r}"
+                )
+            buf.write_u8(ATTR_KIND_STRING_ARRAY)
+            buf.write_varint(len(value))
+            for string in value:
+                buf.write_varint(self._ctx.strings[string])
             return
         if isinstance(value, SymbolName):
             buf.write_u8(ATTR_KIND_SYMBOL)

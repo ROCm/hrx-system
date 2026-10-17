@@ -105,6 +105,7 @@ __all__ = [
     "CanonicalAttrDict",
     "ATTR_AGGREGATE_MAX_NESTING_DEPTH",
     "EnumArrayAttr",
+    "StringArrayAttr",
     "SignedEnumSetAttr",
     "ParameterizedAttr",
     "ParameterizedAttrArray",
@@ -877,9 +878,9 @@ class EncodingInstance:
         Aliases are display-only and do not participate in equality/hash.
     params: Canonical static attributes as sorted key-value pairs. Values use
         the same Python attribute domain as op attrs: ints, floats, bools,
-        strings, EncodingInstance, CanonicalAttrDict, and i64 arrays. Dynamic
-        encoding parameters are named SSA operands on encoding.define, not
-        nested values in this static attribute payload.
+        strings, StringArrayAttr, EncodingInstance, CanonicalAttrDict, and i64
+        arrays. Dynamic encoding parameters are named SSA operands on
+        encoding.define, not nested values in this static attribute payload.
     """
 
     name: str
@@ -930,7 +931,10 @@ def _canonicalize_encoding_param_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return CanonicalAttrDict(value.items())
     if isinstance(value, list | tuple):
-        return tuple(_canonicalize_encoding_param_value(item) for item in value)
+        values = tuple(_canonicalize_encoding_param_value(item) for item in value)
+        if values and all(type(item) is str for item in values):
+            return StringArrayAttr(values)
+        return values
     return value
 
 
@@ -1371,6 +1375,29 @@ def _canonicalize_parameterized_signed_enum_set(
     return SignedEnumSetAttr(positive_values, negative_values)
 
 
+def _canonicalize_parameterized_i64_array(
+    family_name: str, parameter_name: str, value: Any
+) -> tuple[int, ...]:
+    if isinstance(value, str | bytes | bytearray) or not isinstance(value, Iterable):
+        raise TypeError(
+            f"{family_name}: parameter '{parameter_name}' must be an iterable "
+            f"of signed 64-bit integers, got {value!r}"
+        )
+    values = tuple(value)
+    for index, element in enumerate(values):
+        if type(element) is not int or not -(2**63) <= element < 2**63:
+            raise TypeError(
+                f"{family_name}: parameter '{parameter_name}' element {index} "
+                f"must be a signed 64-bit integer, got {element!r}"
+            )
+    if len(values) > 0xFFFF:
+        raise ValueError(
+            f"{family_name}: parameter '{parameter_name}' has {len(values)} "
+            "elements, exceeding UINT16_MAX"
+        )
+    return values
+
+
 def _canonicalize_parameterized_value(
     family_name: str, parameter: Any, value: Any
 ) -> Any:
@@ -1388,6 +1415,7 @@ def _canonicalize_parameterized_value(
         ATTR_TYPE_PARAMETERIZED_ARRAY,
         ATTR_TYPE_SIGNED_ENUM_SET,
         ATTR_TYPE_STRING,
+        ATTR_TYPE_STRING_ARRAY,
         ATTR_TYPE_SYMBOL,
         ATTR_TYPE_SYMBOL_ARRAY,
         ATTR_TYPE_TYPE,
@@ -1412,6 +1440,10 @@ def _canonicalize_parameterized_value(
             if type(value) is not str:
                 raise type_error("a string")
             return value
+        case kind if kind == ATTR_TYPE_STRING_ARRAY:
+            return _canonicalize_parameterized_string_array(
+                family_name, parameter.name, value
+            )
         case kind if kind == ATTR_TYPE_BOOL:
             if type(value) is not bool:
                 raise type_error("a Boolean")
@@ -1452,24 +1484,9 @@ def _canonicalize_parameterized_value(
                 raise type_error("a Loom type")
             return value
         case kind if kind == ATTR_TYPE_I64_ARRAY:
-            if isinstance(value, str | bytes | bytearray) or not isinstance(
-                value, Iterable
-            ):
-                raise type_error("an iterable of signed 64-bit integers")
-            values = tuple(value)
-            for index, element in enumerate(values):
-                if type(element) is not int or not -(2**63) <= element < 2**63:
-                    raise TypeError(
-                        f"{family_name}: parameter '{parameter.name}' element "
-                        f"{index} must be a signed 64-bit integer, got "
-                        f"{element!r}"
-                    )
-            if len(values) > 0xFFFF:
-                raise ValueError(
-                    f"{family_name}: parameter '{parameter.name}' has "
-                    f"{len(values)} elements, exceeding UINT16_MAX"
-                )
-            return values
+            return _canonicalize_parameterized_i64_array(
+                family_name, parameter.name, value
+            )
         case kind if kind == ATTR_TYPE_BYTES:
             if not isinstance(value, bytes | bytearray | memoryview):
                 raise type_error("a byte payload")
@@ -1513,6 +1530,44 @@ def _canonicalize_parameterized_value(
                 f"{family_name}: parameter '{parameter.name}' has unsupported "
                 f"kind '{parameter.attr_type}'"
             )
+
+
+def _canonicalize_parameterized_string_array(
+    family_name: str, parameter_name: str, value: Any
+) -> StringArrayAttr:
+    values = value.values if isinstance(value, StringArrayAttr) else value
+    if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
+        raise TypeError(
+            f"{family_name}: parameter '{parameter_name}' must be an iterable "
+            f"of strings, got {value!r}"
+        )
+    return StringArrayAttr(values)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class StringArrayAttr:
+    """Ordered string attribute payloads."""
+
+    values: tuple[str, ...]
+
+    def __init__(self, values: Iterable[str] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"string array length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if type(value) is not str:
+                raise TypeError(
+                    f"string array element {index} must be a string, got {value!r}"
+                )
+        object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -1725,9 +1780,15 @@ def _canonicalize_attr_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return canonicalize_attr_dict(value)
     if isinstance(value, list):
-        return [_canonicalize_attr_value(item) for item in value]
+        canonical_values = [_canonicalize_attr_value(item) for item in value]
+        if canonical_values and all(type(item) is str for item in canonical_values):
+            return StringArrayAttr(canonical_values)
+        return canonical_values
     if isinstance(value, tuple):
-        return tuple(_canonicalize_attr_value(item) for item in value)
+        canonical_values = tuple(_canonicalize_attr_value(item) for item in value)
+        if canonical_values and all(type(item) is str for item in canonical_values):
+            return StringArrayAttr(canonical_values)
+        return canonical_values
     return value
 
 

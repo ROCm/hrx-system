@@ -58,6 +58,9 @@ typedef struct loom_pass_program_attr_value_t {
     double f64_value;
     // Program-owned string payload for LOOM_ATTR_STRING.
     iree_string_view_t string_value;
+    // Program-owned string views for LOOM_ATTR_STRING_ARRAY. Both the view
+    // array and each string payload belong to the program arena.
+    const iree_string_view_t* string_array;
     // Boolean payload for LOOM_ATTR_BOOL.
     bool bool_value;
     // Enum ordinal payload for LOOM_ATTR_ENUM.

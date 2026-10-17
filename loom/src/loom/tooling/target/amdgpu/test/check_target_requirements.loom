@@ -40,6 +40,7 @@ check.benchmark<@gfx9_4_generic> @gfx9_4_generic_benchmark
 
 check.case @gfx11_generic {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.requires<hal.amdgpu.target> {targets = ["gfx12-generic", "gfx11-generic"]}
   %output = check.generate.fill value(-1) : tensor<1xi32>
   kernel.launch @gfx11_store(%output) : (tensor<1xi32>)
   %expected = check.generate.fill value(42) : tensor<1xi32>
@@ -51,6 +52,7 @@ check.benchmark<@gfx11_generic> @gfx11_generic_benchmark
 
 check.case @gfx12_generic {
   check.requires<hal.amdgpu.target> {target = "gfx12-generic"}
+  check.requires<hal.amdgpu.target> {targets = ["gfx11-generic", "gfx12-generic"]}
   %output = check.generate.fill value(-1) : tensor<1xi32>
   kernel.launch @portable_store(%output) : (tensor<1xi32>)
   %expected = check.generate.fill value(42) : tensor<1xi32>

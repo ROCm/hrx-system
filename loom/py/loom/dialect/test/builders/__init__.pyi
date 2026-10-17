@@ -1186,3 +1186,11 @@ class TestBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def string_array_attrs(
+        self,
+        *,
+        required_values: Sequence[str],
+        optional_values: Sequence[str] | None = ...,
+        dict: Mapping[str, Any] | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
