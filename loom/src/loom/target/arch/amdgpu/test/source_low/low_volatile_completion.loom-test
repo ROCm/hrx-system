@@ -1,0 +1,516 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// RUN: emit amdgpu-assembly @global_publication_gfx942 strategy=source
+
+// Publication stays outstanding across the local barrier. The LDS write
+// completes before synchronization, and the global store completes at exit.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @global_publication_gfx942(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) asm {
+  global_store_dwordx2_saddr<volatile> %address, %value, %base
+  low.br ^exchange
+^exchange:
+  ds_write_b64 %address, %value
+  s_barrier
+  return
+}
+
+// ----
+  global_store_dwordx2 v0, v[2:3], s[0:1] offset:0
+.Lbb1:
+  ds_write_b64 v0, v[2:3] offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_barrier
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_observation_gfx942 strategy=source
+
+// A local barrier does not consume a global observation. Its result still
+// completes before the later use, including when carried across a block.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @global_observation_gfx942(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %observed = global_load_dwordx2_saddr<volatile> %address, %base : reg<amdgpu.vgpr x2>
+  low.br ^exchange
+^exchange:
+  s_barrier
+  return %observed
+}
+
+// ----
+  global_load_dwordx2 v[0:1], v0, s[0:1] offset:0
+.Lbb1:
+  s_barrier
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_publication_gfx1100 strategy=source
+
+// Publication stays outstanding across the local barrier. The LDS write
+// completes before synchronization, and the global store completes at exit.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @global_publication_gfx1100(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) asm {
+  global_store_b64_saddr<volatile> %address, %value, %base
+  low.br ^exchange
+^exchange:
+  ds_write_b64 %address, %value
+  s_barrier
+  return
+}
+
+// ----
+  global_store_b64 v0, v[2:3], s[0:1] offset:0
+.Lbb1:
+  ds_write_b64 v0, v[2:3] offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_barrier
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_observation_gfx1100 strategy=source
+
+// A local barrier does not consume a global observation. Its result still
+// completes before the later use, including when carried across a block.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @global_observation_gfx1100(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %observed = global_load_b64_saddr<volatile> %address, %base
+  low.br ^exchange
+^exchange:
+  s_barrier
+  return %observed
+}
+
+// ----
+  global_load_b64 v[0:1], v0, s[0:1] offset:0
+.Lbb1:
+  s_barrier
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_publication_gfx1151 strategy=source
+
+// Publication stays outstanding across the local barrier. The LDS write
+// completes before synchronization, and the global store completes at exit.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @global_publication_gfx1151(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) asm {
+  global_store_b64_saddr<volatile> %address, %value, %base
+  low.br ^exchange
+^exchange:
+  ds_write_b64 %address, %value
+  s_barrier
+  return
+}
+
+// ----
+  global_store_b64 v0, v[2:3], s[0:1] offset:0
+.Lbb1:
+  ds_write_b64 v0, v[2:3] offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_barrier
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_observation_gfx1151 strategy=source
+
+// A local barrier does not consume a global observation. Its result still
+// completes before the later use, including when carried across a block.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @global_observation_gfx1151(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %observed = global_load_b64_saddr<volatile> %address, %base
+  low.br ^exchange
+^exchange:
+  s_barrier
+  return %observed
+}
+
+// ----
+  global_load_b64 v[0:1], v0, s[0:1] offset:0
+.Lbb1:
+  s_barrier
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_publication_gfx1200 strategy=source
+
+// Publication stays outstanding across the local barrier. The LDS write
+// completes before synchronization, and the global store completes at exit.
+amdgpu.target<gfx1200> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @global_publication_gfx1200(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) asm {
+  global_store_b64_saddr<volatile> %address, %value, %base
+  low.br ^exchange
+^exchange:
+  ds_write_b64 %address, %value
+  s_barrier_signal_all
+  s_barrier_wait_all
+  return
+}
+
+// ----
+  global_store_b64 v0, v[2:3], s[0:1] offset:0
+.Lbb1:
+  ds_write_b64 v0, v[2:3] offset:0
+  s_wait_dscnt dscnt(0)
+  s_barrier_signal -1
+  s_barrier_wait -1
+  s_wait_storecnt storecnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_observation_gfx1200 strategy=source
+
+// A local barrier does not consume a global observation. Its result still
+// completes before the later use, including when carried across a block.
+amdgpu.target<gfx1200> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @global_observation_gfx1200(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %observed = global_load_b64_saddr<volatile> %address, %base
+  low.br ^exchange
+^exchange:
+  s_barrier_signal_all
+  s_barrier_wait_all
+  return %observed
+}
+
+// ----
+  global_load_b64 v[0:1], v0, s[0:1] offset:0
+.Lbb1:
+  s_barrier_signal -1
+  s_barrier_wait -1
+  s_wait_loadcnt loadcnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_publication_gfx1250 strategy=source
+
+// Publication stays outstanding across the local barrier. The LDS write
+// completes before synchronization, and the global store completes at exit.
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @global_publication_gfx1250(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) asm {
+  global_store_b64_saddr<volatile> %address, %value, %base
+  low.br ^exchange
+^exchange:
+  ds_write_b64 %address, %value
+  s_barrier_signal_all
+  s_barrier_wait_all
+  return
+}
+
+// ----
+  global_store_b64 v0, v[2:3], s[0:1] offset:0
+.Lbb1:
+  ds_write_b64 v0, v[2:3] offset:0
+  s_wait_dscnt dscnt(0)
+  s_barrier_signal -1
+  s_barrier_wait -1
+  s_wait_storecnt storecnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_observation_gfx1250 strategy=source
+
+// A local barrier does not consume a global observation. Its result still
+// completes before the later use, including when carried across a block.
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @global_observation_gfx1250(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %observed = global_load_b64_saddr<volatile> %address, %base
+  low.br ^exchange
+^exchange:
+  s_barrier_signal_all
+  s_barrier_wait_all
+  return %observed
+}
+
+// ----
+  global_load_b64 v[2:3], v0, s[0:1] offset:0
+.Lbb1:
+  s_barrier_signal -1
+  s_barrier_wait -1
+  s_wait_loadcnt loadcnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @workgroup_publication strategy=source
+
+// Workgroup publication must complete before a local barrier.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @workgroup_publication(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  ds_write_b32<volatile> %address, %value
+  low.br ^exchange
+^exchange:
+  s_barrier
+  return
+}
+
+// ----
+  ds_write_b32 v0, v1 offset:0
+.Lbb1:
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_barrier
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @generic_publication strategy=source
+
+// A true flat store can access LDS; its completion footprint remains generic.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @generic_publication(%pointer: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) asm {
+  flat_store_b32<volatile> %pointer, %value
+  low.br ^exchange
+^exchange:
+  s_barrier
+  return
+}
+
+// ----
+  flat_store_b32 v[0:1], v2 offset:0
+.Lbb1:
+  s_waitcnt_vscnt vscnt(0)
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_barrier
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @private_publication strategy=source
+
+// Private memory does not become workgroup memory through volatile ordering.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @private_publication(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  scratch_store_b32_vaddr<volatile> %address, %value
+  low.br ^exchange
+^exchange:
+  s_barrier
+  return
+}
+
+// ----
+  scratch_store_b32 v0, v1, off offset:0
+.Lbb1:
+  s_barrier
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @ordered_disjoint_reads strategy=source
+
+// The unused observations remain observable. The second volatile read
+// consumes the first even though their spaces and results are disjoint.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @ordered_disjoint_reads(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  %global = global_load_b32_saddr<volatile> %address, %base
+  low.br ^observe
+^observe:
+  %local = ds_read_b32<volatile> %address
+  return
+}
+
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  ds_read_b32 v0, v0 offset:0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @ordered_disjoint_writes strategy=source
+
+// A volatile global store consumes an incoming volatile LDS store.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @ordered_disjoint_writes(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  ds_write_b32<volatile> %address, %value
+  low.br ^publish
+^publish:
+  global_store_b32_saddr<volatile> %address, %value, %base
+  return
+}
+
+// ----
+  ds_write_b32 v0, v1 offset:0
+.Lbb1:
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @ordered_local_reads strategy=source
+
+// Block-local effect edges preserve the same read/read ordering obligation.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @ordered_local_reads(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  %global = global_load_b32_saddr<volatile> %address, %base
+  %local = ds_read_b32<volatile> %address
+  return
+}
+
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  ds_read_b32 v0, v0 offset:0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_atomic_publication strategy=source
+
+// An RMW carries both read and write completion classes in its actual space.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @global_atomic_publication(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %prior = global_atomic_add_u32_rtn_saddr<volatile> %address, %value, %base
+  low.br ^exchange
+^exchange:
+  s_barrier
+  return %prior
+}
+
+// ----
+  global_atomic_add_u32 v0, v0, v1, s[0:1] offset:0 glc
+.Lbb1:
+  s_barrier
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @ordered_diamond strategy=source
+
+// The join retains global/private stores across the LDS barrier, then drains
+// them at the volatile observation regardless of which predecessor ran.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @ordered_diamond(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) asm {
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  global_store_b32_saddr<volatile> %address, %value, %base
+  low.br ^join
+^right:
+  scratch_store_b32_vaddr<volatile> %address, %value
+  low.br ^join
+^join:
+  s_barrier
+  %observed = ds_read_b32<volatile> %address
+  return
+}
+
+// ----
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_branch .Lbb3
+.Lbb2:
+  scratch_store_b32 v1, v0, off offset:0
+.Lbb3:
+  s_barrier
+  s_waitcnt_vscnt vscnt(0)
+  ds_read_b32 v0, v1 offset:0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @ordered_loop strategy=source
+
+// The backedge publication is consumed by the next volatile LDS read, not
+// by its preceding barrier. Both the loop and exit retain completion.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @ordered_loop(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr>) asm {
+  %step = s_mov_b32 1
+  %zero = s_mov_b32 0
+  low.br ^loop(%count: reg<amdgpu.sgpr>)
+^loop(%remaining: reg<amdgpu.sgpr>):
+  s_barrier
+  %observed = ds_read_b32<volatile> %address
+  global_store_b32_saddr<volatile> %address, %value, %base
+  %next = s_sub_u32 %remaining, %step
+  %more = s_cmp_gt_u32 %next, %zero
+  low.cond_br %more, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s1, 1
+  s_mov_b32 s4, 0
+.Lbb1:
+  s_barrier
+  s_waitcnt_vscnt vscnt(0)
+  ds_read_b32 v2, v0 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  global_store_b32 v0, v1, s[2:3] offset:0
+  s_sub_u32 s0, s0, s1
+  s_cmp_gt_u32 s0, s4
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_completion_barrier strategy=source
+
+// A generic cache-control boundary still consumes a global publication.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @global_completion_barrier(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  global_store_b32_saddr<volatile> %address, %value, %base
+  low.br ^complete
+^complete:
+  buffer_gl1_inv
+  return
+}
+
+// ----
+  global_store_b32 v0, v1, s[0:1] offset:0
+.Lbb1:
+  s_waitcnt_vscnt vscnt(0)
+  buffer_gl1_inv
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @explicit_completion strategy=source
+
+// An explicit full store drain satisfies subsequent incoming ordering.
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @explicit_completion(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+  global_store_b32_saddr<volatile> %address, %value, %base
+  s_waitcnt_vscnt {vscnt = 0}
+  low.br ^exchange
+^exchange:
+  s_barrier
+  %observed = ds_read_b32<volatile> %address
+  return
+}
+
+// ----
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+.Lbb1:
+  s_barrier
+  ds_read_b32 v0, v1 offset:0
+  s_endpgm

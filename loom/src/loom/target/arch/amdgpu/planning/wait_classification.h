@@ -28,9 +28,9 @@ typedef enum loom_amdgpu_wait_node_state_flag_bits_e {
   LOOM_AMDGPU_WAIT_NODE_STATE_FORWARDS_DEPENDENCIES = 1u << 0,
   // Node has a counter effect without a concrete counter id.
   LOOM_AMDGPU_WAIT_NODE_STATE_GENERIC_COUNTER_EFFECT = 1u << 1,
-  // Node has a dependency-participating memory read effect.
+  // Node consumes preceding writes through a memory read or ordering effect.
   LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_READ = 1u << 2,
-  // Node has a dependency-participating memory write effect.
+  // Node consumes preceding reads through a memory write or ordering effect.
   LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_WRITE = 1u << 3,
   // Node has a memory read effect using the descriptor's completion hazards.
   LOOM_AMDGPU_WAIT_NODE_STATE_DEFAULT_DEPENDENCY_READ = 1u << 4,

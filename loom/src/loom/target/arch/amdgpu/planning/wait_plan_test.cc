@@ -188,14 +188,19 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   }
 
   struct CrossBlockMemoryFixture {
+    // Ordinary global store in the predecessor block.
     uint32_t producer_node;
+    // Tensor transfer in the successor block.
     uint32_t consumer_node;
+    // Producer's global write effect.
     uint32_t producer_effect;
+    // Consumer's first memory effect.
     uint32_t consumer_effect;
   };
 
-  void ConfigureRefinedAcyclicMemory(const testing::CfgGraph& graph,
-                                     CrossBlockMemoryFixture* out_fixture) {
+  void ConfigureRefinedAcyclicMemory(
+      const testing::CfgGraph& graph, CrossBlockMemoryFixture* out_fixture,
+      loom_memory_access_flags_t access_flags = 0) {
     const uint32_t producer_effect = static_cast<uint32_t>(effects_.size());
     AppendImmediate(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B32,
                     IREE_SV("scope"), LOOM_CACHE_SCOPE_DEVICE);
@@ -222,14 +227,17 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
 
     loom_builder_set_block(&builder_, successor);
     const uint32_t consumer_effect = static_cast<uint32_t>(effects_.size());
-    Tensor();
+    Append(LOOM_AMDGPU_DESCRIPTOR_REF_TENSOR_LOAD_TO_LDS_D2,
+           loom_named_attr_slice_empty(), access_flags);
     const uint32_t consumer_node = static_cast<uint32_t>(nodes_.size() - 1);
     nodes_[consumer_node].block_index = 1;
     nodes_[consumer_node].scheduled_ordinal = 0;
     for (iree_host_size_t i = consumer_effect; i < effects_.size(); ++i) {
       effects_[i].block_index = 1;
       effects_[i].scheduled_ordinal = 0;
-      effects_[i].flags |= LOOM_LOW_SCHEDULE_EFFECT_USE_FLAG_REFINED_MEMORY;
+      if (!iree_any_bit_set(access_flags, LOOM_MEMORY_ACCESS_FLAG_VOLATILE)) {
+        effects_[i].flags |= LOOM_LOW_SCHEDULE_EFFECT_USE_FLAG_REFINED_MEMORY;
+      }
     }
 
     FinalizeSchedule();
@@ -351,7 +359,8 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   }
 
   void Append(loom_amdgpu_descriptor_ref_t descriptor_ref,
-              loom_named_attr_slice_t attrs) {
+              loom_named_attr_slice_t attrs,
+              loom_memory_access_flags_t access_flags = 0) {
     const auto* descriptor =
         loom_amdgpu_descriptor_ref_descriptor(descriptors_, descriptor_ref);
     const auto* layout = loom_low_descriptor_layout(descriptors_, descriptor);
@@ -373,9 +382,9 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     }
     loom_op_t* op = nullptr;
     IREE_ASSERT_OK(loom_low_build_resolved_descriptor_op(
-        &builder_, descriptors_, descriptor, 0, block_.block->arg_ids,
-        node.operand_count, attrs, nullptr, 0, nullptr, 0,
-        LOOM_LOCATION_UNKNOWN, &op));
+        &builder_, descriptors_, descriptor, access_flags,
+        block_.block->arg_ids, node.operand_count, attrs, nullptr, 0, nullptr,
+        0, LOOM_LOCATION_UNKNOWN, &op));
     node.op = op;
     node.traits = op->traits;
     node.immediate_presence = loom_low_bind_immediate_presence(
@@ -521,6 +530,23 @@ TEST_F(AmdgpuWaitPlanTest, RefinedCrossBlockMemoryWaitsForExactCompletion) {
   EXPECT_EQ(action.scheduled_ordinal, 0u);
   EXPECT_EQ(action.producer_node, fixture.producer_node);
   EXPECT_EQ(action.consumer_node, fixture.consumer_node);
+  EXPECT_EQ(action.counter_id, LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE);
+  EXPECT_EQ(action.target_count, 0);
+  EXPECT_EQ(action.reason, LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT);
+}
+
+TEST_F(AmdgpuWaitPlanTest, VolatileConsumerOrdersRefinedIncomingMemory) {
+  testing::CfgGraph graph({{1}, {}});
+  CrossBlockMemoryFixture fixture = {};
+  // Scheduling excludes volatile accesses from source alias refinement. The
+  // ordinary producer still occupies the separate refined incoming frontier.
+  ConfigureRefinedAcyclicMemory(graph, &fixture,
+                                LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+
+  IREE_ASSERT_OK(BuildPlan());
+  ASSERT_EQ(plan_.action_count, 1u);
+  const loom_amdgpu_wait_plan_action_t& action = plan_.actions[0];
+  EXPECT_EQ(action.node_index, fixture.consumer_node);
   EXPECT_EQ(action.counter_id, LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE);
   EXPECT_EQ(action.target_count, 0);
   EXPECT_EQ(action.reason, LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT);

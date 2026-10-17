@@ -2517,11 +2517,6 @@ loom_amdgpu_wait_plan_handle_cross_block_memory_dependencies(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   const loom_amdgpu_wait_frontier_node_t* frontier_node =
       &builder->classification.frontier_nodes[node_index];
-  if (builder->frontier.memory.static_outgoing_states == NULL ||
-      (frontier_node->read_space_flags == 0 &&
-       frontier_node->write_space_flags == 0)) {
-    return iree_ok_status();
-  }
   const uint32_t counter_mask =
       loom_amdgpu_wait_frontier_memory_dependency_mask(&builder->frontier,
                                                        frontier_node);

@@ -1024,9 +1024,16 @@ uint32_t loom_amdgpu_wait_frontier_memory_dependency_mask(
     const loom_amdgpu_wait_frontier_node_t* node) {
   IREE_ASSERT_ARGUMENT(frontier);
   IREE_ASSERT_ARGUMENT(node);
-  if (frontier->memory.static_outgoing_states == NULL ||
-      (node->read_space_flags == 0 && node->write_space_flags == 0)) {
+  if (frontier->memory.static_outgoing_states == NULL) {
     return 0;
+  }
+  if (iree_any_bit_set(node->flags,
+                       LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_ORDERS_MEMORY)) {
+    return loom_amdgpu_wait_frontier_memory_query(
+        frontier,
+        loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC),
+        LOOM_AMDGPU_WAIT_MEMORY_ACCESS_FLAG_READ |
+            LOOM_AMDGPU_WAIT_MEMORY_ACCESS_FLAG_WRITE);
   }
   uint32_t prior_writes = loom_amdgpu_wait_memory_state_query(
       &frontier->memory.active_state, node->read_space_flags,
