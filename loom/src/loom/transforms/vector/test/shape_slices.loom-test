@@ -1,0 +1,429 @@
+// RUN: pass target=amdgpu:gfx11-generic target-legalize{mode=eager,policy=require-native},canonicalize,dce,target-legalize{mode=complete,policy=require-native},canonicalize,dce
+
+// An exclusive load keeps only the selected two row runs.
+func.def @rectangle(%input: buffer, %row: index, %column: index) -> (vector<2x3xi8>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x8xi8>
+  %values = vector.load %view[0, 0] : view<4x8xi8> -> vector<4x8xi8>
+  %result = vector.slice %values[%row, %column] : vector<4x8xi8> -> vector<2x3xi8>
+  func.return %result : vector<2x3xi8>
+}
+
+// ----
+func.def @rectangle(%input: buffer, %row: index, %column: index) -> (vector<2x3xi8>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x8xi8>
+  %9 = vector.load %view[%row, %column] : view<4x8xi8> -> vector<3xi8>
+  %10 = index.constant 1 : index
+  %11 = index.add %row, %10 : index
+  %12 = vector.load %view[%11, %column] : view<4x8xi8> -> vector<3xi8>
+  %15 = vector.extract %9[0] : vector<3xi8> -> i8
+  %16 = vector.extract %9[1] : vector<3xi8> -> i8
+  %17 = vector.extract %9[2] : vector<3xi8> -> i8
+  %18 = vector.extract %12[0] : vector<3xi8> -> i8
+  %19 = vector.extract %12[1] : vector<3xi8> -> i8
+  %20 = vector.extract %12[2] : vector<3xi8> -> i8
+  %21 = vector.from_elements %15, %16, %17, %18, %19, %20 : vector<6xi8>
+  %result = vector.bitcast %21 : vector<6xi8> to vector<2x3xi8>
+  func.return %result : vector<2x3xi8>
+}
+
+// ====
+
+// A complete trailing plane forms a single contiguous window.
+func.def @plane(%input: buffer, %plane: index) -> (vector<1x2x4xf32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<3x2x4xf32>
+  %values = vector.load %view[0, 0, 0] : view<3x2x4xf32> -> vector<3x2x4xf32>
+  %result = vector.slice %values[%plane, 0, 0] : vector<3x2x4xf32> -> vector<1x2x4xf32>
+  func.return %result : vector<1x2x4xf32>
+}
+
+// ----
+func.def @plane(%input: buffer, %plane: index) -> (vector<1x2x4xf32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<3x2x4xf32>
+  %13 = index.constant 3 : index
+  %14 = index.shli %plane, %13 : index
+  %10 = view.bitcast %view : view<3x2x4xf32> -> view<24xf32>
+  %11 = vector.load %10[%14] : view<24xf32> -> vector<8xf32>
+  %result = vector.bitcast %11 : vector<8xf32> to vector<1x2x4xf32>
+  func.return %result : vector<1x2x4xf32>
+}
+
+// ====
+
+// The full innermost axis joins rows but the cropped middle axis separates
+// planes. A static leading offset participates in the common runtime base.
+func.def @cropped_planes(%input: buffer, %row: index) -> (vector<2x2x4xi16>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<3x4x4xi16>
+  %values = vector.load %view[0, 0, 0] : view<3x4x4xi16> -> vector<3x4x4xi16>
+  %result = vector.slice %values[1, %row, 0] : vector<3x4x4xi16> -> vector<2x2x4xi16>
+  func.return %result : vector<2x2x4xi16>
+}
+
+// ----
+func.def @cropped_planes(%input: buffer, %row: index) -> (vector<2x2x4xi16>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<3x4x4xi16>
+  %8 = vector.load %view[1, %row, 0] : view<3x4x4xi16> -> vector<4xi16>
+  %9 = index.constant 1 : index
+  %10 = index.add %row, %9 : index
+  %11 = vector.load %view[1, %10, 0] : view<3x4x4xi16> -> vector<4xi16>
+  %12 = vector.load %view[2, %row, 0] : view<3x4x4xi16> -> vector<4xi16>
+  %13 = index.constant 1 : index
+  %14 = index.add %row, %13 : index
+  %15 = vector.load %view[2, %14, 0] : view<3x4x4xi16> -> vector<4xi16>
+  %18 = vector.concat<0> %8, %11 : vector<4xi16>, vector<4xi16> -> vector<8xi16>
+  %19 = vector.concat<0> %12, %15 : vector<4xi16>, vector<4xi16> -> vector<8xi16>
+  %20 = vector.concat<0> %18, %19 : vector<8xi16>, vector<8xi16> -> vector<16xi16>
+  %result = vector.bitcast %20 : vector<16xi16> to vector<2x2x4xi16>
+  func.return %result : vector<2x2x4xi16>
+}
+
+// ====
+
+// A partial trailing axis keeps gaps inside every plane.
+func.def @strided_volume(%values: vector<2x3x4xi32>) -> (vector<2x2x2xi32>) {
+  %result = vector.slice %values[0, 1, 1] : vector<2x3x4xi32> -> vector<2x2x2xi32>
+  func.return %result : vector<2x2x2xi32>
+}
+
+// ----
+func.def @strided_volume(%values: vector<2x3x4xi32>) -> (vector<2x2x2xi32>) {
+  %3 = vector.bitcast %values : vector<2x3x4xi32> to vector<24xi32>
+  %4 = vector.slice %3[5] : vector<24xi32> -> vector<2xi32>
+  %5 = vector.slice %3[9] : vector<24xi32> -> vector<2xi32>
+  %6 = vector.slice %3[17] : vector<24xi32> -> vector<2xi32>
+  %7 = vector.slice %3[21] : vector<24xi32> -> vector<2xi32>
+  %10 = vector.concat<0> %4, %5 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %11 = vector.concat<0> %6, %7 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %12 = vector.concat<0> %10, %11 : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %result = vector.bitcast %12 : vector<8xi32> to vector<2x2x2xi32>
+  func.return %result : vector<2x2x2xi32>
+}
+
+// ====
+
+// Register rectangles retain one runtime base and constant row displacements.
+func.def @register_rectangle(%values: vector<4x8xi16>, %row: index, %column: index) -> (vector<2x4xi16>) {
+  %result = vector.slice %values[%row, %column] : vector<4x8xi16> -> vector<2x4xi16>
+  func.return %result : vector<2x4xi16>
+}
+
+// ----
+func.def @register_rectangle(%values: vector<4x8xi16>, %row: index, %column: index) -> (vector<2x4xi16>) {
+  %5 = index.constant 8 : index
+  %6 = index.madd %row, %5, %column : index
+  %7 = vector.bitcast %values : vector<4x8xi16> to vector<32xi16>
+  %8 = vector.slice %7[%6] : vector<32xi16> -> vector<4xi16>
+  %9 = index.constant 8 : index
+  %10 = index.add %6, %9 : index
+  %11 = vector.slice %7[%10] : vector<32xi16> -> vector<4xi16>
+  %12 = vector.concat<0> %8, %11 : vector<4xi16>, vector<4xi16> -> vector<8xi16>
+  %result = vector.bitcast %12 : vector<8xi16> to vector<2x4xi16>
+  func.return %result : vector<2x4xi16>
+}
+
+// ====
+
+// Full-rank load origins compose with trailing slice axes. The leading batch,
+// static column contribution, and cache policy survive the narrowed load.
+func.def @composed_load_origins(%input: buffer, %batch: index, %row: index, %column: index) -> (vector<1x2xi16>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<3x8x12xi16>
+  %values = vector.load %view[%batch, %row, 2] {cache_scope = device, cache_temporal = non_temporal} : view<3x8x12xi16> -> vector<2x4xi16>
+  %result = vector.slice %values[1, %column] : vector<2x4xi16> -> vector<1x2xi16>
+  func.return %result : vector<1x2xi16>
+}
+
+// ----
+func.def @composed_load_origins(%input: buffer, %batch: index, %row: index, %column: index) -> (vector<1x2xi16>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<3x8x12xi16>
+  %9 = index.constant 1 : index
+  %10 = index.add %row, %9 : index
+  %11 = index.constant 2 : index
+  %12 = index.add %column, %11 : index
+  %14 = vector.load %view[%batch, %10, %12] {cache_scope = device, cache_temporal = non_temporal} : view<3x8x12xi16> -> vector<2xi16>
+  %result = vector.bitcast %14 : vector<2xi16> to vector<1x2xi16>
+  func.return %result : vector<1x2xi16>
+}
+
+// ====
+
+// Both the load and the crop can carry runtime origins on the same axes.
+func.def @runtime_load_origins(%input: buffer, %load_row: index, %load_column: index, %row: index, %column: index) -> (vector<2x2xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<8x8xi32>
+  %values = vector.load %view[%load_row, %load_column] : view<8x8xi32> -> vector<4x4xi32>
+  %result = vector.slice %values[%row, %column] : vector<4x4xi32> -> vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ----
+func.def @runtime_load_origins(%input: buffer, %load_row: index, %load_column: index, %row: index, %column: index) -> (vector<2x2xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<8x8xi32>
+  %10 = index.add %load_row, %row : index
+  %11 = index.add %load_column, %column : index
+  %13 = vector.load %view[%10, %11] : view<8x8xi32> -> vector<2xi32>
+  %14 = index.constant 1 : index
+  %15 = index.add %10, %14 : index
+  %16 = vector.load %view[%15, %11] : view<8x8xi32> -> vector<2xi32>
+  %17 = vector.concat<0> %13, %16 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %result = vector.bitcast %17 : vector<4xi32> to vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ====
+
+// Another consumer retains the original loaded value and footprint.
+func.def @shared_load(%input: buffer, %row: index, %column: index) -> (vector<4x4xi32>, vector<2x2xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %values = vector.load %view[0, 0] : view<4x4xi32> -> vector<4x4xi32>
+  %result = vector.slice %values[%row, %column] : vector<4x4xi32> -> vector<2x2xi32>
+  func.return %values, %result : vector<4x4xi32>, vector<2x2xi32>
+}
+
+// ----
+func.def @shared_load(%input: buffer, %row: index, %column: index) -> (vector<4x4xi32>, vector<2x2xi32>) {
+  %31 = index.constant 64 : offset
+  %32 = buffer.alloca<private> align(16) %31 : buffer
+  %33 = index.constant 0 : offset
+  %34 = buffer.view %32[%33] : buffer -> view<16xi32>
+  %26 = index.constant 64 : offset
+  %27 = buffer.alloca<private> align(16) %26 : buffer
+  %28 = index.constant 0 : offset
+  %29 = buffer.view %27[%28] : buffer -> view<16xi32>
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %18 = view.bitcast %view : view<4x4xi32> -> view<16xi32>
+  %21 = vector.load %18[0] : view<16xi32> -> vector<4xi32>
+  vector.store %21, %34[0] : vector<4xi32>, view<16xi32>
+  vector.store %21, %29[0] : vector<4xi32>, view<16xi32>
+  %22 = vector.load %18[4] : view<16xi32> -> vector<4xi32>
+  vector.store %22, %34[4] : vector<4xi32>, view<16xi32>
+  vector.store %22, %29[4] : vector<4xi32>, view<16xi32>
+  %23 = vector.load %18[8] : view<16xi32> -> vector<4xi32>
+  vector.store %23, %34[8] : vector<4xi32>, view<16xi32>
+  vector.store %23, %29[8] : vector<4xi32>, view<16xi32>
+  %24 = vector.load %18[12] : view<16xi32> -> vector<4xi32>
+  vector.store %24, %34[12] : vector<4xi32>, view<16xi32>
+  vector.store %24, %29[12] : vector<4xi32>, view<16xi32>
+  %36 = vector.concat<0> %21, %22 : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %37 = vector.concat<0> %23, %24 : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %38 = vector.concat<0> %36, %37 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
+  %values = vector.bitcast %38 : vector<16xi32> to vector<4x4xi32>
+  %9 = index.constant 4 : index
+  %10 = index.madd %row, %9, %column : index
+  %35 = vector.load %34[%10] : view<16xi32> -> vector<2xi32>
+  %13 = index.constant 4 : index
+  %14 = index.add %10, %13 : index
+  %30 = vector.load %29[%14] : view<16xi32> -> vector<2xi32>
+  %16 = vector.concat<0> %35, %30 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %result = vector.bitcast %16 : vector<4xi32> to vector<2x2xi32>
+  func.return %values, %result : vector<4x4xi32>, vector<2x2xi32>
+}
+
+// ====
+
+// A write between the load and the crop must not change the selected snapshot.
+func.def @write_barrier(%input: buffer, %row: index, %column: index, %replacement: i32) -> (vector<2x2xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %values = vector.load %view[0, 0] : view<4x4xi32> -> vector<4x4xi32>
+  view.store %replacement, %view[0, 0] : i32, view<4x4xi32>
+  %result = vector.slice %values[%row, %column] : vector<4x4xi32> -> vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ----
+func.def @write_barrier(%input: buffer, %row: index, %column: index, %replacement: i32) -> (vector<2x2xi32>) {
+  %31 = index.constant 64 : offset
+  %32 = buffer.alloca<private> align(16) %31 : buffer
+  %33 = index.constant 0 : offset
+  %34 = buffer.view %32[%33] : buffer -> view<16xi32>
+  %26 = index.constant 64 : offset
+  %27 = buffer.alloca<private> align(16) %26 : buffer
+  %28 = index.constant 0 : offset
+  %29 = buffer.view %27[%28] : buffer -> view<16xi32>
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %18 = view.bitcast %view : view<4x4xi32> -> view<16xi32>
+  %21 = vector.load %18[0] : view<16xi32> -> vector<4xi32>
+  vector.store %21, %34[0] : vector<4xi32>, view<16xi32>
+  vector.store %21, %29[0] : vector<4xi32>, view<16xi32>
+  %22 = vector.load %18[4] : view<16xi32> -> vector<4xi32>
+  vector.store %22, %34[4] : vector<4xi32>, view<16xi32>
+  vector.store %22, %29[4] : vector<4xi32>, view<16xi32>
+  %23 = vector.load %18[8] : view<16xi32> -> vector<4xi32>
+  vector.store %23, %34[8] : vector<4xi32>, view<16xi32>
+  vector.store %23, %29[8] : vector<4xi32>, view<16xi32>
+  %24 = vector.load %18[12] : view<16xi32> -> vector<4xi32>
+  vector.store %24, %34[12] : vector<4xi32>, view<16xi32>
+  vector.store %24, %29[12] : vector<4xi32>, view<16xi32>
+  view.store %replacement, %view[0, 0] : i32, view<4x4xi32>
+  %9 = index.constant 4 : index
+  %10 = index.madd %row, %9, %column : index
+  %35 = vector.load %34[%10] : view<16xi32> -> vector<2xi32>
+  %13 = index.constant 4 : index
+  %14 = index.add %10, %13 : index
+  %30 = vector.load %29[%14] : view<16xi32> -> vector<2xi32>
+  %16 = vector.concat<0> %35, %30 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %result = vector.bitcast %16 : vector<4xi32> to vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ====
+
+// Every lane of a volatile load remains observable, even when the crop uses
+// only four lanes of its result.
+func.def @volatile_footprint(%input: buffer, %row: index, %column: index) -> (vector<2x2xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %values = vector.load<volatile> %view[0, 0] : view<4x4xi32> -> vector<4x4xi32>
+  %result = vector.slice %values[%row, %column] : vector<4x4xi32> -> vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ----
+func.def @volatile_footprint(%input: buffer, %row: index, %column: index) -> (vector<2x2xi32>) {
+  %30 = index.constant 64 : offset
+  %31 = buffer.alloca<private> align(16) %30 : buffer
+  %32 = index.constant 0 : offset
+  %33 = buffer.view %31[%32] : buffer -> view<16xi32>
+  %25 = index.constant 64 : offset
+  %26 = buffer.alloca<private> align(16) %25 : buffer
+  %27 = index.constant 0 : offset
+  %28 = buffer.view %26[%27] : buffer -> view<16xi32>
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %17 = view.bitcast %view : view<4x4xi32> -> view<16xi32>
+  %20 = vector.load<volatile> %17[0] : view<16xi32> -> vector<4xi32>
+  vector.store %20, %33[0] : vector<4xi32>, view<16xi32>
+  vector.store %20, %28[0] : vector<4xi32>, view<16xi32>
+  %21 = vector.load<volatile> %17[4] : view<16xi32> -> vector<4xi32>
+  vector.store %21, %33[4] : vector<4xi32>, view<16xi32>
+  vector.store %21, %28[4] : vector<4xi32>, view<16xi32>
+  %22 = vector.load<volatile> %17[8] : view<16xi32> -> vector<4xi32>
+  vector.store %22, %33[8] : vector<4xi32>, view<16xi32>
+  vector.store %22, %28[8] : vector<4xi32>, view<16xi32>
+  %23 = vector.load<volatile> %17[12] : view<16xi32> -> vector<4xi32>
+  vector.store %23, %33[12] : vector<4xi32>, view<16xi32>
+  vector.store %23, %28[12] : vector<4xi32>, view<16xi32>
+  %8 = index.constant 4 : index
+  %9 = index.madd %row, %8, %column : index
+  %34 = vector.load %33[%9] : view<16xi32> -> vector<2xi32>
+  %12 = index.constant 4 : index
+  %13 = index.add %9, %12 : index
+  %29 = vector.load %28[%13] : view<16xi32> -> vector<2xi32>
+  %15 = vector.concat<0> %34, %29 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %result = vector.bitcast %15 : vector<4xi32> to vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ====
+
+// The selected read cannot cross an acquire fence.
+func.def @fence_barrier(%input: buffer, %row: index, %column: index) -> (vector<2x2xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %values = vector.load %view[0, 0] : view<4x4xi32> -> vector<4x4xi32>
+  buffer.fence scope(system) ordering(acquire)
+  %result = vector.slice %values[%row, %column] : vector<4x4xi32> -> vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ----
+func.def @fence_barrier(%input: buffer, %row: index, %column: index) -> (vector<2x2xi32>) {
+  %30 = index.constant 64 : offset
+  %31 = buffer.alloca<private> align(16) %30 : buffer
+  %32 = index.constant 0 : offset
+  %33 = buffer.view %31[%32] : buffer -> view<16xi32>
+  %25 = index.constant 64 : offset
+  %26 = buffer.alloca<private> align(16) %25 : buffer
+  %27 = index.constant 0 : offset
+  %28 = buffer.view %26[%27] : buffer -> view<16xi32>
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %17 = view.bitcast %view : view<4x4xi32> -> view<16xi32>
+  %20 = vector.load %17[0] : view<16xi32> -> vector<4xi32>
+  vector.store %20, %33[0] : vector<4xi32>, view<16xi32>
+  vector.store %20, %28[0] : vector<4xi32>, view<16xi32>
+  %21 = vector.load %17[4] : view<16xi32> -> vector<4xi32>
+  vector.store %21, %33[4] : vector<4xi32>, view<16xi32>
+  vector.store %21, %28[4] : vector<4xi32>, view<16xi32>
+  %22 = vector.load %17[8] : view<16xi32> -> vector<4xi32>
+  vector.store %22, %33[8] : vector<4xi32>, view<16xi32>
+  vector.store %22, %28[8] : vector<4xi32>, view<16xi32>
+  %23 = vector.load %17[12] : view<16xi32> -> vector<4xi32>
+  vector.store %23, %33[12] : vector<4xi32>, view<16xi32>
+  vector.store %23, %28[12] : vector<4xi32>, view<16xi32>
+  buffer.fence scope(system) ordering(acquire)
+  %8 = index.constant 4 : index
+  %9 = index.madd %row, %8, %column : index
+  %34 = vector.load %33[%9] : view<16xi32> -> vector<2xi32>
+  %12 = index.constant 4 : index
+  %13 = index.add %9, %12 : index
+  %29 = vector.load %28[%13] : view<16xi32> -> vector<2xi32>
+  %15 = vector.concat<0> %34, %29 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %result = vector.bitcast %15 : vector<4xi32> to vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ====
+
+// An intervening region may write the input. Slicing the earlier SSA value
+// still observes the load before either branch executes.
+func.def @region_barrier(%input: buffer, %row: index, %column: index, %replace: i1, %replacement: i32) -> (vector<2x2xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %values = vector.load %view[0, 0] : view<4x4xi32> -> vector<4x4xi32>
+  scf.if %replace {
+    view.store %replacement, %view[0, 0] : i32, view<4x4xi32>
+  }
+  %result = vector.slice %values[%row, %column] : vector<4x4xi32> -> vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ----
+func.def @region_barrier(%input: buffer, %row: index, %column: index, %replace: i1, %replacement: i32) -> (vector<2x2xi32>) {
+  %32 = index.constant 64 : offset
+  %33 = buffer.alloca<private> align(16) %32 : buffer
+  %34 = index.constant 0 : offset
+  %35 = buffer.view %33[%34] : buffer -> view<16xi32>
+  %27 = index.constant 64 : offset
+  %28 = buffer.alloca<private> align(16) %27 : buffer
+  %29 = index.constant 0 : offset
+  %30 = buffer.view %28[%29] : buffer -> view<16xi32>
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<4x4xi32>
+  %19 = view.bitcast %view : view<4x4xi32> -> view<16xi32>
+  %22 = vector.load %19[0] : view<16xi32> -> vector<4xi32>
+  vector.store %22, %35[0] : vector<4xi32>, view<16xi32>
+  vector.store %22, %30[0] : vector<4xi32>, view<16xi32>
+  %23 = vector.load %19[4] : view<16xi32> -> vector<4xi32>
+  vector.store %23, %35[4] : vector<4xi32>, view<16xi32>
+  vector.store %23, %30[4] : vector<4xi32>, view<16xi32>
+  %24 = vector.load %19[8] : view<16xi32> -> vector<4xi32>
+  vector.store %24, %35[8] : vector<4xi32>, view<16xi32>
+  vector.store %24, %30[8] : vector<4xi32>, view<16xi32>
+  %25 = vector.load %19[12] : view<16xi32> -> vector<4xi32>
+  vector.store %25, %35[12] : vector<4xi32>, view<16xi32>
+  vector.store %25, %30[12] : vector<4xi32>, view<16xi32>
+  scf.if %replace {
+    view.store %replacement, %view[0, 0] : i32, view<4x4xi32>
+  }
+  %10 = index.constant 4 : index
+  %11 = index.madd %row, %10, %column : index
+  %36 = vector.load %35[%11] : view<16xi32> -> vector<2xi32>
+  %14 = index.constant 4 : index
+  %15 = index.add %11, %14 : index
+  %31 = vector.load %30[%15] : view<16xi32> -> vector<2xi32>
+  %17 = vector.concat<0> %36, %31 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %result = vector.bitcast %17 : vector<4xi32> to vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}

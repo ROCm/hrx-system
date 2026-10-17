@@ -41,6 +41,7 @@ loom_check_test_suite(
         "packed_memory_consumers.loom-test",
         "reduce_axes_to_scalar.loom-test",
         "reshape_lanes.loom-test",
+        "shape_slices.loom-test",
         "sink_single_use_reads.loom-test",
         "to_scalar.loom-test",
         "to_scalar_divrem.loom-test",
