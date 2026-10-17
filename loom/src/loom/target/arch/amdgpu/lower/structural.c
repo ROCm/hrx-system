@@ -122,9 +122,8 @@ static bool loom_amdgpu_vector_storage_fills_registers(
 }
 
 static bool loom_amdgpu_packed_register_slice_storage_shape(
-    loom_type_t type, uint32_t* out_payload_bit_count,
-    uint32_t* out_register_count, uint32_t* out_element_bit_count) {
-  *out_payload_bit_count = 0;
+    loom_type_t type, uint32_t* out_register_count,
+    uint32_t* out_element_bit_count) {
   *out_register_count = 0;
   *out_element_bit_count = 0;
   loom_amdgpu_vector_storage_t storage = {0};
@@ -135,7 +134,6 @@ static bool loom_amdgpu_packed_register_slice_storage_shape(
                         LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD)) {
     return false;
   }
-  *out_payload_bit_count = storage.element_count * storage.element_bit_count;
   *out_register_count = storage.register_count;
   *out_element_bit_count = storage.element_bit_count;
   return true;
@@ -532,24 +530,6 @@ static bool loom_amdgpu_vector_transpose_plan_from_op(
   return true;
 }
 
-static bool loom_amdgpu_packed_register_bit_slice_window_is_supported(
-    uint32_t source_bit_offset, uint32_t result_payload_bit_count,
-    uint32_t result_register_count) {
-  for (uint32_t register_index = 0; register_index < result_register_count;
-       ++register_index) {
-    const uint32_t result_bit_offset = register_index * 32u;
-    const uint32_t result_remaining_bit_count =
-        result_payload_bit_count - result_bit_offset;
-    const uint32_t needed_bit_count = iree_min(result_remaining_bit_count, 32u);
-    const uint32_t source_register_bit_offset =
-        (source_bit_offset + result_bit_offset) & 31u;
-    if (source_register_bit_offset + needed_bit_count > 32u) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static bool loom_amdgpu_vector_slice_plan_from_op(
     const loom_module_t* module, const loom_op_t* source_op,
     loom_amdgpu_vector_slice_plan_t* out_plan) {
@@ -604,25 +584,15 @@ static bool loom_amdgpu_vector_slice_plan_from_op(
         lane_offset * source_storage.element_register_count;
     out_plan->kind = LOOM_AMDGPU_VECTOR_SLICE_KIND_REGISTER_RANGE;
   } else {
-    uint32_t source_payload_bit_count = 0;
-    uint32_t result_payload_bit_count = 0;
     uint32_t source_register_count = 0;
     uint32_t result_register_count = 0;
     uint32_t source_element_bit_count = 0;
     uint32_t result_element_bit_count = 0;
     if (!loom_amdgpu_packed_register_slice_storage_shape(
-            source_type, &source_payload_bit_count, &source_register_count,
-            &source_element_bit_count) ||
+            source_type, &source_register_count, &source_element_bit_count) ||
         !loom_amdgpu_packed_register_slice_storage_shape(
-            result_type, &result_payload_bit_count, &result_register_count,
-            &result_element_bit_count) ||
+            result_type, &result_register_count, &result_element_bit_count) ||
         source_element_bit_count != result_element_bit_count) {
-      return false;
-    }
-    const uint32_t source_bit_offset = lane_offset * source_element_bit_count;
-    if (!loom_amdgpu_packed_register_bit_slice_window_is_supported(
-            source_bit_offset, result_payload_bit_count,
-            result_register_count)) {
       return false;
     }
     out_plan->source_register_count = source_register_count;
@@ -1397,6 +1367,18 @@ static iree_status_t loom_amdgpu_lower_vector_slice_packed_register_bits(
     loom_type_t lane_type, loom_value_id_t* low_registers) {
   const uint32_t source_bit_offset =
       select->lane_offset * select->element_bit_count;
+  const uint32_t result_bit_count =
+      select->lane_count * select->element_bit_count;
+  const uint32_t shift = source_bit_offset & 31u;
+  loom_low_lower_resolved_descriptor_t align_descriptor = {0};
+  loom_value_id_t shift_value = LOOM_VALUE_ID_INVALID;
+  if (shift + iree_min(result_bit_count, 32u) > 32u) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_ALIGNBIT_B32, &align_descriptor));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, shift,
+        lane_type, &shift_value));
+  }
   for (uint32_t i = 0; i < select->result_register_count; ++i) {
     const uint32_t register_source_bit_offset = source_bit_offset + i * 32u;
     const uint32_t source_register_index = register_source_bit_offset / 32u;
@@ -1412,10 +1394,24 @@ static iree_status_t loom_amdgpu_lower_vector_slice_packed_register_bits(
       low_registers[i] = source_register;
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
-        source_register_bit_offset, source_register, lane_type,
-        &low_registers[i]));
+    const uint32_t needed_bit_count = iree_min(result_bit_count - i * 32u, 32u);
+    if (source_register_bit_offset + needed_bit_count > 32u) {
+      // The verified slice window contains the required bits in the adjacent
+      // source dword. A partial final result needs no high word when all of
+      // its live bits already fit in the low word.
+      loom_value_id_t high_register = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
+          context, source_op, low_source, source_register_index + 1u, lane_type,
+          &high_register));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_ternary(
+          context, source_op, &align_descriptor, high_register, source_register,
+          shift_value, lane_type, &low_registers[i]));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+          context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
+          source_register_bit_offset, source_register, lane_type,
+          &low_registers[i]));
+    }
   }
   return iree_ok_status();
 }

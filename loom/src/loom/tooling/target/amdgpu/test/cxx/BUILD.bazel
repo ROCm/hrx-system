@@ -13,6 +13,7 @@ load(
 load(
     "//loom/build_tools/amdgpu:target_config.bzl",
     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY",
+    "LOOM_AMDGPU_SUPPORTED_TARGETS",
 )
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_test", "loom_test_module")
@@ -144,6 +145,14 @@ test_suite(
 loom_test(
     name = "bitcast_test",
     srcs = ["bitcast.cxx"],
+    execution_profiles = _EXECUTION_PROFILES,
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_test(
+    name = "packed_slices_test",
+    srcs = ["packed_slices.cxx"],
+    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
     execution_profiles = _EXECUTION_PROFILES,
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
