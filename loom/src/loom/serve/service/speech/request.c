@@ -36,17 +36,18 @@ typedef struct loom_serve_speech_fields_t {
 
 static iree_status_t loom_serve_speech_request_validate(
     iree_string_view_t input, iree_string_view_t voice,
-    iree_string_view_t instructions, float speed) {
+    iree_string_view_t instructions, float speed, bool input_complete) {
   if (!iree_unicode_utf8_validate(input) ||
       !iree_unicode_utf8_validate(voice) ||
       !iree_unicode_utf8_validate(instructions)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "speech strings must be UTF-8");
   }
-  if (!input.size || !voice.size ||
+  if ((input_complete && !input.size) || !voice.size ||
       iree_string_view_find_char(voice, '\0', 0) != IREE_STRING_VIEW_NPOS) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "speech requires nonempty input and a nonempty "
+                            "finite speech requires nonempty input, and a "
+                            "speech request requires a nonempty "
                             "voice identifier without NUL bytes");
   }
   if (!isfinite(speed) || speed < 0.25f || speed > 4.0f) {
@@ -210,7 +211,7 @@ static iree_status_t loom_serve_speech_request_decode(
   return loom_serve_speech_request_validate(
       iree_string_builder_view(&request->input),
       iree_string_builder_view(&request->voice),
-      iree_string_builder_view(&request->instructions), request->speed);
+      iree_string_builder_view(&request->instructions), request->speed, true);
 }
 
 void loom_serve_speech_request_deinitialize(
@@ -221,18 +222,20 @@ void loom_serve_speech_request_deinitialize(
   memset(request, 0, sizeof(*request));
 }
 
-iree_status_t loom_serve_speech_request_initialize_text(
+static iree_status_t loom_serve_speech_request_copy(
     iree_string_view_t input, iree_string_view_t voice,
     iree_string_view_t instructions, uint64_t seed, float speed,
-    iree_allocator_t host_allocator, loom_serve_speech_request_t* out_request) {
+    bool input_complete, iree_allocator_t host_allocator,
+    loom_serve_speech_request_t* out_request) {
   memset(out_request, 0, sizeof(*out_request));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_speech_request_validate(input, voice, instructions, speed));
+  IREE_RETURN_IF_ERROR(loom_serve_speech_request_validate(
+      input, voice, instructions, speed, input_complete));
   iree_string_builder_initialize(host_allocator, &out_request->input);
   iree_string_builder_initialize(host_allocator, &out_request->voice);
   iree_string_builder_initialize(host_allocator, &out_request->instructions);
   out_request->seed = seed;
   out_request->speed = speed;
+  out_request->input_complete = input_complete;
   iree_status_t status =
       iree_string_builder_append_string(&out_request->input, input);
   if (iree_status_is_ok(status)) {
@@ -248,6 +251,23 @@ iree_status_t loom_serve_speech_request_initialize_text(
   return status;
 }
 
+iree_status_t loom_serve_speech_request_initialize_text(
+    iree_string_view_t input, iree_string_view_t voice,
+    iree_string_view_t instructions, uint64_t seed, float speed,
+    iree_allocator_t host_allocator, loom_serve_speech_request_t* out_request) {
+  return loom_serve_speech_request_copy(input, voice, instructions, seed, speed,
+                                        true, host_allocator, out_request);
+}
+
+iree_status_t loom_serve_speech_request_initialize_stream(
+    iree_string_view_t voice, iree_string_view_t instructions, uint64_t seed,
+    float speed, iree_allocator_t host_allocator,
+    loom_serve_speech_request_t* out_request) {
+  return loom_serve_speech_request_copy(iree_string_view_empty(), voice,
+                                        instructions, seed, speed, false,
+                                        host_allocator, out_request);
+}
+
 iree_status_t loom_serve_speech_request_initialize(
     iree_string_view_t body, iree_string_view_t model,
     iree_allocator_t host_allocator, loom_serve_speech_request_t* out_request) {
@@ -256,6 +276,7 @@ iree_status_t loom_serve_speech_request_initialize(
   iree_string_builder_initialize(host_allocator, &out_request->voice);
   iree_string_builder_initialize(host_allocator, &out_request->instructions);
   out_request->speed = 1.0f;
+  out_request->input_complete = true;
   iree_status_t status = loom_serve_speech_request_decode(
       body, model, host_allocator, out_request);
   if (!iree_status_is_ok(status)) {

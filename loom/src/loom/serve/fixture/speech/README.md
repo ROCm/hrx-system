@@ -25,7 +25,7 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/audio/speech \
 The output has 17 mono frames at 24 kHz: 34 little-endian PCM16 bytes. For frame
 `i`, its signed sample is `((i + 3) % 8) * 4096`. Selecting `negative` negates
 those samples. In general, an input of `N` UTF-8 bytes produces `8*N + 1` frames;
-the seed selects the phase modulo eight. Input length is 1–1024 bytes. The
+the seed selects the phase modulo eight. Finite input length is 1–1024 bytes. The
 fixture accepts speed 1 and empty instructions, rejecting other source controls.
 
 The two voice gains are immutable conditioning entries shared across requests.
@@ -37,6 +37,15 @@ its output position as a scalar and replaces its phase buffer on collection,
 exercising typed request-state ownership independently of device history.
 Native serving code has no fixture selector, sample formula or special-case
 response.
+
+Native continuing requests use a seven-byte input ring and the same total limit.
+The source accepts one complete UTF-8 scalar per input step and takes a separate
+CPU continuation before numerical work. Available audio grows as text arrives;
+concatenating the blocks produces the same waveform as finite input. NUL is
+valid UTF-8 but rejected by this fixture's source policy, including after earlier
+audio, so tests can exercise request-local late rejection. EOF after all available
+audio publishes an empty final block without another numerical command. An empty
+continuing request produces no samples.
 
 The [speech service contract](../../service/speech/README.md) describes ownership
 and the explicit PCM format. The [model header](../../service/speech/model.h)
