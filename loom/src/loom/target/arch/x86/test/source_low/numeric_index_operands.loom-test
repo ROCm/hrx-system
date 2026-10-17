@@ -252,3 +252,39 @@ func.def @bounded_addresses(%row: index, %column: index, %byte_offset: offset) -
 low.func.def target<x86.avx2.core> abi(object_function) @bounded_addresses(%bounded_row: reg<x86.gpr64>, %bounded_column: reg<x86.gpr64>, %aligned_offset: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
   return %bounded_row, %bounded_column, %aligned_offset
 }
+
+// ====
+
+func.def @index_rotations(%value: index, %count: index) -> (index, index) {
+  %left = index.rotli %value, %count : index
+  %right = index.rotri %value, %count : index
+  func.return %left, %right : index, index
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @index_rotations(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %26 = copy %count : reg<x86.gpr64> -> reg<x86.gpr64>
+  %27 = and.imm.gpr64 %26 {imm32 = 63}
+  %28 = mov.imm64 0
+  %29 = copy %28 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %30 = sub.gpr64 %29, %27
+  %31 = copy %30 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %32 = and.imm.gpr64 %31 {imm32 = 63}
+  %33 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %34 = copy %27 : reg<x86.gpr64> -> reg<x86.rcx>
+  %35 = shl.cl.gpr64 %33, %34
+  %36 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %37 = copy %32 : reg<x86.gpr64> -> reg<x86.rcx>
+  %38 = shr.cl.gpr64 %36, %37
+  %39 = copy %35 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %left = or.gpr64 %39, %38
+  %41 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %42 = copy %32 : reg<x86.gpr64> -> reg<x86.rcx>
+  %43 = shl.cl.gpr64 %41, %42
+  %44 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %45 = copy %27 : reg<x86.gpr64> -> reg<x86.rcx>
+  %46 = shr.cl.gpr64 %44, %45
+  %47 = copy %43 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %right = or.gpr64 %47, %46
+  return %left, %right
+}

@@ -44,6 +44,7 @@ loom_check_test_suite(
         "target_legalize_conversion.loom-test",
         "target_legalize_diagnostics.loom-test",
         "target_legalize_float_sign.loom-test",
+        "target_legalize_index_rotation.loom-test",
         "target_legalize_integer_division.loom-test",
         "target_legalize_kernel_scan.loom-test",
         "target_legalize_kernel_shuffle.loom-test",

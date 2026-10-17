@@ -98,6 +98,83 @@ static iree_status_t loom_index_legalize_divrem(
   return iree_ok_status();
 }
 
+// Decomposes a rotation in the target-selected index domain. Both shift counts
+// are masked independently so a zero rotation never materializes an undefined
+// full-width shift. Target-native index contracts retain precedence over this
+// reference fallback.
+static iree_status_t loom_index_legalize_rotation(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+
+  const uint32_t bit_width = loom_target_legalization_context_bundle(context)
+                                 ->snapshot->index_bitwidth;
+  if (bit_width == 0 || bit_width > 64 || (bit_width & (bit_width - 1)) != 0) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  const loom_value_id_t value = loom_op_operands(op)[0];
+  const loom_value_id_t count = loom_op_operands(op)[1];
+  loom_value_id_t replacement = value;
+  if (bit_width != 1) {
+    loom_op_t* mask_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_index_constant_build(builder, loom_attr_i64(bit_width - 1),
+                                  index_type, op->location, &mask_op));
+    loom_op_t* amount_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_andi_build(
+        builder, count, loom_index_constant_result(mask_op), op->location,
+        &amount_op));
+
+    loom_op_t* zero_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_constant_build(
+        builder, loom_attr_i64(0), index_type, op->location, &zero_op));
+    loom_op_t* negative_amount_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_index_sub_build(builder, loom_index_constant_result(zero_op),
+                             loom_index_andi_result(amount_op), index_type,
+                             op->location, &negative_amount_op));
+    loom_op_t* reverse_amount_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_andi_build(
+        builder, loom_index_sub_result(negative_amount_op),
+        loom_index_constant_result(mask_op), op->location, &reverse_amount_op));
+
+    const loom_value_id_t amount = loom_index_andi_result(amount_op);
+    const loom_value_id_t reverse_amount =
+        loom_index_andi_result(reverse_amount_op);
+    const bool rotate_left = loom_index_rotli_isa(op);
+    loom_op_t* left_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_shli_build(
+        builder, value, rotate_left ? amount : reverse_amount, op->location,
+        &left_op));
+    loom_op_t* right_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_shrui_build(
+        builder, value, rotate_left ? reverse_amount : amount, op->location,
+        &right_op));
+    loom_op_t* combine_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_ori_build(
+        builder, loom_index_shli_result(left_op),
+        loom_index_shrui_result(right_op), op->location, &combine_op));
+    replacement = loom_index_ori_result(combine_op);
+  }
+
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  return iree_ok_status();
+}
+
 static const loom_target_legalizer_rule_t kIndexLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_INDEX_MIN,
@@ -110,6 +187,14 @@ static const loom_target_legalizer_rule_t kIndexLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_INDEX_DIVREM,
         .legalize = loom_index_legalize_divrem,
+    },
+    {
+        .root_kind = LOOM_OP_INDEX_ROTLI,
+        .legalize = loom_index_legalize_rotation,
+    },
+    {
+        .root_kind = LOOM_OP_INDEX_ROTRI,
+        .legalize = loom_index_legalize_rotation,
     },
 };
 
