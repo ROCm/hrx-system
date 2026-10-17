@@ -30,6 +30,44 @@ low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 1, direct_
 
 // ====
 
+// A scalar Boolean feeding a divergent select is expanded once at entry into
+// the same two-word native mask used by comparison results.
+kernel.def @divergent_predicate_argument_wave64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%enabled: i1, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %yes = scalar.constant 17 : i32
+  %no = view.load %input_view[0] : view<1xi32> -> i32
+  %value = scf.select %enabled, %yes, %no : i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "enabled"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_payload_sizes = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [8, 16], resource_parameter_indices = [1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @divergent_predicate_argument_wave64(%enabled$10: reg<amdgpu.sgpr>) asm {
+  %input_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = s_mov_b64_exec_read
+  %14 = slice %13[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = slice %13[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = s_mov_b32 0
+  %17 = s_bfe_u32_lit %enabled$10, 524288
+  %18 = s_cmp_lg_i32_src1_inline %17 {rhs = 0}
+  %19 = s_cselect_b32 %14, %16, %18
+  %20 = s_cselect_b32 %15, %16, %18
+  %enabled$21 = concat(%19, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %23 = v_mov_b32 0
+  %no = global_load_dword_saddr %23, %input_view : reg<amdgpu.vgpr>
+  %value = v_cndmask_b32_src1_inline %no, %enabled$21 {true_value = 17}
+  global_store_dword_saddr %23, %value, %output_view
+  return
+}
+
+// ====
+
 // Predicate vectors arrive as dense bytes and expand to the canonical
 // two-word-per-lane mask representation using both halves of wave64 EXEC.
 kernel.def @predicate_vector_argument_wave64() {

@@ -168,7 +168,7 @@ iree_status_t loom_amdgpu_map_argument(
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
-      .resource_source_type = loom_type_none(),
+      .body_type = loom_type_none(),
   };
   // Direct kernel scalars arrive in SGPRs even when their body representation
   // uses VGPRs. Operand adaptation handles that copy at each consuming rule.
@@ -178,6 +178,11 @@ iree_status_t loom_amdgpu_map_argument(
       loom_scalar_type_set_contains(
           LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
           loom_type_element_type(source_type))) {
+    if (loom_amdgpu_type_is_i1(source_type)) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_map_value(
+          user_data, context, source_function_op, source_argument_id,
+          source_type, &out_argument->body_type));
+    }
     const uint32_t bit_count = (uint32_t)loom_scalar_type_bitwidth(
         loom_type_element_type(source_type));
     const uint32_t unit_count = (bit_count + 31) / 32;
@@ -204,14 +209,10 @@ iree_status_t loom_amdgpu_map_argument(
 
 static iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument(
     loom_low_lower_context_t* context, const loom_op_t* source_function_op,
-    loom_value_id_t source_argument,
-    const loom_amdgpu_vector_storage_t* storage, loom_type_t sgpr_type,
+    loom_value_id_t source_argument, uint32_t lane_count, loom_type_t sgpr_type,
     const loom_value_id_t exec_words[2], loom_value_id_t low_zero) {
-  IREE_ASSERT_EQ(storage->kind, LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK);
-  IREE_ASSERT_EQ(storage->element_register_count, 2u);
-  IREE_ASSERT_LE(storage->element_count,
-                 LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES);
-  const uint32_t carrier_unit_count = (storage->element_count + 3u) / 4u;
+  IREE_ASSERT_LE(lane_count, LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES);
+  const uint32_t carrier_unit_count = (lane_count + 3u) / 4u;
   const loom_value_id_t low_carrier =
       loom_low_lower_lookup_value(context, source_argument);
   IREE_ASSERT(loom_amdgpu_low_value_is_register_class_count(
@@ -227,8 +228,7 @@ static iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument(
     IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
         context, source_function_op, low_carrier, carrier_unit_count,
         carrier_index, sgpr_type, &carrier_word));
-    for (uint32_t byte_index = 0;
-         byte_index < 4u && lane_index < storage->element_count;
+    for (uint32_t byte_index = 0; byte_index < 4u && lane_index < lane_count;
          ++byte_index, ++lane_index) {
       loom_value_id_t lane_byte = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_bitfield(
@@ -238,8 +238,7 @@ static iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument(
       loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr32_nonzero_scc(
           context, source_function_op, lane_byte, &condition));
-      for (uint32_t exec_word_index = 0;
-           exec_word_index < storage->element_register_count;
+      for (uint32_t exec_word_index = 0; exec_word_index < 2u;
            ++exec_word_index) {
         const loom_value_id_t operands[] = {
             exec_words[exec_word_index],
@@ -257,8 +256,8 @@ static iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument(
       }
     }
   }
-  IREE_ASSERT_EQ(lane_index, storage->element_count);
-  IREE_ASSERT_EQ(native_mask_word_count, storage->register_count);
+  IREE_ASSERT_EQ(lane_index, lane_count);
+  IREE_ASSERT_EQ(native_mask_word_count, lane_count * 2u);
 
   loom_type_t native_mask_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_range_type(
@@ -291,15 +290,33 @@ iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument_setup(
   uint16_t argument_count = 0;
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(source_function, &argument_count);
+  uint16_t argument_map_count = 0;
+  const loom_low_lower_abi_argument_t* argument_map =
+      loom_low_lower_context_argument_map(context, &argument_map_count);
+  IREE_ASSERT_EQ(argument_count, argument_map_count);
   for (uint16_t i = 0; i < argument_count; ++i) {
     const loom_value_id_t argument = arguments[i];
     if (!loom_module_value_has_uses(module, argument)) {
       continue;
     }
+    const loom_type_t source_type = loom_module_value_type(module, argument);
+    uint32_t predicate_lane_count = 0;
     loom_amdgpu_vector_storage_t storage = {0};
-    if (!loom_amdgpu_type_vector_storage(
-            loom_module_value_type(module, argument), &storage) ||
-        storage.kind != LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK) {
+    if (loom_amdgpu_type_vector_storage(source_type, &storage) &&
+        storage.kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK) {
+      IREE_ASSERT_EQ(storage.element_register_count, 2u);
+      predicate_lane_count = storage.element_count;
+    } else if (loom_amdgpu_type_is_i1(source_type)) {
+      // A scalar predicate remains in its dense one-word ABI carrier when its
+      // body uses scalar truth. Expand only values whose selected body
+      // representation is an EXEC-width native lane mask.
+      if (!loom_amdgpu_low_type_is_register_class_count(
+              context, argument_map[i].body_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+              2)) {
+        continue;
+      }
+      predicate_lane_count = 1;
+    } else {
       continue;
     }
     if (low_zero == LOOM_VALUE_ID_INVALID) {
@@ -326,8 +343,8 @@ iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument_setup(
           sgpr_type, &low_zero));
     }
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_hal_kernel_predicate_argument(
-        context, source_function.op, argument, &storage, sgpr_type, exec_words,
-        low_zero));
+        context, source_function.op, argument, predicate_lane_count, sgpr_type,
+        exec_words, low_zero));
   }
   return iree_ok_status();
 }

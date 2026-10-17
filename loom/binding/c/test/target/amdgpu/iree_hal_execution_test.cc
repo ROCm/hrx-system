@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
@@ -39,10 +40,10 @@ constexpr char kVectorArgumentSourceText[] = R"(
 kernel.def @select_vector_arguments() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
-} launch(%input: buffer, %output: buffer, %values: vector<20xi32>, %predicates: vector<4xi1>) {
+} launch(%input: buffer, %output: buffer, %values: vector<20xi32>, %predicates: vector<4xi1>, %scalar_predicate: i1) {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<4xi32>
-  %output_view = buffer.view %output[%base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<9xi32>
   %fallback0 = view.load %input_view[0] : view<4xi32> -> i32
   %fallback1 = view.load %input_view[1] : view<4xi32> -> i32
   %fallback2 = view.load %input_view[2] : view<4xi32> -> i32
@@ -59,12 +60,13 @@ kernel.def @select_vector_arguments() {
   %selected1 = scf.select %predicate1, %value15, %fallback1 : i32
   %selected2 = scf.select %predicate2, %value16, %fallback2 : i32
   %selected3 = scf.select %predicate3, %value19, %fallback3 : i32
+  %scalar_selected = scf.select %scalar_predicate, %value19, %fallback3 : i32
   %predicate_word0 = scalar.extui %predicate0 : i1 to i32
   %predicate_word1 = scalar.extui %predicate1 : i1 to i32
   %predicate_word2 = scalar.extui %predicate2 : i1 to i32
   %predicate_word3 = scalar.extui %predicate3 : i1 to i32
-  %result = vector.from_elements %selected0, %selected1, %selected2, %selected3, %predicate_word0, %predicate_word1, %predicate_word2, %predicate_word3 : vector<8xi32>
-  vector.store %result, %output_view[0] : vector<8xi32>, view<8xi32>
+  %result = vector.from_elements %selected0, %selected1, %selected2, %selected3, %predicate_word0, %predicate_word1, %predicate_word2, %predicate_word3, %scalar_selected : vector<9xi32>
+  vector.store %result, %output_view[0] : vector<9xi32>, view<9xi32>
   kernel.return
 }
 )";
@@ -466,20 +468,24 @@ TEST(LoomcAmdgpuIreeHalExecutionTest, VectorArgumentsCrossNativeKernarg) {
         EXPECT_EQ(execution.launch_config.workgroup_size.x, 1u);
         EXPECT_EQ(execution.launch_config.workgroup_size.y, 1u);
         EXPECT_EQ(execution.launch_config.workgroup_size.z, 1u);
-        std::array<uint32_t, 21> constants = {};
+        std::array<uint32_t, 21> constant_words = {};
         for (size_t i = 0; i < 20; ++i) {
-          constants[i] = 101 + static_cast<uint32_t>(i);
+          constant_words[i] = 101 + static_cast<uint32_t>(i);
         }
-        constants[20] = 0x00010001;
+        constant_words[20] = 0x00010001;
+        std::array<uint8_t, sizeof(constant_words) + 1> constants = {};
+        std::memcpy(constants.data(), constant_words.data(),
+                    sizeof(constant_words));
+        constants.back() = 1;
         const std::array<int32_t, 4> input = {-1, -2, -3, -4};
-        std::array<int32_t, 8> output = {};
+        std::array<int32_t, 9> output = {};
         loomc::testing::target::ExecuteIreeHalKernelWithBuffers(
             execution,
             iree_make_const_byte_span(constants.data(), sizeof(constants)),
             iree_make_const_byte_span(input.data(), sizeof(input)),
             iree_make_byte_span(output.data(), sizeof(output)));
         EXPECT_EQ(output,
-                  (std::array<int32_t, 8>{101, -2, 117, -4, 1, 0, 1, 0}));
+                  (std::array<int32_t, 9>{101, -2, 117, -4, 1, 0, 1, 0, 120}));
       });
 }
 
