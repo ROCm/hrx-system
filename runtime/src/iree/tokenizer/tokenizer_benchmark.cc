@@ -518,7 +518,7 @@ BENCHMARK_DEFINE_F(BatchEncodeBenchmark, Batch)(benchmark::State& state) {
         IREE_TOKENIZER_ENCODE_FLAG_NONE,
         iree_make_byte_span(state_storage_.data(), state_storage_.size()),
         iree_make_byte_span(transform_buffer_.data(), transform_buffer_.size()),
-        iree_tokenizer_offset_run_list_empty()));
+        iree_tokenizer_offset_run_list_empty(), iree_allocator_system()));
 
     iree_host_size_t batch_tokens = 0;
     for (size_t i = 0; i < batch_size_; ++i) {
@@ -610,7 +610,8 @@ BENCHMARK_DEFINE_F(StreamingEncodeBenchmark, Stream)
         iree_make_byte_span(state_storage_.data(), state_storage_.size()),
         iree_make_byte_span(transform_buffer_.data(), transform_buffer_.size()),
         iree_tokenizer_offset_run_list_empty(),
-        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &encode_state));
+        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+        &encode_state));
 
     // Feed text in chunks.
     iree_host_size_t total_tokens = 0;

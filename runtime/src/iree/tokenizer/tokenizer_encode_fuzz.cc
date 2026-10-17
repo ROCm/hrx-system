@@ -110,7 +110,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         iree_make_byte_span(reinterpret_cast<uint8_t*>(transform_buffer),
                             buffer_size),
         iree_tokenizer_offset_run_list_empty(),
-        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state);
+        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+        &state);
 
     if (iree_status_is_ok(status)) {
       iree_tokenizer_token_id_t tokens[1024];

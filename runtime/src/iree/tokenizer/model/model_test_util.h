@@ -118,11 +118,26 @@ using ScopedVocab =
 using ScopedModel =
     ScopedResource<iree_tokenizer_model_t, iree_tokenizer_model_free>;
 
-using ScopedModelState =
-    ScopedState<iree_tokenizer_model_t, iree_tokenizer_model_state_t,
-                iree_tokenizer_model_state_size,
-                iree_tokenizer_model_state_initialize,
-                iree_tokenizer_model_state_deinitialize>;
+// Owns a model state's slab and exercises its workspace-preserving reset.
+class ScopedModelState {
+ public:
+  explicit ScopedModelState(
+      iree_tokenizer_model_t* model,
+      iree_allocator_t workspace_allocator = iree_allocator_system());
+  ~ScopedModelState();
+
+  ScopedModelState(const ScopedModelState&) = delete;
+  ScopedModelState& operator=(const ScopedModelState&) = delete;
+
+  iree_tokenizer_model_state_t* get() { return state_; }
+  void Reset() { iree_tokenizer_model_state_reset(state_); }
+
+ private:
+  // Caller-owned fixed state storage, which outlives state_.
+  std::vector<uint8_t> storage_;
+  // Initialized model state; owns any grown workspace until destruction.
+  iree_tokenizer_model_state_t* state_ = nullptr;
+};
 
 //===----------------------------------------------------------------------===//
 // Test Helpers

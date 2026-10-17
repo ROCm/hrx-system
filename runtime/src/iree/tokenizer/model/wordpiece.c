@@ -342,19 +342,28 @@ static void iree_tokenizer_wordpiece_model_destroy(
 // WordPiece State Operations
 //===----------------------------------------------------------------------===//
 
-static iree_status_t iree_tokenizer_wordpiece_state_initialize(
-    const iree_tokenizer_model_t* base_model, void* storage,
-    iree_tokenizer_model_state_t** out_state) {
-  IREE_TRACE_ZONE_BEGIN(z0);
+static void iree_tokenizer_wordpiece_state_reset(
+    iree_tokenizer_model_state_t* base_state) {
+  const iree_tokenizer_model_t* base_model = base_state->model;
   iree_tokenizer_wordpiece_state_t* state =
-      (iree_tokenizer_wordpiece_state_t*)storage;
+      (iree_tokenizer_wordpiece_state_t*)base_state;
+  IREE_TRACE_ZONE_BEGIN(z0);
   memset(state, 0, sizeof(*state));
   state->base.model = base_model;
   state->pending_count = 0;
   state->pending_emit_index = 0;
-  *out_state = &state->base;
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+}
+
+static void iree_tokenizer_wordpiece_state_initialize(
+    const iree_tokenizer_model_t* base_model, void* storage,
+    iree_allocator_t workspace_allocator,
+    iree_tokenizer_model_state_t** out_state) {
+  (void)workspace_allocator;
+  iree_tokenizer_model_state_t* state = (iree_tokenizer_model_state_t*)storage;
+  state->model = base_model;
+  iree_tokenizer_wordpiece_state_reset(state);
+  *out_state = state;
 }
 
 static void iree_tokenizer_wordpiece_state_deinitialize(
@@ -576,6 +585,7 @@ static const iree_tokenizer_model_vtable_t
     iree_tokenizer_wordpiece_model_vtable = {
         .destroy = iree_tokenizer_wordpiece_model_destroy,
         .state_initialize = iree_tokenizer_wordpiece_state_initialize,
+        .state_reset = iree_tokenizer_wordpiece_state_reset,
         .state_deinitialize = iree_tokenizer_wordpiece_state_deinitialize,
         .state_encode = iree_tokenizer_wordpiece_state_encode,
         .state_finalize = iree_tokenizer_wordpiece_state_finalize,

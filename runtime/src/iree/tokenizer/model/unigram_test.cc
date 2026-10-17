@@ -90,26 +90,16 @@ TEST_F(UnigramModelTest, StateSizeIsReasonable) {
 
   iree_host_size_t state_size = iree_tokenizer_model_state_size(model());
   EXPECT_GT(state_size, 0u);
-  // State = struct + DP tables (3 arrays * (chunk_size+1) entries)
-  //       + pending buffer (chunk_size entries).
-  // chunk_size = max(max_token_length, 128). For this vocab: chunk_size=128.
-  // DP: 129*(4+4+2) = 1290 bytes, pending: 128*12 = 1536 bytes, struct ~48.
-  // Total ~3KB.
+  // Initial state scales with vocabulary width, not input length.
   EXPECT_LE(state_size, 8192u);
 }
 
-TEST_F(UnigramModelTest, RequiresUnkWhenNoByteFallback) {
+TEST_F(UnigramModelTest, CoveredInputNeedsNoUnknownToken) {
   ScopedVocabBuilder builder;
-  builder.AddTokenWithScore(0, "a", -1.0f);
-  // No UNK token, but byte_fallback disabled.
-  auto* vocab = builder.Build();
-  iree_tokenizer_model_t* raw_model = nullptr;
-  iree_status_t status = iree_tokenizer_unigram_model_allocate(
-      vocab, IREE_TOKENIZER_TOKEN_ID_INVALID, -10.0f,
-      IREE_TOKENIZER_UNIGRAM_FLAG_NO_BYTE_FALLBACK, iree_allocator_system(),
-      &raw_model);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
-  iree_tokenizer_vocab_free(vocab);
+  builder.AddTokenWithScore(0, "a", -1.0);
+  CreateModel(builder, IREE_TOKENIZER_TOKEN_ID_INVALID, -10.0,
+              IREE_TOKENIZER_UNIGRAM_FLAG_NO_BYTE_FALLBACK);
+  TestEncode(model(), "a", {0}, /*expect_pending_after_encode=*/false);
 }
 
 TEST_F(UnigramModelTest, AllowsNoUnkWithByteFallback) {
@@ -613,8 +603,9 @@ TEST_F(UnigramModelTest, OffsetsForByteFallback) {
   EXPECT_EQ(result.offsets[0].start, 0u);
   EXPECT_EQ(result.offsets[0].end, 1u);
   EXPECT_EQ(result.offsets[1].start, 1u);
-  EXPECT_EQ(result.offsets[1].end, 2u);
-  EXPECT_EQ(result.offsets[2].start, 2u);
+  // Both byte tokens expand the selected fused unknown spelling "xy".
+  EXPECT_EQ(result.offsets[1].end, 3u);
+  EXPECT_EQ(result.offsets[2].start, 1u);
   EXPECT_EQ(result.offsets[2].end, 3u);
 }
 
@@ -653,12 +644,11 @@ TEST_F(UnigramModelTest, LimitedOutputCapacityMultiSegment) {
 }
 
 //===----------------------------------------------------------------------===//
-// Large Segments (Chunked Viterbi)
+// Large Segments
 //===----------------------------------------------------------------------===//
 
-TEST_F(UnigramModelTest, LargeSegmentChunkedCorrectly) {
-  // Segments larger than max_token_length are processed in chunks.
-  // With single-char tokens, every chunk boundary is a valid split point.
+TEST_F(UnigramModelTest, LargeSegmentPreservesExactPath) {
+  // Determined prefixes can retire even when the segment exceeds lookahead.
   ScopedVocabBuilder builder;
   builder.AddTokenWithScore(0, "a", -1.0f);
   builder.AddTokenWithScore(1, "[UNK]", -10.0f);
@@ -667,10 +657,8 @@ TEST_F(UnigramModelTest, LargeSegmentChunkedCorrectly) {
   CreateModel(builder, /*unk_token_id=*/1, /*unk_score=*/-10.0f,
               IREE_TOKENIZER_UNIGRAM_FLAG_NO_BYTE_FALLBACK);
 
-  // Chunked Viterbi handles arbitrary segment sizes.
-  TestEncode(model(), "aaaa", {0, 0, 0, 0},
-             /*expect_pending_after_encode=*/false);
-  TestEncode(model(), "aaa", {0, 0, 0},
+  // Complete segments share the same path selection as continuing input.
+  TestEncode(model(), std::string(257, 'a'), std::vector<int32_t>(257, 0),
              /*expect_pending_after_encode=*/false);
 }
 
@@ -722,7 +710,7 @@ TEST_F(UnigramModelTest, MixedTokenizableAndUntokenizable) {
 //===----------------------------------------------------------------------===//
 
 TEST_F(UnigramModelTest, PartialSegmentDeferred) {
-  // When last_is_partial=true, the last segment should be skipped.
+  // A partial segment retains its boundary-sensitive path.
   ScopedVocabBuilder builder;
   builder.AddTokenWithScore(0, "hello", -2.0f);
   builder.AddTokenWithScore(1, "world", -2.0f);
@@ -795,11 +783,11 @@ TEST_F(UnigramModelTest, StreamingMultipleChunks) {
   std::string chunk2 = "world";
   iree_const_byte_span_t buffer2 = {
       reinterpret_cast<const uint8_t*>(chunk2.data()), chunk2.size()};
-  iree_tokenizer_segment_t segments2[] = {{0, 5}};
+  iree_tokenizer_segment_t segments2[] = {{5, 10}};
   iree_tokenizer_segment_list_t list2 =
       iree_tokenizer_make_segment_list(segments2, 1);
 
-  state.Reset();  // Start fresh for the new chunk.
+  list2.buffer_offset = 5;  // Physical relocation preserves logical positions.
   IREE_ASSERT_OK(iree_tokenizer_model_state_encode(
       state.get(), buffer2, list2,
       iree_tokenizer_make_token_output(tokens, NULL, NULL, 8),
@@ -811,7 +799,7 @@ TEST_F(UnigramModelTest, StreamingMultipleChunks) {
 }
 
 TEST_F(UnigramModelTest, AllSegmentsPartial) {
-  // Edge case: single segment marked partial - nothing should be processed.
+  // A partial token spelling remains owned until its continuation arrives.
   ScopedVocabBuilder builder;
   builder.AddTokenWithScore(0, "hello", -2.0f);
   builder.AddTokenWithScore(1, "[UNK]", -10.0f);
@@ -837,7 +825,7 @@ TEST_F(UnigramModelTest, AllSegmentsPartial) {
       iree_tokenizer_make_token_output(tokens, NULL, NULL, 8),
       &segments_consumed, &token_count));
 
-  // Nothing should be processed.
+  // No token is determined yet.
   EXPECT_EQ(segments_consumed, 0u);
   EXPECT_EQ(token_count, 0u);
 }

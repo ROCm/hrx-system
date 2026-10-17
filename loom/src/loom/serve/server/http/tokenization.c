@@ -108,7 +108,8 @@ static iree_status_t loom_serve_http_tokenization_encode(
         tokenizer, iree_make_byte_span(storage, state_size),
         iree_make_byte_span(storage + state_size, transform_size),
         (iree_tokenizer_offset_run_list_t){0},
-        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START | flags, &state);
+        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START | flags, host_allocator,
+        &state);
   }
   iree_host_size_t count = 0;
   while (iree_status_is_ok(status) && text.size && count < capacity) {

@@ -106,7 +106,8 @@ static iree::StatusOr<std::vector<iree_tokenizer_token_id_t>> EncodeStreaming(
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(text.size() + 256);
   iree_host_size_t total_tokens = 0;

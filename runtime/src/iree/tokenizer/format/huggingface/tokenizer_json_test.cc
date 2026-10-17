@@ -271,9 +271,9 @@ TEST_F(TokenizerJsonTest, InferUnigramFromUnkId) {
   iree_tokenizer_builder_deinitialize(&builder);
 }
 
-TEST_F(TokenizerJsonTest, UnigramScorePrecision) {
-  // Exact IDs from tokenizers 0.23.3. The first case loses the winning path if
-  // imported scores narrow to float; the second loses it if sums use float.
+TEST_F(TokenizerJsonTest, UnigramReferencePaths) {
+  // Exact IDs from tokenizers 0.23.3 cover score precision, unknown transition
+  // costs, byte expansion, and models with no configured unknown ID.
   const struct {
     // Serialized model with the score boundary under test.
     const char* json;
@@ -281,6 +281,8 @@ TEST_F(TokenizerJsonTest, UnigramScorePrecision) {
     const char* text;
     // Complete expected token sequence.
     std::vector<int32_t> expected;
+    // Whether encoding succeeds after the model imports successfully.
+    bool success = true;
   } cases[] = {
       {R"({"model":{"type":"Unigram","unk_id":0,"vocab":[
         ["<unk>",0],["a",-1],["b",-1],["ab",-2.00000001]]}})",
@@ -290,6 +292,33 @@ TEST_F(TokenizerJsonTest, UnigramScorePrecision) {
         ["<unk>",0],["a",-16777216],["b",-1],["c",-1],["bc",-2]]}})",
        "abc",
        {1, 4}},
+      {R"({"model":{"type":"Unigram","unk_id":0,"byte_fallback":true,
+          "vocab":[["<unk>",0],["ab",-1],["<0x61>",0],["<0x62>",0]]}})",
+       "ab",
+       {1}},
+      {R"({"model":{"type":"Unigram","unk_id":0,"byte_fallback":false,
+          "vocab":[["<unk>",0],["ab",-1],["bc",-2],["a",-10]]}})",
+       "abc",
+       {3, 2}},
+      {R"({"model":{"type":"Unigram","unk_id":null,"byte_fallback":false,
+          "vocab":[["a",-1]]}})",
+       "a",
+       {0}},
+      {R"({"model":{"type":"Unigram","unk_id":null,"byte_fallback":true,
+          "vocab":[["a",-1]]}})",
+       "x",
+       {},
+       false},
+      {R"({"model":{"type":"Unigram","unk_id":0,"byte_fallback":true,
+          "vocab":[["<unk>",0],["<0xC3>",0],["<0xA9>",0]]}})",
+       "é𐐀",
+       {0}},
+      {R"({"model":{"type":"Unigram","unk_id":0,"byte_fallback":false,
+          "vocab":[["<unk>",100],["a",90],["ac",100]]},
+          "added_tokens":[{"id":3,"content":"<extra>","special":true,
+          "single_word":false,"lstrip":false,"rstrip":false,"normalized":false}]})",
+       "ac",
+       {1, 0}},
   };
   for (const auto& test : cases) {
     SCOPED_TRACE(test.text);
@@ -300,13 +329,19 @@ TEST_F(TokenizerJsonTest, UnigramScorePrecision) {
         tokenizer, iree_tokenizer_free);
     int32_t tokens[3];
     iree_host_size_t count = 0;
-    IREE_ASSERT_OK(iree_tokenizer_encode(
+    iree_status_t status = iree_tokenizer_encode(
         tokenizer, iree_make_cstring_view(test.text),
         IREE_TOKENIZER_ENCODE_FLAG_NONE,
         iree_tokenizer_make_token_output(tokens, nullptr, nullptr,
                                          IREE_ARRAYSIZE(tokens)),
-        allocator_, &count));
-    EXPECT_EQ(std::vector<int32_t>(tokens, tokens + count), test.expected);
+        allocator_, &count);
+    if (test.success) {
+      IREE_ASSERT_OK(status);
+      EXPECT_EQ(std::vector<int32_t>(tokens, tokens + count), test.expected);
+    } else {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
+      EXPECT_EQ(count, 0u);
+    }
   }
 }
 
@@ -1339,7 +1374,8 @@ TEST_F(TokenizerJsonTest, StreamingNewlinesBeforeText) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   // Feed the full input, collecting tokens.
   iree_string_view_t input = IREE_SVL("\n\nA");
@@ -1412,7 +1448,8 @@ StreamingEncodeContext CreateStreamingState(
       iree_make_byte_span(ctx.state_storage.data(), ctx.state_storage.size()),
       iree_make_byte_span(ctx.transform_buffer.data(),
                           ctx.transform_buffer.size()),
-      iree_tokenizer_offset_run_list_empty(), flags, &ctx.state));
+      iree_tokenizer_offset_run_list_empty(), flags, iree_allocator_system(),
+      &ctx.state));
   return ctx;
 }
 
