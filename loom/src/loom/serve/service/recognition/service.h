@@ -20,6 +20,9 @@ typedef struct loom_serve_recognition_service_t
 typedef struct loom_serve_recognition_service_options_t {
   // Deployment name borrowed through adapter retirement.
   iree_string_view_t name;
+  // Recognition requires transcripts and exposes HTTP transcription; activity
+  // requires activity observations and accepts native inference only.
+  loom_serve_model_kind_t kind;
   // Host-only queue capacity beyond the source's resident streams.
   iree_host_size_t pending_capacity;
   // Maximum copied source options for each stream.
