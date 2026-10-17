@@ -403,9 +403,12 @@ iree_status_t iree_hal_amd_xdna_command_buffer_acquire_execution(
     iree_hal_command_buffer_t* base, iree_hal_buffer_binding_table_t table,
     iree_hal_queue_execute_flags_t flags,
     iree_hal_amd_xdna_execution_t** out_execution) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, table.count);
   *out_execution = NULL;
   iree_hal_amd_xdna_command_buffer_t* buffer = (void*)base;
   if (table.count < base->binding_count) {
+    IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "XDNA execution requires %u indirect bindings",
                             base->binding_count);
@@ -417,8 +420,10 @@ iree_status_t iree_hal_amd_xdna_command_buffer_acquire_execution(
   }
   iree_slim_mutex_unlock(&buffer->execution_mutex);
   if (!execution) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        buffer->host_allocator, buffer->layout.size, (void**)&execution));
+    IREE_TRACE_ZONE_APPEND_TEXT(z0, "grow replay storage");
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_allocator_malloc(buffer->host_allocator, buffer->layout.size,
+                                  (void**)&execution));
   }
   memset(execution, 0, sizeof(*execution));
   execution->owner = base;
@@ -444,6 +449,7 @@ iree_status_t iree_hal_amd_xdna_command_buffer_acquire_execution(
   }
   iree_hal_command_buffer_retain(base);
   *out_execution = execution;
+  IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
@@ -507,6 +513,7 @@ iree_status_t iree_hal_amd_xdna_execution_prepare_batch(
   if (execution->batch.count) {
     return iree_ok_status();
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
   const iree_hal_amd_xdna_record_t* record = execution->cursor;
   uint32_t capacity =
       iree_min(iree_min(execution->batch.capacity, maximum_command_count),
@@ -526,6 +533,8 @@ iree_status_t iree_hal_amd_xdna_execution_prepare_batch(
     }
   }
   execution->batch.next = record;
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, execution->batch.count);
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 

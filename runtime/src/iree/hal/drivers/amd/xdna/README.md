@@ -171,6 +171,61 @@ observation retains the native-reachable graph as for direct dispatch.
 
 ## Benchmarking and profiling
 
+### Host work in Tracy
+
+Build the normal tool with the Tracy provider, then start a matching collector
+before running it:
+
+```sh
+python dev.py bazel build --config=opt \
+  --//runtime/config/base/tracing:provider=tracy \
+  //loom/src/loom/tools/iree-benchmark-loom
+tracy-capture -a 127.0.0.1 -p 18086 -o xdna.tracy -m 5
+```
+
+In another terminal, run the just-built executable:
+
+```sh
+TRACY_PORT=18086 TRACY_NO_EXIT=1 \
+  bazel-bin/loom/src/loom/tools/iree-benchmark-loom/iree-benchmark-loom \
+  loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom \
+  --device=xdna --benchmark=@serial_array_latency --batch-size=6 \
+  --iterations=8 --warmup-iterations=2 --profile-final-batch=false
+```
+
+The same build option enables these zones in `loom-serve`. The
+[runtime tracing guide](../../../../base/tracing/README.md) describes tool
+versions and capture lifetimes; the
+[serving observation workflow](../../../../../../../loom/docs/src/serving/workflows/observe-model-server.md#inspect-host-work-in-tracy)
+connects these backend stages to request preparation and output processing.
+
+XDNA zones use the `iree_hal_amd_xdna_` prefix. The table abbreviates that
+prefix; numeric annotations appear in the listed order.
+
+| Zone | Work and annotations |
+| --- | --- |
+| `operation_try_direct_publish` | Admission decision only. Text distinguishes caller-direct publication, queue-state or publisher contention, unavailable native credits/window, and an unproven wait frontier. |
+| `operation_admit` | Deferred admission on the queue owner. Text identifies waiting for producer acceptance or a semaphore; the scope ends after registering that interest. |
+| `command_buffer_acquire_execution`, `execution_prepare_batch` | Capturing a replay frame and preparing its next native array. Cold replay growth is marked; batch preparation reports its command count. |
+| `function_prepare` | Address resolution and exclusive invocation selection, with function name and executable ID. `bindings unchanged` means no dynamic patch or cache publication. Nested `invocation_allocate` and `patch_bindings` expose cold growth and changed bindings. |
+| `native_submit` | The libamdf call, annotated with command count, native submission point, and native status. OS wake or credit latency can be inside this call; it does not measure execution on the array. |
+| `queue_commit_publication` | Publishing the accepted frontier and pending ownership; the value is the accepted command count. |
+| `queue_apply_checked_status`, `operation_complete` | Checked retirement, resource release, and completion signaling. Checked status reports the retired native point and number of commands removed from the pending ring. `wait_retire` starts after a caller's native wait returns; `queue_native_ready` handles unattended notification progress. |
+| `memory_finish_acquire`, `operation_prepare_alloca_storage`, `operation_execute_dealloca` | Pool readiness, backing attachment, and release, with request/buffer counts. Outcome text distinguishes satisfied or absent reuse frontiers, reuse-frontier waiting, and capacity/budget waiting. An absent frontier can describe cached storage whose prior use completed; it does not imply a new native allocation. Native backing work remains under the allocator worker's slab-batch zone. |
+| `operation_execute_host` | Mapped transfers, host calls, and file preparation/publication, with operation kind and completed payload count. Asynchronous file I/O is outside this scope. |
+
+Worker notification sleeps and native completion waits have no XDNA parent
+scope. Every CPU zone ends on the thread that began it; callbacks publish their
+own active work. The gap between submission and completion includes device
+execution and notification delivery, and is not a measured NPU duration.
+A resident model compiled into one native invocation appears as one dispatch;
+these host scopes do not expose its internal layers. Physical allocation events
+belong to the shared memory provider, so transient wrappers and pool reuse do
+not count the same backing again. Tracing changes timing; performance comparisons
+use separate optimized runs with tracing disabled.
+
+### HAL profiling
+
 The ordinary benchmark tool uses the same XDNA provider as correctness tests:
 
 ```sh
@@ -326,8 +381,31 @@ deployment measurements retain normal idle/wake policy. The
 defines that distinction. Report the build identity, power policy, repetition
 spread and raw results with any comparison.
 
-The resource-tagged smoke target exercises the same cases without collecting
-performance evidence:
+`XdnaQueueMemoryBenchmark/` measures `queue_alloca` → recorded execution →
+`queue_dealloca` for one transient output, with resident inputs and a reusable
+recording with an indirect output binding. `Cached*` returns and reacquires
+backing through an explicit one-entry slab cache. `Fresh*` retains no idle
+backing and exercises native allocation on the memory worker. `CapacityWait*` first occupies the
+pool's one-output budget, submits the dependent chain, and then releases the
+held reservation through `queue_dealloca`; that extra release is timed, while
+preparing the held reservation is not. This measures recovery after capacity
+returns, with no artificial delay or polling loop.
+
+All six rows reuse a single semaphore across iterations. `SubmitOnly` excludes
+the terminal completion wait; `EndToEnd` includes it. Each iteration is one
+complete output lifetime, with numerical checks before and after measurement.
+`native_slabs_per_iteration` counts actual backing-pool acquisitions, including
+the pressure setup, so cached reuse and native growth remain distinguishable.
+The rows use 128 fixed iterations and stay outside the ordinary smoke filter:
+
+```sh
+bazel-bin/runtime/src/iree/hal/drivers/amd/xdna/cts/queue_benchmark \
+  --benchmark_filter=XdnaQueueMemoryBenchmark/ --benchmark_repetitions=5 \
+  --benchmark_out=xdna-memory.json --benchmark_out_format=json
+```
+
+The resource-tagged smoke target exercises four representative dispatch and
+profiling cases without collecting performance evidence:
 
 ```sh
 iree-bazel-test --config=asan \
