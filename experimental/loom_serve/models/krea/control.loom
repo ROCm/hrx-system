@@ -1,3 +1,5 @@
+func.decl @krea2.declare_image_stage(%height: i64, %width: i64, %text: i64, %workspace_limit: i64, %adapted: i1, %int8_flag: i64) -> (i32)
+
 func.decl import("runner") @execute_3(%stage: i32, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i64)
 
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
@@ -74,12 +76,17 @@ func.def @check_ids(%ids: buffer, %count: i64) {
 
 // The only host-visible result is a catalog ordinal and opaque upload bytes.
 // This source owns both tokenizer framing and the device payload layout.
-func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i32, %prompt: buffer, %seed: i64, %strength: f32) -> (i32, buffer) {
+func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i32, %height: i64, %width: i64, %prompt: buffer, %seed: i64, %strength: f32) -> (i32, buffer) {
   %origin = index.constant 0 : offset
   %zero64 = scalar.constant 0 : i64
   %one32 = scalar.constant 1 : i32
-  %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
-  %adapted64 = view.load %state_view[0] : view<1xi64> -> i64
+  // Cold preparation owns this layout; tags retain the prompt-capacity facts.
+  %state_view = buffer.view %state[%origin] : buffer -> view<5xi64>
+  %adapted64 = view.load %state_view[0] : view<5xi64> -> i64
+  %default_height = view.load %state_view[1] : view<5xi64> -> i64
+  %default_width = view.load %state_view[2] : view<5xi64> -> i64
+  %workspace_limit = view.load %state_view[3] : view<5xi64> -> i64
+  %int8_flag = view.load %state_view[4] : view<5xi64> -> i64
   %adapted = scalar.cmpi ne, %adapted64, %zero64 : i64
   %strength_bits = scalar.bitcast %strength : f32 to i32
   %exponent_mask = scalar.constant 2139095040 : i32
@@ -131,8 +138,8 @@ func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i3
   func.call @check_ids(%ids, %live) : (buffer, i64)
   func.call @check_ids(%suffix_ids, %suffix_count) : (buffer, i64)
   %live32 = scalar.trunci %live : i64 to i32
-  %stage = func.call @select_stage(%tags, %stage_count, %live32) : (buffer, i32, i32) -> (i32)
-  %stage_value = index.cast %stage : i32 to index
+  %cold_stage = func.call @select_stage(%tags, %stage_count, %live32) : (buffer, i32, i32) -> (i32)
+  %stage_value = index.cast %cold_stage : i32 to index
   // select_stage returns zero or an ordinal visited in this same tag table.
   %stage_index = index.assume %stage_value [range(%stage_value, 0, 2147483646), lt(%stage_value, %count)] : index
   %texts_value = view.load %tag_view[%stage_index] : view<[%count]xi64> -> i64
@@ -158,6 +165,15 @@ func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i3
   %suffix_bytes = index.constant 20 : offset
   buffer.copy %ids[%origin], %payload[%header_bytes], %live_bytes
   buffer.copy %suffix_ids[%origin], %payload[%suffix_offset], %suffix_bytes
+  %same_height = scalar.cmpi eq, %height, %default_height : i64
+  %same_width = scalar.cmpi eq, %width, %default_width : i64
+  %default_geometry = scalar.andi %same_height, %same_width : i1
+  %stage = scf.if %default_geometry -> (i32) {
+    scf.yield %cold_stage : i32
+  } else {
+    %requested = func.call @krea2.declare_image_stage(%height, %width, %texts, %workspace_limit, %adapted, %int8_flag) : (i64, i64, i64, i64, i1, i64) -> (i32)
+    scf.yield %requested : i32
+  }
   func.return %stage, %payload : i32, buffer
 }
 
