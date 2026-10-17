@@ -46,14 +46,18 @@ inline void GpuRingDoorbell(uint64_t address, uint64_t value) {
 template <typename T>
 [[nodiscard]] ::testing::AssertionResult GpuWaitEqual(uint64_t address,
                                                       T value) {
-  T observed = {};
-  const auto result = amdf::cts::WaitUntil("GPU completion", [&] {
+  const amdf::cts::WaitDeadline deadline;
+  T observed = GpuLoadAcquire<T>(address);
+  while (observed != value && deadline.remaining_ns() != 0) {
+    // GPU completion markers have no host notification and normally arrive
+    // below the host timer quantum. Yield without turning every observation
+    // into a rounded scheduler sleep.
+    std::this_thread::yield();
     observed = GpuLoadAcquire<T>(address);
-    return observed == value;
-  });
-  if (!result) {
+  }
+  if (observed != value) {
     return ::testing::AssertionFailure()
-           << result.message() << " at "
+           << "timed out waiting for GPU completion at "
            << reinterpret_cast<const void*>(address) << ": expected " << value
            << ", observed " << observed;
   }
