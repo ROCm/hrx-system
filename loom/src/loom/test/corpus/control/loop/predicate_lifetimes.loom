@@ -1,0 +1,464 @@
+// Every lane retains its final scalar and vector predicates after a loop
+// whose trip count varies across the workgroup. The two carried predicates
+// rotate without becoming integer loop state in the authored CFG.
+kernel.def @loop_predicate_lifetimes() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64x3xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x6xi32>
+  %limit = view.load %inputs[%lane, 0] : view<64x3xi32> -> i32
+  %first_word = view.load %inputs[%lane, 1] : view<64x3xi32> -> i32
+  %second_word = view.load %inputs[%lane, 2] : view<64x3xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %first = scalar.cmpi ne, %first_word, %c0 : i32
+  %second = scalar.cmpi ne, %second_word, %c0 : i32
+  cfg.br ^loop(%c0: i32, %first: i1, %second: i1)
+^loop(%iteration: i32, %head: i1, %tail: i1):
+  %at_begin = scalar.cmpi eq, %iteration, %c0 : i32
+  %pair = vector.from_elements %iteration, %c0 : vector<2xi32>
+  %limits = vector.splat %limit : vector<2xi32>
+  %predicates = vector.cmpi slt, %pair, %limits : vector<2xi32> -> vector<2xi1>
+  %again = scalar.cmpi slt, %iteration, %limit : i32
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %iteration, %c1 : i32
+  cfg.br ^loop(%next: i32, %tail: i1, %head: i1)
+^exit:
+  %head_word = scf.select %head, %c1, %c0 : i32
+  %tail_word = scf.select %tail, %c1, %c0 : i32
+  %begin_word = scf.select %at_begin, %c1, %c0 : i32
+  %true_words = vector.constant 1 : vector<2xi32>
+  %false_words = vector.constant 0 : vector<2xi32>
+  %predicate_words = vector.select %predicates, %true_words, %false_words : vector<2xi32>
+  view.store %iteration, %outputs[%lane, 0] : i32, view<64x6xi32>
+  view.store %head_word, %outputs[%lane, 1] : i32, view<64x6xi32>
+  view.store %tail_word, %outputs[%lane, 2] : i32, view<64x6xi32>
+  view.store %begin_word, %outputs[%lane, 3] : i32, view<64x6xi32>
+  vector.store %predicate_words, %outputs[%lane, 4] : vector<2xi32>, view<64x6xi32>
+  kernel.return
+}
+
+// The oracle computes rotation parity directly, independently of the subject's
+// recurrence and per-lane retirement. Nonpositive limits execute zero times.
+func.def @loop_predicate_lifetimes_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64x3xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x6xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  scf.for %lane = [%begin to %end step %step] {
+    %limit = view.load %inputs[%lane, 0] : view<64x3xi32> -> i32
+    %first = view.load %inputs[%lane, 1] : view<64x3xi32> -> i32
+    %second = view.load %inputs[%lane, 2] : view<64x3xi32> -> i32
+    %positive = scalar.cmpi sgt, %limit, %c0 : i32
+    %count = scf.select %positive, %limit, %c0 : i32
+    %parity = scalar.andi %count, %c1 : i32
+    %odd = scalar.cmpi ne, %parity, %c0 : i32
+    %first_set = scalar.cmpi ne, %first, %c0 : i32
+    %second_set = scalar.cmpi ne, %second, %c0 : i32
+    %first_word = scf.select %first_set, %c1, %c0 : i32
+    %second_word = scf.select %second_set, %c1, %c0 : i32
+    %head = scf.select %odd, %second_word, %first_word : i32
+    %tail = scf.select %odd, %first_word, %second_word : i32
+    %empty = scalar.cmpi eq, %count, %c0 : i32
+    %begin_word = scf.select %empty, %c1, %c0 : i32
+    %positive_word = scf.select %positive, %c1, %c0 : i32
+    view.store %count, %outputs[%lane, 0] : i32, view<64x6xi32>
+    view.store %head, %outputs[%lane, 1] : i32, view<64x6xi32>
+    view.store %tail, %outputs[%lane, 2] : i32, view<64x6xi32>
+    view.store %begin_word, %outputs[%lane, 3] : i32, view<64x6xi32>
+    view.store %c0, %outputs[%lane, 4] : i32, view<64x6xi32>
+    view.store %positive_word, %outputs[%lane, 5] : i32, view<64x6xi32>
+  }
+  func.return
+}
+
+check.scenario @loop_predicate_lifetimes_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) period(5) : tensor<64x3xi32>
+    %storage = check.generate.fill value(-123) : tensor<400xi32>
+    %output = check.tensor.view %storage offset(32) : tensor<400xi32> -> tensor<64x6xi32>
+    check.compare<@loop_predicate_lifetimes, @loop_predicate_lifetimes_oracle>(%input, %output) : (tensor<64x3xi32>, tensor<64x6xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64x3xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<400xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-2) step(1) period(7) : tensor<64x3xi32>
+    %storage = check.generate.fill value(-123) : tensor<400xi32>
+    %output = check.tensor.view %storage offset(32) : tensor<400xi32> -> tensor<64x6xi32>
+    check.compare<@loop_predicate_lifetimes, @loop_predicate_lifetimes_oracle>(%input, %output) : (tensor<64x3xi32>, tensor<64x6xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64x3xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<400xi32>
+    }
+  }
+  check.return
+}
+
+// The inner predicate is observed after both reconvergence boundaries. Its
+// reconstruction inside the outer loop cannot supply the final observation.
+kernel.def @nested_predicate_lifetimes() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64x3xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x4xi32>
+  %outer_limit = view.load %inputs[%lane, 0] : view<64x3xi32> -> i32
+  %inner_seed = view.load %inputs[%lane, 1] : view<64x3xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  cfg.br ^outer(%c0: i32, %c0: i32)
+^outer(%outer_iteration: i32, %empty_count: i32):
+  %inner_limit = scalar.subi %inner_seed, %outer_iteration : i32
+  cfg.br ^inner(%c0: i32)
+^inner(%inner_iteration: i32):
+  %empty = scalar.cmpi eq, %inner_iteration, %c0 : i32
+  %inner_again = scalar.cmpi slt, %inner_iteration, %inner_limit : i32
+  cfg.cond_br %inner_again, ^inner_body, ^inner_exit
+^inner_body:
+  %inner_next = scalar.addi %inner_iteration, %c1 : i32
+  cfg.br ^inner(%inner_next: i32)
+^inner_exit:
+  %empty_word = scf.select %empty, %c1, %c0 : i32
+  %empty_next = scalar.addi %empty_count, %empty_word : i32
+  %outer_next = scalar.addi %outer_iteration, %c1 : i32
+  %outer_again = scalar.cmpi slt, %outer_next, %outer_limit : i32
+  cfg.cond_br %outer_again, ^repeat, ^exit
+^repeat:
+  cfg.br ^outer(%outer_next: i32, %empty_next: i32)
+^exit:
+  %final_empty = scf.select %empty, %c1, %c0 : i32
+  view.store %outer_next, %outputs[%lane, 0] : i32, view<64x4xi32>
+  view.store %inner_iteration, %outputs[%lane, 1] : i32, view<64x4xi32>
+  view.store %final_empty, %outputs[%lane, 2] : i32, view<64x4xi32>
+  view.store %empty_next, %outputs[%lane, 3] : i32, view<64x4xi32>
+  kernel.return
+}
+
+func.def @nested_predicate_lifetimes_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64x3xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  scf.for %lane = [%begin to %end step %step] {
+    %outer_limit = view.load %inputs[%lane, 0] : view<64x3xi32> -> i32
+    %inner_seed = view.load %inputs[%lane, 1] : view<64x3xi32> -> i32
+    %outer_count = scalar.maxsi %outer_limit, %c1 : i32
+    %outer_last = scalar.subi %outer_count, %c1 : i32
+    %inner_bound = scalar.subi %inner_seed, %outer_last : i32
+    %inner_count = scalar.maxsi %inner_bound, %c0 : i32
+    %nonempty_bound = scalar.maxsi %inner_seed, %c0 : i32
+    %nonempty_count = scalar.minsi %nonempty_bound, %outer_count : i32
+    %empty_count = scalar.subi %outer_count, %nonempty_count : i32
+    %empty = scalar.cmpi eq, %inner_count, %c0 : i32
+    %empty_word = scf.select %empty, %c1, %c0 : i32
+    view.store %outer_count, %outputs[%lane, 0] : i32, view<64x4xi32>
+    view.store %inner_count, %outputs[%lane, 1] : i32, view<64x4xi32>
+    view.store %empty_word, %outputs[%lane, 2] : i32, view<64x4xi32>
+    view.store %empty_count, %outputs[%lane, 3] : i32, view<64x4xi32>
+  }
+  func.return
+}
+
+check.scenario @nested_predicate_lifetimes_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1) step(1) period(11) : tensor<64x3xi32>
+    %storage = check.generate.fill value(-123) : tensor<272xi32>
+    %output = check.tensor.view %storage offset(32) : tensor<272xi32> -> tensor<64x4xi32>
+    check.compare<@nested_predicate_lifetimes, @nested_predicate_lifetimes_oracle>(%input, %output) : (tensor<64x3xi32>, tensor<64x4xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64x3xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<272xi32>
+    }
+  }
+  check.return
+}
+
+// Both a header exit and a body exit retire lanes into the same continuation.
+// Boolean arithmetic must retain the same lifetime as comparisons.
+kernel.def @early_exit_predicate_lifetimes() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64x3xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x4xi32>
+  %limit = view.load %inputs[%lane, 0] : view<64x3xi32> -> i32
+  %stop = view.load %inputs[%lane, 1] : view<64x3xi32> -> i32
+  %seed = view.load %inputs[%lane, 2] : view<64x3xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %seed_set = scalar.cmpi ne, %seed, %c0 : i32
+  cfg.br ^loop(%c0: i32)
+^loop(%iteration: i32):
+  %empty = scalar.cmpi eq, %iteration, %c0 : i32
+  %both = scalar.andi %empty, %seed_set : i1
+  %either = scalar.ori %empty, %seed_set : i1
+  %different = scalar.xori %empty, %seed_set : i1
+  %again = scalar.cmpi slt, %iteration, %limit : i32
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %iteration, %c1 : i32
+  %stop_now = scalar.cmpi eq, %next, %stop : i32
+  cfg.cond_br %stop_now, ^exit, ^repeat
+^repeat:
+  cfg.br ^loop(%next: i32)
+^exit:
+  %both_word = scf.select %both, %c1, %c0 : i32
+  %either_word = scf.select %either, %c1, %c0 : i32
+  %different_word = scf.select %different, %c1, %c0 : i32
+  view.store %iteration, %outputs[%lane, 0] : i32, view<64x4xi32>
+  view.store %both_word, %outputs[%lane, 1] : i32, view<64x4xi32>
+  view.store %either_word, %outputs[%lane, 2] : i32, view<64x4xi32>
+  view.store %different_word, %outputs[%lane, 3] : i32, view<64x4xi32>
+  kernel.return
+}
+
+func.def @early_exit_predicate_lifetimes_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64x3xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  scf.for %lane = [%begin to %end step %step] {
+    %limit = view.load %inputs[%lane, 0] : view<64x3xi32> -> i32
+    %stop = view.load %inputs[%lane, 1] : view<64x3xi32> -> i32
+    %seed = view.load %inputs[%lane, 2] : view<64x3xi32> -> i32
+    %bound = scalar.maxsi %limit, %c0 : i32
+    %stop_index = scalar.subi %stop, %c1 : i32
+    %early = scalar.minsi %stop_index, %bound : i32
+    %has_stop = scalar.cmpi sgt, %stop, %c0 : i32
+    %count = scf.select %has_stop, %early, %bound : i32
+    %empty = scalar.cmpi eq, %count, %c0 : i32
+    %seed_set = scalar.cmpi ne, %seed, %c0 : i32
+    %empty_word = scf.select %empty, %c1, %c0 : i32
+    %seed_word = scf.select %seed_set, %c1, %c0 : i32
+    %both = scalar.muli %empty_word, %seed_word : i32
+    %sum = scalar.addi %empty_word, %seed_word : i32
+    %either = scalar.minsi %sum, %c1 : i32
+    %twice_both = scalar.addi %both, %both : i32
+    %different = scalar.subi %sum, %twice_both : i32
+    view.store %count, %outputs[%lane, 0] : i32, view<64x4xi32>
+    view.store %both, %outputs[%lane, 1] : i32, view<64x4xi32>
+    view.store %either, %outputs[%lane, 2] : i32, view<64x4xi32>
+    view.store %different, %outputs[%lane, 3] : i32, view<64x4xi32>
+  }
+  func.return
+}
+
+check.scenario @early_exit_predicate_lifetimes_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1) step(1) period(7) : tensor<64x3xi32>
+    %storage = check.generate.fill value(-123) : tensor<272xi32>
+    %output = check.tensor.view %storage offset(32) : tensor<272xi32> -> tensor<64x4xi32>
+    check.compare<@early_exit_predicate_lifetimes, @early_exit_predicate_lifetimes_oracle>(%input, %output) : (tensor<64x3xi32>, tensor<64x4xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64x3xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<272xi32>
+    }
+  }
+  check.return
+}
+
+// Static dimensions instantiate each vector shape through the same source
+// algorithm. Every vector element has an independent, externally loaded seed.
+func.def device inline @shaped_predicate_lifetimes(%columns: index, %limit: i32, %lane: index, %base: offset, %input: buffer, %output: buffer) {
+  %inputs = buffer.view %input[%base] : buffer -> view<64x[%columns]xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x[%columns]xi32>
+  %seeds = vector.load %inputs[%lane, 0] : view<64x[%columns]xi32> -> vector<[%columns]xi32>
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  cfg.br ^loop(%c0: i32)
+^loop(%iteration: i32):
+  %iterations = vector.splat %iteration : vector<[%columns]xi32>
+  %predicates = vector.cmpi slt, %iterations, %seeds : vector<[%columns]xi32> -> vector<[%columns]xi1>
+  %again = scalar.cmpi slt, %iteration, %limit : i32
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %iteration, %c1 : i32
+  cfg.br ^loop(%next: i32)
+^exit:
+  %true_words = vector.constant 1 : vector<[%columns]xi32>
+  %false_words = vector.constant 0 : vector<[%columns]xi32>
+  %words = vector.select %predicates, %true_words, %false_words : vector<[%columns]xi32>
+  vector.store %words, %outputs[%lane, 0] : vector<[%columns]xi32>, view<64x[%columns]xi32>
+  func.return
+}
+
+kernel.def @predicate_shape_family() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%limits: buffer, %input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : offset
+  %bounds = buffer.view %limits[%c0] : buffer -> view<64xi32>
+  %limit = view.load %bounds[%lane] : view<64xi32> -> i32
+  %width1 = index.constant 1 : index
+  %base1 = index.constant 0 : offset
+  func.call @shaped_predicate_lifetimes(%width1, %limit, %lane, %base1, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width2 = index.constant 2 : index
+  %base2 = index.constant 256 : offset
+  func.call @shaped_predicate_lifetimes(%width2, %limit, %lane, %base2, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width3 = index.constant 3 : index
+  %base3 = index.constant 768 : offset
+  func.call @shaped_predicate_lifetimes(%width3, %limit, %lane, %base3, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width4 = index.constant 4 : index
+  %base4 = index.constant 1536 : offset
+  func.call @shaped_predicate_lifetimes(%width4, %limit, %lane, %base4, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width5 = index.constant 5 : index
+  %base5 = index.constant 2560 : offset
+  func.call @shaped_predicate_lifetimes(%width5, %limit, %lane, %base5, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width6 = index.constant 6 : index
+  %base6 = index.constant 3840 : offset
+  func.call @shaped_predicate_lifetimes(%width6, %limit, %lane, %base6, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width7 = index.constant 7 : index
+  %base7 = index.constant 5376 : offset
+  func.call @shaped_predicate_lifetimes(%width7, %limit, %lane, %base7, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width8 = index.constant 8 : index
+  %base8 = index.constant 7168 : offset
+  func.call @shaped_predicate_lifetimes(%width8, %limit, %lane, %base8, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width9 = index.constant 9 : index
+  %base9 = index.constant 9216 : offset
+  func.call @shaped_predicate_lifetimes(%width9, %limit, %lane, %base9, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width10 = index.constant 10 : index
+  %base10 = index.constant 11520 : offset
+  func.call @shaped_predicate_lifetimes(%width10, %limit, %lane, %base10, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width11 = index.constant 11 : index
+  %base11 = index.constant 14080 : offset
+  func.call @shaped_predicate_lifetimes(%width11, %limit, %lane, %base11, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width12 = index.constant 12 : index
+  %base12 = index.constant 16896 : offset
+  func.call @shaped_predicate_lifetimes(%width12, %limit, %lane, %base12, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width13 = index.constant 13 : index
+  %base13 = index.constant 19968 : offset
+  func.call @shaped_predicate_lifetimes(%width13, %limit, %lane, %base13, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width14 = index.constant 14 : index
+  %base14 = index.constant 23296 : offset
+  func.call @shaped_predicate_lifetimes(%width14, %limit, %lane, %base14, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width15 = index.constant 15 : index
+  %base15 = index.constant 26880 : offset
+  func.call @shaped_predicate_lifetimes(%width15, %limit, %lane, %base15, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width16 = index.constant 16 : index
+  %base16 = index.constant 30720 : offset
+  func.call @shaped_predicate_lifetimes(%width16, %limit, %lane, %base16, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width17 = index.constant 17 : index
+  %base17 = index.constant 34816 : offset
+  func.call @shaped_predicate_lifetimes(%width17, %limit, %lane, %base17, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width18 = index.constant 18 : index
+  %base18 = index.constant 39168 : offset
+  func.call @shaped_predicate_lifetimes(%width18, %limit, %lane, %base18, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width19 = index.constant 19 : index
+  %base19 = index.constant 43776 : offset
+  func.call @shaped_predicate_lifetimes(%width19, %limit, %lane, %base19, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width20 = index.constant 20 : index
+  %base20 = index.constant 48640 : offset
+  func.call @shaped_predicate_lifetimes(%width20, %limit, %lane, %base20, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width21 = index.constant 21 : index
+  %base21 = index.constant 53760 : offset
+  func.call @shaped_predicate_lifetimes(%width21, %limit, %lane, %base21, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width22 = index.constant 22 : index
+  %base22 = index.constant 59136 : offset
+  func.call @shaped_predicate_lifetimes(%width22, %limit, %lane, %base22, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width23 = index.constant 23 : index
+  %base23 = index.constant 64768 : offset
+  func.call @shaped_predicate_lifetimes(%width23, %limit, %lane, %base23, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width24 = index.constant 24 : index
+  %base24 = index.constant 70656 : offset
+  func.call @shaped_predicate_lifetimes(%width24, %limit, %lane, %base24, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width25 = index.constant 25 : index
+  %base25 = index.constant 76800 : offset
+  func.call @shaped_predicate_lifetimes(%width25, %limit, %lane, %base25, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width26 = index.constant 26 : index
+  %base26 = index.constant 83200 : offset
+  func.call @shaped_predicate_lifetimes(%width26, %limit, %lane, %base26, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width27 = index.constant 27 : index
+  %base27 = index.constant 89856 : offset
+  func.call @shaped_predicate_lifetimes(%width27, %limit, %lane, %base27, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width28 = index.constant 28 : index
+  %base28 = index.constant 96768 : offset
+  func.call @shaped_predicate_lifetimes(%width28, %limit, %lane, %base28, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width29 = index.constant 29 : index
+  %base29 = index.constant 103936 : offset
+  func.call @shaped_predicate_lifetimes(%width29, %limit, %lane, %base29, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width30 = index.constant 30 : index
+  %base30 = index.constant 111360 : offset
+  func.call @shaped_predicate_lifetimes(%width30, %limit, %lane, %base30, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width31 = index.constant 31 : index
+  %base31 = index.constant 119040 : offset
+  func.call @shaped_predicate_lifetimes(%width31, %limit, %lane, %base31, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  %width32 = index.constant 32 : index
+  %base32 = index.constant 126976 : offset
+  func.call @shaped_predicate_lifetimes(%width32, %limit, %lane, %base32, %input, %output) : (index, i32, index, offset, buffer, buffer)
+  kernel.return
+}
+
+// The oracle observes each final comparison directly, with scalar indexing.
+// Groups 1..32 enumerate every scalarized predicate carrier width.
+func.def @predicate_shape_family_oracle(%limits: buffer, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %bounds = buffer.view %limits[%base] : buffer -> view<64xi32>
+  %inputs = buffer.view %input[%base] : buffer -> view<33792xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<33792xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %maximum_width = index.constant 32 : index
+  %groups = index.constant 32 : index
+  %lanes = index.constant 64 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  scf.for %group = [%begin to %groups step %step] {
+    %ordinal = index.add %group, %step : index
+    %width = index.min %ordinal, %maximum_width : index
+    %product = index.mul %group, %ordinal : index
+    %triangle = index.div %product, %c2 : index
+    %group_base = index.mul %triangle, %lanes : index
+    scf.for %lane = [%begin to %lanes step %step] {
+      %limit = view.load %bounds[%lane] : view<64xi32> -> i32
+      %count = scalar.maxsi %limit, %c0 : i32
+      %start = index.madd %lane, %width, %group_base : index
+      scf.for %element = [%begin to %width step %step] {
+        %position = index.add %start, %element : index
+        %seed = view.load %inputs[%position] : view<33792xi32> -> i32
+        %predicate = scalar.cmpi slt, %count, %seed : i32
+        %word = scf.select %predicate, %c1, %c0 : i32
+        view.store %word, %outputs[%position] : i32, view<33792xi32>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario @predicate_shape_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %limits = check.generate.iota offset(-2) step(1) period(7) : tensor<64xi32>
+    %input = check.generate.iota offset(-1) step(1) period(11) : tensor<33792xi32>
+    %storage = check.generate.fill value(-123) : tensor<33808xi32>
+    %output = check.tensor.view %storage offset(32) : tensor<33808xi32> -> tensor<33792xi32>
+    check.compare<@predicate_shape_family, @predicate_shape_family_oracle>(%limits, %input, %output) : (tensor<64xi32>, tensor<33792xi32>, tensor<33792xi32>) -> () {
+      check.expect.bitwise actual(%limits) expected(%limits) : tensor<64xi32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<33792xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<33808xi32>
+    }
+  }
+  check.return
+}

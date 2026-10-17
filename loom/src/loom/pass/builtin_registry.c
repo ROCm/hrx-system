@@ -22,6 +22,7 @@
 #include "loom/target/callgraph_specialization.h"
 #include "loom/target/pass_environment.h"
 #include "loom/target/pass_requirements.h"
+#include "loom/transforms/boundary/predicate_lifetimes.h"
 #include "loom/transforms/boundary/projection.h"
 #include "loom/transforms/cfg/branch_fusion.h"
 #include "loom/transforms/cfg/branch_sink.h"
@@ -553,6 +554,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .requirement_defs = kMutableFunctionVersionRequirements,
         .requirement_count =
             IREE_ARRAYSIZE(kMutableFunctionVersionRequirements),
+    },
+    {
+        .key = IREE_SVL("project-loop-predicate-lifetimes"),
+        .info = loom_project_loop_predicate_lifetimes_pass_info,
+        .function_run = loom_project_loop_predicate_lifetimes_run,
     },
     {
         .key = IREE_SVL("promote-private-fragments"),

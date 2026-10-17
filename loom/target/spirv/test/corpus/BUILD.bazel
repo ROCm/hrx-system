@@ -138,6 +138,7 @@ _EXPLICIT_CFG_KERNELS = [
     "control/branch/results.loom",
     "control/loop/callable.loom",
     "control/loop/count.loom",
+    "control/loop/predicate_lifetimes.loom",
     "control/loop/wide_index_recurrence.loom",
     "memory/storage/stability/cfg.loom",
 ]
