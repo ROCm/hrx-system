@@ -37,6 +37,7 @@ iree_runtime_cc_test(
         ":storage",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/fabric",
         "//runtime/src/iree/hal/drivers/amd/fabric:memory",
         "//runtime/src/iree/hal/drivers/amd/gpu:context",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:ring",

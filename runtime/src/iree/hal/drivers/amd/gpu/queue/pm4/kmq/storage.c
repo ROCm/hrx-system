@@ -10,7 +10,7 @@
 #include "iree/hal/drivers/amd/status.h"
 
 iree_status_t iree_hal_amd_gpu_pm4_kmq_storage_allocate(
-    const iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
+    iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
     uint64_t command_capacity, uint32_t submission_capacity,
     const iree_hal_amd_fabric_memory_options_t* memory_options,
     iree_allocator_t host_allocator,
@@ -106,6 +106,11 @@ amdf_status_t iree_hal_amd_gpu_pm4_kmq_storage_arm(
   return status;
 }
 
+static void iree_hal_amd_gpu_pm4_kmq_storage_released(void* user_data) {
+  iree_hal_amd_gpu_pm4_kmq_storage_t* storage = user_data;
+  iree_allocator_free(storage->host_allocator, storage);
+}
+
 amdf_status_t iree_hal_amd_gpu_pm4_kmq_storage_free(
     iree_hal_amd_gpu_pm4_kmq_storage_t* storage) {
   if (!storage) {
@@ -114,7 +119,7 @@ amdf_status_t iree_hal_amd_gpu_pm4_kmq_storage_free(
   if (!amdf_status_is_ok(storage->removal_status)) {
     return storage->removal_status;
   }
-  const iree_hal_amd_gpu_context_t* context = storage->context;
+  iree_hal_amd_gpu_context_t* context = storage->context;
   if (storage->queue && storage->last_submission) {
     amdf_status_t status = context->api->kernel_queue_wait(
         storage->queue, storage->last_submission, AMDF_TIMEOUT_INFINITE, 0);
@@ -134,8 +139,11 @@ amdf_status_t iree_hal_amd_gpu_pm4_kmq_storage_free(
       return status;
     }
   }
-  iree_hal_amd_fabric_memory_deinitialize(context->api, context->event_sink,
-                                          &storage->memory);
-  iree_allocator_free(storage->host_allocator, storage);
+  iree_hal_amd_gpu_context_release_memory(
+      context, 1, &storage->memory,
+      (iree_hal_slab_release_callback_t){
+          .fn = iree_hal_amd_gpu_pm4_kmq_storage_released,
+          .user_data = storage},
+      &storage->release);
   return AMDF_STATUS_OK;
 }

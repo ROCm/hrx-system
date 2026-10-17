@@ -94,9 +94,11 @@ TEST_P(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
   uint64_t native_frontier = 0;
   iree_hal_amd_gpu_pm4_signal_t native_signal;
   iree_hal_amd_gpu_pm4_signal_pool_t signal_pool;
-  iree_hal_amd_gpu_pm4_signal_pool_initialize(
-      this, &native_value, 0x1000, &native_signal, 1, 1, &native_frontier, {},
-      &signal_pool);
+  iree_hal_amd_gpu_pm4_signal_block_t signal_block;
+  iree_hal_amd_gpu_pm4_signal_pool_initialize({}, &signal_pool);
+  iree_hal_amd_gpu_pm4_signal_block_initialize(
+      &signal_pool, this, &native_value, 0x1000, &native_signal, 1, 1,
+      &native_frontier, &signal_block);
   capture->signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&signal_pool);
   iree_hal_amd_gpu_pm4_submission_t* consumer = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
@@ -167,6 +169,7 @@ TEST_P(SubmissionTest, PayloadRetiresBeforePublicationBookkeeping) {
   EXPECT_FALSE(
       iree_hal_amd_gpu_pm4_signal_query_retirement(recycled, &completion_code));
   iree_hal_amd_gpu_pm4_signal_release(recycled);
+  iree_hal_amd_gpu_pm4_signal_block_deinitialize(&signal_block);
   iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&signal_pool);
   iree_async_proactor_release(proactor);
 }
@@ -186,9 +189,11 @@ TEST_P(SubmissionTest, FailedDependencyStillJoinsOtherProducers) {
   std::array<uint64_t, 2> native_frontiers = {};
   std::array<iree_hal_amd_gpu_pm4_signal_t, 2> native_signals;
   iree_hal_amd_gpu_pm4_signal_pool_t signal_pool;
-  iree_hal_amd_gpu_pm4_signal_pool_initialize(
-      this, native_values.data(), 0x1000, native_signals.data(),
-      native_signals.size(), 1, native_frontiers.data(), {}, &signal_pool);
+  iree_hal_amd_gpu_pm4_signal_block_t signal_block;
+  iree_hal_amd_gpu_pm4_signal_pool_initialize({}, &signal_pool);
+  iree_hal_amd_gpu_pm4_signal_block_initialize(
+      &signal_pool, this, native_values.data(), 0x1000, native_signals.data(),
+      native_signals.size(), 1, native_frontiers.data(), &signal_block);
   std::array<iree_hal_amd_gpu_pm4_submission_t*, 2> producers = {};
   for (size_t i = 0; i < producers.size(); ++i) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
@@ -233,6 +238,7 @@ TEST_P(SubmissionTest, FailedDependencyStillJoinsOtherProducers) {
   for (auto* signal : recycled) {
     iree_hal_amd_gpu_pm4_signal_release(signal);
   }
+  iree_hal_amd_gpu_pm4_signal_block_deinitialize(&signal_block);
   iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&signal_pool);
   iree_async_proactor_release(proactor);
 }

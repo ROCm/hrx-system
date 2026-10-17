@@ -28,6 +28,30 @@ _NATIVE_DEVICE_COMPATIBLE_WITH = select({
 })
 
 iree_runtime_cc_library(
+    name = "publication",
+    srcs = ["publication.c"],
+    hdrs = ["publication.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "publication_test",
+    srcs = ["publication_test.cc"],
+    deps = [
+        ":publication",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:publisher",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "device",
     srcs = ["device.c"],
     hdrs = ["device.h"],
@@ -39,6 +63,7 @@ iree_runtime_cc_library(
         ":executable",
         ":feedback",
         ":profile",
+        ":publication",
         ":tsan",
         "//libamdf:headers",
         "//runtime/src/iree/async",
@@ -53,14 +78,13 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/fabric:memory",
         "//runtime/src/iree/hal/drivers/amd/fabric:memory_backend",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:allocation",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:memory_mapping",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:barrier",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:command_buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:program",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:queue",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
-        "//runtime/src/iree/hal/memory:maintenance",
-        "//runtime/src/iree/hal/memory:maintenance_thread",
         "//runtime/src/iree/hal/utils:device_spec_builder",
         "//runtime/src/iree/hal/utils:files",
     ],
@@ -95,7 +119,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:dispatch",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:launch",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
-        "//runtime/src/iree/hal/memory:maintenance",
     ],
 )
 
@@ -207,7 +230,9 @@ iree_runtime_cc_test(
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/fabric",
         "//runtime/src/iree/hal/drivers/amd/fabric:memory",
         "//runtime/src/iree/hal/drivers/amd/gpu/image",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
@@ -215,8 +240,6 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu/image:metadata",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:launch",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
-        "//runtime/src/iree/hal/memory:maintenance",
-        "//runtime/src/iree/hal/memory:maintenance_thread",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -272,10 +295,12 @@ iree_runtime_cc_library(
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/drivers/amd/fabric",
         "//runtime/src/iree/hal/drivers/amd/fabric:event",
+        "//runtime/src/iree/hal/drivers/amd/fabric:slab_provider",
     ],
 )
 
@@ -287,8 +312,10 @@ iree_runtime_cc_test(
         ":context",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/fabric",
+        "//runtime/src/iree/hal/drivers/amd/fabric:slab_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

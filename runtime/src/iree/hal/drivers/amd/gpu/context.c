@@ -9,6 +9,235 @@
 #include "iree/hal/drivers/amd/fabric/event.h"
 #include "iree/hal/drivers/amd/status.h"
 
+iree_status_t iree_hal_amd_gpu_context_prepare_memory(
+    iree_hal_amd_gpu_context_t* context, uint32_t node_id) {
+  iree_hal_amd_fabric_allocation_queue_t* queue = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_acquire_allocation_queue(
+      context->fabric, node_id, &queue));
+  iree_slim_mutex_initialize(&context->memory.mutex);
+  iree_notification_initialize(&context->memory.notification);
+  context->memory.queue = queue;
+  return iree_ok_status();
+}
+
+static void iree_hal_amd_gpu_context_memory_begin(
+    iree_hal_amd_gpu_context_t* context) {
+  iree_slim_mutex_lock(&context->memory.mutex);
+  ++context->memory.pending_count;
+  iree_slim_mutex_unlock(&context->memory.mutex);
+}
+
+static void iree_hal_amd_gpu_context_memory_end(
+    iree_hal_amd_gpu_context_t* context) {
+  iree_slim_mutex_lock(&context->memory.mutex);
+  if (--context->memory.pending_count == 0) {
+    iree_notification_post(&context->memory.notification, IREE_ALL_WAITERS);
+  }
+  // The join predicate takes this same lock. Publishing zero alone would let
+  // teardown free the notification before post's final access to its storage.
+  iree_slim_mutex_unlock(&context->memory.mutex);
+}
+
+static void iree_hal_amd_gpu_context_memory_acquired(void* user_data,
+                                                     iree_status_t status) {
+  iree_hal_amd_gpu_memory_acquire_t* operation = user_data;
+  iree_hal_amd_gpu_context_t* context = operation->context;
+  const iree_hal_slab_acquire_callback_t completion = operation->completion;
+  completion.fn(completion.user_data, status);
+  iree_hal_amd_gpu_context_memory_end(context);
+}
+
+static void iree_hal_amd_gpu_context_memory_released(void* user_data) {
+  iree_hal_amd_gpu_memory_release_t* operation = user_data;
+  iree_hal_amd_gpu_context_t* context = operation->context;
+  const iree_hal_slab_release_callback_t completion = operation->completion;
+  completion.fn(completion.user_data);
+  iree_hal_amd_gpu_context_memory_end(context);
+}
+
+void iree_hal_amd_gpu_context_acquire_memory(
+    iree_hal_amd_gpu_context_t* context, iree_host_size_t count,
+    const iree_hal_amd_fabric_memory_request_t* requests,
+    iree_hal_amd_fabric_memory_t* memories,
+    iree_hal_slab_acquire_callback_t completion,
+    iree_hal_amd_gpu_memory_acquire_t* operation) {
+  *operation = (iree_hal_amd_gpu_memory_acquire_t){
+      .request =
+          {
+              .operation = {.api = context->api,
+                            .event_sink = context->event_sink},
+              .count = count,
+              .requests = requests,
+              .memories = memories,
+              .completion = {.fn = iree_hal_amd_gpu_context_memory_acquired,
+                             .user_data = operation},
+          },
+      .context = context,
+      .completion = completion,
+  };
+  iree_hal_amd_gpu_context_memory_begin(context);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(context->memory.queue,
+                                                      &operation->request);
+}
+
+void iree_hal_amd_gpu_context_release_memory(
+    iree_hal_amd_gpu_context_t* context, iree_host_size_t count,
+    iree_hal_amd_fabric_memory_t* memories,
+    iree_hal_slab_release_callback_t completion,
+    iree_hal_amd_gpu_memory_release_t* operation) {
+  *operation = (iree_hal_amd_gpu_memory_release_t){
+      .request =
+          {
+              .operation = {.api = context->api,
+                            .event_sink = context->event_sink},
+              .count = count,
+              .memories = memories,
+              .completion = {.fn = iree_hal_amd_gpu_context_memory_released,
+                             .user_data = operation},
+          },
+      .context = context,
+      .completion = completion,
+  };
+  iree_hal_amd_gpu_context_memory_begin(context);
+  iree_hal_amd_fabric_allocation_queue_release_memory(context->memory.queue,
+                                                      &operation->request);
+}
+
+static bool iree_hal_amd_gpu_context_memory_is_idle(void* user_data) {
+  iree_hal_amd_gpu_context_t* context = user_data;
+  iree_slim_mutex_lock(&context->memory.mutex);
+  bool idle = context->memory.pending_count == 0;
+  iree_slim_mutex_unlock(&context->memory.mutex);
+  return idle;
+}
+
+static void iree_hal_amd_gpu_context_memory_mapped(void* user_data,
+                                                   iree_status_t status) {
+  iree_hal_amd_gpu_memory_map_t* operation = user_data;
+  iree_hal_amd_gpu_context_t* context = operation->context;
+  const iree_hal_slab_acquire_callback_t completion = operation->completion;
+  completion.fn(completion.user_data, status);
+  iree_hal_amd_gpu_context_memory_end(context);
+}
+
+void iree_hal_amd_gpu_context_map_memory(
+    iree_hal_amd_gpu_context_t* context, iree_hal_memory_mapping_batch_t* batch,
+    iree_hal_slab_acquire_callback_t completion,
+    iree_hal_amd_gpu_memory_map_t* operation) {
+  *operation = (iree_hal_amd_gpu_memory_map_t){
+      .request = {.batch = batch,
+                  .completion = {.fn = iree_hal_amd_gpu_context_memory_mapped,
+                                 .user_data = operation}},
+      .context = context,
+      .completion = completion,
+  };
+  iree_hal_amd_gpu_context_memory_begin(context);
+  iree_hal_amd_fabric_allocation_queue_map_memory(context->memory.queue,
+                                                  &operation->request);
+}
+
+void iree_hal_amd_gpu_context_join_memory(iree_hal_amd_gpu_context_t* context) {
+  if (!context->memory.queue) {
+    return;
+  }
+  iree_notification_await(&context->memory.notification,
+                          iree_hal_amd_gpu_context_memory_is_idle, context,
+                          iree_infinite_timeout());
+}
+
+void iree_hal_amd_gpu_context_deinitialize_memory(
+    iree_hal_amd_gpu_context_t* context) {
+  if (!context->memory.queue) {
+    return;
+  }
+  iree_hal_amd_gpu_context_join_memory(context);
+  iree_hal_amd_fabric_allocation_queue_release(context->memory.queue);
+  context->memory.queue = NULL;
+  iree_notification_deinitialize(&context->memory.notification);
+  iree_slim_mutex_deinitialize(&context->memory.mutex);
+}
+
+// Stack-owned completion for cold calls. The mutex joins the producer's final
+// notification access before the waiting caller returns and reclaims the stack.
+typedef struct iree_hal_amd_gpu_memory_wait_t {
+  // Protects result publication and notification lifetime.
+  iree_slim_mutex_t mutex;
+  // Wakes only this batch's caller, independently of later native batches.
+  iree_notification_t notification;
+  // Native result transferred to the caller after completion.
+  iree_status_t status;
+  // True after the callback has published the native result.
+  bool completed;
+} iree_hal_amd_gpu_memory_wait_t;
+
+static void iree_hal_amd_gpu_memory_wait_initialize(
+    iree_hal_amd_gpu_memory_wait_t* wait) {
+  memset(wait, 0, sizeof(*wait));
+  iree_slim_mutex_initialize(&wait->mutex);
+  iree_notification_initialize(&wait->notification);
+}
+
+static void iree_hal_amd_gpu_memory_wait_complete(void* user_data,
+                                                  iree_status_t status) {
+  iree_hal_amd_gpu_memory_wait_t* wait = user_data;
+  iree_slim_mutex_lock(&wait->mutex);
+  wait->status = status;
+  wait->completed = true;
+  iree_notification_post(&wait->notification, IREE_ALL_WAITERS);
+  iree_slim_mutex_unlock(&wait->mutex);
+}
+
+static void iree_hal_amd_gpu_memory_wait_released(void* user_data) {
+  iree_hal_amd_gpu_memory_wait_complete(user_data, iree_ok_status());
+}
+
+static bool iree_hal_amd_gpu_memory_wait_is_complete(void* user_data) {
+  iree_hal_amd_gpu_memory_wait_t* wait = user_data;
+  iree_slim_mutex_lock(&wait->mutex);
+  bool completed = wait->completed;
+  iree_slim_mutex_unlock(&wait->mutex);
+  return completed;
+}
+
+static iree_status_t iree_hal_amd_gpu_memory_wait_join(
+    iree_hal_amd_gpu_memory_wait_t* wait) {
+  iree_notification_await(&wait->notification,
+                          iree_hal_amd_gpu_memory_wait_is_complete, wait,
+                          iree_infinite_timeout());
+  iree_notification_deinitialize(&wait->notification);
+  iree_slim_mutex_deinitialize(&wait->mutex);
+  return wait->status;
+}
+
+iree_status_t iree_hal_amd_gpu_context_acquire_memory_sync(
+    iree_hal_amd_gpu_context_t* context, iree_host_size_t count,
+    const iree_hal_amd_fabric_memory_request_t* requests,
+    iree_hal_amd_fabric_memory_t* memories) {
+  iree_hal_amd_gpu_memory_wait_t wait;
+  iree_hal_amd_gpu_memory_wait_initialize(&wait);
+  iree_hal_amd_gpu_memory_acquire_t operation;
+  iree_hal_amd_gpu_context_acquire_memory(
+      context, count, requests, memories,
+      (iree_hal_slab_acquire_callback_t){
+          .fn = iree_hal_amd_gpu_memory_wait_complete, .user_data = &wait},
+      &operation);
+  return iree_hal_amd_gpu_memory_wait_join(&wait);
+}
+
+void iree_hal_amd_gpu_context_release_memory_sync(
+    iree_hal_amd_gpu_context_t* context, iree_host_size_t count,
+    iree_hal_amd_fabric_memory_t* memories) {
+  iree_hal_amd_gpu_memory_wait_t wait;
+  iree_hal_amd_gpu_memory_wait_initialize(&wait);
+  iree_hal_amd_gpu_memory_release_t operation;
+  iree_hal_amd_gpu_context_release_memory(
+      context, count, memories,
+      (iree_hal_slab_release_callback_t){
+          .fn = iree_hal_amd_gpu_memory_wait_released, .user_data = &wait},
+      &operation);
+  iree_status_ignore(iree_hal_amd_gpu_memory_wait_join(&wait));
+}
+
 void iree_hal_amd_gpu_context_report_status(
     const iree_hal_amd_gpu_context_t* context, iree_hal_device_t* device,
     const iree_status_t status) {
@@ -57,6 +286,7 @@ void iree_hal_amd_gpu_context_free(iree_hal_amd_gpu_context_t* context) {
   if (!context || context->cleanup_blocked) {
     return;
   }
+  iree_hal_amd_gpu_context_deinitialize_memory(context);
   amdf_status_t event_status =
       iree_hal_amd_gpu_context_deinitialize_completion(context);
   if (!amdf_status_is_ok(event_status)) {

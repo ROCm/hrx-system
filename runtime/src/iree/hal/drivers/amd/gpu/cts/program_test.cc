@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstring>
+#include <future>
 #include <vector>
 
 #include "iree/base/internal/atomics.h"
@@ -61,9 +62,9 @@ class GpuProgramTest : public GpuNativeTest {
     ASSERT_NO_FATAL_FAILURE(
         Allocate(control_policy_, 65536, &control_, &control_address_));
     std::memset(control_.contents.data, 0, control_.contents.data_length);
+    IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_memory(context_, 0));
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_program_pool_initialize(
-        context_, family, nullptr, 3, kernel_, iree_allocator_system(),
-        &pool_));
+        context_, family, 3, kernel_, iree_allocator_system(), &pool_));
     for (auto& queue : queues_native_) {
       if (kernel_) {
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_kmq_storage_allocate(
@@ -451,13 +452,28 @@ TEST_F(GpuProgramTest, PipelinedFixupsCloneAndCausalReuse) {
   iree_hal_amd_gpu_pm4_program_trim(&program_);
   EXPECT_EQ(iree_hal_amd_gpu_pm4_program_source(&program_).address,
             initial->address);
-  EXPECT_EQ(program_.upload.handle, nullptr);
+  EXPECT_EQ(program_.upload, nullptr);
   // Cold allocation precedes publication. Rejected reservations do not claim
   // an initialized clone or overwrite the initial instance's causal state.
   auto* reservation =
       iree_hal_amd_gpu_pm4_program_try_acquire(&program_, 0, frontier);
   ASSERT_NE(reservation, nullptr);
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_program_grow(&program_));
+  iree_hal_amd_gpu_pm4_program_growth_t growth = {};
+  std::promise<iree::Status> grown;
+  const iree_hal_slab_acquire_callback_t completion = {
+      .fn =
+          [](void* user_data, iree_status_t status) {
+            static_cast<std::promise<iree::Status>*>(user_data)->set_value(
+                iree::Status(std::move(status)));
+          },
+      .user_data = &grown,
+  };
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_program_grow_begin(&program_, 1,
+                                                         completion, &growth));
+  auto growth_status = grown.get_future().get();
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_pm4_program_grow_end(&growth, growth_status.release()));
+  iree_hal_amd_gpu_context_join_memory(context_);
   iree_hal_amd_gpu_pm4_program_cancel(&program_, reservation);
   iree_hal_amd_gpu_pm4_program_instance_t* first = nullptr;
   ASSERT_NO_FATAL_FAILURE(Submit(0, 0, 0x12345678, frontier, &first));

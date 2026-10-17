@@ -7,7 +7,10 @@
 #include "iree/hal/drivers/amd/gpu/context.h"
 
 #include <array>
+#include <future>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -40,6 +43,10 @@ struct NativeState {
   std::string fail_release;
   // Original native failures delivered through the device's event sink.
   std::vector<std::string> reports;
+  // Live backings borrowing the native address domain.
+  uint32_t memory_count = 0;
+  // Thread that performed final native device destruction.
+  std::thread::id destruction_thread;
 
   amdf_status_t NextCall() {
     return ++call_count == fail_call
@@ -199,10 +206,12 @@ amdf_status_t AMDF_CALL DestroyDevice(amdf_device_t* device) {
   EXPECT_FALSE(state->event_live);
   EXPECT_TRUE(state->device_live);
   EXPECT_TRUE(state->endpoint_live);
+  EXPECT_EQ(state->memory_count, 0u);
   if (state->fail_release == "device") {
     return amdf_make_api_status(AMDF_STATUS_CODE_PERMISSION_DENIED);
   }
   state->device_live = false;
+  state->destruction_thread = std::this_thread::get_id();
   state->released.push_back("device");
   return AMDF_STATUS_OK;
 }
@@ -250,16 +259,27 @@ class ContextTest : public ::testing::Test {
     api_.endpoint_close = CloseEndpoint;
     api_.device_destroy = DestroyDevice;
     api_.device_enumerate_memory_scopes = EnumerateScopes;
-    iree_atomic_ref_count_init(&fabric_.ref_count);
-    fabric_.api = &api_;
-    fabric_.instance = reinterpret_cast<amdf_instance_t*>(&native_);
+    api_.instance_destroy = [](amdf_instance_t* instance) {
+      auto* native = reinterpret_cast<NativeState*>(instance);
+      EXPECT_FALSE(native->endpoint_live);
+      return AMDF_STATUS_OK;
+    };
+    IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
+                                         sizeof(*fabric_),
+                                         reinterpret_cast<void**>(&fabric_)));
+    iree_atomic_ref_count_init(&fabric_->ref_count);
+    iree_slim_mutex_initialize(&fabric_->allocation_mutex);
+    fabric_->host_allocator = iree_allocator_system();
+    fabric_->api = &api_;
+    fabric_->instance = reinterpret_cast<amdf_instance_t*>(&native_);
   }
 
   void TearDown() override {
     EXPECT_FALSE(native_.endpoint_live);
     EXPECT_FALSE(native_.device_live);
     EXPECT_FALSE(native_.event_live);
-    EXPECT_EQ(iree_atomic_ref_count_load(&fabric_.ref_count), 1);
+    EXPECT_EQ(iree_atomic_ref_count_load(&fabric_->ref_count), 1);
+    iree_hal_amd_fabric_release(fabric_);
   }
 
   iree_status_t Allocate(iree_hal_amd_gpu_context_t** out_context) {
@@ -281,7 +301,7 @@ class ContextTest : public ::testing::Test {
         .user_data = &native_,
     };
     iree_status_t status = iree_hal_amd_gpu_context_allocate(
-        &fabric_, &id, sink, iree_allocator_system(), out_context);
+        fabric_, &id, sink, iree_allocator_system(), out_context);
     if (iree_status_is_ok(status)) {
       status = iree_hal_amd_gpu_context_prepare_completion(
           *out_context, AMDF_QUEUE_PUBLICATION_MODE_USER);
@@ -298,14 +318,14 @@ class ContextTest : public ::testing::Test {
   // Native entry points supplied to the real context constructor.
   amdf_api_t api_ = {};
   // Existing fabric reference retained independently of the context.
-  iree_hal_amd_fabric_t fabric_ = {};
+  iree_hal_amd_fabric_t* fabric_ = nullptr;
 };
 
 TEST_F(ContextTest, EndpointOpeningDoesNotRequireUserPublication) {
   const amdf_endpoint_id_t id = {{37, 0}};
   iree_hal_amd_gpu_context_t* context = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_context_allocate(
-      &fabric_, &id, {}, iree_allocator_system(), &context));
+      fabric_, &id, {}, iree_allocator_system(), &context));
   ASSERT_NE(context, nullptr);
   EXPECT_EQ(context->event, nullptr);
   EXPECT_FALSE(native_.event_live);
@@ -346,7 +366,7 @@ TEST_F(ContextTest, CapturesFamiliesIndependentlyOfIsa) {
     iree_hal_amd_gpu_context_t* context = nullptr;
     IREE_ASSERT_OK(Allocate(&context));
     ASSERT_NE(context, nullptr);
-    EXPECT_EQ(iree_atomic_ref_count_load(&fabric_.ref_count), 2);
+    EXPECT_EQ(iree_atomic_ref_count_load(&fabric_->ref_count), 2);
     EXPECT_EQ(context->target_info.gfx_ip.major, gfx_major);
     EXPECT_EQ(context->target_info.compute.compute_unit_count, 12u);
     EXPECT_EQ(context->device_info.reset_epoch, 91u);
@@ -377,7 +397,7 @@ TEST_F(ContextTest, NoPhysicalLocalStorageStillHasSystemStorage) {
   IREE_ASSERT_OK(Allocate(&context));
   EXPECT_EQ(context->memory_scope_count, 0u);
   EXPECT_EQ(context->memory_scopes, nullptr);
-  EXPECT_EQ(context->fabric, &fabric_);
+  EXPECT_EQ(context->fabric, fabric_);
   iree_hal_amd_gpu_context_free(context);
 }
 
@@ -396,7 +416,7 @@ TEST_F(ContextTest, EveryNativeConstructionFailureUnwindsAcquiredOwners) {
     EXPECT_FALSE(native_.endpoint_live);
     EXPECT_FALSE(native_.device_live);
     EXPECT_FALSE(native_.event_live);
-    EXPECT_EQ(iree_atomic_ref_count_load(&fabric_.ref_count), 1);
+    EXPECT_EQ(iree_atomic_ref_count_load(&fabric_->ref_count), 1);
   }
 }
 
@@ -410,7 +430,7 @@ TEST_F(ContextTest, FailedCleanupPreservesBorrowedParentsAndReportsFailure) {
     EXPECT_EQ(native_.event_live, native_.fail_release == "event");
     EXPECT_EQ(native_.device_live, native_.fail_release != "endpoint");
     EXPECT_TRUE(native_.endpoint_live);
-    EXPECT_EQ(iree_atomic_ref_count_load(&fabric_.ref_count), 2);
+    EXPECT_EQ(iree_atomic_ref_count_load(&fabric_->ref_count), 2);
     ASSERT_EQ(native_.reports.size(), 1u);
     const std::string operation =
         native_.fail_release == "event"    ? "gpu.event_destroy"
@@ -438,12 +458,298 @@ TEST_F(ContextTest, FailedChildJoinPreservesTheCompleteNativeOwner) {
   EXPECT_TRUE(native_.device_live);
   EXPECT_TRUE(native_.endpoint_live);
   EXPECT_TRUE(native_.released.empty());
-  EXPECT_EQ(iree_atomic_ref_count_load(&fabric_.ref_count), 2);
+  EXPECT_EQ(iree_atomic_ref_count_load(&fabric_->ref_count), 2);
 
   // The controlled dependency has no remaining child. Reclaim only this test
   // fixture; production cannot clear the latch after an unproven native join.
   context->cleanup_blocked = false;
   iree_hal_amd_gpu_context_free(context);
+}
+
+// Only native storage is substituted. Context lifetime, the shared allocation
+// domain, request publication, and callback joins use their production paths.
+struct NativeBacking {
+  struct Memory {
+    // Native allocator owning this dependency handle.
+    NativeBacking* owner;
+    // Achieved native extent in bytes.
+    uint64_t length;
+  };
+
+  static amdf_status_t AMDF_CALL Allocate(amdf_memory_scope_t* scope,
+                                          const amdf_memory_create_info_t* info,
+                                          amdf_memory_t** out_memory) {
+    auto* self = reinterpret_cast<NativeBacking*>(scope);
+    EXPECT_TRUE(self->native->device_live);
+    self->threads.push_back(std::this_thread::get_id());
+    if (++self->allocate_count == self->fail_allocate) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+    }
+    ++self->native->memory_count;
+    *out_memory =
+        reinterpret_cast<amdf_memory_t*>(new Memory{self, info->byte_length});
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL Query(amdf_memory_t* handle,
+                                       amdf_memory_info_t* out_info) {
+    auto* memory = reinterpret_cast<Memory*>(handle);
+    out_info->byte_length = memory->length;
+    out_info->alignment = 64;
+    out_info->native_allocation_byte_length = memory->length;
+    out_info->native_allocation_granularity = 64;
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL Free(amdf_memory_t* handle) {
+    auto* memory = reinterpret_cast<Memory*>(handle);
+    auto* self = memory->owner;
+    EXPECT_TRUE(self->native->device_live);
+    self->threads.push_back(std::this_thread::get_id());
+    if (self->free_entered) {
+      self->free_entered->set_value();
+      self->free_resume.wait();
+      self->free_entered = nullptr;
+    }
+    --self->native->memory_count;
+    ++self->free_count;
+    delete memory;
+    return AMDF_STATUS_OK;
+  }
+
+  // Native device whose destruction requires every backing to have retired.
+  NativeState* native = nullptr;
+  // Number of native allocation attempts, including the selected failure.
+  uint32_t allocate_count = 0;
+  // Number of native owners consumed by release or rollback.
+  uint32_t free_count = 0;
+  // Native allocation to reject, or zero for successful acquisition.
+  uint32_t fail_allocate = 0;
+  // Worker observed by each native storage operation.
+  std::vector<std::thread::id> threads;
+  // Optional explicit gate at the native free boundary.
+  std::promise<void>* free_entered = nullptr;
+  // Permission to return from the held native free.
+  std::shared_future<void> free_resume;
+};
+
+class ContextMemoryTest : public ContextTest {
+ protected:
+  void SetUp() override {
+    ContextTest::SetUp();
+    native_backing_.native = &native_;
+    api_.memory_create = NativeBacking::Allocate;
+    api_.memory_query_info = NativeBacking::Query;
+    api_.memory_destroy = NativeBacking::Free;
+    options_.scope = reinterpret_cast<amdf_memory_scope_t*>(&native_backing_);
+    options_.profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
+    options_.profile.allocation.byte_length_granularity = 64;
+    options_.profile.allocation.minimum_alignment = 64;
+    options_.profile.allocation.maximum_byte_length = 4096;
+    IREE_ASSERT_OK(Allocate(&context_));
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_context_prepare_memory(context_, UINT32_MAX));
+  }
+
+  void TearDown() override {
+    iree_hal_amd_gpu_context_free(context_);
+    EXPECT_EQ(native_.memory_count, 0u);
+    ContextTest::TearDown();
+  }
+
+  // Native dependency outlives context cleanup and all worker callbacks.
+  NativeBacking native_backing_;
+  // Qualified native acquisition geometry borrowed by every request.
+  iree_hal_amd_fabric_memory_options_t options_ = {};
+  // Unique native owner, freed on this fixture unless transferred to teardown.
+  iree_hal_amd_gpu_context_t* context_ = nullptr;
+};
+
+TEST_F(ContextMemoryTest, ColdBatchesUseSharedNativeDomain) {
+  iree_hal_amd_fabric_allocation_queue_t* shared = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+      fabric_, UINT32_MAX, &shared));
+  EXPECT_EQ(context_->memory.queue, shared);
+  iree_hal_amd_fabric_allocation_queue_release(shared);
+
+  const iree_hal_amd_fabric_memory_request_t requests[] = {
+      {&options_, 65, 16}, {&options_, 130, 16}, {&options_, 195, 16}};
+  iree_hal_amd_fabric_memory_t memories[IREE_ARRAYSIZE(requests)] = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_acquire_memory_sync(
+      context_, IREE_ARRAYSIZE(requests), requests, memories));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
+    EXPECT_NE(memories[i].handle, nullptr);
+    EXPECT_EQ(memories[i].info.byte_length, 128u + 64u * i);
+  }
+  iree_hal_amd_gpu_context_release_memory_sync(
+      context_, IREE_ARRAYSIZE(memories), memories);
+  iree_hal_amd_gpu_context_join_memory(context_);
+  EXPECT_EQ(native_backing_.allocate_count, 3u);
+  EXPECT_EQ(native_backing_.free_count, 3u);
+  ASSERT_EQ(native_backing_.threads.size(), 6u);
+  for (auto thread : native_backing_.threads) {
+    EXPECT_EQ(thread, native_backing_.threads.front());
+    EXPECT_NE(thread, std::this_thread::get_id());
+  }
+}
+
+TEST_F(ContextMemoryTest, FailedBatchReturnsEveryPartialOwnerBeforeCompletion) {
+  native_backing_.fail_allocate = 3;
+  const iree_hal_amd_fabric_memory_request_t requests[] = {
+      {&options_, 64, 64}, {&options_, 128, 64}, {&options_, 192, 64}};
+  iree_hal_amd_fabric_memory_t memories[IREE_ARRAYSIZE(requests)] = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_amd_gpu_context_acquire_memory_sync(
+          context_, IREE_ARRAYSIZE(requests), requests, memories));
+  iree_hal_amd_gpu_context_join_memory(context_);
+  for (auto& memory : memories) {
+    EXPECT_EQ(memory.handle, nullptr);
+  }
+  EXPECT_EQ(native_backing_.free_count, 2u);
+  EXPECT_EQ(native_.memory_count, 0u);
+}
+
+TEST_F(ContextMemoryTest, CallbackCanReuseAndFreeItsCapture) {
+  struct Capture {
+    // Borrowed native owner protected by the outstanding batch join.
+    iree_hal_amd_gpu_context_t* context;
+    // Geometry borrowed by native acquisition.
+    iree_hal_amd_fabric_memory_request_t request;
+    // Acquired native owner transferred immediately into release.
+    iree_hal_amd_fabric_memory_t memory;
+    // Presecured operation storage reused from its terminal callback.
+    union {
+      iree_hal_amd_gpu_memory_acquire_t acquire;
+      iree_hal_amd_gpu_memory_release_t release;
+    } operation;
+    // Final result observer, independent of the reclaimable capture.
+    std::promise<iree::Status>* completed;
+  };
+  for (uint32_t i = 0; i < 128; ++i) {
+    std::promise<iree::Status> completed;
+    auto* capture = new Capture{
+        .context = context_,
+        .request = {&options_, 64, 64},
+        .memory = {},
+        .operation = {},
+        .completed = &completed,
+    };
+    const iree_hal_slab_acquire_callback_t acquired = {
+        .fn =
+            [](void* user_data, iree_status_t status) {
+              auto* capture = static_cast<Capture*>(user_data);
+              if (!iree_status_is_ok(status)) {
+                auto* completed = capture->completed;
+                delete capture;
+                completed->set_value(iree::Status(std::move(status)));
+                return;
+              }
+              const iree_hal_slab_release_callback_t released = {
+                  .fn =
+                      [](void* user_data) {
+                        auto* capture = static_cast<Capture*>(user_data);
+                        EXPECT_EQ(capture->memory.handle, nullptr);
+                        auto* completed = capture->completed;
+                        delete capture;
+                        completed->set_value(iree::Status());
+                      },
+                  .user_data = capture,
+              };
+              iree_hal_amd_gpu_context_release_memory(
+                  capture->context, 1, &capture->memory, released,
+                  &capture->operation.release);
+            },
+        .user_data = capture,
+    };
+    iree_hal_amd_gpu_context_acquire_memory(context_, 1, &capture->request,
+                                            &capture->memory, acquired,
+                                            &capture->operation.acquire);
+    IREE_ASSERT_OK(completed.get_future().get());
+    iree_hal_amd_gpu_context_join_memory(context_);
+  }
+  iree_hal_amd_gpu_context_join_memory(context_);
+  EXPECT_EQ(native_backing_.allocate_count, 128u);
+  EXPECT_EQ(native_backing_.free_count, 128u);
+}
+
+TEST_F(ContextMemoryTest, NativeTeardownJoinsReleaseOnItsOwnThread) {
+  struct Capture {
+    // Presecured release descriptor, consumed before host storage is reclaimed.
+    iree_hal_amd_gpu_memory_release_t operation;
+    // Last native backing borrowing the device address domain.
+    iree_hal_amd_fabric_memory_t memory;
+  };
+  auto* capture = new Capture{};
+  const iree_hal_amd_fabric_memory_request_t request = {&options_, 64, 64};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_acquire_memory_sync(
+      context_, 1, &request, &capture->memory));
+  std::promise<void> entered, resume;
+  native_backing_.free_entered = &entered;
+  native_backing_.free_resume = resume.get_future().share();
+  iree_hal_amd_gpu_context_release_memory(
+      context_, 1, &capture->memory,
+      {
+          .fn =
+              [](void* user_data) { delete static_cast<Capture*>(user_data); },
+          .user_data = capture,
+      },
+      &capture->operation);
+  entered.get_future().get();
+  std::promise<void> teardown_started;
+  const auto* allocation_queue = context_->memory.queue;
+  std::thread teardown([&, context = std::exchange(context_, nullptr)] {
+    teardown_started.set_value();
+    iree_hal_amd_gpu_context_free(context);
+  });
+  const auto teardown_thread = teardown.get_id();
+  teardown_started.get_future().get();
+  resume.set_value();
+  teardown.join();
+  EXPECT_EQ(native_backing_.free_count, 1u);
+  EXPECT_EQ(native_.destruction_thread, teardown_thread);
+  EXPECT_NE(native_.destruction_thread, native_backing_.threads.front());
+  iree_hal_amd_fabric_allocation_queue_t* shared = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+      fabric_, UINT32_MAX, &shared));
+  EXPECT_EQ(shared, allocation_queue);
+  iree_hal_amd_fabric_allocation_queue_release(shared);
+}
+
+TEST_F(ContextMemoryTest, ConcurrentColdCallersJoinTheirOwnBatches) {
+  std::array<std::thread, 8> callers;
+  for (auto& caller : callers) {
+    caller = std::thread([&] {
+      const iree_hal_amd_fabric_memory_request_t request = {&options_, 64, 64};
+      for (uint32_t i = 0; i < 64; ++i) {
+        iree_hal_amd_fabric_memory_t memory = {};
+        IREE_ASSERT_OK(iree_hal_amd_gpu_context_acquire_memory_sync(
+            context_, 1, &request, &memory));
+        iree_hal_amd_gpu_context_release_memory_sync(context_, 1, &memory);
+        EXPECT_EQ(memory.handle, nullptr);
+      }
+    });
+  }
+  for (auto& caller : callers) {
+    caller.join();
+  }
+  iree_hal_amd_gpu_context_join_memory(context_);
+  EXPECT_EQ(native_backing_.allocate_count, 512u);
+  EXPECT_EQ(native_backing_.free_count, 512u);
+}
+
+TEST_F(ContextMemoryTest, ConstructionRollbackCanReattachSharedDomain) {
+  auto* shared = context_->memory.queue;
+  iree_hal_amd_gpu_context_deinitialize_memory(context_);
+  EXPECT_EQ(context_->memory.queue, nullptr);
+  iree_hal_amd_gpu_context_deinitialize_memory(context_);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_memory(context_, UINT32_MAX));
+  EXPECT_EQ(context_->memory.queue, shared);
+  const iree_hal_amd_fabric_memory_request_t request = {&options_, 64, 64};
+  iree_hal_amd_fabric_memory_t memory = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_context_acquire_memory_sync(
+      context_, 1, &request, &memory));
+  iree_hal_amd_gpu_context_release_memory_sync(context_, 1, &memory);
 }
 
 }  // namespace

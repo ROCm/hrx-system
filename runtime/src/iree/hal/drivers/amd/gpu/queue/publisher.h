@@ -62,6 +62,17 @@ bool iree_hal_amd_gpu_publisher_enqueue(
     iree_hal_amd_gpu_publisher_t* publisher,
     iree_hal_amd_gpu_publication_entry_t* entry);
 
+// Transfers a nonempty, prelinked ready batch in constant time. The caller
+// knows both ends; this neither traverses entries nor invokes their consumers.
+// Interior next links are already initialized, and last->next is overwritten.
+// The ownership result and final handoff contract match enqueue. A publication
+// owner can use this to requeue a cohort after its native storage arrives;
+// callers completing native acquisition hand ownership to the device worker.
+bool iree_hal_amd_gpu_publisher_enqueue_batch(
+    iree_hal_amd_gpu_publisher_t* publisher,
+    iree_hal_amd_gpu_publication_entry_t* first,
+    iree_hal_amd_gpu_publication_entry_t* last);
+
 // Claims pending work for the single service executor. False is a stale wake
 // or a caller's active ownership. True requires a final handoff even when next
 // returns NULL. Service bounds its work independently of the FIFO length.

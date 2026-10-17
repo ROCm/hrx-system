@@ -37,12 +37,13 @@ void iree_hal_amd_gpu_publisher_deinitialize(
 // consumer never detaches that predecessor across an incomplete link.
 static void iree_hal_amd_gpu_publisher_append(
     iree_hal_amd_gpu_publisher_t* publisher,
-    iree_hal_amd_gpu_publication_entry_t* entry) {
-  iree_atomic_store(&entry->next, 0, iree_memory_order_relaxed);
+    iree_hal_amd_gpu_publication_entry_t* first,
+    iree_hal_amd_gpu_publication_entry_t* last) {
+  iree_atomic_store(&last->next, 0, iree_memory_order_relaxed);
   iree_hal_amd_gpu_publication_entry_t* previous =
       (iree_hal_amd_gpu_publication_entry_t*)iree_atomic_exchange(
-          &publisher->tail, (intptr_t)entry, iree_memory_order_acq_rel);
-  iree_atomic_store(&previous->next, (intptr_t)entry,
+          &publisher->tail, (intptr_t)last, iree_memory_order_acq_rel);
+  iree_atomic_store(&previous->next, (intptr_t)first,
                     iree_memory_order_release);
 }
 
@@ -70,7 +71,8 @@ static iree_hal_amd_gpu_publication_entry_t* iree_hal_amd_gpu_publisher_detach(
       iree_atomic_load(&publisher->tail, iree_memory_order_acquire)) {
     return NULL;
   }
-  iree_hal_amd_gpu_publisher_append(publisher, &publisher->stub);
+  iree_hal_amd_gpu_publisher_append(publisher, &publisher->stub,
+                                    &publisher->stub);
   next = (iree_hal_amd_gpu_publication_entry_t*)iree_atomic_load(
       &head->next, iree_memory_order_acquire);
   if (!next) {
@@ -91,7 +93,14 @@ bool iree_hal_amd_gpu_publisher_enqueue(
     publisher->ready = entry;
     return true;
   }
-  iree_hal_amd_gpu_publisher_append(publisher, entry);
+  return iree_hal_amd_gpu_publisher_enqueue_batch(publisher, entry, entry);
+}
+
+bool iree_hal_amd_gpu_publisher_enqueue_batch(
+    iree_hal_amd_gpu_publisher_t* publisher,
+    iree_hal_amd_gpu_publication_entry_t* first,
+    iree_hal_amd_gpu_publication_entry_t* last) {
+  iree_hal_amd_gpu_publisher_append(publisher, first, last);
   // No entry access follows linking: another owner may already have retired
   // it. Idle ownership transfers to this caller; a service handoff stays
   // reserved so capacity pressure does not make every caller retry publication.

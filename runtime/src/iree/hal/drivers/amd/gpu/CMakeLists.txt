@@ -9,6 +9,34 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    publication
+  HDRS
+    "publication.h"
+  SRCS
+    "publication.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::base::threading::thread
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    publication_test
+  SRCS
+    "publication_test.cc"
+  DEPS
+    ::publication
+    iree::base
+    iree::hal::drivers::amd::gpu::queue::publisher
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
@@ -23,6 +51,7 @@ iree_cc_library(
     ::executable
     ::feedback
     ::profile
+    ::publication
     ::tsan
     amdf::headers
     iree::async
@@ -36,6 +65,7 @@ iree_cc_library(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::fabric::memory_backend
     iree::hal::drivers::amd::gpu::queue::allocation
+    iree::hal::drivers::amd::gpu::queue::memory_mapping
     iree::hal::drivers::amd::gpu::queue::pm4::barrier
     iree::hal::drivers::amd::gpu::queue::pm4::command_buffer
     iree::hal::drivers::amd::gpu::queue::pm4::program
@@ -43,8 +73,6 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::pm4::semaphore
     iree::hal::drivers::amd::gpu::target::identity
     iree::hal::drivers::amd::status
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::hal::utils::device_spec_builder
     iree::hal::utils::files
   PUBLIC
@@ -82,7 +110,6 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::queue::pm4::launch
     iree::hal::drivers::amd::gpu::target::identity
     iree::hal::drivers::amd::status
-    iree::hal::memory::maintenance
   PUBLIC
 )
 endif()
@@ -214,7 +241,9 @@ iree_cc_test(
     amdf::headers
     iree::base
     iree::base::core_headers
+    iree::base::threading
     iree::hal
+    iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::image::hsaco
@@ -222,8 +251,6 @@ iree_cc_test(
     iree::hal::drivers::amd::gpu::image::metadata
     iree::hal::drivers::amd::gpu::queue::pm4::launch
     iree::hal::drivers::amd::gpu::target::identity
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -288,9 +315,11 @@ iree_cc_library(
     amdf::headers
     iree::async
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::fabric::event
+    iree::hal::drivers::amd::fabric::slab_provider
     iree::hal::drivers::amd::status
   PUBLIC
 )
@@ -306,8 +335,10 @@ iree_cc_test(
     ::context
     amdf::headers
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::fabric::slab_provider
     iree::testing::gtest
     iree::testing::gtest_main
 )

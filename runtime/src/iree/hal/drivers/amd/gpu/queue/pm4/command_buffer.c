@@ -68,8 +68,6 @@ typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
   iree_allocator_t host_allocator;
   // Borrowed native owner dominated by the retained family device.
   iree_hal_amd_gpu_pm4_program_pool_t* pool;
-  // Single-shot service cleanup entry embedded in this resource.
-  iree_hal_memory_maintenance_entry_t cleanup;
   // Immutable resident execution facts after end.
   iree_hal_amd_gpu_pm4_command_program_t program;
   // Temporary native bytes and fixups, released after sealing.
@@ -103,31 +101,24 @@ typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
 static const iree_hal_command_buffer_vtable_t
     iree_hal_amd_gpu_pm4_command_buffer_vtable;
 
-static void iree_hal_amd_gpu_pm4_command_buffer_cleanup(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  iree_hal_amd_gpu_pm4_command_buffer_t* buffer =
-      (void*)((uint8_t*)entry -
-              offsetof(iree_hal_amd_gpu_pm4_command_buffer_t, cleanup));
-  iree_hal_device_t* device = buffer->base.queue_family->device;
-  iree_hal_amd_gpu_pm4_program_deinitialize(&buffer->program.resident);
-  iree_allocator_free(buffer->host_allocator, buffer);
-  iree_hal_device_release(device);
-}
-
 static void iree_hal_amd_gpu_pm4_command_buffer_destroy(
     iree_hal_command_buffer_t* base) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_amd_gpu_pm4_command_buffer_t* buffer = (void*)base;
+  iree_hal_device_t* device = buffer->base.queue_family->device;
   // Last HAL ownership proves all native uses joined. Drop caller resource
   // references now so an immediately following pool release sees no live
-  // children; only the driver's own IB storage waits for cold service cleanup.
+  // children. Native IB release uses the descriptors embedded in its backing.
   iree_status_free(buffer->recording_status);
   iree_hal_amd_gpu_pm4_recording_deinitialize(&buffer->recording);
   iree_hal_resource_set_free(buffer->resources);
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
   iree_allocator_free(buffer->host_allocator, buffer->inputs);
   iree_allocator_free(buffer->host_allocator, buffer->input_index);
-  buffer->cleanup.fn = iree_hal_amd_gpu_pm4_command_buffer_cleanup;
-  iree_hal_memory_maintenance_enqueue(buffer->pool->service, &buffer->cleanup);
+  iree_hal_amd_gpu_pm4_program_deinitialize(&buffer->program.resident);
+  iree_allocator_free(buffer->host_allocator, buffer);
+  iree_hal_device_release(device);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
@@ -418,30 +409,21 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_flush_barrier(
   return iree_ok_status();
 }
 
-// One service call owns native allocation and sealing. Temporary bytes are
-// copied directly into the prepared upload, with no giant host flattening copy.
-typedef struct iree_hal_amd_gpu_pm4_command_seal_t {
-  // Recorder borrowed until the synchronous cold call joins.
-  iree_hal_amd_gpu_pm4_command_buffer_t* buffer;
-  // Checked total instance extent, excluding the immutable fixup table.
-  uint32_t length;
-  // Native allocation/publication result returned to command_buffer_end.
-  iree_status_t status;
-} iree_hal_amd_gpu_pm4_command_seal_t;
-
-static void iree_hal_amd_gpu_pm4_command_seal(void* user_data) {
-  iree_hal_amd_gpu_pm4_command_seal_t* seal = user_data;
-  iree_hal_amd_gpu_pm4_command_buffer_t* buffer = seal->buffer;
+// Native backing is acquired by the allocation domain. The recorder copies
+// directly into its upload view and seals the program on the recording caller.
+static iree_status_t iree_hal_amd_gpu_pm4_command_seal(
+    iree_hal_amd_gpu_pm4_command_buffer_t* buffer, uint32_t length) {
   iree_hal_amd_gpu_pm4_program_t* program = &buffer->program.resident;
-  seal->status = iree_hal_amd_gpu_pm4_program_initialize(
-      buffer->pool, buffer->recording.alignment, seal->length,
-      iree_hal_amd_gpu_pm4_recording_fixup_count(&buffer->recording), program);
-  if (iree_status_is_ok(seal->status)) {
-    iree_hal_amd_gpu_pm4_recording_write(
-        &buffer->recording, program->contents.data,
-        (void*)(program->contents.data + program->fixup_offset));
-    seal->status = iree_hal_amd_gpu_pm4_program_seal(program);
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_program_initialize(
+      buffer->pool, buffer->recording.alignment, length,
+      iree_hal_amd_gpu_pm4_recording_fixup_count(&buffer->recording), program));
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_hal_amd_gpu_pm4_recording_write(
+      &buffer->recording, program->contents.data,
+      (void*)(program->contents.data + program->fixup_offset));
+  iree_status_t status = iree_hal_amd_gpu_pm4_program_seal(program);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 // Failed append/seal operations invalidate the native recording. Preserve the
@@ -491,13 +473,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
     buffer->requirements[i].parent = root;
     buffer->requirements[i].difference = difference;
   }
-  iree_hal_amd_gpu_pm4_command_seal_t seal = {
-      .buffer = buffer,
-      .length = (uint32_t)length,
-  };
-  iree_hal_memory_maintenance_call(buffer->pool->service,
-                                   iree_hal_amd_gpu_pm4_command_seal, &seal);
-  if (iree_status_is_ok(seal.status)) {
+  iree_status_t status =
+      iree_hal_amd_gpu_pm4_command_seal(buffer, (uint32_t)length);
+  if (iree_status_is_ok(status)) {
     if (buffer->resources) {
       iree_hal_resource_set_freeze(buffer->resources);
     }
@@ -505,7 +483,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_end(
     iree_allocator_free(buffer->host_allocator, buffer->input_index);
     buffer->input_index = NULL;
   }
-  return seal.status;
+  return status;
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_end(

@@ -23,13 +23,15 @@ extern "C" {
 // cost.
 typedef struct iree_hal_amd_gpu_pm4_kmq_storage_t {
   // Borrowed native device and API tables, live through native removal.
-  const iree_hal_amd_gpu_context_t* context;
+  iree_hal_amd_gpu_context_t* context;
   // Allocator owning this structure and its trailing native-point array.
   iree_allocator_t host_allocator;
   // Owned queue, consumed on native removal except an API BUSY rejection.
   amdf_kernel_queue_t* queue;
   // Owned executable bytes and coherent host producer mapping.
   iree_hal_amd_fabric_memory_t memory;
+  // Native release descriptor retained with storage through final cleanup.
+  iree_hal_amd_gpu_memory_release_t release;
   // Native command byte zero, used by resident-program continuations.
   uint64_t address;
   // Prepared immutable command that has not yet been accepted. A zero length
@@ -59,9 +61,9 @@ typedef struct iree_hal_amd_gpu_pm4_kmq_storage_t {
 // Allocates a partial owner before acquiring native resources. The caller
 // always frees a non-NULL output, including after failed preparation. Failure
 // never publishes out_ring. All capacities and family facts are already
-// admitted by the enclosing PM4 queue. Runs only on the device service.
+// admitted by the enclosing PM4 queue. Runs only on its cold constructor.
 iree_status_t iree_hal_amd_gpu_pm4_kmq_storage_allocate(
-    const iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
+    iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
     uint64_t command_capacity, uint32_t submission_capacity,
     const iree_hal_amd_fabric_memory_options_t* memory_options,
     iree_allocator_t host_allocator,
@@ -88,8 +90,9 @@ amdf_status_t iree_hal_amd_gpu_pm4_kmq_storage_arm(
 
 // Joins the last accepted point and removes the native queue before releasing
 // its executable backing. All publishers and observers have already joined.
-// Success frees storage; failure preserves it and every unproven native use.
-// NULL is an empty owner. Runs only on the device service.
+// Success transfers storage to asynchronous native release; failure preserves
+// it and every unproven native use. NULL is an empty owner. Only cold teardown
+// may call this after execution and all host queue accesses have joined.
 amdf_status_t iree_hal_amd_gpu_pm4_kmq_storage_free(
     iree_hal_amd_gpu_pm4_kmq_storage_t* storage);
 

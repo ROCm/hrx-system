@@ -920,7 +920,7 @@ TEST(SemaphoreBridgingTest, AdvanceWithoutSemaphore) {
 // The tracker remains unmodified; the gate models a driver signal in flight.
 struct BridgeSemaphore {
   // Embedded semaphore with the normal timeline and timepoint implementation.
-  iree_async_semaphore_t base;
+  iree_async_semaphore_t base = {};
   // Progress owner retained through semaphore teardown.
   iree_async_proactor_t* proactor = nullptr;
   // Whether native publication of epoch one waits for the explicit gate.
@@ -937,9 +937,12 @@ struct BridgeSemaphore {
   std::atomic<int> signal_count{0};
   // Number of signal methods currently executing, including callback dispatch.
   std::atomic<int> active_signals{0};
-  // Inline causal storage used by the actual async semaphore helpers.
-  alignas(16) uint8_t frontier_storage[sizeof(iree_async_frontier_t) +
-                                       sizeof(iree_async_frontier_entry_t)];
+  // Inline causal storage followed by the semaphore's pending timepoint index.
+  alignas(16) uint8_t
+      frontier_storage[sizeof(iree_async_frontier_t) +
+                       sizeof(iree_async_frontier_entry_t) +
+                       IREE_ASYNC_SEMAPHORE_INLINE_TIMEPOINT_CAPACITY *
+                           sizeof(iree_async_semaphore_timepoint_entry_t)] = {};
 
   BridgeSemaphore() {
     IREE_CHECK_OK(iree_async_proactor_create_platform(
@@ -947,7 +950,7 @@ struct BridgeSemaphore {
         &proactor));
     iree_async_semaphore_initialize(&vtable, proactor, 0,
                                     offsetof(BridgeSemaphore, frontier_storage),
-                                    1, &base);
+                                    1, iree_allocator_system(), &base);
   }
 
   ~BridgeSemaphore() {

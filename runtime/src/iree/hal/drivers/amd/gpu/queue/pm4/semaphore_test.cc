@@ -15,7 +15,6 @@
 
 #include "iree/async/proactor_platform.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
-#include "iree/hal/memory/maintenance_thread.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -52,17 +51,20 @@ struct Allocator {
 };
 
 struct Completion {
-  // Joins the service callback's last access to this result.
+  // Joins the readiness callback's last access to this result.
   std::binary_semaphore done{0};
   // Exactly one callback owns the terminal result.
   std::atomic<uint32_t> calls{0};
   // Owned callback status, read after done.
   iree_status_t status = iree_ok_status();
+  // Context advancing the point, observed after done.
+  std::thread::id thread;
 
   ~Completion() { iree_status_free(status); }
   static void Run(void* user_data, iree_status_t status) {
     auto& self = *static_cast<Completion*>(user_data);
     self.status = status;
+    self.thread = std::this_thread::get_id();
     self.calls.fetch_add(1);
     self.done.release();
   }
@@ -74,13 +76,17 @@ class SemaphoreTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(
-        this, values_.data(), 0x1000, signals_.data(), signals_.size(), 3,
-        frontiers_.data(), {}, &pool_);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize({}, &pool_);
+    iree_hal_amd_gpu_pm4_signal_block_initialize(
+        &pool_, this, values_.data(), 0x1000, signals_.data(), signals_.size(),
+        3, frontiers_.data(), &block_);
   }
   void TearDown() override {
     for (auto* semaphore : semaphores_) {
       iree_hal_semaphore_release(semaphore);
+    }
+    if (block_.pool) {
+      iree_hal_amd_gpu_pm4_signal_block_deinitialize(&block_);
     }
     iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool_);
     iree_async_proactor_release(proactor_);
@@ -104,8 +110,8 @@ class SemaphoreTest : public ::testing::Test {
   }
   Wait AcquireWait(iree_hal_semaphore_t* semaphore, uint64_t value) {
     Wait wait;
-    IREE_CHECK_OK(
-        iree_hal_amd_gpu_pm4_semaphore_acquire_wait(semaphore, value, &wait));
+    IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(semaphore, value,
+                                                              this, &wait));
     return wait;
   }
   uint64_t Value(iree_hal_semaphore_t* semaphore) {
@@ -130,6 +136,8 @@ class SemaphoreTest : public ::testing::Test {
   std::array<uint64_t, 8 * 3> frontiers_;
   // Finite producer storage, reclaimed only after all uses join.
   iree_hal_amd_gpu_pm4_signal_pool_t pool_;
+  // Native extent retained until every semaphore reader releases it.
+  iree_hal_amd_gpu_pm4_signal_block_t block_;
   // Test-owned references, released before native backing.
   std::vector<iree_hal_semaphore_t*> semaphores_;
 };
@@ -174,6 +182,68 @@ TEST_F(SemaphoreTest, SubmittedProducerDoesNotBecomeCompletedHistory) {
   iree_hal_amd_gpu_pm4_signal_release(signal);
 }
 
+TEST_F(SemaphoreTest, ForeignDomainWaitDoesNotPinProducerBacking) {
+  auto* semaphore = Semaphore();
+  auto* signal = AcquireSignal();
+  Publish(semaphore, 1, signal);
+  iree_hal_amd_gpu_pm4_signal_release(signal);
+  uint32_t foreign_domain = 0;
+  Wait wait;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+      semaphore, 1, &foreign_domain, &wait));
+  EXPECT_EQ(wait.state, IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_HOST);
+  EXPECT_EQ(wait.signal, nullptr);
+  EXPECT_EQ(wait.producer.axis, 0u);
+  EXPECT_EQ(wait.producer.epoch, 0u);
+  EXPECT_EQ(Value(semaphore), 0u);
+  EXPECT_EQ(block_.live_count, 1u);
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_pm4_semaphore_publish_completed(semaphore, 1, nullptr));
+  EXPECT_EQ(Value(semaphore), 1u);
+  // The query result may remain alive after the foreign producer tears down.
+  EXPECT_TRUE(iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&block_));
+  iree_hal_amd_gpu_pm4_signal_release(wait.signal);
+}
+
+TEST_F(SemaphoreTest, ForeignQueriesRaceCompletionAndImmediateBackingReuse) {
+  auto* semaphore = Semaphore();
+  constexpr uint32_t kIterations = 128;
+  std::barrier<> start(2), acquired(2), recycled(2);
+  std::thread reader([&] {
+    for (uint64_t value = 1; value <= kIterations; ++value) {
+      start.arrive_and_wait();
+      Wait wait;
+      IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+          semaphore, value, &start, &wait));
+      EXPECT_TRUE(wait.state == IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_HOST ||
+                  wait.state == IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_COMPLETED);
+      EXPECT_EQ(wait.signal, nullptr);
+      acquired.arrive_and_wait();
+      recycled.arrive_and_wait();
+      iree_hal_amd_gpu_pm4_signal_release(wait.signal);
+    }
+  });
+  for (uint64_t value = 1; value <= kIterations; ++value) {
+    auto* signal = AcquireSignal();
+    Publish(semaphore, value, signal);
+    iree_hal_amd_gpu_pm4_signal_release(signal);
+    start.arrive_and_wait();
+    IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_semaphore_publish_completed(
+        semaphore, value, nullptr));
+    acquired.arrive_and_wait();
+    const bool detached =
+        iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&block_);
+    EXPECT_TRUE(detached);
+    if (detached) {
+      iree_hal_amd_gpu_pm4_signal_block_initialize(
+          &pool_, this, values_.data(), 0x1000, signals_.data(),
+          signals_.size(), 3, frontiers_.data(), &block_);
+    }
+    recycled.arrive_and_wait();
+  }
+  reader.join();
+}
+
 TEST_F(SemaphoreTest, ReplacingProducerPreservesRetainedCausalSnapshot) {
   auto* semaphore = Semaphore();
   auto* first = AcquireSignal();
@@ -214,10 +284,10 @@ TEST_F(SemaphoreTest, ReaderOutlivesProducerAndSemaphore) {
   iree_hal_amd_gpu_pm4_signal_release(signal);
   iree_hal_semaphore_release(semaphores_.back());
   semaphores_.pop_back();
-  EXPECT_EQ(pool_.live_count, 1u);
+  EXPECT_EQ(block_.live_count, 1u);
   EXPECT_EQ(wait.signal->device_address, 0x1000u);
   iree_hal_amd_gpu_pm4_signal_release(wait.signal);
-  EXPECT_EQ(pool_.live_count, 0u);
+  EXPECT_EQ(block_.live_count, 0u);
 }
 
 TEST_F(SemaphoreTest, UnassignedTopologyStillProvidesNativeDependency) {
@@ -245,9 +315,9 @@ TEST_F(SemaphoreTest, ReplacingCachePreservesEveryNativeReader) {
   EXPECT_EQ(first_wait.signal, first);
   EXPECT_EQ(second_wait.signal, second);
   EXPECT_EQ(second_wait.producer.axis, 2u);
-  EXPECT_EQ(pool_.live_count, 2u);
+  EXPECT_EQ(block_.live_count, 2u);
   iree_hal_amd_gpu_pm4_signal_release(first_wait.signal);
-  EXPECT_EQ(pool_.live_count, 1u);
+  EXPECT_EQ(block_.live_count, 1u);
   iree_hal_amd_gpu_pm4_signal_release(second_wait.signal);
   iree_hal_amd_gpu_pm4_signal_release(second);
 }
@@ -261,7 +331,7 @@ TEST_F(SemaphoreTest, CompletionBeforePublicationCannotInstallStaleCache) {
   EXPECT_EQ(AcquireWait(semaphore, 1).state,
             IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_COMPLETED);
   iree_hal_amd_gpu_pm4_signal_release(signal);
-  EXPECT_EQ(pool_.live_count, 0u);
+  EXPECT_EQ(block_.live_count, 0u);
 }
 
 TEST_F(SemaphoreTest, DelayedPublicationCannotReplaceHigherProducer) {
@@ -271,7 +341,7 @@ TEST_F(SemaphoreTest, DelayedPublicationCannotReplaceHigherProducer) {
   Publish(semaphore, 2, second, 2);
   Publish(semaphore, 1, first);
   iree_hal_amd_gpu_pm4_signal_release(first);
-  EXPECT_EQ(pool_.live_count, 1u);
+  EXPECT_EQ(block_.live_count, 1u);
   auto wait = AcquireWait(semaphore, 1);
   EXPECT_EQ(wait.signal, second);
   EXPECT_EQ(wait.producer.epoch, 2u);
@@ -289,7 +359,7 @@ TEST_F(SemaphoreTest, CompletionObserversCanArriveInReverseOrder) {
       iree_hal_amd_gpu_pm4_semaphore_publish_completed(semaphore, 1, nullptr));
   EXPECT_EQ(Value(semaphore), 2u);
   iree_hal_amd_gpu_pm4_signal_release(signal);
-  EXPECT_EQ(pool_.live_count, 0u);
+  EXPECT_EQ(block_.live_count, 0u);
 }
 
 TEST_F(SemaphoreTest, HostSignalClearsOnlyCoveredCache) {
@@ -302,7 +372,7 @@ TEST_F(SemaphoreTest, HostSignalClearsOnlyCoveredCache) {
   iree_hal_amd_gpu_pm4_signal_release(wait.signal);
   IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore, 2, nullptr));
   iree_hal_amd_gpu_pm4_signal_release(signal);
-  EXPECT_EQ(pool_.live_count, 0u);
+  EXPECT_EQ(block_.live_count, 0u);
 }
 
 TEST_F(SemaphoreTest, ColdTimelineStartsFromPublishedOrCompletedValue) {
@@ -322,19 +392,16 @@ TEST_F(SemaphoreTest, ColdTimelineStartsFromPublishedOrCompletedValue) {
   iree_hal_amd_gpu_pm4_signal_release(signal);
 }
 
-TEST_F(SemaphoreTest, FuturePublicationResumesOnServiceBeforeCompletion) {
+TEST_F(SemaphoreTest, FuturePublicationResumesInlineBeforeCompletion) {
   auto* semaphore = Semaphore();
   auto* submission = Submission(semaphore);
-  iree_hal_memory_maintenance_t* service = nullptr;
-  IREE_ASSERT_OK(iree_hal_memory_maintenance_thread_create(
-      {}, iree_allocator_system(), &service));
   iree_async_semaphore_wait_context_t context;
   iree_async_semaphore_wait_context_initialize(&context);
   uint64_t value = 1;
   Completion completion;
   iree_hal_amd_gpu_host_wait_t wait;
   IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
-      &context, service, {1, &submission, &value}, Completion::Run, &completion,
+      &context, {1, &submission, &value}, Completion::Run, &completion,
       iree_allocator_system(), &wait));
   EXPECT_EQ(completion.calls.load(), 0u);
   auto* signal = AcquireSignal();
@@ -342,12 +409,12 @@ TEST_F(SemaphoreTest, FuturePublicationResumesOnServiceBeforeCompletion) {
   completion.done.acquire();
   EXPECT_EQ(iree_status_code(completion.status), IREE_STATUS_OK);
   EXPECT_EQ(completion.calls.load(), 1u);
+  EXPECT_EQ(completion.thread, std::this_thread::get_id());
   EXPECT_EQ(Value(semaphore), 0u);
   auto native_wait = AcquireWait(semaphore, value);
   EXPECT_EQ(native_wait.signal, signal);
   iree_hal_amd_gpu_pm4_signal_release(native_wait.signal);
   iree_hal_amd_gpu_pm4_signal_release(signal);
-  iree_hal_memory_maintenance_release(service);
   iree_async_semaphore_wait_context_deinitialize(&context);
 }
 
@@ -363,9 +430,9 @@ TEST_F(SemaphoreTest, FailureDoesNotReclaimNativeReaders) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         iree_hal_semaphore_query(submission, &value));
   Wait failed_wait;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_ABORTED,
-      iree_hal_amd_gpu_pm4_semaphore_acquire_wait(semaphore, 1, &failed_wait));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+                            semaphore, 1, this, &failed_wait));
   EXPECT_EQ(failed_wait.signal, nullptr);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         iree_hal_semaphore_signal(semaphore, 2, nullptr));
@@ -373,9 +440,9 @@ TEST_F(SemaphoreTest, FailureDoesNotReclaimNativeReaders) {
                         iree_hal_amd_gpu_pm4_semaphore_publish_signal(
                             semaphore, 2, {1, 2}, signal));
   iree_hal_amd_gpu_pm4_signal_release(signal);
-  EXPECT_EQ(pool_.live_count, 1u);
+  EXPECT_EQ(block_.live_count, 1u);
   iree_hal_amd_gpu_pm4_signal_release(wait.signal);
-  EXPECT_EQ(pool_.live_count, 0u);
+  EXPECT_EQ(block_.live_count, 0u);
 }
 
 TEST_F(SemaphoreTest, ColdAllocationFailureLeavesReadyPathUsable) {
@@ -419,10 +486,7 @@ TEST_F(SemaphoreTest, TerminalFailurePrecedesColdAllocation) {
   EXPECT_EQ(allocator.live.load(), 0);
 }
 
-TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinOnService) {
-  iree_hal_memory_maintenance_t* service = nullptr;
-  IREE_ASSERT_OK(iree_hal_memory_maintenance_thread_create(
-      {}, iree_allocator_system(), &service));
+TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinInline) {
   iree_async_semaphore_wait_context_t context;
   iree_async_semaphore_wait_context_initialize(&context);
   for (auto expected : {IREE_STATUS_ABORTED, IREE_STATUS_CANCELLED}) {
@@ -432,8 +496,8 @@ TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinOnService) {
     Completion completion;
     iree_hal_amd_gpu_host_wait_t wait;
     IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
-        &context, service, {1, &submission, &value}, Completion::Run,
-        &completion, iree_allocator_system(), &wait));
+        &context, {1, &submission, &value}, Completion::Run, &completion,
+        iree_allocator_system(), &wait));
     if (expected == IREE_STATUS_ABORTED) {
       iree_hal_semaphore_fail(semaphore,
                               iree_make_status(expected, "native producer"));
@@ -443,6 +507,7 @@ TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinOnService) {
     completion.done.acquire();
     EXPECT_EQ(iree_status_code(completion.status), expected);
     EXPECT_EQ(completion.calls.load(), 1u);
+    EXPECT_EQ(completion.thread, std::this_thread::get_id());
     EXPECT_EQ(
         reinterpret_cast<iree_async_semaphore_t*>(submission)->timepoints.count,
         0u);
@@ -454,7 +519,6 @@ TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinOnService) {
       iree_hal_amd_gpu_pm4_signal_release(signal);
     }
   }
-  iree_hal_memory_maintenance_release(service);
   iree_async_semaphore_wait_context_deinitialize(&context);
 }
 
@@ -520,7 +584,7 @@ TEST_F(SemaphoreTest, PublicationCompletionAndReaderAcquisitionRace) {
     finish.arrive_and_wait();
     iree_hal_amd_gpu_pm4_signal_release(signal);
     iree_hal_amd_gpu_pm4_signal_release(wait.signal);
-    EXPECT_EQ(pool_.live_count, 0u);
+    EXPECT_EQ(block_.live_count, 0u);
   }
   publisher.join();
   observer.join();

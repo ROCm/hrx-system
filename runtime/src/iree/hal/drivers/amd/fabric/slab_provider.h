@@ -77,10 +77,14 @@ typedef struct iree_hal_amd_fabric_slab_provider_options_t {
 
 // Creates a provider that obtains one fully attached libamdf allocation per
 // slab. The provider copies the options arrays and retains |device|, every
-// access owner, and |allocation_queue| through all native cleanup. These owners
-// keep the API, native instance/scopes/devices, and progress services alive.
-// Explicit external imports and their native teardown remain synchronous;
-// owned allocation/free batches execute on the native allocation queue.
+// access owner, and |allocation_queue| through native cleanup. Device-owned
+// ASAN quarantine retains cleanup facts without retaining its own device after
+// public provider teardown; that device drains quarantine before native
+// teardown. Peer devices stay retained until the quarantined backing is
+// released. These owners keep native instance/scopes/devices and progress
+// services alive. Explicit external imports and their native teardown remain
+// synchronous; owned allocation/free batches execute on the native allocation
+// queue.
 iree_status_t iree_hal_amd_fabric_slab_provider_create(
     iree_hal_device_t* device, const amdf_api_t* api,
     iree_hal_device_event_sink_t event_sink,
@@ -88,11 +92,14 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
     const iree_hal_amd_fabric_slab_provider_options_t* options,
     iree_allocator_t host_allocator, iree_hal_slab_provider_t** out_provider);
 
-// Executes a prepared fabric-provider batch on its native allocation worker.
-// The worker retains the provider through this call and its completion
-// callback.
-void iree_hal_amd_fabric_slab_provider_execute(
-    iree_hal_slab_operation_t* operation);
+// Native steps used by the fabric allocation worker. The worker keeps batch
+// progress privately and reconsiders priority between slabs. No completion is
+// invoked here; a failed acquisition leaves its output empty.
+iree_status_t iree_hal_amd_fabric_slab_provider_acquire_slab(
+    iree_hal_slab_provider_t* provider, iree_device_size_t min_length,
+    iree_device_size_t min_alignment, iree_hal_slab_t* out_slab);
+void iree_hal_amd_fabric_slab_provider_release_slab(
+    iree_hal_slab_provider_t* provider, const iree_hal_slab_t* slab);
 
 #ifdef __cplusplus
 }  // extern "C"

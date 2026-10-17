@@ -101,8 +101,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
       pool, profiled, waits, signals, payload_size, profile, barriers,
       &submission, &payload));
-  submission->kind = function ? IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH
-                              : IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER;
+  submission->entry.kind = function ? IREE_HAL_AMD_GPU_PM4_ENTRY_DISPATCH
+                                    : IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER;
   submission->dispatch.executable = executable;
   submission->dispatch.function = function;
   submission->dispatch.geometry = dispatch;
@@ -154,7 +154,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
       pool, profiled, waits, signals, layout.byte_length, profile, barriers,
       &submission, &payload));
-  submission->kind = IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER;
+  submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
   iree_status_t status = iree_hal_amd_gpu_pm4_transfer_initialize(
       family, count, operations, layout, payload, &submission->transfer);
   if (iree_status_is_ok(status)) {
@@ -188,7 +188,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
       pool, profiled, waits, signals, payload_size, profile, &barriers,
       &submission, &payload));
-  submission->kind = IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE;
+  submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE;
   iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_initialize(
       command_buffer, bindings, payload, flags, &submission->execute);
   if (iree_status_is_ok(status)) {
@@ -205,7 +205,7 @@ void iree_hal_amd_gpu_pm4_submission_profile_transfer(
   iree_hal_amd_gpu_profile_operation_t* operation =
       iree_hal_amd_gpu_pm4_submission_profile(submission);
   const iree_host_size_t count =
-      submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER
+      submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER
           ? submission->transfer.count
           : 0;
   iree_hal_amd_gpu_profile_operation_initialize(
@@ -277,7 +277,7 @@ bool iree_hal_amd_gpu_pm4_submission_retirement_ready(
 
 void iree_hal_amd_gpu_pm4_submission_release_payload(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
-  if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH) {
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_DISPATCH) {
     const iree_host_size_t reference_count =
         submission->dispatch.bindings.count +
         iree_hal_dispatch_uses_indirect_parameters(submission->dispatch.flags);
@@ -285,12 +285,12 @@ void iree_hal_amd_gpu_pm4_submission_release_payload(
       iree_hal_buffer_release(submission->dispatch.bindings.values[i].buffer);
     }
     iree_hal_executable_release(submission->dispatch.executable);
-  } else if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER) {
+  } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
     iree_hal_amd_gpu_pm4_transfer_deinitialize(&submission->transfer);
-  } else if (submission->kind == IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE) {
+  } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
     iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&submission->execute);
   }
-  submission->kind = IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER;
+  submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER;
 }
 
 static void iree_hal_amd_gpu_pm4_submission_destroy(

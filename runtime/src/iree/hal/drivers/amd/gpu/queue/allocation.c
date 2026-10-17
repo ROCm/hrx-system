@@ -15,11 +15,15 @@ typedef enum iree_hal_amd_gpu_allocation_phase_e {
   IREE_HAL_AMD_GPU_ALLOCATION_RELEASE,
 } iree_hal_amd_gpu_allocation_phase_t;
 
-// Service-owned transaction. Callbacks hand ownership back to service; the
-// capture never occupies native publication or the native completion worker.
+#define IREE_HAL_AMD_GPU_ALLOCATION_FRONTIER_CAPACITY 8
+IREE_ASYNC_FIXED_FRONTIER_TYPE(iree_hal_amd_gpu_allocation_frontier_t,
+                               IREE_HAL_AMD_GPU_ALLOCATION_FRONTIER_CAPACITY);
+
+// Captured pool transaction. Only genuinely deferred native acquisition
+// results require a publisher handoff; warm acquisition and return are inline.
 typedef struct iree_hal_amd_gpu_allocation_t {
-  // One-shot initial admission or resumed pool/frontier work.
-  iree_hal_memory_maintenance_entry_t entry;
+  // Typed completed-acquisition link, unused for warm pool hits.
+  iree_atomic_slist_entry_t entry;
   // Borrowed embedded state dominated by the operation's device reference.
   iree_hal_amd_gpu_allocation_context_t* context;
   // Retained parent, released after every capture and root access finishes.
@@ -30,10 +34,16 @@ typedef struct iree_hal_amd_gpu_allocation_t {
   iree_hal_semaphore_list_t waits;
   // Copied and retained terminal signals.
   iree_hal_semaphore_list_t signals;
-  // Exclusive service phase after initial semaphore admission.
+  // Exclusive phase after initial semaphore admission.
   iree_hal_amd_gpu_allocation_phase_t phase;
-  // Terminal callback result consumed by the next service turn.
+  // Owned acquisition result consumed after the submit/callback join.
   iree_status_t status;
+  // Joins the pool's submitting call and its potentially inline callback.
+  iree_atomic_int32_t pending;
+  // Exact observed prerequisite history, when representable.
+  iree_hal_amd_gpu_allocation_frontier_t frontier;
+  // False when bounded or tainted history cannot prove early reuse.
+  bool frontier_exact;
   // Complete transaction size; arrays contain count entries.
   iree_host_size_t count;
   // Initialized retained roots; NULL entries represent capture rollback.
@@ -47,6 +57,8 @@ typedef struct iree_hal_amd_gpu_allocation_t {
     struct {
       // Borrowed source, live through the returned roots and this transaction.
       iree_hal_pool_t* pool;
+      // Result returned by the whole pool acquisition transaction.
+      iree_hal_pool_acquire_result_t result;
       // Copied requested extents and alignment.
       iree_hal_pool_reservation_request_t* requests;
       // Pool-owned reuse frontiers, borrowed while reservations are held.
@@ -59,7 +71,7 @@ typedef struct iree_hal_amd_gpu_allocation_t {
       bool held;
       // First reuse frontier not yet joined; each is visited only once.
       iree_host_size_t frontier_index;
-      // Active borrowed frontier wait, joined before the next service turn.
+      // Active borrowed frontier wait, joined before further materialization.
       iree_async_frontier_waiter_t frontier_wait;
       // Lazily allocated capacity observation, reused across attempts.
       iree_hal_pool_wait_t* capacity_wait;
@@ -76,16 +88,22 @@ typedef struct iree_hal_amd_gpu_allocation_t {
 
 void iree_hal_amd_gpu_allocation_context_initialize(
     iree_hal_device_t* device, const iree_hal_amd_gpu_context_t* context,
-    iree_hal_memory_maintenance_t* service, iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_publication_t* publication, uint32_t publication_ordinal,
+    iree_allocator_t host_allocator,
     iree_hal_amd_gpu_allocation_context_t* out_context) {
   *out_context = (iree_hal_amd_gpu_allocation_context_t){
-      .device = device, .context = context, .service = service};
+      .device = device,
+      .context = context,
+      .publication = publication,
+      .publication_ordinal = publication_ordinal};
+  iree_atomic_slist_initialize(&out_context->ready);
   iree_arena_block_pool_initialize(1024, host_allocator, &out_context->blocks);
   iree_async_semaphore_wait_context_initialize(&out_context->waits);
 }
 
 void iree_hal_amd_gpu_allocation_context_deinitialize(
     iree_hal_amd_gpu_allocation_context_t* context) {
+  iree_atomic_slist_deinitialize(&context->ready);
   iree_async_semaphore_wait_context_deinitialize(&context->waits);
   iree_arena_block_pool_deinitialize(&context->blocks);
 }
@@ -155,7 +173,11 @@ static void iree_hal_amd_gpu_allocation_complete(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_list_signal(operation->signals, NULL);
+    status = iree_hal_semaphore_list_signal(
+        operation->signals,
+        operation->frontier_exact
+            ? iree_async_fixed_frontier_as_const_frontier(&operation->frontier)
+            : NULL);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_context_report_status(operation->context->context,
@@ -163,15 +185,6 @@ static void iree_hal_amd_gpu_allocation_complete(
     iree_hal_semaphore_list_fail(operation->signals, status);
   }
   iree_hal_amd_gpu_allocation_free(operation);
-}
-
-// Both pool and frontier callbacks finish all access at this queue handoff.
-static void iree_hal_amd_gpu_allocation_resume(void* user_data,
-                                               iree_status_t status) {
-  iree_hal_amd_gpu_allocation_t* operation = user_data;
-  operation->status = status;
-  iree_hal_memory_maintenance_enqueue(operation->context->service,
-                                      &operation->entry);
 }
 
 static iree_status_t iree_hal_amd_gpu_allocation_materialize(
@@ -235,90 +248,208 @@ static void iree_hal_amd_gpu_allocation_release(
     iree_hal_pool_advise_asan_reservations(
         pool, end - i, operation->reservations + i,
         IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED);
-    iree_hal_pool_release_reservations(pool, end - i,
-                                       operation->reservations + i, NULL);
+    iree_hal_pool_release_reservations(
+        pool, end - i, operation->reservations + i,
+        operation->frontier_exact
+            ? iree_async_fixed_frontier_as_const_frontier(&operation->frontier)
+            : NULL);
     i = end;
   }
 }
 
-static void iree_hal_amd_gpu_allocation_progress(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  iree_hal_amd_gpu_allocation_t* operation = (void*)entry;
-  iree_status_t status = operation->status;
-  operation->status = iree_ok_status();
-  if (iree_status_is_ok(status) &&
-      operation->phase == IREE_HAL_AMD_GPU_ALLOCATION_RELEASE) {
-    iree_hal_amd_gpu_allocation_release(operation);
+static void iree_hal_amd_gpu_allocation_acquire(
+    iree_hal_amd_gpu_allocation_t* operation);
+static void iree_hal_amd_gpu_allocation_reuse(
+    iree_hal_amd_gpu_allocation_t* operation);
+
+static void iree_hal_amd_gpu_allocation_resume(void* user_data,
+                                               iree_status_t status) {
+  iree_hal_amd_gpu_allocation_t* operation = user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_allocation_complete(operation, status);
+  } else if (operation->phase == IREE_HAL_AMD_GPU_ALLOCATION_ACQUIRE) {
+    iree_hal_amd_gpu_allocation_acquire(operation);
+  } else {
+    iree_hal_amd_gpu_allocation_reuse(operation);
   }
-  while (iree_status_is_ok(status) &&
-         operation->phase == IREE_HAL_AMD_GPU_ALLOCATION_ACQUIRE) {
-    iree_hal_pool_wait_t* wait = operation->acquire.capacity_wait;
-    if (wait) {
-      iree_hal_pool_wait_prepare(wait);
+}
+
+static void iree_hal_amd_gpu_allocation_reuse(
+    iree_hal_amd_gpu_allocation_t* operation) {
+  iree_status_t status = iree_ok_status();
+  // Visit each exact reuse frontier once. The compact signal history can
+  // overflow without losing the actual dependencies that guard materialization.
+  while (operation->acquire.frontier_index < operation->count &&
+         iree_status_is_ok(status)) {
+    const iree_hal_pool_acquire_info_t* info =
+        &operation->acquire.infos[operation->acquire.frontier_index++];
+    if (operation->frontier_exact && info->reuse_frontier &&
+        !iree_async_frontier_merge(
+            iree_async_fixed_frontier_as_frontier(&operation->frontier),
+            IREE_HAL_AMD_GPU_ALLOCATION_FRONTIER_CAPACITY,
+            info->reuse_frontier)) {
+      operation->frontier_exact = false;
     }
-    iree_hal_pool_acquire_result_t result;
-    status = iree_hal_pool_acquire_reservations(
-        operation->acquire.pool, operation->count, operation->acquire.requests,
-        NULL, IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER,
-        operation->reservations, operation->acquire.infos, &result);
-    if (!iree_status_is_ok(status)) {
-      if (wait) {
-        iree_hal_pool_wait_abort(wait);
-      }
-      break;
+    if (info->result != IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT) {
+      continue;
     }
-    if (result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED ||
-        result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET) {
-      if (wait) {
-        iree_hal_pool_wait_commit(wait, iree_infinite_timeout(),
-                                  (iree_hal_pool_wait_callback_t){
-                                      .fn = iree_hal_amd_gpu_allocation_resume,
-                                      .user_data = operation});
+    iree_async_frontier_tracker_t* tracker =
+        operation->acquire.pool->frontier_tracker;
+    bool satisfied = false;
+    status = iree_async_frontier_tracker_query(tracker, info->reuse_frontier,
+                                               &satisfied);
+    if (iree_status_is_ok(status) && !satisfied) {
+      status = iree_async_frontier_tracker_wait(
+          tracker, info->reuse_frontier, iree_hal_amd_gpu_allocation_resume,
+          operation, &operation->acquire.frontier_wait);
+      if (iree_status_is_ok(status)) {
         return;
       }
-      // Allocate observations only after a real miss, then retry with tokens
-      // captured before the attempt so a concurrent release cannot be lost.
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_allocation_materialize(operation);
+  }
+  iree_hal_amd_gpu_allocation_complete(operation, status);
+}
+
+static void iree_hal_amd_gpu_allocation_finish_acquire(
+    iree_hal_amd_gpu_allocation_t* operation) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = operation->status;
+  operation->status = iree_ok_status();
+  iree_hal_pool_wait_t* wait = operation->acquire.capacity_wait;
+  if (iree_status_is_ok(status) &&
+      (operation->acquire.result == IREE_HAL_POOL_ACQUIRE_EXHAUSTED ||
+       operation->acquire.result == IREE_HAL_POOL_ACQUIRE_OVER_BUDGET)) {
+    if (wait) {
+      iree_hal_pool_wait_commit(wait, iree_infinite_timeout(),
+                                (iree_hal_pool_wait_callback_t){
+                                    .fn = iree_hal_amd_gpu_allocation_resume,
+                                    .user_data = operation});
+    } else {
+      // Enroll observation only after a real miss, then retry after observing
+      // capacity so a concurrent return cannot be lost.
       status = iree_hal_pool_wait_allocate(
           operation->acquire.pool, iree_arena_allocator(&operation->arena),
           &operation->acquire.capacity_wait);
-      continue;
+      iree_hal_amd_gpu_allocation_resume(operation, status);
     }
-    if (wait) {
-      iree_hal_pool_wait_abort(wait);
-    }
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
+  if (wait) {
+    iree_hal_pool_wait_abort(wait);
+  }
+  if (iree_status_is_ok(status)) {
     operation->acquire.held = true;
     operation->phase = IREE_HAL_AMD_GPU_ALLOCATION_MATERIALIZE;
+    iree_hal_amd_gpu_allocation_reuse(operation);
+  } else {
+    iree_hal_amd_gpu_allocation_complete(operation, status);
   }
-  if (iree_status_is_ok(status) &&
-      operation->phase == IREE_HAL_AMD_GPU_ALLOCATION_MATERIALIZE) {
-    // Each borrowed reservation frontier is already normalized by its pool.
-    // Visit it directly instead of merging the batch into a bounded union.
-    while (operation->acquire.frontier_index < operation->count &&
-           iree_status_is_ok(status)) {
-      const iree_hal_pool_acquire_info_t* info =
-          &operation->acquire.infos[operation->acquire.frontier_index++];
-      if (info->result != IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT) {
-        continue;
-      }
-      iree_async_frontier_tracker_t* tracker =
-          operation->acquire.pool->frontier_tracker;
-      bool satisfied = false;
-      status = iree_async_frontier_tracker_query(tracker, info->reuse_frontier,
-                                                 &satisfied);
-      if (iree_status_is_ok(status) && !satisfied) {
-        status = iree_async_frontier_tracker_wait(
-            tracker, info->reuse_frontier, iree_hal_amd_gpu_allocation_resume,
-            operation, &operation->acquire.frontier_wait);
-        if (iree_status_is_ok(status)) {
-          return;
-        }
-      }
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static void iree_hal_amd_gpu_allocation_acquired(
+    void* user_data, iree_status_t status,
+    iree_hal_pool_acquire_result_t result) {
+  iree_hal_amd_gpu_allocation_t* operation = user_data;
+  operation->status = status;
+  operation->acquire.result = result;
+  if (iree_atomic_fetch_sub(&operation->pending, 1,
+                            iree_memory_order_acq_rel) != 1) {
+    return;
+  }
+  // A genuinely deferred pool callback can run on the native allocation
+  // owner. Publish only its typed result there: committing buffers and issuing
+  // dependent GPU work belong to the device publisher. Warm hits finish on
+  // their submitting caller after the other borrow is returned below.
+  iree_hal_device_t* device = operation->device;
+  iree_hal_device_retain(device);
+  iree_hal_amd_gpu_allocation_context_t* context = operation->context;
+  iree_atomic_slist_push(&context->ready, &operation->entry);
+  iree_hal_amd_gpu_publication_notify(context->publication,
+                                      context->publication_ordinal);
+  // The publication can complete before notify returns. This separate borrow
+  // protects the source and notification through the submitting call's tail.
+  iree_hal_device_release(device);
+}
+
+static void iree_hal_amd_gpu_allocation_acquire(
+    iree_hal_amd_gpu_allocation_t* operation) {
+  if (operation->acquire.capacity_wait) {
+    iree_hal_pool_wait_prepare(operation->acquire.capacity_wait);
+  }
+  iree_atomic_store(&operation->pending, 2, iree_memory_order_relaxed);
+  iree_status_t status = iree_hal_pool_acquire_reservations(
+      operation->acquire.pool, operation->count, operation->acquire.requests,
+      operation->frontier_exact
+          ? iree_async_fixed_frontier_as_const_frontier(&operation->frontier)
+          : NULL,
+      operation->reservations, operation->acquire.infos,
+      (iree_hal_pool_acquire_callback_t){
+          .fn = iree_hal_amd_gpu_allocation_acquired, .user_data = operation},
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER);
+  if (!iree_status_is_ok(status)) {
+    if (operation->acquire.capacity_wait) {
+      iree_hal_pool_wait_abort(operation->acquire.capacity_wait);
     }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_amd_gpu_allocation_materialize(operation);
+    iree_hal_amd_gpu_allocation_complete(operation, status);
+    return;
+  }
+  if (iree_atomic_fetch_sub(&operation->pending, 1,
+                            iree_memory_order_acq_rel) == 1) {
+    iree_hal_amd_gpu_allocation_finish_acquire(operation);
+  }
+}
+
+static bool iree_hal_amd_gpu_allocation_publish(void* user_data) {
+  iree_hal_amd_gpu_allocation_context_t* context = user_data;
+  if (!context->ready_head) {
+    iree_atomic_slist_flush(&context->ready,
+                            IREE_ATOMIC_SLIST_FLUSH_ORDER_APPROXIMATE_LIFO,
+                            &context->ready_head, NULL);
+  }
+  for (uint32_t i = 0; i < 32 && context->ready_head; ++i) {
+    iree_atomic_slist_entry_t* entry = context->ready_head;
+    context->ready_head = entry->next;
+    iree_hal_amd_gpu_allocation_finish_acquire(
+        iree_containerof(entry, iree_hal_amd_gpu_allocation_t, entry));
+  }
+  return context->ready_head != NULL;
+}
+
+iree_hal_amd_gpu_publication_source_t
+iree_hal_amd_gpu_allocation_context_publication_source(
+    iree_hal_amd_gpu_allocation_context_t* context) {
+  return (iree_hal_amd_gpu_publication_source_t){
+      .publish = iree_hal_amd_gpu_allocation_publish, .user_data = context};
+}
+
+static void iree_hal_amd_gpu_allocation_resolve_frontier(
+    iree_hal_amd_gpu_allocation_t* operation) {
+  operation->frontier_exact = true;
+  iree_async_frontier_t* target =
+      iree_async_fixed_frontier_as_frontier(&operation->frontier);
+  iree_async_frontier_initialize(target, 0);
+  for (iree_host_size_t i = 0; i < operation->waits.count; ++i) {
+    iree_async_semaphore_t* semaphore =
+        (iree_async_semaphore_t*)operation->waits.semaphores[i];
+    iree_hal_amd_gpu_allocation_frontier_t source_storage;
+    iree_async_frontier_t* source =
+        iree_async_fixed_frontier_as_frontier(&source_storage);
+    const uint8_t count = iree_async_semaphore_query_frontier(
+        semaphore, source, IREE_HAL_AMD_GPU_ALLOCATION_FRONTIER_CAPACITY);
+    if (count > IREE_HAL_AMD_GPU_ALLOCATION_FRONTIER_CAPACITY ||
+        iree_async_semaphore_is_value_tainted(
+            semaphore, operation->waits.payload_values[i]) ||
+        !iree_async_frontier_merge(
+            target, IREE_HAL_AMD_GPU_ALLOCATION_FRONTIER_CAPACITY, source)) {
+      operation->frontier_exact = false;
+      break;
     }
   }
-  iree_hal_amd_gpu_allocation_complete(operation, status);
 }
 
 static void iree_hal_amd_gpu_allocation_ready(void* user_data,
@@ -329,20 +460,27 @@ static void iree_hal_amd_gpu_allocation_ready(void* user_data,
                                               (void*)(operation + 1),
                                               iree_status_is_ok(status), 0);
   }
-  operation->status = status;
-  iree_hal_amd_gpu_allocation_progress(&operation->entry);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_allocation_complete(operation, status);
+    return;
+  }
+  iree_hal_amd_gpu_allocation_resolve_frontier(operation);
+  if (operation->phase == IREE_HAL_AMD_GPU_ALLOCATION_RELEASE) {
+    iree_hal_amd_gpu_allocation_release(operation);
+    iree_hal_amd_gpu_allocation_complete(operation, iree_ok_status());
+  } else {
+    iree_hal_amd_gpu_allocation_acquire(operation);
+  }
 }
 
 static void iree_hal_amd_gpu_allocation_begin(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  iree_hal_amd_gpu_allocation_t* operation = (void*)entry;
-  operation->entry.fn = iree_hal_amd_gpu_allocation_progress;
+    iree_hal_amd_gpu_allocation_t* operation) {
   if (!operation->waits.count) {
     iree_hal_amd_gpu_allocation_ready(operation, iree_ok_status());
     return;
   }
   iree_status_t status = iree_hal_amd_gpu_host_wait_begin(
-      &operation->context->waits, operation->context->service, operation->waits,
+      &operation->context->waits, operation->waits,
       iree_hal_amd_gpu_allocation_ready, operation,
       iree_arena_allocator(&operation->arena), &operation->wait);
   if (!iree_status_is_ok(status)) {
@@ -369,7 +507,6 @@ static iree_status_t iree_hal_amd_gpu_allocation_allocate(
     return status;
   }
   *operation = (iree_hal_amd_gpu_allocation_t){
-      .entry = {.fn = iree_hal_amd_gpu_allocation_begin},
       .context = context,
       .device = context->device,
       .arena = arena,
@@ -471,7 +608,7 @@ iree_status_t iree_hal_amd_gpu_queue_alloca(
         &context->blocks, &operation->buffers[i]);
   }
   if (iree_status_is_ok(status)) {
-    // Enqueue cannot fail. Publish caller references before service may retire
+    // Admission cannot fail. Publish caller references before it may retire
     // the captured list, so there is no post-submission access to its storage.
     for (iree_host_size_t i = 0; i < count; ++i) {
       out_buffers[i] = operation->buffers[i];
@@ -491,7 +628,7 @@ iree_status_t iree_hal_amd_gpu_queue_alloca(
       }
       iree_hal_amd_gpu_profile_operation_defer(profile_operation);
     }
-    iree_hal_memory_maintenance_enqueue(context->service, &operation->entry);
+    iree_hal_amd_gpu_allocation_begin(operation);
   } else {
     iree_hal_amd_gpu_allocation_retire(operation);
     iree_hal_amd_gpu_allocation_free(operation);
@@ -534,7 +671,7 @@ iree_status_t iree_hal_amd_gpu_queue_dealloca(
       }
       iree_hal_amd_gpu_profile_operation_defer(profile_operation);
     }
-    iree_hal_memory_maintenance_enqueue(context->service, &operation->entry);
+    iree_hal_amd_gpu_allocation_begin(operation);
   } else {
     iree_hal_amd_gpu_allocation_retire(operation);
     iree_hal_amd_gpu_allocation_free(operation);

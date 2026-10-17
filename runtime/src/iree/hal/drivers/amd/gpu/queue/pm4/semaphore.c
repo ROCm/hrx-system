@@ -112,7 +112,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_semaphore_update_submission(
 
 iree_status_t iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
     iree_hal_semaphore_t* base_semaphore, uint64_t minimum_value,
-    iree_hal_amd_gpu_pm4_semaphore_wait_t* out_wait) {
+    const void* domain, iree_hal_amd_gpu_pm4_semaphore_wait_t* out_wait) {
   *out_wait = (iree_hal_amd_gpu_pm4_semaphore_wait_t){0};
   iree_hal_amd_gpu_pm4_semaphore_t* semaphore =
       iree_hal_amd_gpu_pm4_semaphore_cast(base_semaphore);
@@ -125,10 +125,14 @@ iree_status_t iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
     if (current_value >= minimum_value) {
       out_wait->state = IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_COMPLETED;
     } else if (semaphore->submitted.value >= minimum_value) {
-      out_wait->state = IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_NATIVE;
-      out_wait->signal = semaphore->submitted.signal;
-      out_wait->producer = semaphore->submitted.producer;
-      iree_hal_amd_gpu_pm4_signal_retain(out_wait->signal);
+      if (semaphore->submitted.signal->block->domain == domain) {
+        out_wait->state = IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_NATIVE;
+        out_wait->signal = semaphore->submitted.signal;
+        out_wait->producer = semaphore->submitted.producer;
+        iree_hal_amd_gpu_pm4_signal_retain(out_wait->signal);
+      } else {
+        out_wait->state = IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_HOST;
+      }
     }
   }
   iree_slim_mutex_unlock(&semaphore->async.mutex);

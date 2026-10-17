@@ -592,7 +592,6 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::kernarg
-    iree::hal::memory::maintenance
     iree::hal::utils::resource_set
   PUBLIC
 )
@@ -649,7 +648,30 @@ iree_cc_library(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::status
-    iree::hal::memory::maintenance
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    growth
+  HDRS
+    "growth.h"
+  SRCS
+    "growth.c"
+  DEPS
+    ::backing
+    ::program
+    ::submission
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amd::fabric::slab_provider
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::publication
+    iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::publisher
   PUBLIC
 )
 endif()
@@ -698,6 +720,36 @@ iree_cc_library(
     iree::hal::utils::host_semaphore
   PUBLIC
 )
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    growth_test
+  SRCS
+    "growth_test.cc"
+  DEPS
+    ::backing
+    ::barrier
+    ::command_buffer
+    ::growth
+    ::program
+    ::signal
+    ::submission
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::publication
+    iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::publisher
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
 
 if(AMDF_BUILD)
 iree_cc_test(
@@ -767,8 +819,6 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::drivers::amd::gpu::queue::host_wait
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -927,6 +977,7 @@ iree_cc_library(
     ::command_buffer
     ::commands
     ::dispatch
+    ::growth
     ::launch
     ::program
     ::retirement
@@ -949,17 +1000,17 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::feedback
     iree::hal::drivers::amd::gpu::profile
+    iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::allocation
     iree::hal::drivers::amd::gpu::queue::capture_pool
-    iree::hal::drivers::amd::gpu::queue::continuation
     iree::hal::drivers::amd::gpu::queue::file_transfer
     iree::hal::drivers::amd::gpu::queue::host_call
     iree::hal::drivers::amd::gpu::queue::host_wait
+    iree::hal::drivers::amd::gpu::queue::memory_mapping
     iree::hal::drivers::amd::gpu::queue::pm4::kmq::storage
     iree::hal::drivers::amd::gpu::queue::pm4::umq::ring
     iree::hal::drivers::amd::gpu::queue::publisher
     iree::hal::drivers::amd::status
-    iree::hal::memory::maintenance
   PUBLIC
 )
 endif()
@@ -1027,7 +1078,12 @@ iree_cc_test(
     ::fixup
     ::launch
     ::program
+    amdf::headers
     iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::image
     iree::hal::drivers::amd::gpu::target::identity
     iree::testing::gtest

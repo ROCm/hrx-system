@@ -9,9 +9,7 @@
 
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/hal/profile_schema.h"
-#include "iree/hal/virtual_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,12 +24,11 @@ typedef struct iree_hal_amd_gpu_host_call_executor_t {
   iree_hal_queue_t* queue;
   // Device diagnostics, dominated by the retained parent.
   const iree_hal_amd_gpu_context_t* context;
-  // Existing cold-memory owner for mapping and deferred native submission.
-  iree_hal_memory_maintenance_t* service;
   // Queue-owned reusable CPU capture storage.
   iree_hal_amd_gpu_capture_pool_t* captures;
   // Private native boundary. A non-NONE type identifies the public entry;
   // the return boundary carries NONE and contributes no public queue event.
+  // Rejection retains no operands and cannot signal the private completion.
   iree_status_t (*barrier)(iree_hal_queue_t* queue,
                            iree_hal_semaphore_list_t waits,
                            iree_hal_semaphore_list_t signals,
@@ -52,16 +49,6 @@ iree_status_t iree_hal_amd_gpu_host_call_submit(
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     iree_hal_host_call_t call, const uint64_t arguments[4],
     iree_hal_host_call_flags_t flags);
-
-// Captures a mapping batch and executes native mapping on the existing service
-// between native release/acquire boundaries. Captured buffer uses end before
-// public completion. Borrowed-buffer mode preserves the caller's responsibility
-// through that same completion boundary. No mapping worker is created.
-iree_status_t iree_hal_amd_gpu_memory_mapping_submit(
-    const iree_hal_amd_gpu_host_call_executor_t* executor,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_host_size_t mapping_count, const iree_hal_memory_mapping_t* mappings,
-    iree_hal_queue_map_flags_t flags);
 
 #ifdef __cplusplus
 }  // extern "C"

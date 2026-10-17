@@ -14,11 +14,15 @@ namespace {
 
 struct Storage {
   Storage() {
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(this, values.data(), 0x1000,
-                                                signals.data(), signals.size(),
-                                                1, frontiers.data(), {}, &pool);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize({}, &pool);
+    iree_hal_amd_gpu_pm4_signal_block_initialize(
+        &pool, this, values.data(), 0x1000, signals.data(), signals.size(), 1,
+        frontiers.data(), &block);
   }
-  ~Storage() { iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool); }
+  ~Storage() {
+    iree_hal_amd_gpu_pm4_signal_block_deinitialize(&block);
+    iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool);
+  }
 
   // CPU-only stand-in for native control storage; no MMIO is timed here.
   std::array<uint64_t, 64> values;
@@ -26,6 +30,8 @@ struct Storage {
   std::array<iree_hal_amd_gpu_pm4_signal_t, 64> signals;
   // Shared finite free list.
   iree_hal_amd_gpu_pm4_signal_pool_t pool;
+  // Attached native extent and its signal metadata.
+  iree_hal_amd_gpu_pm4_signal_block_t block;
   // One-queue causal vector per native signal.
   std::array<uint64_t, 64> frontiers;
 };
@@ -68,9 +74,12 @@ void BM_Frontier(benchmark::State& state) {
   uint64_t value = 0;
   iree_hal_amd_gpu_pm4_signal_t metadata;
   iree_hal_amd_gpu_pm4_signal_pool_t pool;
-  iree_hal_amd_gpu_pm4_signal_pool_initialize(&pool, &value, 0x1000, &metadata,
-                                              1, queue_count, snapshot.data(),
-                                              {}, &pool);
+  // Attached native extent and its signal metadata.
+  iree_hal_amd_gpu_pm4_signal_block_t block;
+  iree_hal_amd_gpu_pm4_signal_pool_initialize({}, &pool);
+  iree_hal_amd_gpu_pm4_signal_block_initialize(&pool, &pool, &value, 0x1000,
+                                               &metadata, 1, queue_count,
+                                               snapshot.data(), &block);
   auto* signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&pool);
   for (auto _ : state) {
     ++source[0];
@@ -80,6 +89,7 @@ void BM_Frontier(benchmark::State& state) {
     benchmark::ClobberMemory();
   }
   iree_hal_amd_gpu_pm4_signal_release(signal);
+  iree_hal_amd_gpu_pm4_signal_block_deinitialize(&block);
   iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool);
   state.SetItemsProcessed(state.iterations());
   state.counters["snapshot_bytes"] = queue_count * sizeof(uint64_t);

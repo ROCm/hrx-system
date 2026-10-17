@@ -17,6 +17,8 @@ extern "C" {
 
 typedef struct iree_hal_amd_gpu_pm4_signal_pool_t
     iree_hal_amd_gpu_pm4_signal_pool_t;
+typedef struct iree_hal_amd_gpu_pm4_signal_block_t
+    iree_hal_amd_gpu_pm4_signal_block_t;
 
 // One native binary signal, independently retained by its publisher,
 // producer, caches, and dependent executions. A producer completing does not
@@ -36,8 +38,8 @@ typedef struct iree_hal_amd_gpu_pm4_signal_t {
     // Link accessed only under the pool mutex after the last use has joined.
     struct iree_hal_amd_gpu_pm4_signal_t* next;
   } state;
-  // Borrowed pool owning this slot, live until every reference is returned.
-  iree_hal_amd_gpu_pm4_signal_pool_t* pool;
+  // Borrowed block owning this slot, live until every reference is returned.
+  iree_hal_amd_gpu_pm4_signal_block_t* block;
   // Immutable address of an eight-byte cell in qualified native backing.
   uint64_t device_address;
   // Borrowed host cell, cleared only during exclusive acquisition. Native
@@ -56,31 +58,54 @@ typedef struct iree_hal_amd_gpu_pm4_signal_pool_notification_t {
   void* user_data;
 } iree_hal_amd_gpu_pm4_signal_pool_notification_t;
 
-// Finite signal slots over already allocated native backing and host metadata.
-// The enclosing owner supplies both extents and joins all publishers, writers,
-// readers, and cache references before reclaiming either. A dynamic producer
-// queue can disappear without reclaiming cells still held by another queue.
-// This object performs no allocation or native call and owns no worker.
+// Available cells across independently allocated blocks. Acquisition and last
+// release take one short metadata lock and perform constant-time list updates.
+// A pending native allocation is independent of returned capacity. This object
+// performs no allocation or native call and owns no worker.
 typedef struct iree_hal_amd_gpu_pm4_signal_pool_t {
-  // Protects only free-list changes and live_count.
+  // Protects block membership, free lists, and each block's live_count.
   iree_slim_mutex_t mutex;
+  // Blocks with at least one free cell, linked without an availability scan.
+  iree_hal_amd_gpu_pm4_signal_block_t* available;
+  // Number of attached blocks, including exhausted and zero-capacity blocks.
+  uint32_t block_count;
+  // Immutable wake target for exhausted-to-available transitions.
+  iree_hal_amd_gpu_pm4_signal_pool_notification_t notification;
+} iree_hal_amd_gpu_pm4_signal_pool_t;
+
+// Finite bookkeeping borrowing one native extent and its host metadata. The
+// enclosing owner joins every native writer, reader, and cache reference before
+// detaching a block. The pool and notification target outlive those releases.
+typedef struct iree_hal_amd_gpu_pm4_signal_block_t {
+  // Borrowed pool, or NULL after successful detachment.
+  iree_hal_amd_gpu_pm4_signal_pool_t* pool;
   // Number of slots with at least one live use, protected by mutex.
   uint32_t live_count;
   // Complete immutable native-domain queue count, including inactive queues.
   uint32_t queue_count;
   // Available metadata slots, protected by mutex.
   iree_hal_amd_gpu_pm4_signal_t* free_head;
+  // Previous available block, or NULL at the list head or while exhausted.
+  iree_hal_amd_gpu_pm4_signal_block_t* available_previous;
+  // Next available block, or NULL at the list tail or while exhausted.
+  iree_hal_amd_gpu_pm4_signal_block_t* available_next;
   // Borrowed qualified address/visibility/atomic domain. Matching identities
   // permit native reads of these exact addresses; NULL permits only host waits.
   const void* domain;
-  // Immutable wake target for capacity recovery, invoked outside mutex.
-  iree_hal_amd_gpu_pm4_signal_pool_notification_t notification;
   // Borrowed metadata base for constant-time signal-to-frontier indexing.
   iree_hal_amd_gpu_pm4_signal_t* signals;
   // Signal-major publication epochs, capacity * queue_count host entries.
   // Each retained signal's vector is immutable after native acceptance.
   uint64_t* frontiers;
-} iree_hal_amd_gpu_pm4_signal_pool_t;
+} iree_hal_amd_gpu_pm4_signal_block_t;
+
+// Initializes an empty owner. Native blocks are attached only after their
+// allocation completes. All blocks must be detached before deinitialization.
+void iree_hal_amd_gpu_pm4_signal_pool_initialize(
+    iree_hal_amd_gpu_pm4_signal_pool_notification_t notification,
+    iree_hal_amd_gpu_pm4_signal_pool_t* out_pool);
+void iree_hal_amd_gpu_pm4_signal_pool_deinitialize(
+    iree_hal_amd_gpu_pm4_signal_pool_t* pool);
 
 // Initializes exclusively owned backing to zero and links the host metadata.
 // Both extents contain capacity entries; device_address names values[0].
@@ -89,20 +114,29 @@ typedef struct iree_hal_amd_gpu_pm4_signal_pool_t {
 // width. The DWORD form uses the low word and leaves its high word zero.
 // Metadata, values, and frontiers do not overlap. Frontiers has
 // capacity * queue_count entries; publication initializes a complete vector
-// before exposing a signal. A zero capacity produces an empty pool.
-void iree_hal_amd_gpu_pm4_signal_pool_initialize(
-    const void* domain, uint64_t* values, uint64_t device_address,
+// before exposing a signal. A zero capacity attaches an empty block.
+// Attaches the initialized block under the pool mutex. The attaching publisher
+// already owns its waiting work; attachment does not invoke the notification.
+void iree_hal_amd_gpu_pm4_signal_block_initialize(
+    iree_hal_amd_gpu_pm4_signal_pool_t* pool, const void* domain,
+    uint64_t* values, uint64_t device_address,
     iree_hal_amd_gpu_pm4_signal_t* signals, uint32_t capacity,
     uint32_t queue_count, uint64_t* frontiers,
-    iree_hal_amd_gpu_pm4_signal_pool_notification_t notification,
-    iree_hal_amd_gpu_pm4_signal_pool_t* out_pool);
+    iree_hal_amd_gpu_pm4_signal_block_t* out_block);
 
-// All acquisitions have joined and every signal reference has been returned.
-// An owner that prevents further acquisitions can observe live_count == 0
-// under mutex to join the final release's pool access. A copied notification
-// may still run; its target belongs to the enclosing progress owner. This does
-// not wait for native execution or free the borrowed data.
-void iree_hal_amd_gpu_pm4_signal_pool_deinitialize(
+// Detaches an entirely unused block from acquisition in constant time. False
+// leaves it attached with live readers. True joins the last release's block
+// access and permits reclamation of its metadata and native extent. A copied
+// notification may still run; its target belongs to the enclosing owner.
+bool iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(
+    iree_hal_amd_gpu_pm4_signal_block_t* block);
+
+// Detaches a block after the enclosing owner has joined all signal references.
+void iree_hal_amd_gpu_pm4_signal_block_deinitialize(
+    iree_hal_amd_gpu_pm4_signal_block_t* block);
+
+// Constant-time capacity observation used to close a miss/enrollment race.
+bool iree_hal_amd_gpu_pm4_signal_pool_has_available(
     iree_hal_amd_gpu_pm4_signal_pool_t* pool);
 
 // Returns one owning reference, or NULL for ordinary capacity pressure. Clears
@@ -116,7 +150,7 @@ iree_hal_amd_gpu_pm4_signal_t* iree_hal_amd_gpu_pm4_signal_pool_try_acquire(
     iree_hal_amd_gpu_pm4_signal_pool_t* pool);
 
 // Captures an accepted producer's complete native-domain frontier before the
-// signal is exposed to readers or completion. The vector has pool->queue_count
+// signal is exposed to readers or completion. The vector has block->queue_count
 // entries and includes the producer's own accepted publication epoch. Exactly
 // one publisher writes it; every subsequent retained reader sees that immutable
 // snapshot, even after the producer queue advances or disappears.

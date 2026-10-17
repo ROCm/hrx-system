@@ -9,13 +9,17 @@
 
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/memory/slab_provider.h"
+#include "iree/hal/virtual_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // A fabric-private native allocation domain shared by execution engines.
-// Only ready native backing acquisition and release execute on its worker.
+// Only dependency-ready native mapping, backing release, and acquisition run
+// here, in that priority order. Acquisition/release reconsider priority between
+// slabs; native mapping vectors keep their publication boundary. An active
+// native call cannot be preempted. No execution or dependency wait runs here.
 typedef struct iree_hal_amd_fabric_allocation_queue_t
     iree_hal_amd_fabric_allocation_queue_t;
 
@@ -44,6 +48,7 @@ void iree_hal_amd_fabric_allocation_queue_enqueue(
 typedef enum iree_hal_amd_fabric_memory_operation_type_e {
   IREE_HAL_AMD_FABRIC_MEMORY_OPERATION_ACQUIRE,
   IREE_HAL_AMD_FABRIC_MEMORY_OPERATION_RELEASE,
+  IREE_HAL_AMD_FABRIC_MEMORY_OPERATION_MAP,
 } iree_hal_amd_fabric_memory_operation_type_t;
 
 typedef struct iree_hal_amd_fabric_memory_operation_t {
@@ -90,6 +95,15 @@ typedef struct iree_hal_amd_fabric_memory_release_request_t {
   iree_hal_slab_release_callback_t completion;
 } iree_hal_amd_fabric_memory_release_request_t;
 
+typedef struct iree_hal_amd_fabric_memory_map_request_t {
+  // Queue linkage; mapping targets carry their native API and diagnostics.
+  iree_hal_amd_fabric_memory_operation_t operation;
+  // Resolved transaction, borrowed through completion; NULL is an empty batch.
+  iree_hal_memory_mapping_batch_t* batch;
+  // Receives the native publication result, without executing dependent work.
+  iree_hal_slab_acquire_callback_t completion;
+} iree_hal_amd_fabric_memory_map_request_t;
+
 // Submits a ready native acquisition without allocating or calling the driver.
 // The request, its arrays, options, and their native owners remain live through
 // completion. Exactly one callback takes the result: all outputs are owned on
@@ -112,6 +126,15 @@ void iree_hal_amd_fabric_allocation_queue_acquire_memory(
 void iree_hal_amd_fabric_allocation_queue_release_memory(
     iree_hal_amd_fabric_allocation_queue_t* queue,
     iree_hal_amd_fabric_memory_release_request_t* request);
+
+// Submits a resolved mapping transaction after its prerequisites complete.
+// Native updates preserve each target/projection's vector and publication
+// boundary. The consumer owns the batch and native targets through completion,
+// and publishes dependent execution from its own execution owner. Completion
+// has the same request-reuse and final-access contract as acquire_memory.
+void iree_hal_amd_fabric_allocation_queue_map_memory(
+    iree_hal_amd_fabric_allocation_queue_t* queue,
+    iree_hal_amd_fabric_memory_map_request_t* request);
 
 #ifdef __cplusplus
 }  // extern "C"

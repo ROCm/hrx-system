@@ -6,6 +6,9 @@
 
 #include "iree/hal/drivers/amd/fabric/virtual_buffer.h"
 
+#include <algorithm>
+#include <future>
+
 #include "iree/hal/drivers/amd/fabric/memory_backend_test_base.h"
 
 namespace iree::hal::amd::fabric {
@@ -492,5 +495,198 @@ TEST_F(MemoryBackendTest,
                  UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE));
   EXPECT_EQ(pool, nullptr);
 }
+
+enum class NativeBatchKind { kAcquire, kRelease, kRollback };
+
+class MappingPriorityTest
+    : public MemoryBackendTest,
+      public ::testing::WithParamInterface<NativeBatchKind> {};
+
+TEST_P(MappingPriorityTest, MappingOvertakesRemainingNativeSteps) {
+  native_.mapping_enabled = true;
+  for (uint32_t i = 0; i < 2; ++i) {
+    binding_descriptions_[i] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                AMDF_MEMORY_ADDRESS_GPU};
+    native_.address_kinds[i] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
+    native_families_[i].host_usage = 0;
+  }
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
+                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE));
+  iree_hal_buffer_t* backing = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(8192, 4096),
+      iree_infinite_timeout(), &backing));
+  iree_hal_buffer_t* reservation = nullptr;
+  IREE_ASSERT_OK(CreateReservation(&reservation));
+  const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
+  const iree_hal_memory_mapping_t mappings[] = {
+      {
+          .target = reservation,
+          .scope = scope,
+          .target_range = {0, 4096},
+          .source = backing,
+          .source_offset = 0,
+          .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      },
+      {
+          .target = reservation,
+          .scope = scope,
+          .target_range = {4096, 4096},
+          .source = backing,
+          .source_offset = 4096,
+          .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      },
+  };
+  iree_hal_memory_mapping_batch_t* batch = nullptr;
+  IREE_ASSERT_OK(iree_hal_memory_mapping_batch_create(
+      iree_hal_device_queue(cpu_device_, 0, 0), IREE_ARRAYSIZE(mappings),
+      mappings, 0, allocator_, &batch));
+  IREE_ASSERT_OK(iree_hal_memory_mapping_batch_resolve(batch));
+
+  // Private backing and pool slabs share the same native owner. The test gates
+  // real native entry points underneath that owner, not its scheduler.
+  iree_hal_amd_fabric_memory_options_t options = {.scope = native_.scope()};
+  options.profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
+  options.profile.allocation.byte_length_granularity = 4096;
+  options.profile.allocation.minimum_alignment = 4096;
+  options.profile.allocation.maximum_byte_length = UINT64_C(1) << 30;
+  options.required_flags = native_.required_flags;
+  std::array<iree_hal_amd_fabric_memory_request_t, 100> requests;
+  std::array<iree_hal_amd_fabric_memory_t, 100> memories = {};
+  for (auto& request : requests) {
+    request = {&options, 4096, 4096};
+  }
+  std::promise<iree::Status> acquired;
+  iree_hal_amd_fabric_memory_acquire_request_t acquire = {
+      .operation =
+          {
+              .api = &native_.api,
+              .event_sink = iree_hal_device_event_sink_discard(),
+          },
+      .count = requests.size(),
+      .requests = requests.data(),
+      .memories = memories.data(),
+      .completion =
+          {
+              .fn =
+                  [](void* user_data, iree_status_t status) {
+                    static_cast<std::promise<iree::Status>*>(user_data)
+                        ->set_value(iree::Status(std::move(status)));
+                  },
+              .user_data = &acquired,
+          },
+  };
+  std::promise<void> released;
+  iree_hal_amd_fabric_memory_release_request_t release = {
+      .operation =
+          {
+              .api = &native_.api,
+              .event_sink = iree_hal_device_event_sink_discard(),
+          },
+      .count = memories.size(),
+      .memories = memories.data(),
+      .completion =
+          {
+              .fn =
+                  [](void* user_data) {
+                    static_cast<std::promise<void>*>(user_data)->set_value();
+                  },
+              .user_data = &released,
+          },
+  };
+  if (GetParam() == NativeBatchKind::kRelease) {
+    iree_hal_amd_fabric_allocation_queue_acquire_memory(allocation_queue_,
+                                                        &acquire);
+    IREE_ASSERT_OK(acquired.get_future().get());
+  }
+
+  std::vector<char> sequence;
+  std::promise<void> entered;
+  std::promise<void> resume;
+  auto resumed = resume.get_future().share();
+  uint32_t acquisition_count = 0, release_count = 0;
+  native_.before_create = [&] {
+    sequence.push_back('A');
+    if (++acquisition_count == 1 && GetParam() == NativeBatchKind::kAcquire) {
+      entered.set_value();
+      resumed.wait();
+    }
+    if (acquisition_count == 3 && GetParam() == NativeBatchKind::kRollback) {
+      native_.create_failure =
+          amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+    }
+  };
+  native_.before_destroy = [&] {
+    sequence.push_back('R');
+    if (++release_count == 1 && GetParam() != NativeBatchKind::kAcquire) {
+      entered.set_value();
+      resumed.wait();
+    }
+  };
+  native_.before_update = [&] { sequence.push_back('M'); };
+  if (GetParam() == NativeBatchKind::kRelease) {
+    iree_hal_amd_fabric_allocation_queue_release_memory(allocation_queue_,
+                                                        &release);
+  } else {
+    iree_hal_amd_fabric_allocation_queue_acquire_memory(allocation_queue_,
+                                                        &acquire);
+  }
+  entered.get_future().get();
+  std::promise<iree::Status> mapped;
+  iree_hal_amd_fabric_memory_map_request_t map = {
+      .batch = batch,
+      .completion =
+          {
+              .fn =
+                  [](void* user_data, iree_status_t status) {
+                    static_cast<std::promise<iree::Status>*>(user_data)
+                        ->set_value(iree::Status(std::move(status)));
+                  },
+              .user_data = &mapped,
+          },
+  };
+  iree_hal_amd_fabric_allocation_queue_map_memory(allocation_queue_, &map);
+  resume.set_value();
+  IREE_EXPECT_OK(mapped.get_future().get());
+  if (GetParam() == NativeBatchKind::kRelease) {
+    released.get_future().get();
+  } else if (GetParam() == NativeBatchKind::kRollback) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          acquired.get_future().get());
+    EXPECT_EQ(sequence, (std::vector<char>{'A', 'A', 'A', 'R', 'M', 'R'}));
+    for (const auto& memory : memories) {
+      EXPECT_EQ(memory.handle, nullptr);
+    }
+  } else {
+    IREE_EXPECT_OK(acquired.get_future().get());
+  }
+  const auto mapping_position =
+      std::find(sequence.begin(), sequence.end(), 'M');
+  EXPECT_EQ(mapping_position - sequence.begin(),
+            GetParam() == NativeBatchKind::kRollback ? 4 : 1);
+  EXPECT_EQ(native_.update_count, 1);
+  EXPECT_EQ(native_.last_updates.size(), 2u);
+
+  native_.before_create = {};
+  native_.before_destroy = {};
+  native_.before_update = {};
+  if (GetParam() == NativeBatchKind::kAcquire) {
+    iree_hal_amd_fabric_allocation_queue_release_memory(allocation_queue_,
+                                                        &release);
+    released.get_future().get();
+  }
+  iree_hal_memory_mapping_batch_release(batch);
+  IREE_EXPECT_OK(iree_hal_virtual_buffer_detach(reservation, scope));
+  iree_hal_buffer_release(reservation);
+  iree_hal_buffer_release(backing);
+  iree_hal_pool_release(pool);
+}
+
+INSTANTIATE_TEST_SUITE_P(NativeBatches, MappingPriorityTest,
+                         ::testing::Values(NativeBatchKind::kAcquire,
+                                           NativeBatchKind::kRelease,
+                                           NativeBatchKind::kRollback));
 
 }  // namespace iree::hal::amd::fabric

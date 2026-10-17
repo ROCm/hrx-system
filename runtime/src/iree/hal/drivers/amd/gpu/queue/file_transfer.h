@@ -24,11 +24,9 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   iree_hal_queue_t* queue;
   // Borrowed device diagnostics, dominated by the retained device.
   const iree_hal_amd_gpu_context_t* context;
-  // Existing device service handling staging and I/O continuations.
-  iree_hal_memory_maintenance_t* service;
   // Queue-owned reusable CPU metadata storage.
   iree_hal_amd_gpu_capture_pool_t* captures;
-  // Queue-owned host dependency associations, finalized on service.
+  // Queue-owned host dependency associations, finalized by their last borrower.
   iree_async_semaphore_wait_context_t* waits;
   // Optional device-owned session, stable while operations are in flight.
   iree_hal_amd_gpu_profile_t* profile;
@@ -40,7 +38,7 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   // The executor defines its representation; the file pipeline never reads it.
   iree_host_size_t barrier_size;
   // Combines qualified queue-side visibility effects into an owned native
-  // barrier value. Host actions execute separately on service. This consumes
+  // barrier value. Host actions execute at their I/O boundary. This consumes
   // trusted global/ranged queue effects and performs no allocation or query.
   void (*add_effects)(iree_hal_queue_t* queue,
                       iree_hal_memory_effects_t effects, void* barrier);

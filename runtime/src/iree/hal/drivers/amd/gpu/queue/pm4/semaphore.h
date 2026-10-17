@@ -35,9 +35,12 @@ typedef enum iree_hal_amd_gpu_pm4_semaphore_wait_state_e {
   IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_COMPLETED,
   // A retained native producer can satisfy the wait without host retirement.
   IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_NATIVE,
+  // The published producer belongs to another native domain. Wait for its
+  // completed public timeline without borrowing its queue-local storage.
+  IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_HOST,
 } iree_hal_amd_gpu_pm4_semaphore_wait_state_t;
 
-// One acquired dependency. Completed and deferred results own no signal.
+// One acquired dependency. Only a native result owns a signal.
 typedef struct iree_hal_amd_gpu_pm4_semaphore_wait_t {
   // Resolution at the instant of acquisition, including sticky failure checks.
   iree_hal_amd_gpu_pm4_semaphore_wait_state_t state;
@@ -51,19 +54,18 @@ typedef struct iree_hal_amd_gpu_pm4_semaphore_wait_t {
 } iree_hal_amd_gpu_pm4_semaphore_wait_t;
 
 // Resolves a wait and pins its native reader under the cache replacement lock.
-// The caller has established the semaphore type. A native result is a pinned
-// producer candidate: the consumer must also match its qualified domain to
-// signal->pool->domain before using the address. An incompatible candidate is
-// released and waited on through the ordinary completed HAL timeline, never
-// through submission availability. Domain identity includes addressing,
-// atomic width, visibility, and forward progress.
+// The caller has established the semaphore type and retains the native domain
+// through the reader's final release. Domain identity includes addressing,
+// atomic width, visibility, forward progress, and backing lifetime. Foreign
+// signals never escape the cache lock: HOST uses the ordinary completed HAL
+// timeline, never submission availability, and owns no producer storage.
 // A native result permits waiting for signal value one, or eliding that wait
 // when an already established causal frontier dominates a nonzero producer
 // epoch. The owning capture keeps the semaphore live through this call. Failure
 // leaves an empty deferred result. No allocation, native call, or retry loop
 // is performed.
 iree_status_t iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
-    iree_hal_semaphore_t* semaphore, uint64_t minimum_value,
+    iree_hal_semaphore_t* semaphore, uint64_t minimum_value, const void* domain,
     iree_hal_amd_gpu_pm4_semaphore_wait_t* out_wait);
 
 // Publishes an already admitted native producer. Its commands, including the

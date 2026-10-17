@@ -147,6 +147,45 @@ TEST_F(PublisherTest, CompletedEntriesMayBeFreedBeforeHandoff) {
   EXPECT_FALSE(Handoff());
 }
 
+TEST_F(PublisherTest, IdleBatchCanBeRetiredOneEntryAtATime) {
+  std::array<Entry*, 3> entries = {new Entry, new Entry, new Entry};
+  for (size_t i = 0; i + 1 < entries.size(); ++i) {
+    iree_atomic_store(&entries[i]->next,
+                      reinterpret_cast<intptr_t>(entries[i + 1]),
+                      iree_memory_order_relaxed);
+  }
+  ASSERT_TRUE(iree_hal_amd_gpu_publisher_enqueue_batch(
+      &publisher_, entries.front(), entries.back()));
+  ASSERT_EQ(Next(), entries[0]);
+  delete entries[0];
+  ASSERT_TRUE(Handoff());
+  ASSERT_TRUE(AcquireService());
+  for (size_t i = 1; i < entries.size(); ++i) {
+    ASSERT_EQ(Next(), entries[i]);
+    delete entries[i];
+  }
+  EXPECT_EQ(Next(), nullptr);
+  EXPECT_FALSE(Handoff());
+}
+
+TEST_F(PublisherTest, ReadyCohortSplicesBehindAlreadyCapturedWork) {
+  std::array<Entry, 5> entries;
+  ASSERT_TRUE(Enqueue(&entries[0]));
+  ASSERT_EQ(Next(), &entries[0]);
+  ASSERT_FALSE(Enqueue(&entries[1]));
+  iree_atomic_store(&entries[2].next, reinterpret_cast<intptr_t>(&entries[3]),
+                    iree_memory_order_relaxed);
+  ASSERT_FALSE(iree_hal_amd_gpu_publisher_enqueue_batch(
+      &publisher_, &entries[2], &entries[3]));
+  ASSERT_FALSE(Enqueue(&entries[4]));
+  ASSERT_TRUE(Handoff());
+  ASSERT_TRUE(AcquireService());
+  for (size_t i = 1; i < entries.size(); ++i) {
+    EXPECT_EQ(Next(), &entries[i]);
+  }
+  EXPECT_FALSE(Handoff());
+}
+
 TEST_F(PublisherTest, UnfinishedProducerLinkLeavesEntriesOwned) {
   Entry first;
   ASSERT_TRUE(Enqueue(&first));
@@ -256,86 +295,102 @@ TEST_F(PublisherTest, FinalEnqueueRacesIdleHandoffWithoutLosingOwnership) {
 }
 
 TEST_F(PublisherTest, ConcurrentProducersReuseRetiredStorage) {
-  constexpr size_t kProducerCount = 4;
-  constexpr size_t kSlotCount = 8;
-  constexpr size_t kEpochCount = 128;
-  struct Operation : Entry {
-    // Exact ordinal for this use of the captured storage.
-    size_t ordinal;
-    // A completion permits the submitting thread to reuse this slot.
-    std::binary_semaphore reusable{1};
-  };
-  std::array<std::array<Operation, kSlotCount>, kProducerCount> operations;
-  std::array<uint32_t, kProducerCount * kSlotCount * kEpochCount> visits = {};
-  std::atomic<bool> stopping = false;
-  iree_notification_t notification;
-  iree_notification_initialize(&notification);
-  auto publish = [&](Entry* entry) {
-    auto* operation = static_cast<Operation*>(entry);
-    // The publisher is the only writer, independent of the calling thread.
-    ++visits[operation->ordinal];
-    operation->reusable.release();
-  };
-  std::thread service([&] {
-    while (true) {
-      const auto token = iree_notification_prepare_wait(&notification);
-      if (!AcquireService()) {
-        if (stopping.load(std::memory_order_acquire)) {
-          iree_notification_cancel_wait(&notification);
-          return;
+  for (bool batch : {false, true}) {
+    SCOPED_TRACE(batch);
+    constexpr size_t kProducerCount = 4;
+    constexpr size_t kSlotCount = 8;
+    constexpr size_t kEpochCount = 128;
+    struct Operation : Entry {
+      // Exact ordinal for this use of the captured storage.
+      size_t ordinal;
+      // A completion permits the submitting thread to reuse this slot.
+      std::binary_semaphore reusable{1};
+    };
+    std::array<std::array<Operation, kSlotCount>, kProducerCount> operations;
+    std::array<uint32_t, kProducerCount * kSlotCount * kEpochCount> visits = {};
+    std::atomic<bool> stopping = false;
+    iree_notification_t notification;
+    iree_notification_initialize(&notification);
+    auto publish = [&](Entry* entry) {
+      auto* operation = static_cast<Operation*>(entry);
+      // The publisher is the only writer, independent of the calling thread.
+      ++visits[operation->ordinal];
+      operation->reusable.release();
+    };
+    std::thread service([&] {
+      while (true) {
+        const auto token = iree_notification_prepare_wait(&notification);
+        if (!AcquireService()) {
+          if (stopping.load(std::memory_order_acquire)) {
+            iree_notification_cancel_wait(&notification);
+            return;
+          }
+          iree_notification_commit_wait(&notification, token, 0,
+                                        IREE_TIME_INFINITE_FUTURE);
+          continue;
         }
-        iree_notification_commit_wait(&notification, token, 0,
-                                      IREE_TIME_INFINITE_FUTURE);
-        continue;
-      }
-      iree_notification_cancel_wait(&notification);
-      // Deliberately cross the per-producer slot boundary across service turns.
-      for (size_t i = 0; i < 7; ++i) {
-        Entry* entry = Next();
-        if (!entry) {
-          break;
+        iree_notification_cancel_wait(&notification);
+        // Deliberately cross the per-producer slot boundary across service
+        // turns.
+        for (size_t i = 0; i < 7; ++i) {
+          Entry* entry = Next();
+          if (!entry) {
+            break;
+          }
+          publish(entry);
         }
-        publish(entry);
+        Handoff();
       }
-      Handoff();
-    }
-  });
-  std::barrier<> start(kProducerCount);
-  std::array<std::thread, kProducerCount> producers;
-  for (size_t i = 0; i < kProducerCount; ++i) {
-    producers[i] = std::thread([&, i] {
-      start.arrive_and_wait();
-      for (size_t epoch = 0; epoch < kEpochCount; ++epoch) {
-        for (size_t slot = 0; slot < kSlotCount; ++slot) {
-          auto& operation = operations[i][slot];
-          operation.reusable.acquire();
-          operation.ordinal = (epoch * kProducerCount + i) * kSlotCount + slot;
-          if (Enqueue(&operation)) {
-            Entry* entry = Next();
-            if (entry) {
-              publish(entry);
+    });
+    std::barrier<> start(kProducerCount);
+    std::array<std::thread, kProducerCount> producers;
+    for (size_t i = 0; i < kProducerCount; ++i) {
+      producers[i] = std::thread([&, i] {
+        start.arrive_and_wait();
+        for (size_t epoch = 0; epoch < kEpochCount; ++epoch) {
+          for (size_t slot = 0; slot < kSlotCount; ++slot) {
+            auto& operation = operations[i][slot];
+            operation.reusable.acquire();
+            operation.ordinal =
+                (epoch * kProducerCount + i) * kSlotCount + slot;
+            if (batch && slot + 1 < kSlotCount) {
+              iree_atomic_store(
+                  &operation.next,
+                  reinterpret_cast<intptr_t>(&operations[i][slot + 1]),
+                  iree_memory_order_relaxed);
+              continue;
             }
-            if (Handoff()) {
-              iree_notification_post(&notification, 1);
+            const bool owned = batch ? iree_hal_amd_gpu_publisher_enqueue_batch(
+                                           &publisher_, &operations[i].front(),
+                                           &operations[i].back())
+                                     : Enqueue(&operation);
+            if (owned) {
+              Entry* entry = Next();
+              if (entry) {
+                publish(entry);
+              }
+              if (Handoff()) {
+                iree_notification_post(&notification, 1);
+              }
             }
           }
         }
-      }
-      for (auto& operation : operations[i]) {
-        operation.reusable.acquire();
-      }
-    });
+        for (auto& operation : operations[i]) {
+          operation.reusable.acquire();
+        }
+      });
+    }
+    for (auto& producer : producers) {
+      producer.join();
+    }
+    stopping.store(true, std::memory_order_release);
+    iree_notification_post(&notification, 1);
+    service.join();
+    for (size_t i = 0; i < visits.size(); ++i) {
+      EXPECT_EQ(visits[i], 1u) << i;
+    }
+    iree_notification_deinitialize(&notification);
   }
-  for (auto& producer : producers) {
-    producer.join();
-  }
-  stopping.store(true, std::memory_order_release);
-  iree_notification_post(&notification, 1);
-  service.join();
-  for (size_t i = 0; i < visits.size(); ++i) {
-    EXPECT_EQ(visits[i], 1u) << i;
-  }
-  iree_notification_deinitialize(&notification);
 }
 
 }  // namespace

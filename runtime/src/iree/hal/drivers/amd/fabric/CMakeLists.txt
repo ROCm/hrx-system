@@ -92,9 +92,11 @@ iree_cc_test(
     "asan_test.cc"
   DEPS
     ::asan
+    ::slab_provider
     amdf::headers
     iree::base
     iree::hal
+    iree::hal::testing::mock_device
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

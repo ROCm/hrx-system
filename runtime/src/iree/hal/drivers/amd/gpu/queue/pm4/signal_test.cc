@@ -24,13 +24,20 @@ using Pool = iree_hal_amd_gpu_pm4_signal_pool_t;
 template <size_t Capacity, size_t QueueCount = 1>
 struct Storage {
   explicit Storage(
-      iree_hal_amd_gpu_pm4_signal_pool_notification_t notification = {}) {
+      iree_hal_amd_gpu_pm4_signal_pool_notification_t notification = {},
+      Pool* target = nullptr) {
     values.fill(UINT64_MAX);
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(
-        this, values.data(), 0x1234fffffff8, signals.data(), Capacity,
-        QueueCount, frontiers.data(), notification, &pool);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize(notification, &pool);
+    iree_hal_amd_gpu_pm4_signal_block_initialize(
+        target ? target : &pool, this, values.data(), 0x1234fffffff8,
+        signals.data(), Capacity, QueueCount, frontiers.data(), &block);
   }
-  ~Storage() { iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool); }
+  ~Storage() {
+    if (block.pool) {
+      iree_hal_amd_gpu_pm4_signal_block_deinitialize(&block);
+    }
+    iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool);
+  }
 
   // Native backing, accessed by host threads only in these ownership tests.
   std::array<uint64_t, Capacity> values;
@@ -38,8 +45,10 @@ struct Storage {
   std::array<Signal, Capacity> signals;
   // Immutable native-domain vectors belonging to retained signals.
   std::array<uint64_t, Capacity * QueueCount> frontiers;
-  // Finite bookkeeping borrowing all extents.
+  // Available blocks and their shared metadata lock.
   Pool pool;
+  // Finite bookkeeping borrowing all extents.
+  iree_hal_amd_gpu_pm4_signal_block_t block;
 };
 
 TEST(SignalTest, NullReferences) {
@@ -61,7 +70,7 @@ TEST(SignalTest, ExhaustionAndIndependentReuse) {
     auto* signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage.pool);
     ASSERT_NE(signal, nullptr);
     EXPECT_EQ(signal, &storage.signals[i]);
-    EXPECT_EQ(signal->pool, &storage.pool);
+    EXPECT_EQ(signal->block, &storage.block);
     EXPECT_EQ(signal->device_address, 0x1234fffffff8 + i * 8);
     EXPECT_EQ(signal->host_value, &storage.values[i]);
     EXPECT_EQ(*signal->host_value, 0u);
@@ -78,6 +87,73 @@ TEST(SignalTest, ExhaustionAndIndependentReuse) {
   for (auto* signal : acquired) {
     iree_hal_amd_gpu_pm4_signal_release(signal);
   }
+}
+
+TEST(SignalTest, ReturnedOlderBlockIsImmediatelyAvailable) {
+  uint32_t notifications = 0;
+  Pool pool;
+  iree_hal_amd_gpu_pm4_signal_pool_initialize(
+      {[](void* data) { ++*static_cast<uint32_t*>(data); }, &notifications},
+      &pool);
+  {
+    Storage<1> older({}, &pool);
+    Storage<2> newer({}, &pool);
+    std::array<Signal*, 3> held;
+    for (auto& signal : held) {
+      signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&pool);
+      ASSERT_NE(signal, nullptr);
+      *signal->host_value = 1;
+    }
+    EXPECT_EQ(held[2]->block, &older.block);
+    EXPECT_FALSE(iree_hal_amd_gpu_pm4_signal_pool_has_available(&pool));
+    iree_hal_amd_gpu_pm4_signal_retain(held[2]);
+    iree_hal_amd_gpu_pm4_signal_release(held[2]);
+    EXPECT_FALSE(iree_hal_amd_gpu_pm4_signal_pool_has_available(&pool));
+    EXPECT_FALSE(
+        iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&older.block));
+
+    iree_hal_amd_gpu_pm4_signal_release(held[2]);
+    EXPECT_EQ(notifications, 1u);
+    auto* reused = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&pool);
+    EXPECT_EQ(reused, held[2]);
+    EXPECT_EQ(*reused->host_value, 0u);
+    EXPECT_EQ(*held[0]->host_value, 1u);
+    EXPECT_EQ(*held[1]->host_value, 1u);
+    iree_hal_amd_gpu_pm4_signal_release(reused);
+    EXPECT_TRUE(
+        iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&older.block));
+    EXPECT_FALSE(iree_hal_amd_gpu_pm4_signal_pool_has_available(&pool));
+    for (size_t i = 0; i < 2; ++i) {
+      iree_hal_amd_gpu_pm4_signal_release(held[i]);
+    }
+  }
+  iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool);
+}
+
+TEST(SignalTest, TrimDetachesAvailableBlocksWithoutChangingLiveCells) {
+  Pool pool;
+  iree_hal_amd_gpu_pm4_signal_pool_initialize({}, &pool);
+  {
+    Storage<2> first({}, &pool);
+    Storage<2> middle({}, &pool);
+    Storage<2> last({}, &pool);
+    auto* held = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&pool);
+    ASSERT_NE(held, nullptr);
+    EXPECT_EQ(held->block, &last.block);
+    EXPECT_TRUE(
+        iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&middle.block));
+    EXPECT_TRUE(
+        iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&first.block));
+    EXPECT_FALSE(
+        iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&last.block));
+    auto* remaining = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&pool);
+    ASSERT_NE(remaining, nullptr);
+    EXPECT_EQ(remaining->block, &last.block);
+    EXPECT_EQ(iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&pool), nullptr);
+    iree_hal_amd_gpu_pm4_signal_release(held);
+    iree_hal_amd_gpu_pm4_signal_release(remaining);
+  }
+  iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool);
 }
 
 TEST(SignalTest, TransitiveFrontierDoesNotReadLaterProducerState) {
@@ -243,13 +319,12 @@ TEST(SignalTest, InactiveBackingCanRetireWhileTheLastReleaseReturns) {
          &notifications});
     signal = iree_hal_amd_gpu_pm4_signal_pool_try_acquire(&storage->pool);
     ready.release();
-    // Service no longer acquires from an inactive pool. Its final native
-    // reader may finish on another queue while service reclaims the backing.
+    // Detachment joins the final native reader on another queue. The copied
+    // notification target remains live even after block metadata is reclaimed.
     bool unused = false;
     while (!unused) {
-      iree_slim_mutex_lock(&storage->pool.mutex);
-      unused = storage->pool.live_count == 0;
-      iree_slim_mutex_unlock(&storage->pool.mutex);
+      unused =
+          iree_hal_amd_gpu_pm4_signal_block_try_deinitialize(&storage->block);
       if (!unused) {
         std::this_thread::yield();
       }

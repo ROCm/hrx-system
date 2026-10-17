@@ -16,7 +16,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
-#include "iree/hal/drivers/amd/fabric/memory_backend.h"
+#include "iree/hal/drivers/amd/fabric/fabric.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
@@ -25,7 +25,6 @@
 #include "iree/hal/drivers/amd/registration/driver_module.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/memory/fixed_block_pool.h"
-#include "iree/hal/memory/maintenance.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -777,10 +776,8 @@ TEST_F(GpuNativeAllocationTest, CapacityWaitDoesNotBlockReleasingItsStorage) {
   IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[1], {},
                                        {1, &semaphores_[1], &one}, finite_pool,
                                        1, &request, &second));
-  // Join the initial service attempt, proving the next allocation is actually
-  // waiting on capacity before its producer is admitted to that same service.
-  iree_hal_memory_maintenance_call(
-      finite_pool->maintenance, [](void*) {}, nullptr);
+  // A finite-pool miss enrolls capacity observation before submission returns.
+  // Releasing the first allocation can therefore satisfy the second directly.
   uint64_t observed = 99;
   IREE_ASSERT_OK(iree_hal_semaphore_query(semaphores_[1], &observed));
   EXPECT_EQ(observed, 0u);
@@ -810,10 +807,10 @@ TEST_F(GpuNativeAllocationTest, RecycledBatchJoinsIndependentOwnerFrontiers) {
   std::array<iree_hal_pool_reservation_t, 2> reservations;
   std::array<iree_hal_pool_acquire_info_t, 2> infos;
   iree_hal_pool_acquire_result_t result;
-  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
       finite_pool, requests.size(), requests.data(), nullptr,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations.data(), infos.data(),
-      &result));
+      reservations.data(), infos.data(), &result,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   // Independent host participants return logical ownership before their
   // outstanding accesses complete. The next queue acquisition must join both.
@@ -836,14 +833,10 @@ TEST_F(GpuNativeAllocationTest, RecycledBatchJoinsIndependentOwnerFrontiers) {
   IREE_ASSERT_OK(iree_hal_queue_alloca(
       queues_[0], {}, {1, &semaphores_[0], &one}, finite_pool, requests.size(),
       requests.data(), roots.data()));
-  iree_hal_memory_maintenance_call(
-      finite_pool->maintenance, [](void*) {}, nullptr);
   uint64_t observed = 99;
   IREE_ASSERT_OK(iree_hal_semaphore_query(semaphores_[0], &observed));
   EXPECT_EQ(observed, 0u);
   iree_async_frontier_tracker_advance(tracker_, axes[1], 1);
-  iree_hal_memory_maintenance_call(
-      finite_pool->maintenance, [](void*) {}, nullptr);
   IREE_ASSERT_OK(iree_hal_semaphore_query(semaphores_[0], &observed));
   EXPECT_EQ(observed, 0u);
   iree_async_frontier_tracker_advance(tracker_, axes[0], 1);
@@ -1070,6 +1063,7 @@ TEST_F(GpuNativeTest, FailedQueueConstructionReleasesWorkersAndKeepsContext) {
 }
 
 TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
+  const void* native_domain = context_;
   Create();
   if (HasFatalFailure()) {
     return;
@@ -1136,8 +1130,8 @@ TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
   // A published native consumer proves the dependency was admitted without
   // waiting on the producer's host timeline, which is still held above.
   iree_hal_amd_gpu_pm4_semaphore_wait_t published = {};
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_pm4_semaphore_acquire_wait(consumer, one, &published));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+      consumer, one, native_domain, &published));
   EXPECT_EQ(published.state, IREE_HAL_AMD_GPU_PM4_SEMAPHORE_WAIT_NATIVE);
   iree_hal_amd_gpu_pm4_signal_release(published.signal);
   iree_hal_semaphore_fail(
@@ -1181,77 +1175,116 @@ TEST_F(GpuNativeTest, LastReleaseFromCompletionCallback) {
   allocator_.reclaimed.acquire();
 }
 
-TEST_F(GpuNativeTest, LastReleaseFromSharedService) {
-  Create();
-  if (HasFatalFailure()) {
-    return;
+// Gate the actual native allocation dependency while forwarding every call to
+// libamdf. This qualifies HAL execution ownership, not kernel lock isolation.
+// GTest runs these fixtures serially; native borrowers join before active_ is
+// cleared and the forwarding API table is destroyed.
+class GpuNativeMemoryProgressTest : public GpuNativeAllocationTest {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+        amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST,
+                       &native_api_),
+        "amdf_query_api"));
+    forwarding_api_ = *native_api_;
+    forwarding_api_.memory_create = CreateMemory;
+    active_ = this;
+    IREE_ASSERT_OK(iree_hal_amd_fabric_create(
+        &forwarding_api_, AMDF_NATIVE_LIFETIME_INSTANCE,
+        iree_allocator_system(), &fabric_));
+    GpuNativeAllocationTest::SetUp();
   }
-  const auto* backend =
-      reinterpret_cast<const iree_hal_amd_fabric_memory_backend_t*>(
-          iree_hal_device_memory_backend(device_));
-  auto* service = backend->maintenance;
-  iree_hal_device_group_release(group_);
-  group_ = nullptr;
-  auto* device = device_;
-  device_ = nullptr;
-  iree_hal_memory_maintenance_call(
-      service,
-      [](void* data) {
-        iree_hal_device_release(static_cast<iree_hal_device_t*>(data));
-      },
-      device);
-  allocator_.reclaimed.acquire();
-}
 
-TEST_F(GpuNativeTest, HostCallbacksProgressWhileColdServiceIsOccupied) {
-  using iree::hal::cts::Ref;
-  Create();
-  if (HasFatalFailure()) {
-    return;
+  void TearDown() override {
+    GpuNativeAllocationTest::TearDown();
+    active_ = nullptr;
   }
-  const iree_hal_pool_family_access_t family = {
-      .family = iree_hal_queue_family(queues_[0]),
-      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
-      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+
+  static amdf_status_t AMDF_CALL CreateMemory(
+      amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
+      amdf_memory_t** out_memory) {
+    auto* self = active_;
+    const bool held = self->hold_.exchange(false);
+    if (held) {
+      self->native_thread_ = std::this_thread::get_id();
+      self->entered_.release();
+      self->resume_.acquire();
+    }
+    const amdf_status_t status =
+        self->native_api_->memory_create(scope, info, out_memory);
+    if (held) {
+      self->returned_.release();
+    }
+    return status;
+  }
+
+  class NativeHold {
+   public:
+    explicit NativeHold(GpuNativeMemoryProgressTest* owner) : owner_(owner) {
+      owner_->hold_ = true;
+    }
+    ~NativeHold() {
+      // An admission failure can leave the gate unused. A consumed gate must
+      // join its actual native call before any callback state is destroyed.
+      if (!owner_->hold_.exchange(false)) {
+        owner_->resume_.release();
+        owner_->returned_.acquire();
+      }
+    }
+    void WaitEntered() { owner_->entered_.acquire(); }
+    void ReleaseAndHoldNext() {
+      // Arm the next native step before releasing the current one. This leaves
+      // a mapping's consumer free to progress during the subsequent allocation.
+      owner_->hold_ = true;
+      owner_->resume_.release();
+      owner_->returned_.acquire();
+      owner_->entered_.acquire();
+    }
+
+   private:
+    // Borrowed fixture outliving the native call and its explicit gate.
+    GpuNativeMemoryProgressTest* owner_;
   };
-  iree_hal_slab_pool_options_t options;
-  iree_hal_slab_pool_options_initialize(&options);
-  Ref<iree_hal_pool_t> pool;
-  IREE_ASSERT_OK(iree_hal_slab_pool_create(
-      group_, {1, &family, {}}, &options, iree_allocator_system(), pool.out()));
-  ASSERT_NE(pool.get()->maintenance, nullptr);
+
+  // Exact native API table, borrowed for all forwarded calls.
+  const amdf_api_t* native_api_ = nullptr;
+  // Same native API with an allocation-entry gate, never a substitute
+  // allocator.
+  amdf_api_t forwarding_api_ = {};
+  // Serial fixture identity required by the native ABI's context-free table.
+  inline static GpuNativeMemoryProgressTest* active_ = nullptr;
+  // One-shot hold consumed by the next native backing acquisition.
+  std::atomic<bool> hold_{false};
+  // Publishes entry and thread identity of the held native call.
+  std::binary_semaphore entered_{0};
+  // Permission to continue the native call after independent work completes.
+  std::binary_semaphore resume_{0};
+  // Joins the forwarding function's final fixture access.
+  std::binary_semaphore returned_{0};
+  // Observed allocation owner, read only after entered_.
+  std::thread::id native_thread_;
+};
+
+TEST_F(GpuNativeMemoryProgressTest,
+       HostCallbacksCompleteWhileAllocationIsHeld) {
+  using iree::hal::cts::Ref;
   for (auto flags :
        {IREE_HAL_HOST_CALL_FLAG_NONE, IREE_HAL_HOST_CALL_FLAG_RELAXED}) {
     SCOPED_TRACE(flags);
     Ref<iree_hal_semaphore_t> done;
     CreateSemaphore(done.out());
+    Ref<iree_hal_semaphore_t> allocated;
+    CreateSemaphore(allocated.out());
+    Ref<iree_hal_buffer_t> cold;
     {
-      struct ServiceCall {
-        // First-field maintenance entry, borrowed until finished.
-        iree_hal_memory_maintenance_entry_t entry;
-        // Signals that the existing service is occupied.
-        std::binary_semaphore started{0};
-        // Explicit release of the simulated slow native operation.
-        std::binary_semaphore proceed{0};
-        // Joins the last service access, including assertion-exit cleanup.
-        std::binary_semaphore finished{0};
-        // Identity of the actual cold-memory worker.
-        std::thread::id thread;
-        ~ServiceCall() {
-          proceed.release();
-          finished.acquire();
-        }
-      } service;
-      service.entry = {
-          .fn =
-              +[](iree_hal_memory_maintenance_entry_t* entry) {
-                auto* service = reinterpret_cast<ServiceCall*>(entry);
-                service->thread = std::this_thread::get_id();
-                service->started.release();
-                service->proceed.acquire();
-                service->finished.release();
-              },
-      };
+      NativeHold hold(this);
+      const auto request = iree_hal_make_pool_reservation_request(4096, 64);
+      uint64_t allocation_value = 1;
+      iree_hal_semaphore_t* allocated_handle = allocated;
+      IREE_ASSERT_OK(iree_hal_queue_alloca(
+          queues_[0], {}, {1, &allocated_handle, &allocation_value}, pool_, 1,
+          &request, cold.out()));
+      hold.WaitEntered();
       struct Callback {
         // Exact other native queue used for a reentrant asynchronous callback.
         iree_hal_queue_t* next_queue;
@@ -1274,27 +1307,201 @@ TEST_F(GpuNativeTest, HostCallbacksProgressWhileColdServiceIsOccupied) {
                        : status;
           },
           &callback);
-      iree_hal_memory_maintenance_enqueue(pool.get()->maintenance,
-                                          &service.entry);
-      service.started.acquire();
       uint64_t value = 1;
       iree_hal_semaphore_t* done_handle = done;
       const uint64_t arguments[4] = {0};
       IREE_ASSERT_OK(iree_hal_queue_host_call(
           queues_[0], {}, {1, &done_handle, &value}, call, arguments, flags));
       callback.called.acquire();
-      EXPECT_NE(callback.thread, service.thread);
+      EXPECT_NE(callback.thread, native_thread_);
       EXPECT_NE(callback.thread, std::this_thread::get_id());
-      if (flags == IREE_HAL_HOST_CALL_FLAG_RELAXED) {
-        IREE_ASSERT_OK(
-            iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(), 0));
-      }
-      // Join service before the ordinary return boundary can retire. The scoped
-      // blocker releases service on assertion exits as well.
+      IREE_ASSERT_OK(
+          iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(), 0));
+      // Both entry and return GPU boundaries have completed while the native
+      // allocation owner is still held. The scoped gate joins on all exits.
     }
     IREE_ASSERT_OK(
-        iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(), 0));
+        iree_hal_semaphore_wait(allocated, 1, iree_infinite_timeout(), 0));
+    iree_hal_buffer_t* cold_handle = cold;
+    IREE_ASSERT_OK(
+        iree_hal_queue_dealloca(queues_[0], {}, {}, 1, &cold_handle));
   }
+}
+
+TEST_F(GpuNativeMemoryProgressTest,
+       RecycledStorageAndGpuConsumerCompleteWhileAllocationIsHeld) {
+  using iree::hal::cts::Ref;
+  Ref<iree_hal_pool_t> finite_pool;
+  CreateFinitePool(finite_pool.out());
+  if (HasFatalFailure()) {
+    return;
+  }
+  const auto request = iree_hal_make_pool_reservation_request(4096, 4);
+  Ref<iree_hal_buffer_t> first;
+  uint64_t one = 1, two = 2, three = 3;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {},
+                                       {1, &semaphores_[0], &one}, finite_pool,
+                                       1, &request, first.out()));
+  Wait(semaphores_[0]);
+  const uint64_t address =
+      iree_hal_buffer_native_binding(first, slot_).device_address;
+  ASSERT_NE(address, 0u);
+
+  Ref<iree_hal_buffer_t> cold;
+  {
+    NativeHold hold(this);
+    IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {},
+                                         {1, &semaphores_[3], &one}, pool_, 1,
+                                         &request, cold.out()));
+    hold.WaitEntered();
+
+    // Logical return and reacquisition require no native allocation or map.
+    // The other queue must observe the same physical range and its history.
+    iree_hal_buffer_t* first_handle = first;
+    IREE_ASSERT_OK(
+        iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[0], &one},
+                                {1, &semaphores_[0], &two}, 1, &first_handle));
+    Ref<iree_hal_buffer_t> reused;
+    IREE_ASSERT_OK(iree_hal_queue_alloca(
+        queues_[1], {1, &semaphores_[0], &two}, {1, &semaphores_[1], &one},
+        finite_pool, 1, &request, reused.out()));
+    Wait(semaphores_[1]);
+    EXPECT_EQ(iree_hal_buffer_native_binding(reused, slot_).device_address,
+              address);
+
+    const uint32_t pattern = 0xCAFE1234;
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        queues_[1], {1, &semaphores_[1], &one}, {1, &semaphores_[1], &two},
+        reused, 0, sizeof(pattern), &pattern, sizeof(pattern), nullptr, 0));
+    uint32_t observed = 0;
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = reused,
+                .target = &observed,
+                .length = sizeof(observed),
+            },
+    };
+    IREE_ASSERT_OK(iree_hal_queue_transfer(
+        queues_[0], {1, &semaphores_[1], &two}, {1, &semaphores_[2], &one}, 1,
+        &download, nullptr));
+    Wait(semaphores_[2]);
+    EXPECT_EQ(observed, pattern);
+
+    iree_hal_buffer_t* reused_handle = reused;
+    IREE_ASSERT_OK(iree_hal_queue_dealloca(
+        queues_[1], {1, &semaphores_[2], &one}, {1, &semaphores_[1], &three}, 1,
+        &reused_handle));
+    Wait(semaphores_[1], three);
+  }
+  Wait(semaphores_[3]);
+  iree_hal_buffer_t* cold_handle = cold;
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[3], &one},
+                                         {1, &semaphores_[3], &two}, 1,
+                                         &cold_handle));
+  Wait(semaphores_[3], two);
+}
+
+TEST_F(GpuNativeMemoryProgressTest,
+       MappingAndGpuConsumerOvertakeRemainingAllocationBatch) {
+  using iree::hal::cts::Ref;
+  const iree_hal_pool_family_access_t access = {
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .interfaces = (UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS) |
+                    (UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE),
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> mapping_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, {1, &access, {}}, &options,
+                                           iree_allocator_system(),
+                                           mapping_pool.out()));
+  auto target_access = access;
+  target_access.interfaces = UINT64_C(1)
+                             << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+  const iree_hal_pool_scope_t scope = {1, &target_access, {}};
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, iree_allocator_system(), &capabilities));
+  ASSERT_NE(capabilities.max_byte_length, 0u);
+  const auto source = iree_hal_pool_query_mapping_requirements(mapping_pool);
+  const uint64_t unit =
+      iree_max(source.minimum_granularity,
+               iree_max(capabilities.mapping_granularity,
+                        capabilities.reservation_granularity));
+  const iree_hal_virtual_buffer_options_t reservation_options = {
+      .byte_length = unit,
+      .mapping_granularity = unit,
+  };
+  Ref<iree_hal_buffer_t> reservation, backing;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      group_, scope, &reservation_options, iree_allocator_system(),
+      reservation.out()));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      mapping_pool, iree_hal_make_pool_reservation_request(unit, unit),
+      iree_infinite_timeout(), backing.out()));
+  iree_hal_memory_scope_t program_scope;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_PROGRAM, access.family}, &program_scope));
+  const iree_hal_memory_mapping_t mapping = {
+      .target = reservation,
+      .scope = program_scope,
+      .target_range = {0, unit},
+      .source = backing,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+  };
+
+  std::array<iree_hal_pool_reservation_request_t, 100> requests;
+  std::array<iree_hal_buffer_t*, 100> cold = {};
+  for (auto& request : requests) {
+    request = iree_hal_make_pool_reservation_request(4096, 64);
+  }
+  uint64_t one = 1, two = 2;
+  {
+    NativeHold hold(this);
+    IREE_ASSERT_OK(
+        iree_hal_queue_alloca(queues_[0], {}, {1, &semaphores_[3], &one}, pool_,
+                              requests.size(), requests.data(), cold.data()));
+    hold.WaitEntered();
+    IREE_ASSERT_OK(iree_hal_queue_map(
+        queues_[1], {}, {1, &semaphores_[0], &one}, 1, &mapping, 0));
+    hold.ReleaseAndHoldNext();
+
+    // Native mapping must have overtaken slab two. Its public completion and
+    // GPU consumers cannot need any further turn on the held allocation owner.
+    Wait(semaphores_[0]);
+    const uint32_t pattern = 0xC0FFEE42;
+    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[1], {1, &semaphores_[0], &one},
+                                       {1, &semaphores_[1], &one}, reservation,
+                                       0, sizeof(pattern), &pattern,
+                                       sizeof(pattern), nullptr, 0));
+    uint32_t observed = 0;
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[0], {1, &semaphores_[1], &one}, {1, &semaphores_[2], &one},
+        reservation, 0, &observed, sizeof(observed), nullptr));
+    Wait(semaphores_[2]);
+    EXPECT_EQ(observed, pattern);
+  }
+  Wait(semaphores_[3]);
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queues_[0], {1, &semaphores_[3], &one},
+                                         {1, &semaphores_[3], &two},
+                                         cold.size(), cold.data()));
+  Wait(semaphores_[3], two);
+  for (auto* buffer : cold) {
+    iree_hal_buffer_release(buffer);
+  }
+  const iree_hal_memory_mapping_t unmap = {
+      .target = reservation,
+      .scope = program_scope,
+      .target_range = {0, unit},
+      .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
+  };
+  IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {}, {1, &semaphores_[0], &two},
+                                    1, &unmap, 0));
+  Wait(semaphores_[0], two);
 }
 
 TEST_F(GpuNativeTest, BatchedMappingsReplaceProtectAndReleaseNativeBacking) {

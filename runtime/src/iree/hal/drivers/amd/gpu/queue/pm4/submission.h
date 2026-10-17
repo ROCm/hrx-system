@@ -32,12 +32,27 @@ typedef struct iree_hal_amd_gpu_pm4_submission_wait_t {
   iree_hal_amd_gpu_pm4_signal_t* signal;
 } iree_hal_amd_gpu_pm4_submission_wait_t;
 
-typedef enum iree_hal_amd_gpu_pm4_submission_kind_e {
-  IREE_HAL_AMD_GPU_PM4_SUBMISSION_BARRIER,
-  IREE_HAL_AMD_GPU_PM4_SUBMISSION_DISPATCH,
-  IREE_HAL_AMD_GPU_PM4_SUBMISSION_TRANSFER,
-  IREE_HAL_AMD_GPU_PM4_SUBMISSION_EXECUTE,
-} iree_hal_amd_gpu_pm4_submission_kind_t;
+typedef enum iree_hal_amd_gpu_pm4_entry_kind_e {
+  IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_DISPATCH,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_TRIM,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_SIGNALS,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_PROGRAM,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_PROGRAM,
+} iree_hal_amd_gpu_pm4_entry_kind_t;
+
+// Typed publication record. Commands and completed native acquisitions use the
+// same FIFO handoff; no allocation callback can invoke a command consumer.
+typedef struct iree_hal_amd_gpu_pm4_entry_t {
+  // Detached before the publisher accesses the enclosing owner.
+  iree_hal_amd_gpu_publication_entry_t publication;
+  // Exact enclosing record and payload interpretation.
+  iree_hal_amd_gpu_pm4_entry_kind_t kind;
+} iree_hal_amd_gpu_pm4_entry_t;
 
 // Captured public operation shared by publication and native retirement.
 // Variable arrays and captured bytes occupy the same CPU allocation. Each
@@ -49,7 +64,7 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   // Number of retained native readers, or UINT32_MAX before admission.
   uint32_t native_wait_count;
   // Captured-work link; the publisher parks unresolved operations separately.
-  iree_hal_amd_gpu_publication_entry_t publication;
+  iree_hal_amd_gpu_pm4_entry_t entry;
   // Borrowed allocation owner, live through the capture's final release.
   iree_hal_amd_gpu_capture_pool_t* pool;
   // Complete owned extent, including unused tail storage, in bytes.
@@ -66,8 +81,6 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   iree_hal_amd_gpu_pm4_barrier_t after;
   // Owned native producer point, if any signal can use native acceleration.
   iree_hal_amd_gpu_pm4_signal_t* signal;
-  // Active payload; barriers have no payload.
-  iree_hal_amd_gpu_pm4_submission_kind_t kind;
   // Optional profile operation occupies the bytes immediately after this
   // header.
   bool profiled;

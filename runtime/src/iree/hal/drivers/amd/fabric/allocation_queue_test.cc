@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amd/fabric/allocation_queue.h"
 
 #include <array>
+#include <functional>
 #include <future>
 #include <thread>
 #include <utility>
@@ -55,6 +56,10 @@ struct NativeAllocator {
   uint32_t allocate_count = 0;
   // Number of native owners consumed by release or rollback.
   uint32_t free_count = 0;
+  // Native operation sequence, observed only after explicit completion.
+  std::vector<char> operations;
+  // Optional native release gate for priority and rollback tests.
+  std::function<void()> before_free;
   // Worker thread observed by each native call.
   std::vector<std::thread::id> threads;
   // Optional deterministic gate at the native allocation boundary.
@@ -76,6 +81,7 @@ amdf_status_t AMDF_CALL NativeAllocator::Allocate(
   auto* self = reinterpret_cast<NativeAllocator*>(scope);
   self->threads.push_back(std::this_thread::get_id());
   ++self->allocate_count;
+  self->operations.push_back('A');
   if (self->entered) {
     self->entered->set_value();
     self->resume.wait();
@@ -108,15 +114,20 @@ amdf_status_t AMDF_CALL NativeAllocator::Query(amdf_memory_t* handle,
 amdf_status_t AMDF_CALL NativeAllocator::Free(amdf_memory_t* handle) {
   auto* memory = reinterpret_cast<NativeMemory*>(handle);
   ++memory->allocator->free_count;
+  memory->allocator->operations.push_back('R');
+  if (memory->allocator->before_free) {
+    memory->allocator->before_free();
+  }
   memory->allocator->threads.push_back(std::this_thread::get_id());
   delete memory;
   return AMDF_STATUS_OK;
 }
 
 struct Acquire {
-  explicit Acquire(NativeAllocator* native) {
+  explicit Acquire(NativeAllocator* native, size_t count = 3)
+      : geometries(count), memories(count) {
     for (size_t i = 0; i < geometries.size(); ++i) {
-      geometries[i] = {&native->options, 65 + 64 * i, 16};
+      geometries[i] = {&native->options, 65 + 64 * (i % 3), 16};
     }
     request.operation.api = &native->api;
     request.operation.event_sink = iree_hal_device_event_sink_discard();
@@ -134,9 +145,9 @@ struct Acquire {
   }
 
   // Captured native geometry, borrowed until completion.
-  std::array<iree_hal_amd_fabric_memory_request_t, 3> geometries;
+  std::vector<iree_hal_amd_fabric_memory_request_t> geometries;
   // Native outputs become owned only after the batch succeeds.
-  std::array<iree_hal_amd_fabric_memory_t, 3> memories = {};
+  std::vector<iree_hal_amd_fabric_memory_t> memories;
   // Production descriptor, submitted without any callback executor.
   iree_hal_amd_fabric_memory_acquire_request_t request = {};
   // Explicit host observation of terminal acquisition.
@@ -250,6 +261,75 @@ TEST_F(AllocationQueueTest, HeldNativeAllocationDoesNotBlockSubmission) {
   Release(second.memories.data(), second.memories.size());
   EXPECT_EQ(native_.allocate_count, 6u);
   EXPECT_EQ(native_.free_count, 6u);
+}
+
+TEST_F(AllocationQueueTest, ReleaseOvertakesRemainingHundredAcquisitions) {
+  Acquire retired(&native_);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &retired.request);
+  IREE_ASSERT_OK(retired.completed.get_future().get());
+
+  std::promise<void> entered;
+  std::promise<void> resume;
+  native_.entered = &entered;
+  native_.resume = resume.get_future().share();
+  Acquire growing(&native_, 100);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &growing.request);
+  entered.get_future().get();
+  std::promise<void> released;
+  iree_hal_amd_fabric_memory_release_request_t release = {
+      .operation =
+          {
+              .api = &native_.api,
+              .event_sink = iree_hal_device_event_sink_discard(),
+          },
+      .count = retired.memories.size(),
+      .memories = retired.memories.data(),
+      .completion =
+          {
+              .fn =
+                  [](void* user_data) {
+                    static_cast<std::promise<void>*>(user_data)->set_value();
+                  },
+              .user_data = &released,
+          },
+  };
+  iree_hal_amd_fabric_allocation_queue_release_memory(queue_, &release);
+  resume.set_value();
+  released.get_future().get();
+  IREE_ASSERT_OK(growing.completed.get_future().get());
+  ASSERT_EQ(native_.operations.size(), 106u);
+  EXPECT_EQ(std::vector<char>(native_.operations.begin(),
+                              native_.operations.begin() + 8),
+            (std::vector<char>{'A', 'A', 'A', 'A', 'R', 'R', 'R', 'A'}));
+  Release(growing.memories.data(), growing.memories.size());
+}
+
+TEST_F(AllocationQueueTest, RollbackCompletesBeforeLaterAcquisition) {
+  native_.fail_on_allocate = 3;
+  std::promise<void> entered;
+  std::promise<void> resume;
+  const auto resumed = resume.get_future().share();
+  native_.before_free = [&] {
+    if (native_.free_count == 1) {
+      entered.set_value();
+      resumed.wait();
+    }
+  };
+  Acquire failed(&native_, 100);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &failed.request);
+  entered.get_future().get();
+  Acquire later(&native_);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &later.request);
+  resume.set_value();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        failed.completed.get_future().get());
+  IREE_ASSERT_OK(later.completed.get_future().get());
+  EXPECT_EQ(native_.operations,
+            (std::vector<char>{'A', 'A', 'A', 'R', 'R', 'A', 'A', 'A'}));
+  for (const auto& memory : failed.memories) {
+    EXPECT_EQ(memory.handle, nullptr);
+  }
+  Release(later.memories.data(), later.memories.size());
 }
 
 TEST_F(AllocationQueueTest, SlabsAndPrivateBackingShareOneNativeWorker) {

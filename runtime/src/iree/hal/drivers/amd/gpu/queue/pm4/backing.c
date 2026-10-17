@@ -8,13 +8,9 @@
 
 #include "iree/hal/drivers/amd/status.h"
 
-iree_status_t iree_hal_amd_gpu_pm4_backing_allocate(
+static iree_status_t iree_hal_amd_gpu_pm4_backing_query_address(
     const iree_hal_amd_gpu_context_t* context,
-    const iree_hal_amd_fabric_memory_options_t* options, uint64_t length,
-    uint64_t alignment, iree_hal_amd_fabric_memory_t* memory,
-    uint64_t* out_address) {
-  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocate(
-      context->api, options, length, alignment, context->event_sink, memory));
+    const iree_hal_amd_fabric_memory_t* memory, uint64_t* out_address) {
   if (memory->host_cacheability != IREE_HAL_HOST_CACHEABILITY_WRITE_BACK) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -28,42 +24,85 @@ iree_status_t iree_hal_amd_gpu_pm4_backing_allocate(
              : iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_pm4_argument_storage_allocate(
-    const iree_hal_amd_gpu_context_t* context,
-    const iree_hal_amd_fabric_memory_options_t* options, uint64_t capacity,
-    uint64_t begin, iree_allocator_t host_allocator,
+iree_status_t iree_hal_amd_gpu_pm4_backing_allocate(
+    iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_fabric_memory_options_t* options, uint64_t length,
+    uint64_t alignment, iree_hal_amd_fabric_memory_t* memory,
+    uint64_t* out_address) {
+  const iree_hal_amd_fabric_memory_request_t request = {
+      .options = options, .byte_length = length, .alignment = alignment};
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_context_acquire_memory_sync(
+      context, 1, &request, memory));
+  return iree_hal_amd_gpu_pm4_backing_query_address(context, memory,
+                                                    out_address);
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_argument_storage_prepare(
+    uint64_t capacity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_argument_storage_t** out_storage) {
   *out_storage = NULL;
   iree_hal_amd_gpu_pm4_argument_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*storage),
                                              (void**)&storage));
+  storage->host_allocator = host_allocator;
   storage->capacity = capacity;
+  *out_storage = storage;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_argument_storage_initialize(
+    iree_hal_amd_gpu_context_t* context, uint64_t begin,
+    iree_hal_amd_gpu_pm4_argument_storage_t* storage) {
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_backing_query_address(
+      context, &storage->memory, &storage->address));
   storage->begin = begin;
   storage->end = begin;
-  iree_status_t status = iree_hal_amd_gpu_pm4_backing_allocate(
-      context, options, capacity, capacity, &storage->memory,
-      &storage->address);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_argument_storage_allocate(
+    iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_fabric_memory_options_t* options, uint64_t capacity,
+    uint64_t begin, iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_pm4_argument_storage_t** out_storage) {
+  *out_storage = NULL;
+  iree_hal_amd_gpu_pm4_argument_storage_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_argument_storage_prepare(
+      capacity, host_allocator, &storage));
+  const iree_hal_amd_fabric_memory_request_t request = {
+      .options = options, .byte_length = capacity, .alignment = capacity};
+  iree_status_t status = iree_hal_amd_gpu_context_acquire_memory_sync(
+      context, 1, &request, &storage->memory);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_pm4_argument_storage_initialize(context, begin,
+                                                              storage);
+  }
   if (iree_status_is_ok(status)) {
     *out_storage = storage;
   } else {
-    iree_hal_amd_gpu_pm4_argument_storage_free(context, host_allocator,
-                                               storage);
+    iree_hal_amd_gpu_pm4_argument_storage_free(context, storage);
   }
   return status;
 }
 
-void iree_hal_amd_gpu_pm4_argument_storage_free(
-    const iree_hal_amd_gpu_context_t* context, iree_allocator_t host_allocator,
-    iree_hal_amd_gpu_pm4_argument_storage_t* storage) {
-  iree_hal_amd_fabric_memory_deinitialize(context->api, context->event_sink,
-                                          &storage->memory);
-  iree_allocator_free(host_allocator, storage);
+static void iree_hal_amd_gpu_pm4_argument_storage_released(void* user_data) {
+  iree_hal_amd_gpu_pm4_argument_storage_t* storage = user_data;
+  iree_allocator_free(storage->host_allocator, storage);
 }
 
-iree_status_t iree_hal_amd_gpu_pm4_signal_storage_allocate(
-    const iree_hal_amd_gpu_context_t* context,
-    const iree_hal_amd_fabric_memory_options_t* options, uint32_t capacity,
-    uint32_t queue_count, iree_allocator_t host_allocator,
+void iree_hal_amd_gpu_pm4_argument_storage_free(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_pm4_argument_storage_t* storage) {
+  iree_hal_amd_gpu_context_release_memory(
+      context, 1, &storage->memory,
+      (iree_hal_slab_release_callback_t){
+          .fn = iree_hal_amd_gpu_pm4_argument_storage_released,
+          .user_data = storage},
+      &storage->release);
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_signal_storage_prepare(
+    uint32_t capacity, uint32_t queue_count, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_pm4_signal_storage_t** out_storage) {
   *out_storage = NULL;
   iree_hal_amd_gpu_pm4_signal_storage_t* storage = NULL;
@@ -76,30 +115,72 @@ iree_status_t iree_hal_amd_gpu_pm4_signal_storage_allocate(
                         &frontiers_offset)));
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, total_size, (void**)&storage));
+  storage->host_allocator = host_allocator;
+  storage->capacity = capacity;
+  storage->queue_count = queue_count;
+  storage->signals = (void*)((uint8_t*)storage + signals_offset);
+  storage->frontiers = (void*)((uint8_t*)storage + frontiers_offset);
+  *out_storage = storage;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_signal_storage_initialize(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_pm4_signal_pool_t* pool,
+    iree_hal_amd_gpu_pm4_signal_storage_t* storage) {
   uint64_t address = 0;
-  iree_status_t status = iree_hal_amd_gpu_pm4_backing_allocate(
-      context, options, capacity * sizeof(uint64_t), 8, &storage->memory,
-      &address);
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_backing_query_address(
+      context, &storage->memory, &address));
+  iree_hal_amd_gpu_pm4_signal_block_initialize(
+      pool, context, (uint64_t*)storage->memory.contents.data, address,
+      storage->signals, storage->capacity, storage->queue_count,
+      storage->frontiers, &storage->block);
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_gpu_pm4_signal_storage_allocate(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_pm4_signal_pool_t* pool,
+    const iree_hal_amd_fabric_memory_options_t* options, uint32_t capacity,
+    uint32_t queue_count, iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_pm4_signal_storage_t** out_storage) {
+  *out_storage = NULL;
+  iree_hal_amd_gpu_pm4_signal_storage_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_signal_storage_prepare(
+      capacity, queue_count, host_allocator, &storage));
+  const iree_hal_amd_fabric_memory_request_t request = {
+      .options = options,
+      .byte_length = (uint64_t)capacity * sizeof(uint64_t),
+      .alignment = 8};
+  iree_status_t status = iree_hal_amd_gpu_context_acquire_memory_sync(
+      context, 1, &request, &storage->memory);
   if (iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(
-        context, (uint64_t*)storage->memory.contents.data, address,
-        (void*)((uint8_t*)storage + signals_offset), capacity, queue_count,
-        (void*)((uint8_t*)storage + frontiers_offset),
-        (iree_hal_amd_gpu_pm4_signal_pool_notification_t){0}, &storage->pool);
+    status =
+        iree_hal_amd_gpu_pm4_signal_storage_initialize(context, pool, storage);
+  }
+  if (iree_status_is_ok(status)) {
     *out_storage = storage;
   } else {
-    iree_hal_amd_fabric_memory_deinitialize(context->api, context->event_sink,
-                                            &storage->memory);
-    iree_allocator_free(host_allocator, storage);
+    iree_hal_amd_gpu_pm4_signal_storage_free(context, storage);
   }
   return status;
 }
 
+static void iree_hal_amd_gpu_pm4_signal_storage_released(void* user_data) {
+  iree_hal_amd_gpu_pm4_signal_storage_t* storage = user_data;
+  iree_allocator_free(storage->host_allocator, storage);
+}
+
 void iree_hal_amd_gpu_pm4_signal_storage_free(
-    const iree_hal_amd_gpu_context_t* context, iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_context_t* context,
     iree_hal_amd_gpu_pm4_signal_storage_t* storage) {
-  iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&storage->pool);
-  iree_hal_amd_fabric_memory_deinitialize(context->api, context->event_sink,
-                                          &storage->memory);
-  iree_allocator_free(host_allocator, storage);
+  if (storage->block.pool) {
+    iree_hal_amd_gpu_pm4_signal_block_deinitialize(&storage->block);
+  }
+  iree_hal_amd_gpu_context_release_memory(
+      context, 1, &storage->memory,
+      (iree_hal_slab_release_callback_t){
+          .fn = iree_hal_amd_gpu_pm4_signal_storage_released,
+          .user_data = storage},
+      &storage->release);
 }

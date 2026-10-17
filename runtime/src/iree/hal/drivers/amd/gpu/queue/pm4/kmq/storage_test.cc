@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "iree/hal/drivers/amd/fabric/fabric.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -179,12 +180,23 @@ class KernelStorageTest : public ::testing::Test {
     api_.host_mapping_query_info = NativeQueue::MappingInfo;
     api_.host_mapping_destroy = NativeQueue::Unmap;
     api_.memory_destroy = NativeQueue::Free;
+    api_.instance_destroy = [](amdf_instance_t*) { return AMDF_STATUS_OK; };
     gpu_.kernel_queue_create = NativeQueue::Create;
     gpu_.kernel_queue_submit = NativeQueue::Submit;
     context_.api = &api_;
     context_.gpu = &gpu_;
     context_.device = reinterpret_cast<amdf_device_t*>(&native_);
     context_.kernel_notification.type = AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT;
+    IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
+                                         sizeof(*fabric_),
+                                         reinterpret_cast<void**>(&fabric_)));
+    iree_atomic_ref_count_init(&fabric_->ref_count);
+    iree_slim_mutex_initialize(&fabric_->allocation_mutex);
+    fabric_->host_allocator = iree_allocator_system();
+    fabric_->api = &api_;
+    context_.fabric = fabric_;
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
     options_.scope = reinterpret_cast<amdf_memory_scope_t*>(&native_);
     options_.profile.allocation.byte_length_granularity = 64;
     options_.profile.allocation.maximum_byte_length = sizeof(native_.words);
@@ -196,6 +208,8 @@ class KernelStorageTest : public ::testing::Test {
       EXPECT_EQ(iree_hal_amd_gpu_pm4_kmq_storage_free(storage_),
                 AMDF_STATUS_OK);
     }
+    iree_hal_amd_gpu_context_deinitialize_memory(&context_);
+    iree_hal_amd_fabric_release(fabric_);
   }
   iree_status_t Allocate() {
     return iree_hal_amd_gpu_pm4_kmq_storage_allocate(
@@ -219,6 +233,8 @@ class KernelStorageTest : public ::testing::Test {
   amdf_api_t api_ = {};
   // Protocol-specific create and submit calls.
   amdf_gpu_api_t gpu_ = {};
+  // Shared native allocation owner using the real typed work queue.
+  iree_hal_amd_fabric_t* fabric_ = nullptr;
   // Borrowed device facts and notification destination.
   iree_hal_amd_gpu_context_t context_ = {};
   // Coherent executable memory policy.
@@ -329,6 +345,7 @@ TEST_F(KernelStorageTest, CleanupJoinsAcceptedTailBeforeReleasingCommandBytes) {
   native_.calls.clear();
   EXPECT_EQ(iree_hal_amd_gpu_pm4_kmq_storage_free(storage_), AMDF_STATUS_OK);
   storage_ = nullptr;
+  iree_hal_amd_gpu_context_join_memory(&context_);
   EXPECT_EQ(native_.waited, 17u);
   EXPECT_EQ(native_.calls,
             (std::vector<std::string>{"wait", "destroy", "unmap", "free"}));
@@ -345,6 +362,7 @@ TEST_F(KernelStorageTest, PartialConstructionPreservesItsCleanupOwner) {
     native_.fail_operation.clear();
     EXPECT_EQ(iree_hal_amd_gpu_pm4_kmq_storage_free(storage_), AMDF_STATUS_OK);
     storage_ = nullptr;
+    iree_hal_amd_gpu_context_join_memory(&context_);
   }
 }
 

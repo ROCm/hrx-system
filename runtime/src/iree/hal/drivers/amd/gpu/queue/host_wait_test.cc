@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "iree/async/proactor_platform.h"
-#include "iree/hal/memory/maintenance_thread.h"
 #include "iree/hal/utils/host_semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -23,12 +22,11 @@
 namespace {
 
 using Wait = iree_hal_amd_gpu_host_wait_t;
-using Entry = iree_hal_memory_maintenance_entry_t;
 
 struct Completion {
   // Joins the callback's final access to this test-owned result.
   std::binary_semaphore done{0};
-  // Owned terminal status transferred by the actual service callback.
+  // Owned terminal status transferred by the actual tracker callback.
   iree_status_t status = iree_ok_status();
   // Executor identity, published before done.
   std::thread::id thread;
@@ -46,29 +44,13 @@ struct Completion {
   }
 };
 
-// Controls an external cold call, without changing the service implementation.
-struct Gate : Entry {
-  // Signals that the service has entered the controlled call.
-  std::binary_semaphore entered{0};
-  // Controller-owned permission to return.
-  std::binary_semaphore resume{0};
-
-  Gate() {
-    fn = [](Entry* entry) {
-      auto& self = *static_cast<Gate*>(entry);
-      self.entered.release();
-      self.resume.acquire();
-    };
-  }
-};
-
 // Observes actual semaphore/tracker destruction through the allocator boundary.
 struct Allocator {
   // Controlled allocation failure before the wait accepts ownership.
   bool fail_allocations = false;
   // Number of allocations released by the owner under test.
   std::atomic<uint32_t> frees{0};
-  // Final release thread, read only after joining the service.
+  // Final release thread, read only after the callback joins.
   std::thread::id thread;
 
   iree_allocator_t get() { return {this, Control}; }
@@ -119,18 +101,9 @@ class HostWaitTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
-    IREE_ASSERT_OK(iree_hal_memory_maintenance_thread_create(
-        {}, iree_allocator_system(), &service_));
     iree_async_semaphore_wait_context_initialize(&context_);
-    iree_hal_memory_maintenance_call(
-        service_,
-        [](void* data) {
-          *static_cast<std::thread::id*>(data) = std::this_thread::get_id();
-        },
-        &service_thread_);
   }
   void TearDown() override {
-    iree_hal_memory_maintenance_release(service_);
     iree_async_semaphore_wait_context_deinitialize(&context_);
     for (auto* semaphore : semaphores_) {
       iree_hal_semaphore_release(semaphore);
@@ -147,35 +120,30 @@ class HostWaitTest : public ::testing::Test {
   iree_status_t Begin(iree_hal_semaphore_list_t waits, Completion& completion,
                       Wait& wait,
                       iree_allocator_t allocator = iree_allocator_system()) {
-    return iree_hal_amd_gpu_host_wait_begin(&context_, service_, waits,
-                                            Completion::Run, &completion,
-                                            allocator, &wait);
+    return iree_hal_amd_gpu_host_wait_begin(&context_, waits, Completion::Run,
+                                            &completion, allocator, &wait);
   }
   void Check(Completion& completion, iree_status_code_t code = IREE_STATUS_OK) {
     completion.done.acquire();
     EXPECT_EQ(iree_status_code(completion.status), code);
     EXPECT_EQ(completion.calls.load(), 1u);
-    EXPECT_EQ(completion.thread, service_thread_);
   }
-  // Existing service executor, shared by waits and cold work.
-  iree_hal_memory_maintenance_t* service_ = nullptr;
   // Platform proactor borrowed by host semaphores; no polling thread is needed.
   iree_async_proactor_t* proactor_ = nullptr;
   // Queue-owned cancellation association, shared by its pending waits.
   iree_async_semaphore_wait_context_t context_;
-  // Identity of the actual service worker.
-  std::thread::id service_thread_;
   // Test-owned references independent of the wait tracker's references.
   std::vector<iree_hal_semaphore_t*> semaphores_;
 };
 
-TEST_F(HostWaitTest, AlreadyReachedWaitRunsOnService) {
+TEST_F(HostWaitTest, AlreadyReachedWaitCompletesInline) {
   iree_hal_semaphore_t* semaphore = Semaphore(7);
   uint64_t value = 7;
   Completion completion;
   Wait wait;
   IREE_ASSERT_OK(Begin({1, &semaphore, &value}, completion, wait));
   Check(completion);
+  EXPECT_EQ(completion.thread, std::this_thread::get_id());
 }
 
 TEST_F(HostWaitTest, InlineTrackerReusesExactStorageAfterFinalization) {
@@ -313,40 +281,52 @@ TEST_F(HostWaitTest, AllocationFailureDoesNotAcceptOrRetain) {
   Wait wait;
   Allocator allocator;
   allocator.fail_allocations = true;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      iree_hal_amd_gpu_host_wait_begin(&context_, service_,
-                                       {1, &semaphore, &value}, Completion::Run,
-                                       &completion, allocator.get(), &wait));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_amd_gpu_host_wait_begin(
+                            &context_, {1, &semaphore, &value}, Completion::Run,
+                            &completion, allocator.get(), &wait));
   IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
   EXPECT_EQ(completion.calls.load(), 0u);
   EXPECT_EQ(wait.operation.base.next, nullptr);
 }
 
-TEST_F(HostWaitTest, LastSemaphoreAndTrackerReferencesReleaseOnService) {
+TEST_F(HostWaitTest, LastReferencesReleaseBeforeTerminalCallback) {
   Allocator semaphore_allocator;
   Allocator tracker_allocator;
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_host_semaphore_create(
       proactor_, 1, semaphore_allocator.get(), &semaphore));
-  Gate gate;
-  iree_hal_memory_maintenance_enqueue(service_, &gate);
-  gate.entered.acquire();
   uint64_t value = 1;
   Completion completion;
   Wait wait;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
-      &context_, service_, {1, &semaphore, &value}, Completion::Run,
-      &completion, tracker_allocator.get(), &wait));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_prepare(
+      &context_, {1, &semaphore, &value}, Completion::Run, &completion,
+      tracker_allocator.get(), &wait));
   iree_hal_semaphore_release(semaphore);
   EXPECT_EQ(semaphore_allocator.frees.load(), 0u);
   EXPECT_EQ(tracker_allocator.frees.load(), 0u);
-  gate.resume.release();
+  iree_hal_amd_gpu_host_wait_register(&wait);
   Check(completion);
   EXPECT_EQ(semaphore_allocator.frees.load(), 1u);
-  EXPECT_EQ(semaphore_allocator.thread, service_thread_);
+  EXPECT_EQ(semaphore_allocator.thread, std::this_thread::get_id());
   EXPECT_EQ(tracker_allocator.frees.load(), 1u);
-  EXPECT_EQ(tracker_allocator.thread, service_thread_);
+  EXPECT_EQ(tracker_allocator.thread, std::this_thread::get_id());
+  EXPECT_EQ(completion.thread, std::this_thread::get_id());
+}
+
+TEST_F(HostWaitTest, CancellationBetweenPreparationAndRegistration) {
+  auto* semaphore = Semaphore();
+  uint64_t value = 1;
+  Completion completion;
+  Wait wait;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_prepare(
+      &context_, {1, &semaphore, &value}, Completion::Run, &completion,
+      iree_allocator_system(), &wait));
+  iree_hal_amd_gpu_host_wait_cancel(&wait);
+  EXPECT_EQ(completion.calls.load(), 0u);
+  iree_hal_amd_gpu_host_wait_register(&wait);
+  Check(completion, IREE_STATUS_CANCELLED);
+  EXPECT_EQ(completion.thread, std::this_thread::get_id());
 }
 
 TEST_F(HostWaitTest, TerminalCallbackCanFreeCaptureImmediately) {
@@ -367,7 +347,7 @@ TEST_F(HostWaitTest, TerminalCallbackCanFreeCaptureImmediately) {
     Completion completion;
     auto* capture = new Capture{{}, semaphore, value, &completion};
     IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
-        &context_, service_, {1, &capture->semaphore, &capture->value},
+        &context_, {1, &capture->semaphore, &capture->value},
         [](void* user_data, iree_status_t status) {
           auto* capture = static_cast<Capture*>(user_data);
           auto* completion = capture->completion;
@@ -435,11 +415,119 @@ TEST_F(HostWaitTest, ConcurrentCancellationAndSignalHaveOneTerminalOwner) {
     const auto code = iree_status_code(completion.status);
     EXPECT_TRUE(code == IREE_STATUS_OK || code == IREE_STATUS_CANCELLED);
     EXPECT_EQ(completion.calls.load(), 1u);
-    EXPECT_EQ(completion.thread, service_thread_);
     EXPECT_EQ(storage.length(), 0u);
     finish.arrive_and_wait();
   }
   producer.join();
+}
+
+struct WaitCapture {
+  // Placed cancellation/tracker state may disappear from its terminal callback.
+  iree_hal_amd_gpu_host_wait_entry_t entry;
+  // Borrowed dependency retained independently by the fixture.
+  iree_hal_semaphore_t* semaphore;
+  // Stable operand until the tracker returns capture ownership.
+  uint64_t value = 1;
+  // External observation survives capture reclamation.
+  Completion* completion;
+
+  static void Complete(void* user_data, iree_status_t status) {
+    auto* capture = static_cast<WaitCapture*>(user_data);
+    Completion* completion = capture->completion;
+    delete capture;
+    Completion::Run(completion, status);
+  }
+};
+
+TEST_F(HostWaitTest, SetDetachesCancelledEntriesBeforeReleasingCaptures) {
+  iree_hal_amd_gpu_host_wait_set_t set;
+  iree_hal_amd_gpu_host_wait_set_initialize(&context_, &set);
+  std::array<Completion, 3> completions;
+  std::array<iree_hal_semaphore_t*, 3> semaphores;
+  for (size_t i = 0; i < completions.size(); ++i) {
+    semaphores[i] = Semaphore();
+    auto* capture = new WaitCapture{
+        .semaphore = semaphores[i],
+        .completion = &completions[i],
+    };
+    IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_set_begin(
+        &set, {1, &capture->semaphore, &capture->value}, WaitCapture::Complete,
+        capture, iree_allocator_system(), &capture->entry));
+  }
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[1], 1, nullptr));
+  Check(completions[1]);
+  iree_hal_amd_gpu_host_wait_set_cancel(&set);
+  Check(completions[0], IREE_STATUS_CANCELLED);
+  Check(completions[2], IREE_STATUS_CANCELLED);
+  EXPECT_EQ(set.head, nullptr);
+  iree_hal_amd_gpu_host_wait_set_deinitialize(&set);
+}
+
+TEST_F(HostWaitTest, CancelledSetCompletesLaterEnrollmentInline) {
+  iree_hal_amd_gpu_host_wait_set_t set;
+  iree_hal_amd_gpu_host_wait_set_initialize(&context_, &set);
+  iree_hal_amd_gpu_host_wait_set_cancel(&set);
+  Completion completion;
+  auto* capture =
+      new WaitCapture{.semaphore = Semaphore(), .completion = &completion};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_set_begin(
+      &set, {1, &capture->semaphore, &capture->value}, WaitCapture::Complete,
+      capture, iree_allocator_system(), &capture->entry));
+  Check(completion, IREE_STATUS_CANCELLED);
+  EXPECT_EQ(completion.thread, std::this_thread::get_id());
+  iree_hal_amd_gpu_host_wait_set_deinitialize(&set);
+}
+
+TEST_F(HostWaitTest, CancellationCallbackMayReenterSet) {
+  iree_hal_amd_gpu_host_wait_set_t set;
+  iree_hal_amd_gpu_host_wait_set_initialize(&context_, &set);
+  iree_hal_amd_gpu_host_wait_entry_t entry;
+  auto* semaphore = Semaphore();
+  uint64_t value = 1;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_set_begin(
+      &set, {1, &semaphore, &value},
+      [](void* user_data, iree_status_t status) {
+        auto* set = static_cast<iree_hal_amd_gpu_host_wait_set_t*>(user_data);
+        EXPECT_EQ(iree_status_code(status), IREE_STATUS_CANCELLED);
+        iree_status_free(status);
+        iree_hal_amd_gpu_host_wait_set_cancel(set);
+      },
+      &set, iree_allocator_system(), &entry));
+  iree_hal_amd_gpu_host_wait_set_cancel(&set);
+  iree_hal_amd_gpu_host_wait_set_deinitialize(&set);
+}
+
+TEST_F(HostWaitTest, ConcurrentEnrollmentCancellationAndSignalReclaimOnce) {
+  for (size_t i = 0; i < 256; ++i) {
+    iree_hal_amd_gpu_host_wait_set_t set;
+    iree_hal_amd_gpu_host_wait_set_initialize(&context_, &set);
+    auto* semaphore = Semaphore();
+    Completion completion;
+    auto* capture =
+        new WaitCapture{.semaphore = semaphore, .completion = &completion};
+    std::barrier<> start(3);
+    std::thread registration([&] {
+      start.arrive_and_wait();
+      IREE_CHECK_OK(iree_hal_amd_gpu_host_wait_set_begin(
+          &set, {1, &capture->semaphore, &capture->value},
+          WaitCapture::Complete, capture, iree_allocator_system(),
+          &capture->entry));
+    });
+    std::thread cancellation([&] {
+      start.arrive_and_wait();
+      iree_hal_amd_gpu_host_wait_set_cancel(&set);
+    });
+    start.arrive_and_wait();
+    IREE_CHECK_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
+    registration.join();
+    cancellation.join();
+    completion.done.acquire();
+    const auto code = iree_status_code(completion.status);
+    EXPECT_TRUE(code == IREE_STATUS_OK || code == IREE_STATUS_CANCELLED);
+    EXPECT_EQ(completion.calls.load(), 1u);
+    EXPECT_EQ(set.head, nullptr);
+    iree_hal_amd_gpu_host_wait_set_deinitialize(&set);
+  }
 }
 
 }  // namespace

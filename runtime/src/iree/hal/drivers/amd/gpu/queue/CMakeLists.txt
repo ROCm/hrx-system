@@ -23,11 +23,35 @@ iree_cc_library(
     iree::async::util::semaphore_wait
     iree::base
     iree::base::internal::arena
+    iree::base::internal::atomic_slist
     iree::hal
     iree::hal::drivers::amd::fabric::transient_buffer
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::profile
-    iree::hal::memory::maintenance
+    iree::hal::drivers::amd::gpu::publication
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    memory_mapping
+  HDRS
+    "memory_mapping.h"
+  SRCS
+    "memory_mapping.c"
+  DEPS
+    ::host_wait
+    iree::async
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::base::internal::arena
+    iree::base::internal::atomic_slist
+    iree::hal
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::profile
+    iree::hal::drivers::amd::gpu::publication
   PUBLIC
 )
 endif()
@@ -51,11 +75,36 @@ iree_cc_library(
     iree::hal::drivers::amd::fabric::file_transfer
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::profile
-    iree::hal::memory::maintenance
   PUBLIC
 )
 endif()
 
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    allocation_test
+  SRCS
+    "allocation_test.cc"
+  DEPS
+    ::allocation
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::publication
+    iree::hal::memory::cpu_slab_provider
+    iree::hal::memory::passthrough_pool
+    iree::hal::memory::slab_provider
+    iree::hal::testing::deferred_pool
+    iree::hal::testing::mock_device
+    iree::hal::utils::host_semaphore
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     host_call
@@ -69,9 +118,53 @@ iree_cc_library(
     iree::base
     iree::hal
     iree::hal::drivers::amd::gpu::context
-    iree::hal::memory::maintenance
   PUBLIC
 )
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    host_call_test
+  SRCS
+    "host_call_test.cc"
+  DEPS
+    ::capture_pool
+    ::host_call
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::utils::host_semaphore
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    file_transfer_test
+  SRCS
+    "file_transfer_test.cc"
+  DEPS
+    ::capture_pool
+    ::file_transfer
+    iree::async
+    iree::async::platform
+    iree::async::util::semaphore_wait
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::testing::mapped_transfer_buffer
+    iree::hal::utils::files
+    iree::hal::utils::host_semaphore
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
 
 iree_cc_library(
   NAME
@@ -84,8 +177,9 @@ iree_cc_library(
     iree::async
     iree::async::util::semaphore_wait
     iree::base
+    iree::base::internal
+    iree::base::threading
     iree::hal
-    iree::hal::memory::maintenance
   PUBLIC
 )
 
@@ -101,8 +195,6 @@ iree_cc_test(
     iree::async::util::semaphore_wait
     iree::base
     iree::hal
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::hal::utils::host_semaphore
     iree::testing::gtest
     iree::testing::gtest_main
@@ -120,52 +212,7 @@ iree_cc_binary_benchmark(
     iree::async::util::semaphore_wait
     iree::base
     iree::hal
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::hal::utils::host_semaphore
-    iree::testing::benchmark_main
-    iree::third_party::google_benchmark
-  TESTONLY
-)
-
-iree_cc_library(
-  NAME
-    continuation
-  HDRS
-    "continuation.h"
-  SRCS
-    "continuation.c"
-  DEPS
-    iree::base
-    iree::base::threading
-    iree::hal::memory::maintenance
-  PUBLIC
-)
-
-iree_cc_test(
-  NAME
-    continuation_test
-  SRCS
-    "continuation_test.cc"
-  DEPS
-    ::continuation
-    iree::base
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-iree_cc_binary_benchmark(
-  NAME
-    continuation_benchmark
-  SRCS
-    "continuation_benchmark.cc"
-  DEPS
-    ::continuation
-    iree::base
-    iree::hal::memory::maintenance
-    iree::hal::memory::maintenance_thread
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
   TESTONLY

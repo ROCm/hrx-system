@@ -41,6 +41,7 @@ iree_cc_test(
     ::storage
     amdf::headers
     iree::base
+    iree::hal::drivers::amd::fabric
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::queue::pm4::ring

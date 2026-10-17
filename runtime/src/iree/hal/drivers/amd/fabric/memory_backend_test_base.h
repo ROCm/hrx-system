@@ -394,6 +394,9 @@ struct FakeNative {
       EXPECT_EQ(info->byte_length % 12288, 0u);
     }
     const uint64_t identity = ++self->create_count;
+    if (self->before_create) {
+      self->before_create();
+    }
     if (self->create_failure != AMDF_STATUS_OK) {
       return self->create_failure;
     }
@@ -420,6 +423,9 @@ struct FakeNative {
   static amdf_status_t AMDF_CALL MemoryDestroy(amdf_memory_t* handle) {
     auto* memory = reinterpret_cast<Memory*>(handle);
     auto* self = memory->owner;
+    if (self->before_destroy) {
+      self->before_destroy();
+    }
     if (!memory->registered) {
       iree_allocator_free_aligned(iree_allocator_system(), memory->data);
     }
@@ -670,7 +676,11 @@ struct FakeNative {
   // Exact permissions the device profile and allocation must receive.
   amdf_memory_access_t device_access =
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
-  // Native allocation attempts observed across the maintenance handoff.
+  // Optional native allocation gate, established before submission.
+  std::function<void()> before_create;
+  // Optional native release gate, established before submission.
+  std::function<void()> before_destroy;
+  // Native allocation attempts observed across allocation-worker completion.
   std::atomic<int> create_count{0};
   // Native allocation failure after the pool has selected its fixed contract.
   amdf_status_t create_failure = AMDF_STATUS_OK;

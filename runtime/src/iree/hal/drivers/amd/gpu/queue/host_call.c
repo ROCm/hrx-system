@@ -17,8 +17,8 @@ enum {
 };
 
 typedef struct iree_hal_amd_gpu_host_call_t {
-  // Service continuation for native mappings or the return cache boundary.
-  iree_hal_memory_maintenance_entry_t entry;
+  // One terminal-chain reference plus each active boundary producer's borrow.
+  iree_atomic_ref_count_t ref_count;
   // Borrowed queue-owned services, dominated by the retained device.
   const iree_hal_amd_gpu_host_call_executor_t* executor;
   // Retained parent through the final callback and native boundary.
@@ -33,16 +33,17 @@ typedef struct iree_hal_amd_gpu_host_call_t {
   uint64_t arguments[4];
   // Admitted public ordering and cache hints.
   iree_hal_host_call_flags_t flags;
-  // Mapping batches execute on service and retain buffers through return.
-  bool mapping;
   // Owned private timeline for entry, callback completion, and return.
   iree_hal_semaphore_t* semaphore;
   // One active point, owned by its callback after dispatch.
   iree_async_semaphore_timepoint_t timepoint;
 } iree_hal_amd_gpu_host_call_t;
 
-static void iree_hal_amd_gpu_host_call_free(
+static void iree_hal_amd_gpu_host_call_join(
     iree_hal_amd_gpu_host_call_t* operation) {
+  if (iree_atomic_ref_count_dec(&operation->ref_count) != 1) {
+    return;
+  }
   iree_hal_device_t* device = operation->device;
   iree_hal_resource_release(operation->call.resource);
   iree_hal_semaphore_list_release(operation->signals);
@@ -55,8 +56,8 @@ static void iree_hal_amd_gpu_host_call_free(
 
 static void iree_hal_amd_gpu_host_call_finish(
     iree_hal_amd_gpu_host_call_t* operation, iree_status_t status) {
-  // Mapping buffers remain protected through the final cache boundary. Public
-  // completion permits immediately destroying their source pools.
+  // Callback resources end before public completion. An outstanding native
+  // producer borrow may still protect the capture's semaphore-list storage.
   iree_hal_resource_release(operation->call.resource);
   operation->call.resource = NULL;
   if (iree_status_is_ok(status)) {
@@ -69,7 +70,7 @@ static void iree_hal_amd_gpu_host_call_finish(
                                            operation->device, status);
     iree_hal_semaphore_list_fail(operation->signals, status);
   }
-  iree_hal_amd_gpu_host_call_free(operation);
+  iree_hal_amd_gpu_host_call_join(operation);
 }
 
 static void iree_hal_amd_gpu_host_call_retire(
@@ -82,13 +83,21 @@ static iree_status_t iree_hal_amd_gpu_host_call_boundary(
     iree_hal_amd_gpu_host_call_t* operation, iree_hal_semaphore_list_t waits,
     uint64_t value, iree_async_semaphore_timepoint_fn_t callback,
     iree_host_size_t operation_count) {
+  // The completion owner can reach the terminal action before barrier returns.
+  // Keep its borrowed signal-list storage live without moving user callbacks
+  // onto the submitting CPU or delaying them behind another execution owner.
+  iree_atomic_ref_count_inc(&operation->ref_count);
   operation->timepoint = (iree_async_semaphore_timepoint_t){
       .callback = callback,
       .user_data = operation,
   };
-  IREE_RETURN_IF_ERROR(iree_async_semaphore_acquire_timepoint(
+  iree_status_t status = iree_async_semaphore_acquire_timepoint(
       (iree_async_semaphore_t*)operation->semaphore, value,
-      &operation->timepoint));
+      &operation->timepoint);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_host_call_join(operation);
+    return status;
+  }
   const bool entering = value == IREE_HAL_AMD_GPU_HOST_CALL_ENTRY;
   const iree_hal_execution_stage_t device_stages =
       IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS |
@@ -120,23 +129,22 @@ static iree_status_t iree_hal_amd_gpu_host_call_boundary(
   };
   // Only this native submission can satisfy the enrolled point. A rejected
   // submission has no producer, so cancellation rejoins storage synchronously.
-  iree_status_t status = operation->executor->barrier(
+  status = operation->executor->barrier(
       operation->executor->queue, waits, completion, &barriers,
-      !entering            ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE
-      : operation->mapping ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_MAP
-                           : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL,
+      entering ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL
+               : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE,
       operation_count, operation->signals.count);
   if (!iree_status_is_ok(status)) {
     const bool cancelled = iree_async_semaphore_cancel_timepoint(
         (iree_async_semaphore_t*)operation->semaphore, &operation->timepoint);
     IREE_ASSERT(cancelled);
   }
+  iree_hal_amd_gpu_host_call_join(operation);
   return status;
 }
 
 static void iree_hal_amd_gpu_host_call_return(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  iree_hal_amd_gpu_host_call_t* operation = (void*)entry;
+    iree_hal_amd_gpu_host_call_t* operation) {
   iree_status_t status = iree_hal_amd_gpu_host_call_boundary(
       operation, iree_hal_semaphore_list_empty(),
       IREE_HAL_AMD_GPU_HOST_CALL_RETURN, iree_hal_amd_gpu_host_call_retire, 0);
@@ -155,14 +163,11 @@ static void iree_hal_amd_gpu_host_call_complete(
     iree_hal_amd_gpu_host_call_finish(operation, status);
     return;
   }
-  operation->entry.fn = iree_hal_amd_gpu_host_call_return;
-  iree_hal_memory_maintenance_enqueue(operation->executor->service,
-                                      &operation->entry);
+  iree_hal_amd_gpu_host_call_return(operation);
 }
 
 static void iree_hal_amd_gpu_host_call_invoke(
-    iree_hal_memory_maintenance_entry_t* entry) {
-  iree_hal_amd_gpu_host_call_t* operation = (void*)entry;
+    iree_hal_amd_gpu_host_call_t* operation) {
   IREE_TRACE_ZONE_BEGIN(z0);
   const bool non_blocking =
       iree_any_bit_set(operation->flags, IREE_HAL_HOST_CALL_FLAG_NON_BLOCKING);
@@ -189,14 +194,12 @@ static void iree_hal_amd_gpu_host_call_invoke(
   };
   iree_status_t status = operation->call.fn(operation->call.user_data,
                                             operation->arguments, &context);
-  if (!operation->mapping) {
-    iree_hal_resource_release(operation->call.resource);
-    operation->call.resource = NULL;
-  }
+  iree_hal_resource_release(operation->call.resource);
+  operation->call.resource = NULL;
   if (iree_status_is_deferred(status)) {
     iree_status_free(status);
     if (non_blocking) {
-      iree_hal_amd_gpu_host_call_free(operation);
+      iree_hal_amd_gpu_host_call_join(operation);
     } else {
       // The callback may have already signaled, but no completion may release
       // this capture until the invocation and optional resource release end.
@@ -223,21 +226,18 @@ static void iree_hal_amd_gpu_host_call_enter(
   iree_hal_amd_gpu_host_call_t* operation = user_data;
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_host_call_finish(operation, status);
-  } else if (operation->mapping) {
-    iree_hal_memory_maintenance_enqueue(operation->executor->service,
-                                        &operation->entry);
   } else {
     // Success comes only from actual native barrier retirement, on the sole
     // completion worker. A submission hint cannot invoke user code.
-    iree_hal_amd_gpu_host_call_invoke(&operation->entry);
+    iree_hal_amd_gpu_host_call_invoke(operation);
   }
 }
 
-static iree_status_t iree_hal_amd_gpu_host_call_submit_on(
+iree_status_t iree_hal_amd_gpu_host_call_submit(
     const iree_hal_amd_gpu_host_call_executor_t* executor,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_hal_host_call_t call, const uint64_t arguments[4], bool mapping,
-    iree_host_size_t operation_count, iree_hal_host_call_flags_t flags) {
+    iree_hal_host_call_t call, const uint64_t arguments[4],
+    iree_hal_host_call_flags_t flags) {
   iree_host_size_t total_size = 0;
   iree_host_size_t values_offset = 0, semaphores_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
@@ -250,7 +250,6 @@ static iree_status_t iree_hal_amd_gpu_host_call_submit_on(
       executor->captures, total_size, &storage));
   iree_hal_amd_gpu_host_call_t* operation = (void*)storage.data;
   *operation = (iree_hal_amd_gpu_host_call_t){
-      .entry = {.fn = iree_hal_amd_gpu_host_call_invoke},
       .executor = executor,
       .device = executor->queue->queue_family->device,
       .allocation_size = storage.data_length,
@@ -262,8 +261,8 @@ static iree_status_t iree_hal_amd_gpu_host_call_submit_on(
           },
       .call = call,
       .flags = flags,
-      .mapping = mapping,
   };
+  iree_atomic_ref_count_init(&operation->ref_count);
   memcpy(operation->arguments, arguments, sizeof(operation->arguments));
   iree_hal_device_retain(operation->device);
   iree_hal_resource_retain(call.resource);
@@ -278,36 +277,10 @@ static iree_status_t iree_hal_amd_gpu_host_call_submit_on(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_host_call_boundary(
         operation, waits, IREE_HAL_AMD_GPU_HOST_CALL_ENTRY,
-        iree_hal_amd_gpu_host_call_enter, operation_count);
+        iree_hal_amd_gpu_host_call_enter, 1);
   }
   if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_host_call_free(operation);
+    iree_hal_amd_gpu_host_call_join(operation);
   }
-  return status;
-}
-
-iree_status_t iree_hal_amd_gpu_host_call_submit(
-    const iree_hal_amd_gpu_host_call_executor_t* executor,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_hal_host_call_t call, const uint64_t arguments[4],
-    iree_hal_host_call_flags_t flags) {
-  return iree_hal_amd_gpu_host_call_submit_on(executor, waits, signals, call,
-                                              arguments, false, 1, flags);
-}
-
-iree_status_t iree_hal_amd_gpu_memory_mapping_submit(
-    const iree_hal_amd_gpu_host_call_executor_t* executor,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_host_size_t mapping_count, const iree_hal_memory_mapping_t* mappings,
-    iree_hal_queue_map_flags_t flags) {
-  iree_hal_host_call_t call;
-  IREE_RETURN_IF_ERROR(iree_hal_memory_mapping_prepare(
-      executor->queue, mapping_count, mappings, flags,
-      executor->captures->host_allocator, &call));
-  const uint64_t arguments[4] = {0};
-  iree_status_t status = iree_hal_amd_gpu_host_call_submit_on(
-      executor, waits, signals, call, arguments, true, mapping_count,
-      IREE_HAL_HOST_CALL_FLAG_NONE);
-  iree_hal_resource_release(call.resource);
   return status;
 }

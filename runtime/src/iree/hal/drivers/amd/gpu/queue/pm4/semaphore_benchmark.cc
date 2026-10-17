@@ -19,12 +19,14 @@ struct Storage {
         &proactor));
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_create(
         proactor, 0, 16, iree_allocator_system(), &semaphore));
-    iree_hal_amd_gpu_pm4_signal_pool_initialize(this, values.data(), 0x1000,
-                                                signals.data(), signals.size(),
-                                                1, frontiers.data(), {}, &pool);
+    iree_hal_amd_gpu_pm4_signal_pool_initialize({}, &pool);
+    iree_hal_amd_gpu_pm4_signal_block_initialize(
+        &pool, this, values.data(), 0x1000, signals.data(), signals.size(), 1,
+        frontiers.data(), &block);
   }
   ~Storage() {
     iree_hal_semaphore_release(semaphore);
+    iree_hal_amd_gpu_pm4_signal_block_deinitialize(&block);
     iree_hal_amd_gpu_pm4_signal_pool_deinitialize(&pool);
     iree_async_proactor_release(proactor);
   }
@@ -38,6 +40,8 @@ struct Storage {
   std::array<iree_hal_amd_gpu_pm4_signal_t, 4> signals;
   // Finite backing shared by publication and independent readers.
   iree_hal_amd_gpu_pm4_signal_pool_t pool;
+  // Attached native extent and its signal metadata.
+  iree_hal_amd_gpu_pm4_signal_block_t block;
   // One-queue causal vector per native signal.
   std::array<uint64_t, 4> frontiers;
 };
@@ -47,8 +51,8 @@ void BM_CompletedWait(benchmark::State& state) {
   IREE_CHECK_OK(iree_hal_semaphore_signal(storage.semaphore, 1, nullptr));
   for (auto _ : state) {
     iree_hal_amd_gpu_pm4_semaphore_wait_t wait;
-    IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(storage.semaphore,
-                                                              1, &wait));
+    IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+        storage.semaphore, 1, &storage, &wait));
     benchmark::DoNotOptimize(wait);
   }
   state.SetItemsProcessed(state.iterations());
@@ -64,8 +68,8 @@ void BM_NativeWait(benchmark::State& state) {
       storage.semaphore, 1, {1, 1}, signal));
   for (auto _ : state) {
     iree_hal_amd_gpu_pm4_semaphore_wait_t wait;
-    IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(storage.semaphore,
-                                                              1, &wait));
+    IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+        storage.semaphore, 1, &storage, &wait));
     benchmark::DoNotOptimize(wait);
     iree_hal_amd_gpu_pm4_signal_release(wait.signal);
   }
@@ -94,8 +98,8 @@ void BM_Lifecycle(benchmark::State& state) {
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_publish_signal(
         storage.semaphore, value, {1, value}, signal));
     iree_hal_amd_gpu_pm4_semaphore_wait_t wait;
-    IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(storage.semaphore,
-                                                              value, &wait));
+    IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_acquire_wait(
+        storage.semaphore, value, &storage, &wait));
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_semaphore_publish_completed(
         storage.semaphore, value, nullptr));
     iree_hal_amd_gpu_pm4_signal_release(signal);

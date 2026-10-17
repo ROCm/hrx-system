@@ -404,7 +404,6 @@ iree_cc_test(
     iree::hal
     iree::hal::cts::util::test_base
     iree::hal::drivers::amd::fabric
-    iree::hal::drivers::amd::fabric::memory_backend
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::device
     iree::hal::drivers::amd::gpu::image::hip_images
@@ -413,7 +412,6 @@ iree_cc_test(
     iree::hal::drivers::amd::registration
     iree::hal::drivers::amd::status
     iree::hal::memory::fixed_block_pool
-    iree::hal::memory::maintenance
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

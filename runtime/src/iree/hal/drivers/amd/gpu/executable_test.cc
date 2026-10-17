@@ -18,7 +18,6 @@
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco_test_util.h"
 #include "iree/hal/drivers/amd/gpu/source_context.h"
-#include "iree/hal/memory/maintenance_thread.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -49,7 +48,9 @@ struct NativeMemory {
   amdf_memory_flags_t access_flags = AMDF_MEMORY_FLAG_HOST_COHERENT;
   // Thread running the last native allocation, captured for placement checks.
   std::thread::id allocation_thread;
-  // Thread running native destruction, captured after the service joins.
+  // Thread publishing the image after caller-side relocation and preparation.
+  std::thread::id publication_thread;
+  // Thread running native destruction, captured after the native backing join.
   std::thread::id destruction_thread;
   // Optional externally controlled stall inside the native cleanup dependency.
   struct {
@@ -198,6 +199,7 @@ struct NativeMemory {
     EXPECT_LE(offset + length, self.bytes.size());
     if (operation == AMDF_HOST_CACHE_OPERATION_FLUSH) {
       ++self.flushes;
+      self.publication_thread = std::this_thread::get_id();
     }
     return AMDF_STATUS_OK;
   }
@@ -299,12 +301,20 @@ class ExecutableTest : public ::testing::TestWithParam<size_t> {
         .memory = &memory_,
         .placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, 17},
     };
-    IREE_ASSERT_OK(iree_hal_memory_maintenance_thread_create(
-        {}, iree_allocator_system(), &options_.maintenance));
+    IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
+                                         sizeof(*fabric_),
+                                         reinterpret_cast<void**>(&fabric_)));
+    iree_atomic_ref_count_init(&fabric_->ref_count);
+    iree_slim_mutex_initialize(&fabric_->allocation_mutex);
+    fabric_->host_allocator = iree_allocator_system();
+    context_.fabric = fabric_;
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
   }
   void TearDown() override {
     iree_hal_executable_release(executable_);
-    iree_hal_memory_maintenance_release(options_.maintenance);
+    iree_hal_amd_gpu_context_deinitialize_memory(&context_);
+    iree_hal_amd_fabric_release(fabric_);
     iree_hal_amd_gpu_source_context_registry_deinitialize(&feedback_.sources);
     EXPECT_EQ(native_.mappings, 0u);
     EXPECT_EQ(native_.allocations, 0u);
@@ -313,8 +323,7 @@ class ExecutableTest : public ::testing::TestWithParam<size_t> {
   void Release() {
     iree_hal_executable_release(executable_);
     executable_ = nullptr;
-    iree_hal_memory_maintenance_call(
-        options_.maintenance, [](void*) {}, nullptr);
+    iree_hal_amd_gpu_context_join_memory(&context_);
   }
   iree_status_t Load(iree_allocator_t allocator = iree_allocator_system()) {
     iree_hal_executable_load_params_t params;
@@ -345,6 +354,8 @@ class ExecutableTest : public ::testing::TestWithParam<size_t> {
     }
     ASSERT_GT(replacements, 0u);
   }
+  // Real fabric allocation domain shared by this fixture's native backings.
+  iree_hal_amd_fabric_t* fabric_ = nullptr;
   // Real compiler-produced artifact borrowed only for each load call.
   std::vector<uint8_t> bytes_;
   // Independent parse supplies fixture expectations and physical target.
@@ -711,6 +722,8 @@ TEST_P(ExecutableTest, HostConstructionFailuresReleasePartialOwnership) {
 
 TEST_P(ExecutableTest, FinalReleaseDoesNotWaitForNativeCleanup) {
   IREE_ASSERT_OK(Load());
+  EXPECT_EQ(native_.publication_thread, std::this_thread::get_id());
+  EXPECT_NE(native_.allocation_thread, native_.publication_thread);
   std::binary_semaphore entered{0};
   std::binary_semaphore resume{0};
   native_.cleanup = {&entered, &resume};
@@ -722,7 +735,7 @@ TEST_P(ExecutableTest, FinalReleaseDoesNotWaitForNativeCleanup) {
   EXPECT_EQ(native_.destruction_thread, native_.allocation_thread);
   EXPECT_NE(native_.destruction_thread, std::this_thread::get_id());
   resume.release();
-  iree_hal_memory_maintenance_call(options_.maintenance, [](void*) {}, nullptr);
+  iree_hal_amd_gpu_context_join_memory(&context_);
   EXPECT_EQ(native_.allocations, 0u);
 }
 

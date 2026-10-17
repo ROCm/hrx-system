@@ -11,7 +11,9 @@
 #include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/feedback.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
+#include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
+#include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 
 #ifdef __cplusplus
@@ -36,10 +38,12 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   // device at access ordinal zero, with coherent host read/write and GPU
   // access. All pointed-to storage remains live through final queue cleanup.
   const iree_hal_amd_fabric_memory_options_t* memory;
-  // Borrowed device-shared thread-backed service, including cold cleanup.
-  iree_hal_memory_maintenance_t* service;
+  // Borrowed device publisher, independent of native allocation and retirement.
+  iree_hal_amd_gpu_publication_t* publication;
   // Borrowed device-shared allocation executor, independent of publication.
   iree_hal_amd_gpu_allocation_context_t* allocations;
+  // Borrowed device-shared mapping admission and result publication.
+  iree_hal_amd_gpu_memory_mapping_context_t* mappings;
   // Optional shared channel drained before host completion on the sole worker.
   iree_hal_amd_gpu_feedback_t* feedback;
   // Prepared physical cache-control encoding.
@@ -47,7 +51,7 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   // Power-of-two number of simultaneously published native completion records.
   uint32_t retirement_capacity;
   // Initial GPU-readable argument ring capacity in bytes, a power of two.
-  // Oversized operations grow it on service before publication.
+  // Oversized operations await typed native acquisition outside publication.
   uint32_t argument_capacity;
   // Fixed CPU block size for captures and deferred wait records. Construction
   // rejects sizes unable to hold either header; oversized captures allocate.
@@ -63,10 +67,10 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
 amdf_queue_publication_modes_t iree_hal_amd_gpu_pm4_queue_publication_modes(
     const amdf_queue_family_info_t* native);
 
-// Creates one exact refcounted HAL queue. The context, family, and service are
-// borrowed from its parent device. The parent selected family/publication using
-// queue_publication_modes. Native construction runs on service. The
-// parent registers completion_source before exposing the returned queue and
+// Creates one exact refcounted HAL queue. Context, family, and publication are
+// borrowed from its parent device. Cold construction joins typed native backing
+// acquisitions on its caller. The parent registers both publication_source and
+// completion_source before exposing the returned queue and
 // keeps that source registered until accepted work has retired. Success assigns
 // one owning reference; failure leaves out_queue NULL.
 iree_status_t iree_hal_amd_gpu_pm4_queue_create(
@@ -87,6 +91,11 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_assign_frontier(
 void iree_hal_amd_gpu_pm4_queue_set_profile(
     iree_hal_queue_t* queue, iree_hal_amd_gpu_profile_t* profile);
 
+// Borrows the queue's bounded deferred publication source. The parent joins
+// this source and all native acquisition callbacks before destroying the queue.
+iree_hal_amd_gpu_publication_source_t
+iree_hal_amd_gpu_pm4_queue_publication_source(iree_hal_queue_t* queue);
+
 // Borrows the queue's bounded record observer for its device's sole completion
 // worker. A native failure fails accepted work but retains unproven GPU uses.
 iree_hal_amd_gpu_completion_source_t
@@ -96,9 +105,10 @@ iree_hal_amd_gpu_pm4_queue_completion_source(iree_hal_queue_t* queue);
 // Already-published native work retains its completion and cleanup ownership.
 void iree_hal_amd_gpu_pm4_queue_notify_failure(iree_hal_queue_t* queue);
 
-// Trims unused capture blocks, replaced argument generations, and inactive
-// signal backing on the device's shared service. Live publishers/readers keep
-// their storage. This never waits for native execution to complete.
+// Requests trim of unused captures, replaced argument generations, and idle
+// signal backing under queue publication ownership. Requests coalesce and can
+// complete inline; live readers keep their storage. This never waits for native
+// execution or backing release. The parent remains live through publication.
 void iree_hal_amd_gpu_pm4_queue_trim(iree_hal_queue_t* queue);
 
 // Rejects subsequent public submissions after the parent has joined external
@@ -111,11 +121,12 @@ void iree_hal_amd_gpu_pm4_queue_close(iree_hal_queue_t* queue);
 // prove consumption of the final notification/padding tail.
 bool iree_hal_amd_gpu_pm4_queue_is_idle(iree_hal_queue_t* queue);
 
-// Joins service turns and the final native notification tail after every queue
-// in this native domain is idle and the completion observer has made its final
-// access. Peer consumers may retain this queue's signal backing until their own
-// retirement. Runs outside service; native work is
-// placed on service. Success permits final queue release. Failure preserves the
+// Joins the final native notification tail after every queue in this domain is
+// idle, native acquisition callbacks have joined, and both publication and
+// completion owners have made their final accesses. Peer consumers may retain
+// this queue's signal backing until their own retirement. Cold native cleanup
+// runs on the caller; backing releases use the allocation domain. Failure
+// preserves the
 // queue/context graph and must be handled by the parent without freeing it.
 amdf_status_t iree_hal_amd_gpu_pm4_queue_shutdown(iree_hal_queue_t* queue);
 

@@ -73,9 +73,11 @@ iree_runtime_cc_test(
     srcs = ["asan_test.cc"],
     deps = [
         ":asan",
+        ":slab_provider",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

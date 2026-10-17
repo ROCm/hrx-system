@@ -7,8 +7,12 @@
 #include "iree/hal/drivers/amd/fabric/asan.h"
 
 #include <map>
+#include <semaphore>
 #include <vector>
 
+#include "iree/hal/drivers/amd/fabric/allocation_queue.h"
+#include "iree/hal/drivers/amd/fabric/slab_provider.h"
+#include "iree/hal/testing/mock_device.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -22,6 +26,8 @@ struct Native {
     Native* owner;
     // Physical bytes shared by every installed alias.
     std::vector<uint8_t> bytes;
+    // Optional release witness whose lifetime includes native destruction.
+    bool* released = nullptr;
   };
   struct Reservation {
     // Native dependency owner.
@@ -63,6 +69,7 @@ struct Native {
               AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
           out->allocation.byte_length_granularity = 4096;
           out->allocation.minimum_alignment = 4096;
+          out->allocation.maximum_alignment = 4096;
           out->allocation.maximum_byte_length = UINT64_MAX;
           return AMDF_STATUS_OK;
         };
@@ -130,6 +137,7 @@ struct Native {
     };
     api.memory_query_info = [](amdf_memory_t* handle, amdf_memory_info_t* out) {
       out->byte_length = reinterpret_cast<Memory*>(handle)->bytes.size();
+      out->alignment = 4096;
       return AMDF_STATUS_OK;
     };
     api.memory_map = [](amdf_memory_t* handle, const amdf_memory_map_info_t*,
@@ -167,6 +175,9 @@ struct Native {
         }
       }
       --memory->owner->live_memory;
+      if (memory->released) {
+        *memory->released = true;
+      }
       delete memory;
       return AMDF_STATUS_OK;
     };
@@ -214,6 +225,120 @@ class AsanTest : public ::testing::Test {
   // Physical test backing, released after all application aliases are removed.
   amdf_memory_t* application_backing_ = nullptr;
 };
+
+// The mock devices own real sanitizer teardown and native backing lifetime.
+// Destruction must reach both owners without manually flushing quarantine.
+struct DeviceLifetime {
+  // Resource retained by the mock device until its final release.
+  iree_hal_resource_t resource;
+  // Optional sanitizer namespace owned by this device.
+  iree_hal_amd_fabric_asan_t* asan = nullptr;
+  // Native backing shared by the sanitizer device and its peer.
+  Native* native = nullptr;
+  // Optional shared physical backing that must be released before this device.
+  bool* backing_released = nullptr;
+  // Joins teardown even when the native worker drops the last provider claim.
+  std::binary_semaphore reclaimed{0};
+
+  DeviceLifetime(iree_hal_amd_fabric_asan_t* asan, Native* native)
+      : asan(asan), native(native) {
+    static const iree_hal_resource_vtable_t vtable = {
+        .destroy =
+            [](iree_hal_resource_t* resource) {
+              auto* self = reinterpret_cast<DeviceLifetime*>(resource);
+              if (self->asan) {
+                EXPECT_TRUE(iree_hal_amd_fabric_asan_deinitialize(self->asan));
+                EXPECT_EQ(self->native->live_memory, 0u);
+              }
+              if (self->backing_released) {
+                EXPECT_TRUE(*self->backing_released);
+              }
+              self->reclaimed.release();
+            },
+    };
+    iree_hal_resource_initialize(&vtable, &resource);
+  }
+};
+
+class QuarantineLifetimeTest : public AsanTest,
+                               public ::testing::WithParamInterface<uint32_t> {
+};
+
+TEST_P(QuarantineLifetimeTest, ReleasesOwningDeviceAndRetainsPeerUntilCleanup) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  DeviceLifetime owners[] = {{&state_, &native_}, {nullptr, &native_}};
+  bool backing_released = false;
+  owners[1].backing_released = &backing_released;
+  iree_hal_device_t* devices[2] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(devices); ++i) {
+    iree_hal_mock_device_options_t options;
+    iree_hal_mock_device_options_initialize(&options);
+    options.lifetime_owner = &owners[i].resource;
+    IREE_ASSERT_OK(iree_hal_mock_device_create(
+        &options, iree_allocator_system(), &devices[i]));
+    iree_hal_resource_release(&owners[i].resource);
+  }
+  iree_hal_amd_fabric_allocation_queue_t* queue = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_allocation_queue_create(
+      UINT32_MAX, iree_allocator_system(), &queue));
+  amdf_memory_device_access_t accesses[] = {
+      state_.access,
+      {.device = reinterpret_cast<amdf_device_t*>(uintptr_t{1})},
+  };
+  iree_hal_amd_fabric_slab_provider_options_t options = {
+      .memory = state_.memory,
+      .access_devices = devices,
+      .host_binding_index = IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE,
+      .asan = &state_,
+      .asan_application_mapping = true,
+  };
+  options.memory.access_count = IREE_ARRAYSIZE(accesses);
+  options.memory.accesses = accesses;
+  iree_hal_slab_provider_t* provider = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_slab_provider_create(
+      devices[GetParam() % 2], &native_.api,
+      iree_hal_device_event_sink_stderr(), queue, &options,
+      iree_allocator_system(), &provider));
+
+  iree_hal_slab_t slab = {};
+  IREE_ASSERT_OK(
+      iree_hal_slab_provider_acquire_slab_sync(provider, 4096, 4096, &slab));
+  native_.reservations[0]->pages.begin()->second->released = &backing_released;
+  const iree_hal_asan_allocation_layout_t layout = {
+      .backing_offset_alignment = 4096,
+      .backing_length_alignment = 4096,
+      .backing_length = 4096,
+  };
+  iree_hal_slab_provider_advise_asan_range(
+      provider, &slab, 0, IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED, &layout);
+  iree_hal_slab_provider_release_slab_sync(provider, &slab);
+  iree_hal_device_asan_observation_t observation;
+  iree_hal_amd_fabric_asan_query_statistics(&state_, &observation);
+  EXPECT_EQ(observation.quarantine_size, 4096u);
+  EXPECT_FALSE(native_.reservations[0]->pages.empty());
+
+  if (GetParam() < 2) {
+    // Last public provider release initiates owning-device teardown.
+    for (auto* device : devices) {
+      iree_hal_device_release(device);
+    }
+    iree_hal_slab_provider_release(provider);
+  } else {
+    // Quarantine outlives the public provider, retaining the peer's native
+    // dependencies until the ASAN owner eventually drains that quarantine.
+    iree_hal_device_release(devices[1]);
+    iree_hal_slab_provider_release(provider);
+    iree_hal_device_release(devices[0]);
+  }
+  for (auto& owner : owners) {
+    owner.reclaimed.acquire();
+  }
+  iree_hal_amd_fabric_allocation_queue_release(queue);
+}
+
+INSTANTIATE_TEST_SUITE_P(Placement, QuarantineLifetimeTest,
+                         ::testing::Values(0u, 1u, 2u, 3u));
 
 TEST_F(AsanTest, PreciseShadowPreservesRedzonesAndPartialTailAcrossSlabs) {
   Initialize();
