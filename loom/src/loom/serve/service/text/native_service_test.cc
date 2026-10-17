@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/tooling/flags.h"
+#include "loom/serve/runtime/device/device.h"
+#include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
 #include "loom/util/json.h"
@@ -24,6 +26,9 @@ using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 
 using NativeStream = std::unique_ptr<loom_serve_text_stream_t,
                                      decltype(&loom_serve_text_stream_close)>;
+using NativeControl =
+    std::unique_ptr<loom_serve_text_checkpoint_control_t,
+                    decltype(&loom_serve_text_checkpoint_control_close)>;
 
 std::string String(iree_string_view_t value) {
   return std::string(value.data, value.size);
@@ -213,6 +218,31 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     ASSERT_NE(loom_serve_text_stream_peek(stream.get()), nullptr);
   }
 
+  iree_status_t OpenCheckpoint(loom_serve_text_checkpoint_action_t action,
+                               const char* name, const char* session,
+                               NativeControl* control) {
+    const loom_serve_text_checkpoint_request_t request = {
+        .action = action,
+        .name = iree_make_cstring_view(name),
+        .session = iree_make_cstring_view(session),
+    };
+    loom_serve_text_checkpoint_control_t* value = nullptr;
+    auto status = loom_serve_registry_try_open_text_checkpoint(
+        registry_, iree_make_cstring_view(name_.c_str()), &request, &value);
+    control->reset(value);
+    return status;
+  }
+
+  void CompleteCheckpoint(const NativeControl& control) {
+    ASSERT_NE(control, nullptr);
+    ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+      return loom_serve_text_checkpoint_control_is_complete(control.get());
+    }));
+    IREE_ASSERT_OK(loom_serve_text_checkpoint_control_status(control.get()));
+    ASSERT_NE(loom_serve_text_checkpoint_control_result(control.get()),
+              nullptr);
+  }
+
   void ReadFinal(const NativeStream& stream) {
     std::string content, reasoning;
     ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
@@ -327,7 +357,8 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     }
   }
 
-  std::string ContinuedRequest(const loom_serve_text_stream_result_t& result) {
+  std::string ContinuedRequest(const loom_serve_text_stream_result_t& result,
+                               const char* prompt = nullptr) {
     const auto messages =
         Field(iree_make_cstring_view(body_.c_str()), "messages");
     std::string continued(messages.data, messages.size - 1);
@@ -336,12 +367,12 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     if (result.reasoning.size) {
       continued += ",\"reasoning_content\":" + Quote(result.reasoning);
     }
-    continued +=
-        "}," +
-        Message("user", FLAG_native_text_model[0]
-                            ? "Repeat your answer, with no extra words."
-                            : "b") +
-        "]";
+    if (!prompt) {
+      prompt = FLAG_native_text_model[0]
+                   ? "Repeat your answer, with no extra words."
+                   : "b";
+    }
+    continued += "}," + Message("user", prompt) + "]";
     std::string request = body_;
     request.replace(messages.data - body_.data(), messages.size, continued);
     return request;
@@ -560,6 +591,286 @@ TEST_F(NativeTextRegistryTest, StoppingSealsReadyServiceAdmission) {
   EXPECT_EQ(service.telemetry.counters->rejected, 1u);
 }
 
+TEST_F(NativeTextRegistryTest, NativeCheckpointPressureAndRejectionStayLocal) {
+  NativeControl waiting(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "retained", "conversation", &waiting));
+  EXPECT_EQ(waiting, nullptr);
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                       "bad/name", "conversation", &waiting));
+  EXPECT_EQ(waiting, nullptr);
+  const auto* counters = Model()->service.telemetry.counters;
+  EXPECT_EQ(counters->requests, 0u);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "retained", "conversation", &waiting));
+  ASSERT_NE(waiting, nullptr);
+  NativeControl pressured(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "retained", "", &pressured));
+  EXPECT_EQ(pressured, nullptr);
+  EXPECT_EQ(counters->requests, 1u);
+  waiting.reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+  EXPECT_EQ(counters->cancelled, 1u);
+
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "retained", "", &pressured));
+  ASSERT_NE(pressured, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+    return loom_serve_text_checkpoint_control_is_complete(pressured.get());
+  }));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      loom_serve_text_checkpoint_control_status(pressured.get()));
+  EXPECT_EQ(loom_serve_text_checkpoint_control_result(pressured.get()),
+            nullptr);
+
+  NativeStream first(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "conversation", &first));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(first));
+  NativeStream queued(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "conversation", &queued));
+  ASSERT_NE(queued, nullptr);
+  NativeControl busy(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN, "busy",
+                                "conversation", &busy));
+  ASSERT_NE(busy, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+    return loom_serve_text_checkpoint_control_is_complete(busy.get());
+  }));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_text_checkpoint_control_status(busy.get()));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(queued));
+  std::string name = "retained", session = "conversation";
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                name.c_str(), session.c_str(), &waiting));
+  ASSERT_NE(waiting, nullptr);
+  name.assign(name.size(), 'x');
+  session.assign(session.size(), 'x');
+  const auto* owned = loom_serve_text_checkpoint_control_request(waiting.get());
+  EXPECT_EQ(String(owned->name), "retained");
+  EXPECT_EQ(String(owned->session), "conversation");
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(waiting));
+
+  NativeControl duplicate(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "retained", "conversation", &duplicate));
+  ASSERT_NE(duplicate, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+    return loom_serve_text_checkpoint_control_is_complete(duplicate.get());
+  }));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ALREADY_EXISTS,
+      loom_serve_text_checkpoint_control_status(duplicate.get()));
+  EXPECT_EQ(counters->failed, 0u);
+  EXPECT_EQ(counters->rejected, 3u);
+  NativeControl released(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "retained", "", &released));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(released));
+}
+
+TEST_F(NativeTextRegistryTest,
+       NativeCheckpointRetirementDoesNotRebindAfterReplacement) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  const auto incarnation = Model()->incarnation;
+  NativeStream first(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "conversation", &first));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(first));
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+  NativeControl submitted(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "retained", "conversation", &submitted));
+  ASSERT_NE(submitted, nullptr);
+  auto& service = Model()->service;
+  bool progress = false;
+  IREE_ASSERT_OK(service.advance(service.self, 0, &progress));
+  ASSERT_TRUE(progress);
+  ASSERT_FALSE(loom_serve_text_checkpoint_control_is_complete(submitted.get()));
+  ASSERT_EQ(service.snapshot(service.self).active_requests, 1u);
+  submitted.reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+
+  // Closing after submission suppresses delivery but preserves the accepted
+  // pin. A real branch proves that the retained history was published.
+  const auto continuation =
+      ContinuedRequest(*loom_serve_text_stream_result(first.get()));
+  NativeStream branch(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(continuation, "branch", &branch, "retained"));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(branch));
+  EXPECT_GT(
+      loom_serve_text_stream_result(branch.get())->response.usage.cached_tokens,
+      0u);
+  NativeControl surviving(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN, "copy",
+                                "branch", &surviving));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(surviving));
+  const auto retained =
+      *loom_serve_text_checkpoint_control_result(surviving.get());
+  NativeControl removed(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "retained", "", &removed));
+  ASSERT_NE(removed, nullptr);
+  IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
+      [&] { return loom_serve_registry_count(registry_) == 0; }));
+  EXPECT_TRUE(loom_serve_text_checkpoint_control_is_complete(removed.get()));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_CANCELLED,
+      loom_serve_text_checkpoint_control_status(removed.get()));
+  IREE_ASSERT_OK(loom_serve_text_checkpoint_control_status(surviving.get()));
+  EXPECT_EQ(
+      loom_serve_text_checkpoint_control_result(surviving.get())->position,
+      retained.position);
+
+  ASSERT_NO_FATAL_FAILURE(Register());
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  EXPECT_NE(Model()->incarnation, incarnation);
+  NativeStream replacement(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "conversation", &replacement));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(replacement));
+  NativeControl pinned(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "retained", "conversation", &pinned));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(pinned));
+  removed.reset();
+  surviving.reset();
+  NativeControl released(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "retained", "", &released));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(released));
+  EXPECT_EQ(Model()->service.telemetry.counters->failed, 0u);
+}
+
+TEST_F(NativeTextRegistryTest,
+       NativeCheckpointExcludesInterruptedAndUnheardHistory) {
+  if (!FLAG_native_text_model[0]) {
+    body_ = Request(Message("user", "abxa"), 2);
+  }
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream base(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "base", &base));
+  ASSERT_NE(base, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(base));
+  NativeControl pin(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "pre-turn", "base", &pin));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(pin));
+  const auto position =
+      loom_serve_text_checkpoint_control_result(pin.get())->position;
+  ASSERT_GT(position, 0u);
+  pin.reset();
+
+  const auto intervening = ContinuedRequest(
+      *loom_serve_text_stream_result(base.get()),
+      FLAG_native_text_model[0]
+          ? "Explain how rain reaches rivers in exactly eight complete "
+            "sentences. Use plain prose without headings or bullets."
+          : "b");
+  const auto messages =
+      Field(iree_make_cstring_view(intervening.c_str()), "messages");
+  std::string corrected = intervening;
+  corrected.insert(
+      messages.data - intervening.data() + messages.size - 1,
+      "," +
+          Message("user", FLAG_native_text_model[0]
+                              ? "Ignore that last request. Reply with exactly "
+                                "the two words blue lantern, without "
+                                "punctuation or any extra words."
+                              : "x"));
+  NativeStream interrupted(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(intervening, "interrupted", &interrupted, "pre-turn"));
+  ASSERT_NE(interrupted, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AwaitBlock(interrupted));
+  ASSERT_FALSE(loom_serve_text_stream_is_complete(interrupted.get()));
+  const auto* block = loom_serve_text_stream_peek(interrupted.get());
+  std::string observed;
+  for (iree_host_size_t i = 0; i < loom_serve_text_stream_block_count(block);
+       ++i) {
+    const auto span = loom_serve_text_stream_block_at(block, i);
+    if (span.kind == LOOM_SERVE_TEXT_CHAT_OUTPUT_CONTENT) {
+      observed.append(span.text.data, span.text.size);
+    }
+  }
+  ASSERT_FALSE(observed.empty());
+  interrupted.reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
+  EXPECT_EQ(Model()->service.telemetry.counters->cancelled, 1u);
+
+  NativeStream fresh(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(corrected, "fresh", &fresh));
+  ASSERT_NE(fresh, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(fresh));
+  const auto* expected = loom_serve_text_stream_result(fresh.get());
+  ASSERT_EQ(expected->calls->count, 0u);
+  EXPECT_EQ(expected->response.usage.cached_tokens, 0u);
+  if (FLAG_native_text_model[0]) {
+    EXPECT_EQ(String(expected->content), "blue lantern");
+    EXPECT_EQ(String(expected->finish_reason), "stop");
+  }
+  const auto check_corrected = [&](const NativeStream& stream,
+                                   iree_host_size_t cached_tokens) {
+    const auto* actual = loom_serve_text_stream_result(stream.get());
+    ASSERT_NE(actual, nullptr);
+    EXPECT_EQ(String(actual->content), String(expected->content));
+    EXPECT_EQ(String(actual->reasoning), String(expected->reasoning));
+    EXPECT_EQ(String(actual->finish_reason), String(expected->finish_reason));
+    EXPECT_EQ(actual->calls->count, 0u);
+    EXPECT_EQ(actual->response.usage.input_tokens,
+              expected->response.usage.input_tokens);
+    EXPECT_EQ(actual->response.usage.output_tokens,
+              expected->response.usage.output_tokens);
+    EXPECT_EQ(actual->response.usage.cached_tokens, cached_tokens);
+  };
+  NativeStream retained(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(corrected, "retained", &retained, "pre-turn"));
+  ASSERT_NE(retained, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(retained));
+  ASSERT_NO_FATAL_FAILURE(check_corrected(retained, position));
+
+  // A fully generated answer can still be unheard. Excluding that assistant
+  // item must not reuse its tail, even when the named session retains it.
+  NativeStream unheard(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(intervening, "unheard", &unheard, "pre-turn"));
+  ASSERT_NE(unheard, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(unheard));
+  EXPECT_EQ(String(loom_serve_text_stream_result(unheard.get())->content)
+                .find(observed),
+            0u);
+  NativeStream replaced(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(corrected, "unheard", &replaced));
+  ASSERT_NE(replaced, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(replaced));
+  ASSERT_NO_FATAL_FAILURE(check_corrected(replaced, 0));
+  retained.reset();
+  IREE_ASSERT_OK(Open(corrected, "retained-again", &retained, "pre-turn"));
+  ASSERT_NE(retained, nullptr);
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(retained));
+  ASSERT_NO_FATAL_FAILURE(check_corrected(retained, position));
+
+  NativeStream incompatible(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "incompatible", &incompatible, "pre-turn"));
+  ASSERT_NE(incompatible, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
+      [&] { return loom_serve_text_stream_is_complete(incompatible.get()); }));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_stream_status(incompatible.get()));
+  EXPECT_EQ(loom_serve_text_stream_result(incompatible.get()), nullptr);
+  NativeControl release(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "pre-turn", "", &release));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(release));
+  EXPECT_EQ(loom_serve_text_checkpoint_control_result(release.get())->position,
+            position);
+  EXPECT_EQ(Model()->service.telemetry.counters->failed, 0u);
+  EXPECT_EQ(Model()->service.telemetry.counters->rejected, 1u);
+  RecordProperty("interrupted_content", observed);
+  RecordProperty("corrected_content", String(expected->content));
+  RecordProperty("checkpoint_position", std::to_string(position));
+}
+
 TEST_F(NativeTextRegistryTest,
        NativeCompletionPreservesPinnedCanonicalHistory) {
   if (!FLAG_native_text_model[0]) {
@@ -577,13 +888,35 @@ TEST_F(NativeTextRegistryTest,
   if (!FLAG_native_text_model[0]) {
     EXPECT_EQ(answer, Oracle::Complete("abxa", 2));
   }
-  const int pin =
-      Send("", "X-Loom-Session: conversation\r\n", "/v1/checkpoints/retained");
-  loom_serve_http_connection_t* connection = nullptr;
-  ASSERT_NO_FATAL_FAILURE(Accept(pin, Model()->service, &connection));
-  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
-  const auto pinned = Read(pin);
-  EXPECT_EQ(pinned.find("HTTP/1.1 201"), 0u) << pinned;
+  NativeControl pin(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "retained", "conversation", &pin));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(pin));
+  const auto* pinned = loom_serve_text_checkpoint_control_result(pin.get());
+  EXPECT_GT(pinned->position, 0u);
+  EXPECT_EQ(pinned->host_bytes, 0u);
+
+  NativeControl suspended(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_SUSPEND,
+                                "retained", "", &suspended));
+  ASSERT_NE(suspended, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+    return loom_serve_text_checkpoint_control_is_complete(suspended.get());
+  }));
+  if (loom_serve_device_memory_pool(loom_serve_device_group_at(group_, 0))) {
+    IREE_ASSERT_OK(loom_serve_text_checkpoint_control_status(suspended.get()));
+    const auto* result =
+        loom_serve_text_checkpoint_control_result(suspended.get());
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->position, pinned->position);
+    EXPECT_GT(result->host_bytes, 0u);
+  } else {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_serve_text_checkpoint_control_status(suspended.get()));
+    EXPECT_EQ(loom_serve_text_checkpoint_control_result(suspended.get()),
+              nullptr);
+  }
   const auto continuation = ContinuedRequest(*final);
   NativeStream branch(nullptr, loom_serve_text_stream_close);
   IREE_ASSERT_OK(Open(continuation, "branch", &branch, "retained"));
@@ -601,6 +934,15 @@ TEST_F(NativeTextRegistryTest,
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
   ASSERT_NO_FATAL_FAILURE(CheckHttp(*resumed));
   EXPECT_EQ(String(final->content), answer);
+  NativeControl released(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "retained", "", &released));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(released));
+  EXPECT_EQ(loom_serve_text_checkpoint_control_result(released.get())->position,
+            pinned->position);
+  EXPECT_EQ(
+      loom_serve_text_checkpoint_control_result(released.get())->host_bytes,
+      0u);
 }
 
 }  // namespace

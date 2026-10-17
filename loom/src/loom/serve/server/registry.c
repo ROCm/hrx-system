@@ -233,6 +233,24 @@ iree_status_t loom_serve_registry_try_open_text(
   return service->try_open_text(service->self, request, out_stream);
 }
 
+iree_status_t loom_serve_registry_try_open_text_checkpoint(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    const loom_serve_text_checkpoint_request_t* request,
+    loom_serve_text_checkpoint_control_t** out_control) {
+  *out_control = NULL;
+  loom_serve_service_t* service = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
+      registry, name, IREE_SV("text"), &service));
+  if (!service) {
+    return iree_ok_status();
+  }
+  if (!service->try_open_text_checkpoint) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "text service has no native checkpoint admission");
+  }
+  return service->try_open_text_checkpoint(service->self, request, out_control);
+}
+
 iree_status_t loom_serve_registry_register(
     loom_serve_registry_t* registry,
     loom_serve_model_configuration_t* configuration,
