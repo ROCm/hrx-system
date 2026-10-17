@@ -277,6 +277,7 @@ loom_cc_library(
     "projector_execution_test.cc"
     "source_execution_test.cc"
   DEPS
+    ::checkpoint_control
     ::epoch
     ::media_projector
     ::model
@@ -288,6 +289,7 @@ loom_cc_library(
     loom::serve::media::image_codec
     loom::serve::media::image_codecs
     loom::serve::media::image_request
+    loom::serve::runtime::device
     loom::serve::service::finite::component
     loom::serve::service::finite::embedding::protocol
     loom::serve::service::finite::model
@@ -864,22 +866,92 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    checkpoint_control
+  HDRS
+    "checkpoint_control.h"
+  SRCS
+    "checkpoint_control.c"
+  DEPS
+    ::session
+    ::telemetry
+    iree::base
+    loom::serve::telemetry::record
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    checkpoint_http
+  HDRS
+    "checkpoint_http.h"
+  SRCS
+    "checkpoint_http.c"
+  DEPS
+    ::checkpoint_control
+    ::http
+    ::telemetry
+    iree::base
+    loom::serve::transport::http::request
+    loom::serve::transport::http::server
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    checkpoint_http_test
+  SRCS
+    "checkpoint_http_test.cc"
+  DEPS
+    ::checkpoint_control
+    ::checkpoint_http
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::transport::http::request
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    checkpoint_control_test
+  SRCS
+    "checkpoint_control_test.cc"
+  DEPS
+    ::checkpoint_control
+    ::telemetry
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::telemetry::stream
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     checkpoint_request
   HDRS
     "checkpoint_request.h"
   SRCS
     "checkpoint_request.c"
   DEPS
+    ::checkpoint_control
     ::checkpoint_registry
-    ::http
     ::model
     ::session
     ::telemetry
     iree::base
     loom::serve::runtime::execution
     loom::serve::telemetry::record
-    loom::serve::transport::http::request
-    loom::serve::transport::http::server
   PUBLIC
 )
 endif()
@@ -1009,6 +1081,8 @@ loom_cc_library(
   DEPS
     ::admission
     ::chat
+    ::checkpoint_control
+    ::checkpoint_http
     ::checkpoint_registry
     ::checkpoint_request
     ::consumer
