@@ -1,0 +1,132 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_library")
+load(":test_defs.bzl", "fft_composition_test", "fft_test")
+
+package(default_visibility = ["//visibility:private"])
+
+filegroup(
+    name = "headers",
+    srcs = [
+        "complex_stages.h",
+        "deinterleave.h",
+        "fft.h",
+        "frame_io.h",
+        "frame_transpose.h",
+        "frequency_packet.h",
+        "geometry.h",
+        "real_packet.h",
+        "real_radix.h",
+    ],
+)
+
+loom_library(
+    name = "layout",
+    srcs = [
+        "deinterleave.cxx",
+        "frame_transpose.cxx",
+    ],
+    data = [":headers"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_library(
+    name = "example",
+    srcs = ["example.cxx"],
+    data = [":headers"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [":layout"],
+)
+
+iree_py_library(
+    name = "tables_lib",
+    srcs = ["tables.py"],
+)
+
+iree_py_binary(
+    name = "tables",
+    srcs = ["tables.py"],
+)
+
+iree_py_binary(
+    name = "test_data",
+    testonly = True,
+    srcs = ["test_data.py"],
+    deps = [":tables_lib"],
+)
+
+[
+    fft_test(
+        name = input_type + "_" + output_type,
+        frames = 15,
+        input_type = input_type,
+        length = 10,
+        output_type = output_type,
+        width = 8,
+    )
+    for input_type in [
+        "f32",
+        "f16",
+        "bf16",
+    ]
+    for output_type in [
+        "f32",
+        "f16",
+        "bf16",
+    ]
+]
+
+fft_test(
+    name = "empty",
+    frames = 0,
+    length = 10,
+    width = 8,
+)
+
+fft_test(
+    name = "single",
+    frames = 1,
+    length = 8,
+    width = 1,
+)
+
+fft_test(
+    name = "minimal",
+    frames = 31,
+    length = 2,
+    width = 16,
+)
+
+fft_test(
+    name = "latency",
+    frames = 3,
+    frequency_only = True,
+    input_type = "bf16",
+    length = 10,
+    output_type = "f16",
+    width = 1,
+)
+
+fft_test(
+    name = "radix4",
+    frames = 3,
+    length = 16,
+    width = 2,
+)
+
+fft_test(
+    name = "twiddles",
+    frames = 3,
+    length = 20,
+    width = 2,
+)
+
+fft_composition_test(name = "composition")
