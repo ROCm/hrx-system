@@ -12,23 +12,56 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/transforms/vector/to_scalar.h"
 
+static iree_status_t loom_vector_build_fixed_shift(
+    loom_builder_t* builder, loom_op_kind_t kind, loom_value_id_t value,
+    loom_type_t type, int64_t amount, loom_location_id_t location,
+    loom_value_id_t* out_result) {
+  loom_op_t* amount_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+      builder, loom_attr_i64(amount), type, location, &amount_op));
+  const loom_value_id_t amount_value = loom_vector_constant_result(amount_op);
+
+  loom_op_t* shift_op = NULL;
+  switch (kind) {
+    case LOOM_OP_VECTOR_SHLI: {
+      IREE_RETURN_IF_ERROR(loom_vector_shli_build(builder, /*instance_flags=*/0,
+                                                  value, amount_value, type,
+                                                  location, &shift_op));
+      break;
+    }
+    case LOOM_OP_VECTOR_SHRSI: {
+      IREE_RETURN_IF_ERROR(loom_vector_shrsi_build(builder, value, amount_value,
+                                                   type, location, &shift_op));
+      break;
+    }
+    case LOOM_OP_VECTOR_SHRUI: {
+      IREE_RETURN_IF_ERROR(loom_vector_shrui_build(builder, value, amount_value,
+                                                   type, location, &shift_op));
+      break;
+    }
+    default:
+      IREE_ASSERT_UNREACHABLE("invalid fixed vector shift kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  *out_result = loom_op_results(shift_op)[0];
+  return iree_ok_status();
+}
+
+// Preserves rejected bitfield extraction in the vector domain. Targets can
+// select the resulting fixed shifts and conversion independently instead of
+// exposing every authored lane to scalar IR.
 iree_status_t loom_vector_legalize_bitfield_extract(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
   (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
   const bool signed_extract = loom_vector_bitfield_extracts_isa(op);
-  loom_value_id_t value = signed_extract
-                              ? loom_vector_bitfield_extracts_source(op)
-                              : loom_vector_bitfield_extractu_source(op);
-  const int64_t offset = signed_extract
-                             ? loom_vector_bitfield_extracts_offset(op)
-                             : loom_vector_bitfield_extractu_offset(op);
-  const int64_t width = signed_extract
-                            ? loom_vector_bitfield_extracts_width(op)
-                            : loom_vector_bitfield_extractu_width(op);
+  const loom_value_id_t source = loom_op_operands(op)[0];
   const loom_type_t source_type =
-      loom_module_value_type(context->module, value);
+      loom_module_value_type(context->module, source);
   // A singleton has no SIMD parallelism. Preserve its scalar lane program
   // instead of introducing a wide-register broadcast and extraction.
   uint64_t element_count = 0;
@@ -49,73 +82,79 @@ iree_status_t loom_vector_legalize_bitfield_extract(
       loom_scalar_type_bitwidth(loom_type_element_type(source_type));
   const int32_t result_width =
       loom_scalar_type_bitwidth(loom_type_element_type(result_type));
+  const int64_t offset = signed_extract
+                             ? loom_vector_bitfield_extracts_offset(op)
+                             : loom_vector_bitfield_extractu_offset(op);
+  const int64_t width = signed_extract
+                            ? loom_vector_bitfield_extracts_width(op)
+                            : loom_vector_bitfield_extractu_width(op);
+
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
   loom_builder_set_before(builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
-  // Retain the logical vector width. Target shift and cast legalizers own
-  // packetization and any required widening of these elementwise operations.
-  loom_op_t* vector_op = NULL;
-  if (signed_extract && source_width - offset - width != 0) {
-    loom_op_t* amount = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(source_width - offset - width), source_type,
-        op->location, &amount));
-    IREE_RETURN_IF_ERROR(
-        loom_vector_shli_build(builder, /*instance_flags=*/0, value,
-                               loom_vector_constant_result(amount), source_type,
-                               op->location, &vector_op));
-    value = loom_vector_shli_result(vector_op);
-  }
-  const int64_t right_shift = signed_extract ? source_width - width : offset;
-  if (right_shift != 0) {
-    loom_op_t* amount = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(builder, loom_attr_i64(right_shift),
-                                   source_type, op->location, &amount));
-    if (signed_extract) {
-      IREE_RETURN_IF_ERROR(loom_vector_shrsi_build(
-          builder, value, loom_vector_constant_result(amount), source_type,
-          op->location, &vector_op));
+  const bool full_width = offset == 0 && width == source_width;
+  const bool top_widen =
+      result_width > source_width && offset + width == source_width;
+  loom_value_id_t replacement = source;
+  loom_type_t working_type = source_type;
+  int32_t working_width = source_width;
+  if (result_width > source_width) {
+    loom_op_t* extension_op = NULL;
+    if (signed_extract && (full_width || top_widen)) {
+      IREE_RETURN_IF_ERROR(
+          loom_vector_extsi_build(builder, replacement, source_type,
+                                  result_type, op->location, &extension_op));
+      replacement = loom_vector_extsi_result(extension_op);
     } else {
-      IREE_RETURN_IF_ERROR(loom_vector_shrui_build(
-          builder, value, loom_vector_constant_result(amount), source_type,
-          op->location, &vector_op));
+      // Extraction interprets the source as raw bits. Zero extension retains
+      // those bits before the field is aligned in the wider result carrier.
+      IREE_RETURN_IF_ERROR(
+          loom_vector_extui_build(builder, replacement, source_type,
+                                  result_type, op->location, &extension_op));
+      replacement = loom_vector_extui_result(extension_op);
     }
-    value = loom_op_results(vector_op)[0];
+    working_type = result_type;
+    working_width = result_width;
   }
-  if (!signed_extract && width < source_width - offset) {
-    loom_op_t* mask = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(UINT64_MAX >> (64 - width)), source_type,
-        op->location, &mask));
-    IREE_RETURN_IF_ERROR(loom_vector_andi_build(
-        builder, value, loom_vector_constant_result(mask), source_type,
-        op->location, &vector_op));
-    value = loom_vector_andi_result(vector_op);
+
+  if (!full_width) {
+    if (top_widen) {
+      IREE_RETURN_IF_ERROR(loom_vector_build_fixed_shift(
+          builder, signed_extract ? LOOM_OP_VECTOR_SHRSI : LOOM_OP_VECTOR_SHRUI,
+          replacement, working_type, offset, op->location, &replacement));
+    } else {
+      const int64_t left_shift = working_width - offset - width;
+      if (left_shift != 0) {
+        IREE_RETURN_IF_ERROR(loom_vector_build_fixed_shift(
+            builder, LOOM_OP_VECTOR_SHLI, replacement, working_type, left_shift,
+            op->location, &replacement));
+      }
+      const int64_t right_shift = working_width - width;
+      if (right_shift != 0) {
+        IREE_RETURN_IF_ERROR(loom_vector_build_fixed_shift(
+            builder,
+            signed_extract ? LOOM_OP_VECTOR_SHRSI : LOOM_OP_VECTOR_SHRUI,
+            replacement, working_type, right_shift, op->location,
+            &replacement));
+      }
+    }
   }
+
   if (result_width < source_width) {
-    IREE_RETURN_IF_ERROR(loom_vector_trunci_build(
-        builder, value, source_type, result_type, op->location, &vector_op));
-    value = loom_vector_trunci_result(vector_op);
-  } else if (result_width > source_width) {
-    if (signed_extract) {
-      IREE_RETURN_IF_ERROR(loom_vector_extsi_build(
-          builder, value, source_type, result_type, op->location, &vector_op));
-    } else {
-      IREE_RETURN_IF_ERROR(loom_vector_extui_build(
-          builder, value, source_type, result_type, op->location, &vector_op));
-    }
-    value = loom_op_results(vector_op)[0];
+    loom_op_t* truncation_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_vector_trunci_build(builder, replacement, source_type, result_type,
+                                 op->location, &truncation_op));
+    replacement = loom_vector_trunci_result(truncation_op);
   }
+
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
-      rewriter, op, &value, 1, checkpoint));
+      rewriter, op, &replacement, 1, checkpoint));
   IREE_RETURN_IF_ERROR(
-      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &value, 1));
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
-  };
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   return iree_ok_status();
 }
 

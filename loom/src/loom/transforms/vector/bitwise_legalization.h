@@ -13,9 +13,9 @@
 extern "C" {
 #endif
 
-// Decomposes signed and unsigned extraction into vector shifts, a mask when
-// required, and a result-width cast. Keeps the source element width and shape;
-// downstream operation contracts own any carrier widening or packetization.
+// Decomposes signed and unsigned extraction into fixed vector shifts and a
+// result-width cast. Widening precedes alignment to preserve packed extension;
+// narrowing follows extraction. Target contracts own packetization.
 // Statically singleton vectors use the scalar lane recipe.
 iree_status_t loom_vector_legalize_bitfield_extract(
     const loom_target_legalizer_entry_t* entry,

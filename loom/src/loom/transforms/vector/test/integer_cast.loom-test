@@ -11,14 +11,25 @@ func.def target(@target) @extract_unsigned_same_width(%count: index, %source: ve
 test.target<low_core> @target
 
 func.def target(@target) @extract_unsigned_same_width(%count: index, %source: vector<[%count]xi32>) -> (vector<[%count]xi32>) {
-  %8 = index.constant 0 : index
-  %9 = index.constant 1 : index
-  %result = scf.for %10 = [%8 to %count step %9](%11 = %source : vector<[%count]xi32>) -> (vector<[%count]xi32>) {
-    %13 = vector.extract %source[%10] : vector<[%count]xi32> -> i32
-    %14 = scalar.constant 1 : i32
-    %15 = scalar.andi %13, %14 : i32
-    %16 = vector.insert %15 into %11[%10] : i32, vector<[%count]xi32>
-    scf.yield %16 : vector<[%count]xi32>
+  %21 = index.constant 0 : index
+  %22 = index.constant 1 : index
+  %25 = scf.for %23 = [%21 to %count step %22](%24 = %source : vector<[%count]xi32>) -> (vector<[%count]xi32>) {
+    %26 = vector.extract %source[%23] : vector<[%count]xi32> -> i32
+    %27 = scalar.constant 31 : i32
+    %28 = scalar.shli %26, %27 : i32
+    %29 = vector.insert %28 into %24[%23] : i32, vector<[%count]xi32>
+    scf.yield %29 : vector<[%count]xi32>
+  }
+  %10 = index.constant 0 : index
+  %11 = index.constant 1 : index
+  %result = scf.for %12 = [%10 to %count step %11](%13 = %25 : vector<[%count]xi32>) -> (vector<[%count]xi32>) {
+    %15 = vector.extract %source[%12] : vector<[%count]xi32> -> i32
+    %16 = scalar.constant 31 : i32
+    %17 = scalar.shli %15, %16 : i32
+    %18 = scalar.constant 31 : i32
+    %19 = scalar.shrui %17, %18 : i32
+    %20 = vector.insert %19 into %13[%12] : i32, vector<[%count]xi32>
+    scf.yield %20 : vector<[%count]xi32>
   }
   func.return %result : vector<[%count]xi32>
 }
@@ -36,30 +47,30 @@ func.def target(@target) @extract_signed_same_width(%source: vector<4xi64>) -> (
 test.target<low_core> @target
 
 func.def target(@target) @extract_signed_same_width(%source: vector<4xi64>) -> (vector<4xi64>) {
-  %12 = vector.extract %source[0] : vector<4xi64> -> i64
-  %13 = scalar.constant 56 : i64
-  %14 = scalar.shli %12, %13 : i64
-  %48 = scalar.constant 56 : i64
-  %18 = scalar.shrsi %14, %48 : i64
-  %19 = vector.extract %source[1] : vector<4xi64> -> i64
+  %9 = vector.extract %source[0] : vector<4xi64> -> i64
+  %10 = scalar.constant 56 : i64
+  %11 = scalar.shli %9, %10 : i64
+  %12 = scalar.constant 56 : i64
+  %13 = scalar.shrsi %11, %12 : i64
+  %14 = vector.extract %source[1] : vector<4xi64> -> i64
+  %15 = scalar.constant 56 : i64
+  %16 = scalar.shli %14, %15 : i64
+  %17 = scalar.constant 56 : i64
+  %18 = scalar.shrsi %16, %17 : i64
+  %19 = vector.extract %source[2] : vector<4xi64> -> i64
   %20 = scalar.constant 56 : i64
   %21 = scalar.shli %19, %20 : i64
-  %47 = scalar.constant 56 : i64
-  %25 = scalar.shrsi %21, %47 : i64
-  %26 = vector.extract %source[2] : vector<4xi64> -> i64
+  %22 = scalar.constant 56 : i64
+  %23 = scalar.shrsi %21, %22 : i64
+  %24 = vector.extract %source[3] : vector<4xi64> -> i64
+  %25 = scalar.constant 56 : i64
+  %26 = scalar.shli %24, %25 : i64
   %27 = scalar.constant 56 : i64
-  %28 = scalar.shli %26, %27 : i64
-  %46 = scalar.constant 56 : i64
-  %32 = scalar.shrsi %28, %46 : i64
-  %33 = vector.extract %source[3] : vector<4xi64> -> i64
-  %34 = scalar.constant 56 : i64
-  %35 = scalar.shli %33, %34 : i64
-  %45 = scalar.constant 56 : i64
-  %39 = scalar.shrsi %35, %45 : i64
-  %41 = vector.splat %18 : vector<4xi64>
-  %42 = vector.insert %25 into %41[1] : i64, vector<4xi64>
-  %43 = vector.insert %32 into %42[2] : i64, vector<4xi64>
-  %result = vector.insert %39 into %43[3] : i64, vector<4xi64>
+  %28 = scalar.shrsi %26, %27 : i64
+  %30 = vector.splat %13 : vector<4xi64>
+  %31 = vector.insert %18 into %30[1] : i64, vector<4xi64>
+  %32 = vector.insert %23 into %31[2] : i64, vector<4xi64>
+  %result = vector.insert %28 into %32[3] : i64, vector<4xi64>
   func.return %result : vector<4xi64>
 }
 
@@ -76,26 +87,38 @@ func.def target(@target) @extract_unsigned_narrower_result(%source: vector<2x3xi
 test.target<low_core> @target
 
 func.def target(@target) @extract_unsigned_narrower_result(%source: vector<2x3xi64>) -> (vector<2x3xi16>) {
-  %8 = vector.extract %source[0, 0] : vector<2x3xi64> -> i64
-  %9 = scalar.constant 255 : i64
-  %10 = scalar.andi %8, %9 : i64
-  %11 = vector.extract %source[0, 1] : vector<2x3xi64> -> i64
-  %12 = scalar.constant 255 : i64
-  %13 = scalar.andi %11, %12 : i64
-  %14 = vector.extract %source[0, 2] : vector<2x3xi64> -> i64
-  %15 = scalar.constant 255 : i64
-  %16 = scalar.andi %14, %15 : i64
-  %17 = vector.extract %source[1, 0] : vector<2x3xi64> -> i64
-  %18 = scalar.constant 255 : i64
-  %19 = scalar.andi %17, %18 : i64
-  %20 = vector.extract %source[1, 1] : vector<2x3xi64> -> i64
-  %21 = scalar.constant 255 : i64
-  %22 = scalar.andi %20, %21 : i64
-  %23 = vector.extract %source[1, 2] : vector<2x3xi64> -> i64
-  %24 = scalar.constant 255 : i64
-  %25 = scalar.andi %23, %24 : i64
-  %26 = vector.from_elements %10, %13, %16, %19, %22, %25 : vector<2x3xi64>
-  %result = vector.trunci %26 : vector<2x3xi64> to vector<2x3xi16>
+  %10 = vector.extract %source[0, 0] : vector<2x3xi64> -> i64
+  %11 = scalar.constant 56 : i64
+  %12 = scalar.shli %10, %11 : i64
+  %13 = scalar.constant 56 : i64
+  %14 = scalar.shrui %12, %13 : i64
+  %15 = vector.extract %source[0, 1] : vector<2x3xi64> -> i64
+  %16 = scalar.constant 56 : i64
+  %17 = scalar.shli %15, %16 : i64
+  %18 = scalar.constant 56 : i64
+  %19 = scalar.shrui %17, %18 : i64
+  %20 = vector.extract %source[0, 2] : vector<2x3xi64> -> i64
+  %21 = scalar.constant 56 : i64
+  %22 = scalar.shli %20, %21 : i64
+  %23 = scalar.constant 56 : i64
+  %24 = scalar.shrui %22, %23 : i64
+  %25 = vector.extract %source[1, 0] : vector<2x3xi64> -> i64
+  %26 = scalar.constant 56 : i64
+  %27 = scalar.shli %25, %26 : i64
+  %28 = scalar.constant 56 : i64
+  %29 = scalar.shrui %27, %28 : i64
+  %30 = vector.extract %source[1, 1] : vector<2x3xi64> -> i64
+  %31 = scalar.constant 56 : i64
+  %32 = scalar.shli %30, %31 : i64
+  %33 = scalar.constant 56 : i64
+  %34 = scalar.shrui %32, %33 : i64
+  %35 = vector.extract %source[1, 2] : vector<2x3xi64> -> i64
+  %36 = scalar.constant 56 : i64
+  %37 = scalar.shli %35, %36 : i64
+  %38 = scalar.constant 56 : i64
+  %39 = scalar.shrui %37, %38 : i64
+  %40 = vector.from_elements %14, %19, %24, %29, %34, %39 : vector<2x3xi64>
+  %result = vector.trunci %40 : vector<2x3xi64> to vector<2x3xi16>
   func.return %result : vector<2x3xi16>
 }
 
@@ -149,31 +172,34 @@ func.def target(@target) @extract_unsigned_wider_result(%source: vector<4xi16>) 
 test.target<low_core> @target
 
 func.def target(@target) @extract_unsigned_wider_result(%source: vector<4xi16>) -> (vector<4xi64>) {
-  %8 = vector.extract %source[0] : vector<4xi16> -> i16
-  %37 = scalar.extui %8 : i16 to i32
-  %44 = scalar.constant 1 : i32
-  %39 = scalar.andi %37, %44 : i32
-  %40 = scalar.trunci %39 : i32 to i16
-  %11 = vector.extract %source[1] : vector<4xi16> -> i16
-  %33 = scalar.extui %11 : i16 to i32
-  %43 = scalar.constant 1 : i32
-  %35 = scalar.andi %33, %43 : i32
-  %36 = scalar.trunci %35 : i32 to i16
-  %14 = vector.extract %source[2] : vector<4xi16> -> i16
-  %29 = scalar.extui %14 : i16 to i32
-  %42 = scalar.constant 1 : i32
-  %31 = scalar.andi %29, %42 : i32
-  %32 = scalar.trunci %31 : i32 to i16
-  %17 = vector.extract %source[3] : vector<4xi16> -> i16
-  %25 = scalar.extui %17 : i16 to i32
-  %41 = scalar.constant 1 : i32
-  %27 = scalar.andi %25, %41 : i32
-  %28 = scalar.trunci %27 : i32 to i16
-  %21 = vector.splat %40 : vector<4xi16>
-  %22 = vector.insert %36 into %21[1] : i16, vector<4xi16>
-  %23 = vector.insert %32 into %22[2] : i16, vector<4xi16>
-  %24 = vector.insert %28 into %23[3] : i16, vector<4xi16>
-  %result = vector.extui %24 : vector<4xi16> to vector<4xi64>
+  %10 = vector.extract %source[0] : vector<4xi16> -> i16
+  %11 = scalar.extui %10 : i16 to i64
+  %12 = scalar.constant 63 : i64
+  %13 = scalar.shli %11, %12 : i64
+  %14 = scalar.constant 63 : i64
+  %15 = scalar.shrui %13, %14 : i64
+  %16 = vector.extract %source[1] : vector<4xi16> -> i16
+  %17 = scalar.extui %16 : i16 to i64
+  %18 = scalar.constant 63 : i64
+  %19 = scalar.shli %17, %18 : i64
+  %20 = scalar.constant 63 : i64
+  %21 = scalar.shrui %19, %20 : i64
+  %22 = vector.extract %source[2] : vector<4xi16> -> i16
+  %23 = scalar.extui %22 : i16 to i64
+  %24 = scalar.constant 63 : i64
+  %25 = scalar.shli %23, %24 : i64
+  %26 = scalar.constant 63 : i64
+  %27 = scalar.shrui %25, %26 : i64
+  %28 = vector.extract %source[3] : vector<4xi16> -> i16
+  %29 = scalar.extui %28 : i16 to i64
+  %30 = scalar.constant 63 : i64
+  %31 = scalar.shli %29, %30 : i64
+  %32 = scalar.constant 63 : i64
+  %33 = scalar.shrui %31, %32 : i64
+  %35 = vector.splat %15 : vector<4xi64>
+  %36 = vector.insert %21 into %35[1] : i64, vector<4xi64>
+  %37 = vector.insert %27 into %36[2] : i64, vector<4xi64>
+  %result = vector.insert %33 into %37[3] : i64, vector<4xi64>
   func.return %result : vector<4xi64>
 }
 
@@ -191,49 +217,42 @@ test.target<low_core> @target
 
 func.def target(@target) @extract_signed_wider_result(%source: vector<2x3xi16>) -> (vector<2x3xi32>) {
   %10 = vector.extract %source[0, 0] : vector<2x3xi16> -> i16
-  %110 = scalar.extsi %10 : i16 to i32
-  %141 = scalar.constant 24 : i32
-  %142 = scalar.shli %110, %141 : i32
-  %139 = scalar.constant 24 : i32
-  %140 = scalar.shrsi %142, %139 : i32
-  %109 = scalar.trunci %140 : i32 to i16
-  %15 = vector.extract %source[0, 1] : vector<2x3xi16> -> i16
-  %97 = scalar.extsi %15 : i16 to i32
-  %137 = scalar.constant 24 : i32
-  %138 = scalar.shli %97, %137 : i32
-  %135 = scalar.constant 24 : i32
-  %136 = scalar.shrsi %138, %135 : i32
-  %96 = scalar.trunci %136 : i32 to i16
-  %20 = vector.extract %source[0, 2] : vector<2x3xi16> -> i16
-  %84 = scalar.extsi %20 : i16 to i32
-  %133 = scalar.constant 24 : i32
-  %134 = scalar.shli %84, %133 : i32
-  %131 = scalar.constant 24 : i32
-  %132 = scalar.shrsi %134, %131 : i32
-  %83 = scalar.trunci %132 : i32 to i16
-  %25 = vector.extract %source[1, 0] : vector<2x3xi16> -> i16
-  %71 = scalar.extsi %25 : i16 to i32
-  %129 = scalar.constant 24 : i32
-  %130 = scalar.shli %71, %129 : i32
-  %127 = scalar.constant 24 : i32
-  %128 = scalar.shrsi %130, %127 : i32
-  %70 = scalar.trunci %128 : i32 to i16
-  %30 = vector.extract %source[1, 1] : vector<2x3xi16> -> i16
-  %58 = scalar.extsi %30 : i16 to i32
-  %125 = scalar.constant 24 : i32
-  %126 = scalar.shli %58, %125 : i32
-  %123 = scalar.constant 24 : i32
-  %124 = scalar.shrsi %126, %123 : i32
-  %57 = scalar.trunci %124 : i32 to i16
-  %35 = vector.extract %source[1, 2] : vector<2x3xi16> -> i16
-  %45 = scalar.extsi %35 : i16 to i32
-  %121 = scalar.constant 24 : i32
-  %122 = scalar.shli %45, %121 : i32
-  %119 = scalar.constant 24 : i32
-  %120 = scalar.shrsi %122, %119 : i32
-  %44 = scalar.trunci %120 : i32 to i16
-  %40 = vector.from_elements %109, %96, %83, %70, %57, %44 : vector<2x3xi16>
-  %result = vector.extsi %40 : vector<2x3xi16> to vector<2x3xi32>
+  %11 = scalar.extui %10 : i16 to i32
+  %12 = scalar.constant 24 : i32
+  %13 = scalar.shli %11, %12 : i32
+  %14 = scalar.constant 24 : i32
+  %15 = scalar.shrsi %13, %14 : i32
+  %16 = vector.extract %source[0, 1] : vector<2x3xi16> -> i16
+  %17 = scalar.extui %16 : i16 to i32
+  %18 = scalar.constant 24 : i32
+  %19 = scalar.shli %17, %18 : i32
+  %20 = scalar.constant 24 : i32
+  %21 = scalar.shrsi %19, %20 : i32
+  %22 = vector.extract %source[0, 2] : vector<2x3xi16> -> i16
+  %23 = scalar.extui %22 : i16 to i32
+  %24 = scalar.constant 24 : i32
+  %25 = scalar.shli %23, %24 : i32
+  %26 = scalar.constant 24 : i32
+  %27 = scalar.shrsi %25, %26 : i32
+  %28 = vector.extract %source[1, 0] : vector<2x3xi16> -> i16
+  %29 = scalar.extui %28 : i16 to i32
+  %30 = scalar.constant 24 : i32
+  %31 = scalar.shli %29, %30 : i32
+  %32 = scalar.constant 24 : i32
+  %33 = scalar.shrsi %31, %32 : i32
+  %34 = vector.extract %source[1, 1] : vector<2x3xi16> -> i16
+  %35 = scalar.extui %34 : i16 to i32
+  %36 = scalar.constant 24 : i32
+  %37 = scalar.shli %35, %36 : i32
+  %38 = scalar.constant 24 : i32
+  %39 = scalar.shrsi %37, %38 : i32
+  %40 = vector.extract %source[1, 2] : vector<2x3xi16> -> i16
+  %41 = scalar.extui %40 : i16 to i32
+  %42 = scalar.constant 24 : i32
+  %43 = scalar.shli %41, %42 : i32
+  %44 = scalar.constant 24 : i32
+  %45 = scalar.shrsi %43, %44 : i32
+  %result = vector.from_elements %15, %21, %27, %33, %39, %45 : vector<2x3xi32>
   func.return %result : vector<2x3xi32>
 }
 
@@ -252,39 +271,41 @@ test.target<low_core> @target
 
 func.def target(@target) @retained_truncation(%count: index, %source: vector<2x[%count]xi32>) -> (vector<2x[%count]xi8>, vector<2x[%count]xi64>) {
   %intermediate = vector.trunci %source : vector<2x[%count]xi32> to vector<2x[%count]xi8>
-  %29 = index.constant 0 : index
-  %30 = index.constant 1 : index
-  %31 = index.constant 2 : index
-  %34 = scf.for %32 = [%29 to %31 step %30](%33 = %source : vector<2x[%count]xi32>) -> (vector<2x[%count]xi32>) {
-    %35 = index.constant 0 : index
-    %36 = index.constant 1 : index
-    %39 = scf.for %37 = [%35 to %count step %36](%38 = %33 : vector<2x[%count]xi32>) -> (vector<2x[%count]xi32>) {
-      %40 = vector.extract %source[%32, %37] : vector<2x[%count]xi32> -> i32
-      %41 = scalar.constant 24 : i32
-      %42 = scalar.shli %40, %41 : i32
-      %43 = vector.insert %42 into %38[%32, %37] : i32, vector<2x[%count]xi32>
-      scf.yield %43 : vector<2x[%count]xi32>
+  %7 = vector.extui %source : vector<2x[%count]xi32> to vector<2x[%count]xi64>
+  %30 = index.constant 0 : index
+  %31 = index.constant 1 : index
+  %32 = index.constant 2 : index
+  %35 = scf.for %33 = [%30 to %32 step %31](%34 = %7 : vector<2x[%count]xi64>) -> (vector<2x[%count]xi64>) {
+    %36 = index.constant 0 : index
+    %37 = index.constant 1 : index
+    %40 = scf.for %38 = [%36 to %count step %37](%39 = %34 : vector<2x[%count]xi64>) -> (vector<2x[%count]xi64>) {
+      %41 = vector.extract %source[%33, %38] : vector<2x[%count]xi32> -> i32
+      %42 = scalar.extui %41 : i32 to i64
+      %43 = scalar.constant 56 : i64
+      %44 = scalar.shli %42, %43 : i64
+      %45 = vector.insert %44 into %39[%33, %38] : i64, vector<2x[%count]xi64>
+      scf.yield %45 : vector<2x[%count]xi64>
     }
-    scf.yield %39 : vector<2x[%count]xi32>
+    scf.yield %40 : vector<2x[%count]xi64>
   }
   %12 = index.constant 0 : index
   %13 = index.constant 1 : index
   %14 = index.constant 2 : index
-  %17 = scf.for %15 = [%12 to %14 step %13](%16 = %34 : vector<2x[%count]xi32>) -> (vector<2x[%count]xi32>) {
+  %result = scf.for %15 = [%12 to %14 step %13](%16 = %35 : vector<2x[%count]xi64>) -> (vector<2x[%count]xi64>) {
     %18 = index.constant 0 : index
     %19 = index.constant 1 : index
-    %22 = scf.for %20 = [%18 to %count step %19](%21 = %16 : vector<2x[%count]xi32>) -> (vector<2x[%count]xi32>) {
+    %22 = scf.for %20 = [%18 to %count step %19](%21 = %16 : vector<2x[%count]xi64>) -> (vector<2x[%count]xi64>) {
       %23 = vector.extract %source[%15, %20] : vector<2x[%count]xi32> -> i32
-      %24 = scalar.constant 24 : i32
-      %25 = scalar.shli %23, %24 : i32
-      %26 = scalar.constant 24 : i32
-      %27 = scalar.shrsi %25, %26 : i32
-      %28 = vector.insert %27 into %21[%15, %20] : i32, vector<2x[%count]xi32>
-      scf.yield %28 : vector<2x[%count]xi32>
+      %24 = scalar.extui %23 : i32 to i64
+      %25 = scalar.constant 56 : i64
+      %26 = scalar.shli %24, %25 : i64
+      %27 = scalar.constant 56 : i64
+      %28 = scalar.shrsi %26, %27 : i64
+      %29 = vector.insert %28 into %21[%15, %20] : i64, vector<2x[%count]xi64>
+      scf.yield %29 : vector<2x[%count]xi64>
     }
-    scf.yield %22 : vector<2x[%count]xi32>
+    scf.yield %22 : vector<2x[%count]xi64>
   }
-  %result = vector.extsi %17 : vector<2x[%count]xi32> to vector<2x[%count]xi64>
   func.return %intermediate, %result : vector<2x[%count]xi8>, vector<2x[%count]xi64>
 }
 
