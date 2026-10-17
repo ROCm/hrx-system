@@ -15,9 +15,12 @@
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_state.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/matrix/projection.h"
+#include "loom/target/registers.h"
 #include "loom/util/numeric_format.h"
 
 void loom_amdgpu_matrix_target_configuration_initialize(
@@ -576,4 +579,32 @@ iree_status_t loom_amdgpu_descriptor_matrix_attrs(
   *out_attrs =
       loom_make_named_attr_slice(attrs, descriptor_layout->immediate_count);
   return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_descriptor_matrix_materialize_operand(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, const loom_low_operand_t* descriptor_operand,
+    loom_value_id_t source_value, loom_value_id_t low_value,
+    loom_value_id_t* out_low_value) {
+  (void)user_data;
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  const loom_type_t low_type =
+      loom_module_value_type(loom_low_lower_context_module(context), low_value);
+  if (!loom_low_type_is_register(low_type)) {
+    *out_low_value = low_value;
+    return iree_ok_status();
+  }
+  const uint16_t register_class_id = loom_low_register_type_class_id(low_type);
+  if (loom_low_operand_reg_class_alt(descriptor_set, descriptor_operand,
+                                     register_class_id) != NULL) {
+    *out_low_value = low_value;
+    return iree_ok_status();
+  }
+  IREE_ASSERT(
+      loom_low_operand_reg_class_alt(descriptor_set, descriptor_operand,
+                                     LOOM_AMDGPU_REG_CLASS_ID_VGPR) != NULL,
+      "selected AMDGPU matrix operand must accept its carrier or VGPRs");
+  return loom_amdgpu_lookup_or_materialize_vgpr_registers(
+      context, source_op, source_value, out_low_value);
 }

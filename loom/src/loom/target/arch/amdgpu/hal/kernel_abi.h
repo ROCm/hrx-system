@@ -41,6 +41,10 @@ extern "C" {
 // Required kernarg alignment for direct dispatch constant words.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT 4u
 
+// Maximum physical word count carried by one direct dispatch argument. This
+// covers the widest source vector representation admitted by AMDGPU lowering.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_ARG_MAX_UNIT_COUNT 32u
+
 // Stable low.live_in source spelling for the AMDGPU kernarg segment pointer.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_KERNARG_SEGMENT_PTR_SOURCE \
   "amdgpu.kernarg_segment_ptr"

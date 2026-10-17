@@ -43,5 +43,5 @@ kernel.def target(@target) @report_attention_tail_peel_accumulator_merge() {
 CHECK: COMPILE-REPORT: source_low_memory * exact_dynamic_packets=8 unknown_dynamic_packets=0 dynamic_packets=8 * dynamic_write_bytes=32 * dispatch_source_write_bytes=1024 *
 CHECK: COMPILE-REPORT: source_low_subgroup_access_summary * dynamic_exact_packets=8 dynamic_unknown_packets=0 dynamic_packets=8 dynamic_dense_packets=8 *
 CHECK: COMPILE-REPORT: source_low_selection[*] * source_op=index.cmp * exact_dynamic_ops=1 unknown_dynamic_ops=0 dynamic_selected_ops=2 dynamic_emitted_ops=2 *
-CHECK: COMPILE-REPORT: source_low_selection[*] * source_op=vector.mma * selected_ops=2 emitted_ops=4 exact_dynamic_ops=1 unknown_dynamic_ops=1 dynamic_selected_ops=1 dynamic_emitted_ops=2 *
+CHECK: COMPILE-REPORT: source_low_selection[*] * source_op=vector.mma * selected_ops=2 emitted_ops=72 exact_dynamic_ops=1 unknown_dynamic_ops=1 dynamic_selected_ops=1 dynamic_emitted_ops=36 *
 CHECK: COMPILE-REPORT: source_low[*] * source_op=index.cmp * execution_count=2

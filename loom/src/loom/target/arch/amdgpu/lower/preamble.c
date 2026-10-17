@@ -14,6 +14,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
+#include "loom/target/arch/amdgpu/lower/abi.h"
 #include "loom/target/arch/amdgpu/lower/cluster_preamble.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -1700,7 +1701,8 @@ iree_status_t loom_amdgpu_emit_entry_setup(void* user_data,
           context, source_op, source_result, low_count));
     }
   }
-  return loom_amdgpu_sanitizer_race_emit_entry_setup(context);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_emit_entry_setup(context));
+  return loom_amdgpu_emit_hal_kernel_predicate_argument_setup(context);
 }
 
 iree_status_t loom_amdgpu_lower_preamble_op(

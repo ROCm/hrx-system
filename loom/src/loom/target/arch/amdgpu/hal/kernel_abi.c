@@ -22,7 +22,6 @@
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_COORDINATE_DIMENSION_COUNT 3u
 // ABI layout snapshots store resource arrays as uint16_t-counted attributes.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_RESOURCE_COUNT UINT16_MAX
-#define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_ARG_MAX_UNIT_COUNT 2u
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_NO_DIMENSION UINT8_MAX
 
 typedef enum loom_amdgpu_hal_kernel_abi_reg_class_e {

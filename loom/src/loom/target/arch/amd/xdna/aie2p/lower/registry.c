@@ -198,7 +198,7 @@ static iree_status_t loom_aie2p_map_argument(
   *out_argument = (loom_low_lower_abi_argument_t){
       .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
       .abi_type = loom_type_none(),
-      .resource_source_type = loom_type_none(),
+      .body_type = loom_type_none(),
   };
   return loom_aie2p_map_type(user_data, context, source_function_op,
                              source_type, &out_argument->abi_type);

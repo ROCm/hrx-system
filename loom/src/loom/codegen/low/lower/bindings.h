@@ -86,8 +86,9 @@ iree_status_t loom_low_lower_bind_value(loom_low_lower_context_t* context,
                                         loom_value_id_t source_value_id,
                                         loom_value_id_t low_value_id);
 
-// Replaces an emitted binding when entry interposition remaps its SSA identity.
-// The replacement preserves the native type selected by the producer.
+// Replaces an emitted binding when entry interposition remaps its SSA identity
+// or adapts a physical ABI carrier to its body representation. Subsequent
+// queries observe the replacement value's actual type.
 iree_status_t loom_low_lower_replace_value_binding(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     loom_value_id_t low_value_id);

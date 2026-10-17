@@ -349,3 +349,60 @@ amdgpu.target<gfx1100> @target
 low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "unused"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 1, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = false}) workgroup_size(64, 1, 1) @predicate_only_arg() asm {
   return
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// A ragged direct carrier uses the widest scalar-memory loads available and
+// concatenates them in increasing kernarg-address order.
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @direct_ragged(%values: reg<amdgpu.sgpr x31>) asm {
+  %first = slice %values[0] : reg<amdgpu.sgpr x31> -> reg<amdgpu.sgpr>
+  %last = slice %values[30] : reg<amdgpu.sgpr x31> -> reg<amdgpu.sgpr>
+  %sum = s_add_u32 %first, %last
+  return
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 31, direct_arg_count = 1, direct_arg_names = {arg0 = "values"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [124], parameter_count = 1, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @direct_ragged() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %5 = s_load_dwordx16_offset_only %kernarg
+  %6 = s_load_dwordx8_offset_only %kernarg {offset = 64}
+  %7 = s_load_dwordx4_offset_only %kernarg {offset = 96}
+  %8 = s_load_dwordx2_offset_only %kernarg {offset = 112}
+  %9 = s_load_dword_offset_only %kernarg {offset = 120}
+  %values = concat(%5, %6, %7, %8, %9) : (reg<amdgpu.sgpr x16>, reg<amdgpu.sgpr x8>, reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x31>
+  %first = slice %values[0] : reg<amdgpu.sgpr x31> -> reg<amdgpu.sgpr>
+  %last = slice %values[30] : reg<amdgpu.sgpr x31> -> reg<amdgpu.sgpr>
+  %sum = s_add_u32 %first, %last
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// The widest direct carrier remains one logical argument even though two
+// native scalar-memory instructions materialize it.
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @direct_max_width(%values: reg<amdgpu.sgpr x32>) asm {
+  %first = slice %values[0] : reg<amdgpu.sgpr x32> -> reg<amdgpu.sgpr>
+  %last = slice %values[31] : reg<amdgpu.sgpr x32> -> reg<amdgpu.sgpr>
+  %sum = s_add_u32 %first, %last
+  return
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 32, direct_arg_count = 1, direct_arg_names = {arg0 = "values"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [128], parameter_count = 1, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @direct_max_width() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %5 = s_load_dwordx16_offset_only %kernarg
+  %6 = s_load_dwordx16_offset_only %kernarg {offset = 64}
+  %values = concat(%5, %6) : (reg<amdgpu.sgpr x16>, reg<amdgpu.sgpr x16>) -> reg<amdgpu.sgpr x32>
+  %first = slice %values[0] : reg<amdgpu.sgpr x32> -> reg<amdgpu.sgpr>
+  %last = slice %values[31] : reg<amdgpu.sgpr x32> -> reg<amdgpu.sgpr>
+  %sum = s_add_u32 %first, %last
+  return
+}

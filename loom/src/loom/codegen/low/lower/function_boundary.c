@@ -79,6 +79,7 @@ iree_status_t loom_low_lower_query_argument(
     loom_value_id_t source_argument_id,
     loom_low_lower_abi_argument_t* out_argument) {
   out_argument->kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT;
+  out_argument->body_type = loom_type_none();
   if (context->policy->map_argument.fn == NULL) {
     return loom_low_lower_query_value(context, context->source_function.op,
                                       source_argument_id,

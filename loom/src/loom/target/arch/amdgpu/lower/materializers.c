@@ -16,6 +16,67 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 
+typedef struct loom_amdgpu_vgpr_materialization_record_t {
+  // Low block containing the materialization and all of its reusable uses.
+  const loom_block_t* block;
+  // Source SSA value whose alternate carrier was materialized.
+  loom_value_id_t source_value;
+  // Canonical Low carrier at the time of materialization.
+  loom_value_id_t low_value;
+  // Block-local VGPR carrier preserving the source payload.
+  loom_value_id_t materialized_low_value;
+  // Next most-recent materialization in this function.
+  struct loom_amdgpu_vgpr_materialization_record_t* next;
+} loom_amdgpu_vgpr_materialization_record_t;
+
+typedef struct loom_amdgpu_vgpr_materialization_state_t {
+  // Most recently materialized alternate carrier.
+  loom_amdgpu_vgpr_materialization_record_t* head;
+} loom_amdgpu_vgpr_materialization_state_t;
+
+static const uint8_t loom_amdgpu_vgpr_materialization_state_key;
+
+static iree_status_t loom_amdgpu_lookup_cached_vgpr_materialization(
+    loom_low_lower_context_t* context, loom_value_id_t source_value,
+    loom_value_id_t low_value, loom_value_id_t* out_low_value) {
+  *out_low_value = LOOM_VALUE_ID_INVALID;
+  loom_amdgpu_vgpr_materialization_state_t* state = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
+      context, &loom_amdgpu_vgpr_materialization_state_key, sizeof(*state),
+      (void**)&state));
+  const loom_block_t* block = loom_low_lower_context_builder(context)->ip.block;
+  for (const loom_amdgpu_vgpr_materialization_record_t* record = state->head;
+       record != NULL; record = record->next) {
+    if (record->block == block && record->source_value == source_value &&
+        record->low_value == low_value) {
+      *out_low_value = record->materialized_low_value;
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_cache_vgpr_materialization(
+    loom_low_lower_context_t* context, loom_value_id_t source_value,
+    loom_value_id_t low_value, loom_value_id_t materialized_low_value) {
+  loom_amdgpu_vgpr_materialization_state_t* state = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
+      context, &loom_amdgpu_vgpr_materialization_state_key, sizeof(*state),
+      (void**)&state));
+  loom_amdgpu_vgpr_materialization_record_t* record = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+      context, 1, sizeof(*record), (void**)&record));
+  *record = (loom_amdgpu_vgpr_materialization_record_t){
+      .block = loom_low_lower_context_builder(context)->ip.block,
+      .source_value = source_value,
+      .low_value = low_value,
+      .materialized_low_value = materialized_low_value,
+      .next = state->head,
+  };
+  state->head = record;
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_prepare_vgpr_literal(
     loom_low_lower_context_t* context, loom_value_id_t source_value,
     const void** out_plan) {
@@ -168,10 +229,32 @@ iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_registers(
 iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_registers(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, loom_value_id_t* out_low_value) {
-  loom_value_id_t low_value =
+  const loom_value_id_t low_value =
       loom_low_lower_lookup_value(context, source_value);
-  return loom_amdgpu_materialize_low_vgpr_b32_registers(
-      context, source_op, low_value, out_low_value);
+  const loom_type_t low_type =
+      loom_module_value_type(loom_low_lower_context_module(context), low_value);
+  if (loom_amdgpu_low_type_is_register_class(context, low_type,
+                                             LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
+    *out_low_value = low_value;
+    return iree_ok_status();
+  }
+
+  const loom_type_t source_type = loom_module_value_type(
+      loom_low_lower_context_module(context), source_value);
+  if (!loom_type_is_vector(source_type)) {
+    return loom_amdgpu_materialize_low_vgpr_b32_registers(
+        context, source_op, low_value, out_low_value);
+  }
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_cached_vgpr_materialization(
+      context, source_value, low_value, out_low_value));
+  if (*out_low_value != LOOM_VALUE_ID_INVALID) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
+      context, source_op, low_value, out_low_value));
+  return loom_amdgpu_cache_vgpr_materialization(context, source_value,
+                                                low_value, *out_low_value);
 }
 
 iree_status_t loom_amdgpu_value_can_materialize_as_vop3_binary_rhs(
