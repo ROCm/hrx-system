@@ -1167,12 +1167,12 @@ iree_status_t loom_vector_packet_staging_store(
 }
 
 // Reifies packet snapshots as immutable private storage at their definition.
-// Each direct consumer receives its own oversized load so a later packetization
-// can stream from the shared storage without retaining the original packet
-// tuple across an unrelated consumer.
+// Each selected consumer receives its own oversized load so later packetization
+// can stream from the shared storage. Restricting redirection to dynamic
+// windows preserves register reuse for full-value and static consumers.
 iree_status_t loom_vector_packet_canonicalize_snapshots(
     loom_vector_packetization_t* packetization,
-    const loom_vector_packet_shape_t* shape) {
+    const loom_vector_packet_shape_t* shape, bool dynamic_windows_only) {
   loom_rewriter_t* rewriter = packetization->context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
   const loom_builder_ip_t saved_ip = loom_builder_save(builder);
@@ -1186,9 +1186,43 @@ iree_status_t loom_vector_packet_canonicalize_snapshots(
 
     loom_value_t* snapshot_value = loom_module_value(
         packetization->context->module, packetized_value->source);
+    const uint32_t use_count = snapshot_value->use_count;
+    loom_op_t** consumers = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(packetization->context->arena, use_count,
+                                  sizeof(*consumers), (void**)&consumers));
+    uint32_t consumer_count = 0;
+    const loom_use_t* use = NULL;
+    loom_value_for_each_use(snapshot_value, use) {
+      loom_op_t* consumer = loom_use_user_op(*use);
+      if (dynamic_windows_only &&
+          (!loom_vector_slice_isa(consumer) ||
+           loom_vector_slice_offsets(consumer).count == 0)) {
+        continue;
+      }
+      bool already_recorded = false;
+      for (uint32_t j = 0; j < consumer_count; ++j) {
+        if (consumers[j] == consumer) {
+          already_recorded = true;
+          break;
+        }
+      }
+      if (!already_recorded) {
+        consumers[consumer_count++] = consumer;
+      }
+    }
+
+    if (consumer_count == 0) {
+      continue;
+    }
+
     loom_op_t* snapshot_op = loom_value_def_op(snapshot_value);
     IREE_ASSERT(snapshot_op != NULL);
-    loom_builder_set_after(builder, snapshot_op);
+    if (dynamic_windows_only) {
+      loom_builder_set_before(builder, snapshot_op->parent_block->first_op);
+    } else {
+      loom_builder_set_after(builder, snapshot_op);
+    }
     loom_value_id_t staging_view = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_vector_packet_build_staging_view(
         packetization, packetized_value->source_type, shape, snapshot_op,
@@ -1202,33 +1236,29 @@ iree_status_t loom_vector_packet_canonicalize_snapshots(
           .lane_count = iree_min(shape->lane_count - lane_offset,
                                  shape->chunk_lane_count),
       };
+      if (dynamic_windows_only) {
+        // The selected chunk divides the regular captured packet width. Store
+        // it as soon as that packet exists instead of extending every packet's
+        // lifetime to the aggregate definition.
+        const loom_value_fact_vector_partition_t partition =
+            packetized_value->source_partition;
+        const uint32_t packet_index =
+            lane_offset / partition.snapshot_lane_count;
+        const loom_value_t* packet_value = loom_module_value(
+            packetization->context->module,
+            partition.snapshot_components[packet_index].value);
+        if (loom_value_is_block_arg(packet_value)) {
+          loom_builder_set_before(builder, snapshot_op);
+        } else {
+          loom_builder_set_after(builder, loom_value_def_op(packet_value));
+        }
+      }
       loom_vector_packet_reset_value(packetized_value);
       IREE_RETURN_IF_ERROR(loom_vector_packet_materialize_snapshot(
           packetization, &slice, packetized_value));
       IREE_RETURN_IF_ERROR(loom_vector_packet_staging_store(
           packetization, staging_view, &slice, packetized_value->packet,
           snapshot_op));
-    }
-
-    const uint32_t use_count = snapshot_value->use_count;
-    loom_op_t** consumers = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(packetization->context->arena, use_count,
-                                  sizeof(*consumers), (void**)&consumers));
-    uint32_t consumer_count = 0;
-    const loom_use_t* use = NULL;
-    loom_value_for_each_use(snapshot_value, use) {
-      loom_op_t* consumer = loom_use_user_op(*use);
-      bool already_recorded = false;
-      for (uint32_t j = 0; j < consumer_count; ++j) {
-        if (consumers[j] == consumer) {
-          already_recorded = true;
-          break;
-        }
-      }
-      if (!already_recorded) {
-        consumers[consumer_count++] = consumer;
-      }
     }
 
     const loom_vector_packet_slice_t snapshot_slice = {

@@ -718,7 +718,8 @@ check.scenario @rectangle_snapshot_values {
 }
 
 // Four element widths capture the same bytes before the entire source is
-// overwritten. Each captured value serves two separately positioned windows.
+// overwritten. Each captured value serves two separately positioned windows;
+// the full wide value also remains observable through a separate output.
 func.def @shared_snapshot_windows(%trial: index, %input: buffer, %output: buffer) {
   %ordinal = index.assume %trial [range(%trial, 0, 8)] : index
   %c2 = index.constant 2 : index
@@ -765,6 +766,9 @@ func.def @shared_snapshot_windows(%trial: index, %input: buffer, %output: buffer
   vector.store %half_result, %half_output[0] : vector<16xi16>, view<16xi16>
   vector.store %word_result, %word_output[0] : vector<8xi32>, view<8xi32>
   vector.store %wide_result, %wide_output[0] : vector<8xi64>, view<8xi64>
+  %full_base = index.constant 200 : offset
+  %full_output = buffer.view %output[%full_base] : buffer -> view<16xi64>
+  vector.store %wide_source, %full_output[0] : vector<16xi64>, view<16xi64>
   func.return
 }
 
@@ -781,13 +785,14 @@ func.def @shared_snapshot_windows_oracle(%trial: index, %input: buffer, %output:
   %c64 = index.constant 64 : index
   %c88 = index.constant 88 : index
   %c128 = index.constant 128 : index
+  %c200 = index.constant 200 : index
   %byte_position = index.mul %ordinal, %c2 : index
   %word_position = index.div %ordinal, %c2 : index
   %word_byte_position = index.mul %word_position, %c4 : index
   %wide_byte_position = index.mul %word_position, %c8 : index
   %base = index.constant 0 : offset
   %bytes = buffer.view %input[%base] : buffer -> view<128xi8>
-  %result = buffer.view %output[%base] : buffer -> view<200xi8>
+  %result = buffer.view %output[%base] : buffer -> view<336xi8>
   scf.for %i = [%c0 to %c32 step %c1] {
     %tail = index.cmp sge, %i, %c16 : index
     %gap = scf.select %tail, %c16, %c0 : index
@@ -799,9 +804,9 @@ func.def @shared_snapshot_windows_oracle(%trial: index, %input: buffer, %output:
     %byte_destination = index.add %i, %c8 : index
     %half_destination = index.add %i, %c48 : index
     %word_destination = index.add %i, %c88 : index
-    view.store %byte_value, %result[%byte_destination] : i8, view<200xi8>
-    view.store %byte_value, %result[%half_destination] : i8, view<200xi8>
-    view.store %word_value, %result[%word_destination] : i8, view<200xi8>
+    view.store %byte_value, %result[%byte_destination] : i8, view<336xi8>
+    view.store %byte_value, %result[%half_destination] : i8, view<336xi8>
+    view.store %word_value, %result[%word_destination] : i8, view<336xi8>
   }
   scf.for %i = [%c0 to %c64 step %c1] {
     %tail = index.cmp sge, %i, %c32 : index
@@ -810,10 +815,13 @@ func.def @shared_snapshot_windows_oracle(%trial: index, %input: buffer, %output:
     %source_index = index.add %wide_byte_position, %relative : index
     %destination_index = index.add %i, %c128 : index
     %value = view.load %bytes[%source_index] : view<128xi8> -> i8
-    view.store %value, %result[%destination_index] : i8, view<200xi8>
+    view.store %value, %result[%destination_index] : i8, view<336xi8>
   }
   %cleared_byte = scalar.constant 0 : i8
   scf.for %i = [%c0 to %c128 step %c1] {
+    %value = view.load %bytes[%i] : view<128xi8> -> i8
+    %destination = index.add %i, %c200 : index
+    view.store %value, %result[%destination] : i8, view<336xi8>
     view.store %cleared_byte, %bytes[%i] : i8, view<128xi8>
   }
   func.return
@@ -822,10 +830,10 @@ func.def @shared_snapshot_windows_oracle(%trial: index, %input: buffer, %output:
 check.scenario @shared_snapshot_window_values {
   check.trial[9](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-128) step(2) : tensor<128xi8>
-    %output = check.generate.fill value(85) : tensor<200xi8>
-    check.compare<@shared_snapshot_windows, @shared_snapshot_windows_oracle>(%trial, %input, %output) : (index, tensor<128xi8>, tensor<200xi8>) -> () {
+    %output = check.generate.fill value(85) : tensor<336xi8>
+    check.compare<@shared_snapshot_windows, @shared_snapshot_windows_oracle>(%trial, %input, %output) : (index, tensor<128xi8>, tensor<336xi8>) -> () {
       check.expect.bitwise actual(%input) expected(%input) : tensor<128xi8>
-      check.expect.bitwise actual(%output) expected(%output) : tensor<200xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<336xi8>
     }
   }
   check.return
