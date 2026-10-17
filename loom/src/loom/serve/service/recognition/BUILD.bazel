@@ -127,6 +127,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "events",
+    srcs = ["events.c"],
+    hdrs = ["events.h"],
+    deps = [
+        ":transcript",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "events_test",
+    srcs = ["events_test.cc"],
+    deps = [
+        ":events",
+        ":transcript",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "document",
     srcs = ["document.c"],
     hdrs = ["document.h"],
@@ -142,6 +164,7 @@ loom_cc_library(
     hdrs = ["stream.h"],
     deps = [
         ":document",
+        ":events",
         ":generator",
         ":input",
         ":request",
@@ -164,6 +187,7 @@ loom_cc_library(
     name = "request",
     hdrs = ["request.h"],
     deps = [
+        ":events",
         "//runtime/src/iree/base",
     ],
 )
@@ -172,9 +196,9 @@ loom_cc_library(
     name = "generator",
     hdrs = ["generator.h"],
     deps = [
+        ":events",
         ":input",
         ":request",
-        ":transcript",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//runtime/src/iree/base",
@@ -187,8 +211,8 @@ loom_cc_library(
     srcs = ["model.c"],
     hdrs = ["model.h"],
     deps = [
+        ":events",
         ":generator",
-        ":transcript",
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
@@ -224,6 +248,7 @@ loom_cc_library(
     srcs = ["source_model_test.cc"],
     visibility = ["//visibility:public"],
     deps = [
+        ":events",
         ":generator",
         ":input",
         ":model",
@@ -259,6 +284,7 @@ loom_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":document",
+        ":events",
         ":generator",
         ":input",
         ":model",

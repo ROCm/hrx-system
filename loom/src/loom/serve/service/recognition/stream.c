@@ -35,7 +35,7 @@ struct loom_serve_recognition_stream_t {
   iree_host_size_t index;
   // Owner-published lifecycle; CPU workers never mutate it.
   loom_serve_recognition_row_phase_t phase;
-  // Caller still owns this handle and can receive transcript revisions.
+  // Caller still owns this handle and can receive source events.
   bool caller_open;
   // Execution ownership, consumed after accepted host borrowers retire.
   bool service_open;
@@ -53,8 +53,10 @@ struct loom_serve_recognition_stream_t {
   loom_serve_recognition_input_block_t snapshot;
   // Latest per-segment revisions; CPU collection owns mutation until publish.
   loom_serve_recognition_document_t document;
-  // One published revision, borrowing the stable document until consume.
-  const loom_serve_recognition_transcript_t* pending;
+  // Reusable caller-owned output, mutated only by accepted CPU collection.
+  loom_serve_recognition_events_t* output;
+  // Owner-published events still awaiting consumption, independent of workers.
+  iree_host_size_t pending_count;
   // Owned terminal failure, independent of service/model lifetime.
   iree_status_t status;
   // Producer-established terminal classification, independent of status codes.
@@ -67,10 +69,8 @@ struct loom_serve_recognition_stream_t {
   struct {
     // Source-validated input prefix acknowledged by the retired batch.
     iree_host_size_t consumed_frames;
-    // Source has no further numerical work or revisions for this request.
+    // Source has no further numerical work or events for this request.
     bool complete;
-    // Copied revision in document storage, or NULL for a silent model unit.
-    const loom_serve_recognition_transcript_t* transcript;
     // Owned document update error, transferred to the request on publication.
     iree_status_t status;
   } result;
@@ -204,16 +204,23 @@ static iree_status_t loom_serve_recognition_cpu_run(
          i < service->batch.count && iree_status_is_ok(status); ++i) {
       loom_serve_recognition_stream_t* row = service->batch.rows[i];
       loom_serve_recognition_result_t collected;
-      status =
-          service->generator.collect(service->generator.self, i, &collected);
+      status = service->generator.collect(service->generator.self, i,
+                                          row->output, &collected);
       if (iree_status_is_ok(status)) {
         row->result.consumed_frames = collected.consumed_frames;
         row->result.complete = collected.complete;
-        row->result.transcript = NULL;
         row->result.status = iree_ok_status();
-        if (collected.has_transcript) {
-          row->result.status = loom_serve_recognition_document_apply(
-              &row->document, &collected.transcript, &row->result.transcript);
+        for (iree_host_size_t j = 0;
+             j < loom_serve_recognition_events_count(row->output) &&
+             iree_status_is_ok(row->result.status);
+             ++j) {
+          const loom_serve_recognition_event_t* event =
+              loom_serve_recognition_events_at(row->output, j);
+          if (event->kind == LOOM_SERVE_RECOGNITION_EVENT_TRANSCRIPT) {
+            const loom_serve_recognition_transcript_t* stored = NULL;
+            row->result.status = loom_serve_recognition_document_apply(
+                &row->document, &event->transcript, &stored);
+          }
         }
         if (iree_status_is_ok(row->result.status) && collected.complete) {
           row->result.status =
@@ -292,6 +299,7 @@ static void loom_serve_recognition_stream_release(
     loom_serve_recognition_stream_t* stream) {
   if (!stream->caller_open && !stream->service_open) {
     loom_serve_recognition_document_deinitialize(&stream->document);
+    loom_serve_recognition_events_free(stream->output);
     iree_status_free(stream->status);
     iree_status_free(stream->result.status);
     iree_allocator_free(stream->host_allocator, stream);
@@ -314,7 +322,7 @@ static void loom_serve_recognition_stream_end(
     stream->outcome = LOOM_SERVE_TELEMETRY_CANCELLED;
   }
   if (!iree_status_is_ok(stream->status)) {
-    stream->pending = NULL;
+    stream->pending_count = 0;
   }
   if (stream->completion.end) {
     stream->completion.end(stream->completion.self, stream->outcome,
@@ -540,9 +548,11 @@ static iree_status_t loom_serve_recognition_collect(
       }
       row->status = iree_status_join(row->status, row->result.status);
       row->result.status = iree_ok_status();
-      row->pending =
-          iree_status_is_ok(row->status) ? row->result.transcript : NULL;
-      row->phase = row->pending ? RECOGNITION_ROW_PUBLISHING
+      row->pending_count =
+          iree_status_is_ok(row->status)
+              ? loom_serve_recognition_events_count(row->output)
+              : 0;
+      row->phase = row->pending_count ? RECOGNITION_ROW_PUBLISHING
                    : row->result.complete || !iree_status_is_ok(row->status)
                        ? RECOGNITION_ROW_COMPLETE
                        : RECOGNITION_ROW_READY;
@@ -668,6 +678,10 @@ iree_status_t loom_serve_recognition_stream_service_try_open(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "recognition service is stopping");
   }
+  if (!request->outputs || (request->outputs & ~service->generator.outputs)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "recognition output selection is unsupported");
+  }
   if (request->language.size > service->options.request_limit ||
       request->prompt.size >
           service->options.request_limit - request->language.size ||
@@ -701,6 +715,11 @@ iree_status_t loom_serve_recognition_stream_service_try_open(
       service->generator.input_capacity, service->generator.format.channels,
       service->host_allocator, &row->input);
   if (iree_status_is_ok(status)) {
+    status = loom_serve_recognition_events_allocate(
+        service->generator.event_capacity, service->generator.event_bytes,
+        service->host_allocator, &row->output);
+  }
+  if (iree_status_is_ok(status)) {
     row->request = *request;
     char* storage = (char*)(row + 1);
     if (request->language.size) {
@@ -725,6 +744,7 @@ iree_status_t loom_serve_recognition_stream_service_try_open(
     service->rows[index] = row;
     *out_stream = row;
   } else {
+    loom_serve_recognition_input_deinitialize(&row->input);
     iree_allocator_free(service->host_allocator, row);
   }
   return status;
@@ -778,24 +798,28 @@ void loom_serve_recognition_stream_finish(
   stream->input.complete = true;
 }
 
-const loom_serve_recognition_transcript_t* loom_serve_recognition_stream_peek(
+const loom_serve_recognition_event_t* loom_serve_recognition_stream_peek(
     const loom_serve_recognition_stream_t* stream) {
   return stream->phase == RECOGNITION_ROW_PUBLISHING && !stream->cancelled &&
                  iree_status_is_ok(stream->status)
-             ? stream->pending
+             ? loom_serve_recognition_events_at(
+                   stream->output,
+                   loom_serve_recognition_events_count(stream->output) -
+                       stream->pending_count)
              : NULL;
 }
 
 void loom_serve_recognition_stream_consume(
     loom_serve_recognition_stream_t* stream) {
-  stream->pending = NULL;
-  stream->phase = stream->result.complete ? RECOGNITION_ROW_COMPLETE
-                                          : RECOGNITION_ROW_READY;
+  if (--stream->pending_count == 0) {
+    stream->phase = stream->result.complete ? RECOGNITION_ROW_COMPLETE
+                                            : RECOGNITION_ROW_READY;
+  }
 }
 
 bool loom_serve_recognition_stream_is_complete(
     const loom_serve_recognition_stream_t* stream) {
-  return !stream->service_open && !stream->pending;
+  return !stream->service_open && !stream->pending_count;
 }
 
 iree_status_t loom_serve_recognition_stream_status(
@@ -805,7 +829,9 @@ iree_status_t loom_serve_recognition_stream_status(
 
 const loom_serve_recognition_document_t* loom_serve_recognition_stream_document(
     const loom_serve_recognition_stream_t* stream) {
-  return loom_serve_recognition_stream_is_complete(stream) &&
+  return iree_any_bit_set(stream->request.outputs,
+                          LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT) &&
+                 loom_serve_recognition_stream_is_complete(stream) &&
                  iree_status_is_ok(stream->status)
              ? &stream->document
              : NULL;
@@ -815,7 +841,7 @@ void loom_serve_recognition_stream_close(
     loom_serve_recognition_stream_t* stream) {
   stream->caller_open = false;
   stream->cancelled = true;
-  stream->pending = NULL;
+  stream->pending_count = 0;
   loom_serve_recognition_stream_release(stream);
 }
 
@@ -851,6 +877,9 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
       !generator.release_batch || !generator.release ||
       !generator.batch_units || !generator.request_capacity ||
       !generator.input_capacity || !generator.frame_limit ||
+      !generator.event_capacity || !generator.event_bytes ||
+      !generator.outputs ||
+      (generator.outputs & ~LOOM_SERVE_RECOGNITION_OUTPUT_ALL) ||
       !generator.format.sample_rate || !generator.format.channels ||
       !options->request_limit || !options->document_limit ||
       options->request_limit >
