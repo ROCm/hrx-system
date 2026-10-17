@@ -5,6 +5,7 @@
     "prepare": "prepare.loom",
     "control": "control.loom",
     "sources": [
+      "geometry.loom",
       "config.loom",
       "request.loom",
       "generate.loom",
