@@ -11,9 +11,14 @@
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
+#include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
+#include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 static iree_status_t loom_amdgpu_make_hal_buffer_type(
     loom_low_lower_context_t* context, loom_type_t* out_type) {
@@ -179,9 +184,152 @@ iree_status_t loom_amdgpu_map_argument(
     return loom_amdgpu_make_sgpr_range_type(context, unit_count,
                                             &out_argument->abi_type);
   }
+  loom_amdgpu_vector_storage_t vector_storage = {0};
+  if (bundle->export_plan->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL &&
+      loom_kernel_def_isa(source_function_op) &&
+      loom_amdgpu_type_vector_storage(source_type, &vector_storage)) {
+    const uint32_t unit_count =
+        vector_storage.kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK
+            ? (vector_storage.element_count + 3u) / 4u
+            : vector_storage.register_count;
+    IREE_ASSERT_LE(unit_count,
+                   LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_ARG_MAX_UNIT_COUNT);
+    return loom_amdgpu_make_sgpr_range_type(context, unit_count,
+                                            &out_argument->abi_type);
+  }
   return loom_amdgpu_map_value(user_data, context, source_function_op,
                                source_argument_id, source_type,
                                &out_argument->abi_type);
+}
+
+static iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument(
+    loom_low_lower_context_t* context, const loom_op_t* source_function_op,
+    loom_value_id_t source_argument,
+    const loom_amdgpu_vector_storage_t* storage, loom_type_t sgpr_type,
+    const loom_value_id_t exec_words[2], loom_value_id_t low_zero) {
+  IREE_ASSERT_EQ(storage->kind, LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK);
+  IREE_ASSERT_EQ(storage->element_register_count, 2u);
+  IREE_ASSERT_LE(storage->element_count,
+                 LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES);
+  const uint32_t carrier_unit_count = (storage->element_count + 3u) / 4u;
+  const loom_value_id_t low_carrier =
+      loom_low_lower_lookup_value(context, source_argument);
+  IREE_ASSERT(loom_amdgpu_low_value_is_register_class_count(
+      context, low_carrier, LOOM_AMDGPU_REG_CLASS_ID_SGPR, carrier_unit_count));
+
+  loom_value_id_t
+      native_mask_words[LOOM_AMDGPU_MAX_VECTOR_STORAGE_REGISTER_UNITS];
+  uint32_t native_mask_word_count = 0;
+  uint32_t lane_index = 0;
+  for (uint32_t carrier_index = 0; carrier_index < carrier_unit_count;
+       ++carrier_index) {
+    loom_value_id_t carrier_word = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+        context, source_function_op, low_carrier, carrier_unit_count,
+        carrier_index, sgpr_type, &carrier_word));
+    for (uint32_t byte_index = 0;
+         byte_index < 4u && lane_index < storage->element_count;
+         ++byte_index, ++lane_index) {
+      loom_value_id_t lane_byte = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_bitfield(
+          context, source_function_op, carrier_word, byte_index * 8u,
+          /*bit_count=*/8, LOOM_AMDGPU_BITFIELD_EXTRACT_MODE_ZERO_EXTEND,
+          sgpr_type, &lane_byte));
+      loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr32_nonzero_scc(
+          context, source_function_op, lane_byte, &condition));
+      for (uint32_t exec_word_index = 0;
+           exec_word_index < storage->element_register_count;
+           ++exec_word_index) {
+        const loom_value_id_t operands[] = {
+            exec_words[exec_word_index],
+            low_zero,
+            condition,
+        };
+        loom_op_t* select_op = NULL;
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+            context, source_function_op,
+            LOOM_AMDGPU_DESCRIPTOR_REF_S_CSELECT_B32, operands,
+            IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(), &sgpr_type,
+            1, &select_op));
+        native_mask_words[native_mask_word_count++] =
+            loom_value_slice_get(loom_low_op_results(select_op), 0);
+      }
+    }
+  }
+  IREE_ASSERT_EQ(lane_index, storage->element_count);
+  IREE_ASSERT_EQ(native_mask_word_count, storage->register_count);
+
+  loom_type_t native_mask_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_range_type(
+      context, native_mask_word_count, &native_mask_type));
+  loom_value_id_t native_mask = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_build_low_register_range(
+      context, source_function_op, native_mask_words, native_mask_word_count,
+      native_mask_type, &native_mask));
+  return loom_low_lower_replace_value_binding(context, source_argument,
+                                              native_mask);
+}
+
+iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument_setup(
+    loom_low_lower_context_t* context) {
+  const loom_target_bundle_t* bundle = loom_low_lower_context_bundle(context);
+  const loom_func_like_t source_function =
+      loom_low_lower_context_source_function(context);
+  if (bundle->export_plan->abi_kind != LOOM_TARGET_ABI_HAL_KERNEL ||
+      !loom_kernel_def_isa(source_function.op)) {
+    return iree_ok_status();
+  }
+
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  loom_type_t sgpr_type = loom_type_none();
+  loom_value_id_t exec_words[2] = {
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+  };
+  loom_value_id_t low_zero = LOOM_VALUE_ID_INVALID;
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(source_function, &argument_count);
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    const loom_value_id_t argument = arguments[i];
+    if (!loom_module_value_has_uses(module, argument)) {
+      continue;
+    }
+    loom_amdgpu_vector_storage_t storage = {0};
+    if (!loom_amdgpu_type_vector_storage(
+            loom_module_value_type(module, argument), &storage) ||
+        storage.kind != LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK) {
+      continue;
+    }
+    if (low_zero == LOOM_VALUE_ID_INVALID) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
+      loom_type_t mask_type = loom_type_none();
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_make_sgpr_range_type(context, 2, &mask_type));
+      loom_op_t* exec_read_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+          context, source_function.op,
+          LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ, /*operands=*/NULL,
+          /*operand_count=*/0, loom_named_attr_slice_empty(), &mask_type, 1,
+          &exec_read_op));
+      const loom_value_id_t exec_mask =
+          loom_value_slice_get(loom_low_op_results(exec_read_op), 0);
+      for (uint32_t exec_word_index = 0;
+           exec_word_index < IREE_ARRAYSIZE(exec_words); ++exec_word_index) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+            context, source_function.op, exec_mask, IREE_ARRAYSIZE(exec_words),
+            exec_word_index, sgpr_type, &exec_words[exec_word_index]));
+      }
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+          context, source_function.op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32, 0,
+          sgpr_type, &low_zero));
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_hal_kernel_predicate_argument(
+        context, source_function.op, argument, &storage, sgpr_type, exec_words,
+        low_zero));
+  }
+  return iree_ok_status();
 }
 
 static iree_string_view_t loom_amdgpu_argument_value_name(
@@ -206,11 +354,14 @@ static uint32_t loom_amdgpu_direct_arg_byte_count(loom_type_t abi_type) {
 
 static uint32_t loom_amdgpu_direct_arg_payload_byte_count(
     loom_type_t source_type, uint32_t kernarg_size) {
-  // Native AMDGPU HAL materialization only admits scalar direct arguments.
-  // Preserve source-low vector layouts so the owning verifier can diagnose an
-  // unsupported native interface without corrupting its target representation.
-  if (!loom_type_is_scalar(source_type)) {
-    return kernarg_size;
+  uint64_t element_count = 1;
+  if (loom_type_is_vector(source_type)) {
+    const bool has_static_element_count =
+        loom_type_static_element_count(source_type, &element_count);
+    IREE_ASSERT(has_static_element_count);
+    (void)has_static_element_count;
+  } else {
+    IREE_ASSERT(loom_type_is_scalar(source_type));
   }
   const loom_scalar_type_t element_type = loom_type_element_type(source_type);
   if (element_type == LOOM_SCALAR_TYPE_INDEX ||
@@ -219,9 +370,15 @@ static uint32_t loom_amdgpu_direct_arg_payload_byte_count(
   }
   const int32_t bit_count = loom_scalar_type_bitwidth(element_type);
   IREE_ASSERT_GT(bit_count, 0);
-  const uint32_t byte_count = ((uint32_t)bit_count + 7u) / 8u;
+  // HAL constants represent every logical i1 lane as one byte. Other scalar
+  // and vector elements use their dense byte width.
+  const uint64_t element_byte_count = element_type == LOOM_SCALAR_TYPE_I1
+                                          ? 1u
+                                          : ((uint32_t)bit_count + 7u) / 8u;
+  const uint64_t byte_count = element_count * element_byte_count;
+  IREE_ASSERT_LE(byte_count, UINT32_MAX);
   IREE_ASSERT_LE(byte_count, kernarg_size);
-  return byte_count;
+  return (uint32_t)byte_count;
 }
 
 static void loom_amdgpu_align_kernarg_offset(uint64_t* inout_offset,

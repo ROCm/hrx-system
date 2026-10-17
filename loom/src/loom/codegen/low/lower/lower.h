@@ -438,6 +438,13 @@ typedef iree_status_t (*loom_low_lower_descriptor_matrix_attrs_fn_t)(
     const loom_low_descriptor_t* descriptor,
     loom_named_attr_slice_t* out_attrs);
 
+typedef iree_status_t (
+    *loom_low_lower_descriptor_matrix_materialize_operand_fn_t)(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, const loom_low_operand_t* descriptor_operand,
+    loom_value_id_t source_value, loom_value_id_t low_value,
+    loom_value_id_t* out_low_value);
+
 typedef struct loom_low_lower_descriptor_matrix_t {
   // Supplies target-specific options for shared source-to-matrix adapters.
   loom_low_lower_descriptor_matrix_options_fn_t options;
@@ -445,6 +452,11 @@ typedef struct loom_low_lower_descriptor_matrix_t {
   loom_low_lower_descriptor_matrix_query_fn_t query;
   // Materializes target-owned immediate attributes for the selected descriptor.
   loom_low_lower_descriptor_matrix_attrs_fn_t attrs;
+  // Adapts a source value's emitted carrier to the selected physical operand
+  // while its source identity and descriptor alternatives are both available.
+  // Planning has already established legality. This runs before destructive
+  // operand copies and group-level descriptor materialization.
+  loom_low_lower_descriptor_matrix_materialize_operand_fn_t materialize_operand;
   // Caller-owned payload passed to descriptor-matrix callbacks.
   void* user_data;
 } loom_low_lower_descriptor_matrix_t;

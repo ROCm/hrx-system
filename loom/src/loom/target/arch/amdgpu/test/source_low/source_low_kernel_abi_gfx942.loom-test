@@ -27,3 +27,54 @@ low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 1, direct_
   global_store_dword_saddr %15, %14, %view
   return
 }
+
+// ====
+
+// Predicate vectors arrive as dense bytes and expand to the canonical
+// two-word-per-lane mask representation using both halves of wave64 EXEC.
+kernel.def @predicate_vector_argument_wave64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%enabled: vector<4xi1>, %output: buffer) {
+  %lane = vector.extract %enabled[3] : vector<4xi1> -> i1
+  %yes = scalar.constant 17 : i32
+  %no = scalar.constant -23 : i32
+  %value = scf.select %lane, %yes, %no : i32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %value, %view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "enabled"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @predicate_vector_argument_wave64(%enabled$9: reg<amdgpu.sgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %11 = s_mov_b64_exec_read
+  %12 = slice %11[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = slice %11[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %14 = s_mov_b32 0
+  %15 = s_bfe_u32_lit %enabled$9, 524288
+  %16 = s_cmp_lg_i32_src1_inline %15 {rhs = 0}
+  %17 = s_cselect_b32 %12, %14, %16
+  %18 = s_cselect_b32 %13, %14, %16
+  %19 = s_bfe_u32_lit %enabled$9, 524296
+  %20 = s_cmp_lg_i32_src1_inline %19 {rhs = 0}
+  %21 = s_cselect_b32 %12, %14, %20
+  %22 = s_cselect_b32 %13, %14, %20
+  %23 = s_bfe_u32_lit %enabled$9, 524304
+  %24 = s_cmp_lg_i32_src1_inline %23 {rhs = 0}
+  %25 = s_cselect_b32 %12, %14, %24
+  %26 = s_cselect_b32 %13, %14, %24
+  %27 = s_lshr_b32_rhs_inline %enabled$9, 24
+  %28 = s_cmp_lg_i32_src1_inline %27 {rhs = 0}
+  %29 = s_cselect_b32 %12, %14, %28
+  %30 = s_cselect_b32 %13, %14, %28
+  %enabled$31 = concat(%17, %18, %21, %22, %25, %26, %29, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x8>
+  %lane = slice %enabled$31[6] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr x2>
+  %no = s_mov_b32 4294967273
+  %35 = v_mov_b32_copy %no
+  %value = v_cndmask_b32_src1_inline %35, %lane {true_value = 17}
+  %37 = v_mov_b32 0
+  global_store_dword_saddr %37, %value, %view
+  return
+}

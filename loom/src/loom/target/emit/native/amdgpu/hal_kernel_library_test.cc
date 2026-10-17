@@ -508,6 +508,25 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
     return iree_make_cstring_view(kSource);
   }
 
+  iree_string_view_t Gfx11VectorArgumentPayloadSource() {
+    static const char kSource[] =
+        "amdgpu.target<gfx1100> @gfx_target\n"
+        "kernel.def target(@gfx_target) export(\"vector_payloads\") "
+        "@vector_payloads() {\n"
+        "  %unit = index.constant 1 : index\n"
+        "  kernel.launch.config workgroups(%unit, %unit, %unit) "
+        "workgroup_size(%unit, %unit, %unit) : index\n"
+        "} launch(%i1: vector<3xi1>, %i8: vector<5xi8>, "
+        "%i16: vector<3xi16>, %i32: vector<3xi32>, "
+        "%i64: vector<3xi64>, %f8e4: vector<5xf8E4M3>, "
+        "%f8e5: vector<5xf8E5M2>, %f16: vector<3xf16>, "
+        "%bf16: vector<3xbf16>, %f32: vector<3xf32>, "
+        "%f64: vector<3xf64>, %output: buffer) {\n"
+        "  kernel.return\n"
+        "}\n";
+    return iree_make_cstring_view(kSource);
+  }
+
   iree_string_view_t Gfx1250TensorLoadSource() {
     static const char kSource[] =
         "amdgpu.target<gfx1250> @gfx_target\n"
@@ -1577,6 +1596,58 @@ TEST_F(AmdgpuHalKernelLibraryTest,
                       : IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE);
   }
   EXPECT_EQ(kernel.kernarg_segment_size, 72u);
+
+  iree_hal_amd_gpu_image_deinitialize(&image);
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loomc_module_release(module_handle);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
+       PreservesLogicalVectorPayloadsInArgumentMetadata) {
+  loomc_module_t* module_handle = nullptr;
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(CompilePreparedLowSource(
+      Gfx11VectorArgumentPayloadSource(), &module_handle, &module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(),
+      .max_errors = 20,
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  ASSERT_TRUE(emitted) << DiagnosticSummary(capture);
+  ASSERT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  ASSERT_NE(library.hsaco_data, nullptr);
+  iree_hal_amd_gpu_image_t image = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_hsaco_image_initialize(
+      library.hsaco_data, iree_allocator_system(), &image));
+  ASSERT_EQ(image.metadata.kernel_count, 1u);
+  const iree_hal_amd_gpu_metadata_kernel_t& kernel = image.metadata.kernels[0];
+  EXPECT_EQ(StringViewToString(kernel.name), "vector_payloads");
+  ASSERT_TRUE(kernel.has_argument_metadata);
+  ASSERT_EQ(kernel.argument_count, 12u);
+
+  static const uint32_t kExpectedOffsets[] = {
+      0, 4, 12, 20, 32, 56, 64, 72, 80, 88, 100, 128,
+  };
+  static const uint32_t kExpectedSizes[] = {
+      3, 5, 6, 12, 24, 5, 5, 6, 6, 12, 24, 8,
+  };
+  for (iree_host_size_t i = 0; i < kernel.argument_count; ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(kernel.arguments[i].offset, kExpectedOffsets[i]);
+    EXPECT_EQ(kernel.arguments[i].size, kExpectedSizes[i]);
+    EXPECT_EQ(kernel.arguments[i].alignment, i == 11 ? 8u : 4u);
+    EXPECT_EQ(kernel.arguments[i].kind,
+              i == 11 ? IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_GLOBAL_BUFFER
+                      : IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_BY_VALUE);
+  }
+  EXPECT_EQ(kernel.kernarg_segment_size, 136u);
 
   iree_hal_amd_gpu_image_deinitialize(&image);
   loom_amdgpu_hal_kernel_library_deinitialize(&library,

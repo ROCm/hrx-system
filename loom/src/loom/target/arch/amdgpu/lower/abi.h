@@ -23,6 +23,11 @@ iree_status_t loom_amdgpu_map_argument(
     loom_value_id_t source_argument_id,
     loom_low_lower_abi_argument_t* out_argument);
 
+// Expands dense byte-per-lane HAL predicate arguments into the native
+// EXEC-width mask-pair representation consumed by the source function body.
+iree_status_t loom_amdgpu_emit_hal_kernel_predicate_argument_setup(
+    loom_low_lower_context_t* context);
+
 // Maps the authored source kernel signature to the AMDGPU HAL ABI layout
 // snapshot attached to low.kernel.def.
 iree_status_t loom_amdgpu_map_abi_layout(

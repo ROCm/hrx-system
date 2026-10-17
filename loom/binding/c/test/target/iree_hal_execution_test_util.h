@@ -113,6 +113,13 @@ iree_status_t DispatchIreeHalKernel(
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores);
 
+// Uploads one input and one output buffer, dispatches the selected kernel, and
+// downloads the output into |output_data|. Uses GTest assertions.
+void ExecuteIreeHalKernelWithBuffers(const IreeHalKernelExecution& execution,
+                                     iree_const_byte_span_t constants,
+                                     iree_const_byte_span_t input_data,
+                                     iree_byte_span_t output_data);
+
 // Checks the standard two-element doubling kernel at a four-byte offset.
 void RunIreeHalByteOffsetExecution(const IreeHalKernelExecution& execution);
 
