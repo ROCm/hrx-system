@@ -73,7 +73,7 @@ entry 0: 1 bindings, 4 dynamic relocations
   relocation 1: binding=0 addend=256 maximum=281474976706560 alignment=4
   relocation 2: binding=0 addend=0 maximum=281474976710400 alignment=4
   relocation 3: binding=0 addend=256 maximum=281474976706560 alignment=4
-  invocation 0: bytes=468 next=1
+  invocation 0: bytes=444 next=1
   invocation 1: bytes=128 next=1
 
 // ====

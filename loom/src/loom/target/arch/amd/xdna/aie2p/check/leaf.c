@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/check/leaf.h"
 
+#include <inttypes.h>
+
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/target_binding.h"
@@ -283,6 +285,15 @@ static iree_status_t loom_aie2p_leaf_check_execute(
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
         &request->result->actual_output, "\n"));
+    for (iree_host_size_t i = 0; i < contribution.object.fixup_count; ++i) {
+      const loom_native_object_fixup_t* fixup = &contribution.object.fixups[i];
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          &request->result->actual_output,
+          "fixup: section=%" PRIhsz " offset=%" PRIu64
+          " kind=%u symbol=%" PRIhsz " addend=%" PRId64 "\n",
+          fixup->section_contribution_index, fixup->section_offset,
+          fixup->relocation_kind, fixup->target_symbol_index, fixup->addend));
+    }
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_leaf_check_append_value_uses(
       native_module->module, function, selected_value_names,

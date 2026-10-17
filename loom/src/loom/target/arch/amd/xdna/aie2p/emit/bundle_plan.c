@@ -34,6 +34,15 @@ typedef struct loom_aie2p_block_branch_t {
   uint32_t target_block_index;
 } loom_aie2p_block_branch_t;
 
+typedef enum loom_aie2p_block_alignment_e {
+  // Fallthrough-only entry with no address constraint.
+  LOOM_AIE2P_BLOCK_ALIGNMENT_NONE = 0,
+  // Forward-only branch destination that may enter a preceding NOP tail.
+  LOOM_AIE2P_BLOCK_ALIGNMENT_NOP_PREFIX = 1,
+  // Function entry or backward destination: align without an added NOP prefix.
+  LOOM_AIE2P_BLOCK_ALIGNMENT_DIRECT = 2,
+} loom_aie2p_block_alignment_t;
+
 typedef struct loom_aie2p_block_analysis_t {
   // Structural terminator packet ending this block.
   uint32_t terminator_packet_index;
@@ -48,8 +57,8 @@ typedef struct loom_aie2p_block_analysis_t {
     // Number of selected native branches, from zero through two.
     uint8_t count;
   } branches;
-  // Entry or an actual native branch destination requiring 16-byte alignment.
-  bool requires_alignment;
+  // Entry alignment required by the selected native incoming branches.
+  loom_aie2p_block_alignment_t alignment;
 } loom_aie2p_block_analysis_t;
 
 typedef struct loom_aie2p_bundle_plan_analysis_t {
@@ -129,6 +138,8 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
   iree_host_size_t block_count;
   // Exact byte length of all bundles appended so far.
   iree_host_size_t encoded_byte_length;
+  // Contiguous NOP bytes after the last instruction with observable behavior.
+  iree_host_size_t trailing_nop_byte_length;
   // Source-order block receiving newly appended bundles.
   uint32_t current_block_index;
   // Next physical issue cycle, including implicit NOP gaps.
@@ -450,7 +461,7 @@ static iree_status_t loom_aie2p_bundle_plan_analyze(
       arena, frame->schedule.block_count, sizeof(*blocks), (void**)&blocks));
   memset(blocks, 0,
          frame->schedule.block_count * sizeof(loom_aie2p_block_analysis_t));
-  blocks[0].requires_alignment = true;
+  blocks[0].alignment = LOOM_AIE2P_BLOCK_ALIGNMENT_DIRECT;
   // Destination marks may be set before a block's own analysis. Each iteration
   // preserves those marks in the once-initialized table.
   for (iree_host_size_t block_index = 0;
@@ -621,8 +632,16 @@ static iree_status_t loom_aie2p_bundle_plan_analyze(
                               "AIE2P control capacity exceeds host size");
     }
     for (uint8_t i = 0; i < block_analysis->branches.count; ++i) {
-      blocks[block_analysis->branches.values[i].target_block_index]
-          .requires_alignment = true;
+      const uint32_t target_block_index =
+          block_analysis->branches.values[i].target_block_index;
+      // Repeated backward transfers must not pay an alignment NOP prefix on
+      // every iteration. This direct-entry requirement wins over forward edges.
+      const loom_aie2p_block_alignment_t alignment =
+          target_block_index <= block_index
+              ? LOOM_AIE2P_BLOCK_ALIGNMENT_DIRECT
+              : LOOM_AIE2P_BLOCK_ALIGNMENT_NOP_PREFIX;
+      blocks[target_block_index].alignment =
+          iree_max(blocks[target_block_index].alignment, alignment);
     }
     if (block_analysis->terminator == LOOM_AIE2P_BLOCK_TERMINATOR_BRANCH) {
       const loom_low_allocation_edge_copy_group_t* edge_copy_group =
@@ -1059,6 +1078,7 @@ static iree_status_t loom_aie2p_bundle_plan_advance(
         "AIE2P encoded leaf exceeds 16 KiB of core program memory");
   }
   builder->encoded_byte_length += (iree_host_size_t)gap_bytes;
+  builder->trailing_nop_byte_length += (iree_host_size_t)gap_bytes;
   builder->next_issue_cycle = (uint32_t)next_cycle;
   return iree_ok_status();
 }
@@ -1136,6 +1156,11 @@ static iree_status_t loom_aie2p_bundle_plan_append_bundle(
       .slot_count = (uint8_t)slot_count,
   };
   builder->encoded_byte_length += byte_length;
+  const bool is_nop =
+      slot_count == 1 &&
+      builder->slots[slot_start].encoded_slot.slot == LOOM_AIE2P_SLOT_NOP;
+  builder->trailing_nop_byte_length =
+      is_nop ? builder->trailing_nop_byte_length + byte_length : 0;
   return iree_ok_status();
 }
 
@@ -1392,6 +1417,13 @@ static iree_status_t loom_aie2p_bundle_plan_try_place_control(
     builder->bundles[i].byte_offset =
         (uint32_t)((int32_t)builder->bundles[i].byte_offset + byte_delta);
   }
+  // A control instruction placed inside the NOP tail shortens the shareable
+  // tail. Bytes after this bundle are unchanged even when the bundle itself
+  // grows.
+  builder->trailing_nop_byte_length =
+      iree_min(builder->trailing_nop_byte_length,
+               builder->encoded_byte_length - candidate_bundle->byte_offset -
+                   old_byte_length);
   builder->encoded_byte_length =
       builder->encoded_byte_length - old_byte_length + new_byte_length;
   candidate_bundle->format = format;
@@ -1569,7 +1601,18 @@ static iree_status_t loom_aie2p_bundle_plan_append_control(
 }
 
 static iree_status_t loom_aie2p_bundle_plan_align_next_block(
-    loom_aie2p_bundle_plan_builder_t* builder, uint32_t logical_issue_cycle) {
+    loom_aie2p_bundle_plan_builder_t* builder, uint32_t logical_issue_cycle,
+    loom_aie2p_block_alignment_t alignment, uint32_t* out_byte_offset) {
+  // Reuse an aligned address in the existing NOP tail without removing the
+  // cycles needed by the predecessor. A taken edge executes only those NOPs
+  // before reaching this block; fallthrough keeps its original retirement gap.
+  const iree_host_size_t aligned_offset = builder->encoded_byte_length & ~15u;
+  if (alignment == LOOM_AIE2P_BLOCK_ALIGNMENT_NOP_PREFIX &&
+      builder->encoded_byte_length - aligned_offset <=
+          builder->trailing_nop_byte_length) {
+    *out_byte_offset = (uint32_t)aligned_offset;
+    return iree_ok_status();
+  }
   if ((builder->encoded_byte_length & 1u) != 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -1579,6 +1622,7 @@ static iree_status_t loom_aie2p_bundle_plan_align_next_block(
     IREE_RETURN_IF_ERROR(
         loom_aie2p_bundle_plan_append_nop_bundle(builder, logical_issue_cycle));
   }
+  *out_byte_offset = (uint32_t)builder->encoded_byte_length;
   return iree_ok_status();
 }
 
@@ -1827,14 +1871,16 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
        block_index < (uint32_t)frame->schedule.block_count; ++block_index) {
     const loom_aie2p_block_analysis_t* block_analysis =
         &analysis.blocks[block_index];
-    if (block_index != 0 && block_analysis->requires_alignment) {
+    uint32_t block_byte_offset = (uint32_t)builder.encoded_byte_length;
+    if (block_index != 0 &&
+        block_analysis->alignment != LOOM_AIE2P_BLOCK_ALIGNMENT_NONE) {
       IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_align_next_block(
-          &builder, analysis.blocks[block_index - 1u].terminator_issue_cycle));
+          &builder, analysis.blocks[block_index - 1u].terminator_issue_cycle,
+          block_analysis->alignment, &block_byte_offset));
     }
     builder.current_block_index = block_index;
     builder.block_issue_cycle = builder.next_issue_cycle;
-    builder.block_byte_offsets[block_index] =
-        (uint32_t)builder.encoded_byte_length;
+    builder.block_byte_offsets[block_index] = block_byte_offset;
     const iree_host_size_t block_bundle_start = builder.bundle_count;
     const loom_low_schedule_block_t* block =
         &frame->schedule.blocks[block_index];

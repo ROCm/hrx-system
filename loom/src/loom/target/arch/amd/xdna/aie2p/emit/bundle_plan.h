@@ -27,7 +27,12 @@ extern "C" {
 // Plans physical bundles for one successful, spill-free AIE2P Low frame.
 //
 // Blocks retain source order. Entry and selected native branch destinations
-// begin at 16-byte program addresses; fallthrough-only labels need no padding.
+// begin at 16-byte program addresses. Forward-only destinations share a
+// preceding NOP tail when one contains an aligned entry. The tail may also
+// retire predecessor work or control; entering its NOPs performs no predecessor
+// work. Backward destinations have direct entries so repeated transfers pay no
+// added NOP prefix. Fallthrough-only labels need no padding.
+//
 // Block analysis selects fallthrough, J, JZ, or JNZ from the following block,
 // and emission consumes that retained choice. Contribution-relative targets
 // remain fixups until final code placement. Structural branches and returns

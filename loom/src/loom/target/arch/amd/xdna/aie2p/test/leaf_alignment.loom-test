@@ -1,5 +1,5 @@
-// Native jump destinations retain aligned entry points. Fallthrough-only
-// labels do not add padding. These code bytes precede target relocation.
+// Native jump destinations retain aligned entry points, including shared NOP
+// tails. Fallthrough labels add no padding. Bytes precede target relocation.
 // RUN: emit aie2p-leaf @identical_next report=code
 
 // Both dynamic outcomes reach the adjacent block after an observable store.
@@ -30,6 +30,7 @@ low.func.def target<amd.xdna.aie2p.core> @identical_nonnext(%condition: reg<aie2
 
 // ----
 code: 3a 21 00 00 00 00 00 30 86 00 00 00 00 00 00 00 00 00 00 00
+fixup: section=0 offset=0 kind=1 symbol=0 addend=0
 
 // ====
 
@@ -49,7 +50,11 @@ low.func.def target<amd.xdna.aie2p.core> @neither_next(%condition: reg<aie2p.er>
 }
 
 // ----
-code: 84 01 40 00 00 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00 00 00 3a 21 00 00 00 00 00 30 86 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3a 21 00 00 00 00 00 30 8a 00 00 00 00 00 00 00 00 00 00 00
+code: 84 01 40 00 00 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00 00 00 3a 21 00 00 00 00 00 30 86 00 00 00 00 00 00 00 00 00 00 00 3a 21 00 00 00 00 00 30 8a 00 00 00 00 00 00 00 00 00 00 00
+fixup: section=0 offset=0 kind=1 symbol=0 addend=48
+fixup: section=0 offset=16 kind=1 symbol=0 addend=64
+fixup: section=0 offset=48 kind=1 symbol=0 addend=32
+fixup: section=0 offset=68 kind=1 symbol=0 addend=32
 
 // ====
 
@@ -72,11 +77,13 @@ low.func.def target<amd.xdna.aie2p.core> @targeted_empty_chain(%condition: reg<a
 
 // ----
 code: 84 01 40 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00 00 00 3a 21 00 00 00 00 00 30 86 00 00 00 00 00 00 00 00 00 00 00
+fixup: section=0 offset=0 kind=1 symbol=0 addend=32
+fixup: section=0 offset=32 kind=1 symbol=0 addend=16
 
 // ====
 
 // The conditional branch shares the store packet and retains five delay
-// cycles before the fallthrough backedge jump. Exit alignment follows it.
+// cycles before the fallthrough backedge jump. The exit shares its NOP tail.
 // RUN: emit aie2p-leaf @countdown_store report=code
 
 low.func.def target<amd.xdna.aie2p.core> @countdown_store(%output: reg<aie2p.ep>, %count: reg<aie2p.er>) asm {
@@ -92,7 +99,9 @@ low.func.def target<amd.xdna.aie2p.core> @countdown_store(%output: reg<aie2p.ep>
 }
 
 // ----
-code: 18 ff 01 10 3a 61 00 00 00 00 00 30 82 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+code: 18 ff 01 10 3a 61 00 00 00 00 00 30 82 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+fixup: section=0 offset=4 kind=1 symbol=0 addend=32
+fixup: section=0 offset=24 kind=1 symbol=0 addend=0
 
 // ====
 
@@ -117,6 +126,7 @@ low.func.def target<amd.xdna.aie2p.core> @shared_tail(%condition: reg<aie2p.er>,
 
 // ----
 code: 98 1b 04 00 00 00 00 00 00 00 00 00 00 00 00 00 78 2d 00 18 84 01 40 00 00 00 18 13 04 09 00 00 00 00 00 00 00 00 44 02 20 00 00 00 5c 00 50 30 82 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 44 04 20 00 00 00 5c 00 50 30 82 28 00 00 00 00 00 00 00 00 00 00
+fixup: section=0 offset=20 kind=1 symbol=0 addend=64
 
 // ====
 
@@ -141,4 +151,55 @@ low.func.def target<amd.xdna.aie2p.core> @loaded_condition(%input: reg<aie2p.ep>
 }
 
 // ----
-code: 44 00 20 00 00 00 18 0b 20 08 98 36 00 00 98 11 04 09 00 00 00 00 00 00 00 00 00 00 84 01 00 00 00 08 00 00 00 00 00 00 00 00 00 00 44 02 20 00 00 00 5c 00 50 30 82 22 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 44 04 20 00 00 00 5c 00 50 30 82 22 00 00 00 00 00 00 00 00 00 00
+code: 44 00 20 00 00 00 18 0b 20 08 98 36 00 00 98 11 04 09 00 00 00 00 00 00 00 00 00 00 84 01 00 00 00 08 00 00 00 00 00 00 00 00 00 00 44 02 20 00 00 00 5c 00 50 30 82 22 00 00 00 00 00 00 00 00 00 00 44 04 20 00 00 00 5c 00 50 30 82 22 00 00 00 00 00 00 00 00 00 00
+fixup: section=0 offset=28 kind=1 symbol=0 addend=64
+
+// ====
+
+// The entry load leaves an implicit timing gap containing an aligned address.
+// The loop backedge retains a direct entry instead of repeating that NOP prefix.
+// The forward exit can share the explicit delay tail of the backedge branch.
+// RUN: emit aie2p-leaf @loop_entry_prefix report=code
+
+low.func.def target<amd.xdna.aie2p.core> @loop_entry_prefix(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %count: reg<aie2p.er>) asm {
+  st %count, %output, 4
+  %loaded = vlda.512.i32x16 %input, 0
+  low.br ^loop(%count: reg<aie2p.er>)
+^loop(%remaining: reg<aie2p.er>):
+  %next = add %remaining, -1
+  vst.512.i32x16 %loaded, %output, 0
+  low.cond_br %next, ^backedge, ^exit : reg<aie2p.er>
+^backedge:
+  low.br ^loop(%next: reg<aie2p.er>)
+^exit:
+  return
+}
+
+// ----
+code: 98 11 14 09 98 1b 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c fe 03 60 82 20 84 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+fixup: section=0 offset=38 kind=1 symbol=0 addend=64
+fixup: section=0 offset=54 kind=1 symbol=0 addend=32
+
+// ====
+
+// A forward join may share the implicit store-retirement gap. The taken edge
+// skips the vector store, while fallthrough still waits for it to retire.
+// RUN: emit aie2p-leaf @forward_store_prefix report=code
+
+low.func.def target<amd.xdna.aie2p.core> @forward_store_prefix(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %condition: reg<aie2p.er>) asm {
+  st %condition, %output, 4
+  st %condition, %output, 8
+  st %condition, %output, 12
+  st %condition, %output, 16
+  low.cond_br %condition, ^join, ^copy : reg<aie2p.er>
+^copy:
+  %loaded = vlda.512.i32x16 %input, 0
+  vst.512.i32x16 %loaded, %output, 0
+  low.br ^join
+^join:
+  return
+}
+
+// ----
+code: 98 11 14 09 3a 61 00 10 00 00 00 30 82 24 98 11 34 09 98 11 44 09 00 00 00 00 00 00 98 1b 04 00 00 00 00 00 00 00 00 00 00 00 00 00 18 13 04 09 00 00 00 00 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+fixup: section=0 offset=4 kind=1 symbol=0 addend=48

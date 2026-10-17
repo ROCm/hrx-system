@@ -422,8 +422,8 @@ low.func.def target<amd.xdna.aie2p.core> @fused_forwarded_loop(%first_row: reg<a
 }
 
 // ----
-issue cycles: 76
-code bytes: 302
+issue cycles: 70
+code bytes: 290
 coissued bundles: 15
 coissued components: 35
 

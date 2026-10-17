@@ -171,7 +171,8 @@ typedef struct loom_aie2p_leaf_program_plan_t {
   const loom_aie2p_leaf_read_only_data_t* read_only_data;
   // Number of entries in |read_only_data|.
   iree_host_size_t read_only_data_count;
-  // Contribution-relative byte offsets in source block order.
+  // Contribution-relative entry offsets in source block order. Aligned entries
+  // may share preceding NOP tails before the block's first useful instruction.
   const uint32_t* block_byte_offsets;
   // Number of records in |block_byte_offsets|.
   iree_host_size_t block_count;
