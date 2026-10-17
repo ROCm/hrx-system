@@ -154,8 +154,9 @@ static void loom_amdgpu_memory_access_try_record_vector_width_diagnostic(
 }
 
 // Canonical address expressions can retain integer payloads after a
-// value-preserving address cast. Narrow payloads already use signed words;
-// predicates project to zero/one. The address form owns any narrowing proof.
+// value-preserving address cast. Narrow payloads keep their signed numeric
+// domain, and the selected materializer normalizes their native carrier before
+// byte arithmetic. Predicates project to zero/one.
 static bool loom_amdgpu_memory_dynamic_index_can_materialize_vaddr(
     const loom_module_t* module, loom_value_id_t value_id) {
   if (value_id >= module->values.count) {

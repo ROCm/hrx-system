@@ -92,17 +92,16 @@ kernel.def target(@target) export("narrow_argument_i8") @narrow_argument_i8() {
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) export("narrow_argument_i8") workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @narrow_argument_i8(%value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_payload_sizes = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) export("narrow_argument_i8") workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @narrow_argument_i8(%value: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %raw_view = resource<hal_binding> {extent = 65, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %extended_view = resource<hal_binding> {extent = 516, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %18 = v_mov_b32_copy %value
   %signed_value = v_bfe_i32_offset_width_inline %18 {offset = 0, width = 8}
-  %unsigned_value = v_and_b32_lit %18, 255
   global_store_b8_saddr %lane, %18, %raw_view {offset = 1}
-  %23 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %23, %signed_value, %extended_view {offset = 4}
-  global_store_b32_saddr %23, %unsigned_value, %extended_view {offset = 260}
+  %22 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %22, %signed_value, %extended_view {offset = 4}
+  global_store_b32_saddr %22, %18, %extended_view {offset = 260}
   return
 }
 
@@ -131,17 +130,32 @@ kernel.def target(@target) export("narrow_argument_i16") @narrow_argument_i16() 
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) export("narrow_argument_i16") workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @narrow_argument_i16(%value: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_payload_sizes = [2], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 2], uses_kernarg_segment_ptr = true}) export("narrow_argument_i16") workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @narrow_argument_i16(%value: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %raw_view = resource<hal_binding> {extent = 130, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %extended_view = resource<hal_binding> {extent = 516, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %18 = v_mov_b32_copy %value
   %signed_value = v_bfe_i32_offset_width_inline %18 {offset = 0, width = 16}
-  %unsigned_value = v_and_b32_lit %18, 65535
-  %23 = v_lshlrev_b32_src0_inline %lane, 1
-  global_store_short_saddr %23, %18, %raw_view {offset = 2}
-  %24 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %24, %signed_value, %extended_view {offset = 4}
-  global_store_b32_saddr %24, %unsigned_value, %extended_view {offset = 260}
+  %22 = v_lshlrev_b32_src0_inline %lane, 1
+  global_store_short_saddr %22, %18, %raw_view {offset = 2}
+  %23 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %23, %signed_value, %extended_view {offset = 4}
+  global_store_b32_saddr %23, %18, %extended_view {offset = 260}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) export("scalar_argument_payloads") @scalar_argument_payloads() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%flag: i1, %i8: i8, %i16: i16, %i32: i32, %i64: i64, %f8e4: f8E4M3, %f8e5: f8E5M2, %f16: f16, %bf16: bf16, %f32: f32, %f64: f64, %index: index, %offset: offset, %output: buffer) {
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 16, direct_arg_count = 13, direct_arg_names = {arg0 = "flag", arg1 = "i8", arg10 = "f64", arg11 = "index", arg12 = "offset", arg2 = "i16", arg3 = "i32", arg4 = "i64", arg5 = "f8e4", arg6 = "f8e5", arg7 = "f16", arg8 = "bf16", arg9 = "f32"}, direct_arg_offsets = [0, 4, 8, 12, 16, 24, 28, 32, 36, 40, 44, 52, 56], direct_arg_parameter_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], direct_arg_payload_sizes = [1, 1, 2, 4, 8, 1, 1, 2, 2, 4, 8, 4, 8], direct_arg_sizes = [4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 8, 4, 8], parameter_count = 14, resource_count = 1, resource_offsets = [64], resource_parameter_indices = [13], uses_kernarg_segment_ptr = true}) export("scalar_argument_payloads") workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_argument_payloads(%flag: reg<amdgpu.sgpr>, %i8: reg<amdgpu.sgpr>, %i16: reg<amdgpu.sgpr>, %i32: reg<amdgpu.sgpr>, %i64: reg<amdgpu.sgpr x2>, %f8e4: reg<amdgpu.sgpr>, %f8e5: reg<amdgpu.sgpr>, %f16: reg<amdgpu.sgpr>, %bf16: reg<amdgpu.sgpr>, %f32: reg<amdgpu.sgpr>, %f64: reg<amdgpu.sgpr x2>, %index: reg<amdgpu.sgpr>, %offset: reg<amdgpu.sgpr x2>) asm {
   return
 }

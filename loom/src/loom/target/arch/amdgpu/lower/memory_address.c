@@ -14,6 +14,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/source_integer_representation.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -116,6 +117,18 @@ static loom_amdgpu_integer_operand_form_t loom_amdgpu_memory_term_operand_form(
   return (loom_amdgpu_integer_operand_form_t)((plan->operand_forms >>
                                                (2 * operand_index)) &
                                               UINT64_C(3));
+}
+
+static iree_status_t loom_amdgpu_normalize_signed_memory_index_word(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t low_value,
+    loom_value_id_t* out_low_value) {
+  const loom_type_t lane_type =
+      loom_module_value_type(loom_low_lower_context_module(context), low_value);
+  return loom_amdgpu_normalize_narrow_source_integer(
+      context, source_op, source_value, low_value,
+      LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED, lane_type,
+      out_low_value);
 }
 
 static void loom_amdgpu_memory_access_select_retained_component(
@@ -380,16 +393,19 @@ static iree_status_t loom_amdgpu_lookup_memory_u32_operand(
     return loom_amdgpu_lookup_or_materialize_i1_integer(
         context, source_op, source_value, register_class_id, out_low_value);
   }
+  loom_value_id_t low_word = low_value;
   if (unit_count == 1) {
-    *out_low_value = low_value;
-    return iree_ok_status();
+    return loom_amdgpu_normalize_signed_memory_index_word(
+        context, source_op, source_value, low_word, out_low_value);
   }
   // The selected address form consumes the low word of this term. A product's
   // low word depends only on the low words of its operands, in either bank.
-  return loom_amdgpu_emit_low_slice(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
       context, source_op, low_value,
       /*offset=*/0, loom_low_register_carrier_type_with_unit_count(low_type, 1),
-      out_low_value);
+      &low_word));
+  return loom_amdgpu_normalize_signed_memory_index_word(
+      context, source_op, source_value, low_word, out_low_value);
 }
 
 // Reuse an existing VGPR carrier. Otherwise the retained literal avoids an
@@ -407,8 +423,11 @@ static iree_status_t loom_amdgpu_emit_memory_vgpr_index(
           LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
     materialization = &literal;
   }
-  return loom_amdgpu_emit_prepared_vgpr_address(context, source_op, index,
-                                                materialization, out_low_value);
+  loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_prepared_vgpr_address(
+      context, source_op, index, materialization, &low_value));
+  return loom_amdgpu_normalize_signed_memory_index_word(
+      context, source_op, index, low_value, out_low_value);
 }
 
 static iree_status_t loom_amdgpu_emit_memory_u32_product(

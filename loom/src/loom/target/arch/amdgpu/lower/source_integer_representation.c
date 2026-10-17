@@ -7,6 +7,8 @@
 #include "loom/target/arch/amdgpu/lower/source_integer_representation.h"
 
 #include "iree/base/internal/math.h"
+#include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/amdgpu/lower/bitpack.h"
@@ -154,6 +156,24 @@ void loom_amdgpu_source_integer_representation_observe_boundary(
     case LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_FLEXIBLE_RESULT:
     case LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_SIGN_EXTENDED_RESULT: {
       IREE_ASSERT_EQ(source_op->result_count, 1u);
+      if (source_op->kind == LOOM_OP_INDEX_CAST) {
+        IREE_ASSERT_EQ(source_op->operand_count, 1u);
+        const loom_value_id_t input = loom_op_const_operands(source_op)[0];
+        const loom_scalar_type_t result_scalar_type =
+            loom_type_element_type(loom_module_value_type(
+                module, loom_op_const_results(source_op)[0]));
+        if (loom_amdgpu_source_integer_representation_is_narrow(module,
+                                                                input) &&
+            (result_scalar_type == LOOM_SCALAR_TYPE_INDEX ||
+             result_scalar_type == LOOM_SCALAR_TYPE_OFFSET)) {
+          loom_amdgpu_source_integer_representation_record_consumer(
+              input,
+              result_scalar_type == LOOM_SCALAR_TYPE_INDEX
+                  ? LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED
+                  : LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_ZERO_EXTENDED,
+              recorder);
+        }
+      }
       const loom_value_id_t result = loom_op_const_results(source_op)[0];
       if (!loom_amdgpu_source_integer_representation_is_narrow(module,
                                                                result)) {
@@ -214,14 +234,14 @@ void loom_amdgpu_source_integer_representation_observe_boundary(
 static void loom_amdgpu_source_integer_representation_record_callable_inputs(
     loom_low_lower_context_t* context, const loom_value_id_t* value_ids,
     iree_host_size_t value_count,
+    loom_amdgpu_narrow_integer_guarantees_t guarantees,
     loom_low_lower_representation_recorder_t* recorder) {
   const loom_module_t* module = loom_low_lower_context_module(context);
   for (iree_host_size_t i = 0; i < value_count; ++i) {
     if (loom_amdgpu_source_integer_representation_is_narrow(module,
                                                             value_ids[i])) {
       loom_amdgpu_source_integer_representation_record_guarantees(
-          value_ids[i], LOOM_AMDGPU_NARROW_INTEGER_GUARANTEE_LOW_BITS,
-          recorder);
+          value_ids[i], guarantees, recorder);
     }
   }
 }
@@ -238,8 +258,23 @@ void loom_amdgpu_source_integer_representation_observe_callable_boundary(
       uint16_t argument_count = 0;
       const loom_value_id_t* argument_ids =
           loom_func_like_arg_ids(function, &argument_count);
-      loom_amdgpu_source_integer_representation_record_callable_inputs(
-          context, argument_ids, argument_count, recorder);
+      const loom_low_lower_abi_argument_t* argument_map = NULL;
+      uint16_t mapped_argument_count = 0;
+      if (loom_kernel_def_isa(source_op)) {
+        argument_map = loom_low_lower_context_argument_map(
+            context, &mapped_argument_count);
+        IREE_ASSERT_EQ(mapped_argument_count, argument_count);
+      }
+      for (uint16_t i = 0; i < argument_count; ++i) {
+        loom_amdgpu_narrow_integer_guarantees_t guarantees =
+            LOOM_AMDGPU_NARROW_INTEGER_GUARANTEE_LOW_BITS;
+        if (argument_map != NULL &&
+            argument_map[i].kind == LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT) {
+          guarantees |= LOOM_AMDGPU_NARROW_INTEGER_GUARANTEE_ZERO_EXTENDED;
+        }
+        loom_amdgpu_source_integer_representation_record_callable_inputs(
+            context, &argument_ids[i], 1, guarantees, recorder);
+      }
       return;
     }
     case LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_CALL: {
@@ -247,7 +282,8 @@ void loom_amdgpu_source_integer_representation_observe_callable_boundary(
           loom_call_like_const_cast(module, source_op);
       const loom_value_slice_t results = loom_call_like_results(call);
       loom_amdgpu_source_integer_representation_record_callable_inputs(
-          context, results.values, results.count, recorder);
+          context, results.values, results.count,
+          LOOM_AMDGPU_NARROW_INTEGER_GUARANTEE_LOW_BITS, recorder);
       return;
     }
     case LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_EXIT:
@@ -271,19 +307,17 @@ loom_low_representation_id_t loom_amdgpu_source_integer_representation_lookup(
   return representation;
 }
 
-iree_status_t loom_amdgpu_normalize_narrow_integer(
+static iree_status_t loom_amdgpu_normalize_narrow_integer_to_lane_type(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_source, uint32_t source_bit_count,
     loom_low_representation_id_t source_representation,
-    loom_low_representation_id_t required_representation,
+    loom_low_representation_id_t required_representation, loom_type_t lane_type,
     loom_value_id_t* out_low_result) {
   *out_low_result = low_source;
   if (source_representation == required_representation) {
     return iree_ok_status();
   }
 
-  loom_type_t lane_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
   switch (required_representation) {
     case LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_LOW_BITS:
       return iree_ok_status();
@@ -293,7 +327,9 @@ iree_status_t loom_amdgpu_normalize_narrow_integer(
           LOOM_AMDGPU_BITFIELD_EXTRACT_MODE_SIGN_EXTEND, lane_type,
           out_low_result);
     case LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_ZERO_EXTENDED:
-      if (loom_amdgpu_low_value_defines_register_low16(context, low_source)) {
+      if (loom_amdgpu_low_type_is_register_class(
+              context, lane_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR) ||
+          loom_amdgpu_low_value_defines_register_low16(context, low_source)) {
         return loom_amdgpu_extract_register_bitfield(
             context, source_op, low_source, /*bit_offset=*/0, source_bit_count,
             LOOM_AMDGPU_BITFIELD_EXTRACT_MODE_ZERO_EXTEND, lane_type,
@@ -309,4 +345,35 @@ iree_status_t loom_amdgpu_normalize_narrow_integer(
   }
   IREE_ASSERT_UNREACHABLE("invalid narrow integer representation");
   return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_normalize_narrow_integer(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint32_t source_bit_count,
+    loom_low_representation_id_t source_representation,
+    loom_low_representation_id_t required_representation,
+    loom_value_id_t* out_low_result) {
+  loom_type_t lane_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
+  return loom_amdgpu_normalize_narrow_integer_to_lane_type(
+      context, source_op, low_source, source_bit_count, source_representation,
+      required_representation, lane_type, out_low_result);
+}
+
+iree_status_t loom_amdgpu_normalize_narrow_source_integer(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t low_source,
+    loom_low_representation_id_t required_representation, loom_type_t lane_type,
+    loom_value_id_t* out_low_result) {
+  const loom_type_t source_type = loom_module_value_type(
+      loom_low_lower_context_module(context), source_value);
+  if (!loom_amdgpu_source_integer_representation_type_is_narrow(source_type)) {
+    *out_low_result = low_source;
+    return iree_ok_status();
+  }
+  return loom_amdgpu_normalize_narrow_integer_to_lane_type(
+      context, source_op, low_source,
+      loom_scalar_type_bitwidth(loom_type_element_type(source_type)),
+      loom_amdgpu_source_integer_representation_lookup(context, source_value),
+      required_representation, lane_type, out_low_result);
 }

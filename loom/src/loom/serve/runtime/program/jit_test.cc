@@ -229,6 +229,36 @@ TEST_P(JitConcurrentTest, DirectStagesJoinNativesAndRetainExecutableOutput) {
 INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitConcurrentTest,
                          ::testing::Values(1, 4));
 
+TEST_P(JitTest, LogicalScalarCommandArgumentsReachNativeKernels) {
+  IREE_ASSERT_OK(Compile(nullptr, 0, IREE_SV("boolean_arguments")));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(device_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(input_), 0),
+      iree_infinite_timeout(), &buffer_));
+  const iree_hal_transfer_operation_t upload = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      .upload = {input_.data(), buffer_, 0, sizeof(input_)},
+  };
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(execution_, 1, &upload, &completion));
+  const iree_hal_buffer_binding_t binding = {buffer_, 0, sizeof(input_)};
+  IREE_ASSERT_OK(loom_serve_execution_execute(execution_, commands_[0],
+                                              {1, &binding}, &completion));
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {buffer_, 0, output_.data(), sizeof(output_)},
+  };
+  IREE_ASSERT_OK(
+      loom_serve_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(output_[0], 17);
+  EXPECT_EQ(output_[1], -23);
+  for (size_t i = 2; i < output_.size(); ++i) {
+    EXPECT_EQ(output_[i], input_[i]);
+  }
+}
+
 class JitCacheTest : public JitTest {
  protected:
   void ReleaseProgram() override {

@@ -881,7 +881,8 @@ iree_status_t loom_amdgpu_select_index_cast_plan(
        source_scalar_type == LOOM_SCALAR_TYPE_I16) &&
       loom_amdgpu_type_is_address_scalar(result_type)) {
     if (source_register_class != result_register_class ||
-        source_register_class != LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+        (source_register_class != LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+         source_register_class != LOOM_AMDGPU_REG_CLASS_ID_VGPR)) {
       return iree_ok_status();
     }
     const loom_low_representation_id_t required_representation =
@@ -895,19 +896,30 @@ iree_status_t loom_amdgpu_select_index_cast_plan(
     const bool sign_extend =
         required_representation ==
         LOOM_AMDGPU_NARROW_INTEGER_REPRESENTATION_SIGN_EXTENDED;
-    const loom_amdgpu_descriptor_ref_t normalization_descriptor_refs[] = {
-        sign_extend ? LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT
-                    : LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
-        sign_extend ? LOOM_AMDGPU_DESCRIPTOR_REF_V_ASHRREV_I32_LIT
-                    : LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
-    };
     const loom_low_descriptor_set_t* descriptor_set =
         loom_low_lower_context_descriptor_set(context);
-    if (needs_normalization &&
-        !loom_amdgpu_descriptor_set_has_all_refs(
-            descriptor_set, normalization_descriptor_refs,
-            IREE_ARRAYSIZE(normalization_descriptor_refs))) {
-      return iree_ok_status();
+    if (needs_normalization) {
+      if (source_register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+        const loom_amdgpu_descriptor_ref_t descriptor_ref =
+            sign_extend ? LOOM_AMDGPU_DESCRIPTOR_REF_S_BFE_I32_LIT
+                        : LOOM_AMDGPU_DESCRIPTOR_REF_S_BFE_U32_LIT;
+        if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                                descriptor_ref)) {
+          return iree_ok_status();
+        }
+      } else {
+        const loom_amdgpu_descriptor_ref_t descriptor_refs[] = {
+            sign_extend ? LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT
+                        : LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
+            sign_extend ? LOOM_AMDGPU_DESCRIPTOR_REF_V_ASHRREV_I32_LIT
+                        : LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
+        };
+        if (!loom_amdgpu_descriptor_set_has_all_refs(
+                descriptor_set, descriptor_refs,
+                IREE_ARRAYSIZE(descriptor_refs))) {
+          return iree_ok_status();
+        }
+      }
     }
     const loom_amdgpu_descriptor_ref_t extension_descriptor_ref =
         sign_extend ? kAmdgpuIndexCastSignDescriptorRefs[result_register_class]

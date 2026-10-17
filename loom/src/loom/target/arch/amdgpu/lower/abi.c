@@ -171,7 +171,7 @@ iree_status_t loom_amdgpu_map_argument(
       loom_kernel_def_isa(source_function_op) &&
       loom_type_is_scalar(source_type) &&
       loom_scalar_type_set_contains(
-          LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD | LOOM_SCALAR_TYPE_SET_FLOAT,
+          LOOM_SCALAR_TYPE_SET_INTEGER | LOOM_SCALAR_TYPE_SET_FLOAT,
           loom_type_element_type(source_type))) {
     const uint32_t bit_count = (uint32_t)loom_scalar_type_bitwidth(
         loom_type_element_type(source_type));
@@ -202,6 +202,26 @@ static uint32_t loom_amdgpu_direct_arg_byte_count(loom_type_t abi_type) {
       LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
   IREE_ASSERT_LE(byte_count, UINT32_MAX);
   return (uint32_t)byte_count;
+}
+
+static uint32_t loom_amdgpu_direct_arg_payload_byte_count(
+    loom_type_t source_type, uint32_t kernarg_size) {
+  // Native AMDGPU HAL materialization only admits scalar direct arguments.
+  // Preserve source-low vector layouts so the owning verifier can diagnose an
+  // unsupported native interface without corrupting its target representation.
+  if (!loom_type_is_scalar(source_type)) {
+    return kernarg_size;
+  }
+  const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+  if (element_type == LOOM_SCALAR_TYPE_INDEX ||
+      element_type == LOOM_SCALAR_TYPE_OFFSET) {
+    return kernarg_size;
+  }
+  const int32_t bit_count = loom_scalar_type_bitwidth(element_type);
+  IREE_ASSERT_GT(bit_count, 0);
+  const uint32_t byte_count = ((uint32_t)bit_count + 7u) / 8u;
+  IREE_ASSERT_LE(byte_count, kernarg_size);
+  return byte_count;
 }
 
 static void loom_amdgpu_align_kernarg_offset(uint64_t* inout_offset,
@@ -255,6 +275,10 @@ static void loom_amdgpu_assign_hal_direct_arg_layout(
       LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT);
   const uint32_t kernarg_size =
       loom_amdgpu_direct_arg_byte_count(argument->abi_type);
+  const loom_type_t source_type =
+      loom_module_value_type(module, source_arguments[parameter_index]);
+  const uint32_t payload_size =
+      loom_amdgpu_direct_arg_payload_byte_count(source_type, kernarg_size);
   direct_args[direct_argument_index] = (loom_amdgpu_hal_kernarg_direct_arg_t){
       .arg_id = LOOM_VALUE_ID_INVALID,
       .name = loom_amdgpu_argument_value_name(
@@ -263,6 +287,7 @@ static void loom_amdgpu_assign_hal_direct_arg_layout(
       .argument_index = direct_argument_index,
       .kernarg_offset = (uint32_t)*inout_kernarg_offset,
       .kernarg_size = kernarg_size,
+      .payload_size = payload_size,
       .kernarg_alignment =
           LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT,
       .abi_type = argument->abi_type,

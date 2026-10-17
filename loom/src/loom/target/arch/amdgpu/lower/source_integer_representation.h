@@ -83,6 +83,15 @@ iree_status_t loom_amdgpu_normalize_narrow_integer(
     loom_low_representation_id_t required_representation,
     loom_value_id_t* out_low_result);
 
+// Normalizes an i8/i16 |source_value| already materialized as one native
+// register in |low_source|. |lane_type| selects the SGPR or VGPR result bank.
+// Other source scalar widths reuse |low_source| unchanged.
+iree_status_t loom_amdgpu_normalize_narrow_source_integer(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t low_source,
+    loom_low_representation_id_t required_representation, loom_type_t lane_type,
+    loom_value_id_t* out_low_result);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
