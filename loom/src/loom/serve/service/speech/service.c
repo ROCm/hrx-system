@@ -12,6 +12,7 @@
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/runtime/parameter/telemetry.h"
+#include "loom/serve/service/kind.h"
 #include "loom/serve/service/speech/http.h"
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/telemetry/latency.h"
@@ -1194,8 +1195,8 @@ loom_serve_service_t loom_serve_speech_service_interface(
       .try_open_speech = loom_serve_speech_open,
       .advance = loom_serve_speech_advance,
       .tokenizer = service->generator.tokenizer,
-      .kind = "speech",
-      .endpoint = "/v1/audio/speech",
+      .kind = LOOM_SERVE_MODEL_KIND_SPEECH,
+      .endpoint = loom_serve_model_kind_endpoint(LOOM_SERVE_MODEL_KIND_SPEECH),
       .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
                                             input_modalities},
                        .output_modalities = {IREE_ARRAYSIZE(output_modalities),

@@ -208,7 +208,7 @@ class TranscriptionClientTest(unittest.TestCase):
                     model = control(address, "GET", "/v1/models", 200)["data"][0]
                     self.assertEqual(model["id"], "recognition")
                     self.assertEqual(model["input_modalities"], ["audio"])
-                    self.assertEqual(model["output_modalities"], ["text"])
+                    self.assertEqual(model["output_modalities"], ["text", "activity"])
 
                     # Different durations and output forms cross conversion,
                     # input-credit, and three-frame source work boundaries.

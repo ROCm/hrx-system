@@ -5,6 +5,13 @@ A `recognition` deployment accepts finite uploads at
 handles. Both callers share one prepared model, bounded admission, compatible
 numerical cohorts, and the application's task executor and proactors.
 
+A native-only `activity` deployment uses the same owner for speech activity
+observations. Registration requires the source to support its declared role:
+transcripts for `recognition`, activity for `activity`. A compound source can
+provide both through either role's native interface. Discovery publishes actual
+prepared output modalities; an activity deployment omits `loom.endpoint` and
+rejects HTTP inference while retaining normal management and residency controls.
+
 The [recognition fixture](../../fixture/recognition/model.json) can be served
 directly. It integrates sample values into deterministic letter revisions,
 providing an independently checkable example of the lifecycle. Learned packages
