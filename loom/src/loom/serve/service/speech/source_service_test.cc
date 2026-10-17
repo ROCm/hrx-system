@@ -161,6 +161,23 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
     }
   }
 
+  iree_status_t LoadControl(iree_string_view_t source,
+                            loom_serve_speech_model_t** out_model) {
+    const iree_string_view_t providers[] = {IREE_SVL("generate.loom")};
+    const loom_serve_speech_model_options_t options = {
+        .sources =
+            {
+                .base_directory = iree_make_cstring_view(directory_.c_str()),
+                .prepare = IREE_SV("prepare.loom"),
+                .control = source,
+                .count = IREE_ARRAYSIZE(providers),
+                .values = providers,
+            },
+    };
+    return loom_serve_speech_model_allocate(
+        loom_serve_device_group_at(group_, 0), &options, allocator_, out_model);
+  }
+
   void TearDown() override {
     if (http_.joinable()) {
       loom_serve_http_server_request_stop(server_);
@@ -448,6 +465,56 @@ TEST_P(SourceSpeechServiceTest, SourceStagesPublishVariableAndEmptyBlocks) {
     }
     IREE_ASSERT_OK(Retire(invocation));
   }
+}
+
+TEST_P(SourceSpeechServiceTest, StateContractsRejectBeforePublication) {
+  struct Case {
+    // Authored mismatch in a consumer of the source-selected state prefix.
+    const char* source;
+    // Entry owning the inconsistent signature.
+    const char* diagnostic;
+  };
+  const Case cases[] = {
+      {"variants/state_argument.loom",
+       "'prepare_work' argument 2 type mismatch"},
+      {"variants/state_result.loom", "'complete' result count mismatch"},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.source);
+    loom_serve_speech_model_t* model = nullptr;
+    iree_status_t status =
+        LoadControl(iree_make_cstring_view(test_case.source), &model);
+    EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+    EXPECT_THAT(iree::Status(iree_status_clone(status)).ToString(),
+                ::testing::HasSubstr(test_case.diagnostic));
+    iree_status_ignore(status);
+    EXPECT_EQ(model, nullptr);
+    IREE_EXPECT_OK(loom_serve_speech_model_free(model));
+  }
+  void* invocation = nullptr;
+  IREE_ASSERT_OK(Prepare("positive", 3, &invocation));
+  IREE_ASSERT_OK(Admit(invocation));
+  std::vector<float> samples;
+  std::vector<size_t> blocks;
+  IREE_ASSERT_OK(Generate(invocation, SIZE_MAX, &samples, &blocks));
+  EXPECT_EQ(samples.size(), 17u);
+  IREE_ASSERT_OK(Retire(invocation));
+}
+
+TEST_P(SourceSpeechServiceTest, EmptyStatePrefixCompletesAndRetires) {
+  IREE_ASSERT_OK(loom_serve_speech_model_free(model_));
+  model_ = nullptr;
+  IREE_ASSERT_OK(LoadControl(IREE_SV("variants/stateless.loom"), &model_));
+  generator_ = loom_serve_speech_model_generator(model_);
+  void* invocation = nullptr;
+  IREE_ASSERT_OK(Prepare("positive", 0, &invocation));
+  IREE_ASSERT_OK(Admit(invocation));
+  std::vector<float> samples;
+  std::vector<size_t> blocks;
+  IREE_ASSERT_OK(Generate(invocation, SIZE_MAX, &samples, &blocks));
+  EXPECT_TRUE(samples.empty());
+  EXPECT_EQ(blocks, std::vector<size_t>({0}));
+  IREE_ASSERT_OK(Retire(invocation));
 }
 
 TEST_P(SourceSpeechServiceTest,
