@@ -278,6 +278,20 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    semaphore_wait_test
+  SRCS
+    "semaphore_wait_test.cc"
+  DEPS
+    ::semaphore_wait
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_library(
   NAME
     sequence_emulation

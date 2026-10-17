@@ -244,6 +244,19 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "semaphore_wait_test",
+    srcs = ["semaphore_wait_test.cc"],
+    deps = [
+        ":semaphore_wait",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "sequence_emulation",
     srcs = ["sequence_emulation.c"],

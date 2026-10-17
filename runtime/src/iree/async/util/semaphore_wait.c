@@ -264,6 +264,20 @@ static void iree_async_semaphore_wait_tracker_timepoint_callback(
   iree_async_semaphore_wait_tracker_release_borrower(tracker);
 }
 
+iree_status_t iree_async_semaphore_wait_tracker_storage_size(
+    iree_host_size_t count, iree_host_size_t* out_size) {
+  *out_size = 0;
+  if (IREE_UNLIKELY(count > INT32_MAX)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "semaphore wait count %" PRIhsz
+                            " exceeds the maximum of %d",
+                            count, INT32_MAX);
+  }
+  return IREE_STRUCT_LAYOUT(
+      sizeof(iree_async_semaphore_wait_tracker_t), out_size,
+      IREE_STRUCT_FIELD_FAM(count, iree_async_semaphore_wait_timepoint_t));
+}
+
 iree_status_t iree_async_semaphore_wait_tracker_allocate(
     iree_async_semaphore_wait_context_t* context,
     iree_async_semaphore_wait_operation_t* operation,
@@ -275,18 +289,9 @@ iree_status_t iree_async_semaphore_wait_tracker_allocate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "semaphore wait enqueue callback is required");
   }
-  if (IREE_UNLIKELY(operation->count > INT32_MAX)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "semaphore wait count %" PRIhsz
-                            " exceeds the maximum of %d",
-                            operation->count, INT32_MAX);
-  }
-
   iree_host_size_t total_size = 0;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      sizeof(iree_async_semaphore_wait_tracker_t), &total_size,
-      IREE_STRUCT_FIELD_FAM(operation->count,
-                            iree_async_semaphore_wait_timepoint_t)));
+  IREE_RETURN_IF_ERROR(iree_async_semaphore_wait_tracker_storage_size(
+      operation->count, &total_size));
 
   iree_async_semaphore_wait_tracker_t* tracker = NULL;
   IREE_RETURN_IF_ERROR(
@@ -381,11 +386,21 @@ void iree_async_semaphore_wait_context_request_cancellation(
   iree_async_semaphore_wait_tracker_t* tracker =
       (iree_async_semaphore_wait_tracker_t*)operation->base.next;
   if (tracker) {
+    // Detachment uses this same lock to exclude new borrowers. Publication can
+    // run the terminal consumer inline, so it must happen outside the lock.
+    iree_atomic_fetch_add(
+        &tracker->lifecycle_state,
+        (int64_t)1 << IREE_ASYNC_SEMAPHORE_WAIT_ACTIVE_COUNT_SHIFT,
+        iree_memory_order_acq_rel);
+  }
+  iree_slim_mutex_unlock(&context->association_mutex);
+  if (tracker) {
     iree_async_semaphore_wait_tracker_publish_completion(
         tracker,
         iree_make_status(IREE_STATUS_CANCELLED, "operation cancelled"));
+    // A final inline consumer may free the tracker at this handoff.
+    iree_async_semaphore_wait_tracker_release_borrower(tracker);
   }
-  iree_slim_mutex_unlock(&context->association_mutex);
 }
 
 bool iree_async_semaphore_wait_tracker_try_prepare_completion(
@@ -408,7 +423,20 @@ bool iree_async_semaphore_wait_tracker_try_prepare_completion(
     int64_t lifecycle_state =
         iree_atomic_load(&tracker->lifecycle_state, iree_memory_order_acquire);
     if (iree_async_semaphore_wait_active_count(lifecycle_state) == 0) {
-      return true;
+      // A canceler can acquire a borrower until we detach the operation. Join
+      // that acquisition before granting exclusive finalization ownership.
+      iree_slim_mutex_lock(&tracker->context->association_mutex);
+      lifecycle_state = iree_atomic_load(&tracker->lifecycle_state,
+                                         iree_memory_order_acquire);
+      const bool ready =
+          iree_async_semaphore_wait_active_count(lifecycle_state) == 0;
+      if (ready) {
+        operation->base.next = NULL;
+      }
+      iree_slim_mutex_unlock(&tracker->context->association_mutex);
+      if (ready) {
+        return true;
+      }
     }
     int32_t queue_state =
         iree_async_semaphore_wait_queue_state(lifecycle_state);
@@ -443,9 +471,6 @@ void iree_async_semaphore_wait_tracker_finalize(
     operation->satisfied_index = (iree_host_size_t)satisfied;
   }
 
-  iree_slim_mutex_lock(&tracker->context->association_mutex);
-  operation->base.next = NULL;
-  iree_slim_mutex_unlock(&tracker->context->association_mutex);
   out_completion->operation = operation;
   out_completion->continuation_head = tracker->continuation_head;
   out_completion->status = status;
