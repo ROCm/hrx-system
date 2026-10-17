@@ -718,6 +718,20 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "driver_test",
+    srcs = ["driver_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "driver_options_test",
     srcs = ["driver_options_test.cc"],
     deps = [
