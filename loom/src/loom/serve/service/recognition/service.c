@@ -12,6 +12,7 @@
 #include "loom/serve/media/audio_decoder.h"
 #include "loom/serve/media/audio_resampler.h"
 #include "loom/serve/runtime/parameter/telemetry.h"
+#include "loom/serve/service/kind.h"
 #include "loom/serve/service/recognition/transcription.h"
 #include "loom/util/json.h"
 
@@ -707,21 +708,30 @@ static loom_serve_service_snapshot_t loom_serve_recognition_snapshot(
 loom_serve_service_t loom_serve_recognition_service_interface(
     loom_serve_recognition_service_t* service) {
   static const iree_string_view_t input[] = {IREE_SVL("audio")};
-  static const iree_string_view_t output[] = {IREE_SVL("text")};
+  static const iree_string_view_t output[] = {IREE_SVL("text"),
+                                              IREE_SVL("activity")};
+  static const iree_string_view_list_t outputs[] = {
+      [LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT] = {1, output},
+      [LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY] = {1, output + 1},
+      [LOOM_SERVE_RECOGNITION_OUTPUT_ALL] = {2, output},
+  };
   return (loom_serve_service_t){
       .name = service->options.name,
       .self = service,
       .set_observer = loom_serve_recognition_set_observer,
       .is_pending = loom_serve_recognition_is_pending,
       .is_active = loom_serve_recognition_is_active,
-      .accept = loom_serve_transcription_accept,
+      .accept = service->options.kind == LOOM_SERVE_MODEL_KIND_RECOGNITION
+                    ? loom_serve_transcription_accept
+                    : NULL,
       .try_open_recognition = loom_serve_recognition_try_open,
       .advance = loom_serve_recognition_advance,
       .tokenizer = service->generator.tokenizer,
-      .kind = "recognition",
-      .endpoint = "/v1/audio/transcriptions",
+      .kind = service->options.kind,
+      .endpoint = loom_serve_model_kind_endpoint(service->options.kind),
       .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input), input},
-                       .output_modalities = {IREE_ARRAYSIZE(output), output}},
+                       .output_modalities =
+                           outputs[service->generator.outputs]},
       .snapshot = loom_serve_recognition_snapshot,
       .capacity_domain = service->generator.capacity_domain,
       .telemetry = {.stream = service->telemetry,
@@ -752,6 +762,21 @@ iree_status_t loom_serve_recognition_service_allocate(
     loom_serve_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
     loom_serve_recognition_service_t** out_service) {
   *out_service = NULL;
+  if (options->kind != LOOM_SERVE_MODEL_KIND_RECOGNITION &&
+      options->kind != LOOM_SERVE_MODEL_KIND_ACTIVITY) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "recognition owner requires recognition or "
+                            "activity deployment kind");
+  }
+  const loom_serve_recognition_output_flags_t required =
+      options->kind == LOOM_SERVE_MODEL_KIND_RECOGNITION
+          ? LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT
+          : LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY;
+  if (!(generator.outputs & required)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source outputs do not support '%s' deployment",
+                            loom_serve_model_kind_name(options->kind));
+  }
   if (!options->name.size || !options->pending_capacity ||
       !options->decode_frames || !options->conversion_limit ||
       !generator.format.channels ||

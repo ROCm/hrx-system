@@ -7,6 +7,7 @@
 #include "loom/serve/server/registry.h"
 
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/service/kind.h"
 
 struct loom_serve_registry_t {
   // Allocator owning the table and registration operations.
@@ -146,8 +147,8 @@ loom_serve_service_snapshot_t loom_serve_registry_snapshot(
 }
 
 static iree_status_t loom_serve_registry_find_admission(
-    loom_serve_registry_t* registry, iree_string_view_t name,
-    iree_string_view_t kind, loom_serve_service_t** out_service) {
+    loom_serve_registry_t* registry, iree_string_view_t name, uint32_t kinds,
+    const char* operation, loom_serve_service_t** out_service) {
   *out_service = NULL;
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
     loom_serve_registered_model_t* model = &registry->models[i];
@@ -162,11 +163,9 @@ static iree_status_t loom_serve_registry_find_admission(
     if (!iree_status_is_ok(model->status)) {
       return iree_status_clone(model->status);
     }
-    if (!iree_string_view_equal(iree_make_cstring_view(model->service.kind),
-                                kind)) {
+    if (!(kinds & (1u << model->service.kind))) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "selected model does not provide %.*s",
-                              (int)kind.size, kind.data);
+                              "selected model does not provide %s", operation);
     }
     if (model->closed || model->held_count ||
         model->phase != LOOM_SERVE_REGISTRATION_READY) {
@@ -185,7 +184,7 @@ iree_status_t loom_serve_registry_try_open_speech(
   *out_stream = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, IREE_SV("speech"), &service));
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "speech", &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -203,7 +202,10 @@ iree_status_t loom_serve_registry_try_open_recognition(
   *out_stream = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, IREE_SV("recognition"), &service));
+      registry, name,
+      (1u << LOOM_SERVE_MODEL_KIND_RECOGNITION) |
+          (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY),
+      "recognition", &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -220,7 +222,7 @@ iree_status_t loom_serve_registry_try_open_text(
   *out_stream = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, IREE_SV("text"), &service));
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text", &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -238,7 +240,7 @@ iree_status_t loom_serve_registry_try_open_text_checkpoint(
   *out_control = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, IREE_SV("text"), &service));
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text", &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -287,32 +289,9 @@ iree_status_t loom_serve_registry_register(
   model->registration_time = iree_time_now();
   model->service.name = model->configuration.name;
   // Protocol metadata is known before source preparation, without model access.
-  switch (model->configuration.kind) {
-    case LOOM_SERVE_MODEL_KIND_TEXT:
-      model->service.kind = "text";
-      model->service.endpoint = "/v1/chat/completions";
-      break;
-    case LOOM_SERVE_MODEL_KIND_IMAGE:
-      model->service.kind = "image";
-      model->service.endpoint = "/v1/images/generations";
-      break;
-    case LOOM_SERVE_MODEL_KIND_SPEECH:
-      model->service.kind = "speech";
-      model->service.endpoint = "/v1/audio/speech";
-      break;
-    case LOOM_SERVE_MODEL_KIND_RECOGNITION:
-      model->service.kind = "recognition";
-      model->service.endpoint = "/v1/audio/transcriptions";
-      break;
-    case LOOM_SERVE_MODEL_KIND_EMBEDDING:
-      model->service.kind = "embedding";
-      model->service.endpoint = "/v1/embeddings";
-      break;
-    case LOOM_SERVE_MODEL_KIND_DECISION:
-      model->service.kind = "decision";
-      model->service.endpoint = "/v1/systemone";
-      break;
-  }
+  model->service.kind = model->configuration.kind;
+  model->service.endpoint =
+      loom_serve_model_kind_endpoint(model->configuration.kind);
   model->service.telemetry.counters = &model->counters;
   model->service.telemetry.latency = &model->latency;
   model->service.telemetry.stream = model->stream;

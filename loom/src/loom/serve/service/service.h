@@ -10,6 +10,7 @@
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/inspection.h"
+#include "loom/serve/service/kind.h"
 #include "loom/serve/service/reconfiguration.h"
 #include "loom/serve/telemetry/latency.h"
 #include "loom/serve/telemetry/stream.h"
@@ -80,7 +81,8 @@ typedef struct loom_serve_service_t {
   // Queued requests alone are not activity: mutually blocked queues cannot
   // make progress by waiting on one another. Called by the serialized owner.
   bool (*is_active)(void* self);
-  // Takes the connection claim on both success and failure. Invalid requests
+  // Optional HTTP inference; absent when endpoint is NULL. Takes the connection
+  // claim on both success and failure. Invalid requests
   // produce an HTTP rejection and success; a terminal failure ends the owner
   // loop. Request views remain valid until this service finishes or aborts.
   iree_status_t (*accept)(void* self, loom_serve_http_connection_t* connection,
@@ -121,10 +123,11 @@ typedef struct loom_serve_service_t {
   // Optional immutable input tokenizer, live through utility task release. Raw
   // utilities use independent CPU states and never call this model's methods.
   const iree_tokenizer_t* tokenizer;
-  // Immutable modality name with process lifetime, independent of the model.
-  const char* kind;
+  // Immutable deployment role, independent of model lifetime.
+  loom_serve_model_kind_t kind;
   // Primary inference endpoint with process lifetime; excludes utilities and
-  // modality-specific control routes such as text checkpoints.
+  // modality-specific control routes such as text checkpoints. NULL means
+  // native-only inference and requires an absent accept callback.
   const char* endpoint;
   // Immutable client capabilities published with the prepared service. Views
   // remain valid through retirement; empty lists and zero limits mean unknown

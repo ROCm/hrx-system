@@ -346,6 +346,11 @@ an utterance. Each request retains its own sample clock, convolution history,
 encoder state, decoder cache and transcript revisions as batch membership changes.
 A source can also publish speech activity probabilities, either alone or together
 with transcripts. Native callers explicitly select supported output types.
+The `recognition` deployment role requires transcript support and exposes HTTP
+transcription. The `activity` role requires activity support and serves native
+streams without an HTTP inference endpoint. Both use the same preparation,
+batching, input credit, and retirement contracts; compound sources can share
+their weights and execution across different output selections.
 
 The [recognition model declaration](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/recognition/model.h)
 owns entry signatures and binary layouts. Cold preparation declares stages,

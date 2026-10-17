@@ -20,6 +20,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::serve::server::registry
+    loom::serve::service::kind
     loom::serve::telemetry::latency
     loom::serve::telemetry::record
   PUBLIC

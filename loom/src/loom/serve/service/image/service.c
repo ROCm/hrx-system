@@ -18,6 +18,7 @@
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/image/output.h"
 #include "loom/serve/service/image/telemetry.h"
+#include "loom/serve/service/kind.h"
 #include "loom/util/json.h"
 
 typedef struct loom_serve_image_job_t {
@@ -935,8 +936,8 @@ loom_serve_service_t loom_serve_image_service_interface(
       .accept = loom_serve_image_accept,
       .advance = loom_serve_image_advance,
       .tokenizer = service->generator.tokenizer,
-      .kind = "image",
-      .endpoint = "/v1/images/generations",
+      .kind = LOOM_SERVE_MODEL_KIND_IMAGE,
+      .endpoint = loom_serve_model_kind_endpoint(LOOM_SERVE_MODEL_KIND_IMAGE),
       .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
                                             input_modalities},
                        .output_modalities = {IREE_ARRAYSIZE(output_modalities),

@@ -1065,6 +1065,7 @@ loom_cc_library(
     loom::serve::service
     loom::serve::service::execution_reconfiguration
     loom::serve::service::finite::component
+    loom::serve::service::kind
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
     loom::serve::transport::http::request
