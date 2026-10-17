@@ -900,7 +900,7 @@ static iree_status_t iree_tokenizer_unigram_vocab_entry_visitor(
     return iree_status_from_code(IREE_STATUS_CANCELLED);
   }
 
-  // Parse the score as double (JSON numbers) then convert to float.
+  // Preserve the serialized score precision through path selection.
   double score_value = 0.0;
   status = iree_json_parse_double(score_json, &score_value);
   if (!iree_status_is_ok(status)) {
@@ -912,7 +912,7 @@ static iree_status_t iree_tokenizer_unigram_vocab_entry_visitor(
 
   // Add token with index as ID and parsed score.
   status = iree_tokenizer_vocab_builder_add_token_with_id(
-      context->builder, (int32_t)index, token_text, (float)score_value,
+      context->builder, (int32_t)index, token_text, score_value,
       IREE_TOKENIZER_TOKEN_ATTR_NONE);
   if (!iree_status_is_ok(status)) {
     context->status = status;
@@ -1045,7 +1045,7 @@ iree_status_t iree_tokenizer_huggingface_parse_unigram_model(
   }
 
   // Get UNK score from vocab (for model allocation).
-  float unk_score = -10.0f;  // Default if no UNK.
+  double unk_score = -10.0;  // Default if no UNK.
   if (iree_status_is_ok(status) &&
       unk_token_id != IREE_TOKENIZER_TOKEN_ID_INVALID) {
     unk_score = iree_tokenizer_vocab_token_score(vocab, unk_token_id);

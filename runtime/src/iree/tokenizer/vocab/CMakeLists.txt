@@ -26,7 +26,7 @@ iree_cc_library(
     "vocab.h"
   SRCS
     "vocab.c"
-    "vocab_internal.h"
+    "vocab_storage.h"
   DEPS
     ::token
     ::vocab_hash
@@ -53,7 +53,7 @@ iree_cc_library(
     "vocab_builder.h"
   SRCS
     "vocab_builder.c"
-    "vocab_internal.h"
+    "vocab_storage.h"
   DEPS
     ::token
     ::vocab

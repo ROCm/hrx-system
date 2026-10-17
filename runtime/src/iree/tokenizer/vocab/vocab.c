@@ -8,7 +8,7 @@
 
 #include "iree/base/api.h"
 #include "iree/tokenizer/vocab/vocab_hash.h"
-#include "iree/tokenizer/vocab/vocab_internal.h"
+#include "iree/tokenizer/vocab/vocab_storage.h"
 
 //===----------------------------------------------------------------------===//
 // Implementation
@@ -37,8 +37,8 @@ iree_string_view_t iree_tokenizer_vocab_token_text(
       token->string_length);
 }
 
-float iree_tokenizer_vocab_token_score(const iree_tokenizer_vocab_t* vocab,
-                                       int32_t token_id) {
+double iree_tokenizer_vocab_token_score(const iree_tokenizer_vocab_t* vocab,
+                                        int32_t token_id) {
   if (!vocab || !vocab->scores || token_id < 0 ||
       token_id > vocab->max_token_id) {
     return 0.0f;

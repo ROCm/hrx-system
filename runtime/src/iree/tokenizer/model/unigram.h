@@ -76,7 +76,7 @@ typedef uint32_t iree_tokenizer_unigram_flags_t;
 // |out_model| receives the allocated model on success.
 iree_status_t iree_tokenizer_unigram_model_allocate(
     const iree_tokenizer_vocab_t* vocab, iree_tokenizer_token_id_t unk_token_id,
-    float unk_score, iree_tokenizer_unigram_flags_t flags,
+    double unk_score, iree_tokenizer_unigram_flags_t flags,
     iree_allocator_t allocator, iree_tokenizer_model_t** out_model);
 
 #ifdef __cplusplus
