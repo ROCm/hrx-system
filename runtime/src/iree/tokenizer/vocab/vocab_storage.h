@@ -4,11 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Internal header for vocab structure definition.
-// Used by vocab.c and vocab_builder.c.
+// Immutable vocabulary storage transferred from the vocabulary builder.
 
-#ifndef IREE_TOKENIZER_VOCAB_INTERNAL_H_
-#define IREE_TOKENIZER_VOCAB_INTERNAL_H_
+#ifndef IREE_TOKENIZER_VOCAB_STORAGE_H_
+#define IREE_TOKENIZER_VOCAB_STORAGE_H_
 
 #include "iree/base/api.h"
 #include "iree/tokenizer/vocab/vocab.h"
@@ -18,16 +17,18 @@
 extern "C" {
 #endif
 
-// Internal vocabulary structure.
+// Token and optional score arrays share one owned slab. The builder transfers
+// this slab without copying when the vocabulary is finalized.
 struct iree_tokenizer_vocab_t {
+  // Allocator owning all vocabulary storage.
   iree_allocator_t allocator;
 
-  // Token data (owned) stored in a single slab allocation.
-  // Arrays are sized (max_token_id + 1) to allow O(1) lookup by ID.
-  // Gap slots (missing IDs in sparse vocabs) have ATTR_UNUSED set.
-  void* token_slab;                // Combined [tokens][scores] allocation.
-  iree_tokenizer_token_t* tokens;  // = token_slab + 0
-  float* scores;                   // = token_slab + tokens_size
+  // Owned combined [tokens][optional scores] allocation.
+  void* token_slab;
+  // Slab token array indexed by ID; sparse gap slots have ATTR_UNUSED set.
+  iree_tokenizer_token_t* tokens;
+  // Slab score array indexed by ID, or NULL when every score is zero.
+  double* scores;
   // Actual number of tokens (excludes gaps).
   iree_host_size_t token_count;
   // Highest valid token ID (-1 if empty).
@@ -35,9 +36,10 @@ struct iree_tokenizer_vocab_t {
 
   // String table (owned).
   uint8_t* string_data;
+  // Length of the string table in bytes.
   iree_host_size_t string_size;
 
-  // Hash table for lookup (owned).
+  // Hash table embedded in the vocabulary allocation.
   iree_tokenizer_vocab_hash_t* hash;
 
   // Special token IDs.
@@ -46,6 +48,7 @@ struct iree_tokenizer_vocab_t {
   // BPE merge rules (owned, NULL for non-BPE vocabs).
   // Stored in rank order: index 0 = highest priority merge.
   iree_tokenizer_merge_t* merges;
+  // Number of merge rules.
   iree_host_size_t merge_count;
 
   // Maximum token text length in bytes across all tokens.
@@ -58,4 +61,4 @@ struct iree_tokenizer_vocab_t {
 }  // extern "C"
 #endif
 
-#endif  // IREE_TOKENIZER_VOCAB_INTERNAL_H_
+#endif  // IREE_TOKENIZER_VOCAB_STORAGE_H_
