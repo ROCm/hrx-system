@@ -408,6 +408,75 @@ TEST_F(BpeBacktrackTest, SuffixBlocking_PreemptionCounterPreempted) {
   TestEncode(model(), "pqrstu", {0, 10, 7}, false);  // [p, qrs, tu]
 }
 
+class BpeCompoundBoundaryTest
+    : public BpeBacktrackTest,
+      public ::testing::WithParamInterface<iree_tokenizer_bpe_flags_t> {};
+
+TEST_P(BpeCompoundBoundaryTest, PreemptingCompoundConsumed) {
+  ScopedVocabBuilder builder;
+  const char* tokens[] = {"L",    "i",    "b",   "e",    "r",  "a",
+                          "l",    "s",    "er",  "al",   "ib", "als",
+                          "eral", "iber", "Lib", "erals"};
+  for (const char* token : tokens) {
+    builder.AddToken(token);
+  }
+  builder.AddMerge(3, 4);   // e + r -> er
+  builder.AddMerge(5, 6);   // a + l -> al
+  builder.AddMerge(1, 2);   // i + b -> ib
+  builder.AddMerge(9, 7);   // al + s -> als
+  builder.AddMerge(8, 9);   // er + al -> eral
+  builder.AddMerge(10, 8);  // ib + er -> iber
+  builder.AddMerge(0, 10);  // L + ib -> Lib
+  builder.AddMerge(8, 11);  // er + als -> erals
+  CreateModel(builder, GetParam());
+
+  // al is consumed by al+s before er+al can preempt ib+er. Therefore ib
+  // merges rightward into iber before L+ib can form Lib.
+  TestEncode(model(), "Liberals", {0, 13, 11}, false);
+  // Without the consuming suffix, er+al does preempt ib+er.
+  TestEncode(model(), "Liberal", {14, 12}, false);
+  testing::TestMultipleEncodeCalls(model(), "Liberals", {{0, 8}}, {0, 13, 11},
+                                   "Liberals", {{0, 8}}, {0, 13, 11});
+}
+
+TEST_P(BpeCompoundBoundaryTest, BlockingPrefixCompoundConsumed) {
+  ScopedVocabBuilder builder;
+  bool byte_level = GetParam() & IREE_TOKENIZER_BPE_FLAG_BYTE_LEVEL_INPUT;
+  const std::string space = byte_level ? "\xC4\xA0" : " ";
+  const std::string tokens[] = {
+      space,   "u",   "t",   "e",    "r",     "s",          "er",
+      "ut",    "ers", "ter", "ters", "utter", space + "ut", space + "utter",
+      "utters"};
+  for (const std::string& token : tokens) {
+    builder.AddToken(token.c_str());
+  }
+  builder.AddMerge(3, 4);   // e + r -> er
+  builder.AddMerge(1, 2);   // u + t -> ut
+  builder.AddMerge(6, 5);   // er + s -> ers
+  builder.AddMerge(2, 6);   // t + er -> ter
+  builder.AddMerge(2, 8);   // t + ers -> ters
+  builder.AddMerge(7, 9);   // ut + ter -> utter
+  builder.AddMerge(0, 7);   // space + ut
+  builder.AddMerge(0, 11);  // space + utter
+  builder.AddMerge(7, 10);  // ut + ters -> utters
+  CreateModel(builder, GetParam());
+
+  // er+s consumes the compound suffix er before t+er can form ter. The
+  // unavailable ter cannot block space+ut through the lower-rank ut+ter merge.
+  TestEncode(model(), " utters", {12, 10}, false);
+  TestEncode(model(), " utter", {13}, false);
+  testing::TestMultipleEncodeCalls(model(), " utters", {{0, 7}}, {12, 10},
+                                   " utters", {{0, 7}}, {12, 10});
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InputModes, BpeCompoundBoundaryTest,
+    ::testing::Values(IREE_TOKENIZER_BPE_FLAG_NONE,
+                      IREE_TOKENIZER_BPE_FLAG_BYTE_LEVEL_INPUT,
+                      IREE_TOKENIZER_BPE_FLAG_ENABLE_WORD_CACHE,
+                      IREE_TOKENIZER_BPE_FLAG_BYTE_LEVEL_INPUT |
+                          IREE_TOKENIZER_BPE_FLAG_ENABLE_WORD_CACHE));
+
 //===----------------------------------------------------------------------===//
 // Bitfield and State Management
 //===----------------------------------------------------------------------===//

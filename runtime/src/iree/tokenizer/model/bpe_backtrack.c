@@ -536,7 +536,10 @@ static bool iree_tokenizer_bpe_is_suffix_merge_preempted(
         iree_tokenizer_vocab_merge_hash_lookup(model->merge_hash, prefix_token,
                                                compound_token);
     if (iree_tokenizer_merge_hash_result_is_valid(prefix_compound) &&
-        prefix_compound.rank < suffix_merge_rank) {
+        prefix_compound.rank < suffix_merge_rank &&
+        !iree_tokenizer_bpe_is_token_consumed_rightward(
+            model, compound_token, remaining_data, remaining_size, compound_end,
+            prefix_compound.rank)) {
       return true;
     }
 
@@ -714,24 +717,25 @@ static bool iree_tokenizer_bpe_is_suffix_blocked(
         continue;
       }
 
-      // Verify the prefix token can actually form at this position. A
-      // multi-character prefix requires its internal merges to complete
-      // before external boundary merges consume its edge characters. If
-      // the rightmost base of the prefix merges with the following
-      // character at a rank lower than the prefix's internal consumption
-      // of that base, the prefix cannot form here.
-      if (effective_rank[(uint32_t)prefix_token] > 1 &&
-          i + 1 < remaining_size) {
-        uint32_t rightmost_base = iree_tokenizer_bpe_rightmost_base_token(
-            model, (uint32_t)prefix_token);
-        uint32_t right_consumed =
-            iree_tokenizer_bpe_right_boundary_consumed_rank(
-                model, (uint32_t)prefix_token);
+      // Every suffix on the prefix's right spine must survive until its
+      // parent merge. Checking only the final base token misses compound
+      // suffixes: in ter+s, er+s can consume er before t+er forms ter even
+      // though the base r was safely consumed by e+r much earlier.
+      bool prefix_available = true;
+      for (uint32_t current = (uint32_t)prefix_token;
+           i + 1 < remaining_size && split_table[current].right_id != current;
+           current = split_table[current].right_id) {
+        uint32_t right = split_table[current].right_id;
+        uint32_t parent_rank = effective_rank[current] - 1;
         if (iree_tokenizer_bpe_is_token_consumed_rightward(
-                model, (int32_t)rightmost_base, remaining_data, remaining_size,
-                i + 1, right_consumed)) {
-          continue;  // Prefix can't form at this position.
+                model, (int32_t)right, remaining_data, remaining_size, i + 1,
+                parent_rank)) {
+          prefix_available = false;
+          break;
         }
+      }
+      if (!prefix_available) {
+        continue;
       }
 
       // Found a valid blocking merge. Report its rank so pair validation
