@@ -58,7 +58,7 @@ class GpuProgramTest : public GpuNativeTest {
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_pm4_barrier_profile_initialize(gfxip, &barriers_));
     ASSERT_NO_FATAL_FAILURE(
-        SelectMemory(true, &control_access_, &control_policy_));
+        SelectControlMemory(&control_access_, &control_policy_));
     ASSERT_NO_FATAL_FAILURE(
         Allocate(control_policy_, 65536, &control_, &control_address_));
     std::memset(control_.contents.data, 0, control_.contents.data_length);
@@ -124,17 +124,17 @@ class GpuProgramTest : public GpuNativeTest {
     GpuNativeTest::TearDown();
   }
 
-  void SelectMemory(bool coherent, amdf_memory_device_access_t* access,
-                    iree_hal_amd_fabric_memory_options_t* policy) {
+  void SelectControlMemory(amdf_memory_device_access_t* access,
+                           iree_hal_amd_fabric_memory_options_t* policy) {
     *access = {
         .device = context_->device,
         .requirements =
             {
                 .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
                           AMDF_MEMORY_ACCESS_EXECUTE,
-                .flags =
-                    AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
-                    (coherent ? AMDF_MEMORY_FLAG_HOST_COHERENT : UINT64_C(0)),
+                .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                         AMDF_MEMORY_FLAG_HOST_COHERENT |
+                         AMDF_MEMORY_FLAG_QUEUE_STORAGE,
                 .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
             },
     };
@@ -178,7 +178,7 @@ class GpuProgramTest : public GpuNativeTest {
         return;
       }
     }
-    FAIL() << "No admitted host upload profile";
+    FAIL() << "No admitted host control profile";
   }
 
   void Allocate(const iree_hal_amd_fabric_memory_options_t& policy,
@@ -414,7 +414,7 @@ class GpuProgramTest : public GpuNativeTest {
   bool kernel_ = false;
   // Captured physical cache contract.
   iree_hal_amd_gpu_pm4_barrier_profile_t barriers_ = {};
-  // Native access requirements backing the two qualified policies.
+  // Native access requirements for live control backing.
   amdf_memory_device_access_t control_access_ = {};
   // Host/GPU control storage policy.
   iree_hal_amd_fabric_memory_options_t control_policy_ = {};

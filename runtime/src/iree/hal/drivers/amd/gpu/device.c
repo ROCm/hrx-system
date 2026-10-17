@@ -234,7 +234,8 @@ static iree_status_t iree_hal_amd_gpu_device_prepare_control(
                                  AMDF_MEMORY_ACCESS_WRITE |
                                  AMDF_MEMORY_ACCESS_EXECUTE,
                        .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
-                                AMDF_MEMORY_FLAG_HOST_COHERENT,
+                                AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                AMDF_MEMORY_FLAG_QUEUE_STORAGE,
                        .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU},
   };
   amdf_memory_scope_info_t info = {
