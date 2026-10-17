@@ -1257,10 +1257,24 @@ static iree_status_t loom_low_lower_function_plan_build(
         &context->function_analysis.value_identities);
   }
   if (iree_status_is_ok(status)) {
+    if (loom_region_has_convergent_effects(source_body)) {
+      status = iree_arena_allocate(
+          &context->analysis_arena,
+          sizeof(*context->function_analysis.participant_zeros),
+          (void**)&context->function_analysis.participant_zeros);
+      if (iree_status_is_ok(status)) {
+        loom_control_participant_table_initialize(
+            &context->analysis_arena,
+            context->function_analysis.participant_zeros);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
     const loom_vector_memory_footprint_options_t footprint_options = {
         .fact_table = context->fact_table,
         .value_domain = &context->lowering->value_domain,
         .value_identities = &context->function_analysis.value_identities,
+        .participants = context->function_analysis.participant_zeros,
         .emitter = options->emitter,
         .max_errors = options->max_errors,
     };

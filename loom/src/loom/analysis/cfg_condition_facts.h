@@ -16,6 +16,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/cfg_condition_derivation.h"
 #include "loom/analysis/cfg_condition_relation_anchors.h"
 #include "loom/analysis/cfg_value_identity.h"
 #include "loom/analysis/condition_facts.h"
@@ -88,6 +89,21 @@ iree_status_t loom_cfg_condition_relation_table_compute(
     const loom_cfg_value_identity_table_t* identities,
     const loom_cfg_condition_relation_anchor_provider_t* anchor_provider,
     iree_arena_allocator_t* arena,
+    loom_cfg_condition_relation_table_t* out_table);
+
+// Computes the same retained relation table from shared edge derivations.
+// |edge_facts| contains graph->edge_count entries and is borrowed only during
+// the call. Consumers projecting other compact facts can share those inputs
+// without repeating condition-expression traversal or retaining proof scratch.
+iree_status_t loom_cfg_condition_relation_table_compute_from_edges(
+    const loom_module_t* module, const loom_cfg_graph_t* graph,
+    const loom_value_fact_table_t* fact_table,
+    const loom_dominance_info_t* dominance,
+    loom_local_value_domain_t* value_domain,
+    const loom_cfg_value_identity_table_t* identities,
+    const loom_cfg_condition_relation_anchor_provider_t* anchor_provider,
+    const loom_cfg_condition_edge_facts_t* edge_facts,
+    iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena,
     loom_cfg_condition_relation_table_t* out_table);
 
 // Returns the immutable facts at |block_index|, or NULL when unavailable.

@@ -1,10 +1,10 @@
-// RUN: with-checks compile-report source-to-low{control-flow=structured-low},low-dce
+// RUN: pass source-to-low{control-flow=structured-low},low-dce
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 // RDNA wave64 combines two native 32-lane partitions for this workgroup.
-// The unrelated inner branch must not hide the enclosing workitem-zero guard
-// from collective result-demand analysis.
+// The false edge proves a normalized coordinate is zero. The unrelated inner
+// branch inherits that guarantee without changing collective publication.
 kernel.def target(@target) @workgroup_reduce_structured_nested_guard() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -21,8 +21,10 @@ kernel.def target(@target) @workgroup_reduce_structured_nested_guard() {
   %sum = kernel.workgroup.reduce<addf> %value : f32
   %flag = view.load %flags_view[%leader_index] : view<1xi32> -> i32
   %has_output = scalar.cmpi ne, %flag, %c0 : i32
-  %is_leader = index.cmp eq, %tid, %leader_index : index
-  scf.if %is_leader {
+  %coordinate = index.add %tid, %leader_index : index
+  %is_nonleader = index.cmp ne, %coordinate, %leader_index : index
+  scf.if %is_nonleader {
+  } else {
     scf.if %has_output {
       view.store %sum, %output_view[%leader_index] : f32, view<1xf32>
     }
@@ -31,4 +33,54 @@ kernel.def target(@target) @workgroup_reduce_structured_nested_guard() {
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] * source_op=kernel.workgroup.reduce selection=plan plan_key=amdgpu.workgroup_reduce.publication.leader_workitem *
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_structured_nested_guard() asm {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %flags_view = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %leader_index = s_mov_b32 0
+  %23 = v_lshlrev_b32_src0_inline %tid, 2
+  %value = global_load_b32_saddr %23, %input_view
+  %25 = v_and_b32_src0_inline %tid, 31
+  %26 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
+  %27 = storage_address %26 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %28 = v_add_f32_dpp16 %value, %value {dpp_ctrl = 177}
+  %29 = v_add_f32_dpp16 %28, %28 {dpp_ctrl = 78}
+  %30 = v_add_f32_dpp16 %29, %29 {dpp_ctrl = 321}
+  %31 = v_add_f32_dpp16 %30, %30 {dpp_ctrl = 320}
+  %32 = v_permlanex16_b32_src12_inline %31, 0, 0
+  %33 = v_add_f32 %31, %32
+  %34 = v_lshrrev_b32_src0_inline %tid, 5
+  %35 = v_lshlrev_b32_src0_inline %34, 2
+  %36 = v_mov_b32 1
+  %37 = v_cmp_lt_u32 %25, %36
+  %38, %39 = s_and_saveexec_b64 %37
+  %40 = v_add_u32 %27, %35
+  ds_write_b32 %40, %33
+  s_mov_b64_exec %38
+  s_barrier
+  %41 = v_mov_b32 1
+  %42 = v_cmp_lt_u32 %tid, %41
+  %43, %44 = s_and_saveexec_b64 %42
+  %45 = ds_read_b32 %27
+  %46 = v_add_u32_src0_inline %27, 4
+  %47 = ds_read_b32 %46
+  %sum = v_add_f32 %45, %47
+  s_mov_b64_exec %43
+  s_barrier
+  %49 = v_mov_b32 0
+  %flag = global_load_b32_saddr %49, %flags_view
+  %has_output = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
+  %coordinate = v_add_u32 %leader_index, %tid
+  %is_nonleader = v_cmp_ne_i32_src1_inline %coordinate {rhs = 0}
+  low.scf.if %is_nonleader {
+  } else {
+    low.scf.if %has_output {
+      %54 = v_mov_b32 0
+      global_store_b32_saddr %54, %sum, %output_view
+    }
+  }
+  return
+}

@@ -9,6 +9,15 @@
 #include "loom/analysis/control_uniformity.h"
 #include "loom/codegen/low/lower/context.h"
 
+loom_control_participant_zeros_t loom_low_lower_source_participant_zeros(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  const loom_control_participant_table_t* table =
+      context->function_analysis.participant_zeros;
+  return table ? loom_control_participant_table_lookup(table,
+                                                       source_op->parent_block)
+               : 0;
+}
+
 struct loom_low_lower_participation_state_t {
   // Shared control facts borrowed from the immutable source snapshot.
   loom_control_uniformity_info_t control_uniformity;

@@ -91,6 +91,7 @@ loom_cc_library(
     loom::analysis::condition_facts
     loom::analysis::consumption
     loom::analysis::contract_vector
+    loom::analysis::control_participants
     loom::analysis::control_uniformity
     loom::analysis::integer_relation
     loom::analysis::kernel_barrier_lifetime
@@ -312,6 +313,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::cfg_value_identity
+    loom::analysis::control_participants
     loom::ir
     loom::ops::scalar
     loom::ops::test

@@ -468,12 +468,14 @@ loom_cc_benchmark(
 loom_cc_library(
     name = "cfg_condition_facts",
     srcs = [
+        "cfg_condition_derivation.c",
         "cfg_condition_facts.c",
         "cfg_condition_operand_domain.c",
         "cfg_condition_relation_anchors.c",
         "cfg_condition_relation_table.c",
     ],
     hdrs = [
+        "cfg_condition_derivation.h",
         "cfg_condition_facts.h",
         "cfg_condition_operand_domain.h",
         "cfg_condition_relation_anchors.h",
@@ -915,6 +917,7 @@ loom_cc_library(
         ":cfg_value_identity",
         ":condition_fact_scope",
         ":condition_facts",
+        ":control_participants",
         ":symbolic_expr",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
@@ -932,6 +935,38 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "control_participants",
+    srcs = ["control_participants.c"],
+    hdrs = ["control_participants.h"],
+    deps = [
+        ":cfg_condition_facts",
+        ":condition_facts",
+        ":symbolic_expr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "control_participants_test",
+    srcs = ["control_participants_test.cc"],
+    deps = [
+        ":control_participants",
+        ":symbolic_expr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

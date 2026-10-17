@@ -107,6 +107,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/analysis:consumption",
         "//loom/src/loom/analysis:contract_vector",
+        "//loom/src/loom/analysis:control_participants",
         "//loom/src/loom/analysis:control_uniformity",
         "//loom/src/loom/analysis:integer_relation",
         "//loom/src/loom/analysis:kernel_barrier_lifetime",
@@ -320,6 +321,7 @@ loom_cc_test(
     deps = [
         ":lower",
         "//loom/src/loom/analysis:cfg_value_identity",
+        "//loom/src/loom/analysis:control_participants",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/test",

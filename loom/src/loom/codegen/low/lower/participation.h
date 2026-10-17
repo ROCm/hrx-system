@@ -4,12 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Optional source execution evidence for memory reports.
+// Source execution participation for target planning and reports.
 
 #ifndef LOOM_CODEGEN_LOW_LOWER_PARTICIPATION_H_
 #define LOOM_CODEGEN_LOW_LOWER_PARTICIPATION_H_
 
 #include "loom/analysis/condition_facts.h"
+#include "loom/analysis/control_participants.h"
 #include "loom/analysis/symbolic_expr.h"
 
 #ifdef __cplusplus
@@ -17,6 +18,11 @@ extern "C" {
 #endif
 
 typedef struct loom_low_lower_context_t loom_low_lower_context_t;
+
+// Returns the source block's retained zero-coordinate guarantees. Common
+// verification owns the proof; target planning consumes this indexed result.
+loom_control_participant_zeros_t loom_low_lower_source_participant_zeros(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op);
 
 typedef enum loom_low_lower_participation_kind_e {
   LOOM_LOW_LOWER_PARTICIPATION_UNKNOWN = 0,
