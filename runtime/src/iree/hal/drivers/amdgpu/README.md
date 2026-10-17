@@ -66,6 +66,21 @@ ROCR_VISIBLE_DEVICES=2,3 iree-run-loom \
   --device=amdgpu --probe-hal
 ```
 
+The device provisions one queue per selected GPU by default. Applications
+that submit independent workloads can request a fixed inventory at device
+creation:
+
+```sh
+iree-run-loom --device='amdgpu://0?queue_count=2' --probe-hal
+```
+
+`queue_count` is a positive decimal integer per selected GPU. The total across
+selected GPUs must fit the topology's 256 queue axes; native resource limits
+may be lower. The queues live until device destruction and remain available
+to profiling. Creating extra queues does not assign workloads to them or
+reserve compute resources; applications select provisioned queues through
+the HAL queue-family interface.
+
 Compile and run a Loom kernel with the AMDGPU HAL driver:
 
 ```sh
