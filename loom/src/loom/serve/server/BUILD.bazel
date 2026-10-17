@@ -267,6 +267,7 @@ loom_cc_library(
         "//loom/src/loom/serve/service/speech:request",
         "//loom/src/loom/serve/service/speech:stream",
         "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/telemetry:stream",
         "//loom/src/loom/serve/testing:http_harness",
         "//loom/src/loom/serve/testing:service_application",
         "//loom/src/loom/serve/transport/http:listener",
