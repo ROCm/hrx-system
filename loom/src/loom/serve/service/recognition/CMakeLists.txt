@@ -149,6 +149,38 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    events
+  HDRS
+    "events.h"
+  SRCS
+    "events.c"
+  DEPS
+    ::transcript
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    events_test
+  SRCS
+    "events_test.cc"
+  DEPS
+    ::events
+    ::transcript
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     document
   HDRS
     "document.h"
@@ -171,6 +203,7 @@ loom_cc_library(
     "stream.c"
   DEPS
     ::document
+    ::events
     ::generator
     ::input
     ::request
@@ -197,6 +230,7 @@ loom_cc_library(
   HDRS
     "request.h"
   DEPS
+    ::events
     iree::base
   PUBLIC
 )
@@ -209,9 +243,9 @@ loom_cc_library(
   HDRS
     "generator.h"
   DEPS
+    ::events
     ::input
     ::request
-    ::transcript
     iree::base
     iree::tokenizer
     loom::serve::runtime::execution
@@ -229,8 +263,8 @@ loom_cc_library(
   SRCS
     "model.c"
   DEPS
+    ::events
     ::generator
-    ::transcript
     iree::base
     iree::base::threading
     iree::hal
@@ -268,6 +302,7 @@ loom_cc_library(
   SRCS
     "source_model_test.cc"
   DEPS
+    ::events
     ::generator
     ::input
     ::model
@@ -311,6 +346,7 @@ loom_cc_library(
     "source_stream_test.cc"
   DEPS
     ::document
+    ::events
     ::generator
     ::input
     ::model

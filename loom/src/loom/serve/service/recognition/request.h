@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_RECOGNITION_REQUEST_H_
 #define LOOM_SERVE_SERVICE_RECOGNITION_REQUEST_H_
 
-#include "iree/base/api.h"
+#include "loom/serve/service/recognition/events.h"
 
 // Immutable source options, borrowed through asynchronous request preparation.
 // Audio arrives separately through bounded sample-frame snapshots.
@@ -18,6 +18,8 @@ typedef struct loom_serve_recognition_request_t {
   iree_string_view_t prompt;
   // Source decoding temperature; zero requests deterministic decoding.
   float temperature;
+  // Nonempty subset of the admitted source's supported output types.
+  loom_serve_recognition_output_flags_t outputs;
 } loom_serve_recognition_request_t;
 
 #endif  // LOOM_SERVE_SERVICE_RECOGNITION_REQUEST_H_

@@ -219,8 +219,10 @@ admission and compute scheduling. Speech does not currently accept
 Recognition requires `kind:"recognition"` and an `assets` directory. It uses the
 same `prepare`, `control`, `sources` and source-owned `options` fields as other
 modalities. The package declares input sample rate and channels, bounded input
-credit, maximum recording length, transcript-event capacity, persistent request
-storage and numerical batch capacity.
+credit, maximum recording length, supported event types, event count and byte
+bounds, persistent request storage and numerical batch capacity. Native requests
+explicitly select transcript or activity output, or both when the source supports
+them. HTTP transcription selects transcripts.
 
 `pending_requests` bounds the additional host queue. Each admitted request owns
 its input clock, unconsumed PCM, model state and transcript revisions. Source
