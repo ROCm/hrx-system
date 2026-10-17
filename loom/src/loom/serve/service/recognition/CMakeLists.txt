@@ -47,6 +47,7 @@ loom_cc_library(
     iree::base::threading
     iree::task
     loom::serve::media::audio_decoder
+    loom::serve::media::audio_resampler
     loom::serve::runtime::host
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::telemetry

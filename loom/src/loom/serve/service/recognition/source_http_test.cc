@@ -8,8 +8,10 @@
 #include <unistd.h>
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "iree/base/threading/notification.h"
 #include "iree/base/tooling/flags.h"
@@ -22,15 +24,26 @@
 #include "loom/serve/testing/worker_gate.h"
 
 IREE_FLAG(string, model_source, "", "Recognition fixture bootstrap source.");
+IREE_FLAG(int32_t, test_workers, 1, "Shared application worker count.");
 
 namespace {
 
-std::string Request(bool encoded) {
-  std::string pcm(19 * sizeof(int16_t), '\0');
-  for (size_t i = 0; i < 19; ++i) {
+// Zero rate selects encoded WAV; positive rates select declared PCM16LE.
+std::string Request(uint32_t sample_rate, size_t frame_count = 0) {
+  const bool encoded = sample_rate == 0;
+  if (encoded) {
+    sample_rate = 16000;
+  }
+  if (!frame_count) {
+    frame_count =
+        sample_rate == 16000 ? 19 : (18ull * sample_rate + 15999) / 16000;
+  }
+  std::string pcm(frame_count * sizeof(int16_t), '\0');
+  for (size_t i = 0; i < frame_count; ++i) {
     iree_unaligned_store_le_u16(pcm.data() + i * sizeof(int16_t), 8192);
   }
-  std::string content_type = "audio/pcm;rate=16000;channels=1";
+  std::string content_type =
+      "audio/pcm;rate=" + std::to_string(sample_rate) + ";channels=1";
   if (encoded) {
     std::string header(44, '\0');
     memcpy(header.data(), "RIFF", 4);
@@ -60,11 +73,11 @@ std::string Request(bool encoded) {
          std::to_string(body.size()) + "\r\n\r\n" + body;
 }
 
-class SourceRecognitionHttpTest
-    : public ::testing::TestWithParam<std::tuple<bool, bool>> {
+class SourceRecognitionHttpTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    const auto options = loom_serve_test_application_options_default();
+    auto options = loom_serve_test_application_options_default();
+    options.worker_count = FLAG_test_workers;
     loom_serve_test_application_t* application = nullptr;
     IREE_ASSERT_OK(loom_serve_test_application_acquire(
         &options, iree_allocator_system(), &application));
@@ -100,6 +113,7 @@ class SourceRecognitionHttpTest
         .request_limit = 1024,
         .document_limit = 4096,
         .decode_frames = 5,
+        .conversion_limit = 8 * 1024 * 1024,
     };
     IREE_ASSERT_OK(loom_serve_recognition_service_allocate(
         host_, loom_serve_recognition_model_generator(model_), &service_options,
@@ -156,7 +170,7 @@ class SourceRecognitionHttpTest
         interface_.accept(interface_.self, *connection, *request, 0));
   }
 
-  // Shared application host; its sole worker supplies the deterministic gate.
+  // Shared application host; worker gates establish the pre-execution cut.
   loom_serve_host_t* host_ = nullptr;
   // Real source-owned request state and numerical execution.
   loom_serve_recognition_model_t* model_ = nullptr;
@@ -172,10 +186,15 @@ class SourceRecognitionHttpTest
   loom_serve::testing::HttpHarness http_;
 };
 
-TEST_P(SourceRecognitionHttpTest, CancellationRetainsAcceptedDecodeBorrow) {
-  const auto [stopping, encoded] = GetParam();
+class SourceRecognitionHttpRetirementTest
+    : public SourceRecognitionHttpTest,
+      public ::testing::WithParamInterface<std::tuple<bool, uint32_t>> {};
+
+TEST_P(SourceRecognitionHttpRetirementTest,
+       CancellationRetainsAcceptedDecodeBorrow) {
+  const auto [stopping, sample_rate] = GetParam();
   loom_serve::testing::HttpClient client;
-  IREE_ASSERT_OK(http_.Send(Request(encoded), client.put()));
+  IREE_ASSERT_OK(http_.Send(Request(sample_rate), client.put()));
   loom_serve_http_connection_t* connection = nullptr;
   const loom_serve_http_request_t* request = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
@@ -184,7 +203,11 @@ TEST_P(SourceRecognitionHttpTest, CancellationRetainsAcceptedDecodeBorrow) {
   EXPECT_TRUE(interface_.is_pending(interface_.self));
   EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
   const std::string body(request->body.data, request->body.size);
-  loom_serve::testing::WorkerGate gate(loom_serve_host_executor(host_));
+  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  for (int32_t i = 0; i < FLAG_test_workers; ++i) {
+    gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
+        loom_serve_host_executor(host_)));
+  }
   ASSERT_NO_FATAL_FAILURE(Advance(false));
   EXPECT_TRUE(interface_.is_active(interface_.self));
   ASSERT_TRUE(interface_.is_pending(interface_.self));
@@ -207,7 +230,7 @@ TEST_P(SourceRecognitionHttpTest, CancellationRetainsAcceptedDecodeBorrow) {
   EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
   EXPECT_TRUE(interface_.is_pending(interface_.self));
   EXPECT_EQ(std::string(request->body.data, request->body.size), body);
-  gate.Open();
+  gates.clear();
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       [&] {
         return interface_.telemetry.counters->cancelled == 1 &&
@@ -217,7 +240,7 @@ TEST_P(SourceRecognitionHttpTest, CancellationRetainsAcceptedDecodeBorrow) {
   EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 0u);
   EXPECT_FALSE(interface_.is_active(interface_.self));
   if (!stopping) {
-    IREE_ASSERT_OK(http_.Send(Request(encoded), client.put()));
+    IREE_ASSERT_OK(http_.Send(Request(sample_rate), client.put()));
     ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         [&] { return interface_.telemetry.counters->completed == 1; }));
@@ -228,10 +251,45 @@ TEST_P(SourceRecognitionHttpTest, CancellationRetainsAcceptedDecodeBorrow) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    DisconnectAndShutdown, SourceRecognitionHttpTest,
-    ::testing::Combine(::testing::Bool(), LOOM_TEST_AUDIO_WAV
-                                              ? ::testing::Bool()
-                                              : ::testing::ValuesIn({false})));
+std::vector<uint32_t> InputRates() {
+  std::vector<uint32_t> rates = {8000, 16000, 22050, 24000, 48000};
+  if (LOOM_TEST_AUDIO_WAV) {
+    rates.push_back(0);
+  }
+  return rates;
+}
+
+INSTANTIATE_TEST_SUITE_P(DisconnectAndShutdown,
+                         SourceRecognitionHttpRetirementTest,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::ValuesIn(InputRates())));
+
+TEST_F(SourceRecognitionHttpTest, RawPcmLimitsRejectOnlyTheAffectedRequest) {
+  // The first upload exceeds normalized duration before admission. The second
+  // fits that duration but exceeds filter storage on its accepted CPU task.
+  for (uint32_t rate : {1u, UINT32_MAX}) {
+    loom_serve::testing::HttpClient client;
+    IREE_ASSERT_OK(http_.Send(Request(rate, 1), client.put()));
+    loom_serve_http_connection_t* connection = nullptr;
+    const loom_serve_http_request_t* request = nullptr;
+    ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
+    ASSERT_NO_FATAL_FAILURE(
+        AdvanceUntil([&] { return !interface_.is_pending(interface_.self); }));
+    std::string response;
+    IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
+    EXPECT_NE(response.find("HTTP/1.1 400 Bad Request\r\n"), std::string::npos);
+  }
+  loom_serve::testing::HttpClient client;
+  IREE_ASSERT_OK(http_.Send(Request(24000), client.put()));
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 1; }));
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
+  EXPECT_NE(response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+  EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
+}
 
 }  // namespace
