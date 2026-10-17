@@ -296,6 +296,7 @@ def _load_core_types() -> list[Any]:
     from loom.dialect.check import ALL_CHECK_TYPES
     from loom.dialect.group import ALL_GROUP_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
+    from loom.dialect.input import ALL_INPUT_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
     from loom.dialect.pipeline import ALL_PIPELINE_TYPES
 
@@ -304,6 +305,7 @@ def _load_core_types() -> list[Any]:
         *ALL_CHECK_TYPES,
         *ALL_GROUP_TYPES,
         *ALL_HAL_TYPES,
+        *ALL_INPUT_TYPES,
         *ALL_KERNEL_TYPES,
         *ALL_PIPELINE_TYPES,
     ]
