@@ -173,6 +173,26 @@ class RequestCheckTest(unittest.TestCase):
                     self.assertFalse(value["reusable"])
                     self.assertTrue(value["checkpoint"].endswith("<|im_end|>\n"))
 
+    def test_thinking_defaults_off_and_remains_request_selectable(self):
+        for tools in ([], TOOLS):
+            with self.subTest(tools=bool(tools)):
+                request = self.request(tools=tools)
+                disabled = self.success(self.execute(PACKAGE / "control.loom", request))
+                self.assertTrue(disabled["prompt"].endswith("<think>\n\n</think>\n\n"))
+                self.assertNotIn(
+                    "Reasoning effort is set to xhigh.", disabled["prompt"]
+                )
+
+                del request["enable_thinking"]
+                default = self.success(self.execute(PACKAGE / "control.loom", request))
+                self.assertEqual(default["prompt"], disabled["prompt"])
+                self.assertEqual(default["tokens"], disabled["tokens"])
+
+                request["enable_thinking"] = True
+                enabled = self.success(self.execute(PACKAGE / "control.loom", request))
+                self.assertTrue(enabled["prompt"].endswith("<think>\n"))
+                self.assertIn("Reasoning effort is set to xhigh.", enabled["prompt"])
+
     def test_images_reject_non_data_urls(self):
         result = self.execute(
             PACKAGE / "control.loom",
