@@ -2,6 +2,12 @@ func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) ->
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
+
+func.decl import("prepare") @workspace_limit(%stage: i32, %byte_length: i64)
+
 func.decl import("runner") @execute_3(%stage: i32, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i64)
 
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
@@ -9,11 +15,30 @@ func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i
 // prompt exceeds fixture text capacity
 global.rodata.def @invalid = bytes("70726f6d7074206578636565647320666978747572652074657874206361706163697479")
 
+global.rodata.def @invalid_shape = bytes("6669787475726520726571756972657320312d363420706978656c20657874656e7473")
+
+global.rodata.def @root = bytes("67656e65726174655f696d616765")
+
+global.rodata.def @pixels = bytes("666978747572652e706978656c73")
+
 // The payload carries request-derived facts, not host-rendered pixels.
-func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i32, %prompt: buffer, %seed: i64, %strength: f32) -> (i32, buffer) {
+func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i32, %height: i64, %width: i64, %prompt: buffer, %seed: i64, %strength: f32) -> (i32, buffer) {
   %origin = index.constant 0 : offset
-  %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
-  %capacity = view.load %state_view[0] : view<1xi64> -> i64
+  %state_view = buffer.view %state[%origin] : buffer -> view<2xi64>
+  %capacity = view.load %state_view[0] : view<2xi64> -> i64
+  %cold_pixels = view.load %state_view[1] : view<2xi64> -> i64
+  %minimum = scalar.constant 0 : i64
+  %maximum = scalar.constant 64 : i64
+  %h0 = scalar.cmpi ugt, %height, %minimum : i64
+  %h1 = scalar.cmpi ule, %height, %maximum : i64
+  %w0 = scalar.cmpi ugt, %width, %minimum : i64
+  %w1 = scalar.cmpi ule, %width, %maximum : i64
+  %h = scalar.andi %h0, %h1 : i1
+  %w = scalar.andi %w0, %w1 : i1
+  %shape = scalar.andi %h, %w : i1
+  %shape32 = scalar.extui %shape : i1 to i32
+  %shape_error = global.load @invalid_shape : buffer
+  func.call @require(%shape32, %shape_error) : (i32, buffer)
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i64
   %bound = scalar.addi %capacity, %c1 : i64
@@ -27,7 +52,20 @@ func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i3
   %header = buffer.view %payload[%origin] : buffer -> view<2xi64>
   view.store %seed, %header[0] : i64, view<2xi64>
   view.store %count, %header[1] : i64, view<2xi64>
-  func.return %c0, %payload : i32, buffer
+  %pixels = scalar.muli %height, %width : i64
+  %cold = scalar.cmpi eq, %pixels, %cold_pixels : i64
+  %selected = scf.if %cold -> (i32) {
+    scf.yield %c0 : i32
+  } else {
+    %root = global.load @root : buffer
+    %stage = func.call @stage(%root, %capacity) : (buffer, i64) -> (i32)
+    %workspace_limit = scalar.constant 8192 : i64
+    func.call @workspace_limit(%stage, %workspace_limit) : (i32, i64)
+    %key = global.load @pixels : buffer
+    func.call @config_i64(%stage, %key, %pixels) : (i32, buffer, i64)
+    scf.yield %stage : i32
+  }
+  func.return %selected, %payload : i32, buffer
 }
 
 func.def public @generate(%first_part: i32, %part_count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i32) {

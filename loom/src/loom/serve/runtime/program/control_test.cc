@@ -630,6 +630,30 @@ TEST_P(ControlTest, FeedbackChecksBothExtentsAndAllowsSubranges) {
   for (size_t i = 1; i < outputs_[0].tokens.size(); ++i) {
     EXPECT_EQ(outputs_[0].tokens[i], -12345);
   }
+
+  // Rebinding updates the borrowed address and its public extent together.
+  int32_t& rebound = outputs_[1].tokens[0];
+  rebound = -1;
+  loom_serve_module_bind_feedback(
+      native_module_, 0, iree_make_byte_span(&rebound, sizeof(rebound)));
+  for (int64_t length : {8, 4}) {
+    iree_vm_variant_t rebound_arguments[] = {
+        iree_vm_variant_from_i32(0),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][1]),
+        iree_vm_variant_from_i64(4),
+        iree_vm_variant_from_i64(length),
+    };
+    IREE_EXPECT_STATUS_IS(
+        length == 4 ? IREE_STATUS_OK : IREE_STATUS_OUT_OF_RANGE,
+        InvokeFunction(function,
+                       iree_vm_variant_span_from_array(rebound_arguments),
+                       &completion));
+  }
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(rebound, 41);
+  loom_serve_module_bind_feedback(
+      native_module_, 0,
+      iree_make_byte_span(outputs_[0].tokens.data(), kLengths[1]));
 }
 
 TEST_P(ControlTest, SourceForkAndPartialFailureRetireBorrowedStorage) {

@@ -18,6 +18,7 @@ loom_cc_library(
   SRCS
     "request.c"
   DEPS
+    ::output
     iree::base
     iree::base::internal::json
     iree::base::internal::unicode

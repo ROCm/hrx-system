@@ -447,6 +447,13 @@ TEST_F(ConfigurationTest, VariantCapacityAppliesToEveryService) {
 }
 
 TEST_F(ConfigurationTest, SpecializationCacheBoundsReuseNotRequestGeometry) {
+  IREE_ASSERT_OK(Parse(Image("")));
+  EXPECT_EQ(model_.specialization_cache.capacity, 16u);
+  EXPECT_EQ(model_.specialization_cache.max_bytes, 16u * 1024 * 1024);
+  IREE_ASSERT_OK(Parse(
+      Image(R"(,"specialization_cache":{"capacity":2,"max_bytes":1048576})")));
+  EXPECT_EQ(model_.specialization_cache.capacity, 2u);
+  EXPECT_EQ(model_.specialization_cache.max_bytes, 1048576u);
   for (const char* kind : {"embedding", "decision"}) {
     IREE_ASSERT_OK(Parse(Document(kind, R"(,"assets":".")")));
     EXPECT_EQ(model_.specialization_cache.capacity, 16u);
@@ -477,6 +484,7 @@ TEST_F(ConfigurationTest, SpecializationCacheRejectsInvalidPolicy) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         Parse(Document("embedding", R"(,"assets":".")" + field)));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(Image(field)));
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         Parse(Text(R"(,"image":{"prepare":"p","control":"c","assets":".")" +
@@ -484,8 +492,6 @@ TEST_F(ConfigurationTest, SpecializationCacheRejectsInvalidPolicy) {
   }
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse(Text(R"(,"specialization_cache":{})")));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        Parse(Image(R"(,"specialization_cache":{})")));
 }
 
 TEST_F(ConfigurationTest, NativeCapacitiesAreNotOneModelShape) {

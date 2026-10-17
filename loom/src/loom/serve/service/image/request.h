@@ -22,14 +22,20 @@ typedef struct loom_serve_image_request_t {
   uint64_t seed;
   // Finite adapter multiplier; one when omitted.
   float strength;
+  // Requested pixel width; the registered default when size is omitted.
+  uint32_t width;
+  // Requested pixel height; the registered default when size is omitted.
+  uint32_t height;
 } loom_serve_image_request_t;
 
-// Decodes one bounded JSON/JSONC body for a fixed model and pixel geometry.
-// Requires prompt; optional model/size must exactly match the supplied literal
-// names. Only n=1 and response_format="b64_json" are supported. Seed accepts an
-// unsigned integer or literal decimal string. Unknown, duplicate, wrongly
-// typed and trailing fields fail. No body storage is borrowed after return.
-// Failure releases partial ownership and leaves a deinitializable empty value.
+// Decodes one bounded JSON/JSONC body with default pixel geometry. Requires
+// prompt; optional model must match the supplied name. Size is positive decimal
+// WIDTHxHEIGHT with representable F32 RGB/PNG storage; the source validates its
+// supported geometry during preparation. Only n=1 and
+// response_format="b64_json" are supported. Seed accepts an unsigned integer or
+// literal decimal string. Unknown, duplicate, wrongly typed and trailing fields
+// fail. No body storage is borrowed after return. Failure releases partial
+// ownership and leaves a deinitializable empty value.
 iree_status_t loom_serve_image_request_initialize(
     iree_string_view_t body, iree_string_view_t model, uint32_t width,
     uint32_t height, iree_allocator_t host_allocator,

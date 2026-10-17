@@ -57,10 +57,11 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %key = global.load @pixels : buffer
   %pixels = scalar.muli %height, %width : i64
   func.call @config_i64(%stage, %key, %pixels) : (i32, buffer, i64)
-  %length = index.constant 8 : offset
+  %length = index.constant 16 : offset
   %state = buffer.alloca<private> align(8) %length : buffer
-  %view = buffer.view %state[%origin] : buffer -> view<1xi64>
-  view.store %text, %view[0] : i64, view<1xi64>
+  %view = buffer.view %state[%origin] : buffer -> view<2xi64>
+  view.store %text, %view[0] : i64, view<2xi64>
+  view.store %pixels, %view[1] : i64, view<2xi64>
   %capacity = scalar.constant 16 : i64
   %tokenizer = global.load @tokenizer : buffer
   %name = global.load @name : buffer

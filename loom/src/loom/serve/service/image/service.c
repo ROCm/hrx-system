@@ -330,7 +330,7 @@ static iree_status_t loom_serve_image_cpu_run(
   iree_byte_span_t png = iree_byte_span_empty();
   IREE_TRACE_ZONE_BEGIN_NAMED(z_png, "loom_serve_image_encode_png");
   iree_status_t status = loom_serve_image_encode_rgb_f32_png(
-      service->options.width, service->options.height, service->cpu.rgb,
+      service->job.request.width, service->job.request.height, service->cpu.rgb,
       service->host_allocator, &png);
   IREE_TRACE_ZONE_END(z_png);
   const iree_time_t encoded = iree_time_now();
@@ -599,7 +599,7 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
     }
     ++service->telemetry.totals.generated_images;
     service->telemetry.totals.generated_pixels +=
-        (uint64_t)service->options.width * service->options.height;
+        (uint64_t)service->job.request.width * service->job.request.height;
     loom_serve_image_event(service, &LOOM_SERVE_IMAGE_GENERATED,
                            service->active);
     if (service->connection) {

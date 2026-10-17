@@ -134,7 +134,10 @@ for the source boundaries.
 Image requires `checkpoint`, an asset directory interpreted by source
 preparation. `adapter` optionally supplies another asset path. `width` and
 `height` default to 384 pixels, and `text_tokens` defaults to 512; all are
-positive, with architecture constraints checked by the source.
+positive, with architecture constraints checked by the source. Width and height
+are defaults, not the only accepted request size. An explicit image `size`
+reaches source preparation and can select or declare shape-specialized code
+without changing checkpoint residency.
 
 `command_quantum` defaults to zero, meaning one whole-program submission.
 A positive value is a soft command-count target for full-barrier-aligned
@@ -145,7 +148,8 @@ Embedding and decision definitions require an `assets` directory. Their
 architecture and batching settings belong in source-owned `options`, not new
 native per-model fields.
 
-`specialization_cache` bounds executable choices declared by request preparation:
+For image, embedding, and decision deployments, `specialization_cache` bounds
+executable choices declared by request preparation:
 
 ```json
 "specialization_cache": {"capacity": 16, "max_bytes": 16777216}
@@ -162,8 +166,8 @@ this byte budget.
 
 This cache is independent of `variant_capacity`, which controls explicitly
 registered native replacements. Requests use the source generation selected
-when their cohort is prepared; selecting another replacement affects subsequent
-cohorts without changing one already being compiled or executed.
+when their image or cohort is prepared; selecting another replacement affects
+subsequent requests without changing one already being compiled or executed.
 
 The referenced assets must match the package's preparation policy. Loading
 checks its declared parameter keys and extents; matching a filename alone does

@@ -43,6 +43,13 @@ typedef struct loom_serve_module_t {
 static const iree_vm_module_signature_type_t loom_serve_module_result = {
     IREE_VM_SCALAR_TYPE_I64, 0};
 
+void loom_serve_module_bind_feedback(iree_vm_module_t* base,
+                                     iree_host_size_t slot,
+                                     iree_byte_span_t destination) {
+  loom_serve_module_t* module = (loom_serve_module_t*)base;
+  module->feedback[slot] = destination;
+}
+
 void loom_serve_module_clear_stages(iree_vm_module_t* base) {
   loom_serve_module_t* module = (loom_serve_module_t*)base;
   for (iree_host_size_t i = 0; i < module->stage_count; ++i) {

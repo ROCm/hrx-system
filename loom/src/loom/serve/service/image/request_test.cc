@@ -27,6 +27,8 @@ TEST(ImageRequestTest, OwnsDecodedPromptAndFullWidthSeed) {
             std::string(expected, sizeof(expected) - 1));
   EXPECT_EQ(request.seed, UINT64_MAX);
   EXPECT_EQ(request.strength, 0.25f);
+  EXPECT_EQ(request.width, 384u);
+  EXPECT_EQ(request.height, 256u);
   loom_serve_image_request_deinitialize(&request);
 }
 
@@ -38,6 +40,8 @@ TEST(ImageRequestTest, EmptyPromptDefaultsAndJsonc) {
   EXPECT_EQ(iree_string_builder_size(&request.prompt), 0u);
   EXPECT_EQ(request.seed, 0u);
   EXPECT_EQ(request.strength, 1.0f);
+  EXPECT_EQ(request.width, 384u);
+  EXPECT_EQ(request.height, 256u);
   loom_serve_image_request_deinitialize(&request);
 }
 
@@ -54,7 +58,19 @@ TEST(ImageRequestTest, RejectsMalformedOrUnsupportedRequests) {
            R"({"prompt":"x","seed":"42junk"})",
            R"({"prompt":"x","strength":1e100})",
            R"({"prompt":"x","strength":"0"})",
-           R"({"prompt":"x","size":"256x384"})",
+           R"({"prompt":"x","size":"auto"})",
+           R"({"prompt":"x","size":"0x384"})",
+           R"({"prompt":"x","size":"256x0"})",
+           R"({"prompt":"x","size":"256"})",
+           R"({"prompt":"x","size":"256x"})",
+           R"({"prompt":"x","size":"x384"})",
+           R"({"prompt":"x","size":"256X384"})",
+           R"({"prompt":"x","size":"256x384x1"})",
+           R"({"prompt":"x","size":"-256x384"})",
+           R"({"prompt":"x","size":"256x 384"})",
+           R"({"prompt":"x","size":"4294967296x384"})",
+           R"({"prompt":"x","size":"4294967295x1"})",
+           R"({"prompt":"x","size":"4294967295x4294967295"})",
            R"({"prompt":"x","model":"other"})",
            R"({"prompt":"x","n":2})",
            R"({"prompt":"x","response_format":"url"})",
@@ -72,6 +88,28 @@ TEST(ImageRequestTest, RejectsMalformedOrUnsupportedRequests) {
     EXPECT_EQ(request.prompt.buffer, nullptr);
     loom_serve_image_request_deinitialize(&request);
   }
+}
+
+TEST(ImageRequestTest, ExplicitGeometryDoesNotChangeDefaults) {
+  for (const char* size : {"256x384", "1536x1024", "1024x1536", "1x1"}) {
+    const std::string body =
+        std::string(R"({"prompt":"x","size":")") + size + "\"}";
+    loom_serve_image_request_t request;
+    IREE_ASSERT_OK(loom_serve_image_request_initialize(
+        iree_make_string_view(body.data(), body.size()), IREE_SV("test-image"),
+        384, 256, iree_allocator_system(), &request));
+    EXPECT_EQ(
+        std::to_string(request.width) + "x" + std::to_string(request.height),
+        size);
+    loom_serve_image_request_deinitialize(&request);
+  }
+  loom_serve_image_request_t request;
+  IREE_ASSERT_OK(loom_serve_image_request_initialize(
+      IREE_SV(R"({"prompt":"x"})"), IREE_SV("test-image"), 384, 256,
+      iree_allocator_system(), &request));
+  EXPECT_EQ(request.width, 384u);
+  EXPECT_EQ(request.height, 256u);
+  loom_serve_image_request_deinitialize(&request);
 }
 
 TEST(ImageRequestTest, AllocationFailurePublishesNoOwnership) {

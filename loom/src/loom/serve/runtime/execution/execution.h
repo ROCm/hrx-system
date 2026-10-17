@@ -65,11 +65,14 @@ iree_status_t loom_serve_execution_reserve_workspace(
     iree_device_size_t alignment);
 
 // Enqueues a private workspace allocation on the work timeline. The caller
-// owns the returned tracked view, orders its consumers through this domain,
-// enqueues execution_dealloca, and releases the view before draining the
-// domain. The shared workspace separately retains the original root and source
-// pool. A failed view allocation after accepted alloca leaves no caller buffer,
-// but the accepted timeline and allocation bookkeeping remain protected.
+// owns the returned tracked view and orders its consumers through this domain.
+// Work-only storage can enqueue execution_dealloca for early ordered reuse.
+// Storage escaping onto feedback or another consumer instead remains allocated
+// until its final queue/caller borrow retires. Release tracked views before
+// draining the domain. The shared workspace separately retains the original
+// root and source pool. A failed view allocation after accepted alloca leaves
+// no caller buffer, but the accepted timeline and allocation bookkeeping remain
+// protected.
 iree_status_t loom_serve_execution_alloca(
     loom_serve_execution_t* execution,
     const iree_hal_pool_reservation_request_t* request,

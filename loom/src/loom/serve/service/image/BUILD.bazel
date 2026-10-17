@@ -22,6 +22,7 @@ loom_cc_library(
     srcs = ["request.c"],
     hdrs = ["request.h"],
     deps = [
+        ":output",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:unicode",

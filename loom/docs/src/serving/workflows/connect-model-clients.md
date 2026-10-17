@@ -191,7 +191,6 @@ IMAGE_GENERATION_MODEL=illustrator
 IMAGE_SIZE=1024x1024
 IMAGES_OPENAI_API_BASE_URL=http://loom-host:8080/v1
 IMAGES_OPENAI_API_KEY=loom
-IMAGES_OPENAI_API_PARAMS={"size":"1024x1024"}
 
 RAG_EMBEDDING_ENGINE=openai
 RAG_EMBEDDING_MODEL=vectors
@@ -199,11 +198,11 @@ RAG_OPENAI_API_BASE_URL=http://loom-host:8080/v1
 RAG_OPENAI_API_KEY=loom
 ```
 
-Replace `loom-host`, the three model IDs and the image dimensions with the
-deployment values. The image size must exactly match the fixed shape in the
-image model document. Pinning it in `IMAGES_OPENAI_API_PARAMS` also prevents a
-native image tool from overriding that fixed shape. Omit the image or RAG block
-when no deployment provides that operation; Open WebUI can retain its local
+Replace `loom-host`, the three model IDs, and the default image dimensions with
+your deployment values. Open WebUI can request other sizes supported by the
+image model; Loom specializes them on demand and reuses resident weights.
+Omit the image or RAG block when no deployment provides that operation;
+Open WebUI can retain its local
 embedding engine instead.
 
 `OPENAI_API_CONFIGS` key `0` describes the first OpenAI base URL. Its
@@ -318,5 +317,5 @@ fields for chat, image, embedding, speech and transcription operations. Loom
 deliberately rejects unknown or unsupported options instead of silently changing
 their meaning.
 Common configuration failures are a nonzero sampling parameter, an image size
-that differs from the deployment, an operation using a model of another kind,
+unsupported by the model's source, an operation using a model of another kind,
 or a client base URL that duplicates or omits `/v1`.

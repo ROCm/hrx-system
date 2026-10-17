@@ -19,9 +19,9 @@ typedef struct loom_serve_image_service_options_t {
   // Borrowed deployment route name, outliving the service. Source identity
   // remains owned by the generator independently of this HTTP selector.
   iree_string_view_t name;
-  // Output pixel width of the retained generator.
+  // Default output pixel width for requests omitting size.
   uint32_t width;
-  // Output pixel height of the retained generator.
+  // Default output pixel height for requests omitting size.
   uint32_t height;
   // Whether the retained generator accepts an adapter strength other than one.
   bool adapter_enabled;

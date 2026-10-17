@@ -29,15 +29,17 @@ typedef struct loom_serve_image_model_options_t {
   iree_string_view_t adapter_path;
   // Source-owned JSON options, borrowed through load completion; empty is {}.
   iree_string_view_t options;
-  // Fixed output height in pixels.
+  // Default output height in pixels, used for cold preparation.
   uint32_t height;
-  // Fixed output width in pixels.
+  // Default output width in pixels, used for cold preparation.
   uint32_t width;
   // Text capacity requested from the source; its meaning is model-defined.
   uint32_t text_tokens;
   // Soft command-count target per submission; zero records the whole program.
   // Cuts occur only at full barriers, never within an indivisible wave.
   uint32_t command_quantum;
+  // Bounds reusable request code without restricting one active image.
+  loom_serve_variant_cache_options_t specialization_cache;
 } loom_serve_image_model_options_t;
 
 // Owner-driven preparation. Private CPU/JIT work runs on the shared host;
@@ -95,23 +97,27 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load);
 // and retained independently of the cold program; its VM environment stays
 // live. control.loom:
 //   prepare_request(buffer state, buffer i64_stage_tags, i32 stage_count,
-//                   buffer prompt, i64 seed, f32 strength) -> (i32 stage,
+//                   i64 height, i64 width, buffer prompt, i64 seed,
+//                   f32 strength) -> (i32 stage,
 //                                                             buffer payload)
 //   generate(i32 first_part, i32 part_count, i32 cursor, i64 output_bytes,
 //            hal.buffer payload, hal.buffer rgb, hal.buffer workspace) -> i32
 // The cursor starts at zero. Each invocation submits its next part and returns
 // a cursor for continuation, or a negative value after final feedback. The
 // owner invokes it again only after both accepted frontiers retire.
-// The warm program imports input capabilities and runner.execute_N/feedback.
+// The warm program imports input/JSON capabilities, invocation-only prepare
+// declarations, and runner.execute_N/feedback. Request stage ordinals follow
+// the immutable cold table; request declarations cannot introduce parameters.
 // Each command has shared reflected fixed parameter domains and three dynamic
 // bindings: opaque request bytes, output F32 CHW RGB [-1,1], and workspace.
 // External input/output roots promise only byte alignment; stronger private
 // storage and parameter alignments come from their compiler-reflected
 // contracts. All retained stages have identical parameter placement. Input
 // capacity comes from source; workspace extent/alignment comes from compiler
-// reflection. One queue allocation preserves all compiler live values across
-// the barrier-aligned parts; execute_3 receives it explicitly. Final output or
-// cancellation queues its release. Private storage belongs to the shared
+// reflection. One queue allocation contains the RGB prefix and aligned private
+// workspace; execute_3 receives distinct views. Final output or cancellation
+// releases those views; queue captures retain the allocation through actual
+// feedback retirement. Private storage belongs to the shared
 // workspace pool, not this model's residency. This model owns independent work
 // and feedback timelines over the device queues. The cold constructor drives
 // the asynchronous load and joins on its outer application caller, never a
@@ -120,7 +126,8 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load);
 // reading weight payloads. The device owner outlives the model and serializes
 // all model calls. Its physical pool backs parameter roots independently of
 // cached commands. First generation or explicit activation streams/prepares
-// weights. Already active generation does no JIT or parameter preparation.
+// weights. Active weights remain shared across request specializations; an
+// exact code-cache hit does no JIT or parameter preparation.
 // Failure releases partial ownership and leaves *out_model NULL. Compilation
 // evidence is available through load_report; this wrapper performs no
 // process-global output.
@@ -187,10 +194,14 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
 // Retains the resulting payload until successful completion or destruction.
 // INVALID_ARGUMENT rejects the request with no retained payload. No prepared
 // request may already be outstanding; prepare is serialized with submission.
+// Width/height are positive and their F32 RGB extent fits host storage and i64;
+// the public request parser establishes this representational boundary. Source
+// preparation validates model-specific geometry before any output allocation.
 // Returns copied invocation facts on success and zeros them on rejection.
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
-    float strength, loom_serve_image_prepared_t* out_prepared);
+    float strength, uint32_t width, uint32_t height,
+    loom_serve_image_prepared_t* out_prepared);
 
 // Installs the serialized owner's nonblocking compilation wake. Detachment
 // follows terminal advance of all accepted preparation work.
@@ -219,7 +230,7 @@ iree_status_t loom_serve_image_model_submit(
 
 // Consumes successful completion of both terminal frontiers on the scheduler
 // owner. Releases the request payload and residency pin. Returned F32 CHW RGB
-// remains borrowed until another submission or model destruction. Failed
+// remains borrowed until another preparation or model destruction. Failed
 // readiness never calls this function: teardown joins actual queue ownership.
 // Cancelled invocations return storage without valid output; callers discard
 // it.
@@ -236,8 +247,8 @@ iree_const_byte_span_t loom_serve_image_model_complete(
 // when subsequent admission or device work fails.
 iree_status_t loom_serve_image_model_generate(
     loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
-    float strength, loom_serve_image_prepared_t* out_prepared,
-    iree_const_byte_span_t* out_rgb);
+    float strength, uint32_t width, uint32_t height,
+    loom_serve_image_prepared_t* out_prepared, iree_const_byte_span_t* out_rgb);
 
 #ifdef __cplusplus
 }  // extern "C"

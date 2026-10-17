@@ -438,15 +438,20 @@ client's response without invalidating peers in the cohort.
 
 ## Image generation
 
-`POST /v1/images/generations` accepts a fixed-shape image deployment:
+`POST /v1/images/generations` generates one image at the requested size:
 
 ```json
-{"model":"illustrator","prompt":"a red fox in the snow","seed":"0","response_format":"b64_json"}
+{"model":"illustrator","prompt":"a red fox in the snow","size":"1536x1024","seed":"0","response_format":"b64_json"}
 ```
 
 The response has one `data[0].b64_json` PNG. Only `n:1` and
-`response_format:"b64_json"` are supported. Optional `size` must match the
-deployment's configured width and height; it does not trigger a new shape.
+`response_format:"b64_json"` are supported. Optional `size` is `WIDTHxHEIGHT`;
+omitting it uses the deployment's configured width and height. The model's
+source validates supported geometry. Sizes are exact, never silently rounded.
+A new shape can compile asynchronously on demand while sharing resident weights;
+later requests reuse its code within the deployment's specialization-cache
+limits. Larger images require more work and memory, and a first request can
+include compilation time. Request sizes do not change the deployment default.
 `seed` defaults to zero and accepts an unsigned integer or decimal string.
 
 `strength` is a finite adapter multiplier, default one. With a loaded adapter,

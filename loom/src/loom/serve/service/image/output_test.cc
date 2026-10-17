@@ -54,6 +54,10 @@ TEST(ImageOutputTest, StoredBlockBoundariesAreIndependentOfRows) {
     IREE_ASSERT_OK(loom_serve_image_encode_rgb_f32_png(
         width, height, iree_make_const_byte_span(rgb.data(), rgb.size()),
         iree_allocator_system(), &png));
+    iree_host_size_t predicted_length = 0;
+    IREE_ASSERT_OK(
+        loom_serve_image_rgb_f32_png_size(width, height, &predicted_length));
+    EXPECT_EQ(predicted_length, png.data_length);
     const uint8_t* cursor = png.data + 43;
     size_t decoded = 0;
     do {
@@ -76,6 +80,21 @@ TEST(ImageOutputTest, StoredBlockBoundariesAreIndependentOfRows) {
     EXPECT_EQ(cursor[3], 1);
     EXPECT_EQ(size_t(cursor - png.data) + 20, png.data_length);
     iree_allocator_free(iree_allocator_system(), png.data);
+  }
+}
+
+TEST(ImageOutputTest, RejectsUnencodableShapeWithoutAllocating) {
+  iree_host_size_t length = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_image_rgb_f32_png_size(UINT32_MAX, 1, &length));
+  EXPECT_EQ(length, 0u);
+  if (IREE_HOST_SIZE_MAX > UINT32_MAX) {
+    // RGB storage fits a 64-bit host, but the PNG IDAT cannot represent it.
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        loom_serve_image_rgb_f32_png_size(32768, 32768, &length));
+    EXPECT_EQ(length, 0u);
   }
 }
 

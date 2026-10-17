@@ -13,6 +13,13 @@
 extern "C" {
 #endif
 
+// Checks representable F32 RGB storage and PNG dimensions/chunk limits before
+// generation and returns the exact encoded byte length without allocating.
+// Failure leaves *out_length zero. Model-specific geometry remains a source
+// preparation contract, independent of these transport representation limits.
+iree_status_t loom_serve_image_rgb_f32_png_size(uint32_t width, uint32_t height,
+                                                iree_host_size_t* out_length);
+
 // Encodes completed little-endian F32 CHW RGB in [-1,1] as an RGB8 PNG.
 // The exact shape and every sample are checked before publishing output.
 // Conversion rounds (value/2+0.5)*255 using the caller's FP rounding mode.

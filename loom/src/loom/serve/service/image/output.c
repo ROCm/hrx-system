@@ -32,13 +32,12 @@ static void loom_serve_image_store_be32(uint8_t* target, uint32_t value) {
   target[3] = (uint8_t)value;
 }
 
-iree_status_t loom_serve_image_encode_rgb_f32_png(
-    uint32_t width, uint32_t height, iree_const_byte_span_t rgb,
-    iree_allocator_t host_allocator, iree_byte_span_t* out_png) {
-  *out_png = iree_byte_span_empty();
+iree_status_t loom_serve_image_rgb_f32_png_size(uint32_t width, uint32_t height,
+                                                iree_host_size_t* out_length) {
+  *out_length = 0;
   const uint64_t pixels = (uint64_t)width * height;
   if (!width || !height || width > INT32_MAX || height > INT32_MAX ||
-      pixels > IREE_HOST_SIZE_MAX / 12 || rgb.data_length != pixels * 12) {
+      pixels > IREE_HOST_SIZE_MAX / 12) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "expected exact positive F32 CHW RGB shape");
   }
@@ -50,9 +49,29 @@ iree_status_t loom_serve_image_encode_rgb_f32_png(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "image exceeds one PNG data chunk");
   }
+  *out_length = (iree_host_size_t)idat_length + 57;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_image_encode_rgb_f32_png(
+    uint32_t width, uint32_t height, iree_const_byte_span_t rgb,
+    iree_allocator_t host_allocator, iree_byte_span_t* out_png) {
+  *out_png = iree_byte_span_empty();
+  iree_host_size_t encoded_length = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_image_rgb_f32_png_size(width, height, &encoded_length));
+  const uint64_t pixels = (uint64_t)width * height;
+  if (rgb.data_length != pixels * 12) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "expected exact positive F32 CHW RGB shape");
+  }
+  const uint64_t row_length = (uint64_t)width * 3 + 1;
+  const uint64_t raw_length = row_length * height;
+  const uint64_t blocks = (raw_length + 65534) / 65535;
+  const uint64_t idat_length = encoded_length - 57;
   uint8_t* png = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, (iree_host_size_t)idat_length + 57, (void**)&png));
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, encoded_length, (void**)&png));
   memcpy(png, "\x89PNG\r\n\x1a\n", 8);
   loom_serve_image_store_be32(png + 8, 13);
   memcpy(png + 12, "IHDR", 4);
@@ -107,7 +126,7 @@ iree_status_t loom_serve_image_encode_rgb_f32_png(
     loom_serve_image_store_be32(end, 0);
     memcpy(end + 4, "IEND", 4);
     loom_serve_image_store_be32(end + 8, loom_serve_image_crc32(end + 4, 4));
-    *out_png = iree_make_byte_span(png, (iree_host_size_t)idat_length + 57);
+    *out_png = iree_make_byte_span(png, encoded_length);
   } else {
     iree_allocator_free(host_allocator, png);
   }

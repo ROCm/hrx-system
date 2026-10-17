@@ -917,7 +917,7 @@ def check_control_contracts(server_command, directory, catalog):
         (
             "image",
             [("%strength: f32", "%strength: i32")],
-            "model export 'prepare_request' argument 5 type mismatch: "
+            "model export 'prepare_request' argument 7 type mismatch: "
             "host expects f32, source declares i32",
         ),
         (

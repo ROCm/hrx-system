@@ -208,13 +208,22 @@ matter more than getting one unretained prompt to emit plausible text. The
 [text service](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/text/README.md)
 links the storage, epoch and chat-policy declarations beside their owners.
 
-Image preparation selects stages and parameter domains for configured geometry.
-Warm source prepares opaque request bytes from prompt, seed and adapter strength,
-then drives command parts to final RGB. Image control returns a continuation
+Cold image preparation selects stages and parameter domains for default geometry.
+Warm source receives the requested height and width alongside prompt, seed, and
+adapter strength. It validates the geometry, prepares opaque request bytes, and
+selects a cold stage or declares request stages through the same invocation-only
+`prepare` capability as finite cohorts. Exact declaration sets reuse code within
+the selected source generation; misses compile before parameter admission.
+Request stages share the cold parameter layout and cannot declare new parameters.
+
+Image control then drives command parts to final RGB. It returns a continuation
 cursor; another invocation occurs only after the previous accepted frontiers
 retire. Compiler-reflected workspace remains live across barrier-aligned parts.
-Final output is F32 CHW RGB in `[-1,1]` before native image encoding. The
-[image source contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/image/model.h)
+RGB and compiler-aligned workspace share one request-sized pool allocation,
+retained through final feedback. Neither storage nor pixel geometry belongs to
+the executable cache. Final output is F32 CHW RGB in `[-1,1]` before native image
+encoding uses that request's dimensions.
+The [image source contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/image/model.h)
 defines entry signatures, alignment and cancellation.
 
 ## Stream speech with independent requests

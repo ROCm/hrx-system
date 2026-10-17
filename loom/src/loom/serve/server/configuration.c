@@ -386,7 +386,8 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
       [DEFINITION_SPECIALIZATION_CACHE] = {
           "specialization_cache", IREE_JSON_VALUE_TYPE_OBJECT,
           .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
-                   (1u << LOOM_SERVE_MODEL_KIND_DECISION)}};
+                   (1u << LOOM_SERVE_MODEL_KIND_DECISION) |
+                   (1u << LOOM_SERVE_MODEL_KIND_IMAGE)}};
   loom_serve_model_configuration_fields_t context = {IREE_ARRAYSIZE(fields),
                                                      fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
@@ -456,15 +457,16 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
     return loom_serve_model_configuration_text(fields, &model->text,
                                                host_allocator);
   }
-  if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
-    return loom_serve_model_configuration_image(fields, &model->image,
-                                                host_allocator);
-  }
-  if (model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||
+  if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE ||
+      model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||
       model->kind == LOOM_SERVE_MODEL_KIND_DECISION) {
     IREE_RETURN_IF_ERROR(loom_serve_model_configuration_specialization_cache(
         fields[DEFINITION_SPECIALIZATION_CACHE].value,
         &model->specialization_cache));
+  }
+  if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
+    return loom_serve_model_configuration_image(fields, &model->image,
+                                                host_allocator);
   }
   return loom_serve_model_configuration_string(&fields[DEFINITION_ASSETS],
                                                host_allocator, &model->assets);

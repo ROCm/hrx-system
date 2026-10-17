@@ -7,11 +7,11 @@
 #include "loom/serve/service/image/request.h"
 
 #include <math.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "iree/base/internal/json.h"
 #include "iree/base/internal/unicode.h"
+#include "loom/serve/service/image/output.h"
 
 #define IMAGE_STRING (1u << IREE_JSON_VALUE_TYPE_STRING)
 #define IMAGE_NUMBER (1u << IREE_JSON_VALUE_TYPE_NUMBER)
@@ -90,13 +90,30 @@ static iree_status_t loom_serve_image_request_decode(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "select model '%.*s'",
                             (int)model.size, model.data);
   }
-  char size[32];
-  snprintf(size, sizeof(size), "%ux%u", width, height);
-  if (fields[4].value.data &&
-      !iree_string_view_equal(fields[4].value, iree_make_cstring_view(size))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "this residency produces size '%s'", size);
+  request->width = width;
+  request->height = height;
+  if (fields[4].value.data) {
+    const iree_string_view_t size = fields[4].value;
+    iree_string_view_t dimensions[2];
+    iree_string_view_split(size, 'x', &dimensions[0], &dimensions[1]);
+    uint32_t values[2] = {0};
+    for (iree_host_size_t i = 0; i < 2; ++i) {
+      for (iree_host_size_t j = 0; j < dimensions[i].size; ++j) {
+        const unsigned digit = (unsigned)(dimensions[i].data[j] - '0');
+        if (digit > 9 || values[i] > (UINT32_MAX - digit) / 10) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "size requires positive decimal WIDTHxHEIGHT");
+        }
+        values[i] = values[i] * 10 + digit;
+      }
+    }
+    request->width = values[0];
+    request->height = values[1];
   }
+  iree_host_size_t encoded_length = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_image_rgb_f32_png_size(
+      request->width, request->height, &encoded_length));
   uint64_t count = 1;
   if (fields[5].value.data) {
     IREE_RETURN_IF_ERROR(iree_json_parse_uint64(fields[5].value, &count));

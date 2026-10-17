@@ -114,7 +114,8 @@ typedef struct loom_serve_model_configuration_t {
   // Retained execution choices, including original/pending/failed attempts.
   // Zero disables reconfiguration independently of modality admission.
   iree_host_size_t variant_capacity;
-  // Idle source-selected request executables for finite vector deployments.
+  // Idle source-selected request executables for finite vector/image
+  // deployments.
   loom_serve_variant_cache_options_t specialization_cache;
   // Register metadata without preparing the model until admission opens.
   bool start_drained;

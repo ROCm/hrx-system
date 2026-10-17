@@ -387,7 +387,8 @@ static iree_status_t loom_serve_image_registration_create(
       .height = configuration->image.height,
       .width = configuration->image.width,
       .text_tokens = configuration->image.text_tokens,
-      .command_quantum = configuration->image.command_quantum};
+      .command_quantum = configuration->image.command_quantum,
+      .specialization_cache = configuration->specialization_cache};
   iree_status_t status = loom_serve_image_load_allocate(
       registration->device, &model_options, observer.wake, observer.user_data,
       host_allocator, &registration->load);

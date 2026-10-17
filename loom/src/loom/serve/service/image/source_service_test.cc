@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -120,7 +122,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     });
   }
 
-  void CreateStandaloneModel() {
+  void CreateStandaloneModel(
+      loom_serve_variant_cache_options_t cache = {2, 16 * 1024 * 1024},
+      iree_allocator_t allocator = iree_allocator_system()) {
     loom_serve::testing::ModelDocument document;
     IREE_ASSERT_OK(document.Load(directory_ + "/model.json"));
     const loom_serve_image_model_options_t options = {
@@ -130,9 +134,10 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         .width = kWidth,
         .text_tokens = 32,
         .command_quantum = GetParam(),
+        .specialization_cache = cache,
     };
-    IREE_ASSERT_OK(loom_serve_image_model_allocate(device_, &options,
-                                                   host_allocator_, &model_));
+    IREE_ASSERT_OK(
+        loom_serve_image_model_allocate(device_, &options, allocator, &model_));
   }
 
   void StartManaged() {
@@ -220,22 +225,25 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     return response;
   }
 
-  static std::array<float, kPixels * 3> Pixels(size_t tokens, uint64_t seed) {
-    std::array<float, kPixels * 3> pixels;
-    for (size_t i = 0; i < kPixels; ++i) {
+  static std::vector<float> Pixels(size_t tokens, uint64_t seed,
+                                   size_t count = kPixels) {
+    std::vector<float> pixels(count * 3);
+    for (size_t i = 0; i < count; ++i) {
       pixels[i] = seed & 1 ? 1.0f : -1.0f;
-      pixels[kPixels + i] = tokens & 1 ? 1.0f : -1.0f;
-      pixels[2 * kPixels + i] = i & 1 ? 1.0f : -1.0f;
+      pixels[count + i] = tokens & 1 ? 1.0f : -1.0f;
+      pixels[2 * count + i] = i & 1 ? 1.0f : -1.0f;
     }
     return pixels;
   }
 
-  std::string EncodedPixels(size_t tokens, uint64_t seed) {
-    const auto pixels = Pixels(tokens, seed);
+  std::string EncodedPixels(size_t tokens, uint64_t seed,
+                            uint32_t width = kWidth,
+                            uint32_t height = kHeight) {
+    const auto pixels = Pixels(tokens, seed, (size_t)width * height);
     iree_byte_span_t png;
     IREE_EXPECT_OK(loom_serve_image_encode_rgb_f32_png(
-        kWidth, kHeight,
-        iree_make_const_byte_span(pixels.data(), sizeof(pixels)),
+        width, height,
+        iree_make_const_byte_span(pixels.data(), pixels.size() * sizeof(float)),
         host_allocator_, &png));
     std::string encoded(iree_base64_encoded_size(png.data_length), '\0');
     size_t length = 0;
@@ -508,7 +516,7 @@ TEST_P(SourceImageServiceTest,
   EXPECT_EQ(retained.activations, weights.activations);
 }
 
-TEST_P(SourceImageServiceTest, PreparedImagePinsCodeAcrossSelectionAndRemoval) {
+TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
   ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
   const auto generator = loom_serve_image_model_generator(model_);
   const auto update = generator.execution_update;
@@ -560,6 +568,8 @@ TEST_P(SourceImageServiceTest, PreparedImagePinsCodeAcrossSelectionAndRemoval) {
     iree_status_t status = iree_ok_status();
     // Terminal callback has transferred ownership.
     bool complete = false;
+    // Request compilation publications observed by the serialized test owner.
+    uint64_t wakes = 0;
   } compilation;
   IREE_ASSERT_OK(update.compile(
       update.self, &sources,
@@ -581,12 +591,31 @@ TEST_P(SourceImageServiceTest, PreparedImagePinsCodeAcrossSelectionAndRemoval) {
       compilation.candidate, update.dispose);
   IREE_ASSERT_OK(std::exchange(compilation.status, iree_ok_status()));
   retained_package.reset();
+  generator.set_observer(
+      generator.self, {[](void* self) {
+                         auto* publication = static_cast<Compilation*>(self);
+                         std::lock_guard<std::mutex> lock(publication->mutex);
+                         ++publication->wakes;
+                         publication->condition.notify_all();
+                       },
+                       &compilation});
 
   auto complete = [&](uint64_t expected_seed, uint32_t expected_parts) {
     bool resolved = false;
-    IREE_ASSERT_OK(
-        generator.advance_prepared_request(generator.self, false, &resolved));
-    ASSERT_TRUE(resolved);
+    while (!resolved) {
+      uint64_t before;
+      {
+        std::lock_guard<std::mutex> lock(compilation.mutex);
+        before = compilation.wakes;
+      }
+      IREE_ASSERT_OK(
+          generator.advance_prepared_request(generator.self, false, &resolved));
+      if (!resolved) {
+        std::unique_lock<std::mutex> lock(compilation.mutex);
+        compilation.condition.wait(lock,
+                                   [&] { return compilation.wakes != before; });
+      }
+    }
     IREE_ASSERT_OK(loom_serve_residency_acquire_wait(
         loom_serve_image_model_residency(model_)));
     bool finished = false;
@@ -601,28 +630,29 @@ TEST_P(SourceImageServiceTest, PreparedImagePinsCodeAcrossSelectionAndRemoval) {
     }
     EXPECT_EQ(parts, expected_parts);
     const auto rgb = generator.complete(generator.self);
-    const auto expected = Pixels(3, expected_seed);
-    ASSERT_EQ(rgb.data_length, sizeof(expected));
+    const auto expected = Pixels(3, expected_seed, 15 * 9);
+    ASSERT_EQ(rgb.data_length, expected.size() * sizeof(float));
     for (size_t i = 0; i < expected.size(); ++i) {
       EXPECT_EQ(iree_unaligned_load_le_f32(rgb.data + i * sizeof(float)),
                 expected[i]);
     }
   };
   loom_serve_image_prepared_t prepared;
-  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
-                                                        1, 1.0f, &prepared));
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(
+      model_, IREE_SV("aba"), 1, 1.0f, 15, 9, &prepared));
   IREE_ASSERT_OK(update.select(update.self, candidate.get()));
   ASSERT_NO_FATAL_FAILURE(complete(1, GetParam() ? 2 : 1));
 
-  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
-                                                        1, 1.0f, &prepared));
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(
+      model_, IREE_SV("aba"), 1, 1.0f, 15, 9, &prepared));
   IREE_ASSERT_OK(update.select(update.self, nullptr));
   candidate.reset();
   ASSERT_NO_FATAL_FAILURE(complete(0, GetParam() ? 3 : 1));
 
-  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
-                                                        1, 1.0f, &prepared));
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(
+      model_, IREE_SV("aba"), 1, 1.0f, 15, 9, &prepared));
   ASSERT_NO_FATAL_FAILURE(complete(1, GetParam() ? 2 : 1));
+  generator.set_observer(generator.self, {});
 }
 
 TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
@@ -724,8 +754,8 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
 TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
   loom_serve_image_prepared_t prepared;
-  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("x"), 0,
-                                                        1.0f, &prepared));
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(
+      model_, IREE_SV("x"), 0, 1.0f, kWidth, kHeight, &prepared));
   EXPECT_EQ(prepared.stage, 0u);
   EXPECT_EQ(prepared.tag, 32);
   EXPECT_EQ(prepared.input_bytes, 16u);
@@ -733,13 +763,13 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   // Verify source arithmetic independently of the image encoder.
   for (uint64_t seed : {0u, 1u}) {
     iree_const_byte_span_t rgb;
-    IREE_ASSERT_OK(loom_serve_image_model_generate(model_, IREE_SV("aba"), seed,
-                                                   1.0f, &prepared, &rgb));
+    IREE_ASSERT_OK(loom_serve_image_model_generate(
+        model_, IREE_SV("aba"), seed, 1.0f, kWidth, kHeight, &prepared, &rgb));
     EXPECT_EQ(prepared.stage, 0u);
     EXPECT_EQ(prepared.tag, 32);
     EXPECT_EQ(prepared.input_bytes, 16u);
     const auto expected = Pixels(3, seed);
-    ASSERT_EQ(rgb.data_length, sizeof(expected));
+    ASSERT_EQ(rgb.data_length, expected.size() * sizeof(float));
     for (size_t i = 0; i < expected.size(); ++i) {
       EXPECT_EQ(iree_unaligned_load_le_f32(rgb.data + 4 * i), expected[i]);
     }
@@ -799,6 +829,82 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
             std::string::npos);
 }
 
+TEST_P(SourceImageServiceTest, RequestGeometryOwnsPixelsAndPreservesDefault) {
+  ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
+  Start();
+  const std::array<uint32_t, 2> dimensions[] = {
+      {15, 9}, {9, 15}, {16, 11}, {1, 1}, {15, 9}, {kWidth, kHeight}};
+  std::vector<int> clients;
+  for (size_t i = 0; i < IREE_ARRAYSIZE(dimensions); ++i) {
+    const auto [width, height] = dimensions[i];
+    const std::string size = i + 1 == IREE_ARRAYSIZE(dimensions)
+                                 ? ""
+                                 : ",\"size\":\"" + std::to_string(width) +
+                                       "x" + std::to_string(height) + "\"";
+    clients.push_back(
+        Send("POST", "/v1/images/generations",
+             "{\"model\":\"fixture-image\",\"prompt\":\"aba\",\"seed\":" +
+                 std::to_string(i) + size + "}"));
+  }
+  uint64_t generated_pixels = 0;
+  for (size_t i = 0; i < clients.size(); ++i) {
+    const auto [width, height] = dimensions[i];
+    const auto response = Read(clients[i]);
+    ASSERT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u) << response;
+    EXPECT_NE(response.find("\"b64_json\":\"" +
+                            EncodedPixels(3, i, width, height) + "\""),
+              std::string::npos);
+    generated_pixels += (uint64_t)width * height;
+  }
+  const auto rejected =
+      Read(Send("POST", "/v1/images/generations",
+                R"({"model":"fixture-image","prompt":"aba","size":"65x9"})"));
+  EXPECT_EQ(rejected.find("HTTP/1.1 400 Bad Request\r\n"), 0u) << rejected;
+  EXPECT_NE(rejected.find("1-64 pixel extents"), std::string::npos);
+  const auto restored =
+      Read(Send("POST", "/v1/images/generations",
+                R"({"model":"fixture-image","prompt":"aba","seed":1})"));
+  EXPECT_EQ(restored.find("HTTP/1.1 200 OK\r\n"), 0u) << restored;
+  EXPECT_NE(restored.find("\"b64_json\":\"" + EncodedPixels(3, 1) + "\""),
+            std::string::npos);
+  generated_pixels += kPixels;
+  // The model log has a bounded page size. Follow its cursor to the final
+  // cumulative snapshot instead of treating the first page as the whole log.
+  std::string cursor;
+  std::string events;
+  std::string latest;
+  for (;;) {
+    latest =
+        Read(Send("GET", "/logz", {},
+                  "X-Loom-Model: fixture-image\r\n" +
+                      (cursor.empty() ? std::string()
+                                      : "X-Loom-Cursor: " + cursor + "\r\n")));
+    ASSERT_EQ(latest.find("HTTP/1.1 200 OK\r\n"), 0u) << latest;
+    ASSERT_EQ(latest.find(R"("event":"gap")"), std::string::npos) << latest;
+    events += latest;
+    const std::string marker = R"({"event":"cursor","value":")";
+    const size_t position = latest.find(marker);
+    ASSERT_NE(position, std::string::npos) << latest;
+    const size_t first = position + marker.size();
+    const std::string next =
+        latest.substr(first, latest.find('"', first) - first);
+    if (cursor == next) {
+      break;
+    }
+    cursor = next;
+  }
+  EXPECT_NE(latest.find(R"("requests":8,"completed":7,"rejected":1)"),
+            std::string::npos)
+      << latest;
+  EXPECT_NE(events.find("\"partial\":false"), std::string::npos) << events;
+  const std::string pixel_count = "\"generated_pixels\":";
+  const size_t position = events.rfind(pixel_count);
+  ASSERT_NE(position, std::string::npos) << events;
+  const uint64_t recorded_pixels =
+      std::stoull(events.substr(position + pixel_count.size()));
+  EXPECT_EQ(recorded_pixels, generated_pixels);
+}
+
 TEST_P(SourceImageServiceTest, ClosedTransportTerminatesModelPolling) {
   StartManaged();
   loom_serve_http_server_request_stop(server_);
@@ -814,6 +920,48 @@ TEST_P(SourceImageServiceTest, ClosedTransportTerminatesModelPolling) {
   ASSERT_EQ(failures.size(), 1);
   EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
   EXPECT_TRUE(http_.failed());
+}
+
+TEST_P(SourceImageServiceTest, ShapeCompilationFailureLeavesModelReusable) {
+  ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
+  Start();
+  const auto inventory = Read(Send("GET", "/v1/models/variants", {},
+                                   "X-Loom-Model: fixture-image\r\n"));
+  const uint64_t original = Number(inventory, "selected");
+  std::ifstream input(directory_ + "/generate.loom");
+  ASSERT_TRUE(input.good());
+  std::string source((std::istreambuf_iterator<char>(input)), {});
+  const std::string range = "range(%value, 1, 4096)";
+  const auto offset = source.find(range);
+  ASSERT_NE(offset, std::string::npos);
+  source.replace(offset, range.size(), "range(%value, 1, 100)");
+  loom_serve::testing::SourcePackage package;
+  package.Add("model/generate.loom", source);
+  IREE_ASSERT_OK(
+      package.AddFile("model/config.loom", directory_ + "/config.loom"));
+  int client = -1;
+  IREE_ASSERT_OK(http_.Send(
+      package.Request(
+          "/v1/models/variants",
+          "{\"model\":\"fixture-image\",\"base\":" + std::to_string(original) +
+              ",\"sources\":[\"config.loom\",\"generate.loom\"],\"wait\":"
+              "true}"),
+      &client));
+  const auto staged = Read(client);
+  ASSERT_EQ(staged.find("HTTP/1.1 200"), 0u) << staged;
+  ASSERT_EQ(SelectVariant(Number(staged, "id", "variant"), original)
+                .find("HTTP/1.1 200"),
+            0u);
+  const auto rejected =
+      Read(Send("POST", "/v1/images/generations",
+                R"({"model":"fixture-image","prompt":"aba","size":"15x9"})"));
+  EXPECT_EQ(rejected.find("HTTP/1.1 422"), 0u) << rejected;
+  const auto valid = Read(Send(
+      "POST", "/v1/images/generations",
+      R"({"model":"fixture-image","prompt":"aba","seed":1,"size":"9x9"})"));
+  EXPECT_EQ(valid.find("HTTP/1.1 200"), 0u) << valid;
+  EXPECT_NE(valid.find("\"b64_json\":\"" + EncodedPixels(3, 1, 9, 9) + "\""),
+            std::string::npos);
 }
 
 TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
@@ -1157,8 +1305,8 @@ TEST_P(SourceImageServiceTest, StoppingDeviceImageSkipsEncoding) {
 TEST_P(SourceImageServiceTest, FailedPartReadinessPreservesActualRetirement) {
   ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
   loom_serve_image_prepared_t prepared;
-  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
-                                                        1, 1.0f, &prepared));
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(
+      model_, IREE_SV("aba"), 1, 1.0f, kWidth, kHeight, &prepared));
   const auto generator = loom_serve_image_model_generator(model_);
   bool resolved = false;
   IREE_ASSERT_OK(
@@ -1182,6 +1330,149 @@ TEST_P(SourceImageServiceTest, FailedPartReadinessPreservesActualRetirement) {
 }
 
 INSTANTIATE_TEST_SUITE_P(CommandQuanta, SourceImageServiceTest,
+                         ::testing::Values(0u, 1u));
+
+class ImageSpecializationTest : public SourceImageServiceTest {
+ protected:
+  void TearDown() override {
+    ReleaseCompiler();
+    if (prepared_) {
+      IREE_EXPECT_OK(Resolve(true));
+      loom_serve_image_model_discard_prepared_request(model_);
+    }
+    SourceImageServiceTest::TearDown();
+  }
+
+  static iree_status_t Allocate(void* self, iree_allocator_command_t command,
+                                const void* parameters, void** pointer) {
+    auto* test = static_cast<ImageSpecializationTest*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+        std::this_thread::get_id() != test->owner_) {
+      ++test->compiler_allocations_;
+      std::unique_lock<std::mutex> lock(test->mutex_);
+      if (test->holding_) {
+        test->entered_ = true;
+        test->condition_.notify_all();
+        test->condition_.wait(lock, [&] { return !test->holding_; });
+      }
+    }
+    const auto allocator = iree_allocator_system();
+    return allocator.ctl(allocator.self, command, parameters, pointer);
+  }
+
+  static void Wake(void* self) {
+    auto* test = static_cast<ImageSpecializationTest*>(self);
+    std::lock_guard<std::mutex> lock(test->mutex_);
+    ++test->wakes_;
+    test->condition_.notify_all();
+  }
+
+  iree_status_t Resolve(bool cancel) {
+    bool complete = false;
+    while (!complete) {
+      const auto before = wakes_.load();
+      IREE_RETURN_IF_ERROR(
+          loom_serve_image_model_advance_request(model_, cancel, &complete));
+      if (!complete) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [&] { return wakes_.load() != before; });
+      }
+    }
+    return iree_ok_status();
+  }
+
+  void Run(uint32_t width, uint32_t height, bool reuse) {
+    const auto before = compiler_allocations_.load();
+    loom_serve_image_prepared_t prepared;
+    iree_const_byte_span_t rgb;
+    IREE_ASSERT_OK(loom_serve_image_model_generate(
+        model_, IREE_SV("aba"), 1, 1.0f, width, height, &prepared, &rgb));
+    EXPECT_EQ(compiler_allocations_.load() == before, reuse);
+    const auto expected = Pixels(3, 1, (size_t)width * height);
+    ASSERT_EQ(rgb.data_length, expected.size() * sizeof(float));
+    for (size_t i = 0; i < expected.size(); ++i) {
+      EXPECT_EQ(iree_unaligned_load_le_f32(rgb.data + i * sizeof(float)),
+                expected[i]);
+    }
+  }
+
+  void ReleaseCompiler() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    holding_ = false;
+    condition_.notify_all();
+  }
+
+  // This outer thread performs preparation and drives the real native model.
+  const std::thread::id owner_ = std::this_thread::get_id();
+  // Model allocations on actual compiler workers distinguish misses from hits.
+  std::atomic<size_t> compiler_allocations_ = 0;
+  // Published compiler completions observed by the outer test owner.
+  std::atomic<uint64_t> wakes_ = 0;
+  // Protects the explicit dependency used to test accepted-compile retirement.
+  std::mutex mutex_;
+  // Signals worker entry, dependency release, and terminal publication.
+  std::condition_variable condition_;
+  // An accepted worker is held only for the cancellation experiment.
+  bool holding_ = false;
+  // A real compiler allocation has reached the held boundary.
+  bool entered_ = false;
+  // Teardown must collect and release an outstanding prepared request.
+  bool prepared_ = false;
+};
+
+TEST_P(ImageSpecializationTest, ExactReuseAndLruEvictionPreserveOutput) {
+  ASSERT_NO_FATAL_FAILURE(
+      CreateStandaloneModel({2, 16 * 1024 * 1024}, {this, Allocate}));
+  ASSERT_NO_FATAL_FAILURE(Run(15, 9, false));
+  // This source specializes pixel count, so rotation reuses the same code.
+  ASSERT_NO_FATAL_FAILURE(Run(9, 15, true));
+  ASSERT_NO_FATAL_FAILURE(Run(16, 11, false));
+  ASSERT_NO_FATAL_FAILURE(Run(15, 9, true));
+  ASSERT_NO_FATAL_FAILURE(Run(1, 1, false));
+  ASSERT_NO_FATAL_FAILURE(Run(16, 11, false));
+  ASSERT_NO_FATAL_FAILURE(Run(kWidth, kHeight, true));
+}
+
+TEST_P(ImageSpecializationTest, DisabledReuseStillAllowsLargerRequests) {
+  ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel({0, 0}, {this, Allocate}));
+  ASSERT_NO_FATAL_FAILURE(Run(15, 9, false));
+  ASSERT_NO_FATAL_FAILURE(Run(15, 9, false));
+  ASSERT_NO_FATAL_FAILURE(Run(kWidth, kHeight, true));
+}
+
+TEST_P(ImageSpecializationTest, CancellationJoinsAcceptedCompilerBeforeReuse) {
+  ASSERT_NO_FATAL_FAILURE(
+      CreateStandaloneModel({2, 16 * 1024 * 1024}, {this, Allocate}));
+  loom_serve_image_model_set_observer(model_, {Wake, this});
+  loom_serve_image_prepared_t prepared;
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(
+      model_, IREE_SV("aba"), 1, 1.0f, 15, 9, &prepared));
+  prepared_ = true;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    holding_ = true;
+  }
+  bool complete = true;
+  IREE_ASSERT_OK(
+      loom_serve_image_model_advance_request(model_, false, &complete));
+  EXPECT_FALSE(complete);
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return entered_; });
+  }
+  IREE_ASSERT_OK(
+      loom_serve_image_model_advance_request(model_, true, &complete));
+  EXPECT_FALSE(complete);
+  ReleaseCompiler();
+  IREE_ASSERT_OK(Resolve(true));
+  loom_serve_image_model_discard_prepared_request(model_);
+  prepared_ = false;
+  loom_serve_image_model_set_observer(model_, {});
+  ASSERT_NO_FATAL_FAILURE(Run(15, 9, true));
+  ASSERT_NO_FATAL_FAILURE(Run(kWidth, kHeight, true));
+}
+
+INSTANTIATE_TEST_SUITE_P(CommandQuanta, ImageSpecializationTest,
                          ::testing::Values(0u, 1u));
 
 }  // namespace
