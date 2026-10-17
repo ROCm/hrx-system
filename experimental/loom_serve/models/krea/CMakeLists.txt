@@ -283,8 +283,9 @@ loom_test_module(
   NAME
     vae_workspace_test_module
   SRCS
-    "prepare.loom"
     "tests/vae_workspace.loom"
+  LIBRARIES
+    "::geometry_library"
 )
 
 if(LOOM_TARGET_ARCH_VM)
@@ -294,6 +295,41 @@ loom_execution_test(
   CORRECTNESS_ONLY
   MODULE
     "::vae_workspace_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
+
+loom_module(
+  NAME
+    geometry_library
+  SRCS
+    "geometry.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+
+loom_test_module(
+  NAME
+    geometry_test_module
+  SRCS
+    "tests/geometry.loom"
+  LIBRARIES
+    "::geometry_library"
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    geometry_test_execute_vm_reference_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::geometry_test_module"
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
     "loom-execution-profile=vm_reference"

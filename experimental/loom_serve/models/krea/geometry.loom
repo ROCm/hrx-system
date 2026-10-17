@@ -1,0 +1,166 @@
+// One source-owned geometry and specialization contract serves cold defaults
+// and request-time declarations. Checkpoint paths are deliberately absent.
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
+
+func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
+
+// expected supported 16-aligned pixel/text extents and at most 65536 combined tokens
+global.rodata.def @geometry_error = bytes("657870656374656420737570706f727465642031362d616c69676e656420706978656c2f7465787420657874656e747320616e64206174206d6f737420363535333620636f6d62696e656420746f6b656e73")
+
+// generate_image
+global.rodata.def @root_base = bytes("67656e65726174655f696d616765")
+
+// generate_image_adapted
+global.rodata.def @root_adapted = bytes("67656e65726174655f696d6167655f61646170746564")
+
+// krea2.block_tokens
+global.rodata.def @block_tokens = bytes("6b726561322e626c6f636b5f746f6b656e73")
+
+// krea2.image_tokens
+global.rodata.def @image_tokens = bytes("6b726561322e696d6167655f746f6b656e73")
+
+// krea2.text_tokens
+global.rodata.def @text_tokens = bytes("6b726561322e746578745f746f6b656e73")
+
+// krea2.time_count
+global.rodata.def @time_count = bytes("6b726561322e74696d655f636f756e74")
+
+// krea2.latent_height
+global.rodata.def @latent_height = bytes("6b726561322e6c6174656e745f686569676874")
+
+// krea2.latent_width
+global.rodata.def @latent_width = bytes("6b726561322e6c6174656e745f7769647468")
+
+// krea2.vae_tile_height
+global.rodata.def @vae_tile_height = bytes("6b726561322e7661655f74696c655f686569676874")
+
+// krea2.vae_tile_width
+global.rodata.def @vae_tile_width = bytes("6b726561322e7661655f74696c655f7769647468")
+
+// krea2.dit_int8
+global.rodata.def @int8_config = bytes("6b726561322e6469745f696e7438")
+
+// Shape validation is pure; declaration rejects a false result before using
+// any derived extent. Unsigned arithmetic keeps rejected inputs well-defined.
+func.def public @krea2.image_geometry_valid(%height: i64, %width: i64, %text: i64) -> (i1) {
+  %zero_geometry = scalar.constant 0 : i64
+  %sixteen_geometry = scalar.constant 16 : i64
+  %pixel_limit = scalar.constant 8192 : i64
+  %token_limit = scalar.constant 65536 : i64
+  %height_positive = scalar.cmpi ugt, %height, %zero_geometry : i64
+  %width_positive = scalar.cmpi ugt, %width, %zero_geometry : i64
+  %text_positive = scalar.cmpi ugt, %text, %zero_geometry : i64
+  %height_bounded = scalar.cmpi ule, %height, %pixel_limit : i64
+  %width_bounded = scalar.cmpi ule, %width, %pixel_limit : i64
+  %text_bounded = scalar.cmpi ule, %text, %token_limit : i64
+  %height_rem = scalar.remui %height, %sixteen_geometry : i64
+  %width_rem = scalar.remui %width, %sixteen_geometry : i64
+  %text_rem = scalar.remui %text, %sixteen_geometry : i64
+  %height_aligned = scalar.cmpi eq, %height_rem, %zero_geometry : i64
+  %width_aligned = scalar.cmpi eq, %width_rem, %zero_geometry : i64
+  %text_aligned = scalar.cmpi eq, %text_rem, %zero_geometry : i64
+  %h0 = scalar.andi %height_positive, %height_bounded : i1
+  %w0 = scalar.andi %width_positive, %width_bounded : i1
+  %t0 = scalar.andi %text_positive, %text_bounded : i1
+  %h = scalar.andi %h0, %height_aligned : i1
+  %w = scalar.andi %w0, %width_aligned : i1
+  %t = scalar.andi %t0, %text_aligned : i1
+  %hw = scalar.andi %h, %w : i1
+  %valid_extents = scalar.andi %hw, %t : i1
+  %rows_geometry = scalar.divui %height, %sixteen_geometry : i64
+  %columns_geometry = scalar.divui %width, %sixteen_geometry : i64
+  %patches = scalar.muli %rows_geometry, %columns_geometry : i64
+  %combined = scalar.addi %patches, %text : i64
+  %patch_rem = scalar.remui %patches, %sixteen_geometry : i64
+  %patch_aligned = scalar.cmpi eq, %patch_rem, %zero_geometry : i64
+  %patch_positive = scalar.cmpi uge, %patches, %sixteen_geometry : i64
+  %combined_bounded = scalar.cmpi ule, %combined, %token_limit : i64
+  %patch_valid = scalar.andi %patch_aligned, %patch_positive : i1
+  %valid_tokens = scalar.andi %patch_valid, %combined_bounded : i1
+  %valid = scalar.andi %valid_extents, %valid_tokens : i1
+  func.return %valid : i1
+}
+
+// Chooses the exact decoder geometry for one source-owned workspace policy.
+// Zero leaves the throughput path untiled. A positive limit below the
+// conservative untiled decoder bound selects the smallest physical tile that
+// covers the axis in at most two tiles with the required 30-pixel overlap.
+func.def public @krea2.vae_workspace_tile(%height: i64, %width: i64, %limit: i64) -> (i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %decoder_bytes_per_pixel = scalar.constant 98304 : i64
+  %pixels = scalar.muli %height, %width : i64
+  %untiled_bytes = scalar.muli %pixels, %decoder_bytes_per_pixel : i64
+  %constrained = scalar.cmpi ne, %limit, %c0 : i64
+  %below_untiled = scalar.cmpi ult, %limit, %untiled_bytes : i64
+  %tiled = scalar.andi %constrained, %below_untiled : i1
+  %tiled_height = func.call @krea2.vae_workspace_tile_axis(%height) : (i64) -> (i64)
+  %tiled_width = func.call @krea2.vae_workspace_tile_axis(%width) : (i64) -> (i64)
+  %selected_height = scf.select %tiled, %tiled_height, %height : i64
+  %selected_width = scf.select %tiled, %tiled_width, %width : i64
+  func.return %selected_height, %selected_width : i64, i64
+}
+
+func.def @krea2.vae_workspace_tile_axis(%extent: i64) -> (i64) {
+  %overlap = scalar.constant 30 : i64
+  %c1 = scalar.constant 1 : i64
+  %c2 = scalar.constant 2 : i64
+  %with_overlap = scalar.addi %extent, %overlap : i64
+  %half = scalar.divui %with_overlap, %c2 : i64
+  %rounding = scalar.addi %half, %c1 : i64
+  %rounded_half = scalar.divui %rounding, %c2 : i64
+  %even = scalar.muli %rounded_half, %c2 : i64
+  %tile = scalar.minui %even, %extent : i64
+  func.return %tile : i64
+}
+
+func.def public @krea2.declare_image_stage(%height: i64, %width: i64, %text: i64, %workspace_limit: i64, %adapted: i1, %int8_flag: i64) -> (i32) {
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  %condition = scalar.extui %valid : i1 to i32
+  %diagnostic = global.load @geometry_error : buffer
+  func.call @require(%condition, %diagnostic) : (i32, buffer)
+  %c8 = scalar.constant 8 : i64
+  %latent_height = scalar.divui %height, %c8 : i64
+  %latent_width = scalar.divui %width, %c8 : i64
+  %tile_height, %tile_width = func.call @krea2.vae_workspace_tile(%latent_height, %latent_width, %workspace_limit) : (i64, i64, i64) -> (i64, i64)
+  %root = scf.if %adapted -> (buffer) {
+    %value = global.load @root_adapted : buffer
+    scf.yield %value : buffer
+  } else {
+    %value = global.load @root_base : buffer
+    scf.yield %value : buffer
+  }
+  %stage = func.call @stage(%root, %text) : (buffer, i64) -> (i32)
+  %zero64 = scalar.constant 0 : i64
+  %has_workspace_limit = scalar.cmpi ne, %workspace_limit, %zero64 : i64
+  scf.if %has_workspace_limit {
+    func.call @workspace_limit(%stage, %workspace_limit) : (i32, i64)
+  }
+  %int8_key = global.load @int8_config : buffer
+  func.call @config_i64(%stage, %int8_key, %int8_flag) : (i32, buffer, i64)
+  %c16 = scalar.constant 16 : i64
+  %rows = scalar.divui %height, %c16 : i64
+  %columns = scalar.divui %width, %c16 : i64
+  %images = scalar.muli %rows, %columns : i64
+  %blocks = scalar.addi %images, %text : i64
+  %key_blocks = global.load @block_tokens : buffer
+  %key_images = global.load @image_tokens : buffer
+  %key_text = global.load @text_tokens : buffer
+  %key_steps = global.load @time_count : buffer
+  %key_height = global.load @latent_height : buffer
+  %key_width = global.load @latent_width : buffer
+  %key_tile_height = global.load @vae_tile_height : buffer
+  %key_tile_width = global.load @vae_tile_width : buffer
+  func.call @config_i64(%stage, %key_blocks, %blocks) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_images, %images) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_text, %text) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_steps, %c8) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_height, %latent_height) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_width, %latent_width) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_tile_height, %tile_height) : (i32, buffer, i64)
+  func.call @config_i64(%stage, %key_tile_width, %tile_width) : (i32, buffer, i64)
+  func.return %stage : i32
+}

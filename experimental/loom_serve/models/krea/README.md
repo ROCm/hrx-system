@@ -57,13 +57,20 @@ request selects the registered alias and adapter strength:
 ```sh
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/images/generations \
   -H 'Content-Type: application/json' \
-  -d '{"model":"krea","prompt":"A small brass robot tending red flowers in a sunlit greenhouse","seed":42,"size":"1024x1024","strength":1,"response_format":"b64_json"}' \
+  -d '{"model":"krea","prompt":"A small brass robot tending red flowers in a sunlit greenhouse","seed":42,"size":"1536x1024","strength":1,"response_format":"b64_json"}' \
   | jq -r '.data[0].b64_json' | base64 --decode > /tmp/robot.png
 ```
 
-Request size matches the registered geometry. A small 384×384 deployment is
-useful for lifecycle checks. The source selects a short or long text stage from
-the prepared token count; both share parameter domains. An adapter is prepared
+Omitting `size` uses the registered default. Explicit sizes such as 1024×1024,
+1536×1024, and 1024×1536 select exact shape-specialized code on demand, sharing
+the same resident weights. The first request at a new shape can include JIT
+compilation; subsequent requests reuse it within the deployment's
+`specialization_cache` limits. The source rejects unsupported geometry instead
+of silently resizing, and request sizes do not change the default.
+
+A small 384×384 deployment is useful for lifecycle checks. The source selects
+a short or long text stage from the prepared token count; both share parameter
+domains. An adapter is prepared
 once with the model, not reloaded for every image. Strength zero selects the base
 path; nonzero strength applies the loaded adapter. Arbitrary adapter ranks,
 multi-adapter request stacks and reference-image input need different source or
@@ -84,9 +91,10 @@ bytes:
 When the full decoder exceeds the limit, preparation selects an exact
 overlapping tile specialization. The tiled path preserves the untiled pixels;
 it does not blend or approximate tile boundaries. The compiler still enforces
-the limit for the complete stage and rejects a deployment that cannot satisfy
-it. This option can share the same `options` object with the INT8 checkpoint
-selection below.
+the limit for the complete stage and rejects a shape that cannot satisfy it.
+The same policy applies to default and request-selected sizes; tiling is not
+enabled implicitly for larger requests. This option can share the same
+`options` object with the INT8 checkpoint selection below.
 
 ## INT8 ConvRot DiT
 
@@ -109,7 +117,9 @@ code does not interpret Krea-specific quantization names.
 
 ## Source map
 
-`prepare.loom` defines stages, parameter domains and specialization;
+`prepare.loom` defines cold stages and parameter domains;
+`geometry.loom` supplies shared shape validation and stage specialization for
+both cold preparation and request-time control;
 `weights.loom` defines parameter placement and preparation. `control.loom`
 validates and frames requests and drives prepared execution. `generate.loom`
 composes text encoding, denoising and final image production. Encoder, DiT,
