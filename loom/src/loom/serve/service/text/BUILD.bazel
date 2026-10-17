@@ -234,6 +234,7 @@ loom_cc_library(
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
+        ":checkpoint_control",
         ":epoch",
         ":media_projector",
         ":model",
@@ -243,6 +244,7 @@ loom_cc_library(
         "//loom/src/loom/serve/media:image_codec",
         "//loom/src/loom/serve/media:image_codecs",
         "//loom/src/loom/serve/media:image_request",
+        "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/service/finite:component",
         "//loom/src/loom/serve/service/finite:model",
         "//loom/src/loom/serve/service/finite:result",
@@ -716,20 +718,71 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "checkpoint_control",
+    srcs = ["checkpoint_control.c"],
+    hdrs = ["checkpoint_control.h"],
+    deps = [
+        ":session",
+        ":telemetry",
+        "//loom/src/loom/serve/telemetry:record",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "checkpoint_http",
+    srcs = ["checkpoint_http.c"],
+    hdrs = ["checkpoint_http.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":checkpoint_control",
+        ":http",
+        ":telemetry",
+        "//loom/src/loom/serve/transport/http:request",
+        "//loom/src/loom/serve/transport/http:server",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "checkpoint_http_test",
+    srcs = ["checkpoint_http_test.cc"],
+    deps = [
+        ":checkpoint_control",
+        ":checkpoint_http",
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "checkpoint_control_test",
+    srcs = ["checkpoint_control_test.cc"],
+    deps = [
+        ":checkpoint_control",
+        ":telemetry",
+        "//loom/src/loom/serve/telemetry:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "checkpoint_request",
     srcs = ["checkpoint_request.c"],
     hdrs = ["checkpoint_request.h"],
     visibility = ["//visibility:private"],
     deps = [
+        ":checkpoint_control",
         ":checkpoint_registry",
-        ":http",
         ":model",
         ":session",
         ":telemetry",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/telemetry:record",
-        "//loom/src/loom/serve/transport/http:request",
-        "//loom/src/loom/serve/transport/http:server",
         "//runtime/src/iree/base",
     ],
 )
@@ -794,6 +847,8 @@ loom_cc_library(
     deps = [
         ":admission",
         ":chat",
+        ":checkpoint_control",
+        ":checkpoint_http",
         ":checkpoint_registry",
         ":checkpoint_request",
         ":consumer",
