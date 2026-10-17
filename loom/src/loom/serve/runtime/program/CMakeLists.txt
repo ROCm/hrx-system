@@ -116,6 +116,25 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    stage_table
+  HDRS
+    "stage_table.h"
+  SRCS
+    "stage_table.c"
+  DEPS
+    ::jit
+    ::module
+    iree::base
+    iree::hal
+    loom::serve::runtime::execution::dispatch
+    loom::target::arch::cmd::program
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     module
   HDRS
     "module.h"

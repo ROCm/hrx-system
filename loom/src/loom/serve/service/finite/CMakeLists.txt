@@ -126,43 +126,12 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
-    executables
-  HDRS
-    "executables.h"
-  SRCS
-    "executables.c"
-  DEPS
-    iree::base
-    iree::hal
-    iree::vm
-    loom::binding::c::loomc
-    loom::binding::c::task_pool
-    loom::serve::runtime::device
-    loom::serve::runtime::execution::dispatch
-    loom::serve::runtime::host
-    loom::serve::runtime::program::compilation
-    loom::serve::runtime::program::jit
-    loom::serve::runtime::program::module
-    loom::serve::runtime::program::parameter_layout
-    loom::serve::runtime::program::preparation
-    loom::serve::runtime::program::sources
-    loom::serve::runtime::program::stage_set
-    loom::serve::runtime::program::variant_pool
-    loom::serve::service::execution_reconfiguration
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM)
-loom_cc_library(
-  NAME
     model
   HDRS
     "model.h"
   SRCS
     "model.c"
   DEPS
-    ::executables
     ::result
     iree::base
     iree::base::threading
@@ -187,8 +156,10 @@ loom_cc_library(
     loom::serve::runtime::program::preparation
     loom::serve::runtime::program::sources
     loom::serve::runtime::program::stage_set
+    loom::serve::runtime::program::stage_table
     loom::serve::runtime::program::tokenizer_load
     loom::serve::runtime::program::variant_pool
+    loom::serve::service::executables
     loom::serve::service::execution_reconfiguration
     loom::util::stream
   PUBLIC

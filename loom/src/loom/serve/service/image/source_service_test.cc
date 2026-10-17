@@ -8,11 +8,14 @@
 #include <unistd.h>
 
 #include <array>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "iree/async/proactor.h"
@@ -21,6 +24,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/runtime/program/package.h"
 #include "loom/serve/runtime/program/variant_pool.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
@@ -502,6 +506,123 @@ TEST_P(SourceImageServiceTest,
   EXPECT_EQ(retained.read_bytes, weights.read_bytes);
   EXPECT_EQ(retained.prepared_bytes, weights.prepared_bytes);
   EXPECT_EQ(retained.activations, weights.activations);
+}
+
+TEST_P(SourceImageServiceTest, PreparedImagePinsCodeAcrossSelectionAndRemoval) {
+  ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
+  const auto generator = loom_serve_image_model_generator(model_);
+  const auto update = generator.execution_update;
+  const std::string paths[] = {directory_ + "/config.loom",
+                               directory_ + "/generate.loom"};
+  std::string contents[2];
+  for (size_t i = 0; i < 2; ++i) {
+    std::ifstream input(paths[i]);
+    ASSERT_TRUE(input.good());
+    contents[i].assign(std::istreambuf_iterator<char>(input), {});
+  }
+  const std::string red = "scf.select %odd_seed, %high, %low";
+  const auto red_position = contents[1].find(red);
+  ASSERT_NE(red_position, std::string::npos);
+  contents[1].replace(red_position, red.size(),
+                      "scf.select %odd_seed, %low, %high");
+  const std::string launch = "  kernel.launch @pixels(%colors, %rgb)";
+  const auto launch_position = contents[1].find(launch);
+  ASSERT_NE(launch_position, std::string::npos);
+  contents[1].insert(
+      launch_position,
+      "  kernel.launch @colors(%request, %colors) : (buffer, buffer)\n");
+  const loom_serve_package_file_t files[] = {
+      {IREE_SV("model/config.loom"),
+       iree_make_const_byte_span(contents[0].data(), contents[0].size())},
+      {IREE_SV("model/generate.loom"),
+       iree_make_const_byte_span(contents[1].data(), contents[1].size())}};
+  loom_serve_package_t* package = nullptr;
+  IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model/model.json"),
+                                           IREE_ARRAYSIZE(files), files,
+                                           host_allocator_, &package));
+  std::unique_ptr<loom_serve_package_t, decltype(&loom_serve_package_release)>
+      retained_package(package, loom_serve_package_release);
+  const iree_string_view_t providers[] = {IREE_SV("config.loom"),
+                                          IREE_SV("generate.loom")};
+  const loom_serve_sources_t sources = {
+      .count = IREE_ARRAYSIZE(providers),
+      .values = providers,
+      .package = package,
+  };
+  struct Compilation {
+    // Joins the accepted compiler's publication with this outer test thread.
+    std::mutex mutex;
+    // Notifies completion without blocking a compiler or serving worker.
+    std::condition_variable condition;
+    // Compiler result, transferred after the callback's final access.
+    void* candidate = nullptr;
+    // Owned compilation outcome, consumed after publication.
+    iree_status_t status = iree_ok_status();
+    // Terminal callback has transferred ownership.
+    bool complete = false;
+  } compilation;
+  IREE_ASSERT_OK(update.compile(
+      update.self, &sources,
+      [](void* self, iree_status_t status, void* value,
+         const loom_serve_compilation_report_t*) {
+        auto* compilation = static_cast<Compilation*>(self);
+        std::lock_guard<std::mutex> lock(compilation->mutex);
+        compilation->candidate = value;
+        compilation->status = status;
+        compilation->complete = true;
+        compilation->condition.notify_one();
+      },
+      &compilation));
+  {
+    std::unique_lock<std::mutex> lock(compilation.mutex);
+    compilation.condition.wait(lock, [&] { return compilation.complete; });
+  }
+  std::unique_ptr<void, loom_serve_variant_dispose_fn_t> candidate(
+      compilation.candidate, update.dispose);
+  IREE_ASSERT_OK(std::exchange(compilation.status, iree_ok_status()));
+  retained_package.reset();
+
+  auto complete = [&](uint64_t expected_seed, uint32_t expected_parts) {
+    bool resolved = false;
+    IREE_ASSERT_OK(
+        generator.advance_prepared_request(generator.self, false, &resolved));
+    ASSERT_TRUE(resolved);
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(
+        loom_serve_image_model_residency(model_)));
+    bool finished = false;
+    uint32_t parts = 0;
+    while (!finished) {
+      loom_serve_execution_frontier_t frontier;
+      IREE_ASSERT_OK(generator.submit(generator.self, 0, &frontier, &finished));
+      IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+          {2, frontier.semaphores, frontier.values}, iree_infinite_timeout(),
+          IREE_ASYNC_WAIT_FLAG_NONE));
+      ++parts;
+    }
+    EXPECT_EQ(parts, expected_parts);
+    const auto rgb = generator.complete(generator.self);
+    const auto expected = Pixels(3, expected_seed);
+    ASSERT_EQ(rgb.data_length, sizeof(expected));
+    for (size_t i = 0; i < expected.size(); ++i) {
+      EXPECT_EQ(iree_unaligned_load_le_f32(rgb.data + i * sizeof(float)),
+                expected[i]);
+    }
+  };
+  loom_serve_image_prepared_t prepared;
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
+                                                        1, 1.0f, &prepared));
+  IREE_ASSERT_OK(update.select(update.self, candidate.get()));
+  ASSERT_NO_FATAL_FAILURE(complete(1, GetParam() ? 2 : 1));
+
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
+                                                        1, 1.0f, &prepared));
+  IREE_ASSERT_OK(update.select(update.self, nullptr));
+  candidate.reset();
+  ASSERT_NO_FATAL_FAILURE(complete(0, GetParam() ? 3 : 1));
+
+  IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
+                                                        1, 1.0f, &prepared));
+  ASSERT_NO_FATAL_FAILURE(complete(1, GetParam() ? 2 : 1));
 }
 
 TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
@@ -1039,6 +1160,10 @@ TEST_P(SourceImageServiceTest, FailedPartReadinessPreservesActualRetirement) {
   IREE_ASSERT_OK(loom_serve_image_model_prepare_request(model_, IREE_SV("aba"),
                                                         1, 1.0f, &prepared));
   const auto generator = loom_serve_image_model_generator(model_);
+  bool resolved = false;
+  IREE_ASSERT_OK(
+      generator.advance_prepared_request(generator.self, false, &resolved));
+  ASSERT_TRUE(resolved);
   loom_serve_residency_admission_t admission;
   IREE_ASSERT_OK(generator.try_admit(generator.self, &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);

@@ -192,6 +192,17 @@ iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
     float strength, loom_serve_image_prepared_t* out_prepared);
 
+// Installs the serialized owner's nonblocking compilation wake. Detachment
+// follows terminal advance of all accepted preparation work.
+void loom_serve_image_model_set_observer(loom_serve_image_model_t* model,
+                                         loom_serve_wake_callback_t observer);
+
+// Resolves the prepared invocation's captured executables before admission.
+// Cancellation retires accepted compilation but submits no device work. The
+// owner calls until complete, then admits or discards the prepared request.
+iree_status_t loom_serve_image_model_advance_request(
+    loom_serve_image_model_t* model, bool cancel, bool* out_complete);
+
 // Releases a successfully prepared request that has not been submitted. This
 // does not release residency pins or retire device work. The model is reusable.
 void loom_serve_image_model_discard_prepared_request(

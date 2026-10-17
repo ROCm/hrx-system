@@ -219,6 +219,12 @@ class ImageServiceFixture : public ::testing::Test {
     const loom_serve_image_generator_t generator = {
         .self = &gates_[index],
         .prepare = loom_serve_test_image_gate_t::Prepare,
+        .set_observer = [](void*, loom_serve_wake_callback_t) {},
+        .advance_prepared_request =
+            [](void*, bool, bool* out_complete) {
+              *out_complete = true;
+              return iree_ok_status();
+            },
         .discard_prepared_request =
             loom_serve_test_image_gate_t::DiscardPreparedRequest,
         .try_admit = loom_serve_test_image_gate_t::Admit,

@@ -110,36 +110,10 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "executables",
-    srcs = ["executables.c"],
-    hdrs = ["executables.h"],
-    deps = [
-        "//loom/binding/c:loomc",
-        "//loom/binding/c:task_pool",
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/execution:dispatch",
-        "//loom/src/loom/serve/runtime/host",
-        "//loom/src/loom/serve/runtime/program:compilation",
-        "//loom/src/loom/serve/runtime/program:jit",
-        "//loom/src/loom/serve/runtime/program:module",
-        "//loom/src/loom/serve/runtime/program:parameter_layout",
-        "//loom/src/loom/serve/runtime/program:preparation",
-        "//loom/src/loom/serve/runtime/program:sources",
-        "//loom/src/loom/serve/runtime/program:stage_set",
-        "//loom/src/loom/serve/runtime/program:variant_pool",
-        "//loom/src/loom/serve/service:execution_reconfiguration",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/vm",
-    ],
-)
-
-loom_cc_library(
     name = "model",
     srcs = ["model.c"],
     hdrs = ["model.h"],
     deps = [
-        ":executables",
         ":result",
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/device",
@@ -157,8 +131,10 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/program:preparation",
         "//loom/src/loom/serve/runtime/program:sources",
         "//loom/src/loom/serve/runtime/program:stage_set",
+        "//loom/src/loom/serve/runtime/program:stage_table",
         "//loom/src/loom/serve/runtime/program:tokenizer_load",
         "//loom/src/loom/serve/runtime/program:variant_pool",
+        "//loom/src/loom/serve/service:executables",
         "//loom/src/loom/serve/service:execution_reconfiguration",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

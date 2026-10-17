@@ -171,12 +171,13 @@ loom_cc_library(
     loom::serve::runtime::program::jit
     loom::serve::runtime::program::json
     loom::serve::runtime::program::module
-    loom::serve::runtime::program::parameter_layout
     loom::serve::runtime::program::preparation
     loom::serve::runtime::program::sources
     loom::serve::runtime::program::stage_set
+    loom::serve::runtime::program::stage_table
     loom::serve::runtime::program::tokenizer_load
     loom::serve::runtime::program::variant_pool
+    loom::serve::service::executables
     loom::util::stream
   PUBLIC
 )
@@ -200,6 +201,7 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::program::package
     loom::serve::runtime::program::sources
     loom::serve::runtime::program::variant_pool
     loom::serve::server::model_registration

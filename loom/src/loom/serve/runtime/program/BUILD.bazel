@@ -107,6 +107,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "stage_table",
+    srcs = ["stage_table.c"],
+    hdrs = ["stage_table.h"],
+    deps = [
+        ":jit",
+        ":module",
+        "//loom/src/loom/serve/runtime/execution:dispatch",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
     name = "module",
     srcs = ["module.c"],
     hdrs = ["module.h"],

@@ -45,14 +45,16 @@ typedef struct loom_serve_image_pending_t {
 typedef enum loom_serve_image_phase_e {
   IMAGE_PHASE_IDLE = 0,
   IMAGE_PHASE_PREPARING,
+  IMAGE_PHASE_SPECIALIZING,
   IMAGE_PHASE_WAITING,
   IMAGE_PHASE_READY,
   IMAGE_PHASE_GENERATING,
   IMAGE_PHASE_ENCODING,
 } loom_serve_image_phase_t;
 
-static const char* const image_phases[] = {"idle",  "preparing",  "waiting",
-                                           "ready", "generating", "encoding"};
+static const char* const image_phases[] = {
+    "idle",  "preparing",  "specializing", "waiting",
+    "ready", "generating", "encoding"};
 
 enum { IMAGE_EVENT_CPU = 1u << 0, IMAGE_EVENT_DEVICE = 1u << 1 };
 
@@ -610,7 +612,7 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
   } else if (service->phase == IMAGE_PHASE_PREPARING) {
     loom_serve_image_record_prepared(service->telemetry.stream, service->active,
                                      &service->job.prepared);
-    service->phase = IMAGE_PHASE_WAITING;
+    service->phase = IMAGE_PHASE_SPECIALIZING;
     service->phase_start = iree_time_now();
   } else {
     loom_serve_image_finish(service, LOOM_SERVE_TELEMETRY_COMPLETED);
@@ -802,11 +804,13 @@ static void loom_serve_image_set_observer(void* self,
   loom_serve_timer_set_observer(&service->timer, observer);
   loom_serve_execution_reconfiguration_set_observer(service->reconfiguration,
                                                     observer);
+  service->generator.set_observer(service->generator.self, observer);
 }
 
 static bool loom_serve_image_is_active(void* self) {
   const loom_serve_image_service_t* service = self;
   return service->phase == IMAGE_PHASE_PREPARING ||
+         service->phase == IMAGE_PHASE_SPECIALIZING ||
          service->phase == IMAGE_PHASE_READY ||
          service->phase == IMAGE_PHASE_GENERATING ||
          service->phase == IMAGE_PHASE_ENCODING;
@@ -841,6 +845,39 @@ static iree_status_t loom_serve_image_advance(
     service->telemetry.failure_code = iree_status_code(service->status);
     loom_serve_image_stop(service);
     *out_progress = true;
+  }
+  if (service->phase == IMAGE_PHASE_SPECIALIZING) {
+    const bool cancel = service->stopping || !service->connection;
+    bool complete = false;
+    iree_status_t status = service->generator.advance_prepared_request(
+        service->generator.self, cancel, &complete);
+    if (!iree_status_is_ok(status)) {
+      service->generator.discard_prepared_request(service->generator.self);
+      loom_serve_image_diagnose(service, service->active, status);
+      if (service->connection) {
+        service->status = iree_status_join(
+            service->status, loom_serve_image_rejection_response(
+                                 service, service->connection, service->active,
+                                 iree_status_is_resource_exhausted(status)
+                                     ? "503 Service Unavailable"
+                                     : "422 Unprocessable Entity",
+                                 iree_status_message(status)));
+        service->connection = NULL;
+      }
+      iree_status_free(status);
+      loom_serve_image_finish(service, cancel ? LOOM_SERVE_TELEMETRY_CANCELLED
+                                              : LOOM_SERVE_TELEMETRY_REJECTED);
+      *out_progress = true;
+    } else if (complete) {
+      if (cancel) {
+        service->generator.discard_prepared_request(service->generator.self);
+        loom_serve_image_finish(service, LOOM_SERVE_TELEMETRY_CANCELLED);
+      } else {
+        service->phase = IMAGE_PHASE_WAITING;
+        service->phase_start = iree_time_now();
+      }
+      *out_progress = true;
+    }
   }
   if (service->phase == IMAGE_PHASE_WAITING) {
     loom_serve_image_prepared(service, flags, out_progress);
@@ -930,6 +967,8 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
                                          : LOOM_SERVE_TELEMETRY_CANCELLED);
   }
   loom_serve_execution_reconfiguration_free(service->reconfiguration);
+  service->generator.set_observer(service->generator.self,
+                                  (loom_serve_wake_callback_t){0});
   loom_serve_timer_deinitialize(&service->timer);
   iree_string_builder_deinitialize(&service->cpu.response);
   iree_string_builder_deinitialize(&service->response);
@@ -950,7 +989,8 @@ iree_status_t loom_serve_image_service_allocate(
     loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_image_service_t** out_service) {
   *out_service = NULL;
-  if (!generator.try_admit || !generator.prepare ||
+  if (!generator.try_admit || !generator.prepare || !generator.set_observer ||
+      !generator.advance_prepared_request ||
       !generator.discard_prepared_request || !generator.submit ||
       !generator.complete || !options->width || !options->height ||
       !options->name.size || !options->pending_capacity ||

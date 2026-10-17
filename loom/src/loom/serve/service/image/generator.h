@@ -51,6 +51,13 @@ typedef struct loom_serve_image_generator_t {
   iree_status_t (*prepare)(void* self,
                            const loom_serve_image_request_t* request,
                            loom_serve_image_prepared_t* out_prepared);
+  // Installs the serialized owner's nonblocking wake before preparation. The
+  // owner detaches it only after every accepted compilation has retired.
+  void (*set_observer)(void* self, loom_serve_wake_callback_t observer);
+  // Resolves prepared code before residency admission. A miss progresses
+  // asynchronously; cancellation joins accepted producers before completion.
+  iree_status_t (*advance_prepared_request)(void* self, bool cancel,
+                                            bool* out_complete);
   // Releases prepared CPU payload and withdraws any unsubmitted admission
   // interest. Runs on the owner, never concurrently with other services.
   void (*discard_prepared_request)(void* self);
@@ -73,8 +80,8 @@ typedef struct loom_serve_image_generator_t {
   // NULL means the generator does not expose weight activity, not zero work.
   loom_serve_weight_activity_t (*weight_activity)(void* self);
   // Optional independent execution compiler over retained preparation/state.
-  // Selection occurs before submission or after the whole image and encoder
-  // retire, never between command parts or while CPU preparation borrows state.
+  // Selection affects subsequent preparations. An active request pins its
+  // generation through all parts; CPU preparation serializes with selection.
   loom_serve_execution_update_t execution_update;
   // Optional immutable input tokenizer, live through the model lifetime. Raw
   // HTTP utilities borrow it independently of the serialized invocation.
