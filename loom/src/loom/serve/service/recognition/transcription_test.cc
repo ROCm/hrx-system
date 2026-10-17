@@ -78,6 +78,7 @@ TEST_F(TranscriptionTest, BorrowsAudioAndSourceOptionsIndependentOfPartOrder) {
   EXPECT_EQ(request_.pcm_sample_rate, 16000u);
   EXPECT_EQ(request_.normalized_frame_count, 2u);
   EXPECT_TRUE(request_.text_response);
+  EXPECT_EQ(request_.request.outputs, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT);
   EXPECT_FLOAT_EQ(request_.request.temperature, 0.75f);
   EXPECT_TRUE(iree_string_view_equal(request_.request.language, IREE_SV("en")));
   EXPECT_TRUE(
@@ -86,6 +87,7 @@ TEST_F(TranscriptionTest, BorrowsAudioAndSourceOptionsIndependentOfPartOrder) {
   IREE_ASSERT_OK(
       Parse({Field(IREE_SV("model"), IREE_SV("recognition")), file}));
   EXPECT_FALSE(request_.text_response);
+  EXPECT_EQ(request_.request.outputs, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT);
   EXPECT_FLOAT_EQ(request_.request.temperature, 0.0f);
   EXPECT_EQ(request_.request.language.size, 0u);
   EXPECT_EQ(request_.request.prompt.size, 0u);

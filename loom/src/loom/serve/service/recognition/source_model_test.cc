@@ -28,6 +28,8 @@ class SourceRecognitionModelTest : public ::testing::Test {
     loom_serve_recognition_input_t input = {};
     // Admitted source state, independently resident until release.
     void* invocation = nullptr;
+    // Cold caller-owned storage, reused after each consumed event packet.
+    loom_serve_recognition_events_t* events = nullptr;
   };
 
   void SetUp() override {
@@ -59,13 +61,18 @@ class SourceRecognitionModelTest : public ::testing::Test {
     EXPECT_EQ(generator_.format.channels, 1u);
     EXPECT_EQ(generator_.input_capacity, 7u);
     EXPECT_EQ(generator_.frame_limit, 2048u);
-    EXPECT_EQ(generator_.transcript_capacity, 49u);
+    EXPECT_EQ(generator_.event_bytes, 146u);
+    EXPECT_EQ(generator_.event_capacity, 3u);
+    EXPECT_EQ(generator_.outputs, LOOM_SERVE_RECOGNITION_OUTPUT_ALL);
     EXPECT_EQ(generator_.request_capacity, rows_.size());
     EXPECT_EQ(generator_.batch_units, rows_.size());
     for (auto& row : rows_) {
       IREE_ASSERT_OK(loom_serve_recognition_input_initialize(
           generator_.input_capacity, generator_.format.channels, allocator_,
           &row.input));
+      IREE_ASSERT_OK(loom_serve_recognition_events_allocate(
+          generator_.event_capacity, generator_.event_bytes, allocator_,
+          &row.events));
     }
   }
 
@@ -76,6 +83,7 @@ class SourceRecognitionModelTest : public ::testing::Test {
     IREE_EXPECT_OK(loom_serve_recognition_model_free(model_));
     for (auto& row : rows_) {
       loom_serve_recognition_input_deinitialize(&row.input);
+      loom_serve_recognition_events_free(row.events);
     }
   }
 
@@ -94,7 +102,10 @@ class SourceRecognitionModelTest : public ::testing::Test {
   void Admit(size_t index,
              iree_string_view_t prompt = iree_string_view_empty()) {
     auto& row = rows_[index];
-    const loom_serve_recognition_request_t request = {.prompt = prompt};
+    const loom_serve_recognition_request_t request = {
+        .prompt = prompt,
+        .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+    };
     IREE_ASSERT_OK(
         generator_.prepare(generator_.self, index, &request, &row.invocation));
     loom_serve_residency_admission_t admission;
@@ -166,17 +177,22 @@ class SourceRecognitionModelTest : public ::testing::Test {
     IREE_ASSERT_OK(Wait(frontier_));
     std::vector<loom_serve_recognition_result_t> results(members_.size());
     for (size_t ordinal = 0; ordinal < members_.size(); ++ordinal) {
-      IREE_ASSERT_OK(
-          generator_.collect(generator_.self, ordinal, &results[ordinal]));
+      IREE_ASSERT_OK(generator_.collect(generator_.self, ordinal,
+                                        rows_[members_[ordinal]].events,
+                                        &results[ordinal]));
     }
     for (size_t ordinal = 0; ordinal < members_.size(); ++ordinal) {
       const auto& result = results[ordinal];
-      ASSERT_TRUE(result.has_transcript);
-      ASSERT_EQ(result.transcript.text.size, 1u);
-      EXPECT_EQ(result.transcript.text.data[0], text[ordinal]);
-      EXPECT_EQ(result.transcript.end, positions[ordinal]);
+      const auto* events = rows_[members_[ordinal]].events;
+      ASSERT_EQ(loom_serve_recognition_events_count(events), 1u);
+      const auto* event = loom_serve_recognition_events_at(events, 0);
+      ASSERT_EQ(event->kind, LOOM_SERVE_RECOGNITION_EVENT_TRANSCRIPT);
+      const auto& transcript = event->transcript;
+      ASSERT_EQ(transcript.text.size, 1u);
+      EXPECT_EQ(transcript.text.data[0], text[ordinal]);
+      EXPECT_EQ(transcript.end, positions[ordinal]);
       EXPECT_EQ(result.complete, complete[ordinal]);
-      EXPECT_EQ(iree_any_bit_set(result.transcript.flags,
+      EXPECT_EQ(iree_any_bit_set(transcript.flags,
                                  LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL),
                 complete[ordinal]);
       auto& input = rows_[members_[ordinal]].input;

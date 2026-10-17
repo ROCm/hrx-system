@@ -143,9 +143,13 @@ repeated HTTP output through direct `queue_dispatch`, with no command buffer.
 It requires an enabled XDNA compiler target/HAL and physical NPU, and has no
 learned weights. The ordinary catalog instead proves the native command-stage boundary.
 The recognition fixture exercises bounded audio input and independent transcript
-state through the production service. Its HTTP tests cover raw PCM and selected
-WAV/MP3/FLAC decoders, including mixed concurrent uploads and cancellation. The
-speech package supplies the incremental raw-waveform output boundary.
+and activity state through the production service. Compound native requests
+receive an activity observation plus two revisions of one segment in source order.
+All ordinals reuse one source packet buffer; caller-owned delivery must preserve
+every event while peers run and after model retirement. Its HTTP tests cover raw
+PCM and selected WAV/MP3/FLAC decoders, including mixed concurrent uploads and
+cancellation. The speech package supplies the incremental raw-waveform output
+boundary.
 
 ## Focused verification
 
