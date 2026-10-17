@@ -333,7 +333,7 @@
       "patterns": [
         {
           "name": "support.type.loom",
-          "match": "\\b(?:kernel\\.tensor\\.lds\\.descriptor|spirv\\.cooperative_matrix|kernel\\.barrier\\.phase|kernel\\.async\\.group|kernel\\.async\\.token|hal\\.buffer_view|check\\.entropy|low\\.storage|hal\\.buffer|encoding|channel|buffer|f8E4M3|f8E5M2|offset|tensor|vector|group|index|write|bf16|pool|read|tile|view|f16|f32|f64|i16|i32|i64|i1|i8)\\b"
+          "match": "\\b(?:kernel\\.tensor\\.lds\\.descriptor|spirv\\.cooperative_matrix|kernel\\.barrier\\.phase|kernel\\.async\\.group|kernel\\.async\\.token|hal\\.buffer_view|check\\.entropy|input\\.decoder|input\\.encoder|low\\.storage|hal\\.buffer|encoding|channel|buffer|f8E4M3|f8E5M2|offset|tensor|vector|group|index|write|bf16|pool|read|tile|view|f16|f32|f64|i16|i32|i64|i1|i8)\\b"
         }
       ]
     },

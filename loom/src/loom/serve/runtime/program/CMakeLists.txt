@@ -355,8 +355,26 @@ loom_cc_library(
   SRCS
     "input.c"
   DEPS
+    ::input_codec
     iree::base
     iree::base::internal::unicode
+    iree::tokenizer
+    iree::tokenizer::vocab
+    iree::vm
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    input_codec
+  HDRS
+    "input_codec.h"
+  SRCS
+    "input_codec.c"
+  DEPS
+    iree::base
     iree::tokenizer
     iree::tokenizer::vocab
     iree::vm
