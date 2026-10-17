@@ -1,0 +1,54 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+global.rodata.def @root = bytes("7177656e335f656d62656464696e672e656d626564")
+
+global.rodata.def @checkpoint = bytes("776569676874732e7361666574656e736f7273")
+
+global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
+
+global.rodata.def @tokenizer = bytes("746f6b656e697a65722e6a736f6e")
+
+global.rodata.def @name = bytes("5177656e332d456d62656464696e672d302e3642")
+
+global.rodata.def @invalid = bytes("4d6f64656c206f7074696f6e73206d75737420626520616e20656d707479206f626a6563742e")
+
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %zero = scalar.constant 0 : i64
+  %zero32 = scalar.constant 0 : i32
+  %object_type = scalar.constant 2 : i32
+  %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %object = scalar.cmpi eq, %type, %object_type : i32
+  %empty = scalar.cmpi eq, %count, %zero : i64
+  %valid = scalar.andi %object, %empty : i1
+  %valid32 = scalar.extui %valid : i1 to i32
+  %error = global.load @invalid : buffer
+  func.call @require(%valid32, %error) : (i32, buffer)
+  %root = global.load @root : buffer
+  %stage = func.call @stage(%root, %zero) : (buffer, i64) -> (i32)
+  %checkpoint = global.load @checkpoint : buffer
+  %policy = global.load @policy : buffer
+  func.call @parameter(%stage, %zero32, %directory, %checkpoint, %policy) : (i32, i32, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  %state_bytes = index.constant 8 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
+  %units = scalar.constant 128 : i64
+  view.store %units, %state_view[0] : i64, view<1xi64>
+  %payload = scalar.constant 8192 : i64
+  %output = scalar.constant 524288 : i64
+  %tokenizer = global.load @tokenizer : buffer
+  %name = global.load @name : buffer
+  func.return %units, %payload, %output, %output, %tokenizer, %name, %state : i64, i64, i64, i64, buffer, buffer, buffer
+}

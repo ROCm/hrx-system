@@ -1,0 +1,1312 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Four token row groups span all 32 cores. Each column streams its packed
+// weights once per cohort; peer storage and FIFO endpoints remain explicit.
+aie2p.target<array> @qwen3_embedding.array {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+func.decl inline @qwen3_embedding.query_key_ingress_root(%sequence_storage: buffer, %origin: offset, %local_storage: buffer, %result_offset: offset, %peer_storage: buffer, %gather_storage: buffer, %activations: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %weights: buffer, %state: buffer, %incoming_arrival: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %projection_stream: channel<tile<4096xbf16>>, %output: buffer, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %probability_stream: channel<tile<4096xbf16>>, %result_stream: channel<tile<4096xbf16>>)
+
+func.decl inline @qwen3_embedding.probability_value_normalize(%dimension_storage: buffer, %origin: offset, %local_storage: buffer, %result_offset: offset, %peer_storage: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %incoming_arrival: channel<tile<16xi32>>, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %projection_stream: channel<tile<4096xbf16>>, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %probability_stream: channel<tile<4096xbf16>>, %result_stream: channel<tile<4096xbf16>>, %column_offset: index, %dimension_row_base: index, %row_column: index, %skip_column: index)
+
+func.decl inline @qwen3_embedding.query_key_egress(%sequence_storage: buffer, %origin: offset, %local_storage: buffer, %result_offset: offset, %peer_storage: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %incoming_arrival: channel<tile<16xi32>>, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %projection_stream: channel<tile<4096xbf16>>, %output: buffer, %state: buffer, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %probability_stream: channel<tile<4096xbf16>>, %result_stream: channel<tile<4096xbf16>>, %column_offset: index, %row_column: index, %finish_initial: offset, %normalized_initial: offset, %skip_column: index, %query_initial: offset, %key_initial: offset, %value_initial: offset, %mlp_initial: offset, %residual_initial: offset, %output_initial: offset)
+
+func.decl inline @qwen3_embedding.probability_value(%dimension_storage: buffer, %origin: offset, %local_storage: buffer, %result_offset: offset, %peer_storage: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %incoming_arrival: channel<tile<16xi32>>, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %projection_stream: channel<tile<4096xbf16>>, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %probability_stream: channel<tile<4096xbf16>>, %result_stream: channel<tile<4096xbf16>>, %column_offset: index, %dimension_row_base: index, %row_column: index, %skip_column: index)
+
+func.decl inline @qwen3_embedding.query_key_epilogue(%sequence_storage: buffer, %origin: offset, %dimension_storage: buffer, %local_storage: buffer, %result_offset: offset, %peer_storage: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %incoming_arrival: channel<tile<16xi32>>, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %normalization_stream: channel<tile<4096xbf16>>, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %projection_stream: channel<tile<4096xbf16>>, %probability_stream: channel<tile<4096xbf16>>, %column_offset: index, %dimension_row_base: index, %row_column: index, %skip_column: index)
+
+func.decl inline @qwen3_embedding.probability_value_ingress(%local_storage: buffer, %origin: offset, %result_offset: offset, %peer_storage: buffer, %gather_storage: buffer, %activations: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %weights: buffer, %state: buffer, %incoming_arrival: channel<tile<16xi32>>, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %normalization_stream: channel<tile<4096xbf16>>, %output: buffer, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %projection_stream: channel<tile<4096xbf16>>, %probability_stream: channel<tile<4096xbf16>>, %sequence_storage: buffer, %result_stream: channel<tile<4096xbf16>>, %column_offset: index, %gather_row_base: index, %row_column: index, %row_input_initial: offset, %finish_initial: offset, %normalized_initial: offset, %dense_normalized_initial: offset, %dense_context_initial: offset, %dense_mlp_initial: offset, %skip_initial: offset, %rotary_address: offset, %skip_column: index, %query_initial: offset, %key_initial: offset, %value_initial: offset, %mlp_initial: offset, %residual_initial: offset, %output_initial: offset)
+
+func.decl inline @qwen3_embedding.query_key_normalize(%sequence_storage: buffer, %origin: offset, %dimension_storage: buffer, %local_storage: buffer, %result_offset: offset, %peer_storage: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %incoming_arrival: channel<tile<16xi32>>, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %normalization_stream: channel<tile<4096xbf16>>, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %probability_stream: channel<tile<4096xbf16>>, %column_offset: index, %dimension_row_base: index, %row_column: index, %skip_column: index)
+
+func.decl inline @qwen3_embedding.probability_value_egress(%local_storage: buffer, %origin: offset, %result_offset: offset, %peer_storage: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %incoming_arrival: channel<tile<16xi32>>, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %normalization_stream: channel<tile<4096xbf16>>, %output: buffer, %state: buffer, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %projection_stream: channel<tile<4096xbf16>>, %probability_stream: channel<tile<4096xbf16>>, %result_stream: channel<tile<4096xbf16>>, %column_offset: index, %row_column: index, %finish_initial: offset, %normalized_initial: offset, %skip_column: index, %query_initial: offset, %key_initial: offset, %value_initial: offset, %mlp_initial: offset, %residual_initial: offset, %output_initial: offset)
+
+func.decl inline @qwen3_embedding.query_key_ingress(%sequence_storage: buffer, %origin: offset, %local_storage: buffer, %result_offset: offset, %peer_storage: buffer, %gather_storage: buffer, %activations: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %weights: buffer, %state: buffer, %incoming_arrival: channel<tile<16xi32>>, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %outgoing_departure: channel<tile<16xi32>>, %projection_stream: channel<tile<4096xbf16>>, %output: buffer, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %probability_stream: channel<tile<4096xbf16>>, %result_stream: channel<tile<4096xbf16>>)
+
+func.decl inline @qwen3_embedding.query_key_egress_terminal(%sequence_storage: buffer, %origin: offset, %local_storage: buffer, %result_offset: offset, %peer_storage: buffer, %activation_stream: channel<tile<2048xi32>>, %zero: index, %one: index, %outgoing_arrival: channel<tile<16xi32>>, %incoming_departure: channel<tile<16xi32>>, %projection_stream: channel<tile<4096xbf16>>, %output: buffer, %state: buffer, %weight_stream: channel<tile<4624xi32>>, %activation_offset: offset, %probability_stream: channel<tile<4096xbf16>>, %result_stream: channel<tile<4096xbf16>>)
+
+pipeline.def<kernel> public retain target(@qwen3_embedding.array) @qwen3_embedding.cohort() run(%weights_arg: buffer, %activations_arg: buffer, %output_arg: buffer, %state_arg: buffer) {
+  %weights_unique, %activations_unique, %output_unique, %state_unique = buffer.assume.noalias %weights_arg, %activations_arg, %output_arg, %state_arg : buffer, buffer, buffer, buffer
+  %weights, %activations, %output, %state = buffer.assume.alignment %weights_unique, %activations_unique, %output_unique, %state_unique {minimum_alignment = 64} : buffer, buffer, buffer, buffer
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %records = index.constant 3360 : index
+  %memory_tile0 = pipeline.memory<workgroup>[0, 1] : pool
+  %weight_ingress0_bytes = index.constant 18496 : offset
+  %weight_ingress0_storage = buffer.alloca<workgroup> pool(%memory_tile0) align(64) %weight_ingress0_bytes : buffer
+  %weight_ingress0_slots = buffer.view %weight_ingress0_storage[%origin] : buffer -> view<1x4624xi32>
+  %weight_ingress0 = channel.bind<fifo> %weight_ingress0_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %memory_tile1 = pipeline.memory<workgroup>[1, 1] : pool
+  %weight_ingress1_bytes = index.constant 18496 : offset
+  %weight_ingress1_storage = buffer.alloca<workgroup> pool(%memory_tile1) align(64) %weight_ingress1_bytes : buffer
+  %weight_ingress1_slots = buffer.view %weight_ingress1_storage[%origin] : buffer -> view<1x4624xi32>
+  %weight_ingress1 = channel.bind<fifo> %weight_ingress1_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %memory_tile2 = pipeline.memory<workgroup>[2, 1] : pool
+  %weight_ingress2_bytes = index.constant 18496 : offset
+  %weight_ingress2_storage = buffer.alloca<workgroup> pool(%memory_tile2) align(64) %weight_ingress2_bytes : buffer
+  %weight_ingress2_slots = buffer.view %weight_ingress2_storage[%origin] : buffer -> view<1x4624xi32>
+  %weight_ingress2 = channel.bind<fifo> %weight_ingress2_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %memory_tile3 = pipeline.memory<workgroup>[3, 1] : pool
+  %weight_ingress3_bytes = index.constant 18496 : offset
+  %weight_ingress3_storage = buffer.alloca<workgroup> pool(%memory_tile3) align(64) %weight_ingress3_bytes : buffer
+  %weight_ingress3_slots = buffer.view %weight_ingress3_storage[%origin] : buffer -> view<1x4624xi32>
+  %weight_ingress3 = channel.bind<fifo> %weight_ingress3_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %memory_tile4 = pipeline.memory<workgroup>[4, 1] : pool
+  %weight_ingress4_bytes = index.constant 18496 : offset
+  %weight_ingress4_storage = buffer.alloca<workgroup> pool(%memory_tile4) align(64) %weight_ingress4_bytes : buffer
+  %weight_ingress4_slots = buffer.view %weight_ingress4_storage[%origin] : buffer -> view<1x4624xi32>
+  %weight_ingress4 = channel.bind<fifo> %weight_ingress4_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %memory_tile5 = pipeline.memory<workgroup>[5, 1] : pool
+  %weight_ingress5_bytes = index.constant 18496 : offset
+  %weight_ingress5_storage = buffer.alloca<workgroup> pool(%memory_tile5) align(64) %weight_ingress5_bytes : buffer
+  %weight_ingress5_slots = buffer.view %weight_ingress5_storage[%origin] : buffer -> view<1x4624xi32>
+  %weight_ingress5 = channel.bind<fifo> %weight_ingress5_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %memory_tile6 = pipeline.memory<workgroup>[6, 1] : pool
+  %weight_ingress6_bytes = index.constant 18496 : offset
+  %weight_ingress6_storage = buffer.alloca<workgroup> pool(%memory_tile6) align(64) %weight_ingress6_bytes : buffer
+  %weight_ingress6_slots = buffer.view %weight_ingress6_storage[%origin] : buffer -> view<1x4624xi32>
+  %weight_ingress6 = channel.bind<fifo> %weight_ingress6_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %memory_tile7 = pipeline.memory<workgroup>[7, 1] : pool
+  %weight_ingress7_bytes = index.constant 18496 : offset
+  %weight_ingress7_storage = buffer.alloca<workgroup> pool(%memory_tile7) align(64) %weight_ingress7_bytes : buffer
+  %weight_ingress7_slots = buffer.view %weight_ingress7_storage[%origin] : buffer -> view<1x4624xi32>
+  %weight_ingress7 = channel.bind<fifo> %weight_ingress7_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %payload_bytes = index.constant 64448 : offset
+  %activation_offset = index.constant 18816 : offset
+  %packed_offset = index.constant 26688 : offset
+  %result_first = index.constant 31360 : offset
+  %result_second = index.constant 47744 : offset
+  %scratch_tail_offset = index.constant 37120 : offset
+  %tile0 = pipeline.memory<workgroup>[0, 2] : pool
+  %storage0 = buffer.alloca<workgroup> pool(%tile0) align(64) %payload_bytes : buffer
+  %tile1 = pipeline.memory<workgroup>[0, 3] : pool
+  %storage1 = buffer.alloca<workgroup> pool(%tile1) align(64) %payload_bytes : buffer
+  %tile2 = pipeline.memory<workgroup>[0, 4] : pool
+  %storage2 = buffer.alloca<workgroup> pool(%tile2) align(64) %payload_bytes : buffer
+  %tile3 = pipeline.memory<workgroup>[0, 5] : pool
+  %storage3 = buffer.alloca<workgroup> pool(%tile3) align(64) %payload_bytes : buffer
+  %tile4 = pipeline.memory<workgroup>[1, 2] : pool
+  %storage4 = buffer.alloca<workgroup> pool(%tile4) align(64) %payload_bytes : buffer
+  %tile5 = pipeline.memory<workgroup>[1, 3] : pool
+  %storage5 = buffer.alloca<workgroup> pool(%tile5) align(64) %payload_bytes : buffer
+  %tile6 = pipeline.memory<workgroup>[1, 4] : pool
+  %storage6 = buffer.alloca<workgroup> pool(%tile6) align(64) %payload_bytes : buffer
+  %tile7 = pipeline.memory<workgroup>[1, 5] : pool
+  %storage7 = buffer.alloca<workgroup> pool(%tile7) align(64) %payload_bytes : buffer
+  %tile8 = pipeline.memory<workgroup>[2, 2] : pool
+  %storage8 = buffer.alloca<workgroup> pool(%tile8) align(64) %payload_bytes : buffer
+  %tile9 = pipeline.memory<workgroup>[2, 3] : pool
+  %storage9 = buffer.alloca<workgroup> pool(%tile9) align(64) %payload_bytes : buffer
+  %tile10 = pipeline.memory<workgroup>[2, 4] : pool
+  %storage10 = buffer.alloca<workgroup> pool(%tile10) align(64) %payload_bytes : buffer
+  %tile11 = pipeline.memory<workgroup>[2, 5] : pool
+  %storage11 = buffer.alloca<workgroup> pool(%tile11) align(64) %payload_bytes : buffer
+  %tile12 = pipeline.memory<workgroup>[3, 2] : pool
+  %storage12 = buffer.alloca<workgroup> pool(%tile12) align(64) %payload_bytes : buffer
+  %tile13 = pipeline.memory<workgroup>[3, 3] : pool
+  %storage13 = buffer.alloca<workgroup> pool(%tile13) align(64) %payload_bytes : buffer
+  %tile14 = pipeline.memory<workgroup>[3, 4] : pool
+  %storage14 = buffer.alloca<workgroup> pool(%tile14) align(64) %payload_bytes : buffer
+  %tile15 = pipeline.memory<workgroup>[3, 5] : pool
+  %storage15 = buffer.alloca<workgroup> pool(%tile15) align(64) %payload_bytes : buffer
+  %tile16 = pipeline.memory<workgroup>[4, 2] : pool
+  %storage16 = buffer.alloca<workgroup> pool(%tile16) align(64) %payload_bytes : buffer
+  %tile17 = pipeline.memory<workgroup>[4, 3] : pool
+  %storage17 = buffer.alloca<workgroup> pool(%tile17) align(64) %payload_bytes : buffer
+  %tile18 = pipeline.memory<workgroup>[4, 4] : pool
+  %storage18 = buffer.alloca<workgroup> pool(%tile18) align(64) %payload_bytes : buffer
+  %tile19 = pipeline.memory<workgroup>[4, 5] : pool
+  %storage19 = buffer.alloca<workgroup> pool(%tile19) align(64) %payload_bytes : buffer
+  %tile20 = pipeline.memory<workgroup>[5, 2] : pool
+  %storage20 = buffer.alloca<workgroup> pool(%tile20) align(64) %payload_bytes : buffer
+  %tile21 = pipeline.memory<workgroup>[5, 3] : pool
+  %storage21 = buffer.alloca<workgroup> pool(%tile21) align(64) %payload_bytes : buffer
+  %tile22 = pipeline.memory<workgroup>[5, 4] : pool
+  %storage22 = buffer.alloca<workgroup> pool(%tile22) align(64) %payload_bytes : buffer
+  %tile23 = pipeline.memory<workgroup>[5, 5] : pool
+  %storage23 = buffer.alloca<workgroup> pool(%tile23) align(64) %payload_bytes : buffer
+  %tile24 = pipeline.memory<workgroup>[6, 2] : pool
+  %storage24 = buffer.alloca<workgroup> pool(%tile24) align(64) %payload_bytes : buffer
+  %tile25 = pipeline.memory<workgroup>[6, 3] : pool
+  %storage25 = buffer.alloca<workgroup> pool(%tile25) align(64) %payload_bytes : buffer
+  %tile26 = pipeline.memory<workgroup>[6, 4] : pool
+  %storage26 = buffer.alloca<workgroup> pool(%tile26) align(64) %payload_bytes : buffer
+  %tile27 = pipeline.memory<workgroup>[6, 5] : pool
+  %storage27 = buffer.alloca<workgroup> pool(%tile27) align(64) %payload_bytes : buffer
+  %tile28 = pipeline.memory<workgroup>[7, 2] : pool
+  %storage28 = buffer.alloca<workgroup> pool(%tile28) align(64) %payload_bytes : buffer
+  %tile29 = pipeline.memory<workgroup>[7, 3] : pool
+  %storage29 = buffer.alloca<workgroup> pool(%tile29) align(64) %payload_bytes : buffer
+  %tile30 = pipeline.memory<workgroup>[7, 4] : pool
+  %storage30 = buffer.alloca<workgroup> pool(%tile30) align(64) %payload_bytes : buffer
+  %tile31 = pipeline.memory<workgroup>[7, 5] : pool
+  %storage31 = buffer.alloca<workgroup> pool(%tile31) align(64) %payload_bytes : buffer
+  %weights0_slots = buffer.view %storage0[%origin] : buffer -> view<1x4624xi32>
+  %weights0 = channel.bind<fifo> %weights0_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations0_slots = buffer.view %storage0[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations0 = channel.bind<fifo> %activations0_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights1_slots = buffer.view %storage1[%origin] : buffer -> view<1x4624xi32>
+  %weights1 = channel.bind<fifo> %weights1_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations1_slots = buffer.view %storage1[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations1 = channel.bind<fifo> %activations1_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights2_slots = buffer.view %storage2[%origin] : buffer -> view<1x4624xi32>
+  %weights2 = channel.bind<fifo> %weights2_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations2_slots = buffer.view %storage2[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations2 = channel.bind<fifo> %activations2_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights3_slots = buffer.view %storage3[%origin] : buffer -> view<1x4624xi32>
+  %weights3 = channel.bind<fifo> %weights3_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations3_slots = buffer.view %storage3[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations3 = channel.bind<fifo> %activations3_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights4_slots = buffer.view %storage4[%origin] : buffer -> view<1x4624xi32>
+  %weights4 = channel.bind<fifo> %weights4_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations4_slots = buffer.view %storage4[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations4 = channel.bind<fifo> %activations4_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights5_slots = buffer.view %storage5[%origin] : buffer -> view<1x4624xi32>
+  %weights5 = channel.bind<fifo> %weights5_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations5_slots = buffer.view %storage5[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations5 = channel.bind<fifo> %activations5_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights6_slots = buffer.view %storage6[%origin] : buffer -> view<1x4624xi32>
+  %weights6 = channel.bind<fifo> %weights6_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations6_slots = buffer.view %storage6[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations6 = channel.bind<fifo> %activations6_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights7_slots = buffer.view %storage7[%origin] : buffer -> view<1x4624xi32>
+  %weights7 = channel.bind<fifo> %weights7_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations7_slots = buffer.view %storage7[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations7 = channel.bind<fifo> %activations7_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights8_slots = buffer.view %storage8[%origin] : buffer -> view<1x4624xi32>
+  %weights8 = channel.bind<fifo> %weights8_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations8_slots = buffer.view %storage8[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations8 = channel.bind<fifo> %activations8_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights9_slots = buffer.view %storage9[%origin] : buffer -> view<1x4624xi32>
+  %weights9 = channel.bind<fifo> %weights9_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations9_slots = buffer.view %storage9[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations9 = channel.bind<fifo> %activations9_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights10_slots = buffer.view %storage10[%origin] : buffer -> view<1x4624xi32>
+  %weights10 = channel.bind<fifo> %weights10_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations10_slots = buffer.view %storage10[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations10 = channel.bind<fifo> %activations10_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights11_slots = buffer.view %storage11[%origin] : buffer -> view<1x4624xi32>
+  %weights11 = channel.bind<fifo> %weights11_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations11_slots = buffer.view %storage11[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations11 = channel.bind<fifo> %activations11_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights12_slots = buffer.view %storage12[%origin] : buffer -> view<1x4624xi32>
+  %weights12 = channel.bind<fifo> %weights12_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations12_slots = buffer.view %storage12[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations12 = channel.bind<fifo> %activations12_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights13_slots = buffer.view %storage13[%origin] : buffer -> view<1x4624xi32>
+  %weights13 = channel.bind<fifo> %weights13_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations13_slots = buffer.view %storage13[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations13 = channel.bind<fifo> %activations13_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights14_slots = buffer.view %storage14[%origin] : buffer -> view<1x4624xi32>
+  %weights14 = channel.bind<fifo> %weights14_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations14_slots = buffer.view %storage14[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations14 = channel.bind<fifo> %activations14_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights15_slots = buffer.view %storage15[%origin] : buffer -> view<1x4624xi32>
+  %weights15 = channel.bind<fifo> %weights15_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations15_slots = buffer.view %storage15[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations15 = channel.bind<fifo> %activations15_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights16_slots = buffer.view %storage16[%origin] : buffer -> view<1x4624xi32>
+  %weights16 = channel.bind<fifo> %weights16_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations16_slots = buffer.view %storage16[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations16 = channel.bind<fifo> %activations16_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights17_slots = buffer.view %storage17[%origin] : buffer -> view<1x4624xi32>
+  %weights17 = channel.bind<fifo> %weights17_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations17_slots = buffer.view %storage17[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations17 = channel.bind<fifo> %activations17_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights18_slots = buffer.view %storage18[%origin] : buffer -> view<1x4624xi32>
+  %weights18 = channel.bind<fifo> %weights18_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations18_slots = buffer.view %storage18[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations18 = channel.bind<fifo> %activations18_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights19_slots = buffer.view %storage19[%origin] : buffer -> view<1x4624xi32>
+  %weights19 = channel.bind<fifo> %weights19_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations19_slots = buffer.view %storage19[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations19 = channel.bind<fifo> %activations19_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights20_slots = buffer.view %storage20[%origin] : buffer -> view<1x4624xi32>
+  %weights20 = channel.bind<fifo> %weights20_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations20_slots = buffer.view %storage20[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations20 = channel.bind<fifo> %activations20_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights21_slots = buffer.view %storage21[%origin] : buffer -> view<1x4624xi32>
+  %weights21 = channel.bind<fifo> %weights21_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations21_slots = buffer.view %storage21[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations21 = channel.bind<fifo> %activations21_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights22_slots = buffer.view %storage22[%origin] : buffer -> view<1x4624xi32>
+  %weights22 = channel.bind<fifo> %weights22_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations22_slots = buffer.view %storage22[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations22 = channel.bind<fifo> %activations22_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights23_slots = buffer.view %storage23[%origin] : buffer -> view<1x4624xi32>
+  %weights23 = channel.bind<fifo> %weights23_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations23_slots = buffer.view %storage23[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations23 = channel.bind<fifo> %activations23_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights24_slots = buffer.view %storage24[%origin] : buffer -> view<1x4624xi32>
+  %weights24 = channel.bind<fifo> %weights24_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations24_slots = buffer.view %storage24[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations24 = channel.bind<fifo> %activations24_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights25_slots = buffer.view %storage25[%origin] : buffer -> view<1x4624xi32>
+  %weights25 = channel.bind<fifo> %weights25_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations25_slots = buffer.view %storage25[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations25 = channel.bind<fifo> %activations25_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights26_slots = buffer.view %storage26[%origin] : buffer -> view<1x4624xi32>
+  %weights26 = channel.bind<fifo> %weights26_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations26_slots = buffer.view %storage26[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations26 = channel.bind<fifo> %activations26_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights27_slots = buffer.view %storage27[%origin] : buffer -> view<1x4624xi32>
+  %weights27 = channel.bind<fifo> %weights27_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations27_slots = buffer.view %storage27[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations27 = channel.bind<fifo> %activations27_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights28_slots = buffer.view %storage28[%origin] : buffer -> view<1x4624xi32>
+  %weights28 = channel.bind<fifo> %weights28_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations28_slots = buffer.view %storage28[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations28 = channel.bind<fifo> %activations28_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights29_slots = buffer.view %storage29[%origin] : buffer -> view<1x4624xi32>
+  %weights29 = channel.bind<fifo> %weights29_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations29_slots = buffer.view %storage29[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations29 = channel.bind<fifo> %activations29_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights30_slots = buffer.view %storage30[%origin] : buffer -> view<1x4624xi32>
+  %weights30 = channel.bind<fifo> %weights30_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations30_slots = buffer.view %storage30[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations30 = channel.bind<fifo> %activations30_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %weights31_slots = buffer.view %storage31[%origin] : buffer -> view<1x4624xi32>
+  %weights31 = channel.bind<fifo> %weights31_slots, %one : view<1x4624xi32>, index -> channel<tile<4624xi32>>
+  %activations31_slots = buffer.view %storage31[%activation_offset] : buffer -> view<1x2048xi32>
+  %activations31 = channel.bind<fifo> %activations31_slots, %one : view<1x2048xi32>, index -> channel<tile<2048xi32>>
+  %arrival0_bytes = index.constant 64 : offset
+  %arrival0_storage = buffer.alloca<workgroup> pool(%tile0) align(64) %arrival0_bytes : buffer
+  %arrival0_slots = buffer.view %arrival0_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival0 = channel.bind<fifo> %arrival0_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure0_bytes = index.constant 64 : offset
+  %departure0_storage = buffer.alloca<workgroup> pool(%tile0) align(64) %departure0_bytes : buffer
+  %departure0_slots = buffer.view %departure0_storage[%origin] : buffer -> view<1x16xi32>
+  %departure0 = channel.bind<fifo> %departure0_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival1_bytes = index.constant 64 : offset
+  %arrival1_storage = buffer.alloca<workgroup> pool(%tile1) align(64) %arrival1_bytes : buffer
+  %arrival1_slots = buffer.view %arrival1_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival1 = channel.bind<fifo> %arrival1_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure1_bytes = index.constant 64 : offset
+  %departure1_storage = buffer.alloca<workgroup> pool(%tile1) align(64) %departure1_bytes : buffer
+  %departure1_slots = buffer.view %departure1_storage[%origin] : buffer -> view<1x16xi32>
+  %departure1 = channel.bind<fifo> %departure1_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival2_bytes = index.constant 64 : offset
+  %arrival2_storage = buffer.alloca<workgroup> pool(%tile2) align(64) %arrival2_bytes : buffer
+  %arrival2_slots = buffer.view %arrival2_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival2 = channel.bind<fifo> %arrival2_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure2_bytes = index.constant 64 : offset
+  %departure2_storage = buffer.alloca<workgroup> pool(%tile2) align(64) %departure2_bytes : buffer
+  %departure2_slots = buffer.view %departure2_storage[%origin] : buffer -> view<1x16xi32>
+  %departure2 = channel.bind<fifo> %departure2_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival3_bytes = index.constant 64 : offset
+  %arrival3_storage = buffer.alloca<workgroup> pool(%tile3) align(64) %arrival3_bytes : buffer
+  %arrival3_slots = buffer.view %arrival3_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival3 = channel.bind<fifo> %arrival3_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure3_bytes = index.constant 64 : offset
+  %departure3_storage = buffer.alloca<workgroup> pool(%tile3) align(64) %departure3_bytes : buffer
+  %departure3_slots = buffer.view %departure3_storage[%origin] : buffer -> view<1x16xi32>
+  %departure3 = channel.bind<fifo> %departure3_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival7_bytes = index.constant 64 : offset
+  %arrival7_storage = buffer.alloca<workgroup> pool(%tile7) align(64) %arrival7_bytes : buffer
+  %arrival7_slots = buffer.view %arrival7_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival7 = channel.bind<fifo> %arrival7_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure7_bytes = index.constant 64 : offset
+  %departure7_storage = buffer.alloca<workgroup> pool(%tile7) align(64) %departure7_bytes : buffer
+  %departure7_slots = buffer.view %departure7_storage[%origin] : buffer -> view<1x16xi32>
+  %departure7 = channel.bind<fifo> %departure7_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival6_bytes = index.constant 64 : offset
+  %arrival6_storage = buffer.alloca<workgroup> pool(%tile6) align(64) %arrival6_bytes : buffer
+  %arrival6_slots = buffer.view %arrival6_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival6 = channel.bind<fifo> %arrival6_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure6_bytes = index.constant 64 : offset
+  %departure6_storage = buffer.alloca<workgroup> pool(%tile6) align(64) %departure6_bytes : buffer
+  %departure6_slots = buffer.view %departure6_storage[%origin] : buffer -> view<1x16xi32>
+  %departure6 = channel.bind<fifo> %departure6_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival5_bytes = index.constant 64 : offset
+  %arrival5_storage = buffer.alloca<workgroup> pool(%tile5) align(64) %arrival5_bytes : buffer
+  %arrival5_slots = buffer.view %arrival5_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival5 = channel.bind<fifo> %arrival5_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure5_bytes = index.constant 64 : offset
+  %departure5_storage = buffer.alloca<workgroup> pool(%tile5) align(64) %departure5_bytes : buffer
+  %departure5_slots = buffer.view %departure5_storage[%origin] : buffer -> view<1x16xi32>
+  %departure5 = channel.bind<fifo> %departure5_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival4_bytes = index.constant 64 : offset
+  %arrival4_storage = buffer.alloca<workgroup> pool(%tile4) align(64) %arrival4_bytes : buffer
+  %arrival4_slots = buffer.view %arrival4_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival4 = channel.bind<fifo> %arrival4_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure4_bytes = index.constant 64 : offset
+  %departure4_storage = buffer.alloca<workgroup> pool(%tile4) align(64) %departure4_bytes : buffer
+  %departure4_slots = buffer.view %departure4_storage[%origin] : buffer -> view<1x16xi32>
+  %departure4 = channel.bind<fifo> %departure4_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival8_bytes = index.constant 64 : offset
+  %arrival8_storage = buffer.alloca<workgroup> pool(%tile8) align(64) %arrival8_bytes : buffer
+  %arrival8_slots = buffer.view %arrival8_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival8 = channel.bind<fifo> %arrival8_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure8_bytes = index.constant 64 : offset
+  %departure8_storage = buffer.alloca<workgroup> pool(%tile8) align(64) %departure8_bytes : buffer
+  %departure8_slots = buffer.view %departure8_storage[%origin] : buffer -> view<1x16xi32>
+  %departure8 = channel.bind<fifo> %departure8_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival9_bytes = index.constant 64 : offset
+  %arrival9_storage = buffer.alloca<workgroup> pool(%tile9) align(64) %arrival9_bytes : buffer
+  %arrival9_slots = buffer.view %arrival9_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival9 = channel.bind<fifo> %arrival9_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure9_bytes = index.constant 64 : offset
+  %departure9_storage = buffer.alloca<workgroup> pool(%tile9) align(64) %departure9_bytes : buffer
+  %departure9_slots = buffer.view %departure9_storage[%origin] : buffer -> view<1x16xi32>
+  %departure9 = channel.bind<fifo> %departure9_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival10_bytes = index.constant 64 : offset
+  %arrival10_storage = buffer.alloca<workgroup> pool(%tile10) align(64) %arrival10_bytes : buffer
+  %arrival10_slots = buffer.view %arrival10_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival10 = channel.bind<fifo> %arrival10_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure10_bytes = index.constant 64 : offset
+  %departure10_storage = buffer.alloca<workgroup> pool(%tile10) align(64) %departure10_bytes : buffer
+  %departure10_slots = buffer.view %departure10_storage[%origin] : buffer -> view<1x16xi32>
+  %departure10 = channel.bind<fifo> %departure10_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival11_bytes = index.constant 64 : offset
+  %arrival11_storage = buffer.alloca<workgroup> pool(%tile11) align(64) %arrival11_bytes : buffer
+  %arrival11_slots = buffer.view %arrival11_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival11 = channel.bind<fifo> %arrival11_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure11_bytes = index.constant 64 : offset
+  %departure11_storage = buffer.alloca<workgroup> pool(%tile11) align(64) %departure11_bytes : buffer
+  %departure11_slots = buffer.view %departure11_storage[%origin] : buffer -> view<1x16xi32>
+  %departure11 = channel.bind<fifo> %departure11_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival15_bytes = index.constant 64 : offset
+  %arrival15_storage = buffer.alloca<workgroup> pool(%tile15) align(64) %arrival15_bytes : buffer
+  %arrival15_slots = buffer.view %arrival15_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival15 = channel.bind<fifo> %arrival15_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure15_bytes = index.constant 64 : offset
+  %departure15_storage = buffer.alloca<workgroup> pool(%tile15) align(64) %departure15_bytes : buffer
+  %departure15_slots = buffer.view %departure15_storage[%origin] : buffer -> view<1x16xi32>
+  %departure15 = channel.bind<fifo> %departure15_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival14_bytes = index.constant 64 : offset
+  %arrival14_storage = buffer.alloca<workgroup> pool(%tile14) align(64) %arrival14_bytes : buffer
+  %arrival14_slots = buffer.view %arrival14_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival14 = channel.bind<fifo> %arrival14_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure14_bytes = index.constant 64 : offset
+  %departure14_storage = buffer.alloca<workgroup> pool(%tile14) align(64) %departure14_bytes : buffer
+  %departure14_slots = buffer.view %departure14_storage[%origin] : buffer -> view<1x16xi32>
+  %departure14 = channel.bind<fifo> %departure14_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival13_bytes = index.constant 64 : offset
+  %arrival13_storage = buffer.alloca<workgroup> pool(%tile13) align(64) %arrival13_bytes : buffer
+  %arrival13_slots = buffer.view %arrival13_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival13 = channel.bind<fifo> %arrival13_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure13_bytes = index.constant 64 : offset
+  %departure13_storage = buffer.alloca<workgroup> pool(%tile13) align(64) %departure13_bytes : buffer
+  %departure13_slots = buffer.view %departure13_storage[%origin] : buffer -> view<1x16xi32>
+  %departure13 = channel.bind<fifo> %departure13_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival12_bytes = index.constant 64 : offset
+  %arrival12_storage = buffer.alloca<workgroup> pool(%tile12) align(64) %arrival12_bytes : buffer
+  %arrival12_slots = buffer.view %arrival12_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival12 = channel.bind<fifo> %arrival12_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure12_bytes = index.constant 64 : offset
+  %departure12_storage = buffer.alloca<workgroup> pool(%tile12) align(64) %departure12_bytes : buffer
+  %departure12_slots = buffer.view %departure12_storage[%origin] : buffer -> view<1x16xi32>
+  %departure12 = channel.bind<fifo> %departure12_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival16_bytes = index.constant 64 : offset
+  %arrival16_storage = buffer.alloca<workgroup> pool(%tile16) align(64) %arrival16_bytes : buffer
+  %arrival16_slots = buffer.view %arrival16_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival16 = channel.bind<fifo> %arrival16_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure16_bytes = index.constant 64 : offset
+  %departure16_storage = buffer.alloca<workgroup> pool(%tile16) align(64) %departure16_bytes : buffer
+  %departure16_slots = buffer.view %departure16_storage[%origin] : buffer -> view<1x16xi32>
+  %departure16 = channel.bind<fifo> %departure16_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival17_bytes = index.constant 64 : offset
+  %arrival17_storage = buffer.alloca<workgroup> pool(%tile17) align(64) %arrival17_bytes : buffer
+  %arrival17_slots = buffer.view %arrival17_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival17 = channel.bind<fifo> %arrival17_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure17_bytes = index.constant 64 : offset
+  %departure17_storage = buffer.alloca<workgroup> pool(%tile17) align(64) %departure17_bytes : buffer
+  %departure17_slots = buffer.view %departure17_storage[%origin] : buffer -> view<1x16xi32>
+  %departure17 = channel.bind<fifo> %departure17_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival18_bytes = index.constant 64 : offset
+  %arrival18_storage = buffer.alloca<workgroup> pool(%tile18) align(64) %arrival18_bytes : buffer
+  %arrival18_slots = buffer.view %arrival18_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival18 = channel.bind<fifo> %arrival18_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure18_bytes = index.constant 64 : offset
+  %departure18_storage = buffer.alloca<workgroup> pool(%tile18) align(64) %departure18_bytes : buffer
+  %departure18_slots = buffer.view %departure18_storage[%origin] : buffer -> view<1x16xi32>
+  %departure18 = channel.bind<fifo> %departure18_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival19_bytes = index.constant 64 : offset
+  %arrival19_storage = buffer.alloca<workgroup> pool(%tile19) align(64) %arrival19_bytes : buffer
+  %arrival19_slots = buffer.view %arrival19_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival19 = channel.bind<fifo> %arrival19_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure19_bytes = index.constant 64 : offset
+  %departure19_storage = buffer.alloca<workgroup> pool(%tile19) align(64) %departure19_bytes : buffer
+  %departure19_slots = buffer.view %departure19_storage[%origin] : buffer -> view<1x16xi32>
+  %departure19 = channel.bind<fifo> %departure19_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival23_bytes = index.constant 64 : offset
+  %arrival23_storage = buffer.alloca<workgroup> pool(%tile23) align(64) %arrival23_bytes : buffer
+  %arrival23_slots = buffer.view %arrival23_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival23 = channel.bind<fifo> %arrival23_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure23_bytes = index.constant 64 : offset
+  %departure23_storage = buffer.alloca<workgroup> pool(%tile23) align(64) %departure23_bytes : buffer
+  %departure23_slots = buffer.view %departure23_storage[%origin] : buffer -> view<1x16xi32>
+  %departure23 = channel.bind<fifo> %departure23_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival22_bytes = index.constant 64 : offset
+  %arrival22_storage = buffer.alloca<workgroup> pool(%tile22) align(64) %arrival22_bytes : buffer
+  %arrival22_slots = buffer.view %arrival22_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival22 = channel.bind<fifo> %arrival22_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure22_bytes = index.constant 64 : offset
+  %departure22_storage = buffer.alloca<workgroup> pool(%tile22) align(64) %departure22_bytes : buffer
+  %departure22_slots = buffer.view %departure22_storage[%origin] : buffer -> view<1x16xi32>
+  %departure22 = channel.bind<fifo> %departure22_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival21_bytes = index.constant 64 : offset
+  %arrival21_storage = buffer.alloca<workgroup> pool(%tile21) align(64) %arrival21_bytes : buffer
+  %arrival21_slots = buffer.view %arrival21_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival21 = channel.bind<fifo> %arrival21_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure21_bytes = index.constant 64 : offset
+  %departure21_storage = buffer.alloca<workgroup> pool(%tile21) align(64) %departure21_bytes : buffer
+  %departure21_slots = buffer.view %departure21_storage[%origin] : buffer -> view<1x16xi32>
+  %departure21 = channel.bind<fifo> %departure21_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival20_bytes = index.constant 64 : offset
+  %arrival20_storage = buffer.alloca<workgroup> pool(%tile20) align(64) %arrival20_bytes : buffer
+  %arrival20_slots = buffer.view %arrival20_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival20 = channel.bind<fifo> %arrival20_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure20_bytes = index.constant 64 : offset
+  %departure20_storage = buffer.alloca<workgroup> pool(%tile20) align(64) %departure20_bytes : buffer
+  %departure20_slots = buffer.view %departure20_storage[%origin] : buffer -> view<1x16xi32>
+  %departure20 = channel.bind<fifo> %departure20_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival24_bytes = index.constant 64 : offset
+  %arrival24_storage = buffer.alloca<workgroup> pool(%tile24) align(64) %arrival24_bytes : buffer
+  %arrival24_slots = buffer.view %arrival24_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival24 = channel.bind<fifo> %arrival24_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure24_bytes = index.constant 64 : offset
+  %departure24_storage = buffer.alloca<workgroup> pool(%tile24) align(64) %departure24_bytes : buffer
+  %departure24_slots = buffer.view %departure24_storage[%origin] : buffer -> view<1x16xi32>
+  %departure24 = channel.bind<fifo> %departure24_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival25_bytes = index.constant 64 : offset
+  %arrival25_storage = buffer.alloca<workgroup> pool(%tile25) align(64) %arrival25_bytes : buffer
+  %arrival25_slots = buffer.view %arrival25_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival25 = channel.bind<fifo> %arrival25_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure25_bytes = index.constant 64 : offset
+  %departure25_storage = buffer.alloca<workgroup> pool(%tile25) align(64) %departure25_bytes : buffer
+  %departure25_slots = buffer.view %departure25_storage[%origin] : buffer -> view<1x16xi32>
+  %departure25 = channel.bind<fifo> %departure25_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival26_bytes = index.constant 64 : offset
+  %arrival26_storage = buffer.alloca<workgroup> pool(%tile26) align(64) %arrival26_bytes : buffer
+  %arrival26_slots = buffer.view %arrival26_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival26 = channel.bind<fifo> %arrival26_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure26_bytes = index.constant 64 : offset
+  %departure26_storage = buffer.alloca<workgroup> pool(%tile26) align(64) %departure26_bytes : buffer
+  %departure26_slots = buffer.view %departure26_storage[%origin] : buffer -> view<1x16xi32>
+  %departure26 = channel.bind<fifo> %departure26_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival27_bytes = index.constant 64 : offset
+  %arrival27_storage = buffer.alloca<workgroup> pool(%tile27) align(64) %arrival27_bytes : buffer
+  %arrival27_slots = buffer.view %arrival27_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival27 = channel.bind<fifo> %arrival27_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure27_bytes = index.constant 64 : offset
+  %departure27_storage = buffer.alloca<workgroup> pool(%tile27) align(64) %departure27_bytes : buffer
+  %departure27_slots = buffer.view %departure27_storage[%origin] : buffer -> view<1x16xi32>
+  %departure27 = channel.bind<fifo> %departure27_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival31_bytes = index.constant 64 : offset
+  %arrival31_storage = buffer.alloca<workgroup> pool(%tile31) align(64) %arrival31_bytes : buffer
+  %arrival31_slots = buffer.view %arrival31_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival31 = channel.bind<fifo> %arrival31_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure31_bytes = index.constant 64 : offset
+  %departure31_storage = buffer.alloca<workgroup> pool(%tile31) align(64) %departure31_bytes : buffer
+  %departure31_slots = buffer.view %departure31_storage[%origin] : buffer -> view<1x16xi32>
+  %departure31 = channel.bind<fifo> %departure31_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival30_bytes = index.constant 64 : offset
+  %arrival30_storage = buffer.alloca<workgroup> pool(%tile30) align(64) %arrival30_bytes : buffer
+  %arrival30_slots = buffer.view %arrival30_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival30 = channel.bind<fifo> %arrival30_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure30_bytes = index.constant 64 : offset
+  %departure30_storage = buffer.alloca<workgroup> pool(%tile30) align(64) %departure30_bytes : buffer
+  %departure30_slots = buffer.view %departure30_storage[%origin] : buffer -> view<1x16xi32>
+  %departure30 = channel.bind<fifo> %departure30_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %arrival29_bytes = index.constant 64 : offset
+  %arrival29_storage = buffer.alloca<workgroup> pool(%tile29) align(64) %arrival29_bytes : buffer
+  %arrival29_slots = buffer.view %arrival29_storage[%origin] : buffer -> view<1x16xi32>
+  %arrival29 = channel.bind<fifo> %arrival29_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %departure29_bytes = index.constant 64 : offset
+  %departure29_storage = buffer.alloca<workgroup> pool(%tile29) align(64) %departure29_bytes : buffer
+  %departure29_slots = buffer.view %departure29_storage[%origin] : buffer -> view<1x16xi32>
+  %departure29 = channel.bind<fifo> %departure29_slots, %one : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %activation_records = index.constant 128 : index
+  %result_offset = index.constant 10624 : offset
+  %result0_slots = buffer.view %storage0[%result_offset] : buffer -> view<1x4096xbf16>
+  %result0 = channel.bind<fifo> %result0_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result2_slots = buffer.view %storage2[%result_offset] : buffer -> view<1x4096xbf16>
+  %result2 = channel.bind<fifo> %result2_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result4_slots = buffer.view %storage4[%result_offset] : buffer -> view<1x4096xbf16>
+  %result4 = channel.bind<fifo> %result4_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result6_slots = buffer.view %storage6[%result_offset] : buffer -> view<1x4096xbf16>
+  %result6 = channel.bind<fifo> %result6_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result8_slots = buffer.view %storage9[%result_offset] : buffer -> view<1x4096xbf16>
+  %result8 = channel.bind<fifo> %result8_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result10_slots = buffer.view %storage11[%result_offset] : buffer -> view<1x4096xbf16>
+  %result10 = channel.bind<fifo> %result10_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result12_slots = buffer.view %storage12[%result_offset] : buffer -> view<1x4096xbf16>
+  %result12 = channel.bind<fifo> %result12_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result14_slots = buffer.view %storage14[%result_offset] : buffer -> view<1x4096xbf16>
+  %result14 = channel.bind<fifo> %result14_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result16_slots = buffer.view %storage16[%result_offset] : buffer -> view<1x4096xbf16>
+  %result16 = channel.bind<fifo> %result16_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result18_slots = buffer.view %storage18[%result_offset] : buffer -> view<1x4096xbf16>
+  %result18 = channel.bind<fifo> %result18_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result20_slots = buffer.view %storage20[%result_offset] : buffer -> view<1x4096xbf16>
+  %result20 = channel.bind<fifo> %result20_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result22_slots = buffer.view %storage22[%result_offset] : buffer -> view<1x4096xbf16>
+  %result22 = channel.bind<fifo> %result22_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result24_slots = buffer.view %storage25[%result_offset] : buffer -> view<1x4096xbf16>
+  %result24 = channel.bind<fifo> %result24_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result26_slots = buffer.view %storage27[%result_offset] : buffer -> view<1x4096xbf16>
+  %result26 = channel.bind<fifo> %result26_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result28_slots = buffer.view %storage28[%result_offset] : buffer -> view<1x4096xbf16>
+  %result28 = channel.bind<fifo> %result28_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %result30_slots = buffer.view %storage30[%result_offset] : buffer -> view<1x4096xbf16>
+  %result30 = channel.bind<fifo> %result30_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+
+  %query_records = index.constant 5190 : index
+  %value_records = index.constant 4294 : index
+  %sequence_bytes = index.constant 512 : offset
+  %probability0_slots = buffer.view %storage0[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability0 = channel.bind<fifo> %probability0_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence0_storage = buffer.alloca<workgroup> pool(%tile0) align(64) %sequence_bytes : buffer
+  %probability2_slots = buffer.view %storage2[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability2 = channel.bind<fifo> %probability2_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence2_storage = buffer.alloca<workgroup> pool(%tile2) align(64) %sequence_bytes : buffer
+  %probability4_slots = buffer.view %storage4[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability4 = channel.bind<fifo> %probability4_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence4_storage = buffer.alloca<workgroup> pool(%tile4) align(64) %sequence_bytes : buffer
+  %probability6_slots = buffer.view %storage6[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability6 = channel.bind<fifo> %probability6_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence6_storage = buffer.alloca<workgroup> pool(%tile6) align(64) %sequence_bytes : buffer
+  %probability8_slots = buffer.view %storage8[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability8 = channel.bind<fifo> %probability8_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence8_storage = buffer.alloca<workgroup> pool(%tile8) align(64) %sequence_bytes : buffer
+  %probability10_slots = buffer.view %storage10[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability10 = channel.bind<fifo> %probability10_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence10_storage = buffer.alloca<workgroup> pool(%tile10) align(64) %sequence_bytes : buffer
+  %probability12_slots = buffer.view %storage12[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability12 = channel.bind<fifo> %probability12_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence12_storage = buffer.alloca<workgroup> pool(%tile12) align(64) %sequence_bytes : buffer
+  %probability14_slots = buffer.view %storage14[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability14 = channel.bind<fifo> %probability14_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence14_storage = buffer.alloca<workgroup> pool(%tile14) align(64) %sequence_bytes : buffer
+  %probability16_slots = buffer.view %storage16[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability16 = channel.bind<fifo> %probability16_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence16_storage = buffer.alloca<workgroup> pool(%tile16) align(64) %sequence_bytes : buffer
+  %probability18_slots = buffer.view %storage18[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability18 = channel.bind<fifo> %probability18_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence18_storage = buffer.alloca<workgroup> pool(%tile18) align(64) %sequence_bytes : buffer
+  %probability20_slots = buffer.view %storage20[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability20 = channel.bind<fifo> %probability20_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence20_storage = buffer.alloca<workgroup> pool(%tile20) align(64) %sequence_bytes : buffer
+  %probability22_slots = buffer.view %storage22[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability22 = channel.bind<fifo> %probability22_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence22_storage = buffer.alloca<workgroup> pool(%tile22) align(64) %sequence_bytes : buffer
+  %probability24_slots = buffer.view %storage24[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability24 = channel.bind<fifo> %probability24_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence24_storage = buffer.alloca<workgroup> pool(%tile24) align(64) %sequence_bytes : buffer
+  %probability26_slots = buffer.view %storage26[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability26 = channel.bind<fifo> %probability26_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence26_storage = buffer.alloca<workgroup> pool(%tile26) align(64) %sequence_bytes : buffer
+  %probability28_slots = buffer.view %storage28[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability28 = channel.bind<fifo> %probability28_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence28_storage = buffer.alloca<workgroup> pool(%tile28) align(64) %sequence_bytes : buffer
+  %probability30_slots = buffer.view %storage30[%result_offset] : buffer -> view<1x4096xbf16>
+  %probability30 = channel.bind<fifo> %probability30_slots, %one : view<1x4096xbf16>, index -> channel<tile<4096xbf16>>
+  %sequence30_storage = buffer.alloca<workgroup> pool(%tile30) align(64) %sequence_bytes : buffer
+
+  %paired_capacity = index.constant 2 : index
+  %query_result_offset = index.constant 39872 : offset
+  %query_output0_slots = buffer.view %storage0[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output0 = channel.bind<fifo> %query_output0_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output2_slots = buffer.view %storage2[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output2 = channel.bind<fifo> %query_output2_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output4_slots = buffer.view %storage4[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output4 = channel.bind<fifo> %query_output4_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output6_slots = buffer.view %storage6[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output6 = channel.bind<fifo> %query_output6_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output8_slots = buffer.view %storage9[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output8 = channel.bind<fifo> %query_output8_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output10_slots = buffer.view %storage11[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output10 = channel.bind<fifo> %query_output10_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output12_slots = buffer.view %storage12[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output12 = channel.bind<fifo> %query_output12_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output14_slots = buffer.view %storage14[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output14 = channel.bind<fifo> %query_output14_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output16_slots = buffer.view %storage16[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output16 = channel.bind<fifo> %query_output16_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output18_slots = buffer.view %storage18[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output18 = channel.bind<fifo> %query_output18_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output20_slots = buffer.view %storage20[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output20 = channel.bind<fifo> %query_output20_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output22_slots = buffer.view %storage22[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output22 = channel.bind<fifo> %query_output22_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output24_slots = buffer.view %storage25[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output24 = channel.bind<fifo> %query_output24_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output26_slots = buffer.view %storage27[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output26 = channel.bind<fifo> %query_output26_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output28_slots = buffer.view %storage28[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output28 = channel.bind<fifo> %query_output28_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %query_output30_slots = buffer.view %storage30[%query_result_offset] : buffer -> view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>
+  %query_output30 = channel.bind<fifo> %query_output30_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %dimension_bytes = index.constant 32 : offset
+  %normal_output8 = channel.bind<fifo> %query_output8_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %normal_output10 = channel.bind<fifo> %query_output10_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %normal_output24 = channel.bind<fifo> %query_output24_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %normal_output26 = channel.bind<fifo> %query_output26_slots, %paired_capacity : view<2x4096xbf16, #encoding.layout.strided<strides=[8192, 1]>>, index -> channel<tile<4096xbf16>>
+  %dimensions1_storage = buffer.alloca<workgroup> pool(%tile1) align(16) %dimension_bytes : buffer
+  %dimensions3_storage = buffer.alloca<workgroup> pool(%tile3) align(16) %dimension_bytes : buffer
+  %dimensions5_storage = buffer.alloca<workgroup> pool(%tile5) align(16) %dimension_bytes : buffer
+  %dimensions7_storage = buffer.alloca<workgroup> pool(%tile7) align(16) %dimension_bytes : buffer
+  %dimensions8_storage = buffer.alloca<workgroup> pool(%tile8) align(16) %dimension_bytes : buffer
+  %dimensions10_storage = buffer.alloca<workgroup> pool(%tile10) align(16) %dimension_bytes : buffer
+  %dimensions13_storage = buffer.alloca<workgroup> pool(%tile13) align(16) %dimension_bytes : buffer
+  %dimensions15_storage = buffer.alloca<workgroup> pool(%tile15) align(16) %dimension_bytes : buffer
+  %dimensions17_storage = buffer.alloca<workgroup> pool(%tile17) align(16) %dimension_bytes : buffer
+  %dimensions19_storage = buffer.alloca<workgroup> pool(%tile19) align(16) %dimension_bytes : buffer
+  %dimensions21_storage = buffer.alloca<workgroup> pool(%tile21) align(16) %dimension_bytes : buffer
+  %dimensions23_storage = buffer.alloca<workgroup> pool(%tile23) align(16) %dimension_bytes : buffer
+  %dimensions24_storage = buffer.alloca<workgroup> pool(%tile24) align(16) %dimension_bytes : buffer
+  %dimensions26_storage = buffer.alloca<workgroup> pool(%tile26) align(16) %dimension_bytes : buffer
+  %dimensions29_storage = buffer.alloca<workgroup> pool(%tile29) align(16) %dimension_bytes : buffer
+  %dimensions31_storage = buffer.alloca<workgroup> pool(%tile31) align(16) %dimension_bytes : buffer
+  %gather_cache_bytes = index.constant 192 : offset
+  %gather_cache0 = buffer.alloca<workgroup> pool(%tile0) align(16) %gather_cache_bytes : buffer
+  %gather_cache9 = buffer.alloca<workgroup> pool(%tile9) align(16) %gather_cache_bytes : buffer
+  %gather_cache18 = buffer.alloca<workgroup> pool(%tile18) align(16) %gather_cache_bytes : buffer
+  %gather_cache27 = buffer.alloca<workgroup> pool(%tile27) align(16) %gather_cache_bytes : buffer
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %base = index.constant 0 : offset
+    %stride = index.constant 18496 : offset
+    scf.for %record = [%zero to %records step %one] {
+      %relative = index.scale %record, %stride : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %weights[%offset] : buffer -> view<4624xi32>
+      %weight_ingress0_write, %weight_ingress0_destination = channel.reserve %weight_ingress0 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      %ingress_copy = kernel.async.copy %external to %weight_ingress0_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4624xi32> to view<4624xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress_copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_ingress0_write : write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %records step %one] {
+      %weight_ingress0_read, %weight_ingress0_source = channel.acquire %weight_ingress0 : channel<tile<4624xi32>> -> (read<tile<4624xi32>>, view<4624xi32>)
+      %branch0, %branch1, %branch2, %branch3 = channel.fanout %weight_ingress0_read : read<tile<4624xi32>> -> (read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>)
+      %weights0_write, %weights0_destination = channel.reserve %weights0 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch0 -> %weights0_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights1_write, %weights1_destination = channel.reserve %weights1 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch1 -> %weights1_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights2_write, %weights2_destination = channel.reserve %weights2 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch2 -> %weights2_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights3_write, %weights3_destination = channel.reserve %weights3 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch3 -> %weights3_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+    %base = index.constant 62146560 : offset
+    %stride = index.constant 18496 : offset
+    scf.for %record = [%zero to %records step %one] {
+      %relative = index.scale %record, %stride : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %weights[%offset] : buffer -> view<4624xi32>
+      %weight_ingress1_write, %weight_ingress1_destination = channel.reserve %weight_ingress1 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      %ingress_copy = kernel.async.copy %external to %weight_ingress1_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4624xi32> to view<4624xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress_copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_ingress1_write : write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %records step %one] {
+      %weight_ingress1_read, %weight_ingress1_source = channel.acquire %weight_ingress1 : channel<tile<4624xi32>> -> (read<tile<4624xi32>>, view<4624xi32>)
+      %branch0, %branch1, %branch2, %branch3 = channel.fanout %weight_ingress1_read : read<tile<4624xi32>> -> (read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>)
+      %weights4_write, %weights4_destination = channel.reserve %weights4 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch0 -> %weights4_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights5_write, %weights5_destination = channel.reserve %weights5 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch1 -> %weights5_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights6_write, %weights6_destination = channel.reserve %weights6 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch2 -> %weights6_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights7_write, %weights7_destination = channel.reserve %weights7 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch3 -> %weights7_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([2, 2], [1, 1], [1, 1]) {
+    %base = index.constant 124293120 : offset
+    %stride = index.constant 18496 : offset
+    scf.for %record = [%zero to %records step %one] {
+      %relative = index.scale %record, %stride : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %weights[%offset] : buffer -> view<4624xi32>
+      %weight_ingress2_write, %weight_ingress2_destination = channel.reserve %weight_ingress2 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      %ingress_copy = kernel.async.copy %external to %weight_ingress2_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4624xi32> to view<4624xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress_copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_ingress2_write : write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([2, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %records step %one] {
+      %weight_ingress2_read, %weight_ingress2_source = channel.acquire %weight_ingress2 : channel<tile<4624xi32>> -> (read<tile<4624xi32>>, view<4624xi32>)
+      %branch0, %branch1, %branch2, %branch3 = channel.fanout %weight_ingress2_read : read<tile<4624xi32>> -> (read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>)
+      %weights8_write, %weights8_destination = channel.reserve %weights8 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch0 -> %weights8_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights9_write, %weights9_destination = channel.reserve %weights9 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch1 -> %weights9_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights10_write, %weights10_destination = channel.reserve %weights10 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch2 -> %weights10_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights11_write, %weights11_destination = channel.reserve %weights11 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch3 -> %weights11_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([3, 2], [1, 1], [1, 1]) {
+    %base = index.constant 186439680 : offset
+    %stride = index.constant 18496 : offset
+    scf.for %record = [%zero to %records step %one] {
+      %relative = index.scale %record, %stride : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %weights[%offset] : buffer -> view<4624xi32>
+      %weight_ingress3_write, %weight_ingress3_destination = channel.reserve %weight_ingress3 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      %ingress_copy = kernel.async.copy %external to %weight_ingress3_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4624xi32> to view<4624xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress_copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_ingress3_write : write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([3, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %records step %one] {
+      %weight_ingress3_read, %weight_ingress3_source = channel.acquire %weight_ingress3 : channel<tile<4624xi32>> -> (read<tile<4624xi32>>, view<4624xi32>)
+      %branch0, %branch1, %branch2, %branch3 = channel.fanout %weight_ingress3_read : read<tile<4624xi32>> -> (read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>)
+      %weights12_write, %weights12_destination = channel.reserve %weights12 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch0 -> %weights12_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights13_write, %weights13_destination = channel.reserve %weights13 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch1 -> %weights13_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights14_write, %weights14_destination = channel.reserve %weights14 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch2 -> %weights14_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights15_write, %weights15_destination = channel.reserve %weights15 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch3 -> %weights15_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([4, 2], [1, 1], [1, 1]) {
+    %base = index.constant 248586240 : offset
+    %stride = index.constant 18496 : offset
+    scf.for %record = [%zero to %records step %one] {
+      %relative = index.scale %record, %stride : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %weights[%offset] : buffer -> view<4624xi32>
+      %weight_ingress4_write, %weight_ingress4_destination = channel.reserve %weight_ingress4 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      %ingress_copy = kernel.async.copy %external to %weight_ingress4_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4624xi32> to view<4624xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress_copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_ingress4_write : write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([4, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %records step %one] {
+      %weight_ingress4_read, %weight_ingress4_source = channel.acquire %weight_ingress4 : channel<tile<4624xi32>> -> (read<tile<4624xi32>>, view<4624xi32>)
+      %branch0, %branch1, %branch2, %branch3 = channel.fanout %weight_ingress4_read : read<tile<4624xi32>> -> (read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>)
+      %weights16_write, %weights16_destination = channel.reserve %weights16 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch0 -> %weights16_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights17_write, %weights17_destination = channel.reserve %weights17 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch1 -> %weights17_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights18_write, %weights18_destination = channel.reserve %weights18 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch2 -> %weights18_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights19_write, %weights19_destination = channel.reserve %weights19 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch3 -> %weights19_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([5, 2], [1, 1], [1, 1]) {
+    %base = index.constant 310732800 : offset
+    %stride = index.constant 18496 : offset
+    scf.for %record = [%zero to %records step %one] {
+      %relative = index.scale %record, %stride : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %weights[%offset] : buffer -> view<4624xi32>
+      %weight_ingress5_write, %weight_ingress5_destination = channel.reserve %weight_ingress5 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      %ingress_copy = kernel.async.copy %external to %weight_ingress5_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4624xi32> to view<4624xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress_copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_ingress5_write : write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([5, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %records step %one] {
+      %weight_ingress5_read, %weight_ingress5_source = channel.acquire %weight_ingress5 : channel<tile<4624xi32>> -> (read<tile<4624xi32>>, view<4624xi32>)
+      %branch0, %branch1, %branch2, %branch3 = channel.fanout %weight_ingress5_read : read<tile<4624xi32>> -> (read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>)
+      %weights20_write, %weights20_destination = channel.reserve %weights20 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch0 -> %weights20_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights21_write, %weights21_destination = channel.reserve %weights21 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch1 -> %weights21_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights22_write, %weights22_destination = channel.reserve %weights22 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch2 -> %weights22_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights23_write, %weights23_destination = channel.reserve %weights23 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch3 -> %weights23_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([6, 2], [1, 1], [1, 1]) {
+    %base = index.constant 372879360 : offset
+    %stride = index.constant 18496 : offset
+    scf.for %record = [%zero to %records step %one] {
+      %relative = index.scale %record, %stride : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %weights[%offset] : buffer -> view<4624xi32>
+      %weight_ingress6_write, %weight_ingress6_destination = channel.reserve %weight_ingress6 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      %ingress_copy = kernel.async.copy %external to %weight_ingress6_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4624xi32> to view<4624xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress_copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_ingress6_write : write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([6, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %records step %one] {
+      %weight_ingress6_read, %weight_ingress6_source = channel.acquire %weight_ingress6 : channel<tile<4624xi32>> -> (read<tile<4624xi32>>, view<4624xi32>)
+      %branch0, %branch1, %branch2, %branch3 = channel.fanout %weight_ingress6_read : read<tile<4624xi32>> -> (read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>)
+      %weights24_write, %weights24_destination = channel.reserve %weights24 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch0 -> %weights24_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights25_write, %weights25_destination = channel.reserve %weights25 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch1 -> %weights25_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights26_write, %weights26_destination = channel.reserve %weights26 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch2 -> %weights26_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights27_write, %weights27_destination = channel.reserve %weights27 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch3 -> %weights27_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([7, 2], [1, 1], [1, 1]) {
+    %base = index.constant 435025920 : offset
+    %stride = index.constant 18496 : offset
+    scf.for %record = [%zero to %records step %one] {
+      %relative = index.scale %record, %stride : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %weights[%offset] : buffer -> view<4624xi32>
+      %weight_ingress7_write, %weight_ingress7_destination = channel.reserve %weight_ingress7 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      %ingress_copy = kernel.async.copy %external to %weight_ingress7_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4624xi32> to view<4624xi32> -> kernel.async.token
+      %ingress_group = kernel.async.group %ingress_copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_ingress7_write : write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([7, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %records step %one] {
+      %weight_ingress7_read, %weight_ingress7_source = channel.acquire %weight_ingress7 : channel<tile<4624xi32>> -> (read<tile<4624xi32>>, view<4624xi32>)
+      %branch0, %branch1, %branch2, %branch3 = channel.fanout %weight_ingress7_read : read<tile<4624xi32>> -> (read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>, read<tile<4624xi32>>)
+      %weights28_write, %weights28_destination = channel.reserve %weights28 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch0 -> %weights28_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights29_write, %weights29_destination = channel.reserve %weights29 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch1 -> %weights29_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights30_write, %weights30_destination = channel.reserve %weights30 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch2 -> %weights30_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+      %weights31_write, %weights31_destination = channel.reserve %weights31 : channel<tile<4624xi32>> -> (write<tile<4624xi32>>, view<4624xi32>)
+      channel.copy %branch3 -> %weights31_write : read<tile<4624xi32>>, write<tile<4624xi32>>
+    }
+  }
+
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %query_records step %one] {
+      %activations0_read, %activations0_source = channel.acquire %activations0 : channel<tile<2048xi32>> -> (read<tile<2048xi32>>, view<2048xi32>)
+      %branch4, %branch8, %branch12, %branch16, %branch20, %branch24, %branch28 = channel.fanout %activations0_read : read<tile<2048xi32>> -> (read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>)
+      %activations4_write, %activations4_destination = channel.reserve %activations4 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch4 -> %activations4_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations8_write, %activations8_destination = channel.reserve %activations8 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch8 -> %activations8_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations12_write, %activations12_destination = channel.reserve %activations12 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch12 -> %activations12_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations16_write, %activations16_destination = channel.reserve %activations16 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch16 -> %activations16_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations20_write, %activations20_destination = channel.reserve %activations20 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch20 -> %activations20_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations24_write, %activations24_destination = channel.reserve %activations24 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch24 -> %activations24_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations28_write, %activations28_destination = channel.reserve %activations28 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch28 -> %activations28_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+    }
+  }
+
+  pipeline.strand workers([2, 3], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %value_records step %one] {
+      %activations9_read, %activations9_source = channel.acquire %activations9 : channel<tile<2048xi32>> -> (read<tile<2048xi32>>, view<2048xi32>)
+      %branch1, %branch5, %branch13, %branch17, %branch21, %branch25, %branch29 = channel.fanout %activations9_read : read<tile<2048xi32>> -> (read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>)
+      %activations1_write, %activations1_destination = channel.reserve %activations1 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch1 -> %activations1_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations5_write, %activations5_destination = channel.reserve %activations5 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch5 -> %activations5_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations13_write, %activations13_destination = channel.reserve %activations13 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch13 -> %activations13_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations17_write, %activations17_destination = channel.reserve %activations17 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch17 -> %activations17_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations21_write, %activations21_destination = channel.reserve %activations21 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch21 -> %activations21_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations25_write, %activations25_destination = channel.reserve %activations25 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch25 -> %activations25_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations29_write, %activations29_destination = channel.reserve %activations29 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch29 -> %activations29_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+    }
+  }
+
+  pipeline.strand workers([4, 4], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %query_records step %one] {
+      %activations18_read, %activations18_source = channel.acquire %activations18 : channel<tile<2048xi32>> -> (read<tile<2048xi32>>, view<2048xi32>)
+      %branch2, %branch6, %branch10, %branch14, %branch22, %branch26, %branch30 = channel.fanout %activations18_read : read<tile<2048xi32>> -> (read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>)
+      %activations2_write, %activations2_destination = channel.reserve %activations2 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch2 -> %activations2_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations6_write, %activations6_destination = channel.reserve %activations6 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch6 -> %activations6_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations10_write, %activations10_destination = channel.reserve %activations10 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch10 -> %activations10_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations14_write, %activations14_destination = channel.reserve %activations14 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch14 -> %activations14_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations22_write, %activations22_destination = channel.reserve %activations22 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch22 -> %activations22_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations26_write, %activations26_destination = channel.reserve %activations26 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch26 -> %activations26_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations30_write, %activations30_destination = channel.reserve %activations30 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch30 -> %activations30_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+    }
+  }
+
+  pipeline.strand workers([6, 5], [1, 1], [1, 1]) {
+    scf.for %record = [%zero to %value_records step %one] {
+      %activations27_read, %activations27_source = channel.acquire %activations27 : channel<tile<2048xi32>> -> (read<tile<2048xi32>>, view<2048xi32>)
+      %branch3, %branch7, %branch11, %branch15, %branch19, %branch23, %branch31 = channel.fanout %activations27_read : read<tile<2048xi32>> -> (read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>, read<tile<2048xi32>>)
+      %activations3_write, %activations3_destination = channel.reserve %activations3 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch3 -> %activations3_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations7_write, %activations7_destination = channel.reserve %activations7 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch7 -> %activations7_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations11_write, %activations11_destination = channel.reserve %activations11 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch11 -> %activations11_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations15_write, %activations15_destination = channel.reserve %activations15 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch15 -> %activations15_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations19_write, %activations19_destination = channel.reserve %activations19 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch19 -> %activations19_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations23_write, %activations23_destination = channel.reserve %activations23 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch23 -> %activations23_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+      %activations31_write, %activations31_destination = channel.reserve %activations31 : channel<tile<2048xi32>> -> (write<tile<2048xi32>>, view<2048xi32>)
+      channel.copy %branch31 -> %activations31_write : read<tile<2048xi32>>, write<tile<2048xi32>>
+    }
+  }
+
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @qwen3_embedding.query_key_ingress_root(%sequence0_storage, %origin, %storage0, %result_offset, %storage1, %gather_cache0, %activations, %activations0, %zero, %one, %weights, %state, %arrival0, %departure0, %query_output0, %output, %weights0, %activation_offset, %probability0, %result0) : (buffer, offset, buffer, offset, buffer, buffer, buffer, channel<tile<2048xi32>>, index, index, buffer, buffer, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>)
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %column_offset = index.constant 0 : index
+    %dimension_row_base = index.constant 0 : index
+    %row_column = index.constant 0 : index
+    %skip_column = index.constant 0 : index
+    func.call @qwen3_embedding.probability_value_normalize(%dimensions1_storage, %origin, %storage1, %result_offset, %storage0, %activations1, %zero, %one, %arrival1, %arrival0, %departure0, %departure1, %query_output0, %weights1, %activation_offset, %probability0, %result0, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    %column_offset = index.constant 0 : index
+    %row_column = index.constant 0 : index
+    %finish_initial = index.constant 262144 : offset
+    %normalized_initial = index.constant 1073152 : offset
+    %skip_column = index.constant 0 : index
+    %query_initial = index.constant 663552 : offset
+    %key_initial = index.constant 139264 : offset
+    %value_initial = index.constant 270464 : offset
+    %mlp_initial = index.constant 1859584 : offset
+    %residual_initial = index.constant 2760704 : offset
+    %output_initial = index.constant 1351680 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence2_storage, %origin, %storage2, %result_offset, %storage3, %activations2, %zero, %one, %arrival2, %arrival1, %departure1, %departure2, %query_output2, %output, %state, %weights2, %activation_offset, %probability2, %result2, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([0, 5], [1, 1], [1, 1]) {
+    %column_offset = index.constant 0 : index
+    %dimension_row_base = index.constant 64 : index
+    %row_column = index.constant 0 : index
+    %skip_column = index.constant 0 : index
+    func.call @qwen3_embedding.probability_value(%dimensions3_storage, %origin, %storage3, %result_offset, %storage2, %activations3, %zero, %one, %arrival3, %arrival2, %departure2, %departure3, %query_output2, %weights3, %activation_offset, %probability2, %result2, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+    %column_offset = index.constant 512 : index
+    %row_column = index.constant 1 : index
+    %finish_initial = index.constant 16384 : offset
+    %normalized_initial = index.constant 1056832 : offset
+    %skip_column = index.constant 128 : index
+    %query_initial = index.constant 794624 : offset
+    %key_initial = index.constant 9216 : offset
+    %value_initial = index.constant 271360 : offset
+    %mlp_initial = index.constant 1875968 : offset
+    %residual_initial = index.constant 2629888 : offset
+    %output_initial = index.constant 1384448 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence4_storage, %origin, %storage4, %result_offset, %storage5, %activations4, %zero, %one, %arrival4, %arrival5, %departure5, %departure4, %query_output4, %output, %state, %weights4, %activation_offset, %probability4, %result4, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([1, 3], [1, 1], [1, 1]) {
+    %column_offset = index.constant 512 : index
+    %dimension_row_base = index.constant 4 : index
+    %row_column = index.constant 1 : index
+    %skip_column = index.constant 128 : index
+    func.call @qwen3_embedding.probability_value(%dimensions5_storage, %origin, %storage5, %result_offset, %storage4, %activations5, %zero, %one, %arrival5, %arrival6, %departure6, %departure5, %query_output4, %weights5, %activation_offset, %probability4, %result4, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([1, 4], [1, 1], [1, 1]) {
+    %column_offset = index.constant 512 : index
+    %row_column = index.constant 1 : index
+    %finish_initial = index.constant 278528 : offset
+    %normalized_initial = index.constant 1073216 : offset
+    %skip_column = index.constant 128 : index
+    %query_initial = index.constant 925696 : offset
+    %key_initial = index.constant 140288 : offset
+    %value_initial = index.constant 271488 : offset
+    %mlp_initial = index.constant 1892352 : offset
+    %residual_initial = index.constant 2760960 : offset
+    %output_initial = index.constant 1417216 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence6_storage, %origin, %storage6, %result_offset, %storage7, %activations6, %zero, %one, %arrival6, %arrival7, %departure7, %departure6, %query_output6, %output, %state, %weights6, %activation_offset, %probability6, %result6, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([1, 5], [1, 1], [1, 1]) {
+    %column_offset = index.constant 512 : index
+    %dimension_row_base = index.constant 68 : index
+    %row_column = index.constant 1 : index
+    %skip_column = index.constant 128 : index
+    func.call @qwen3_embedding.probability_value(%dimensions7_storage, %origin, %storage7, %result_offset, %storage6, %activations7, %zero, %one, %arrival7, %arrival3, %departure3, %departure7, %query_output6, %weights7, %activation_offset, %probability6, %result6, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([2, 2], [1, 1], [1, 1]) {
+    %column_offset = index.constant 1024 : index
+    %dimension_row_base = index.constant 8 : index
+    %row_column = index.constant 2 : index
+    %skip_column = index.constant 256 : index
+    func.call @qwen3_embedding.query_key_epilogue(%sequence8_storage, %origin, %dimensions8_storage, %storage8, %result_offset, %storage9, %activations8, %zero, %one, %arrival8, %arrival4, %departure4, %departure8, %normal_output8, %weights8, %activation_offset, %query_output8, %probability8, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([2, 3], [1, 1], [1, 1]) {
+    %column_offset = index.constant 1024 : index
+    %gather_row_base = index.constant 32 : index
+    %row_column = index.constant 2 : index
+    %row_input_initial = index.constant 2695168 : offset
+    %finish_initial = index.constant 32768 : offset
+    %normalized_initial = index.constant 1056896 : offset
+    %dense_normalized_initial = index.constant 1064960 : offset
+    %dense_context_initial = index.constant 1327104 : offset
+    %dense_mlp_initial = index.constant 1851392 : offset
+    %skip_initial = index.constant 2695168 : offset
+    %rotary_address = index.constant 2899968 : offset
+    %skip_column = index.constant 256 : index
+    %query_initial = index.constant 533504 : offset
+    %key_initial = index.constant 10240 : offset
+    %value_initial = index.constant 272384 : offset
+    %mlp_initial = index.constant 1908736 : offset
+    %residual_initial = index.constant 2630144 : offset
+    %output_initial = index.constant 1449984 : offset
+    func.call @qwen3_embedding.probability_value_ingress(%storage9, %origin, %result_offset, %storage8, %gather_cache9, %activations, %activations9, %zero, %one, %weights, %state, %arrival9, %arrival8, %departure8, %departure9, %normal_output8, %output, %weights9, %activation_offset, %query_output8, %probability8, %sequence8_storage, %result8, %column_offset, %gather_row_base, %row_column, %row_input_initial, %finish_initial, %normalized_initial, %dense_normalized_initial, %dense_context_initial, %dense_mlp_initial, %skip_initial, %rotary_address, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, offset, buffer, buffer, buffer, channel<tile<2048xi32>>, index, index, buffer, buffer, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, buffer, channel<tile<4096xbf16>>, index, index, index, offset, offset, offset, offset, offset, offset, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([2, 4], [1, 1], [1, 1]) {
+    %column_offset = index.constant 1024 : index
+    %dimension_row_base = index.constant 72 : index
+    %row_column = index.constant 2 : index
+    %skip_column = index.constant 256 : index
+    func.call @qwen3_embedding.query_key_normalize(%sequence10_storage, %origin, %dimensions10_storage, %storage10, %result_offset, %storage11, %activations10, %zero, %one, %arrival10, %arrival9, %departure9, %departure10, %normal_output10, %weights10, %activation_offset, %probability10, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([2, 5], [1, 1], [1, 1]) {
+    %column_offset = index.constant 1024 : index
+    %row_column = index.constant 2 : index
+    %finish_initial = index.constant 294912 : offset
+    %normalized_initial = index.constant 1073280 : offset
+    %skip_column = index.constant 256 : index
+    %query_initial = index.constant 664576 : offset
+    %key_initial = index.constant 141312 : offset
+    %value_initial = index.constant 272512 : offset
+    %mlp_initial = index.constant 1925120 : offset
+    %residual_initial = index.constant 2761216 : offset
+    %output_initial = index.constant 1482752 : offset
+    func.call @qwen3_embedding.probability_value_egress(%storage11, %origin, %result_offset, %storage10, %activations11, %zero, %one, %arrival11, %arrival10, %departure10, %departure11, %normal_output10, %output, %state, %weights11, %activation_offset, %query_output10, %probability10, %result10, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([3, 2], [1, 1], [1, 1]) {
+    %column_offset = index.constant 1536 : index
+    %row_column = index.constant 3 : index
+    %finish_initial = index.constant 49152 : offset
+    %normalized_initial = index.constant 1056960 : offset
+    %skip_column = index.constant 384 : index
+    %query_initial = index.constant 795648 : offset
+    %key_initial = index.constant 11264 : offset
+    %value_initial = index.constant 273408 : offset
+    %mlp_initial = index.constant 1941504 : offset
+    %residual_initial = index.constant 2630400 : offset
+    %output_initial = index.constant 1515520 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence12_storage, %origin, %storage12, %result_offset, %storage13, %activations12, %zero, %one, %arrival12, %arrival13, %departure13, %departure12, %query_output12, %output, %state, %weights12, %activation_offset, %probability12, %result12, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([3, 3], [1, 1], [1, 1]) {
+    %column_offset = index.constant 1536 : index
+    %dimension_row_base = index.constant 12 : index
+    %row_column = index.constant 3 : index
+    %skip_column = index.constant 384 : index
+    func.call @qwen3_embedding.probability_value(%dimensions13_storage, %origin, %storage13, %result_offset, %storage12, %activations13, %zero, %one, %arrival13, %arrival14, %departure14, %departure13, %query_output12, %weights13, %activation_offset, %probability12, %result12, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([3, 4], [1, 1], [1, 1]) {
+    %column_offset = index.constant 1536 : index
+    %row_column = index.constant 3 : index
+    %finish_initial = index.constant 311296 : offset
+    %normalized_initial = index.constant 1073344 : offset
+    %skip_column = index.constant 384 : index
+    %query_initial = index.constant 926720 : offset
+    %key_initial = index.constant 142336 : offset
+    %value_initial = index.constant 273536 : offset
+    %mlp_initial = index.constant 1957888 : offset
+    %residual_initial = index.constant 2761472 : offset
+    %output_initial = index.constant 1548288 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence14_storage, %origin, %storage14, %result_offset, %storage15, %activations14, %zero, %one, %arrival14, %arrival15, %departure15, %departure14, %query_output14, %output, %state, %weights14, %activation_offset, %probability14, %result14, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([3, 5], [1, 1], [1, 1]) {
+    %column_offset = index.constant 1536 : index
+    %dimension_row_base = index.constant 76 : index
+    %row_column = index.constant 3 : index
+    %skip_column = index.constant 384 : index
+    func.call @qwen3_embedding.probability_value(%dimensions15_storage, %origin, %storage15, %result_offset, %storage14, %activations15, %zero, %one, %arrival15, %arrival11, %departure11, %departure15, %query_output14, %weights15, %activation_offset, %probability14, %result14, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([4, 2], [1, 1], [1, 1]) {
+    %column_offset = index.constant 2048 : index
+    %row_column = index.constant 4 : index
+    %finish_initial = index.constant 65536 : offset
+    %normalized_initial = index.constant 1057024 : offset
+    %skip_column = index.constant 512 : index
+    %query_initial = index.constant 534528 : offset
+    %key_initial = index.constant 12288 : offset
+    %value_initial = index.constant 274432 : offset
+    %mlp_initial = index.constant 1974272 : offset
+    %residual_initial = index.constant 2630656 : offset
+    %output_initial = index.constant 1581056 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence16_storage, %origin, %storage16, %result_offset, %storage17, %activations16, %zero, %one, %arrival16, %arrival12, %departure12, %departure16, %query_output16, %output, %state, %weights16, %activation_offset, %probability16, %result16, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([4, 3], [1, 1], [1, 1]) {
+    %column_offset = index.constant 2048 : index
+    %dimension_row_base = index.constant 16 : index
+    %row_column = index.constant 4 : index
+    %skip_column = index.constant 512 : index
+    func.call @qwen3_embedding.probability_value(%dimensions17_storage, %origin, %storage17, %result_offset, %storage16, %activations17, %zero, %one, %arrival17, %arrival16, %departure16, %departure17, %query_output16, %weights17, %activation_offset, %probability16, %result16, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([4, 4], [1, 1], [1, 1]) {
+    func.call @qwen3_embedding.query_key_ingress(%sequence18_storage, %origin, %storage18, %result_offset, %storage19, %gather_cache18, %activations, %activations18, %zero, %one, %weights, %state, %arrival18, %arrival17, %departure17, %departure18, %query_output18, %output, %weights18, %activation_offset, %probability18, %result18) : (buffer, offset, buffer, offset, buffer, buffer, buffer, channel<tile<2048xi32>>, index, index, buffer, buffer, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>)
+  }
+  pipeline.strand workers([4, 5], [1, 1], [1, 1]) {
+    %column_offset = index.constant 2048 : index
+    %dimension_row_base = index.constant 80 : index
+    %row_column = index.constant 4 : index
+    %skip_column = index.constant 512 : index
+    func.call @qwen3_embedding.probability_value_normalize(%dimensions19_storage, %origin, %storage19, %result_offset, %storage18, %activations19, %zero, %one, %arrival19, %arrival18, %departure18, %departure19, %query_output18, %weights19, %activation_offset, %probability18, %result18, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([5, 2], [1, 1], [1, 1]) {
+    %column_offset = index.constant 2560 : index
+    %row_column = index.constant 5 : index
+    %finish_initial = index.constant 81920 : offset
+    %normalized_initial = index.constant 1057088 : offset
+    %skip_column = index.constant 640 : index
+    %query_initial = index.constant 796672 : offset
+    %key_initial = index.constant 13312 : offset
+    %value_initial = index.constant 275456 : offset
+    %mlp_initial = index.constant 2007040 : offset
+    %residual_initial = index.constant 2630912 : offset
+    %output_initial = index.constant 1646592 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence20_storage, %origin, %storage20, %result_offset, %storage21, %activations20, %zero, %one, %arrival20, %arrival21, %departure21, %departure20, %query_output20, %output, %state, %weights20, %activation_offset, %probability20, %result20, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([5, 3], [1, 1], [1, 1]) {
+    %column_offset = index.constant 2560 : index
+    %dimension_row_base = index.constant 20 : index
+    %row_column = index.constant 5 : index
+    %skip_column = index.constant 640 : index
+    func.call @qwen3_embedding.probability_value(%dimensions21_storage, %origin, %storage21, %result_offset, %storage20, %activations21, %zero, %one, %arrival21, %arrival22, %departure22, %departure21, %query_output20, %weights21, %activation_offset, %probability20, %result20, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([5, 4], [1, 1], [1, 1]) {
+    %column_offset = index.constant 2560 : index
+    %row_column = index.constant 5 : index
+    %finish_initial = index.constant 344064 : offset
+    %normalized_initial = index.constant 1073472 : offset
+    %skip_column = index.constant 640 : index
+    %query_initial = index.constant 927744 : offset
+    %key_initial = index.constant 144384 : offset
+    %value_initial = index.constant 275584 : offset
+    %mlp_initial = index.constant 2023424 : offset
+    %residual_initial = index.constant 2761984 : offset
+    %output_initial = index.constant 1679360 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence22_storage, %origin, %storage22, %result_offset, %storage23, %activations22, %zero, %one, %arrival22, %arrival23, %departure23, %departure22, %query_output22, %output, %state, %weights22, %activation_offset, %probability22, %result22, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([5, 5], [1, 1], [1, 1]) {
+    %column_offset = index.constant 2560 : index
+    %dimension_row_base = index.constant 84 : index
+    %row_column = index.constant 5 : index
+    %skip_column = index.constant 640 : index
+    func.call @qwen3_embedding.probability_value(%dimensions23_storage, %origin, %storage23, %result_offset, %storage22, %activations23, %zero, %one, %arrival23, %arrival19, %departure19, %departure23, %query_output22, %weights23, %activation_offset, %probability22, %result22, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([6, 2], [1, 1], [1, 1]) {
+    %column_offset = index.constant 3072 : index
+    %dimension_row_base = index.constant 24 : index
+    %row_column = index.constant 6 : index
+    %skip_column = index.constant 768 : index
+    func.call @qwen3_embedding.query_key_normalize(%sequence24_storage, %origin, %dimensions24_storage, %storage24, %result_offset, %storage25, %activations24, %zero, %one, %arrival24, %arrival20, %departure20, %departure24, %normal_output24, %weights24, %activation_offset, %probability24, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([6, 3], [1, 1], [1, 1]) {
+    %column_offset = index.constant 3072 : index
+    %row_column = index.constant 6 : index
+    %finish_initial = index.constant 98304 : offset
+    %normalized_initial = index.constant 1057152 : offset
+    %skip_column = index.constant 768 : index
+    %query_initial = index.constant 535552 : offset
+    %key_initial = index.constant 14336 : offset
+    %value_initial = index.constant 276480 : offset
+    %mlp_initial = index.constant 2039808 : offset
+    %residual_initial = index.constant 2631168 : offset
+    %output_initial = index.constant 1712128 : offset
+    func.call @qwen3_embedding.probability_value_egress(%storage25, %origin, %result_offset, %storage24, %activations25, %zero, %one, %arrival25, %arrival24, %departure24, %departure25, %normal_output24, %output, %state, %weights25, %activation_offset, %query_output24, %probability24, %result24, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([6, 4], [1, 1], [1, 1]) {
+    %column_offset = index.constant 3072 : index
+    %dimension_row_base = index.constant 88 : index
+    %row_column = index.constant 6 : index
+    %skip_column = index.constant 768 : index
+    func.call @qwen3_embedding.query_key_epilogue(%sequence26_storage, %origin, %dimensions26_storage, %storage26, %result_offset, %storage27, %activations26, %zero, %one, %arrival26, %arrival25, %departure25, %departure26, %normal_output26, %weights26, %activation_offset, %query_output26, %probability26, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([6, 5], [1, 1], [1, 1]) {
+    %column_offset = index.constant 3072 : index
+    %gather_row_base = index.constant 96 : index
+    %row_column = index.constant 6 : index
+    %row_input_initial = index.constant 2826240 : offset
+    %finish_initial = index.constant 360448 : offset
+    %normalized_initial = index.constant 1073536 : offset
+    %dense_normalized_initial = index.constant 1081344 : offset
+    %dense_context_initial = index.constant 1343488 : offset
+    %dense_mlp_initial = index.constant 1867776 : offset
+    %skip_initial = index.constant 2826240 : offset
+    %rotary_address = index.constant 2916352 : offset
+    %skip_column = index.constant 768 : index
+    %query_initial = index.constant 666624 : offset
+    %key_initial = index.constant 145408 : offset
+    %value_initial = index.constant 276608 : offset
+    %mlp_initial = index.constant 2056192 : offset
+    %residual_initial = index.constant 2762240 : offset
+    %output_initial = index.constant 1744896 : offset
+    func.call @qwen3_embedding.probability_value_ingress(%storage27, %origin, %result_offset, %storage26, %gather_cache27, %activations, %activations27, %zero, %one, %weights, %state, %arrival27, %arrival26, %departure26, %departure27, %normal_output26, %output, %weights27, %activation_offset, %query_output26, %probability26, %sequence26_storage, %result26, %column_offset, %gather_row_base, %row_column, %row_input_initial, %finish_initial, %normalized_initial, %dense_normalized_initial, %dense_context_initial, %dense_mlp_initial, %skip_initial, %rotary_address, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, offset, buffer, buffer, buffer, channel<tile<2048xi32>>, index, index, buffer, buffer, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, buffer, channel<tile<4096xbf16>>, index, index, index, offset, offset, offset, offset, offset, offset, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([7, 2], [1, 1], [1, 1]) {
+    func.call @qwen3_embedding.query_key_egress_terminal(%sequence28_storage, %origin, %storage28, %result_offset, %storage29, %activations28, %zero, %one, %arrival29, %departure29, %query_output28, %output, %state, %weights28, %activation_offset, %probability28, %result28) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>)
+  }
+  pipeline.strand workers([7, 3], [1, 1], [1, 1]) {
+    %column_offset = index.constant 3584 : index
+    %dimension_row_base = index.constant 28 : index
+    %row_column = index.constant 7 : index
+    %skip_column = index.constant 896 : index
+    func.call @qwen3_embedding.probability_value(%dimensions29_storage, %origin, %storage29, %result_offset, %storage28, %activations29, %zero, %one, %arrival29, %arrival30, %departure30, %departure29, %query_output28, %weights29, %activation_offset, %probability28, %result28, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+  pipeline.strand workers([7, 4], [1, 1], [1, 1]) {
+    %column_offset = index.constant 3584 : index
+    %row_column = index.constant 7 : index
+    %finish_initial = index.constant 376832 : offset
+    %normalized_initial = index.constant 1073600 : offset
+    %skip_column = index.constant 896 : index
+    %query_initial = index.constant 928768 : offset
+    %key_initial = index.constant 146432 : offset
+    %value_initial = index.constant 277632 : offset
+    %mlp_initial = index.constant 2088960 : offset
+    %residual_initial = index.constant 2762496 : offset
+    %output_initial = index.constant 1810432 : offset
+    func.call @qwen3_embedding.query_key_egress(%sequence30_storage, %origin, %storage30, %result_offset, %storage31, %activations30, %zero, %one, %arrival30, %arrival31, %departure31, %departure30, %query_output30, %output, %state, %weights30, %activation_offset, %probability30, %result30, %column_offset, %row_column, %finish_initial, %normalized_initial, %skip_column, %query_initial, %key_initial, %value_initial, %mlp_initial, %residual_initial, %output_initial) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, buffer, buffer, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, offset, offset, index, offset, offset, offset, offset, offset, offset)
+  }
+  pipeline.strand workers([7, 5], [1, 1], [1, 1]) {
+    %column_offset = index.constant 3584 : index
+    %dimension_row_base = index.constant 92 : index
+    %row_column = index.constant 7 : index
+    %skip_column = index.constant 896 : index
+    func.call @qwen3_embedding.probability_value(%dimensions31_storage, %origin, %storage31, %result_offset, %storage30, %activations31, %zero, %one, %arrival31, %arrival27, %departure27, %departure31, %query_output30, %weights31, %activation_offset, %probability30, %result30, %column_offset, %dimension_row_base, %row_column, %skip_column) : (buffer, offset, buffer, offset, buffer, channel<tile<2048xi32>>, index, index, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<4096xbf16>>, channel<tile<4624xi32>>, offset, channel<tile<4096xbf16>>, channel<tile<4096xbf16>>, index, index, index, index)
+  }
+}
