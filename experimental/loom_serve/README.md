@@ -9,6 +9,8 @@ are no per-model C implementations or compiler-internal dependencies here.
   loading, mixed prefill/decode, paged KV, MTP and DFlash2 source programs.
 - [Qwen3.8 Flash-Next](models/qwen_flash_next/README.md): resident MoE text,
   recurrent GDN, paged sparse attention, and n-gram embeddings over packed epochs.
+- [Qwen3-Embedding-0.6B](models/qwen3_embedding/README.md): NPU document and
+  query embeddings, independent sequence batching, and normalized output prefixes.
 - [Krea 2 Turbo](models/krea/README.md): text-to-image, BF16 or INT8 ConvRot DiT,
   and a separately loaded LoRA with request-time strength.
 - [Pocket TTS](models/pocket_tts/README.md): streaming speech, registered
@@ -18,8 +20,9 @@ are no per-model C implementations or compiler-internal dependencies here.
 - [Shared motifs](motifs/README.md): reusable arithmetic receiving SSA operands
   and template arguments, independent of a model's configuration namespace.
 
-These numerical programs target GFX11 AMD GPUs. A server built with other
-backends does not translate their AMDGPU-specific kernels into CPU or NPU code.
+Each package targets its stated device architecture. Qwen3 embeddings use the
+Strix Halo NPU; the text, image, and speech packages use GFX11 AMD GPUs. Model
+documents select the corresponding device in a multi-device server.
 The server and model packages have independent lifetimes: changing a compatible
 package needs no server rebuild. The packages remain experimental and separate
 from the supported serving implementation.
