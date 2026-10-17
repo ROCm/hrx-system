@@ -85,6 +85,19 @@ iree_py_test(
 )
 endif()
 
+if(IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    execution_queues_test
+  DEPS
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::runtime::execution::queues_tests
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME

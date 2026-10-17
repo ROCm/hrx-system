@@ -49,7 +49,8 @@ typedef struct loom_serve_device_options_t {
 
 // Creates every requested HAL device from its application-selected driver,
 // seals one group, then constructs each record's pools and selects its first
-// provisioned dispatch/transfer queues.
+// provisioned dispatch/transfer families. The first queue in each family serves
+// preparation; model executions share the families' entire fixed inventory.
 // Missing roles fail creation. device_count must be nonzero and within the HAL
 // topology limit; options are borrowed only during creation. This establishes
 // runtime ownership, not compiler support or cross-device tensor access.
@@ -131,7 +132,7 @@ iree_status_t loom_serve_device_trim_idle(
     iree_time_t now, bool* out_pending);
 
 // Borrowed handles valid through group destruction. Every device record returns
-// the same HAL group; execution domains retain their own exact queues.
+// the same HAL group; execution bindings retain their shared queue inventory.
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device);
 // Borrowed native source for retained model buffers. Access is qualified for
 // this record's dispatch and transfer families, including indirect dispatch
@@ -148,9 +149,13 @@ iree_hal_queue_t* loom_serve_device_dispatch_queue(
     const loom_serve_device_t* device);
 iree_hal_queue_t* loom_serve_device_transfer_queue(
     const loom_serve_device_t* device);
-// Creates an owned model timeline over this device's shared workspace. It must
-// be drained and released before the device owner. Sharing physical backing
-// introduces no dependency edges between models.
+// Creates an owned model timeline over this device's shared workspace. The
+// serialized device owner assigns the least borrowed provisioned queues;
+// final execution release returns that binding, including retained result and
+// VM references. A shared family supplies one exact queue for both roles.
+// The domain must retire before the device owner. Sharing physical backing
+// introduces no dependency edges between models. Queue placement counts live
+// executions, not requests or priority, and adds no native queues.
 iree_status_t loom_serve_device_create_execution(
     loom_serve_device_t* device, loom_serve_execution_t** out_execution);
 // Borrowed shared physical owner, or NULL for explicitly fixed backing.

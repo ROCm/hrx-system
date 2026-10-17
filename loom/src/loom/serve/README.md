@@ -20,8 +20,11 @@ The shared foundation consists of:
   inference; producer-specific event schemas live with their owners.
 - [`runtime/execution`](runtime/execution/execution.h): model-local work and
   feedback timelines, direct dispatch, queue-ordered transient workspace, and
-  final buffer retirement. Sharing a workspace does not serialize model
-  timelines; owners distinguish completion from release of accepted consumers.
+  final buffer retirement. A fixed [queue inventory](runtime/execution/queues.h)
+  assigns the least borrowed provisioned queues at model creation. Final
+  execution release returns the binding, including retained result and VM
+  references. Sharing a workspace does not serialize model timelines; owners
+  distinguish completion from release of accepted consumers.
 - [`runtime/program`](runtime/program/jit.h): source catalogs, task-based JIT,
   command materialization, and the native capabilities available to source VM
   programs. Compiled stages retain their code independently of their catalog.
