@@ -54,9 +54,10 @@ curl --fail --silent --show-error http://127.0.0.1:8080/v1/chat/completions \
 
 The registration name is the HTTP routing alias. Reusing `X-Loom-Session` with
 the complete matching conversation allows the server to reuse retained state.
-Thinking is enabled by default, using the checkpoint's xhigh reasoning
-instruction. `enable_thinking: false` selects the closed, empty reasoning prefix
-used in the short example above. Streamed deltas and complete messages carry
+Thinking is off by default. `enable_thinking: true` enables the checkpoint's
+xhigh reasoning instruction for that request; an omitted field or explicit
+`false` selects the closed, empty reasoning prefix used in the short example
+above. Streamed deltas and complete messages carry
 reasoning in `reasoning_content`, independently of answer `content` and tool calls.
 Include that reasoning field in subsequent assistant history to retain the exact
 conversation. A generation truncated inside its reasoning block remains valid

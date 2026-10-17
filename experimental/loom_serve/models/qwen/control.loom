@@ -1007,9 +1007,9 @@ func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
   %extent = index.cast %bounded_count : i64 to index
   %records = buffer.view %fields[%origin] : buffer -> view<[%extent]x5xi64>
   %thinking_key = global.load @chat_thinking_key : buffer
-  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
   %default_image_tokens = scalar.constant 1024 : i64
-  %thinking, %image_tokens = scf.for %i = [%c0 to %extent step %c1](%selected = %true : i1, %budget = %default_image_tokens : i64) -> (i1, i64) {
+  %thinking, %image_tokens = scf.for %i = [%c0 to %extent step %c1](%selected = %false : i1, %budget = %default_image_tokens : i64) -> (i1, i64) {
     %key_origin = view.load %records[%i, 0] : view<[%extent]x5xi64> -> i64
     %key_length = view.load %records[%i, 1] : view<[%extent]x5xi64> -> i64
     %key = func.call @option_key(%request, %key_origin, %key_length) : (buffer, i64, i64) -> (buffer)
