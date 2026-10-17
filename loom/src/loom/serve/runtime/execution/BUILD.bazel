@@ -35,10 +35,21 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "queues",
+    srcs = ["queues.c"],
+    hdrs = ["queues.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
     name = "execution",
     srcs = ["execution.c"],
     hdrs = ["execution.h"],
     deps = [
+        ":queues",
         ":retirement",
         ":workspace",
         "//runtime/src/iree/base",
@@ -76,6 +87,7 @@ loom_cc_test(
     ]),
     deps = [
         ":execution",
+        ":queues",
         ":workspace",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/host",
@@ -95,4 +107,23 @@ loom_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
     ],
+)
+
+loom_cc_library(
+    name = "queues_tests",
+    testonly = True,
+    srcs = ["queues_test.cc"],
+    deps = [
+        ":execution",
+        ":queues",
+        ":workspace",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/testing:device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
 )

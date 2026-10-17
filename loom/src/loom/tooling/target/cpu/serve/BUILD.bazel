@@ -87,6 +87,18 @@ loom_py_test(
 )
 
 loom_cc_test(
+    name = "execution_queues_test",
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":test_device",
+        "//loom/src/loom/serve/runtime/execution:queues_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "finite_component_test",
     data = COMPONENT_SOURCES,
     env = {
