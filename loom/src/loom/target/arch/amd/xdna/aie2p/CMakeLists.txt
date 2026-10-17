@@ -633,11 +633,13 @@ loom_cc_library(
     pipeline_native
   HDRS
     "pipeline/native.h"
+    "pipeline/switch.h"
   SRCS
     "pipeline/channels.c"
     "pipeline/configuration.c"
     "pipeline/dma.c"
     "pipeline/native.c"
+    "pipeline/switch.c"
     "pipeline/transport.c"
   DEPS
     ::array_abi_layout
@@ -1471,6 +1473,28 @@ loom_cc_test(
     loom::analysis::storage_geometry
     loom::target::arch::amd::xdna::array_facts
     loom::target::arch::amd::xdna::array_registers
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_test(
+  NAME
+    pipeline_switch_test
+  SRCS
+    "pipeline/switch_test.cc"
+  DEPS
+    ::array_plan
+    ::pipeline_native
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::pass::types
+    loom::target::arch::amd::xdna::array_facts
+    loom::target::arch::amd::xdna::array_registers
+    loom::testing::diagnostic_matchers
   LABELS
     "iree-build-requirement=loom.target.arch.xdna"
 )

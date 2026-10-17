@@ -10,6 +10,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/worker.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/transforms/pipeline/realization.h"
@@ -140,41 +141,6 @@ typedef struct loom_aie2p_native_dma_path_t {
   // True for external reads, false for external writes.
   bool ingress;
 } loom_aie2p_native_dma_path_t;
-
-// One physical route edge carrying the packet identity used during admission.
-typedef struct loom_aie2p_native_route_t {
-  // Corresponding edge in the canonical route builder.
-  const loom_aie2p_array_route_plan_t* edge;
-  // Packet ID, or UINT8_MAX for an unframed circuit.
-  uint8_t packet;
-} loom_aie2p_native_route_t;
-
-typedef enum loom_aie2p_native_switch_bank_e {
-  LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS = 0,
-  LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES,
-  LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS,
-  LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT,
-} loom_aie2p_native_switch_bank_t;
-
-// Complete valid register bank, with zero words for every disabled entry.
-typedef struct loom_aie2p_native_register_bank_t {
-  // Absolute address in the native transaction's 32-bit register space.
-  uint32_t address;
-  // Number of contiguous register words, excluding reserved address holes.
-  uint32_t word_count;
-  // Desired values retained by route admission in the pass arena.
-  uint32_t* words;
-} loom_aie2p_native_register_bank_t;
-
-// A native pipeline owns route selection on each traversed switch. Its first
-// invocation replaces complete banks after prior work has drained; externally
-// prefixed routes are not an undeclared input to this materialization.
-typedef struct loom_aie2p_native_switch_t {
-  // Next routed switch in first-use order, excluding untouched tiles.
-  struct loom_aie2p_native_switch_t* next;
-  // Master, slave, and packet-filter banks from the generated register facts.
-  loom_aie2p_native_register_bank_t banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT];
-} loom_aie2p_native_switch_t;
 
 // One arrival credit reused only after its latest wait consumes that credit.
 // Descriptors with different immutable geometries can share this semaphore.

@@ -150,6 +150,8 @@ class TileFacts:
     lock_count: int
     lock_value_minimum: int
     lock_value_maximum: int
+    packet_arbiter_count: int
+    packet_master_select_count: int
     register_modules: tuple[RegisterModule, ...]
     dma: DmaEngineFacts | None
 
@@ -818,6 +820,11 @@ def validate_array_family(family: ArrayFamily) -> None:
             raise ValueError(f"{tile.kind.value}: lock-value native carrier overflows")
         if tile.lock_value_minimum > 0 or tile.lock_value_maximum <= 0:
             raise ValueError(f"{tile.kind.value}: invalid lock domain")
+        if (
+            not 0 < tile.packet_arbiter_count <= 8
+            or not 0 < tile.packet_master_select_count <= 4
+        ):
+            raise ValueError(f"{tile.kind.value}: invalid packet-switch resources")
         _validate_tile_memory(tile, family.row_shift)
         _validate_load_window_resources(family, tile)
         _validate_dma(tile)
