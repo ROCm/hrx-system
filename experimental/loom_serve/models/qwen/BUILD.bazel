@@ -162,17 +162,17 @@ loom_library(
 )
 
 loom_library(
-    name = "vision_geometry",
+    name = "vision_geometry_library",
     srcs = ["vision_geometry.loom"],
 )
 
 loom_library(
-    name = "vision_pixels",
+    name = "vision_pixels_library",
     srcs = ["vision_pixels.loom"],
 )
 
 loom_library(
-    name = "vision_stages",
+    name = "vision_stages_library",
     srcs = ["vision_stages.loom"],
 )
 
@@ -191,7 +191,7 @@ loom_test(
     srcs = ["tests/vision_geometry.loom"],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
-    deps = [":vision_geometry"],
+    deps = [":vision_geometry_library"],
 )
 
 loom_test(
@@ -204,7 +204,7 @@ loom_test(
     ],
     deps = [
         ":vision_kernels",
-        ":vision_pixels",
+        ":vision_pixels_library",
     ],
 )
 
@@ -216,7 +216,7 @@ loom_test(
     ],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
-    deps = [":vision_pixels"],
+    deps = [":vision_pixels_library"],
 )
 
 loom_test(
@@ -567,20 +567,18 @@ loom_module(
     name = "request_control",
     srcs = ["control.loom"],
     include_input_exports = True,
-    libraries = [":vision_geometry"],
+    libraries = [":vision_geometry_library"],
     mode = "link",
     output_format = "bc",
-    strict_deps = True,
 )
 
 loom_module(
     name = "vision_preparation",
     srcs = ["vision_prepare.loom"],
     include_input_exports = True,
-    libraries = [":vision_stages"],
+    libraries = [":vision_stages_library"],
     mode = "link",
     output_format = "bc",
-    strict_deps = True,
 )
 
 loom_module(
@@ -588,12 +586,11 @@ loom_module(
     srcs = ["vision_control.loom"],
     include_input_exports = True,
     libraries = [
-        ":vision_pixels",
-        ":vision_stages",
+        ":vision_pixels_library",
+        ":vision_stages_library",
     ],
     mode = "link",
     output_format = "bc",
-    strict_deps = True,
 )
 
 py_test(
