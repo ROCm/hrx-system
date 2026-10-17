@@ -14,12 +14,94 @@
 #include <cxx/types.h>
 
 #include <algorithm>
+#include <string_view>
 
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/expressions.h"
 
 namespace loom::cxx_import {
+namespace {
+
+bool operation_is(cxx::Symbol* symbol, std::string_view operation) {
+  auto* binding = annotation(symbol, "op");
+  return binding && binding->arguments.size() == 1 &&
+         binding->arguments[0]->name() == operation;
+}
+
+bool operation_is(cxx::Symbol* symbol, std::string_view operation,
+                  std::string_view parameter) {
+  auto* binding = annotation(symbol, "op");
+  return binding && binding->arguments.size() == 2 &&
+         binding->arguments[0]->name() == operation &&
+         binding->arguments[1]->name() == parameter;
+}
+
+// CXX materializes trivial by-value class arguments as an implicit copy around
+// a one-element paren initializer. Peel only those same-type copies so loop
+// admission still reasons about the resolved source binding identity.
+cxx::IdExpressionAST* address_identity(cxx::TranslationUnit& unit,
+                                       const AddressPartition& address,
+                                       cxx::ExpressionAST* expression) {
+  while (expression) {
+    if (auto* cast =
+            cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
+      if (cast->conversionFunction &&
+          cast->conversionFunction != address.source->copyConstructor() &&
+          cast->conversionFunction != address.source->moveConstructor()) {
+        return nullptr;
+      }
+      expression = cast->expression;
+      continue;
+    }
+    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+      expression = nested->expression;
+      continue;
+    }
+    if (auto* copy = cxx::ast_cast<cxx::ParenInitializerAST>(expression)) {
+      if (!copy->expressionList || copy->expressionList->next) {
+        return nullptr;
+      }
+      expression = copy->expressionList->value;
+      continue;
+    }
+    break;
+  }
+  auto* identity = cxx::ast_cast<cxx::IdExpressionAST>(expression);
+  if (!identity) {
+    return nullptr;
+  }
+  auto traits = unit.typeTraits();
+  return traits.is_same(traits.remove_cv(identity->type),
+                        address.source->type())
+             ? identity
+             : nullptr;
+}
+
+bool is_address_unit(cxx::TranslationUnit& unit,
+                     const AddressPartition& address,
+                     cxx::ExpressionAST* expression) {
+  expression = unwrap_expression(expression);
+  cxx::List<cxx::ExpressionAST*>* arguments = nullptr;
+  if (auto* construction =
+          cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression)) {
+    arguments = construction->bracedInitList
+                    ? construction->bracedInitList->expressionList
+                    : nullptr;
+  } else if (auto* construction =
+                 cxx::ast_cast<cxx::TypeConstructionAST>(expression)) {
+    arguments = construction->expressionList;
+  }
+  auto value = arguments && !arguments->next
+                   ? integer_constant(unit, arguments->value)
+                   : std::nullopt;
+  auto traits = unit.typeTraits();
+  return traits.is_same(traits.remove_cv(expression->type),
+                        address.source->type()) &&
+         value && *value == 1;
+}
+
+}  // namespace
 
 ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                          Types& types, cxx::StatementAST* body)
@@ -69,7 +151,13 @@ const CountedLoop* ControlFlow::counted(cxx::ForStatementAST* loop) const {
   }
   // An aliased bound can change through a helper without a syntactic write in
   // the loop. Consult complete address demand, including later source uses.
-  auto* bound = std::get_if<CountedLoop::Bound>(&found->second.upper);
+  const CountedLoop::Bound* bound = nullptr;
+  if (auto* range =
+          std::get_if<CountedLoop::UnsignedRange>(&found->second.range)) {
+    bound = std::get_if<CountedLoop::Bound>(&range->upper);
+  } else {
+    bound = &std::get<CountedLoop::AddressRange>(found->second.range).upper;
+  }
   return bound && addressed(bound->binding) ? nullptr : &found->second;
 }
 
@@ -418,12 +506,6 @@ bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
   return false;
 }
 
-// The unit-step unsigned interval cannot wrap before its strict upper bound.
-// Larger constant steps require room for the final increment even when the
-// bound is not a multiple of the step. Pure constants and stable scalar bounds
-// in that same unsigned width may be evaluated once. Wider comparisons can
-// observe induction wraparound and retain their general while semantics, as do
-// mutable or volatile bounds.
 std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {
   auto* declaration =
       cxx::ast_cast<cxx::DeclarationStatementAST>(loop->initializer);
@@ -434,18 +516,34 @@ std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {
   auto* condition = cxx::ast_cast<cxx::BinaryExpressionAST>(
       unwrap_expression(loop->condition));
   if (!initial || !initial->initDeclaratorList ||
-      initial->initDeclaratorList->next || !condition || condition->symbol ||
+      initial->initDeclaratorList->next || !condition ||
       condition->op != cxx::TokenKind::T_LESS) {
     return std::nullopt;
   }
   auto* induction = initial->initDeclaratorList->value->symbol;
+  auto traits = unit_.typeTraits();
+  if (!induction || traits.is_volatile(induction->type())) {
+    return std::nullopt;
+  }
+  if (traits.remove_cv(induction->type())->kind() ==
+      cxx::TypeKind::kUnsignedInt) {
+    return classify_unsigned(loop, induction, condition);
+  }
+  return traits.is_class(induction->type())
+             ? classify_address(loop, induction, condition)
+             : std::nullopt;
+}
+
+// Larger unsigned-int steps require room for the final source increment even
+// when the bound is not a multiple of the step. Wider comparisons, mutable or
+// volatile bounds, and address escapes retain general while semantics.
+std::optional<CountedLoop> ControlFlow::classify_unsigned(
+    cxx::ForStatementAST* loop, cxx::Symbol* induction,
+    cxx::BinaryExpressionAST* condition) {
+  auto traits = unit_.typeTraits();
   auto* left = cxx::ast_cast<cxx::IdExpressionAST>(
       unwrap_expression(condition->leftExpression));
-  auto traits = unit_.typeTraits();
-  if (!left || left->symbol != induction ||
-      traits.is_volatile(induction->type()) ||
-      traits.remove_cv(induction->type())->kind() !=
-          cxx::TypeKind::kUnsignedInt ||
+  if (condition->symbol || !left || left->symbol != induction ||
       traits.remove_cv(condition->leftExpression->type)->kind() !=
           cxx::TypeKind::kUnsignedInt ||
       traits.remove_cv(condition->rightExpression->type)->kind() !=
@@ -483,7 +581,9 @@ std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {
 
   if (auto upper = integer_constant(unit_, condition->rightExpression)) {
     if (*upper >= 0 && *upper <= UINT32_MAX - step_value + 1) {
-      return CountedLoop{induction, static_cast<unsigned>(*upper), step_value};
+      return CountedLoop{
+          induction, CountedLoop::UnsignedRange{static_cast<unsigned>(*upper),
+                                                step_value}};
     }
     return std::nullopt;
   }
@@ -496,8 +596,79 @@ std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {
     return std::nullopt;
   }
   return CountedLoop{
-      induction, CountedLoop::Bound{bound->symbol, condition->rightExpression},
-      step_value};
+      induction,
+      CountedLoop::UnsignedRange{
+          CountedLoop::Bound{bound->symbol, condition->rightExpression},
+          step_value}};
+}
+
+// A strict native address interval with a unit step cannot wrap before its
+// upper bound, independently of the target-selected carrier width. Non-unit
+// steps retain while semantics because an overshoot may wrap.
+std::optional<CountedLoop> ControlFlow::classify_address(
+    cxx::ForStatementAST* loop, cxx::Symbol* induction,
+    cxx::BinaryExpressionAST* condition) {
+  const auto& partition = types_.partition(induction->type(), loop);
+  if (partition.kind != ValueKind::Address) {
+    return std::nullopt;
+  }
+  const auto& address = static_cast<const AddressPartition&>(partition);
+  auto domain = address.element_type;
+  if (domain != LOOM_SCALAR_TYPE_INDEX && domain != LOOM_SCALAR_TYPE_OFFSET) {
+    return std::nullopt;
+  }
+  auto predicate = domain == LOOM_SCALAR_TYPE_INDEX ? "slt" : "ult";
+  auto* left = address_identity(unit_, address, condition->leftExpression);
+  auto* bound = address_identity(unit_, address, condition->rightExpression);
+  if (!left || left->symbol != induction || !bound ||
+      !operation_is(condition->symbol, "index.cmp", predicate)) {
+    return std::nullopt;
+  }
+  auto* assignment = cxx::ast_cast<cxx::AssignmentExpressionAST>(
+      unwrap_expression(loop->expression));
+  auto* increment = assignment
+                        ? cxx::ast_cast<cxx::IdExpressionAST>(
+                              unwrap_expression(assignment->leftExpression))
+                        : nullptr;
+  auto* addition = assignment
+                       ? cxx::ast_cast<cxx::BinaryExpressionAST>(
+                             unwrap_expression(assignment->rightExpression))
+                       : nullptr;
+  if (!assignment || assignment->op != cxx::TokenKind::T_EQUAL || !increment ||
+      increment->symbol != induction || !addition ||
+      !operation_is(addition->symbol, "index.add")) {
+    return std::nullopt;
+  }
+  auto* addition_left =
+      address_identity(unit_, address, addition->leftExpression);
+  auto* addition_right =
+      address_identity(unit_, address, addition->rightExpression);
+  cxx::ExpressionAST* amount = nullptr;
+  if (addition_left && addition_left->symbol == induction) {
+    amount = addition->rightExpression;
+  } else if (addition_right && addition_right->symbol == induction) {
+    amount = addition->leftExpression;
+  } else {
+    return std::nullopt;
+  }
+  if (!is_address_unit(unit_, address, amount)) {
+    return std::nullopt;
+  }
+
+  const auto& body_writes = written(loop->statement);
+  const auto& loop_writes = written(loop);
+  if (std::ranges::find(body_writes, induction) != body_writes.end() ||
+      unit_.typeTraits().is_volatile(bound->type) ||
+      std::ranges::find(loop_writes, bound->symbol) != loop_writes.end()) {
+    return std::nullopt;
+  }
+  return CountedLoop{
+      induction,
+      CountedLoop::AddressRange{
+          CountedLoop::Bound{bound->symbol, condition->rightExpression},
+          domain == LOOM_SCALAR_TYPE_INDEX
+              ? CountedLoop::AddressDomain::Index
+              : CountedLoop::AddressDomain::Offset}};
 }
 
 }  // namespace loom::cxx_import

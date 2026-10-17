@@ -2353,9 +2353,7 @@ class Translator final : private Initialization::Evaluation {
         return;
       }
       if (!schedule.empty()) {
-        fail(
-            ast,
-            "loop scheduling requires a nonwrapping unsigned counted for loop");
+        fail(ast, "loop scheduling requires a nonwrapping counted for loop");
       }
       conditional_loop(ast, loop->condition, loop->statement, loop->expression,
                        LoopTest::BeforeBody);
@@ -2638,16 +2636,33 @@ class Translator final : private Initialization::Evaluation {
                     const LoopSchedule& schedule) {
     auto source = locations_.get(loop);
     auto* induction = counted.induction;
-    auto lower = unsigned_offset(values_.at(induction).ssa(), source);
-    auto* constant_upper = std::get_if<unsigned>(&counted.upper);
-    auto bound =
-        constant_upper
-            ? scalars_.integer(static_cast<int32_t>(*constant_upper),
-                               LOOM_SCALAR_TYPE_I32, source)
-            : expression(std::get<CountedLoop::Bound>(counted.upper).expression)
-                  .ssa();
-    auto upper = unsigned_offset(bound, source);
-    auto step = scalars_.integer(counted.step, LOOM_SCALAR_TYPE_OFFSET, source);
+    loom_value_id_t lower;
+    loom_value_id_t upper;
+    loom_value_id_t step;
+    bool native_address = false;
+    if (auto* range = std::get_if<CountedLoop::UnsignedRange>(&counted.range)) {
+      lower = unsigned_offset(values_.at(induction).ssa(), source);
+      auto* constant_upper = std::get_if<unsigned>(&range->upper);
+      auto bound =
+          constant_upper
+              ? scalars_.integer(static_cast<int32_t>(*constant_upper),
+                                 LOOM_SCALAR_TYPE_I32, source)
+              : expression(
+                    std::get<CountedLoop::Bound>(range->upper).expression)
+                    .ssa();
+      upper = unsigned_offset(bound, source);
+      step = scalars_.integer(range->step, LOOM_SCALAR_TYPE_OFFSET, source);
+    } else {
+      const auto& address_range =
+          std::get<CountedLoop::AddressRange>(counted.range);
+      auto domain = address_range.domain == CountedLoop::AddressDomain::Index
+                        ? LOOM_SCALAR_TYPE_INDEX
+                        : LOOM_SCALAR_TYPE_OFFSET;
+      lower = values_.at(induction).ssa();
+      upper = expression(address_range.upper.expression).ssa();
+      step = scalars_.integer(1, domain, source);
+      native_address = true;
+    }
     auto depth = schedule.pipeline_depth()
                      ? expression(schedule.pipeline_depth()).ssa()
                      : 0;
@@ -2664,11 +2679,17 @@ class Translator final : private Initialization::Evaluation {
     auto saved = loom_builder_enter_region(&builder_, op, body);
     auto iteration = name(loom_region_entry_arg_id(body, 0),
                           cxx::to_string(induction->name()));
-    loom_op_t* cast;
-    check(loom_index_cast_build(&builder_, iteration, value_type(iteration),
-                                types_.get(induction->type(), loop), source,
-                                &cast));
-    values_[induction] = result(cast);
+    if (native_address) {
+      std::array<loom_value_id_t, 1> components = {iteration};
+      values_[induction] = value_arena_.capture(
+          types_.partition(induction->type(), loop), components);
+    } else {
+      loom_op_t* cast;
+      check(loom_index_cast_build(&builder_, iteration, value_type(iteration),
+                                  types_.get(induction->type(), loop), source,
+                                  &cast));
+      values_[induction] = result(cast);
+    }
     bind(written, body, 1);
     loop_body(loop->statement);
     auto yielded = current(written);

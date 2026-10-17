@@ -35,21 +35,36 @@ struct Destination {
   const Partition* member;
 };
 
-// Retained proof that a source loop has a stable, nonwrapping unsigned
-// interval.
+// Retained proof that a source loop has a stable, nonwrapping counted interval.
 struct CountedLoop {
   struct Bound {
     // Resolved identifier supplying the loop-invariant bound.
     cxx::Symbol* binding;
-    // Evaluated source expression, including its integer promotions.
+    // Resolved source expression, including inserted value materializations.
     cxx::ExpressionAST* expression;
+  };
+  struct UnsignedRange {
+    // Proven constant or stable runtime bound evaluated once by translation.
+    std::variant<unsigned, Bound> upper;
+    // Positive constant step in the source's unsigned-int width.
+    unsigned step;
+  };
+  enum class AddressDomain {
+    Index,
+    Offset,
+  };
+  struct AddressRange {
+    // Stable bound in the same native address domain as the induction value.
+    Bound upper;
+    // Signed logical index or unsigned physical offset comparison semantics.
+    AddressDomain domain;
   };
   // Source binding replaced by the structured loop's induction argument.
   cxx::Symbol* induction;
-  // Proven constant or stable runtime bound evaluated once by translation.
-  std::variant<unsigned, Bound> upper;
-  // Positive constant step in the source's unsigned-int width.
-  unsigned step;
+  // Fixed-width C++ arithmetic or a target-selected native address interval.
+  // Native address ranges have an implicit unit step: larger steps can wrap
+  // after overshooting a bound whose target carrier width is not yet known.
+  std::variant<UnsignedRange, AddressRange> range;
 };
 
 // Syntactic paths through a statement that take a particular exit. Other
@@ -131,6 +146,12 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool classify_storage(cxx::ExpressionAST* expression) const;
   cxx::Symbol* object_owner(cxx::ExpressionAST* expression) const;
   std::optional<CountedLoop> classify(cxx::ForStatementAST* loop);
+  std::optional<CountedLoop> classify_unsigned(
+      cxx::ForStatementAST* loop, cxx::Symbol* induction,
+      cxx::BinaryExpressionAST* condition);
+  std::optional<CountedLoop> classify_address(
+      cxx::ForStatementAST* loop, cxx::Symbol* induction,
+      cxx::BinaryExpressionAST* condition);
   unsigned paths(cxx::StatementAST* statement) const;
   unsigned classify_paths(cxx::StatementAST* statement) const;
   ExitFlow exits(cxx::StatementAST* statement, unsigned selected_paths) const;

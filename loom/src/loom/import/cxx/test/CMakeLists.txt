@@ -28,6 +28,7 @@ loom_check_test_suite(
   NAME
     compiler_test
   SRCS
+    "address_counted_loops.cxx-test"
     "address_values.cxx-test"
     "address_values_invalid.cxx-test"
     "aggregate_constants.cxx-test"
@@ -786,6 +787,26 @@ if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
 if(LOOM_TARGET_ARCH_VM)
 loom_execution_test(
   NAME
+    address_counted_loops_test_execute_vm_reference_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::address_counted_loops_module"
+  RUNNER_ARGS
+    "--case=address_counted_loops_functions"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
     assumptions_test_execute_vm_reference_test
   CORRECTNESS_ONLY
   MODULE
@@ -1136,6 +1157,15 @@ loom_test_module(
   SRCS
     "record_memory.cxx"
     "record_memory_kernels.loom"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    address_counted_loops_module
+  SRCS
+    "address_counted_loops.cxx"
 )
 endif()
 

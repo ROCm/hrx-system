@@ -136,12 +136,13 @@ TEST(ControlFlowTest, CountedAdmissionRetainsTheNonwrappingIntervalProof) {
     auto* counted = analysis.counted(loop);
     ASSERT_EQ(counted != nullptr, test.step != 0);
     if (counted) {
-      EXPECT_EQ(counted->step, test.step);
+      const auto& range = std::get<CountedLoop::UnsignedRange>(counted->range);
+      EXPECT_EQ(range.step, test.step);
       EXPECT_EQ(cxx::to_string(counted->induction->name()), "i");
       if (test.upper) {
-        EXPECT_EQ(std::get<unsigned>(counted->upper), *test.upper);
+        EXPECT_EQ(std::get<unsigned>(range.upper), *test.upper);
       } else {
-        const auto& bound = std::get<CountedLoop::Bound>(counted->upper);
+        const auto& bound = std::get<CountedLoop::Bound>(range.upper);
         EXPECT_EQ(bound.binding, function->symbol->parameters()[0]);
         auto* condition =
             cxx::ast_cast<cxx::BinaryExpressionAST>(loop->condition);
@@ -149,6 +150,96 @@ TEST(ControlFlowTest, CountedAdmissionRetainsTheNonwrappingIntervalProof) {
       }
       EXPECT_EQ(analysis.counted(loop), counted);
     }
+  }
+}
+
+TEST(ControlFlowTest, AddressAdmissionRetainsNativeUnitStepIntervals) {
+  struct Case {
+    // Fully qualified native address type used by the source loop.
+    const char* type;
+    // Standalone source loop whose classification is under test.
+    const char* loop;
+    // Expected native range, or no value for general while semantics.
+    std::optional<CountedLoop::AddressDomain> domain;
+  };
+  const Case cases[] = {
+      {"loom::type::index",
+       "for (auto i=begin; i<end; i=i+loom::type::index{1}) {}",
+       CountedLoop::AddressDomain::Index},
+      {"loom::type::index",
+       "for (auto i=begin; i<end; i=loom::type::index(1)+i) {}",
+       CountedLoop::AddressDomain::Index},
+      {"loom::type::offset",
+       "for (auto i=begin; i<end; i=i+loom::type::offset{1}) {}",
+       CountedLoop::AddressDomain::Offset},
+      {"loom::type::offset",
+       "for (auto i=begin; i<end; i=loom::type::offset{1}+i) {}",
+       CountedLoop::AddressDomain::Offset},
+      {"loom::type::index",
+       "for (auto i=begin; i<end; i=i+loom::type::index{2}) {}", std::nullopt},
+      {"loom::type::offset",
+       "for (auto i=begin; i<end; i=i+loom::type::offset{2}) {}", std::nullopt},
+      {"loom::type::index",
+       "for (auto i=begin; loom::index::ult(i,end); "
+       "i=i+loom::type::index{1}) {}",
+       std::nullopt},
+      {"loom::type::offset",
+       "for (auto i=begin; loom::offset::slt(i,end); "
+       "i=i+loom::type::offset{1}) {}",
+       std::nullopt},
+      {"loom::type::index",
+       "for (auto i=begin; i<end; i=i+loom::type::index{1}) "
+       "end=loom::type::index{4};",
+       std::nullopt},
+      {"loom::type::offset",
+       "for (auto i=begin; i<end; i=i+loom::type::offset{1}) "
+       "i=loom::type::offset{4};",
+       std::nullopt},
+      {"loom::type::index",
+       "for (auto i=begin; i<end; i=i+loom::type::index{1}) (void)&end;",
+       std::nullopt},
+      {"loom::type::index",
+       "for (auto i=begin; i<end; i=i+loom::type::index{1}) {} (void)&end;",
+       std::nullopt},
+      {"loom::type::offset",
+       "for (auto i=begin; i<end; i=i+loom::type::offset{1}) (void)&i;",
+       std::nullopt},
+  };
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.loop);
+    std::string text = std::string("#include <loomcxx/index.h>\nvoid entry(") +
+                       test.type + " begin, " + test.type + " end) {" +
+                       test.loop + "}";
+    Source source(view(text), IREE_SV("address_loops.cxx"), options);
+    auto* function = definition(source);
+    ASSERT_NE(function, nullptr);
+    auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                     function->functionBody)
+                     ->statement;
+    auto* loop =
+        cxx::ast_cast<cxx::ForStatementAST>(body->statementList->value);
+    ASSERT_NE(loop, nullptr);
+    Types types(source.unit(), source.diagnostics());
+    ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
+    auto* counted = analysis.counted(loop);
+    ASSERT_EQ(counted != nullptr, test.domain.has_value());
+    if (!counted) {
+      continue;
+    }
+    EXPECT_EQ(counted->induction,
+              cxx::ast_cast<cxx::SimpleDeclarationAST>(
+                  cxx::ast_cast<cxx::DeclarationStatementAST>(loop->initializer)
+                      ->declaration)
+                  ->initDeclaratorList->value->symbol);
+    const auto& range = std::get<CountedLoop::AddressRange>(counted->range);
+    EXPECT_EQ(range.domain, *test.domain);
+    EXPECT_EQ(range.upper.binding, function->symbol->parameters()[1]);
+    EXPECT_EQ(range.upper.expression,
+              cxx::ast_cast<cxx::BinaryExpressionAST>(loop->condition)
+                  ->rightExpression);
+    EXPECT_EQ(analysis.counted(loop), counted);
   }
 }
 
