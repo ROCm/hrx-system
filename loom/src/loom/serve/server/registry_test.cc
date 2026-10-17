@@ -197,6 +197,7 @@ TEST(RegistryAdmissionTest, NativeRecognitionUsesTypedAdmissionPolicy) {
   const loom_serve_recognition_request_t request = {
       .language = IREE_SV("en"),
       .prompt = IREE_SV("Keep this context."),
+      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
   };
   const struct {
     // Name resolved through the actual registry's borrowed service metadata.

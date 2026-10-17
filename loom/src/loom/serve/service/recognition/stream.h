@@ -63,6 +63,7 @@ void loom_serve_recognition_stream_service_set_observer(
 // all source slots are occupied; the caller retains its own queue position.
 // A non-NULL handle belongs to the caller until close, independently of service
 // and model lifetime. Final results need no model slot or input-ring storage.
+// Output selection must be a nonempty subset of the source's capabilities.
 iree_status_t loom_serve_recognition_stream_service_try_open(
     loom_serve_recognition_stream_service_t* service,
     const loom_serve_recognition_request_t* request,
@@ -89,17 +90,18 @@ iree_host_size_t loom_serve_recognition_stream_credit(
 void loom_serve_recognition_stream_finish(
     loom_serve_recognition_stream_t* stream);
 
-// Borrows the one pending replacement revision until consume/close. A stalled
-// consumer makes only this stream ineligible for the next compatible batch.
-// NULL means no published revision, including while CPU collection is active.
-const loom_serve_recognition_transcript_t* loom_serve_recognition_stream_peek(
+// Borrows the next source-ordered event until consume/close. One source result
+// may contain several observations or revisions. A stalled consumer makes only
+// this stream ineligible for the next compatible batch. NULL means no published
+// event, including while CPU collection is active.
+const loom_serve_recognition_event_t* loom_serve_recognition_stream_peek(
     const loom_serve_recognition_stream_t* stream);
-// Consumes the non-NULL revision returned by peek on this owner turn.
+// Consumes the non-NULL event returned by peek on this owner turn.
 void loom_serve_recognition_stream_consume(
     loom_serve_recognition_stream_t* stream);
 
 // Completion becomes visible after execution ownership ends and the final
-// pending revision is consumed. A stopped service leaves a cancelled terminal
+// pending event is consumed. A stopped service leaves a cancelled terminal
 // result. Failed readiness ends this stream but does not retire device
 // resources; those remain owned by model teardown.
 bool loom_serve_recognition_stream_is_complete(
@@ -111,8 +113,9 @@ iree_status_t loom_serve_recognition_stream_status(
     const loom_serve_recognition_stream_t* stream);
 
 // Borrows the finalized document after successful completion, or NULL before
-// then. Its views remain immutable until close, including after service/model
-// destruction, and need no feedback-buffer copy.
+// then or when the request did not select transcripts. Its views remain
+// immutable until close, including after service/model destruction, and need
+// no feedback-buffer copy.
 const loom_serve_recognition_document_t* loom_serve_recognition_stream_document(
     const loom_serve_recognition_stream_t* stream);
 
