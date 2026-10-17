@@ -46,10 +46,10 @@ int32_t iree_tokenizer_vocab_lookup(const iree_tokenizer_vocab_t* vocab,
 iree_string_view_t iree_tokenizer_vocab_token_text(
     const iree_tokenizer_vocab_t* vocab, int32_t token_id);
 
-// Returns the score for a token ID (BPE priority, 0.0 for unscored).
+// Returns the score for a token ID (Unigram log probability, 0.0 for unscored).
 // Returns 0.0 if token_id is out of range.
-float iree_tokenizer_vocab_token_score(const iree_tokenizer_vocab_t* vocab,
-                                       int32_t token_id);
+double iree_tokenizer_vocab_token_score(const iree_tokenizer_vocab_t* vocab,
+                                        int32_t token_id);
 
 // Returns the attributes for a token ID.
 // Returns ATTR_NONE if token_id is out of range.
@@ -71,7 +71,7 @@ iree_host_size_t iree_tokenizer_vocab_token_count(
 // Returns the token array for building index structures (trie, etc.).
 // The returned pointer is valid for the lifetime of the vocab.
 // Models that need to build their own index structures (e.g., BPE trie for
-// greedy encoding) use these accessors rather than depending on vocab_internal.
+// greedy encoding) use these accessors instead of the storage representation.
 const iree_tokenizer_token_t* iree_tokenizer_vocab_tokens(
     const iree_tokenizer_vocab_t* vocab);
 
