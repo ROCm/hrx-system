@@ -341,10 +341,8 @@ TemplateApplyIntrinsic::Family* Intrinsics::intern_template_family(
     return &found->second;
   }
   names_.reserve(spelling, owner);
-  loom_string_id_t name;
-  check(loom_module_intern_string(module_, view(spelling), &name));
   TemplateApplyIntrinsic::Family family = {};
-  check(loom_module_add_symbol(module_, name, &family.reference.symbol_id));
+  check(loom_module_intern_string(module_, view(spelling), &family.name));
   auto [entry, inserted] =
       template_families_.emplace(std::string(spelling), family);
   (void)inserted;

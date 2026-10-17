@@ -32,8 +32,8 @@ class Types;
 class TemplateApplyIntrinsic {
  public:
   struct Family {
-    // Module-local reference to the unresolved or separately defined family.
-    loom_symbol_ref_t reference;
+    // Module-interned spelling, reserved before any declaration is needed.
+    loom_string_id_t name;
     // Canonical source declaration owning this family's stable signature.
     cxx::FunctionSymbol* function = nullptr;
     // Lazily materialized declaration, absent until a reached call needs it.
