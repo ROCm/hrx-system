@@ -766,23 +766,6 @@ static bool loom_value_facts_unsigned_relation_holds(loom_predicate_kind_t kind,
   }
 }
 
-static loom_predicate_kind_t loom_value_facts_signed_relation_kind(
-    loom_predicate_kind_t unsigned_kind) {
-  switch (unsigned_kind) {
-    case LOOM_PREDICATE_ULT:
-      return LOOM_PREDICATE_LT;
-    case LOOM_PREDICATE_ULE:
-      return LOOM_PREDICATE_LE;
-    case LOOM_PREDICATE_UGT:
-      return LOOM_PREDICATE_GT;
-    case LOOM_PREDICATE_UGE:
-      return LOOM_PREDICATE_GE;
-    default:
-      IREE_ASSERT_UNREACHABLE("expected an unsigned relation predicate");
-      IREE_BUILTIN_UNREACHABLE();
-  }
-}
-
 static bool loom_value_facts_predicate_required_range(
     const loom_predicate_t* predicate, int64_t* out_minimum,
     int64_t* out_maximum) {
@@ -1095,7 +1078,7 @@ void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
       loom_value_facts_t constant_facts = loom_value_facts_exact_i64(constant);
       (void)loom_value_facts_refine_relation(predicate->kind, *facts,
                                              constant_facts, facts, NULL);
-      return;
+      break;
     }
 
     case LOOM_PREDICATE_MULTIPLE_OF: {
@@ -1154,6 +1137,51 @@ void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
   facts->flags |= preserved_predicate_flags;
 }
 
+// Projects lhs <u rhs (or <=u) onto each signed interval. A crossing interval
+// has unsigned extrema zero and all-ones. Each projection intersects at most
+// two sign partitions; their signed hull retains every satisfying value.
+static void loom_value_facts_refine_unsigned_order(
+    bool strict, loom_value_facts_t lhs_facts, loom_value_facts_t rhs_facts,
+    loom_value_facts_t* lhs_result, loom_value_facts_t* rhs_result) {
+  int64_t minimum = lhs_facts.range_lo < 0 && lhs_facts.range_hi >= 0
+                        ? 0
+                        : lhs_facts.range_lo;
+  int64_t maximum = rhs_facts.range_lo < 0 && rhs_facts.range_hi >= 0
+                        ? -1
+                        : rhs_facts.range_hi;
+  // There is no empty-set representation. Contradictory relations retain the
+  // incoming facts instead of wrapping a strict bound into an exact value.
+  if ((uint64_t)minimum > (uint64_t)maximum || (strict && minimum == maximum)) {
+    return;
+  }
+  if (strict) {
+    minimum = minimum == INT64_MAX ? INT64_MIN : minimum + 1;
+    maximum = maximum == INT64_MIN ? INT64_MAX : maximum - 1;
+  }
+  if (lhs_result) {
+    if (maximum >= 0) {
+      lhs_result->range_lo = iree_max(lhs_result->range_lo, 0);
+      lhs_result->range_hi = iree_min(lhs_result->range_hi, maximum);
+    } else if (lhs_facts.range_hi < 0) {
+      lhs_result->range_hi = iree_min(lhs_result->range_hi, maximum);
+    } else if (lhs_facts.range_lo > maximum) {
+      // No negative value survives, so only the nonnegative partition remains.
+      lhs_result->range_lo = iree_max(lhs_result->range_lo, 0);
+    }
+  }
+  if (rhs_result) {
+    if (minimum < 0) {
+      rhs_result->range_lo = iree_max(rhs_result->range_lo, minimum);
+      rhs_result->range_hi = iree_min(rhs_result->range_hi, -1);
+    } else if (rhs_facts.range_lo >= 0) {
+      rhs_result->range_lo = iree_max(rhs_result->range_lo, minimum);
+    } else if (rhs_facts.range_hi < minimum) {
+      // No nonnegative value survives, so only the negative partition remains.
+      rhs_result->range_hi = iree_min(rhs_result->range_hi, -1);
+    }
+  }
+}
+
 bool loom_value_facts_refine_relation(uint8_t predicate_kind,
                                       loom_value_facts_t lhs_facts,
                                       loom_value_facts_t rhs_facts,
@@ -1163,26 +1191,19 @@ bool loom_value_facts_refine_relation(uint8_t predicate_kind,
       lhs_facts.flags & LOOM_VALUE_FACT_NON_ZERO;
   const uint32_t rhs_preserved_flags =
       rhs_facts.flags & LOOM_VALUE_FACT_NON_ZERO;
-  if (predicate_kind == LOOM_PREDICATE_ULT ||
-      predicate_kind == LOOM_PREDICATE_ULE ||
-      predicate_kind == LOOM_PREDICATE_UGT ||
-      predicate_kind == LOOM_PREDICATE_UGE) {
-    const bool lhs_is_nonnegative = lhs_facts.range_lo >= 0;
-    const bool rhs_is_nonnegative = rhs_facts.range_lo >= 0;
-    const bool lhs_is_negative = lhs_facts.range_hi < 0;
-    const bool rhs_is_negative = rhs_facts.range_hi < 0;
-    if ((lhs_is_nonnegative && rhs_is_nonnegative) ||
-        (lhs_is_negative && rhs_is_negative)) {
-      return loom_value_facts_refine_relation(
-          loom_value_facts_signed_relation_kind(predicate_kind), lhs_facts,
-          rhs_facts, lhs_result, rhs_result);
-    }
-    // A split interval needs two unsigned ranges, while opposite sign-stable
-    // partitions make the relation either tautological or contradictory. This
-    // lattice has neither unions nor an empty set, so retain its current facts.
-    return true;
-  }
   switch ((loom_predicate_kind_t)predicate_kind) {
+    case LOOM_PREDICATE_ULT:
+    case LOOM_PREDICATE_ULE:
+      loom_value_facts_refine_unsigned_order(
+          predicate_kind == LOOM_PREDICATE_ULT, lhs_facts, rhs_facts,
+          lhs_result, rhs_result);
+      break;
+    case LOOM_PREDICATE_UGT:
+    case LOOM_PREDICATE_UGE:
+      loom_value_facts_refine_unsigned_order(
+          predicate_kind == LOOM_PREDICATE_UGT, rhs_facts, lhs_facts,
+          rhs_result, lhs_result);
+      break;
     case LOOM_PREDICATE_EQ: {
       const int64_t range_lo = iree_max(lhs_facts.range_lo, rhs_facts.range_lo);
       const int64_t range_hi = iree_min(lhs_facts.range_hi, rhs_facts.range_hi);

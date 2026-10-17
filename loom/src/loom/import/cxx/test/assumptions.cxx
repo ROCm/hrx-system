@@ -5,7 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <hip/hip_runtime.h>
+#include <loomcxx/buffer.h>
 #include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
 #include <loomcxx/view.h>
 
 [[loom::force_inline]] unsigned bound_pair(unsigned first, unsigned second) {
@@ -664,4 +666,69 @@ LOOM_CHECK_SCENARIO(assumption_kernel_values) {
     loom::check::compare<assumption_kernel, assumption_kernel_oracle>(
         output, input, [&] { loom::check::expect_bitwise(storage, storage); });
   });
+}
+
+template <class Index>
+static LOOM_FORCE_INLINE void assumed_table_indices(const Index* input,
+                                                    unsigned* output) {
+  unsigned lane = loom::kernel::workitem::id.x;
+  auto* table =
+      loom::buffer::alloca<unsigned, loom::memory_space::workgroup, 16>(6);
+  if (lane < 6u) {
+    table[lane] = lane + 10u;
+  }
+  loom::kernel::workgroup::barrier();
+
+  // Each relation constrains a separate unbounded input. The dynamic-operand
+  // assumption must prove both nonnegativity and the table's upper bound.
+  Index first = input[4u * lane];
+  Index second = input[4u * lane + 1u];
+  Index third = input[4u * lane + 2u];
+  Index fourth = input[4u * lane + 3u];
+  Index count = 6;
+  Index last = 5;
+  loom::assume(first < count);
+  loom::assume(second <= last);
+  loom::assume(count > third);
+  loom::assume(last >= fourth);
+  output[4u * lane] = table[first];
+  output[4u * lane + 1u] = table[second];
+  output[4u * lane + 2u] = table[third];
+  output[4u * lane + 3u] = table[fourth];
+}
+
+[[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void assumed_table_u32(const unsigned* input, unsigned* output) {
+  assumed_table_indices(input, output);
+}
+
+[[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void assumed_table_u64(const unsigned long long* input, unsigned* output) {
+  assumed_table_indices(input, output);
+}
+
+LOOM_CHECK_CASE(unsigned_table_u32) {
+  const auto input = loom::check::iota<128, unsigned>(0u, 1u, 6);
+  const auto storage = loom::check::fill<132, unsigned>(0xA5A5A5A5u);
+  const auto output = loom::check::slice<128>(storage, 2);
+  loom::check::launch<assumed_table_u32>(input, output);
+  loom::check::expect_bitwise(output,
+                              loom::check::iota<128, unsigned>(10u, 1u, 6));
+  loom::check::expect_bitwise(loom::check::slice<2>(storage, 0),
+                              loom::check::fill<2, unsigned>(0xA5A5A5A5u));
+  loom::check::expect_bitwise(loom::check::slice<2>(storage, 130),
+                              loom::check::fill<2, unsigned>(0xA5A5A5A5u));
+}
+
+LOOM_CHECK_CASE(unsigned_table_u64) {
+  const auto input = loom::check::iota<128, unsigned long long>(0ull, 1ull, 6);
+  const auto storage = loom::check::fill<132, unsigned>(0xA5A5A5A5u);
+  const auto output = loom::check::slice<128>(storage, 2);
+  loom::check::launch<assumed_table_u64>(input, output);
+  loom::check::expect_bitwise(output,
+                              loom::check::iota<128, unsigned>(10u, 1u, 6));
+  loom::check::expect_bitwise(loom::check::slice<2>(storage, 0),
+                              loom::check::fill<2, unsigned>(0xA5A5A5A5u));
+  loom::check::expect_bitwise(loom::check::slice<2>(storage, 130),
+                              loom::check::fill<2, unsigned>(0xA5A5A5A5u));
 }
