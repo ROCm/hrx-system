@@ -1267,9 +1267,9 @@ def check_dynamic_catalog(
             else:
                 raise AssertionError(kind)
 
-        # Activate the shared device queue with one real request before checking
-        # model-count scaling. Vulkan starts its queue completion thread lazily.
-        # Names may change during native initialization; identities must remain.
+        # Observe the first request separately from activating the whole fixed
+        # queue inventory. Models may bind different provisioned queues, and
+        # Vulkan starts each queue's completion thread on first submission.
         first = next(
             item for item in declarations if item["definition"]["kind"] == "embedding"
         )
@@ -1287,12 +1287,13 @@ def check_dynamic_catalog(
             queued_requests=0,
             active_requests=0,
         )
-        activated_threads = thread_snapshot(process)
+        first_request_threads = thread_snapshot(process)
         assert (
-            initial_threads["userspace"].keys() <= activated_threads["userspace"].keys()
+            initial_threads["userspace"].keys()
+            <= first_request_threads["userspace"].keys()
         ), (
             initial_threads,
-            activated_threads,
+            first_request_threads,
         )
         for declaration in declarations:
             if declaration is not first:
@@ -1306,13 +1307,13 @@ def check_dynamic_catalog(
                 future.result()
             client.idle()
             observer.completed(2)
-            loaded_threads = thread_snapshot(process)
+            activated_threads = thread_snapshot(process)
             assert (
-                loaded_threads["userspace"].keys()
-                == activated_threads["userspace"].keys()
+                first_request_threads["userspace"].keys()
+                <= activated_threads["userspace"].keys()
             ), (
+                first_request_threads,
                 activated_threads,
-                loaded_threads,
             )
             check_sporadic_connections(
                 process,
@@ -1414,6 +1415,8 @@ def check_dynamic_catalog(
             retained = device["memory"]["retained"]
             if retained is not None:
                 assert retained["reserved_bytes"] == retained["committed_bytes"] == 0
+        # Reloads reuse the provisioned inventory. Its completion threads and
+        # the shared application workers survive model churn with no new IDs.
         final_threads = thread_snapshot(process)
         assert (
             final_threads["userspace"].keys() == activated_threads["userspace"].keys()
@@ -1441,8 +1444,8 @@ def check_dynamic_catalog(
                     "sse_model_lifetime_verified": True,
                     "thread_samples": [
                         initial_threads,
+                        first_request_threads,
                         activated_threads,
-                        loaded_threads,
                         final_threads,
                     ],
                 }

@@ -25,6 +25,7 @@ loom_cc_library(
     iree::hal
     iree::tooling::device_profiling
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::queues
     loom::serve::runtime::execution::workspace
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
