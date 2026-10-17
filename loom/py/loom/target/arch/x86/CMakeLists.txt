@@ -78,6 +78,7 @@ iree_py_library(
     "vector_encoding.py"
   DEPS
     loom::py::loom::target::arch::x86::package_init
+    loom::py::loom::target::arch::x86::scalar_families
     loom::py::loom::target::low_descriptors
 )
 

@@ -23,6 +23,16 @@ class ScalarReadMemoryFamily:
     commutative: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class ScalarVariableShiftFamily:
+    """A source shift and its non-destructive BMI2 machine form."""
+
+    source_operation: str
+    descriptor_operation: str
+    semantic: str
+    mandatory_prefix: int
+
+
 X86_SCALAR_READ_MEMORY_FAMILIES = (
     ScalarReadMemoryFamily("addi", "add", "add", "add", 0x03),
     ScalarReadMemoryFamily("subi", "sub", "sub", "sub", 0x2B, False),
@@ -30,4 +40,10 @@ X86_SCALAR_READ_MEMORY_FAMILIES = (
     ScalarReadMemoryFamily("andi", "and", "and", "and", 0x23),
     ScalarReadMemoryFamily("ori", "or", "or", "or", 0x0B),
     ScalarReadMemoryFamily("xori", "xor", "xor", "xor", 0x33),
+)
+
+X86_SCALAR_VARIABLE_SHIFT_FAMILIES = (
+    ScalarVariableShiftFamily("shli", "shlx", "shl", 1),
+    ScalarVariableShiftFamily("shrsi", "sarx", "shrs", 2),
+    ScalarVariableShiftFamily("shrui", "shrx", "shru", 3),
 )

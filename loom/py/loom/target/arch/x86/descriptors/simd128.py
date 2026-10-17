@@ -14,10 +14,10 @@ from pathlib import Path
 from loom.target.low_descriptors import RegClass, RegClassFlag, SpillSlotSpace
 
 from .common import _REG_XMM
-from .scalar import X86_SCALAR_DESCRIPTOR_SET
+from .scalar import X86_SCALAR_BASE_DESCRIPTOR_SET
 
 X86_SIMD128_DESCRIPTOR_SET = replace(
-    X86_SCALAR_DESCRIPTOR_SET,
+    X86_SCALAR_BASE_DESCRIPTOR_SET,
     key="x86.simd128.core",
     feature_key="x86.simd128.v1",
     c_header_path=Path(
@@ -30,7 +30,7 @@ X86_SIMD128_DESCRIPTOR_SET = replace(
     c_table_prefix="X86Simd128Core",
     c_enum_prefix="X86_SIMD128_CORE",
     reg_classes=(
-        *X86_SCALAR_DESCRIPTOR_SET.reg_classes,
+        *X86_SCALAR_BASE_DESCRIPTOR_SET.reg_classes,
         RegClass(
             _REG_XMM,
             128,

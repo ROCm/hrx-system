@@ -93,6 +93,36 @@ code: 62 f5 7c 08 51 c0 62 f6 7d 08 4e c0 62 f5 7e 08 51 c0 62 f6 7d 08 4f c0 c3
 
 // ====
 
+// RUN: emit x86-native-bytes @bmi2_i32
+x86.target<scalar> @target {features = [bmi2]}
+
+low.func.def target<x86.scalar.core>(@target) @bmi2_i32(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %left = shlx.gpr32 %lhs, %rhs
+  %signed = sarx.gpr32 %lhs, %rhs
+  %unsigned = shrx.gpr32 %lhs, %rhs
+  return %left, %signed, %unsigned
+}
+
+// ----
+code: 41 57 4d 8b fa c4 e2 49 f7 c7 c4 e2 4a f7 cf c4 e2 4b f7 d7 41 89 17 8b d1 41 5f c3
+
+// ====
+
+// RUN: emit x86-native-bytes @bmi2_i64
+x86.target<scalar> @target {features = [bmi2]}
+
+low.func.def target<x86.scalar.core>(@target) @bmi2_i64(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %left = shlx.gpr64 %lhs, %rhs
+  %signed = sarx.gpr64 %lhs, %rhs
+  %unsigned = shrx.gpr64 %lhs, %rhs
+  return %left, %signed, %unsigned
+}
+
+// ----
+code: 41 57 4d 8b fa c4 e2 c9 f7 c7 c4 e2 ca f7 cf c4 e2 cb f7 d7 49 89 17 48 8b d1 41 5f c3
+
+// ====
+
 // RUN: emit x86-native-bytes @fp16_ymm
 x86.target<avx512> @target {features = [avx512fp16]}
 

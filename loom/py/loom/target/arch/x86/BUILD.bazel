@@ -68,6 +68,7 @@ iree_py_library(
     ],
     deps = [
         ":package_init",
+        ":scalar_families",
         "//loom/py/loom/target:low_descriptors",
     ],
 )

@@ -26,6 +26,7 @@ from .packed_dot import (
     X86_AVX_VNNI_INT8_DESCRIPTOR_SET,
     X86_AVX_VNNI_INT16_DESCRIPTOR_SET,
 )
+from .scalar import X86_SCALAR_BMI2_DESCRIPTORS
 
 _X86_DESCRIPTOR_SET_COMPONENTS = tuple[tuple[DescriptorSet, frozenset[str]], ...]
 
@@ -55,6 +56,7 @@ _X86_AVX2_FEATURE_COMPONENTS: _X86_DESCRIPTOR_SET_COMPONENTS = (
 
 def _merge_component_descriptors(
     components: tuple[tuple[DescriptorSet, frozenset[str]], ...],
+    extension_descriptors: tuple[Descriptor, ...] = (),
 ) -> tuple[Descriptor, ...]:
     descriptors = []
     seen_keys: set[str] = set()
@@ -69,6 +71,13 @@ def _merge_component_descriptors(
                 )
             descriptors.append(_qualify_packed_dot_descriptor_asm_forms(descriptor))
             seen_keys.add(descriptor.key)
+    for descriptor in extension_descriptors:
+        if descriptor.key in seen_keys:
+            raise ValueError(
+                f"x86 descriptor set extension repeats descriptor '{descriptor.key}'"
+            )
+        descriptors.append(_qualify_packed_dot_descriptor_asm_forms(descriptor))
+        seen_keys.add(descriptor.key)
     return tuple(descriptors)
 
 
@@ -81,6 +90,7 @@ def _composite_descriptor_set(
     c_table_prefix: str,
     c_enum_prefix: str,
     components: _X86_DESCRIPTOR_SET_COMPONENTS,
+    extension_descriptors: tuple[Descriptor, ...] = (),
 ) -> DescriptorSet:
     core = components[0][0]
     return DescriptorSet(
@@ -112,7 +122,7 @@ def _composite_descriptor_set(
         enum_domains=_merge_named_items(
             tuple(descriptor_set.enum_domains for descriptor_set, _ in components)
         ),
-        descriptors=_merge_component_descriptors(components),
+        descriptors=_merge_component_descriptors(components, extension_descriptors),
     )
 
 
@@ -124,6 +134,7 @@ X86_AVX2_FEATURES_DESCRIPTOR_SET = _composite_descriptor_set(
     c_table_prefix="X86Avx2FeaturesCore",
     c_enum_prefix="X86_AVX2_FEATURES_CORE",
     components=_X86_AVX2_FEATURE_COMPONENTS,
+    extension_descriptors=X86_SCALAR_BMI2_DESCRIPTORS,
 )
 
 X86_AVX512_FEATURES_DESCRIPTOR_SET = _composite_descriptor_set(
@@ -134,4 +145,5 @@ X86_AVX512_FEATURES_DESCRIPTOR_SET = _composite_descriptor_set(
     c_table_prefix="X86Avx512FeaturesCore",
     c_enum_prefix="X86_AVX512_FEATURES_CORE",
     components=_X86_AVX512_FEATURE_COMPONENTS,
+    extension_descriptors=X86_SCALAR_BMI2_DESCRIPTORS,
 )

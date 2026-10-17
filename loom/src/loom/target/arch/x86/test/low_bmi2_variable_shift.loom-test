@@ -1,0 +1,14 @@
+// Every BMI2 variable-shift width and semantic remains authorable in Low asm.
+// RUN: roundtrip
+
+x86.target<scalar> @target {features = [bmi2]}
+
+low.func.def target<x86.scalar.core>(@target) @bmi2_variable_shifts(%lhs32: reg<x86.gpr32>, %rhs32: reg<x86.gpr32>, %lhs64: reg<x86.gpr64>, %rhs64: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %shlx32 = shlx.gpr32 %lhs32, %rhs32
+  %sarx32 = sarx.gpr32 %lhs32, %rhs32
+  %shrx32 = shrx.gpr32 %lhs32, %rhs32
+  %shlx64 = shlx.gpr64 %lhs64, %rhs64
+  %sarx64 = sarx.gpr64 %lhs64, %rhs64
+  %shrx64 = shrx.gpr64 %lhs64, %rhs64
+  return %shlx32, %sarx32, %shrx32, %shlx64, %sarx64, %shrx64
+}
