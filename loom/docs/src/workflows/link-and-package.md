@@ -144,6 +144,12 @@ through `--root-library` when that definition should independently remain an
 output. This prevents a reusable library's complete public catalog from being
 re-exported through every product that consumes one definition.
 
+Selecting a root retains it without making a private symbol public. When the
+requester declares that root, its declaration controls the linked visibility
+and export name, even if the resolved library definition is public. Declare
+the requester root `public` when it should be callable through the output's
+public interface.
+
 Some products close before every reachable implementation. Portable command
 construction, for example, follows a kernel's contract and pure configuration
 without pulling its device body into the command artifact. [Parallelize kernel
