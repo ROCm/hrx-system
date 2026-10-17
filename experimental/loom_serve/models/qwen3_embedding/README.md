@@ -55,6 +55,26 @@ The service checker uses a ready deployment and exercises input forms,
 independent rows, row order, prefix normalization, encodings, usage counts, and
 rejection boundaries. It neither downloads a checkpoint nor starts a server.
 
+## Measured serving behavior
+
+Warm Strix Halo measurements compare this package with the pinned Halogen
+0.18.4 engine and its HTTP adapter. Both use the same texts, token counts,
+1024-dimensional outputs, and persistent loopback HTTP completion boundary.
+The NPU stays powered during measurement. Five warmups precede 30 requests per
+shape in each round of a Loom/Halogen/Loom/Halogen/Loom sequence; the table
+reports pooled medians. Tokenization and response serialization are included.
+
+| Inputs per request | Loom | Halogen | Halogen / Loom |
+| --- | ---: | ---: | ---: |
+| 1 × 128 tokens | 60.4 ms | 60.3 ms | 1.00× |
+| 4 × 32 tokens | 60.3 ms | 240.5 ms | 3.99× |
+| 16 × 8 tokens | 60.2 ms | 641.2 ms | 10.64× |
+
+The fixed 128-slot execution makes batching the useful throughput advantage.
+Single-input latency is approximately equal; short inputs still execute the
+complete cohort. These warm, isolated measurements exclude arrival queueing,
+cold wakeup, and model preparation.
+
 ## Execution and ownership
 
 `array.loom` owns physical placement, storage, FIFO fanout, and stream lengths.
