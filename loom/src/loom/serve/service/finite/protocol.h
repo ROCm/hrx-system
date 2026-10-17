@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/vm/buffer.h"
+#include "loom/serve/service/kind.h"
 
 // Initial member of each modality's request. The source packet and protocol
 // metadata survive until CPU encoding releases the cohort, including reset
@@ -23,10 +24,8 @@ typedef struct loom_serve_finite_request_t {
 // Native modality wiring for the shared finite cohort service, not a model
 // plugin interface. Source programs still own preparation and learned math.
 typedef struct loom_serve_finite_protocol_t {
-  // Static modality name used in diagnostics and event names.
-  const char* name;
-  // Static POST endpoint handled by this modality.
-  const char* endpoint;
+  // Native finite protocol role, including its canonical POST endpoint.
+  loom_serve_model_kind_t kind;
   // Client-visible output modality with static storage.
   iree_string_view_t output_modality;
   // Static HTTP status for malformed schema or source input rejection.

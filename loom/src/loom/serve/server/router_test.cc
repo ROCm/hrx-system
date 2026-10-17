@@ -170,53 +170,53 @@ TEST_P(HttpRouterTest, MetricsCopyHeldAndQueuedOwnershipWithEscapedLabels) {
       "Connection: close\r\n\r\n"
       R"(# HELP loom_serve_model_queued_requests Requests outside the active invocation or cohort.
 # TYPE loom_serve_model_queued_requests gauge
-loom_serve_model_queued_requests{model="a",kind="fixture"} 0
-loom_serve_model_queued_requests{model="b",kind="fixture"} 1
-loom_serve_model_queued_requests{model="held",kind="fixture"} 0
-loom_serve_model_queued_requests{model="other",kind="fixture"} 0
-loom_serve_model_queued_requests{model="quoted\"\\name",kind="fixture"} 0
+loom_serve_model_queued_requests{model="a",kind="embedding"} 0
+loom_serve_model_queued_requests{model="b",kind="embedding"} 1
+loom_serve_model_queued_requests{model="held",kind="embedding"} 0
+loom_serve_model_queued_requests{model="other",kind="embedding"} 0
+loom_serve_model_queued_requests{model="quoted\"\\name",kind="embedding"} 0
 # HELP loom_serve_model_active_requests Requests owned by the active invocation or cohort, not hardware utilization.
 # TYPE loom_serve_model_active_requests gauge
-loom_serve_model_active_requests{model="a",kind="fixture"} 0
-loom_serve_model_active_requests{model="b",kind="fixture"} 0
-loom_serve_model_active_requests{model="held",kind="fixture"} 1
-loom_serve_model_active_requests{model="other",kind="fixture"} 0
-loom_serve_model_active_requests{model="quoted\"\\name",kind="fixture"} 0
+loom_serve_model_active_requests{model="a",kind="embedding"} 0
+loom_serve_model_active_requests{model="b",kind="embedding"} 0
+loom_serve_model_active_requests{model="held",kind="embedding"} 1
+loom_serve_model_active_requests{model="other",kind="embedding"} 0
+loom_serve_model_active_requests{model="quoted\"\\name",kind="embedding"} 0
 # HELP loom_serve_model_phase Current scheduler ownership phase.
 # TYPE loom_serve_model_phase gauge
-loom_serve_model_phase{model="a",kind="fixture",phase="idle"} 1
-loom_serve_model_phase{model="b",kind="fixture",phase="idle"} 1
-loom_serve_model_phase{model="held",kind="fixture",phase="held"} 1
-loom_serve_model_phase{model="other",kind="fixture",phase="idle"} 1
-loom_serve_model_phase{model="quoted\"\\name",kind="fixture",phase="idle"} 1
+loom_serve_model_phase{model="a",kind="embedding",phase="idle"} 1
+loom_serve_model_phase{model="b",kind="embedding",phase="idle"} 1
+loom_serve_model_phase{model="held",kind="embedding",phase="held"} 1
+loom_serve_model_phase{model="other",kind="embedding",phase="idle"} 1
+loom_serve_model_phase{model="quoted\"\\name",kind="embedding",phase="idle"} 1
 # HELP loom_serve_model_oldest_queued_age_seconds Time since the oldest queued request was accepted, or zero if empty.
 # TYPE loom_serve_model_oldest_queued_age_seconds gauge
-loom_serve_model_oldest_queued_age_seconds{model="a",kind="fixture"} 0
-loom_serve_model_oldest_queued_age_seconds{model="b",kind="fixture"} 12.5
-loom_serve_model_oldest_queued_age_seconds{model="held",kind="fixture"} 0
-loom_serve_model_oldest_queued_age_seconds{model="other",kind="fixture"} 0
-loom_serve_model_oldest_queued_age_seconds{model="quoted\"\\name",kind="fixture"} 0
+loom_serve_model_oldest_queued_age_seconds{model="a",kind="embedding"} 0
+loom_serve_model_oldest_queued_age_seconds{model="b",kind="embedding"} 12.5
+loom_serve_model_oldest_queued_age_seconds{model="held",kind="embedding"} 0
+loom_serve_model_oldest_queued_age_seconds{model="other",kind="embedding"} 0
+loom_serve_model_oldest_queued_age_seconds{model="quoted\"\\name",kind="embedding"} 0
 # HELP loom_serve_model_oldest_active_age_seconds Time since the oldest active request was accepted, including prior queue residence, or zero if empty.
 # TYPE loom_serve_model_oldest_active_age_seconds gauge
-loom_serve_model_oldest_active_age_seconds{model="a",kind="fixture"} 0
-loom_serve_model_oldest_active_age_seconds{model="b",kind="fixture"} 0
-loom_serve_model_oldest_active_age_seconds{model="held",kind="fixture"} 2.25
-loom_serve_model_oldest_active_age_seconds{model="other",kind="fixture"} 0
-loom_serve_model_oldest_active_age_seconds{model="quoted\"\\name",kind="fixture"} 0
+loom_serve_model_oldest_active_age_seconds{model="a",kind="embedding"} 0
+loom_serve_model_oldest_active_age_seconds{model="b",kind="embedding"} 0
+loom_serve_model_oldest_active_age_seconds{model="held",kind="embedding"} 2.25
+loom_serve_model_oldest_active_age_seconds{model="other",kind="embedding"} 0
+loom_serve_model_oldest_active_age_seconds{model="quoted\"\\name",kind="embedding"} 0
 # HELP loom_serve_model_held_requests Requests held outside model admission.
 # TYPE loom_serve_model_held_requests gauge
 # HELP loom_serve_model_admission_open Whether new requests may enter the model.
 # TYPE loom_serve_model_admission_open gauge
-loom_serve_model_held_requests{model="a",kind="fixture"} 0
-loom_serve_model_admission_open{model="a",kind="fixture"} 1
-loom_serve_model_held_requests{model="b",kind="fixture"} 0
-loom_serve_model_admission_open{model="b",kind="fixture"} 1
-loom_serve_model_held_requests{model="held",kind="fixture"} 0
-loom_serve_model_admission_open{model="held",kind="fixture"} 1
-loom_serve_model_held_requests{model="other",kind="fixture"} 0
-loom_serve_model_admission_open{model="other",kind="fixture"} 1
-loom_serve_model_held_requests{model="quoted\"\\name",kind="fixture"} 0
-loom_serve_model_admission_open{model="quoted\"\\name",kind="fixture"} 1
+loom_serve_model_held_requests{model="a",kind="embedding"} 0
+loom_serve_model_admission_open{model="a",kind="embedding"} 1
+loom_serve_model_held_requests{model="b",kind="embedding"} 0
+loom_serve_model_admission_open{model="b",kind="embedding"} 1
+loom_serve_model_held_requests{model="held",kind="embedding"} 0
+loom_serve_model_admission_open{model="held",kind="embedding"} 1
+loom_serve_model_held_requests{model="other",kind="embedding"} 0
+loom_serve_model_admission_open{model="other",kind="embedding"} 1
+loom_serve_model_held_requests{model="quoted\"\\name",kind="embedding"} 0
+loom_serve_model_admission_open{model="quoted\"\\name",kind="embedding"} 1
 # HELP loom_serve_model_parameter_pins Accepted-consumer and explicit-retention pins, excluding persistent policy.
 # TYPE loom_serve_model_parameter_pins gauge
 # HELP loom_serve_model_parameter_admission_waiting Whether new work is waiting for parameter admission.
@@ -267,21 +267,21 @@ loom_serve_server_latency_available 0
   EXPECT_NE(Read(queued).find("b:/v1/test:"), std::string::npos);
   const auto idle = Read(Send("GET", "/metrics"));
   EXPECT_NE(idle.find("loom_serve_model_active_requests{model=\"held\","
-                      "kind=\"fixture\"} 0\n"),
+                      "kind=\"embedding\"} 0\n"),
             std::string::npos);
   EXPECT_NE(idle.find("loom_serve_model_queued_requests{model=\"b\","
-                      "kind=\"fixture\"} 0\n"),
+                      "kind=\"embedding\"} 0\n"),
             std::string::npos);
   EXPECT_NE(idle.find("loom_serve_model_phase{model=\"held\","
-                      "kind=\"fixture\",phase=\"idle\"} 1\n"),
+                      "kind=\"embedding\",phase=\"idle\"} 1\n"),
             std::string::npos);
   EXPECT_EQ(idle.find("phase=\"held\""), std::string::npos);
   EXPECT_NE(
       idle.find("loom_serve_model_oldest_active_age_seconds{model=\"held\","
-                "kind=\"fixture\"} 0\n"),
+                "kind=\"embedding\"} 0\n"),
       std::string::npos);
   EXPECT_NE(idle.find("loom_serve_model_oldest_queued_age_seconds{model=\"b\","
-                      "kind=\"fixture\"} 0\n"),
+                      "kind=\"embedding\"} 0\n"),
             std::string::npos);
 }
 
@@ -332,7 +332,7 @@ TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {
   const auto snapshot = Read(Send("GET", "/v1/status"));
   EXPECT_NE(
       snapshot.find(
-          R"("loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":2.250000000,"admission":"open","held_requests":0,"tokenizer_requests":)"),
+          R"("loom":{"kind":"embedding","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":2.250000000,"admission":"open","held_requests":0,"tokenizer_requests":)"),
       std::string::npos);
   for (int i = 0; i < 12; ++i) {
     const auto response = Read(clients[i]);
@@ -404,11 +404,11 @@ TEST_P(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {
             std::string::npos);
   EXPECT_NE(
       models.find(
-          R"("owned_by":"local","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true}})"),
+          R"("owned_by":"local","loom":{"kind":"embedding","endpoint":"/v1/test","tokenize":true}})"),
       std::string::npos);
   EXPECT_NE(
       models.find(
-          R"("owned_by":"local","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":false}})"),
+          R"("owned_by":"local","loom":{"kind":"embedding","endpoint":"/v1/test","tokenize":false}})"),
       std::string::npos);
   EXPECT_EQ(models.find("\"status\":"), std::string::npos);
   const std::string body_a = R"({"model":"\u0061","messages":["first"]})";
@@ -491,13 +491,13 @@ TEST_P(HttpRouterTest, DrainFinishesAdmittedQueueAndHoldsLaterModelBorrowers) {
       std::string::npos);
   const auto metrics = Read(Send("GET", "/metrics"));
   EXPECT_NE(metrics.find("loom_serve_model_queued_requests{model=\"b\","
-                         "kind=\"fixture\"} 2\n"),
+                         "kind=\"embedding\"} 2\n"),
             std::string::npos);
   EXPECT_NE(metrics.find("loom_serve_model_held_requests{model=\"b\","
-                         "kind=\"fixture\"} 2\n"),
+                         "kind=\"embedding\"} 2\n"),
             std::string::npos);
   EXPECT_NE(metrics.find("loom_serve_model_admission_open{model=\"b\","
-                         "kind=\"fixture\"} 0\n"),
+                         "kind=\"embedding\"} 0\n"),
             std::string::npos);
 
   held_.Release();
@@ -838,7 +838,7 @@ TEST_P(HttpRouterCountersTest, ServerTotalsPreserveIntegerPrecisionAndScope) {
   for (int i = 0; i < 2; ++i) {
     const auto metrics = Read(Send("GET", "/metrics"));
     EXPECT_NE(metrics.find("loom_serve_model_input_tokens_total{model=\"a\","
-                           "kind=\"fixture\"} 9007199254740993\n"),
+                           "kind=\"embedding\"} 9007199254740993\n"),
               std::string::npos);
     EXPECT_NE(metrics.find("loom_serve_server_requests_total 15\n"),
               std::string::npos);
@@ -849,7 +849,7 @@ TEST_P(HttpRouterCountersTest, ServerTotalsPreserveIntegerPrecisionAndScope) {
               std::string::npos);
     const std::string model = "loom_serve_model_request_duration_seconds_";
     const std::string labels =
-        "{model=\"a\",kind=\"fixture\",outcome=\"completed\"";
+        "{model=\"a\",kind=\"embedding\",outcome=\"completed\"";
     for (const auto& suffix : {"bucket", "count", "sum"}) {
       const std::string expected =
           model + suffix + labels +

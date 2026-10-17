@@ -109,6 +109,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
     IREE_ASSERT_OK(http_.Initialize(server_, listener_));
     const loom_serve_recognition_service_options_t service_options = {
         .name = IREE_SV("recognition"),
+        .kind = LOOM_SERVE_MODEL_KIND_RECOGNITION,
         .pending_capacity = 2,
         .request_limit = 1024,
         .document_limit = 4096,
@@ -189,6 +190,73 @@ class SourceRecognitionHttpTest : public ::testing::Test {
 class SourceRecognitionHttpRetirementTest
     : public SourceRecognitionHttpTest,
       public ::testing::WithParamInterface<std::tuple<bool, uint32_t>> {};
+
+TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
+  interface_.set_observer(interface_.self, {});
+  loom_serve_recognition_service_free(service_);
+  service_ = nullptr;
+  interface_ = {};
+  const struct {
+    // Deployment contract checked before the service is published.
+    loom_serve_model_kind_t kind;
+    // Capability mask supplied by the generator dependency.
+    loom_serve_recognition_output_flags_t outputs;
+    // Whether that source satisfies the deployment contract.
+    bool valid;
+    // Actual output modalities published on successful preparation.
+    size_t modality_count;
+  } cases[] = {
+      {LOOM_SERVE_MODEL_KIND_RECOGNITION,
+       LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT, true, 1},
+      {LOOM_SERVE_MODEL_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY,
+       true, 1},
+      {LOOM_SERVE_MODEL_KIND_RECOGNITION, LOOM_SERVE_RECOGNITION_OUTPUT_ALL,
+       true, 2},
+      {LOOM_SERVE_MODEL_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_ALL, true,
+       2},
+      {LOOM_SERVE_MODEL_KIND_RECOGNITION,
+       LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY, false, 0},
+      {LOOM_SERVE_MODEL_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+       false, 0},
+      {LOOM_SERVE_MODEL_KIND_TEXT, LOOM_SERVE_RECOGNITION_OUTPUT_ALL, false, 0},
+  };
+  for (const auto& row : cases) {
+    SCOPED_TRACE(row.kind);
+    SCOPED_TRACE(row.outputs);
+    auto generator = loom_serve_recognition_model_generator(model_);
+    generator.outputs = row.outputs;
+    const loom_serve_recognition_service_options_t options = {
+        .name = IREE_SV("audio"),
+        .kind = row.kind,
+        .pending_capacity = 1,
+        .request_limit = 1024,
+        .document_limit = 4096,
+        .decode_frames = 5,
+        .conversion_limit = 8 * 1024 * 1024,
+    };
+    auto status = loom_serve_recognition_service_allocate(
+        host_, generator, &options, nullptr, iree_allocator_system(),
+        &service_);
+    if (row.valid) {
+      IREE_ASSERT_OK(status);
+      interface_ = loom_serve_recognition_service_interface(service_);
+      EXPECT_EQ(interface_.kind, row.kind);
+      EXPECT_EQ(interface_.capabilities.output_modalities.count,
+                row.modality_count);
+      EXPECT_EQ(interface_.accept != nullptr,
+                row.kind == LOOM_SERVE_MODEL_KIND_RECOGNITION);
+      EXPECT_EQ(interface_.endpoint != nullptr,
+                row.kind == LOOM_SERVE_MODEL_KIND_RECOGNITION);
+      EXPECT_NE(interface_.try_open_recognition, nullptr);
+      loom_serve_recognition_service_free(service_);
+      service_ = nullptr;
+      interface_ = {};
+    } else {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
+      EXPECT_EQ(service_, nullptr);
+    }
+  }
+}
 
 TEST_P(SourceRecognitionHttpRetirementTest,
        CancellationRetainsAcceptedDecodeBorrow) {

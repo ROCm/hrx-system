@@ -628,6 +628,7 @@ static iree_status_t loom_serve_recognition_registration_prepare(
         registration->configuration;
     const loom_serve_recognition_service_options_t service_options = {
         .name = configuration->name,
+        .kind = configuration->kind,
         .pending_capacity = configuration->pending_requests,
         .request_limit = 64 * 1024,
         .document_limit = 1024 * 1024,
@@ -1018,28 +1019,22 @@ static iree_status_t loom_serve_model_registration_create(
     loom_serve_wake_callback_t observer, loom_serve_telemetry_stream_t* stream,
     iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
-  if (configuration->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
-    return loom_serve_text_registration_create(self, configuration, observer,
-                                               stream, host_allocator,
-                                               out_registration);
-  }
-  if (configuration->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
-    return loom_serve_image_registration_create(self, configuration, observer,
-                                                stream, host_allocator,
-                                                out_registration);
-  }
-  if (configuration->kind == LOOM_SERVE_MODEL_KIND_SPEECH) {
-    return loom_serve_speech_registration_create(self, configuration, observer,
-                                                 stream, host_allocator,
-                                                 out_registration);
-  }
-  if (configuration->kind == LOOM_SERVE_MODEL_KIND_RECOGNITION) {
-    return loom_serve_recognition_registration_create(
-        self, configuration, observer, stream, host_allocator,
-        out_registration);
-  }
-  return loom_serve_finite_registration_create(
-      self, configuration, observer, stream, host_allocator, out_registration);
+  static iree_status_t (*const create[])(
+      void*, const loom_serve_model_configuration_t*,
+      loom_serve_wake_callback_t, loom_serve_telemetry_stream_t*,
+      iree_allocator_t, loom_serve_registration_t*) = {
+      [LOOM_SERVE_MODEL_KIND_TEXT] = loom_serve_text_registration_create,
+      [LOOM_SERVE_MODEL_KIND_IMAGE] = loom_serve_image_registration_create,
+      [LOOM_SERVE_MODEL_KIND_EMBEDDING] = loom_serve_finite_registration_create,
+      [LOOM_SERVE_MODEL_KIND_DECISION] = loom_serve_finite_registration_create,
+      [LOOM_SERVE_MODEL_KIND_SPEECH] = loom_serve_speech_registration_create,
+      [LOOM_SERVE_MODEL_KIND_RECOGNITION] =
+          loom_serve_recognition_registration_create,
+      [LOOM_SERVE_MODEL_KIND_ACTIVITY] =
+          loom_serve_recognition_registration_create,
+  };
+  return create[configuration->kind](self, configuration, observer, stream,
+                                     host_allocator, out_registration);
 }
 
 static iree_status_t loom_serve_model_registration_query_status(void* self) {
@@ -1065,6 +1060,7 @@ loom_serve_registration_factory_t loom_serve_model_registration_factory(
                (1u << LOOM_SERVE_MODEL_KIND_IMAGE) |
                (1u << LOOM_SERVE_MODEL_KIND_SPEECH) |
                (1u << LOOM_SERVE_MODEL_KIND_RECOGNITION) |
+               (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY) |
                (1u << LOOM_SERVE_MODEL_KIND_TEXT),
       .device_count = loom_serve_device_group_count(options->device_group),
       .create = loom_serve_model_registration_create,

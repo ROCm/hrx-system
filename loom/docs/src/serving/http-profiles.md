@@ -51,8 +51,11 @@ header.
 
 Prepared but drained or weight-evicted models remain discoverable.
 `created` is the registration timestamp; `owned_by` is `"local"`.
-`loom.kind`, `loom.endpoint` and `loom.tokenize` describe the modality and
-loaded tokenizer. Text also reports configured `context_length` and
+`loom.kind`, optional `loom.endpoint`, and `loom.tokenize` describe the deployment
+role, HTTP inference route, and loaded tokenizer. Native-only activity models
+omit `loom.endpoint`; HTTP inference requests to them return 404. Management and
+tokenizer utilities remain available according to their normal capabilities.
+Text also reports configured `context_length` and
 `limits.max_output_tokens`, not training context or total cache-pool capacity.
 `loom.input_tokens:true` advertises exact prepared-chat input counting.
 Capabilities do not establish learned quality or support for every optional field.

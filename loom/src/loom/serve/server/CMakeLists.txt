@@ -54,6 +54,7 @@ loom_cc_library(
     loom::serve::server::http::variants
     loom::serve::service
     loom::serve::service::inspection
+    loom::serve::service::kind
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
     loom::serve::transport::http::multipart
@@ -196,6 +197,7 @@ loom_cc_library(
     iree::io::file_handle
     loom::serve::runtime::program::sources
     loom::serve::runtime::program::variant_pool
+    loom::serve::service::kind
   PUBLIC
 )
 endif()
@@ -217,6 +219,7 @@ loom_cc_library(
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::program::compilation
     loom::serve::service
+    loom::serve::service::kind
     loom::serve::telemetry::latency
     loom::serve::telemetry::record
     loom::serve::telemetry::stream
