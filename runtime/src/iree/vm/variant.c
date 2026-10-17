@@ -301,6 +301,14 @@ iree_vm_variant_retain(iree_vm_variant_t variant) {
 }
 
 IREE_API_EXPORT iree_vm_variant_t
+iree_vm_variant_borrow(iree_vm_variant_t variant) {
+  if (variant.payload && iree_vm_variant_is_ref(variant)) {
+    variant.metadata |= IREE_VM_VARIANT_TAG_BORROWED_REF;
+  }
+  return variant;
+}
+
+IREE_API_EXPORT iree_vm_variant_t
 iree_vm_variant_move(iree_vm_variant_t* variant) {
   iree_vm_variant_t result = *variant;
   if (result.payload && iree_vm_variant_ref_is_borrowed(result)) {

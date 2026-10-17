@@ -372,6 +372,52 @@ TEST(VMVariantRefTest, MovingOwnedRefTransfersExistingOwner) {
   EXPECT_EQ(destroy_count, 1);
 }
 
+TEST(VMVariantRefTest, BorrowingDoesNotTransferOrRetainOwnership) {
+  int destroy_count = 0;
+  TestObject* object = CreateTestObject(&destroy_count);
+  iree_vm_variant_t owner =
+      test_object_variant_from_ptr_move(&kTestTypes, &object);
+  iree_vm_variant_t first = iree_vm_variant_borrow(owner);
+  iree_vm_variant_t second = iree_vm_variant_borrow(first);
+  EXPECT_EQ(first.metadata & IREE_VM_VARIANT_TAG_MASK,
+            IREE_VM_VARIANT_TAG_BORROWED_REF);
+  EXPECT_EQ(second.metadata, first.metadata);
+  EXPECT_EQ(first.payload, owner.payload);
+  EXPECT_EQ(iree_vm_variant_ref_type(first), &kTestObjectType);
+  iree_vm_variant_reset(&first);
+  EXPECT_EQ(destroy_count, 0);
+  iree_vm_variant_reset(&owner);
+  EXPECT_EQ(destroy_count, 1);
+  // Resetting an abandoned borrower never dereferences the dead object.
+  iree_vm_variant_reset(&second);
+  EXPECT_EQ(destroy_count, 1);
+}
+
+TEST(VMVariantTest, BorrowingPreservesNonOwningCarriers) {
+  const iree_vm_variant_t sentinels[] = {
+      iree_vm_variant_empty(),
+      iree_vm_variant_null(),
+      iree_vm_variant_from_function_ref(iree_vm_function_ref_null()),
+      iree_vm_variant_from_function_ref(
+          {UINT64_C(0x12345678), UINT64_C(0xFEDCBA9876543200)}),
+  };
+  for (iree_vm_variant_t source : sentinels) {
+    iree_vm_variant_t borrowed = iree_vm_variant_borrow(source);
+    EXPECT_EQ(borrowed.payload, source.payload);
+    EXPECT_EQ(borrowed.metadata, source.metadata);
+    iree_vm_variant_reset(&borrowed);
+  }
+  for (iree_vm_scalar_type_t type = IREE_VM_SCALAR_TYPE_I8;
+       type <= IREE_VM_SCALAR_TYPE_F64; ++type) {
+    iree_vm_variant_t source = iree_vm_variant_empty();
+    IREE_ASSERT_OK(iree_vm_variant_from_scalar_bits(type, UINT64_MAX, &source));
+    iree_vm_variant_t borrowed = iree_vm_variant_borrow(source);
+    EXPECT_EQ(borrowed.payload, source.payload);
+    EXPECT_EQ(borrowed.metadata, source.metadata);
+    iree_vm_variant_reset(&borrowed);
+  }
+}
+
 TEST(VMVariantRefTest, CheckedExtractionTransitionsAreExact) {
   int destroy_count = 0;
   TestObject* object = CreateTestObject(&destroy_count);

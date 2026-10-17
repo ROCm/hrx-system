@@ -10,6 +10,8 @@ global.rodata.def @negative = bytes("6e65676174697665")
 
 global.rodata.def @invalid = bytes("737065656368206669787475726520726571756972657320312d3130323420696e7075742062797465732c20706f736974697665206f72206e6567617469766520766f6963652c207370656564203120616e64206e6f20696e737472756374696f6e73")
 
+global.rodata.def @position_mismatch = bytes("737065656368206669787475726520736f7572636520616e642064657669636520706c61796261636b20706f736974696f6e7320646966666572")
+
 func.def @check(%condition: i1) {
   %valid = scalar.extui %condition : i1 to i32
   %diagnostic = global.load @invalid : buffer
@@ -17,7 +19,7 @@ func.def @check(%condition: i1) {
   func.return
 }
 
-func.def public @prepare_request(%model: buffer, %text: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer, buffer) {
+func.def public @prepare_request(%model: buffer, %text: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer, i64, buffer) {
   %origin = index.constant 0 : offset
   %voice_bytes = index.constant 8 : offset
   %maximum = index.constant 1024 : offset
@@ -76,11 +78,12 @@ func.def public @prepare_request(%model: buffer, %text: buffer, %voice: buffer, 
   %state = buffer.alloca<private> align(4) %state_bytes : buffer
   %cursor = buffer.view %state[%origin] : buffer -> view<1xi32>
   view.store %c0, %cursor[0] : i32, view<1xi32>
-  func.return %state, %payload : buffer, buffer
+  %position = scalar.constant 0 : i64
+  func.return %state, %position, %payload : buffer, i64, buffer
 }
 
 // A work offer observes the current phase without advancing the request.
-func.def public @prepare_work(%model: buffer, %state: buffer) -> (buffer, i64, i64) {
+func.def public @prepare_work(%model: buffer, %state: buffer, %position: i64) -> (buffer, i64, i64) {
   %origin = index.constant 0 : offset
   %cursor = buffer.view %state[%origin] : buffer -> view<1xi32>
   %stage = view.load %cursor[0] : view<1xi32> -> i32
@@ -142,17 +145,16 @@ func.def public @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer
   func.return
 }
 
-func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, i64, i64, i32) {
+func.def public @complete(%model: buffer, %state: buffer, %position: i64, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (buffer, i64, i64, i64, i64, i32) {
   %origin = index.constant 0 : offset
   %cursor = buffer.view %state[%origin] : buffer -> view<1xi32>
   %stage = view.load %cursor[0] : view<1xi32> -> i32
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %initial = scalar.cmpi eq, %stage, %c0 : i32
-  %position, %offset, %count, %done = scf.if %initial -> (i64, i64, i64, i32) {
-    view.store %c1, %cursor[0] : i32, view<1xi32>
+  %offset, %count, %done = scf.if %initial -> (i64, i64, i32) {
     %c0_i64 = scalar.constant 0 : i64
-    scf.yield %c0_i64, %c0_i64, %c0_i64, %c0 : i64, i64, i64, i32
+    scf.yield %c0_i64, %c0_i64, %c0 : i64, i64, i32
   } else {
     %stride = scalar.constant 36 : i64
     %row_offset = scalar.muli %ordinal, %stride : i64
@@ -160,13 +162,22 @@ func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordina
     %start = index.cast %bounded : i64 to offset
     %header = buffer.view %feedback[%start] : buffer -> view<4xi32>
     %position32 = view.load %header[0] : view<4xi32> -> i32
+    %position64 = scalar.extui %position32 : i32 to i64
+    %same_position = scalar.cmpi eq, %position64, %position : i64
+    %valid_position = scalar.extui %same_position : i1 to i32
+    %diagnostic = global.load @position_mismatch : buffer
+    func.call @require(%valid_position, %diagnostic) : (i32, buffer)
     %count32 = view.load %header[1] : view<4xi32> -> i32
     %last = view.load %header[2] : view<4xi32> -> i32
-    %position64 = scalar.extui %position32 : i32 to i64
     %count64 = scalar.extui %count32 : i32 to i64
     %header_bytes = scalar.constant 16 : i64
     %sample_offset = scalar.addi %row_offset, %header_bytes : i64
-    scf.yield %position64, %sample_offset, %count64, %last : i64, i64, i64, i32
+    scf.yield %sample_offset, %count64, %last : i64, i64, i32
   }
-  func.return %position, %offset, %count, %done : i64, i64, i64, i32
+  %state_bytes = index.constant 4 : offset
+  %next_state = buffer.alloca<private> align(4) %state_bytes : buffer
+  %next_cursor = buffer.view %next_state[%origin] : buffer -> view<1xi32>
+  view.store %c1, %next_cursor[0] : i32, view<1xi32>
+  %next_position = scalar.addi %position, %count : i64
+  func.return %next_state, %next_position, %position, %offset, %count, %done : buffer, i64, i64, i64, i64, i32
 }
