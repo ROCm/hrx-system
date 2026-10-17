@@ -80,6 +80,16 @@ objects. Binding checks those signatures before service publication. State never
 passes through the packed numerical upload or moves when batch membership
 changes.
 
+The synchronous [`input` capability](../../runtime/program/input.h) supplies
+managed `input.encoder` and `input.decoder` objects for source-owned text
+processing. Each object retains its own tokenizer state across calls. Source
+passes reusable buffer ranges, receives consumed/written counts, and drains
+final output with an explicit completion result. Reset restores independent
+first-token behavior, so a continuing prefix decoder and a fresh suffix decoder
+can coexist without rebuilding tokenizer state for every token. The capability
+owns byte conversion and tokenizer mechanics; normalization, sentence boundaries,
+packet construction, and buffering limits remain source policy.
+
 `prepare_work` describes the request's next operation without advancing it.
 Equal compatibility tags and additive work units within the declared batch
 capacity permit a cohort. Source owns phase and shape compatibility; differing
