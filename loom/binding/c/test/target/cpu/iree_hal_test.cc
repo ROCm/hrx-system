@@ -515,6 +515,190 @@ TEST(LoomcCpuIreeHalTargetTest, CompilesBfloatBroadcastWithoutNeConvert) {
   }
 }
 
+TEST(LoomcCpuIreeHalTargetTest,
+     DeviceFactsCompileAndExecuteBmi2VariableShifts) {
+  const iree_cpu_data_t cpu_data = {
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {IREE_CPU_DATA0_X86_64_BMI2},
+  };
+  DeviceSpecPtr device_spec;
+  IREE_ASSERT_OK(CreateCpuDeviceSpec(true, true, &device_spec, &cpu_data));
+  FakeHalDevice device = {};
+  InitializeFakeDevice(device_spec.get(), &device);
+  TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
+  loomc_result_t* selection_result = nullptr;
+  TargetProfilePtr profile =
+      SelectCpuTarget(target_environment.get(), &device, &selection_result);
+  ResultPtr selection_result_ptr(selection_result);
+  ASSERT_TRUE(loomc_result_succeeded(selection_result_ptr.get()));
+  ASSERT_NE(profile.get(), nullptr);
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_target_facts_t* base_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_profile_project_facts(
+      loomc_target_profile_get_interop_view(profile.get()), &arena,
+      &base_facts));
+  const loom_x86_target_facts_t* facts = loom_x86_target_facts_cast(base_facts);
+  ASSERT_NE(facts, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(
+      facts->base.storage.config.contract_feature_bits, LOOM_X86_FEATURE_BMI2));
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+
+  ContextPtr context = CreateConfiguredContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  ModulePtr module = ParseModule(context.get(), workspace.get(), R"(
+func.def public @variable_shifts(%input: buffer, %output: buffer, %reserved: buffer) -> (i32) {
+  %base32 = index.constant 0 : offset
+  %base64 = index.constant 16 : offset
+  %input32 = buffer.view %input[%base32] : buffer -> view<2xi32>
+  %input64 = buffer.view %input[%base64] : buffer -> view<2xi64>
+  %output32 = buffer.view %output[%base32] : buffer -> view<3xi32>
+  %output64 = buffer.view %output[%base64] : buffer -> view<3xi64>
+  %value32 = view.load %input32[0] : view<2xi32> -> i32
+  %count32 = view.load %input32[1] : view<2xi32> -> i32
+  %value64 = view.load %input64[0] : view<2xi64> -> i64
+  %count64 = view.load %input64[1] : view<2xi64> -> i64
+  %shlx32 = scalar.shli %value32, %count32 : i32
+  %sarx32 = scalar.shrsi %value32, %count32 : i32
+  %shrx32 = scalar.shrui %value32, %count32 : i32
+  %shlx64 = scalar.shli %value64, %count64 : i64
+  %sarx64 = scalar.shrsi %value64, %count64 : i64
+  %shrx64 = scalar.shrui %value64, %count64 : i64
+  view.store %shlx32, %output32[0] : i32, view<3xi32>
+  view.store %sarx32, %output32[1] : i32, view<3xi32>
+  view.store %shrx32, %output32[2] : i32, view<3xi32>
+  view.store %shlx64, %output64[0] : i64, view<3xi64>
+  view.store %sarx64, %output64[1] : i64, view<3xi64>
+  view.store %shrx64, %output64[2] : i64, view<3xi64>
+  %status = scalar.constant 0 : i32
+  func.return %status : i32
+}
+)");
+  const loomc_string_view_t root = loomc_make_cstring_view("variable_shifts");
+  const loomc_emit_options_t emit_options = {
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .artifact_format = loomc_make_cstring_view("x86-elf-shared"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+  };
+  const loomc_compile_artifact_options_t compile_options = {
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .roots = &root,
+      .root_count = 1,
+      .target_profile = profile.get(),
+      .emit_options = &emit_options,
+  };
+  loomc_result_t* compile_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_artifact(
+      compiler.get(), workspace.get(), nullptr, module.get(), &compile_options,
+      loomc_allocator_system(), &compile_result));
+  ResultPtr result(compile_result);
+  if (!loomc_result_succeeded(result.get())) {
+    for (loomc_host_size_t i = 0;
+         i < loomc_result_diagnostic_count(result.get()); ++i) {
+      ADD_FAILURE() << ToString(
+          loomc_result_diagnostic_at(result.get(), i)->message);
+    }
+  }
+  ASSERT_TRUE(loomc_result_succeeded(result.get()));
+  const loomc_artifact_t* image = FindArtifact(
+      result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE, "x86-elf-shared");
+  ASSERT_NE(image, nullptr);
+
+  iree_cpu_data_t host_cpu_data;
+  iree_cpu_query_data(iree_allocator_system(), &host_cpu_data);
+  if (!iree_cpu_data_satisfies_features(&host_cpu_data, &cpu_data)) {
+    GTEST_SKIP() << "Compiled the profile; host lacks BMI2 execution support";
+  }
+
+  const std::string contents = ToString(image->contents);
+  iree_elf_module_t native_module = {};
+  IREE_ASSERT_OK(iree_elf_module_initialize_from_memory(
+      iree_make_const_byte_span(contents.data(), contents.size()),
+      iree_allocator_system(), &native_module));
+  auto unload = [](iree_elf_module_t* module) {
+    iree_elf_module_deinitialize(module);
+  };
+  std::unique_ptr<iree_elf_module_t, decltype(unload)> native_guard(
+      &native_module, unload);
+  void* address = nullptr;
+  IREE_ASSERT_OK(iree_elf_module_lookup_export(&native_module,
+                                               "variable_shifts", &address));
+
+  const auto arithmetic_shift_right32 = [](uint32_t value, uint32_t count) {
+    if (count == 0) {
+      return value;
+    }
+    const uint32_t sign = (value & 0x80000000u) ? ~uint32_t{0} : 0;
+    return (value >> count) | (sign << (32 - count));
+  };
+  const auto arithmetic_shift_right64 = [](uint64_t value, uint64_t count) {
+    if (count == 0) {
+      return value;
+    }
+    const uint64_t sign = (value & 0x8000000000000000ull) ? ~uint64_t{0} : 0;
+    return (value >> count) | (sign << (64 - count));
+  };
+  uint64_t random_state = 0x243f6a8885a308d3ull;
+  for (int trial = 0; trial < 66; ++trial) {
+    random_state =
+        random_state * 6364136223846793005ull + 1442695040888963407ull;
+    const uint32_t value32 =
+        static_cast<uint32_t>(random_state ^ (random_state >> 32));
+    const uint64_t value64 = random_state ^ 0xa4093822299f31d0ull;
+    const uint32_t count32 =
+        trial == 0 ? 0 : (trial == 1 ? 31 : (random_state >> 17) & 31);
+    const uint64_t count64 =
+        trial == 0 ? 0 : (trial == 1 ? 63 : (random_state >> 41) & 63);
+    SCOPED_TRACE(trial);
+
+    std::array<uint8_t, 72> input;
+    std::array<uint8_t, 72> output;
+    input.fill(0xa7);
+    output.fill(0xa7);
+    uint8_t* input_data = input.data() + 16;
+    uint8_t* output_data = output.data() + 16;
+    std::memcpy(input_data, &value32, sizeof(value32));
+    std::memcpy(input_data + 4, &count32, sizeof(count32));
+    std::memcpy(input_data + 16, &value64, sizeof(value64));
+    std::memcpy(input_data + 24, &count64, sizeof(count64));
+    const auto before = input;
+    ASSERT_EQ(iree_elf_call_i_ppp(address, input_data, output_data, nullptr),
+              0);
+    ASSERT_EQ(input, before);
+
+    const uint32_t expected32[] = {
+        value32 << count32,
+        arithmetic_shift_right32(value32, count32),
+        value32 >> count32,
+    };
+    const uint64_t expected64[] = {
+        value64 << count64,
+        arithmetic_shift_right64(value64, count64),
+        value64 >> count64,
+    };
+    for (int i = 0; i < 3; ++i) {
+      uint32_t actual32;
+      uint64_t actual64;
+      std::memcpy(&actual32, output_data + i * 4, sizeof(actual32));
+      std::memcpy(&actual64, output_data + 16 + i * 8, sizeof(actual64));
+      EXPECT_EQ(actual32, expected32[i]) << i;
+      EXPECT_EQ(actual64, expected64[i]) << i;
+    }
+    const auto is_guard = [](uint8_t byte) { return byte == 0xa7; };
+    EXPECT_TRUE(std::all_of(output.begin(), output.begin() + 16, is_guard));
+    EXPECT_TRUE(
+        std::all_of(output.begin() + 28, output.begin() + 32, is_guard));
+    EXPECT_TRUE(std::all_of(output.begin() + 56, output.end(), is_guard));
+  }
+}
+
 class LegacyHalfConversionTest : public ::testing::TestWithParam<int> {};
 
 TEST_P(LegacyHalfConversionTest,
