@@ -369,8 +369,7 @@ static iree_status_t loom_serve_embedding_protocol_response(
 
 const loom_serve_finite_protocol_t* loom_serve_embedding_protocol(void) {
   static const loom_serve_finite_protocol_t protocol = {
-      .name = "embedding",
-      .endpoint = "/v1/embeddings",
+      .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING,
       .output_modality = IREE_SVL("embedding"),
       .invalid_status = "400 Bad Request",
       .request_size = sizeof(loom_serve_embedding_request_t),

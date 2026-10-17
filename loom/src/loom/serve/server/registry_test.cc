@@ -142,8 +142,8 @@ INSTANTIATE_TEST_SUITE_P(DirectoryBase, RegistryTest, ::testing::Bool());
 
 TEST(RegistryAdmissionTest, NativeSpeechRejectionsPreserveOwnedInput) {
   const loom_serve_service_t services[] = {
-      {.name = IREE_SV("vectors"), .kind = "embedding"},
-      {.name = IREE_SV("http-speech"), .kind = "speech"},
+      {.name = IREE_SV("vectors"), .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING},
+      {.name = IREE_SV("http-speech"), .kind = LOOM_SERVE_MODEL_KIND_SPEECH},
   };
   loom_serve_registry_t* registry = nullptr;
   IREE_ASSERT_OK(
@@ -187,8 +187,12 @@ TEST(RegistryAdmissionTest, NativeSpeechRejectionsPreserveOwnedInput) {
 
 TEST(RegistryAdmissionTest, NativeRecognitionUsesTypedAdmissionPolicy) {
   const loom_serve_service_t services[] = {
-      {.name = IREE_SV("vectors"), .kind = "embedding"},
-      {.name = IREE_SV("http-recognition"), .kind = "recognition"},
+      {.name = IREE_SV("vectors"), .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING},
+      {
+          .name = IREE_SV("http-recognition"),
+          .kind = LOOM_SERVE_MODEL_KIND_RECOGNITION,
+      },
+      {.name = IREE_SV("activity"), .kind = LOOM_SERVE_MODEL_KIND_ACTIVITY},
   };
   loom_serve_registry_t* registry = nullptr;
   IREE_ASSERT_OK(
@@ -206,7 +210,8 @@ TEST(RegistryAdmissionTest, NativeRecognitionUsesTypedAdmissionPolicy) {
     iree_status_code_t code;
   } cases[] = {{"missing", IREE_STATUS_NOT_FOUND},
                {"vectors", IREE_STATUS_INVALID_ARGUMENT},
-               {"http-recognition", IREE_STATUS_UNIMPLEMENTED}};
+               {"http-recognition", IREE_STATUS_UNIMPLEMENTED},
+               {"activity", IREE_STATUS_UNIMPLEMENTED}};
   for (const auto& test : cases) {
     SCOPED_TRACE(test.name);
     loom_serve_recognition_stream_t* stream = nullptr;

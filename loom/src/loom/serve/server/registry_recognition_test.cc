@@ -147,6 +147,7 @@ class RegistryRecognitionTest : public ::testing::Test {
     loom_serve_model_configuration_t configuration;
     IREE_ASSERT_OK(loom_serve_model_configuration_load(
         iree_make_cstring_view(FLAG_model), allocator_, &configuration));
+    Configure(&configuration);
     name_.assign(configuration.name.data, configuration.name.size);
     configuration.start_drained = true;
     auto status =
@@ -154,6 +155,8 @@ class RegistryRecognitionTest : public ::testing::Test {
     loom_serve_model_configuration_deinitialize(&configuration);
     IREE_ASSERT_OK(status);
   }
+
+  virtual void Configure(loom_serve_model_configuration_t* configuration) {}
 
   loom_serve_registered_model_t* Model() {
     return loom_serve_registry_at(registry_, index_);
@@ -201,9 +204,11 @@ class RegistryRecognitionTest : public ::testing::Test {
         [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
   }
 
-  iree_status_t Open(loom_serve_recognition_test_input_t* input) {
+  iree_status_t Open(loom_serve_recognition_test_input_t* input,
+                     loom_serve_recognition_output_flags_t outputs =
+                         LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT) {
     const loom_serve_recognition_request_t request = {
-        .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+        .outputs = outputs,
     };
     loom_serve_recognition_stream_t* stream = nullptr;
     iree_status_t status = loom_serve_registry_try_open_recognition(
@@ -253,7 +258,7 @@ class RegistryRecognitionTest : public ::testing::Test {
                  std::string* text) {
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
       auto* stream = input->stream.get();
-      if (loom_serve_recognition_stream_peek(stream)) {
+      while (loom_serve_recognition_stream_peek(stream)) {
         loom_serve_recognition_stream_consume(stream);
       }
       Feed(input);
@@ -472,6 +477,132 @@ TEST_F(RegistryRecognitionTest, InvalidOptionsLeaveAdmissionAvailable) {
   EXPECT_EQ(counters.requests, 1u);
   EXPECT_EQ(counters.completed, 1u);
   EXPECT_EQ(counters.rejected, 0u);
+}
+
+// The compound source has both output families. Its deployment role controls
+// HTTP exposure independently of each native request's output selection.
+class RegistryActivityTest : public RegistryRecognitionTest {
+ protected:
+  void Configure(loom_serve_model_configuration_t* configuration) override {
+    configuration->kind = LOOM_SERVE_MODEL_KIND_ACTIVITY;
+  }
+};
+
+TEST_F(RegistryActivityTest, CompoundOutputSurvivesDrainAndReplacement) {
+  EXPECT_EQ(Model()->service.kind, LOOM_SERVE_MODEL_KIND_ACTIVITY);
+  EXPECT_EQ(Model()->service.endpoint, nullptr);
+  EXPECT_EQ(Model()->service.accept, nullptr);
+  EXPECT_EQ(Model()->service.capabilities.output_modalities.count, 0u);
+  loom_serve_recognition_test_input_t input;
+  IREE_ASSERT_OK(Open(&input, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
+  EXPECT_EQ(input.stream, nullptr);
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  EXPECT_EQ(Model()->service.kind, LOOM_SERVE_MODEL_KIND_ACTIVITY);
+  EXPECT_EQ(Model()->service.endpoint, nullptr);
+  EXPECT_EQ(Model()->service.accept, nullptr);
+  const auto outputs = Model()->service.capabilities.output_modalities;
+  ASSERT_EQ(outputs.count, 2u);
+  EXPECT_EQ(std::string(outputs.values[0].data, outputs.values[0].size),
+            "text");
+  EXPECT_EQ(std::string(outputs.values[1].data, outputs.values[1].size),
+            "activity");
+  IREE_ASSERT_OK(Open(&input, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
+  ASSERT_NE(input.stream, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AwaitRevision(&input));
+  const auto* held = loom_serve_recognition_stream_peek(input.stream.get());
+  ASSERT_EQ(held->kind, LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY);
+  const auto activity = held->activity;
+  EXPECT_LT(activity.begin, activity.end);
+  EXPECT_FLOAT_EQ(activity.speech_probability, 0.75f);
+
+  loom_serve_recognition_test_input_t peer;
+  IREE_ASSERT_OK(Open(&peer));
+  ASSERT_NE(peer.stream, nullptr);
+  std::string peer_text;
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(&peer, &peer_text));
+  EXPECT_EQ(loom_serve_recognition_stream_peek(input.stream.get()), held);
+  EXPECT_EQ(held->activity.begin, activity.begin);
+  EXPECT_EQ(held->activity.end, activity.end);
+  EXPECT_FLOAT_EQ(held->activity.speech_probability,
+                  activity.speech_probability);
+
+  const uint64_t incarnation = Model()->incarnation;
+  IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_DRAIN));
+  loom_serve_recognition_test_input_t rejected;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      Open(&rejected, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    auto* stream = input.stream.get();
+    while (const auto* event = loom_serve_recognition_stream_peek(stream)) {
+      if (event->kind == LOOM_SERVE_RECOGNITION_EVENT_TRANSCRIPT &&
+          (event->transcript.flags & LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL)) {
+        return true;
+      }
+      loom_serve_recognition_stream_consume(stream);
+    }
+    Feed(&input);
+    return HasFatalFailure() ||
+           loom_serve_recognition_stream_is_complete(stream);
+  }));
+  const auto* final = loom_serve_recognition_stream_peek(input.stream.get());
+  ASSERT_NE(final, nullptr);
+  ASSERT_EQ(final->kind, LOOM_SERVE_RECOGNITION_EVENT_TRANSCRIPT);
+  ASSERT_TRUE(final->transcript.flags &
+              LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL);
+  EXPECT_EQ(
+      std::string(final->transcript.text.data, final->transcript.text.size),
+      peer_text);
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return loom_serve_registry_count(registry_) == 0; }));
+  ASSERT_NO_FATAL_FAILURE(Register());
+  EXPECT_GT(Model()->incarnation, incarnation);
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  loom_serve_recognition_test_input_t replacement;
+  IREE_ASSERT_OK(Open(&replacement));
+  ASSERT_NE(replacement.stream, nullptr);
+  std::string replacement_text;
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(&replacement, &replacement_text));
+  EXPECT_EQ(replacement_text, peer_text);
+  IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_DRAIN));
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return loom_serve_registry_count(registry_) == 0; }));
+  EXPECT_EQ(loom_serve_recognition_stream_peek(input.stream.get()), final);
+  EXPECT_EQ(
+      std::string(final->transcript.text.data, final->transcript.text.size),
+      peer_text);
+  loom_serve_recognition_stream_consume(input.stream.get());
+  EXPECT_TRUE(loom_serve_recognition_stream_is_complete(input.stream.get()));
+  IREE_EXPECT_OK(loom_serve_recognition_stream_status(input.stream.get()));
+}
+
+TEST_F(RegistryActivityTest, AbortRetiresActivityPeersAndRetainsCallerStatus) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  loom_serve_recognition_test_input_t first;
+  loom_serve_recognition_test_input_t second;
+  IREE_ASSERT_OK(Open(&first, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  ASSERT_NE(first.stream, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AwaitRevision(&first));
+  ASSERT_EQ(loom_serve_recognition_stream_peek(first.stream.get())->kind,
+            LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY);
+  EXPECT_EQ(loom_serve_recognition_stream_document(first.stream.get()),
+            nullptr);
+  IREE_ASSERT_OK(Open(&second, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  ASSERT_NE(second.stream, nullptr);
+  Feed(&second);
+  IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));
+  second.stream.reset();
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return loom_serve_registry_count(registry_) == 0; }));
+  loom_serve_telemetry_counters_t counters;
+  ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
+  EXPECT_EQ(counters.requests, 2u);
+  EXPECT_EQ(counters.cancelled, 2u);
+  EXPECT_TRUE(loom_serve_recognition_stream_is_complete(first.stream.get()));
+  EXPECT_EQ(loom_serve_recognition_stream_peek(first.stream.get()), nullptr);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_CANCELLED,
+      loom_serve_recognition_stream_status(first.stream.get()));
 }
 
 }  // namespace

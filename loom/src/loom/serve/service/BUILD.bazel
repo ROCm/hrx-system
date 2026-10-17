@@ -17,6 +17,7 @@ loom_cc_library(
     hdrs = ["service.h"],
     deps = [
         ":inspection",
+        ":kind",
         ":reconfiguration",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/telemetry:latency",
@@ -24,6 +25,24 @@ loom_cc_library(
         "//loom/src/loom/serve/transport/http:server",
         "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
+    name = "kind",
+    srcs = ["kind.c"],
+    hdrs = ["kind.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "kind_test",
+    srcs = ["kind_test.cc"],
+    deps = [
+        ":kind",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

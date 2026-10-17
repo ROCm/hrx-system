@@ -672,8 +672,7 @@ static iree_status_t loom_serve_decision_response(
 
 const loom_serve_finite_protocol_t* loom_serve_decision_protocol(void) {
   static const loom_serve_finite_protocol_t protocol = {
-      .name = "decision",
-      .endpoint = "/v1/systemone",
+      .kind = LOOM_SERVE_MODEL_KIND_DECISION,
       .output_modality = IREE_SVL("decision"),
       .invalid_status = "422 Unprocessable Entity",
       .request_size = sizeof(loom_serve_decision_request_t),

@@ -14,6 +14,7 @@
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/finite/result.h"
+#include "loom/serve/service/kind.h"
 #include "loom/util/json.h"
 
 typedef struct loom_serve_finite_job_t {
@@ -792,7 +793,8 @@ static iree_status_t loom_serve_finite_accept(
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
       !iree_string_view_equal(
           request->target,
-          iree_make_cstring_view(service->protocol->endpoint))) {
+          iree_make_cstring_view(
+              loom_serve_model_kind_endpoint(service->protocol->kind)))) {
     return loom_serve_finite_decline(service, id, arrival_time, connection,
                                      "404 Not Found",
                                      IREE_SV("unknown finite-result endpoint"));
@@ -872,8 +874,8 @@ loom_serve_service_t loom_serve_finite_service_interface(
       .accept = loom_serve_finite_accept,
       .advance = loom_serve_finite_advance,
       .tokenizer = loom_serve_finite_model_tokenizer(service->model),
-      .kind = service->protocol->name,
-      .endpoint = service->protocol->endpoint,
+      .kind = service->protocol->kind,
+      .endpoint = loom_serve_model_kind_endpoint(service->protocol->kind),
       .capabilities =
           {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
                                 input_modalities},
