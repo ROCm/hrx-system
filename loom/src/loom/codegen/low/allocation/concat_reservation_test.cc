@@ -373,10 +373,16 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
                                         IREE_ARRAYSIZE(sweep_assignments),
                                         /*start_point=*/3);
   context.active_set = &swept_active_set;
+  loom_low_allocation_concat_reservation_sources_t swept_sources =
+      reservation_sources;
+  swept_sources.source_constraint = {
+      .kind = LOOM_LOW_ALLOCATION_CONCAT_SOURCE_CONSTRAINT_LINEAR_LOCATION,
+      .linear_result_location_base = 2,
+  };
   loom_low_allocation_assignment_t swept_reservation;
   IREE_ASSERT_OK(loom_low_allocation_concat_reservation_find(
       &context, &intervals[1], &relations[1], &intervals[2], &result_ranges[2],
-      &reservation_sources, &swept_reservation));
+      &swept_sources, &swept_reservation));
   EXPECT_EQ(swept_reservation.value_id, value_ids[2]);
   EXPECT_EQ(swept_reservation.location_base, 2u);
 

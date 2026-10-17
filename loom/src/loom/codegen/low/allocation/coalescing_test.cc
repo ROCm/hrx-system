@@ -296,5 +296,182 @@ TEST_F(LowAllocationCoalescingTest,
   loom_module_free(module);
 }
 
+TEST_F(LowAllocationCoalescingTest,
+       AssignedConcatSourcesConstrainReservations) {
+  // A source pair is already at units 3 and 4. The next source cannot use 5
+  // until a temporary dies. Reserving the aggregate at 4 would put the new
+  // source at 6, but materializing its first component would overwrite the
+  // still-live second component. Repeat that component in the final slot.
+  for (uint32_t width : {1u, 2u}) {
+    for (uint32_t result_lifetime : {1u, 2u}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "width=" << width << " lifetime=" << result_lifetime);
+      loom_module_t* module = AllocateModule();
+      loom_value_id_t value_ids[5];
+      for (uint32_t i = 0; i < IREE_ARRAYSIZE(value_ids); ++i) {
+        IREE_ASSERT_OK(loom_module_define_value(
+            module, loom_low_register_type(17, 0, i == 3 ? 4 * width : width),
+            &value_ids[i]));
+      }
+      loom_module_value_ordinal_scratch_acquire(module);
+      for (uint32_t i = 0; i < IREE_ARRAYSIZE(value_ids); ++i) {
+        loom_module_value_ordinal_scratch_set(module, value_ids[i], i);
+      }
+      const loom_liveness_value_class_t value_class = RegisterValueClass(17);
+      loom_liveness_interval_t intervals[] = {
+          Interval(value_ids[0], 1, 5, value_class),
+          Interval(value_ids[1], 0, 8, value_class),
+          Interval(value_ids[2], 3, 5, value_class),
+          Interval(value_ids[3], 5, 5 + result_lifetime, value_class),
+          Interval(value_ids[4], 0, 4, value_class),
+      };
+      const uint32_t interval_indices[] = {0, 1, 2, 3, 4};
+      loom_liveness_analysis_t liveness = {
+          .intervals = intervals,
+          .interval_count = IREE_ARRAYSIZE(intervals),
+          .value_ids = value_ids,
+          .value_count = IREE_ARRAYSIZE(value_ids),
+          .value_interval_indices = interval_indices,
+      };
+      loom_low_allocation_unit_liveness_value_t unit_values[5];
+      uint32_t unit_start_points[16];
+      uint32_t unit_end_points[16];
+      uint32_t point_count = 0;
+      for (uint32_t i = 0; i < IREE_ARRAYSIZE(intervals); ++i) {
+        intervals[i].unit_count = i == 3 ? 4 * width : width;
+        unit_values[i] = {point_count, intervals[i].start_point};
+        for (uint32_t unit = 0; unit < intervals[i].unit_count; ++unit) {
+          unit_start_points[point_count] = intervals[i].start_point;
+          unit_end_points[point_count++] = intervals[i].end_point;
+        }
+      }
+      uint64_t incomplete_storage_words[] = {0};
+      loom_low_allocation_unit_liveness_t unit_liveness = {
+          .values = unit_values,
+          .start_points = unit_start_points,
+          .end_points = unit_end_points,
+          .point_count = point_count,
+          .values_with_incomplete_storage_segments = {5,
+                                                      incomplete_storage_words},
+      };
+      loom_low_placement_relation_t relations[4] = {};
+      const uint32_t source_ordinals[] = {0, 1, 2, 1};
+      for (uint32_t i = 0; i < IREE_ARRAYSIZE(relations); ++i) {
+        relations[i].result_ordinal = 3;
+        relations[i].source_ordinal = source_ordinals[i];
+        relations[i].result_unit_offset = i * width;
+        relations[i].unit_count = width;
+        relations[i].kind = LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART;
+        relations[i].cause = LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT;
+        relations[i].flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
+      }
+      const loom_low_placement_relation_range_t result_ranges[] = {
+          {0, 0}, {0, 0}, {0, 0}, {0, 4}, {4, 0}};
+      const loom_low_placement_relation_range_t source_ranges[] = {
+          {0, 1}, {1, 2}, {3, 1}, {4, 0}, {4, 0}};
+      const uint32_t source_relations[] = {0, 1, 3, 2};
+      loom_low_placement_operand_constraints_t operands[5] = {};
+      loom_low_placement_table_t placement = {
+          .value_ids = value_ids,
+          .value_count = IREE_ARRAYSIZE(value_ids),
+          .relations = relations,
+          .relation_count = IREE_ARRAYSIZE(relations),
+          .ranges_by_result_ordinal = result_ranges,
+          .relation_indices_by_source_ordinal = source_relations,
+          .ranges_by_source_ordinal = source_ranges,
+          .operand_constraints_by_interval = operands,
+      };
+      loom_low_reg_class_t reg_class = {
+          .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+          .alloc_unit_bits = 32,
+          .allocatable_count = 16,
+          .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+      };
+      loom_low_descriptor_set_t descriptor_set = {
+          .stable_id = 17,
+          .reg_classes = &reg_class,
+          .reg_class_count = 1,
+      };
+      loom_low_resolved_target_t target = {.descriptor_set = &descriptor_set};
+      loom_low_allocation_resolved_reserved_range_t prefix = {
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_count = 3 * width,
+      };
+      uint32_t high_water[] = {6 * width};
+      uint32_t constrained_high_water[] = {3 * width};
+      loom_low_allocation_target_constraints_t constraints = {
+          .module = module,
+          .target = &target,
+          .reserved_ranges = &prefix,
+          .reserved_range_count = 1,
+          .max_assigned_location_end_by_reg_class = high_water,
+          .max_constrained_location_end_by_reg_class = constrained_high_water,
+      };
+      loom_low_allocation_assignment_t assigned[] = {
+          Assignment(value_ids[0], 1, 5, value_class, 3 * width, 0),
+          Assignment(value_ids[1], 0, 8, value_class, 4 * width, width),
+          Assignment(value_ids[4], 0, 4, value_class, 5 * width, 7 * width),
+      };
+      for (auto& assignment : assigned) {
+        assignment.unit_count = assignment.location_count = width;
+      }
+      const uint32_t assignment_indices[] = {0, 1, UINT32_MAX, UINT32_MAX, 2};
+      loom_low_allocation_assignment_map_t assignment_map = {
+          .module = module,
+          .liveness = &liveness,
+          .assignments = assigned,
+          .assignment_count = IREE_ARRAYSIZE(assigned),
+          .assignment_indices_by_value_ordinal = assignment_indices,
+      };
+      loom_low_allocation_active_set_t active_set = {};
+      IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
+          &descriptor_set, IREE_ARRAYSIZE(assigned), 9, 16, &arena_,
+          &active_set));
+      for (uint32_t i = 0; i < IREE_ARRAYSIZE(assigned); ++i) {
+        loom_low_allocation_active_set_insert(&active_set, &descriptor_set,
+                                              assigned,
+                                              IREE_ARRAYSIZE(assigned), i);
+      }
+      loom_low_allocation_storage_lease_state_t leases = {};
+      loom_low_allocation_search_context_t search = {
+          .module = module,
+          .descriptor_set = &descriptor_set,
+          .liveness = &liveness,
+          .unit_liveness = &unit_liveness,
+          .target_constraints = &constraints,
+          .assignment_map = &assignment_map,
+          .placement = &placement,
+          .active_set = &active_set,
+          .storage_leases = &leases,
+      };
+      loom_low_allocation_coalescing_context_t context = {
+          .arena = &arena_,
+          .liveness = &liveness,
+          .placement = &placement,
+          .target_constraints = &constraints,
+          .assignment_map = &assignment_map,
+          .search_context = &search,
+          .append_assignment =
+              [](void*, const loom_low_allocation_assignment_t*,
+                 const loom_value_id_t*, uint16_t) -> iree_status_t {
+            return iree_make_status(IREE_STATUS_ABORTED,
+                                    "incompatible assembly must not reserve");
+          },
+      };
+      bool did_assign = true;
+      IREE_EXPECT_OK(
+          loom_low_allocation_coalescing_assign_concat_source_interval(
+              &context, &intervals[2], &did_assign));
+      EXPECT_FALSE(did_assign);
+      EXPECT_EQ(assignment_map.assignment_count, 3u);
+      for (loom_value_id_t value_id : value_ids) {
+        loom_module_value_ordinal_scratch_clear(module, value_id);
+      }
+      loom_module_value_ordinal_scratch_release(module);
+      loom_module_free(module);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace loom
