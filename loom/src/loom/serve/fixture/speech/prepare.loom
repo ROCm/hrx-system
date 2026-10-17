@@ -17,7 +17,7 @@ global.rodata.def @invalid = bytes("73706565636820666978747572652065787065637473
 // Two immutable conditioning entries are shared across independent streams.
 global.rodata.def @conditioning = bytes("0000003e000000be")
 
-func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
   %c0 = scalar.constant 0 : i64
   %c1 = scalar.constant 1 : i64
   %object_kind = scalar.constant 2 : i32
@@ -38,10 +38,12 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %conditioning_bytes = scalar.constant 8 : i64
   %stream = scalar.constant 16 : i64
   %output = scalar.constant 144 : i64
+  %text_capacity = scalar.constant 7 : i64
+  %text_limit = scalar.constant 1024 : i64
   %frames = scalar.constant 5 : i64
   %rate = scalar.constant 24000 : i64
   %empty_buffer = global.load @empty : buffer
   %name = global.load @name : buffer
   %conditioning = global.load @conditioning : buffer
-  func.return %rows, %rows, %input, %conditioning_bytes, %stream, %work_bytes, %output, %output, %frames, %rate, %c1, %empty_buffer, %name, %empty_buffer, %conditioning : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
+  func.return %rows, %rows, %input, %conditioning_bytes, %stream, %work_bytes, %output, %output, %frames, %rate, %c1, %text_capacity, %text_limit, %empty_buffer, %name, %empty_buffer, %conditioning : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
 }

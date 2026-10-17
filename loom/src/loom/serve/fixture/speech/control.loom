@@ -8,7 +8,7 @@ global.rodata.def @positive = bytes("706f736974697665")
 
 global.rodata.def @negative = bytes("6e65676174697665")
 
-global.rodata.def @invalid = bytes("737065656368206669787475726520726571756972657320312d3130323420696e7075742062797465732c20706f736974697665206f72206e6567617469766520766f6963652c207370656564203120616e64206e6f20696e737472756374696f6e73")
+global.rodata.def @invalid = bytes("7370656563682066697874757265207265717569726573206e6f6e2d4e554c20746578742c20706f736974697665206f72206e6567617469766520766f6963652c207370656564203120616e64206e6f20696e737472756374696f6e73")
 
 global.rodata.def @position_mismatch = bytes("737065656368206669787475726520736f7572636520616e642064657669636520706c61796261636b20706f736974696f6e7320646966666572")
 
@@ -19,15 +19,9 @@ func.def @check(%condition: i1) {
   func.return
 }
 
-func.def public @prepare_request(%model: buffer, %text: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer, i64, buffer) {
+func.def public @prepare_request(%model: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer, i64, buffer) {
   %origin = index.constant 0 : offset
   %voice_bytes = index.constant 8 : offset
-  %maximum = index.constant 1024 : offset
-  %length = buffer.length %text
-  %positive_length = index.cmp ugt, %length, %origin : offset
-  %bounded = index.cmp ule, %length, %maximum : offset
-  %valid_length = scalar.andi %positive_length, %bounded : i1
-  func.call @check(%valid_length) : (i1)
   %instruction_length = buffer.length %instructions
   %plain = index.cmp eq, %instruction_length, %origin : offset
   func.call @check(%plain) : (i1)
@@ -61,35 +55,115 @@ func.def public @prepare_request(%model: buffer, %text: buffer, %voice: buffer, 
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %voice_id = scf.select %is_positive, %c0, %c1 : i32
-  %bounded_length = index.assume %length [range(%length, 1, 1024)] : offset
-  %length32 = index.cast %bounded_length : offset to i32
-  %scale = scalar.constant 8 : i32
-  %scaled = scalar.muli %length32, %scale : i32
-  %total = scalar.addi %scaled, %c1 : i32
   %seed32 = scalar.trunci %seed : i64 to i32
   %payload_bytes = index.constant 16 : offset
   %payload = buffer.alloca<private> align(8) %payload_bytes : buffer
   %header = buffer.view %payload[%origin] : buffer -> view<4xi32>
-  view.store %total, %header[0] : i32, view<4xi32>
+  view.store %c0, %header[0] : i32, view<4xi32>
   view.store %seed32, %header[1] : i32, view<4xi32>
   view.store %voice_id, %header[2] : i32, view<4xi32>
   view.store %c0, %header[3] : i32, view<4xi32>
-  %state_bytes = index.constant 4 : offset
+  %state_bytes = index.constant 16 : offset
   %state = buffer.alloca<private> align(4) %state_bytes : buffer
-  %cursor = buffer.view %state[%origin] : buffer -> view<1xi32>
-  view.store %c0, %cursor[0] : i32, view<1xi32>
+  %cursor = buffer.view %state[%origin] : buffer -> view<4xi32>
+  view.store %c0, %cursor[0] : i32, view<4xi32>
+  view.store %c0, %cursor[1] : i32, view<4xi32>
+  view.store %c0, %cursor[2] : i32, view<4xi32>
+  view.store %c0, %cursor[3] : i32, view<4xi32>
   %position = scalar.constant 0 : i64
   func.return %state, %position, %payload : buffer, i64, buffer
 }
 
-// A work offer observes the current phase without advancing the request.
-func.def public @prepare_work(%model: buffer, %state: buffer, %position: i64) -> (buffer, i64, i64) {
+// Accept one complete scalar, then take a separate bounded CPU continuation.
+// The source owns byte policy; NUL demonstrates request-local late rejection.
+func.def public @prepare_input(%model: buffer, %state: buffer, %position: i64, %text: buffer, %offset: i64, %complete: i32) -> (buffer, i64, i64) {
   %origin = index.constant 0 : offset
-  %cursor = buffer.view %state[%origin] : buffer -> view<1xi32>
-  %stage = view.load %cursor[0] : view<1xi32> -> i32
+  %cursor = buffer.view %state[%origin] : buffer -> view<4xi32>
+  %pending = view.load %cursor[3] : view<4xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c0_i64 = scalar.constant 0 : i64
+  %needs_cpu = scalar.cmpi ne, %pending, %c0 : i32
+  %length = buffer.length %text
+  %length64 = index.cast %length : offset to i64
+  %remaining = scalar.subi %length64, %offset : i64
+  %has_text = scalar.cmpi ne, %remaining, %c0_i64 : i64
+  %consumed = scf.if %needs_cpu -> (i64) {
+    view.store %c0, %cursor[3] : i32, view<4xi32>
+    scf.yield %c0_i64 : i64
+  } else {
+    %count = scf.if %has_text -> (i64) {
+      %bounded_offset = scalar.assume %offset [range(%offset, 0, 7)] : i64
+      %start = index.cast %bounded_offset : i64 to offset
+      %head = buffer.view %text[%start] : buffer -> view<1xi8>
+      %byte = view.load %head[0] : view<1xi8> -> i8
+      %lead = scalar.extui %byte : i8 to i32
+      %nonzero = scalar.cmpi ne, %lead, %c0 : i32
+      func.call @check(%nonzero) : (i1)
+      %c2 = scalar.constant 2 : i32
+      %c3 = scalar.constant 3 : i32
+      %c4 = scalar.constant 4 : i32
+      %ascii = scalar.constant 128 : i32
+      %three_start = scalar.constant 224 : i32
+      %four_start = scalar.constant 240 : i32
+      %is_ascii = scalar.cmpi ult, %lead, %ascii : i32
+      %is_two = scalar.cmpi ult, %lead, %three_start : i32
+      %is_three = scalar.cmpi ult, %lead, %four_start : i32
+      %wide = scf.select %is_three, %c3, %c4 : i32
+      %nonascii = scf.select %is_two, %c2, %wide : i32
+      %count32 = scf.select %is_ascii, %c1, %nonascii : i32
+      %available = view.load %cursor[1] : view<4xi32> -> i32
+      %first = scalar.cmpi eq, %available, %c0 : i32
+      %extra = scf.select %first, %c1, %c0 : i32
+      %scale = scalar.constant 8 : i32
+      %frames = scalar.muli %count32, %scale : i32
+      %extended = scalar.addi %available, %frames : i32
+      %next = scalar.addi %extended, %extra : i32
+      view.store %next, %cursor[1] : i32, view<4xi32>
+      view.store %c1, %cursor[3] : i32, view<4xi32>
+      %count64 = scalar.extui %count32 : i32 to i64
+      scf.yield %count64 : i64
+    } else {
+      scf.yield %c0_i64 : i64
+    }
+    scf.yield %count : i64
+  }
+  %drained = scalar.cmpi eq, %consumed, %remaining : i64
+  %final = scalar.cmpi ne, %complete, %c0 : i32
+  %at_end = scalar.andi %drained, %final : i1
+  scf.if %at_end {
+    view.store %c1, %cursor[2] : i32, view<4xi32>
+  }
+  func.return %state, %position, %consumed : buffer, i64, i64
+}
+
+// Numerical compatibility is independent of input and playback positions.
+func.def public @prepare_work(%model: buffer, %state: buffer, %position: i64) -> (i32, buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %cursor = buffer.view %state[%origin] : buffer -> view<4xi32>
+  %stage = view.load %cursor[0] : view<4xi32> -> i32
+  %available = view.load %cursor[1] : view<4xi32> -> i32
+  %complete = view.load %cursor[2] : view<4xi32> -> i32
+  %pending = view.load %cursor[3] : view<4xi32> -> i32
+  %numerical = scalar.constant 0 : i32
+  %cpu = scalar.constant 1 : i32
+  %input = scalar.constant 2 : i32
+  %done = scalar.constant 3 : i32
+  %initial = scalar.cmpi eq, %stage, %numerical : i32
+  %available64 = scalar.extui %available : i32 to i64
+  %has_audio = scalar.cmpi ult, %position, %available64 : i64
+  %finished = scalar.cmpi ne, %complete, %numerical : i32
+  %needs_cpu = scalar.cmpi ne, %pending, %numerical : i32
+  %waiting = scf.select %finished, %done, %input : i32
+  %after_initial = scf.select %has_audio, %numerical, %waiting : i32
+  %may_initialize = scf.select %initial, %numerical, %after_initial : i32
+  %drained = scalar.cmpi eq, %position, %available64 : i64
+  %at_end = scalar.andi %drained, %finished : i1
+  %next = scf.select %at_end, %done, %may_initialize : i32
+  %kind = scf.select %needs_cpu, %cpu, %next : i32
   %tag = scalar.extui %stage : i32 to i64
   %unit = scalar.constant 1 : i64
-  func.return %state, %unit, %tag : buffer, i64, i64
+  func.return %kind, %state, %unit, %tag : i32, buffer, i64, i64
 }
 
 // Only the small row map changes as independently resident requests join/leave.
@@ -103,10 +177,10 @@ func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %
   %bounded_count = scalar.assume %count64 [range(%count64, 1, 4)] : i64
   %count = index.cast %bounded_count : i64 to index
   %records = buffer.view %ranges[%origin] : buffer -> view<[%count]x3xi64>
-  %work_length = index.constant 24 : offset
+  %work_length = index.constant 40 : offset
   %payload = buffer.alloca<private> align(8) %work_length : buffer
   %header = buffer.view %payload[%origin] : buffer -> view<2xi32>
-  %map = buffer.view %payload[%map_offset] : buffer -> view<4xi32>
+  %map = buffer.view %payload[%map_offset] : buffer -> view<4x2xi32>
   %count32 = scalar.trunci %count64 : i64 to i32
   %first_work = buffer.view %packed[%origin] : buffer -> view<1xi32>
   %stage = view.load %first_work[0] : view<1xi32> -> i32
@@ -117,12 +191,19 @@ func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %
   %limit = index.constant 4 : index
   %c0_i32 = scalar.constant 0 : i32
   scf.for %i = [%begin to %limit step %step] {
-    view.store %c0_i32, %map[%i] : i32, view<4xi32>
+    view.store %c0_i32, %map[%i, 0] : i32, view<4x2xi32>
+    view.store %c0_i32, %map[%i, 1] : i32, view<4x2xi32>
   }
   scf.for %i = [%begin to %count step %step] {
     %row = view.load %records[%i, 0] : view<[%count]x3xi64> -> i64
     %row32 = scalar.trunci %row : i64 to i32
-    view.store %row32, %map[%i] : i32, view<4xi32>
+    %offset64 = view.load %records[%i, 1] : view<[%count]x3xi64> -> i64
+    %bounded_offset = scalar.assume %offset64 [range(%offset64, 0, 48)] : i64
+    %offset = index.cast %bounded_offset : i64 to offset
+    %work = buffer.view %packed[%offset] : buffer -> view<4xi32>
+    %available = view.load %work[1] : view<4xi32> -> i32
+    view.store %row32, %map[%i, 0] : i32, view<4x2xi32>
+    view.store %available, %map[%i, 1] : i32, view<4x2xi32>
   }
   func.return %payload, %payload : buffer, buffer
 }
@@ -147,8 +228,10 @@ func.def public @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer
 
 func.def public @complete(%model: buffer, %state: buffer, %position: i64, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (buffer, i64, i64, i64, i64, i32) {
   %origin = index.constant 0 : offset
-  %cursor = buffer.view %state[%origin] : buffer -> view<1xi32>
-  %stage = view.load %cursor[0] : view<1xi32> -> i32
+  %cursor = buffer.view %state[%origin] : buffer -> view<4xi32>
+  %stage = view.load %cursor[0] : view<4xi32> -> i32
+  %available = view.load %cursor[1] : view<4xi32> -> i32
+  %final = view.load %cursor[2] : view<4xi32> -> i32
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %initial = scalar.cmpi eq, %stage, %c0 : i32
@@ -172,12 +255,16 @@ func.def public @complete(%model: buffer, %state: buffer, %position: i64, %plan:
     %count64 = scalar.extui %count32 : i32 to i64
     %header_bytes = scalar.constant 16 : i64
     %sample_offset = scalar.addi %row_offset, %header_bytes : i64
-    scf.yield %sample_offset, %count64, %last : i64, i64, i32
+    %done = scalar.andi %last, %final : i32
+    scf.yield %sample_offset, %count64, %done : i64, i64, i32
   }
-  %state_bytes = index.constant 4 : offset
+  %state_bytes = index.constant 16 : offset
   %next_state = buffer.alloca<private> align(4) %state_bytes : buffer
-  %next_cursor = buffer.view %next_state[%origin] : buffer -> view<1xi32>
-  view.store %c1, %next_cursor[0] : i32, view<1xi32>
+  %next_cursor = buffer.view %next_state[%origin] : buffer -> view<4xi32>
+  view.store %c1, %next_cursor[0] : i32, view<4xi32>
+  view.store %available, %next_cursor[1] : i32, view<4xi32>
+  view.store %final, %next_cursor[2] : i32, view<4xi32>
+  view.store %c0, %next_cursor[3] : i32, view<4xi32>
   %next_position = scalar.addi %position, %count : i64
   func.return %next_state, %next_position, %position, %offset, %count, %done : buffer, i64, i64, i64, i64, i32
 }
