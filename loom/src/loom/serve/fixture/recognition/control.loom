@@ -2,14 +2,16 @@ func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %request: 
 
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
-func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32) -> (buffer, buffer) {
+func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
   %origin = index.constant 0 : offset
-  %length = index.constant 16 : offset
+  %length = index.constant 24 : offset
   %state = buffer.alloca<private> align(8) %length : buffer
-  %fields = buffer.view %state[%origin] : buffer -> view<2xi64>
+  %fields = buffer.view %state[%origin] : buffer -> view<3xi64>
   %c0 = scalar.constant 0 : i64
-  view.store %c0, %fields[0] : i64, view<2xi64>
-  view.store %c0, %fields[1] : i64, view<2xi64>
+  view.store %c0, %fields[0] : i64, view<3xi64>
+  view.store %c0, %fields[1] : i64, view<3xi64>
+  %outputs64 = scalar.extui %outputs : i32 to i64
+  view.store %outputs64, %fields[2] : i64, view<3xi64>
   // The prompt is immutable request data; it may be empty. Numerical work
   // consumes PCM from later work offers and does not need this request root.
   func.return %state, %prompt : buffer, buffer
@@ -122,7 +124,37 @@ func.def public @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffe
   func.return
 }
 
-func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i32) {
+// A transcript record contains its typed envelope, fixed header, and one byte.
+func.def @write_transcript(%packet: buffer, %offset: offset, %revision: i64, %end: i64, %flags: i32, %character: i8) {
+  %record = buffer.view %packet[%offset] : buffer -> view<2xi32>
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %length = scalar.constant 49 : i32
+  view.store %zero32, %record[0] : i32, view<2xi32>
+  view.store %length, %record[1] : i32, view<2xi32>
+  %header_delta = index.constant 8 : offset
+  %header_offset = index.add %offset, %header_delta : offset
+  %header = buffer.view %packet[%header_offset] : buffer -> view<4xi64>
+  %zero64 = scalar.constant 0 : i64
+  view.store %zero64, %header[0] : i64, view<4xi64>
+  view.store %revision, %header[1] : i64, view<4xi64>
+  view.store %zero64, %header[2] : i64, view<4xi64>
+  view.store %end, %header[3] : i64, view<4xi64>
+  %flags_delta = index.constant 40 : offset
+  %flags_offset = index.add %offset, %flags_delta : offset
+  %fields = buffer.view %packet[%flags_offset] : buffer -> view<4xi32>
+  view.store %flags, %fields[0] : i32, view<4xi32>
+  view.store %one32, %fields[1] : i32, view<4xi32>
+  view.store %zero32, %fields[2] : i32, view<4xi32>
+  view.store %zero32, %fields[3] : i32, view<4xi32>
+  %text_delta = index.constant 56 : offset
+  %text_offset = index.add %offset, %text_delta : offset
+  %text = buffer.view %packet[%text_offset] : buffer -> view<1xi8>
+  view.store %character, %text[0] : i8, view<1xi8>
+  func.return
+}
+
+func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32) {
   %stride = scalar.constant 16 : i64
   %offset64 = scalar.muli %ordinal, %stride : i64
   %bounded = scalar.assume %offset64 [range(%offset64, 0, 48)] : i64
@@ -141,29 +173,77 @@ func.def public @complete(%model: buffer, %state: buffer, %plan: buffer, %ordina
   %count = scalar.extui %count32 : i32 to i64
   %end = scalar.extui %end32 : i32 to i64
   %origin = index.constant 0 : offset
-  %cursor = buffer.view %state[%origin] : buffer -> view<2xi64>
-  %revision = view.load %cursor[1] : view<2xi64> -> i64
-  %c1 = scalar.constant 1 : i64
-  %next = scalar.addi %revision, %c1 : i64
-  view.store %c1, %cursor[0] : i64, view<2xi64>
-  view.store %next, %cursor[1] : i64, view<2xi64>
-  %header = buffer.view %model[%origin] : buffer -> view<4xi64>
+  %cursor = buffer.view %state[%origin] : buffer -> view<3xi64>
+  %revision = view.load %cursor[1] : view<3xi64> -> i64
+  %outputs = view.load %cursor[2] : view<3xi64> -> i64
   %c0 = scalar.constant 0 : i64
-  view.store %c0, %header[0] : i64, view<4xi64>
-  view.store %next, %header[1] : i64, view<4xi64>
-  view.store %c0, %header[2] : i64, view<4xi64>
-  view.store %end, %header[3] : i64, view<4xi64>
-  %flags_offset = index.constant 32 : offset
-  %flags = buffer.view %model[%flags_offset] : buffer -> view<4xi32>
-  %one32 = scalar.constant 1 : i32
+  %c1 = scalar.constant 1 : i64
+  %c2 = scalar.constant 2 : i64
+  %c3 = scalar.constant 3 : i64
+  %transcript_bit = scalar.andi %outputs, %c1 : i64
+  %activity_bit = scalar.andi %outputs, %c2 : i64
+  %has_activity = scalar.cmpi ne, %activity_bit, %c0 : i64
+  %has_input = scalar.cmpi ne, %count, %c0 : i64
+  %activity = scalar.andi %has_activity, %has_input : i1
+  %activity_count = scalar.extui %activity : i1 to i64
+  // Compound output includes a provisional and replacement revision together.
+  // They must remain individually observable after the document is updated.
+  %compound = scalar.cmpi eq, %outputs, %c3 : i64
+  %extra = scalar.extui %compound : i1 to i64
+  %transcripts = scalar.addi %transcript_bit, %extra : i64
+  %event_count = scalar.addi %activity_count, %transcripts : i64
+  %count_header = buffer.view %model[%origin] : buffer -> view<1xi32>
+  %event_count32 = scalar.trunci %event_count : i64 to i32
+  view.store %event_count32, %count_header[0] : i32, view<1xi32>
+  scf.if %activity {
+    %activity_offset = index.constant 4 : offset
+    %record = buffer.view %model[%activity_offset] : buffer -> view<2xi32>
+    %kind = scalar.constant 1 : i32
+    %activity_bytes = scalar.constant 20 : i32
+    view.store %kind, %record[0] : i32, view<2xi32>
+    view.store %activity_bytes, %record[1] : i32, view<2xi32>
+    %interval_offset = index.constant 12 : offset
+    %interval = buffer.view %model[%interval_offset] : buffer -> view<2xi64>
+    %begin = scalar.subi %end, %count : i64
+    view.store %begin, %interval[0] : i64, view<2xi64>
+    view.store %end, %interval[1] : i64, view<2xi64>
+    %probability_offset = index.constant 28 : offset
+    %probability = buffer.view %model[%probability_offset] : buffer -> view<1xf32>
+    %score = scalar.constant 0.75 : f32
+    view.store %score, %probability[0] : f32, view<1xf32>
+  }
+  %header_bytes = scalar.constant 4 : i64
+  %activity_bytes = scalar.constant 28 : i64
+  %transcript_bytes = scalar.constant 57 : i64
+  %activity_size = scalar.muli %activity_count, %activity_bytes : i64
+  %transcript_start = scalar.addi %header_bytes, %activity_size : i64
+  %bounded_transcripts = scalar.assume %transcripts [range(%transcripts, 0, 2)] : i64
+  %limit = index.cast %bounded_transcripts : i64 to index
+  %first = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lowercase_delta = scalar.constant 32 : i32
+  %lowercase = scalar.addi %character32, %lowercase_delta : i32
   %zero32 = scalar.constant 0 : i32
-  view.store %done, %flags[0] : i32, view<4xi32>
-  view.store %one32, %flags[1] : i32, view<4xi32>
-  view.store %zero32, %flags[2] : i32, view<4xi32>
-  view.store %zero32, %flags[3] : i32, view<4xi32>
-  %text_offset = index.constant 48 : offset
-  %text = buffer.view %model[%text_offset] : buffer -> view<1xi8>
-  %character = scalar.trunci %character32 : i32 to i8
-  view.store %character, %text[0] : i8, view<1xi8>
-  func.return %count, %model, %done : i64, buffer, i32
+  scf.for %i = [%first to %limit step %step] {
+    %index64 = index.cast %i : index to i64
+    %offset_delta = scalar.muli %index64, %transcript_bytes : i64
+    %offset64 = scalar.addi %transcript_start, %offset_delta : i64
+    %bounded_offset = scalar.assume %offset64 [range(%offset64, 4, 89)] : i64
+    %event_offset = index.cast %bounded_offset : i64 to offset
+    %next_index = scalar.addi %index64, %c1 : i64
+    %next_revision = scalar.addi %revision, %next_index : i64
+    %last = scalar.cmpi eq, %next_index, %transcripts : i64
+    %flags = scf.select %last, %done, %zero32 : i32
+    %letter32 = scf.select %last, %character32, %lowercase : i32
+    %letter = scalar.trunci %letter32 : i32 to i8
+    func.call @write_transcript(%model, %event_offset, %next_revision, %end, %flags, %letter) : (buffer, offset, i64, i64, i32, i8)
+  }
+  %next = scalar.addi %revision, %transcripts : i64
+  view.store %c1, %cursor[0] : i64, view<3xi64>
+  view.store %next, %cursor[1] : i64, view<3xi64>
+  %transcript_size = scalar.muli %transcripts, %transcript_bytes : i64
+  %packet_size = scalar.addi %transcript_start, %transcript_size : i64
+  %empty = scalar.cmpi eq, %event_count, %c0 : i64
+  %produced_bytes = scf.select %empty, %c0, %packet_size : i64
+  func.return %count, %model, %produced_bytes, %done : i64, buffer, i64, i32
 }

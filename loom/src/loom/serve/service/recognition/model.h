@@ -71,14 +71,20 @@ iree_status_t loom_serve_recognition_load_free(
 // Source ABI: cold prepare(asset_root, options: buffer) ->
 //   (request_capacity, batch_units, input_stride, conditioning_capacity,
 //    stream_stride, batch_input_capacity, output_capacity, feedback_capacity,
-//    input_frames, frame_limit, transcript_bytes, sample_rate, channels: i64,
+//    input_frames, frame_limit, event_bytes, sample_rate, channels,
+//    event_capacity: i64, outputs: i32,
 //    tokenizer_asset, name, model_state, initial_conditioning: buffer).
 // Positive geometry is checked at this external source boundary. Input/stream
 // strides are alignment multiples; whole arenas fit signed device offsets.
 // Tokenizer is optional and relative to asset_root. Initial conditioning and
 // model_state survive the cold program. Checkpoints use prepare.parameter.
+// outputs declares a nonempty subset of recognition/events.h output flags.
+// Request preparation receives the explicitly selected subset, and completion
+// may emit only those event types. event_capacity bounds decoded event count;
+// event_bytes independently bounds the complete encoded packet.
 //
-// Warm prepare_request(model_state, language, prompt: buffer, temperature: f32)
+// Warm prepare_request(model_state, language, prompt: buffer, temperature: f32,
+//                      outputs: i32)
 //   -> (request_state, payload: buffer).
 // prepare_work(model_state, request_state, pcm: buffer, position: i64, eof:
 // i32)
@@ -89,7 +95,7 @@ iree_status_t loom_serve_recognition_load_free(
 //          output: hal.buffer).
 // complete(model_state, request_state, plan: buffer, ordinal: i64,
 //          feedback: buffer)
-//   -> (consumed_frames: i64, transcript: buffer, complete: i32).
+//   -> (consumed_frames: i64, events: buffer, event_bytes: i64, complete: i32).
 //
 // Request payload may be empty when source carries all request inputs in its
 // host state or subsequent work. Admission uploads only nonempty payloads and
@@ -112,8 +118,11 @@ iree_status_t loom_serve_recognition_load_free(
 //
 // Each original ordinal is collected after actual retirement, even when
 // cancelled. consumed_frames acknowledges only a prefix of its input snapshot;
-// EOF completion requires the whole snapshot to be consumed. Empty transcript
-// means no event. Nonempty packets follow recognition/transcript.h. Revisions
+// EOF completion requires the whole snapshot to be consumed. event_bytes is
+// the produced extent within events, not its allocation capacity; zero means no
+// event. The buffer remains non-NULL and may be reused for later ordinals. The
+// native caller copies and checks the bounded packet before another source call
+// can mutate it. Nonempty packets follow recognition/events.h. Revisions
 // replace the whole hypothesis identified by their segment, including speaker
 // and alignment evidence. The transcript owner retains segment history and
 // checks revision order/finality; multiple provisional segments may coexist.
@@ -122,8 +131,8 @@ iree_status_t loom_serve_recognition_load_free(
 //
 // One model CPU owner and one accepted numerical batch serialize source calls.
 // Request state, uploads, and original ordinals survive membership changes and
-// cancellation. Transcript packets remain owned through all CPU borrowers and
-// batch release. Source state changes and conditioning publication occur only
+// cancellation. Caller-owned event packets survive batch release and model
+// destruction. Source state changes and conditioning publication occur only
 // after their accepted producer retires. No model math is linked in the server.
 //
 // Cold outer-owner constructor: joins the same asynchronous load, never on a

@@ -174,7 +174,8 @@ iree_status_t loom_serve_transcription_parse(
   *out_request = (loom_serve_transcription_t){
       .request = {.language = values[2],
                   .prompt = values[3],
-                  .temperature = temperature},
+                  .temperature = temperature,
+                  .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT},
       .audio = audio,
       .pcm_sample_rate = pcm_sample_rate,
       .normalized_frame_count = normalized_frame_count,

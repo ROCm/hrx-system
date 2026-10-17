@@ -124,10 +124,11 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       return iree_ok_status();
     };
     observed.collect = [](void* self, iree_host_size_t ordinal,
+                          loom_serve_recognition_events_t* events,
                           loom_serve_recognition_result_t* out) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       IREE_RETURN_IF_ERROR(
-          test->actual_.collect(test->actual_.self, ordinal, out));
+          test->actual_.collect(test->actual_.self, ordinal, events, out));
       ++test->collected_[test->members_[ordinal]];
       return iree_ok_status();
     };
@@ -258,8 +259,10 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     return status;
   }
 
-  void Open(loom_serve_recognition_stream_t** out) {
-    const loom_serve_recognition_request_t request = {};
+  void Open(loom_serve_recognition_stream_t** out,
+            loom_serve_recognition_output_flags_t outputs =
+                LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT) {
+    const loom_serve_recognition_request_t request = {.outputs = outputs};
     const loom_serve_recognition_completion_t completion = {
         this, [](void* self, loom_serve_telemetry_outcome_t outcome,
                  const iree_status_t status) {
@@ -297,6 +300,11 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   static std::string Text(
       const loom_serve_recognition_transcript_t* transcript) {
     return std::string(transcript->text.data, transcript->text.size);
+  }
+
+  static std::string Text(const loom_serve_recognition_event_t* event) {
+    EXPECT_EQ(event->kind, LOOM_SERVE_RECOGNITION_EVENT_TRANSCRIPT);
+    return Text(&event->transcript);
   }
 
   bool Consume(loom_serve_recognition_stream_t* stream) {
@@ -391,7 +399,9 @@ TEST_F(SourceRecognitionStreamTest,
   EXPECT_EQ(largest_batch_, 4u);
   ASSERT_NO_FATAL_FAILURE(Close(streams[2]));
   streams[2] = nullptr;
-  const loom_serve_recognition_request_t request = {};
+  const loom_serve_recognition_request_t request = {
+      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+  };
   loom_serve_recognition_stream_t* replacement = nullptr;
   IREE_ASSERT_OK(loom_serve_recognition_stream_service_try_open(
       service_, &request, {}, &replacement));
@@ -408,7 +418,7 @@ TEST_F(SourceRecognitionStreamTest,
   ASSERT_NO_FATAL_FAILURE(CheckFinal(streams[3], "J"));
   const auto* stalled = loom_serve_recognition_stream_peek(streams[0]);
   ASSERT_NE(stalled, nullptr);
-  EXPECT_EQ(stalled->end, 6u);
+  EXPECT_EQ(stalled->transcript.end, 6u);
   EXPECT_EQ(Text(stalled), "V");
   const auto stalled_offers = offers_[0].load();
 
@@ -419,7 +429,7 @@ TEST_F(SourceRecognitionStreamTest,
   ASSERT_NO_FATAL_FAILURE(CheckFinal(replacement, "F"));
   EXPECT_EQ(offers_[0].load(), stalled_offers);
   EXPECT_EQ(Text(stalled), "V");
-  EXPECT_EQ(stalled->end, 6u);
+  EXPECT_EQ(stalled->transcript.end, 6u);
   loom_serve_recognition_stream_consume(streams[0]);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(streams[0]); }));
   ASSERT_NO_FATAL_FAILURE(CheckFinal(streams[0], "D"));
@@ -533,7 +543,8 @@ TEST_F(SourceRecognitionStreamTest,
   const auto* retained = loom_serve_recognition_stream_peek(first);
   ASSERT_NE(retained, nullptr);
   EXPECT_EQ(Text(retained), "D");
-  EXPECT_TRUE(retained->flags & LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL);
+  EXPECT_TRUE(retained->transcript.flags &
+              LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL);
   ASSERT_NO_FATAL_FAILURE(Settle());
   EXPECT_EQ(released_[0], 1u);
   EXPECT_EQ(end_count_, 1u);
@@ -552,7 +563,7 @@ TEST_F(SourceRecognitionStreamTest,
 
   EXPECT_EQ(loom_serve_recognition_stream_peek(first), retained);
   EXPECT_EQ(Text(retained), "D");
-  EXPECT_EQ(retained->end, 2u);
+  EXPECT_EQ(retained->transcript.end, 2u);
   EXPECT_EQ(loom_serve_recognition_stream_format(first).sample_rate, 16000u);
   EXPECT_EQ(loom_serve_recognition_stream_format(first).channels, 1u);
   EXPECT_EQ(loom_serve_recognition_stream_credit(first), 0u);
@@ -595,6 +606,136 @@ TEST_F(SourceRecognitionStreamTest, ClosedCallerRetainsAcceptedInputBorrow) {
   EXPECT_EQ(end_count_, 1u);
   EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
   EXPECT_EQ(last_end_code_, IREE_STATUS_CANCELLED);
+}
+
+TEST_F(SourceRecognitionStreamTest,
+       HeldPacketRetainsEachRevisionWhilePeerRuns) {
+  loom_serve_recognition_stream_t* stream = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&stream, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
+  ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 1, 1, 1, 1, 1}, 6));
+  loom_serve_recognition_stream_finish(stream);
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return loom_serve_recognition_stream_peek(stream); }));
+  const auto* activity = loom_serve_recognition_stream_peek(stream);
+  ASSERT_EQ(activity->kind, LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY);
+  EXPECT_EQ(activity->activity.begin, 0u);
+  EXPECT_EQ(activity->activity.end, 3u);
+  EXPECT_EQ(activity->activity.speech_probability, 0.75f);
+  loom_serve_recognition_stream_consume(stream);
+  const auto* provisional = loom_serve_recognition_stream_peek(stream);
+  ASSERT_NE(provisional, nullptr);
+  EXPECT_EQ(Text(provisional), "d");
+  EXPECT_EQ(provisional->transcript.revision, 1u);
+  const auto held_offers = offers_[0].load();
+
+  loom_serve_recognition_stream_t* peer = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&peer, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  ASSERT_NO_FATAL_FAILURE(Write(peer, {5, 6}, 2));
+  loom_serve_recognition_stream_finish(peer);
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return loom_serve_recognition_stream_peek(peer); }));
+  const auto* peer_event = loom_serve_recognition_stream_peek(peer);
+  ASSERT_EQ(peer_event->kind, LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY);
+  EXPECT_EQ(peer_event->activity.end, 2u);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(peer); }));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_status(peer));
+  EXPECT_EQ(loom_serve_recognition_stream_document(peer), nullptr);
+  EXPECT_EQ(offers_[0].load(), held_offers);
+  EXPECT_EQ(loom_serve_recognition_stream_peek(stream), provisional);
+  EXPECT_EQ(Text(provisional), "d");
+  loom_serve_recognition_stream_consume(stream);
+  const auto* replacement = loom_serve_recognition_stream_peek(stream);
+  ASSERT_NE(replacement, nullptr);
+  EXPECT_EQ(Text(replacement), "D");
+  EXPECT_EQ(replacement->transcript.revision, 2u);
+  ASSERT_NO_FATAL_FAILURE(Settle());
+  EXPECT_EQ(offers_[0].load(), held_offers);
+  EXPECT_EQ(submitted_, 2u);
+  loom_serve_recognition_stream_consume(stream);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(stream); }));
+  EXPECT_EQ(submitted_, 3u);
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(stream, "G"));
+}
+
+TEST_F(SourceRecognitionStreamTest,
+       FinalPacketSurvivesSlotReuseAndModelDestruction) {
+  loom_serve_recognition_stream_t* stream = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&stream, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
+  ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2}, 2));
+  loom_serve_recognition_stream_finish(stream);
+  ASSERT_NO_FATAL_FAILURE(Settle());
+  const auto* activity = loom_serve_recognition_stream_peek(stream);
+  ASSERT_NE(activity, nullptr);
+  ASSERT_EQ(activity->kind, LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY);
+  EXPECT_EQ(released_[0], 1u);
+  EXPECT_FALSE(loom_serve_recognition_stream_is_complete(stream));
+
+  loom_serve_recognition_stream_t* peer = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&peer, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
+  ASSERT_NO_FATAL_FAILURE(Write(peer, {4, 5}, 2));
+  loom_serve_recognition_stream_finish(peer);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(peer); }));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(peer, "J"));
+  EXPECT_EQ(released_[0], 2u);
+  ASSERT_NO_FATAL_FAILURE(RetireModel());
+
+  EXPECT_EQ(loom_serve_recognition_stream_peek(stream), activity);
+  EXPECT_EQ(activity->activity.end, 2u);
+  loom_serve_recognition_stream_consume(stream);
+  const auto* provisional = loom_serve_recognition_stream_peek(stream);
+  ASSERT_NE(provisional, nullptr);
+  EXPECT_EQ(Text(provisional), "d");
+  EXPECT_EQ(provisional->transcript.flags, 0u);
+  EXPECT_FALSE(loom_serve_recognition_stream_is_complete(stream));
+  loom_serve_recognition_stream_consume(stream);
+  const auto* final = loom_serve_recognition_stream_peek(stream);
+  ASSERT_NE(final, nullptr);
+  EXPECT_EQ(Text(final), "D");
+  EXPECT_EQ(final->transcript.revision, 2u);
+  EXPECT_TRUE(final->transcript.flags &
+              LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL);
+  loom_serve_recognition_stream_consume(stream);
+  EXPECT_TRUE(loom_serve_recognition_stream_is_complete(stream));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(stream, "D"));
+}
+
+TEST_F(SourceRecognitionStreamTest,
+       CancelledCompoundBatchCollectsBeforeRelease) {
+  loom_serve_recognition_stream_t* stream = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&stream, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
+  ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
+  loom_serve_recognition_stream_finish(stream);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return submitted_ == 1; }));
+  ASSERT_NO_FATAL_FAILURE(Close(stream));
+  EXPECT_EQ(collected_[0].load(), 0u);
+  EXPECT_EQ(released_[0], 0u);
+  ASSERT_NO_FATAL_FAILURE(Settle());
+  EXPECT_EQ(collected_[0].load(), 1u);
+  EXPECT_EQ(released_[0], 1u);
+  EXPECT_EQ(end_count_, 1u);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
+}
+
+TEST_F(SourceRecognitionStreamTest, ExplicitSelectionAndEmptyActivityEof) {
+  for (uint32_t outputs : {0u, 4u}) {
+    const loom_serve_recognition_request_t request = {.outputs = outputs};
+    loom_serve_recognition_stream_t* rejected = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_serve_recognition_stream_service_try_open(
+                              service_, &request, {}, &rejected));
+    EXPECT_EQ(rejected, nullptr);
+  }
+  loom_serve_recognition_stream_t* stream = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      Open(&stream, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  loom_serve_recognition_stream_finish(stream);
+  ASSERT_NO_FATAL_FAILURE(Settle());
+  EXPECT_EQ(loom_serve_recognition_stream_peek(stream), nullptr);
+  EXPECT_TRUE(loom_serve_recognition_stream_is_complete(stream));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_status(stream));
+  EXPECT_EQ(loom_serve_recognition_stream_document(stream), nullptr);
+  EXPECT_EQ(collected_[0].load(), 1u);
+  EXPECT_EQ(released_[0], 1u);
 }
 
 TEST_F(SourceRecognitionStreamTest, CloseReturnsRowBeforeNativeCapacity) {

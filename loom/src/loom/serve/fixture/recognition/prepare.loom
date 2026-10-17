@@ -6,7 +6,7 @@ global.rodata.def @name = bytes("666978747572652d7265636f676e6974696f6e")
 
 global.rodata.def @empty = bytes("")
 
-func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
   %c0 = scalar.constant 0 : i64
   %c1 = scalar.constant 1 : i64
   %root = global.load @root : buffer
@@ -17,13 +17,15 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %output_bytes = scalar.constant 64 : i64
   %input_frames = scalar.constant 7 : i64
   %frame_limit = scalar.constant 2048 : i64
-  %event_bytes = scalar.constant 49 : i64
+  %event_bytes = scalar.constant 146 : i64
+  %event_count = scalar.constant 3 : i64
+  %outputs = scalar.constant 3 : i32
   %rate = scalar.constant 16000 : i64
   %empty = global.load @empty : buffer
   %name = global.load @name : buffer
   // The control program deliberately reuses one event buffer. The native
   // boundary must preserve each revision through all batch consumers.
-  %event_length = index.constant 49 : offset
+  %event_length = index.constant 146 : offset
   %event = buffer.alloca<private> align(8) %event_length : buffer
-  func.return %rows, %rows, %stride, %stride, %stride, %batch_bytes, %output_bytes, %output_bytes, %input_frames, %frame_limit, %event_bytes, %rate, %c1, %empty, %name, %event, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
+  func.return %rows, %rows, %stride, %stride, %stride, %batch_bytes, %output_bytes, %output_bytes, %input_frames, %frame_limit, %event_bytes, %rate, %c1, %event_count, %outputs, %empty, %name, %event, %empty : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
 }
