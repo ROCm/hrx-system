@@ -1,0 +1,21 @@
+{
+  "name": "qwen3-embedding-0.6b",
+  "definition": {
+    "kind": "embedding",
+    "prepare": "prepare.loom",
+    "control": "control.loom",
+    "sources": [
+      "command.loom",
+      "array.loom",
+      "protocol.loom",
+      "tile_math.loom",
+      "workers_ingress.loom",
+      "workers_query.loom",
+      "workers_value.loom",
+      "workers_epilogue.loom"
+    ],
+    "assets": ".",
+    "options": {},
+    "pending_requests": 32
+  }
+}
