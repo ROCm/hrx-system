@@ -40,7 +40,7 @@ static amdf_status_t amdf_gpu_kfd_user_queue_create_native(
     struct kfd_ioctl_create_queue_args* inout_arguments) {
   (void)user_data;
   struct kfd_ioctl_create_queue_args arguments = *inout_arguments;
-  amdf_gpu_kfd_device_lock_memory(device);
+  amdf_gpu_kfd_device_lock_memory(device, AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
   const int result =
       ioctl(device->descriptor, AMDKFD_IOC_CREATE_QUEUE, &arguments);
   const int error = errno;
@@ -58,7 +58,7 @@ static amdf_status_t amdf_gpu_kfd_user_queue_destroy_native(
   struct kfd_ioctl_destroy_queue_args arguments = {
       .queue_id = queue_identifier,
   };
-  amdf_gpu_kfd_device_lock_memory(device);
+  amdf_gpu_kfd_device_lock_memory(device, AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE);
   const int result =
       ioctl(device->descriptor, AMDKFD_IOC_DESTROY_QUEUE, &arguments);
   const int error = errno;

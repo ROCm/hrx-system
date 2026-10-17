@@ -46,7 +46,7 @@ amdf_status_t amdf_gpu_umd_device_create(
   device->instance = instance;
   device->descriptor = -1;
   device->render_descriptor = -1;
-  device->memory_mutex = amdf_gpu_kfd_instance_memory_mutex(instance);
+  device->memory_lock = amdf_gpu_kfd_instance_memory_lock(instance);
   device->native_lifetime = native_lifetime;
   device->user_queue_native_api = amdf_gpu_kfd_user_queue_default_native_api();
 
@@ -63,7 +63,8 @@ amdf_status_t amdf_gpu_umd_device_create(
   }
   if (amdf_status_is_ok(status)) {
     device->descriptor = amdf_gpu_kfd_instance_descriptor(instance);
-    amdf_gpu_kfd_device_lock_memory(device);
+    amdf_gpu_kfd_device_lock_memory(device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
     status = amdf_gpu_kfd_instance_prepare_vm(
         instance, endpoint, &device->topology, device->page_size,
         &device->render_descriptor);

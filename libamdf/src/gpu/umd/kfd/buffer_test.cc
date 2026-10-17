@@ -27,7 +27,7 @@ namespace {
 // the production implementation and real host allocation/mapping operations.
 struct NativeBufferState {
   // Shared native connection lock borrowed by every modeled device handle.
-  pthread_mutex_t memory_mutex = PTHREAD_MUTEX_INITIALIZER;
+  amdf_gpu_kfd_memory_lock_t memory_lock = {};
   // Number of map calls interrupted after completing the device prefix.
   uint32_t map_interruptions = 0;
   // Number of unmap calls interrupted after completing the device prefix.
@@ -134,11 +134,9 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
   if (request != AMDKFD_IOC_EXPORT_DMABUF) {
     // Native completion includes the flush after KFD drops its own mutex.
     // Every retry and failure path must still exclude another caller here.
-    const int lock_result = pthread_mutex_trylock(&native_state->memory_mutex);
-    EXPECT_EQ(lock_result, EBUSY);
-    if (lock_result == 0) {
-      EXPECT_EQ(pthread_mutex_unlock(&native_state->memory_mutex), 0);
-    }
+    EXPECT_EQ(pthread_mutex_lock(&native_state->memory_lock.mutex), 0);
+    EXPECT_TRUE(native_state->memory_lock.occupied);
+    EXPECT_EQ(pthread_mutex_unlock(&native_state->memory_lock.mutex), 0);
   }
   switch (request) {
     case AMDKFD_IOC_IMPORT_DMABUF: {
@@ -263,6 +261,7 @@ class KfdBufferNativeTest : public ::testing::Test {
  protected:
   void SetUp() override {
     native_state = &native_;
+    ASSERT_EQ(amdf_gpu_kfd_memory_lock_initialize(&native_.memory_lock), 0);
     device_.host_allocator = amdf_allocator_system();
     device_.host_allocator.user_data = &native_;
     device_.host_allocator.free = [](void* user_data, void* allocation) {
@@ -270,7 +269,7 @@ class KfdBufferNativeTest : public ::testing::Test {
       amdf_free(amdf_allocator_system(), allocation);
     };
     device_.descriptor = 17;
-    device_.memory_mutex = &native_.memory_mutex;
+    device_.memory_lock = &native_.memory_lock;
     device_.render_descriptor = memfd_create("amdf-kfd-buffer", MFD_CLOEXEC);
     ASSERT_GE(device_.render_descriptor, 0);
     ASSERT_EQ(ftruncate(device_.render_descriptor, 4096), 0);
@@ -296,12 +295,8 @@ class KfdBufferNativeTest : public ::testing::Test {
       EXPECT_EQ(close(device_.render_descriptor), 0);
     }
     native_state = nullptr;
-    const int lock_result = pthread_mutex_trylock(&native_.memory_mutex);
-    EXPECT_EQ(lock_result, 0) << "terminal paths must release serialization";
-    if (lock_result == 0) {
-      EXPECT_EQ(pthread_mutex_unlock(&native_.memory_mutex), 0);
-      EXPECT_EQ(pthread_mutex_destroy(&native_.memory_mutex), 0);
-    }
+    EXPECT_FALSE(native_.memory_lock.occupied);
+    amdf_gpu_kfd_memory_lock_deinitialize(&native_.memory_lock);
   }
 
   amdf_status_t Create() {

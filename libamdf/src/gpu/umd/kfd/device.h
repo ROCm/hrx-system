@@ -7,10 +7,10 @@
 #ifndef AMDF_SRC_GPU_UMD_KFD_DEVICE_H_
 #define AMDF_SRC_GPU_UMD_KFD_DEVICE_H_
 
-#include <pthread.h>
 #include <stddef.h>
 
 #include "libamdf/src/gpu/umd/device.h"
+#include "libamdf/src/gpu/umd/kfd/memory_lock.h"
 #include "libamdf/src/gpu/umd/kfd/topology.h"
 
 typedef struct amdf_gpu_kfd_user_queue_native_api_t
@@ -33,7 +33,7 @@ struct amdf_gpu_umd_device_t {
   int render_descriptor;
   // Borrowed connection-wide lock for cold VM mutations, including peers.
   // Queue publication and progress operations never acquire this lock.
-  pthread_mutex_t* memory_mutex;
+  amdf_gpu_kfd_memory_lock_t* memory_lock;
   // Native lifetime inherited from the provider instance.
   amdf_native_lifetime_t native_lifetime;
   // Native identity, geometry and address limits established at creation.
@@ -54,17 +54,13 @@ struct amdf_gpu_umd_device_t {
 // return, not merely page-table mutation. This does not synchronize device work
 // or replace the kernel's eviction/restore ordering.
 static inline void amdf_gpu_kfd_device_lock_memory(
-    amdf_gpu_umd_device_t* device) {
-  const int error = pthread_mutex_lock(device->memory_mutex);
-  amdf_assert(error == 0);
-  (void)error;
+    amdf_gpu_umd_device_t* device, amdf_gpu_kfd_memory_priority_t priority) {
+  amdf_gpu_kfd_memory_lock_acquire(device->memory_lock, priority);
 }
 
 static inline void amdf_gpu_kfd_device_unlock_memory(
     amdf_gpu_umd_device_t* device) {
-  const int error = pthread_mutex_unlock(device->memory_mutex);
-  amdf_assert(error == 0);
-  (void)error;
+  amdf_gpu_kfd_memory_lock_release(device->memory_lock);
 }
 
 #endif  // AMDF_SRC_GPU_UMD_KFD_DEVICE_H_

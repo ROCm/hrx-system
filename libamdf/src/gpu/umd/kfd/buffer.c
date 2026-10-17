@@ -44,8 +44,9 @@ struct amdf_gpu_kfd_buffer_t {
 // interrupted before consuming its handle. Other native failures remain
 // terminal results of this call, not reasons to retry.
 static int amdf_gpu_kfd_buffer_ioctl(amdf_gpu_umd_device_t* device,
+                                     amdf_gpu_kfd_memory_priority_t priority,
                                      unsigned long request, void* arguments) {
-  amdf_gpu_kfd_device_lock_memory(device);
+  amdf_gpu_kfd_device_lock_memory(device, priority);
   int result;
   do {
     result = ioctl(device->descriptor, request, arguments);
@@ -66,7 +67,8 @@ static amdf_status_t amdf_gpu_kfd_buffer_release_native(
         .n_success = buffer->unmap_success_count,
     };
     const int result = amdf_gpu_kfd_buffer_ioctl(
-        buffer->device, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+        buffer->device, AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE,
+        AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
     buffer->unmap_success_count = unmap.n_success;
     if (result != 0) {
       return amdf_linux_error(errno);
@@ -80,8 +82,9 @@ static amdf_status_t amdf_gpu_kfd_buffer_release_native(
     struct kfd_ioctl_free_memory_of_gpu_args release = {
         .handle = buffer->handle,
     };
-    if (amdf_gpu_kfd_buffer_ioctl(buffer->device, AMDKFD_IOC_FREE_MEMORY_OF_GPU,
-                                  &release) != 0) {
+    if (amdf_gpu_kfd_buffer_ioctl(
+            buffer->device, AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE,
+            AMDKFD_IOC_FREE_MEMORY_OF_GPU, &release) != 0) {
       return amdf_linux_error(errno);
     }
     buffer->handle = 0;
@@ -229,7 +232,8 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
         (uintptr_t)create_info->host_pointer - create_info->host_byte_offset;
   }
   if (amdf_status_is_ok(status)) {
-    amdf_gpu_kfd_device_lock_memory(device);
+    amdf_gpu_kfd_device_lock_memory(device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
     if (ioctl(device->descriptor, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocate) !=
         0) {
       status = amdf_linux_error(errno);
@@ -264,7 +268,8 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
         .n_devices = gpu_count,
     };
     const int result =
-        amdf_gpu_kfd_buffer_ioctl(device, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
+        amdf_gpu_kfd_buffer_ioctl(device, AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE,
+                                  AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
     // Mapping can succeed before the final residency/page-table wait fails.
     buffer->mapped_gpu_count = map.n_success;
     if (result != 0) {

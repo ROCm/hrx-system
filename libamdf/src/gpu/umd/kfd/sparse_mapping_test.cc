@@ -256,7 +256,7 @@ class KfdSparseMappingBackend final : public SparseMappingBackend {
     for (const auto& mapping : mappings) {
       sources.push_back(bo_entries_[mapping.backing]);
     }
-    amdf_gpu_kfd_device_lock_memory(device_);
+    amdf_gpu_kfd_device_lock_memory(device_, AMDF_GPU_KFD_MEMORY_PRIORITY_MAP);
     for (const auto& mapping : mappings) {
       Update(AMDGPU_VA_OP_REPLACE, bo_entries_[mapping.backing].bo_handle,
              reservation_addresses[mapping.reservation] + mapping.byte_offset,
@@ -267,7 +267,7 @@ class KfdSparseMappingBackend final : public SparseMappingBackend {
   }
 
   void Detach(std::span<const SparseMapping> mappings) override {
-    amdf_gpu_kfd_device_lock_memory(device_);
+    amdf_gpu_kfd_device_lock_memory(device_, AMDF_GPU_KFD_MEMORY_PRIORITY_MAP);
     for (const auto& mapping : mappings) {
       Update(AMDGPU_VA_OP_CLEAR, 0,
              reservation_addresses[mapping.reservation] + mapping.byte_offset,
@@ -319,7 +319,7 @@ class KfdSparseMappingBackend final : public SparseMappingBackend {
     // Clear the complete reservations, including holes, without enumerating
     // their installed mappings. Completion precedes backing release while the
     // same queue is alive; queue teardown cannot supply this guarantee.
-    amdf_gpu_kfd_device_lock_memory(device_);
+    amdf_gpu_kfd_device_lock_memory(device_, AMDF_GPU_KFD_MEMORY_PRIORITY_MAP);
     for (uint64_t address : reservation_addresses) {
       Update(AMDGPU_VA_OP_CLEAR, 0, address, reservation_byte_length_);
     }

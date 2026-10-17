@@ -53,8 +53,9 @@ bool amdf_gpu_kfd_hdp_supports_host_publication(
 }
 
 static int amdf_gpu_kfd_hdp_map_ioctl(amdf_gpu_umd_device_t* device,
+                                      amdf_gpu_kfd_memory_priority_t priority,
                                       unsigned long request, void* arguments) {
-  amdf_gpu_kfd_device_lock_memory(device);
+  amdf_gpu_kfd_device_lock_memory(device, priority);
   int result;
   do {
     result = ioctl(device->descriptor, request, arguments);
@@ -74,7 +75,8 @@ static amdf_status_t amdf_gpu_kfd_hdp_release_native(amdf_gpu_kfd_hdp_t* hdp) {
         .n_devices = hdp->mapped_count,
     };
     if (amdf_gpu_kfd_hdp_map_ioctl(
-            hdp->device, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap) != 0) {
+            hdp->device, AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE,
+            AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap) != 0) {
       return amdf_linux_error(errno);
     }
     if (unmap.n_success != hdp->mapped_count) {
@@ -93,7 +95,8 @@ static amdf_status_t amdf_gpu_kfd_hdp_release_native(amdf_gpu_kfd_hdp_t* hdp) {
     struct kfd_ioctl_free_memory_of_gpu_args release = {
         .handle = hdp->handle,
     };
-    amdf_gpu_kfd_device_lock_memory(hdp->device);
+    amdf_gpu_kfd_device_lock_memory(hdp->device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE);
     const int result =
         ioctl(hdp->device->descriptor, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &release);
     const int error = errno;
@@ -158,7 +161,8 @@ amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
   };
   bool unavailable = false;
   if (amdf_status_is_ok(status)) {
-    amdf_gpu_kfd_device_lock_memory(device);
+    amdf_gpu_kfd_device_lock_memory(device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
     const int result =
         ioctl(device->descriptor, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocate);
     const int error = errno;
@@ -191,7 +195,8 @@ amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
         .n_devices = 1,
     };
     const int result =
-        amdf_gpu_kfd_hdp_map_ioctl(device, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
+        amdf_gpu_kfd_hdp_map_ioctl(device, AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE,
+                                   AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
     hdp->mapped_count = map.n_success;
     if (result != 0) {
       status = amdf_linux_error(errno);

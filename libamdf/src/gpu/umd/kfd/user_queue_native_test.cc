@@ -28,25 +28,26 @@ TEST(KfdUserQueueNativeTest, FailedVmFaultQueryPreservesOutput) {
 }
 
 TEST(KfdUserQueueNativeTest, DestroyPreservesNativeErrorDomain) {
-  pthread_mutex_t memory_mutex = PTHREAD_MUTEX_INITIALIZER;
+  amdf_gpu_kfd_memory_lock_t memory_lock;
+  ASSERT_EQ(amdf_gpu_kfd_memory_lock_initialize(&memory_lock), 0);
   amdf_gpu_umd_device_t device = {
       .descriptor = -1,
-      .memory_mutex = &memory_mutex,
+      .memory_lock = &memory_lock,
   };
   const auto* native_api = amdf_gpu_kfd_user_queue_default_native_api();
   EXPECT_EQ(native_api->queue_destroy(native_api->user_data, &device, 47),
             amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EBADF));
-  ASSERT_EQ(pthread_mutex_trylock(&memory_mutex), 0);
-  EXPECT_EQ(pthread_mutex_unlock(&memory_mutex), 0);
-  EXPECT_EQ(pthread_mutex_destroy(&memory_mutex), 0);
+  EXPECT_FALSE(memory_lock.occupied);
+  amdf_gpu_kfd_memory_lock_deinitialize(&memory_lock);
 }
 
 TEST(KfdUserQueueNativeTest,
      FailedCreateReleasesSerializationAndPreservesOutput) {
-  pthread_mutex_t memory_mutex = PTHREAD_MUTEX_INITIALIZER;
+  amdf_gpu_kfd_memory_lock_t memory_lock;
+  ASSERT_EQ(amdf_gpu_kfd_memory_lock_initialize(&memory_lock), 0);
   amdf_gpu_umd_device_t device = {
       .descriptor = -1,
-      .memory_mutex = &memory_mutex,
+      .memory_lock = &memory_lock,
   };
   kfd_ioctl_create_queue_args arguments;
   std::memset(&arguments, 0xA5, sizeof(arguments));
@@ -56,9 +57,8 @@ TEST(KfdUserQueueNativeTest,
       native_api->queue_create(native_api->user_data, &device, &arguments),
       amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EBADF));
   EXPECT_EQ(std::memcmp(&arguments, &original, sizeof(arguments)), 0);
-  ASSERT_EQ(pthread_mutex_trylock(&memory_mutex), 0);
-  EXPECT_EQ(pthread_mutex_unlock(&memory_mutex), 0);
-  EXPECT_EQ(pthread_mutex_destroy(&memory_mutex), 0);
+  EXPECT_FALSE(memory_lock.occupied);
+  amdf_gpu_kfd_memory_lock_deinitialize(&memory_lock);
 }
 
 }  // namespace

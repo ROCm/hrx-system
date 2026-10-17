@@ -38,7 +38,8 @@ static amdf_status_t amdf_gpu_kfd_doorbell_release_native(
         .device_ids_array_ptr = (uintptr_t)&gpu_id,
         .n_devices = doorbell->mapped_count,
     };
-    amdf_gpu_kfd_device_lock_memory(doorbell->device);
+    amdf_gpu_kfd_device_lock_memory(doorbell->device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE);
     int result;
     do {
       // KFD preserves its completed prefix across interrupted final waits.
@@ -60,7 +61,8 @@ static amdf_status_t amdf_gpu_kfd_doorbell_release_native(
     };
     // Special allocation release has different consumption semantics from
     // ordinary GTT/VRAM buffers. Any error is terminal for this owner.
-    amdf_gpu_kfd_device_lock_memory(doorbell->device);
+    amdf_gpu_kfd_device_lock_memory(doorbell->device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE);
     const int result = ioctl(doorbell->device->descriptor,
                              AMDKFD_IOC_FREE_MEMORY_OF_GPU, &release);
     const int error = errno;
@@ -123,7 +125,8 @@ amdf_status_t amdf_gpu_kfd_doorbell_create(
                KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED,
   };
   if (amdf_status_is_ok(status)) {
-    amdf_gpu_kfd_device_lock_memory(device);
+    amdf_gpu_kfd_device_lock_memory(device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
     if (ioctl(device->descriptor, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocate) !=
         0) {
       status = amdf_linux_error(errno);
@@ -142,7 +145,8 @@ amdf_status_t amdf_gpu_kfd_doorbell_create(
         .device_ids_array_ptr = (uintptr_t)&gpu_id,
         .n_devices = 1,
     };
-    amdf_gpu_kfd_device_lock_memory(device);
+    amdf_gpu_kfd_device_lock_memory(device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
     int result;
     do {
       result = ioctl(device->descriptor, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);

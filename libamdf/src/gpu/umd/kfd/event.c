@@ -36,7 +36,7 @@ amdf_status_t amdf_gpu_umd_event_create(
   }
   event->device = device;
   amdf_gpu_kfd_event_info_t info = {0};
-  amdf_gpu_kfd_device_lock_memory(device);
+  amdf_gpu_kfd_device_lock_memory(device, AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
   status = amdf_gpu_kfd_instance_create_event(
       device->instance, &device->topology, device->page_size, &info);
   amdf_gpu_kfd_device_unlock_memory(device);

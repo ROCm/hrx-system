@@ -173,11 +173,12 @@ class KfdInstanceTest : public ::testing::Test {
       topology = &local_topology;
     }
     topology->gpu_id = gpu_id;
-    auto* mutex = amdf_gpu_kfd_instance_memory_mutex(instance_);
-    EXPECT_EQ(pthread_mutex_lock(mutex), 0);
+    auto* lock = amdf_gpu_kfd_instance_memory_lock(instance_);
+    amdf_gpu_kfd_memory_lock_acquire(lock,
+                                     AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
     const auto status = amdf_gpu_kfd_instance_prepare_vm(
         instance_, &endpoint, topology, 4096, out_descriptor);
-    EXPECT_EQ(pthread_mutex_unlock(mutex), 0);
+    amdf_gpu_kfd_memory_lock_release(lock);
     return status;
   }
 
@@ -191,11 +192,12 @@ class KfdInstanceTest : public ::testing::Test {
 
   amdf_status_t CreateEvent(const amdf_gpu_kfd_topology_t& topology,
                             amdf_gpu_kfd_event_info_t* out_info) {
-    auto* mutex = amdf_gpu_kfd_instance_memory_mutex(instance_);
-    EXPECT_EQ(pthread_mutex_lock(mutex), 0);
+    auto* lock = amdf_gpu_kfd_instance_memory_lock(instance_);
+    amdf_gpu_kfd_memory_lock_acquire(lock,
+                                     AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
     const auto status = amdf_gpu_kfd_instance_create_event(instance_, &topology,
                                                            4096, out_info);
-    EXPECT_EQ(pthread_mutex_unlock(mutex), 0);
+    amdf_gpu_kfd_memory_lock_release(lock);
     if (amdf_status_is_ok(status)) {
       signals_.push_back(out_info->signal_id);
     }

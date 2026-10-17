@@ -59,8 +59,8 @@ struct amdf_gpu_umd_instance_t {
   amdf_gpu_kfd_vm_binding_t* bindings;
   // Serializes foreground VM mutations through their final native TLB flush.
   // One connection-wide lock covers peer operations without lock ordering.
-  pthread_mutex_t memory_mutex;
-  // Native event bootstrap, serialized by memory_mutex while devices are live.
+  amdf_gpu_kfd_memory_lock_t memory_lock;
+  // Native event bootstrap, serialized by memory_lock while devices are live.
   struct {
     // Owned VA reservation, retained until every GPU mapping has been removed.
     void* reservation;
@@ -314,7 +314,8 @@ amdf_status_t amdf_gpu_umd_instance_prepare(
     if (!amdf_status_is_ok(status)) {
       return status;
     }
-    const int mutex_error = pthread_mutex_init(&instance->memory_mutex, NULL);
+    const int mutex_error =
+        amdf_gpu_kfd_memory_lock_initialize(&instance->memory_lock);
     if (mutex_error != 0) {
       amdf_free(host_allocator, instance);
       return amdf_linux_error(mutex_error);
@@ -352,9 +353,9 @@ int amdf_gpu_kfd_instance_descriptor(const amdf_gpu_umd_instance_t* instance) {
   return instance->descriptor;
 }
 
-pthread_mutex_t* amdf_gpu_kfd_instance_memory_mutex(
+amdf_gpu_kfd_memory_lock_t* amdf_gpu_kfd_instance_memory_lock(
     amdf_gpu_umd_instance_t* instance) {
-  return &instance->memory_mutex;
+  return &instance->memory_lock;
 }
 
 amdf_status_t amdf_gpu_kfd_instance_prepare_vm(
@@ -437,9 +438,7 @@ amdf_status_t amdf_gpu_umd_instance_destroy(amdf_gpu_umd_instance_t* instance) {
     }
   }
   if (amdf_status_is_ok(status)) {
-    const int mutex_error = pthread_mutex_destroy(&instance->memory_mutex);
-    amdf_assert(mutex_error == 0);
-    (void)mutex_error;
+    amdf_gpu_kfd_memory_lock_deinitialize(&instance->memory_lock);
     amdf_free(instance->host_allocator, instance);
   }
   return status;

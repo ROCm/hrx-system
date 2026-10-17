@@ -23,7 +23,7 @@ namespace {
 // production implementation; no native GPU or driver is accessed by this test.
 struct NativeDoorbellState {
   // Connection lock shared with ordinary memory and native queue lifecycle.
-  pthread_mutex_t memory_mutex = PTHREAD_MUTEX_INITIALIZER;
+  amdf_gpu_kfd_memory_lock_t memory_lock = {};
   // Allocation arguments captured before the dependency returns its handle.
   kfd_ioctl_alloc_memory_of_gpu_args allocation = {};
   // Allocation failure before acquiring native backing, or zero.
@@ -69,11 +69,9 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
     return __real_ioctl(descriptor, request, argument);
   }
   EXPECT_EQ(descriptor, 17);
-  const int lock_result = pthread_mutex_trylock(&native_state->memory_mutex);
-  EXPECT_EQ(lock_result, EBUSY);
-  if (lock_result == 0) {
-    EXPECT_EQ(pthread_mutex_unlock(&native_state->memory_mutex), 0);
-  }
+  EXPECT_EQ(pthread_mutex_lock(&native_state->memory_lock.mutex), 0);
+  EXPECT_TRUE(native_state->memory_lock.occupied);
+  EXPECT_EQ(pthread_mutex_unlock(&native_state->memory_lock.mutex), 0);
   switch (request) {
     case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU: {
       auto* allocate =
@@ -153,6 +151,7 @@ class KfdDoorbellTest : public ::testing::Test {
  protected:
   void SetUp() override {
     native_state = &native_;
+    ASSERT_EQ(amdf_gpu_kfd_memory_lock_initialize(&native_.memory_lock), 0);
     device_.host_allocator = amdf_allocator_system();
     device_.host_allocator.user_data = &native_;
     device_.host_allocator.free = [](void* user_data, void* allocation) {
@@ -160,7 +159,7 @@ class KfdDoorbellTest : public ::testing::Test {
       amdf_free(amdf_allocator_system(), allocation);
     };
     device_.descriptor = 17;
-    device_.memory_mutex = &native_.memory_mutex;
+    device_.memory_lock = &native_.memory_lock;
     device_.page_size = 4096;
     device_.topology.gpu_id = 19;
     device_.topology.virtual_address.end = UINT64_MAX;
@@ -174,12 +173,8 @@ class KfdDoorbellTest : public ::testing::Test {
     EXPECT_FALSE(native_.mapped);
     EXPECT_EQ(native_.metadata_free_count, 1u);
     native_state = nullptr;
-    const int lock_result = pthread_mutex_trylock(&native_.memory_mutex);
-    EXPECT_EQ(lock_result, 0) << "terminal paths must release serialization";
-    if (lock_result == 0) {
-      EXPECT_EQ(pthread_mutex_unlock(&native_.memory_mutex), 0);
-      EXPECT_EQ(pthread_mutex_destroy(&native_.memory_mutex), 0);
-    }
+    EXPECT_FALSE(native_.memory_lock.occupied);
+    amdf_gpu_kfd_memory_lock_deinitialize(&native_.memory_lock);
   }
 
   void ReclaimModeledLeak() {

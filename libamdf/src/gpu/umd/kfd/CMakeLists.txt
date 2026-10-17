@@ -10,6 +10,37 @@
 iree_add_all_subdirs()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
+    memory_lock
+  HDRS
+    "memory_lock.h"
+  SRCS
+    "memory_lock.c"
+  DEPS
+    amdf::headers
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    memory_lock_test
+  SRCS
+    "memory_lock_test.cc"
+  DEPS
+    ::memory_lock
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_test(
   NAME
     sparse_mapping_test
@@ -146,6 +177,7 @@ iree_cc_library(
     "instance.c"
   DEPS
     ::file
+    ::memory_lock
     ::topology
     ::vm
     amdf::headers
@@ -207,6 +239,7 @@ iree_cc_library(
   HDRS
     "device.h"
   DEPS
+    ::memory_lock
     ::topology
     amdf::headers
     libamdf::src::gpu::umd::device
@@ -540,6 +573,7 @@ iree_cc_test(
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_amdgpu_uapi>
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_drm_uapi>
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>
+    ::buffer
     ::device_state
     ::memory
     amdf::headers

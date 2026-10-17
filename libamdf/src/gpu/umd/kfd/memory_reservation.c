@@ -211,7 +211,8 @@ static amdf_status_t amdf_gpu_kfd_reservation_clear(
   const struct drm_amdgpu_bo_list_entry transport = {
       .bo_handle = target->transport_handle,
   };
-  amdf_gpu_kfd_device_lock_memory(target->device);
+  amdf_gpu_kfd_device_lock_memory(target->device,
+                                  AMDF_GPU_KFD_MEMORY_PRIORITY_MAP);
   amdf_status_t status =
       amdf_gpu_kfd_reservation_ioctl(target, DRM_IOCTL_AMDGPU_GEM_VA, &clear);
   if (amdf_status_is_ok(status)) {
@@ -439,7 +440,8 @@ amdf_status_t amdf_gpu_umd_memory_reservation_update(
           amdf_gpu_kfd_memory_mapping_handle(updates[i].memory, target->device);
     }
   }
-  amdf_gpu_kfd_device_lock_memory(target->device);
+  amdf_gpu_kfd_device_lock_memory(target->device,
+                                  AMDF_GPU_KFD_MEMORY_PRIORITY_MAP);
   *mutation_started = true;
   uint32_t source = 1;
   for (uint32_t i = 0; i < update_count && amdf_status_is_ok(status); ++i) {

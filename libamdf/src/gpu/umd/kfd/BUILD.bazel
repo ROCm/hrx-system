@@ -19,6 +19,24 @@ KFD_COMPATIBILITY = [
     "@platforms//cpu:x86_64",
 ]
 
+amdf_cc_library(
+    name = "memory_lock",
+    srcs = ["memory_lock.c"],
+    hdrs = ["memory_lock.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+)
+
+amdf_cc_test(
+    name = "memory_lock_test",
+    srcs = ["memory_lock_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":memory_lock",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
 amdf_cc_test(
     name = "sparse_mapping_test",
     size = "medium",
@@ -122,6 +140,7 @@ amdf_cc_library(
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
         ":file",
+        ":memory_lock",
         ":topology",
         ":vm",
         "//libamdf/src:allocator",
@@ -168,6 +187,7 @@ amdf_cc_library(
     hdrs = ["device.h"],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
+        ":memory_lock",
         ":topology",
         "//libamdf/src/gpu/umd:device",
     ],
@@ -423,6 +443,7 @@ amdf_cc_test(
     linkopts = ["-Wl,--wrap=ioctl"],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
+        ":buffer",
         ":device_state",
         ":memory",
         "//libamdf/src:allocator",

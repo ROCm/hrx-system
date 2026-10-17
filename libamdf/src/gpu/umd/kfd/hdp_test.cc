@@ -20,7 +20,7 @@ namespace {
 
 struct NativeHdpState {
   // Native VM mutation lock borrowed by the device.
-  pthread_mutex_t memory_mutex = PTHREAD_MUTEX_INITIALIZER;
+  amdf_gpu_kfd_memory_lock_t memory_lock = {};
   // Last special-allocation request received by the native boundary.
   kfd_ioctl_alloc_memory_of_gpu_args allocation = {};
   // Real anonymous reservation substituted for the uncached MMIO page.
@@ -66,11 +66,9 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
   if (request == DRM_IOCTL_AMDGPU_INFO) {
     EXPECT_EQ(descriptor, 23);
     // Publication has no native VM mutation and never takes its lock.
-    const int lock_result = pthread_mutex_trylock(&native_state->memory_mutex);
-    EXPECT_EQ(lock_result, 0);
-    if (lock_result == 0) {
-      EXPECT_EQ(pthread_mutex_unlock(&native_state->memory_mutex), 0);
-    }
+    EXPECT_EQ(pthread_mutex_lock(&native_state->memory_lock.mutex), 0);
+    EXPECT_FALSE(native_state->memory_lock.occupied);
+    EXPECT_EQ(pthread_mutex_unlock(&native_state->memory_lock.mutex), 0);
     const auto* query = static_cast<const drm_amdgpu_info*>(argument);
     EXPECT_EQ(query->query, AMDGPU_INFO_TIMESTAMP);
     EXPECT_EQ(query->return_size, sizeof(uint64_t));
@@ -90,11 +88,9 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
     return 0;
   }
   EXPECT_EQ(descriptor, 17);
-  const int lock_result = pthread_mutex_trylock(&native_state->memory_mutex);
-  EXPECT_EQ(lock_result, EBUSY);
-  if (lock_result == 0) {
-    EXPECT_EQ(pthread_mutex_unlock(&native_state->memory_mutex), 0);
-  }
+  EXPECT_EQ(pthread_mutex_lock(&native_state->memory_lock.mutex), 0);
+  EXPECT_TRUE(native_state->memory_lock.occupied);
+  EXPECT_EQ(pthread_mutex_unlock(&native_state->memory_lock.mutex), 0);
   switch (request) {
     case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU: {
       auto* allocate =
@@ -208,10 +204,11 @@ class KfdHdpTest : public ::testing::Test {
  protected:
   void SetUp() override {
     native_state = &native_;
+    ASSERT_EQ(amdf_gpu_kfd_memory_lock_initialize(&native_.memory_lock), 0);
     device_.host_allocator = amdf_allocator_system();
     device_.descriptor = 17;
     device_.render_descriptor = 23;
-    device_.memory_mutex = &native_.memory_mutex;
+    device_.memory_lock = &native_.memory_lock;
     device_.page_size = 4096;
     device_.topology = Topology(12, 0, 1);
     device_.topology.gpu_id = 19;
@@ -228,7 +225,7 @@ class KfdHdpTest : public ::testing::Test {
     EXPECT_FALSE(native_.allocated);
     EXPECT_FALSE(native_.mapped);
     native_state = nullptr;
-    EXPECT_EQ(pthread_mutex_destroy(&native_.memory_mutex), 0);
+    amdf_gpu_kfd_memory_lock_deinitialize(&native_.memory_lock);
   }
 
   NativeHdpState native_;

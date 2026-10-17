@@ -57,10 +57,10 @@ class KfdEventTest : public ::testing::Test {
  protected:
   void SetUp() override {
     native_state = &native_;
-    ASSERT_EQ(pthread_mutex_init(&mutex_, nullptr), 0);
+    ASSERT_EQ(amdf_gpu_kfd_memory_lock_initialize(&memory_lock_), 0);
     device_.descriptor = 10000;
     device_.page_size = 4096;
-    device_.memory_mutex = &mutex_;
+    device_.memory_lock = &memory_lock_;
     device_.host_allocator = {
         .user_data = &native_,
         .allocate = [](void* user_data, uint64_t byte_length,
@@ -92,7 +92,7 @@ class KfdEventTest : public ::testing::Test {
       EXPECT_EQ(amdf_gpu_umd_event_destroy(event_), AMDF_STATUS_OK);
     }
     EXPECT_EQ(native_.allocation_count, 0u);
-    EXPECT_EQ(pthread_mutex_destroy(&mutex_), 0);
+    amdf_gpu_kfd_memory_lock_deinitialize(&memory_lock_);
     native_state = nullptr;
   }
 
@@ -104,7 +104,7 @@ class KfdEventTest : public ::testing::Test {
   // Native dependency state, alive through event teardown.
   NativeState native_;
   // Real connection lock, used only by event creation.
-  pthread_mutex_t mutex_;
+  amdf_gpu_kfd_memory_lock_t memory_lock_;
   // Borrowed device carrying the exact native descriptor and allocator.
   amdf_gpu_umd_device_t device_ = {};
   // Test-owned real implementation, published only after creation succeeds.
