@@ -71,6 +71,15 @@ commands lives in the stream bank; compiler-private workspace belongs to one
 complete command and is released by the shared runner. Each request retains its
 own source state, including cache positions and RNG progression.
 
+CPU request state is an ordered set of typed scalar and reference values chosen
+by `prepare_request`. Its final result is the device upload buffer; the preceding
+values remain owned by that request. Every consuming entry declares the exact
+same types. `complete` returns replacement state before its waveform fields, so
+source can grow a text buffer while retaining independent tokenizer or decoder
+objects. Binding checks those signatures before service publication. State never
+passes through the packed numerical upload or moves when batch membership
+changes.
+
 `prepare_work` describes the request's next operation without advancing it.
 Equal compatibility tags and additive work units within the declared batch
 capacity permit a cohort. Source owns phase and shape compatibility; differing
