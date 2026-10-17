@@ -309,6 +309,37 @@ endif()
 
 file(GLOB _GLOB_TESTDATA_IMAGE_FUZZ_X_TXT LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS testdata/image_fuzz/*.txt)
 if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    audio_resampler
+  HDRS
+    "audio_resampler.h"
+  SRCS
+    "audio_resampler.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    audio_resampler_test
+  SRCS
+    "audio_resampler_test.cc"
+  DEPS
+    ::audio_resampler
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
 set(_audio_decoder_platform_srcs "")
 if(LOOM_SERVE_AUDIO_DECODING)
   list(APPEND _audio_decoder_platform_srcs "audio_decoder.c")
