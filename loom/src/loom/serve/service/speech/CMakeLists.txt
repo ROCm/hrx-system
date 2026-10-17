@@ -12,6 +12,36 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    input
+  HDRS
+    "input.h"
+  SRCS
+    "input.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    input_test
+  SRCS
+    "input_test.cc"
+  DEPS
+    ::input
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     request
   HDRS
     "request.h"
@@ -48,6 +78,7 @@ loom_cc_library(
   HDRS
     "generator.h"
   DEPS
+    ::input
     ::request
     iree::base
     iree::tokenizer
@@ -82,6 +113,8 @@ loom_cc_library(
   DEPS
     ::consumer
     ::generator
+    ::input
+    ::request
     iree::base
     loom::serve::telemetry::record
   PUBLIC
@@ -98,6 +131,7 @@ loom_cc_library(
     "model.c"
   DEPS
     ::generator
+    ::input
     iree::base
     iree::base::threading
     iree::hal
@@ -128,14 +162,39 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    stream_test
+  SRCS
+    "stream_test.cc"
+  DEPS
+    ::consumer
+    ::input
+    ::request
+    ::stream
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::telemetry::record
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_library(
   NAME
     source_service_tests
+  HDRS
+    "service_test.h"
   SRCS
+    "readiness_test.cc"
+    "service_test.cc"
     "source_service_test.cc"
   DEPS
     ::generator
+    ::input
     ::model
     ::request
     ::service
@@ -233,6 +292,7 @@ loom_cc_library(
     ::consumer
     ::generator
     ::http
+    ::input
     ::request
     ::stream
     iree::async

@@ -26,6 +26,8 @@ typedef struct loom_serve_speech_request_t {
   uint64_t seed;
   // Requested speech speed in [0.25, 4], with one meaning the natural speed.
   float speed;
+  // True for a finite text request; false for an initially empty native stream.
+  bool input_complete;
 } loom_serve_speech_request_t;
 
 // Copies a native request without JSON encoding. Text, voice, and instructions
@@ -36,6 +38,14 @@ iree_status_t loom_serve_speech_request_initialize_text(
     iree_string_view_t input, iree_string_view_t voice,
     iree_string_view_t instructions, uint64_t seed, float speed,
     iree_allocator_t host_allocator, loom_serve_speech_request_t* out_request);
+
+// Copies the immutable options for an initially empty continuing text stream.
+// Voice, instructions, and speed use the same validation as a finite request.
+// The admitted native handle accepts text and publishes end-of-input later.
+iree_status_t loom_serve_speech_request_initialize_stream(
+    iree_string_view_t voice, iree_string_view_t instructions, uint64_t seed,
+    float speed, iree_allocator_t host_allocator,
+    loom_serve_speech_request_t* out_request);
 
 // Decodes one complete UTF-8 JSON/JSONC speech request. Model, nonempty input
 // and voice are required; voice accepts a string or an object containing id.

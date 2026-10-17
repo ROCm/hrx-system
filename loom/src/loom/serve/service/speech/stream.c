@@ -14,6 +14,8 @@ struct loom_serve_speech_stream_t {
   iree_allocator_t host_allocator;
   // Immutable geometry copied from the prepared model.
   loom_serve_speech_format_t format;
+  // Caller-owned input reference; relinquished on close or service detachment.
+  loom_serve_speech_input_t* input;
   // Caller ownership, consumed by close on the serialized owner.
   bool caller_open;
   // Service ownership, consumed by end only after all CPU borrowers retire.
@@ -86,6 +88,8 @@ static iree_status_t loom_serve_speech_stream_end(
     const iree_status_t status) {
   loom_serve_speech_stream_t* stream = self;
   stream->service_open = false;
+  loom_serve_speech_input_release(stream->input);
+  stream->input = NULL;
   if (outcome != LOOM_SERVE_TELEMETRY_COMPLETED) {
     stream->published = false;
     stream->status = iree_status_is_ok(status)
@@ -98,9 +102,13 @@ static iree_status_t loom_serve_speech_stream_end(
 
 iree_status_t loom_serve_speech_stream_allocate(
     loom_serve_speech_format_t format, iree_host_size_t block_capacity,
-    iree_allocator_t host_allocator, loom_serve_speech_stream_t** out_stream,
+    iree_host_size_t text_capacity, uint64_t text_limit,
+    loom_serve_speech_request_t* request, iree_allocator_t host_allocator,
+    loom_serve_speech_stream_t** out_stream,
+    loom_serve_speech_input_t** out_input,
     loom_serve_speech_consumer_t* out_consumer) {
   *out_stream = NULL;
+  *out_input = NULL;
   *out_consumer = (loom_serve_speech_consumer_t){0};
   const uint64_t frame_bytes = (uint64_t)format.channels * sizeof(float);
   if (block_capacity >
@@ -113,6 +121,15 @@ iree_status_t loom_serve_speech_stream_allocate(
       host_allocator,
       sizeof(*stream) + block_capacity * format.channels * sizeof(float),
       (void**)&stream));
+  iree_status_t status = loom_serve_speech_input_allocate(
+      text_capacity, text_limit, &request->input, request->input_complete,
+      host_allocator, out_input);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(host_allocator, stream);
+    return status;
+  }
+  stream->input = *out_input;
+  loom_serve_speech_input_retain(stream->input);
   stream->host_allocator = host_allocator;
   stream->format = format;
   stream->caller_open = true;
@@ -129,6 +146,33 @@ iree_status_t loom_serve_speech_stream_allocate(
       .end = loom_serve_speech_stream_end,
   };
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_speech_stream_write(loom_serve_speech_stream_t* stream,
+                                             iree_const_byte_span_t text,
+                                             iree_host_size_t* out_byte_count) {
+  *out_byte_count = 0;
+  if (!stream->service_open || stream->cancelled) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "speech stream input is closed");
+  }
+  return loom_serve_speech_input_write(stream->input, text, out_byte_count);
+}
+
+iree_host_size_t loom_serve_speech_stream_write_credit(
+    const loom_serve_speech_stream_t* stream) {
+  return stream->service_open && !stream->cancelled
+             ? loom_serve_speech_input_credit(stream->input)
+             : 0;
+}
+
+iree_status_t loom_serve_speech_stream_finish(
+    loom_serve_speech_stream_t* stream) {
+  if (!stream->service_open || stream->cancelled) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "speech stream input is closed");
+  }
+  return loom_serve_speech_input_finish(stream->input);
 }
 
 loom_serve_speech_format_t loom_serve_speech_stream_format(
@@ -158,5 +202,7 @@ iree_status_t loom_serve_speech_stream_status(
 void loom_serve_speech_stream_close(loom_serve_speech_stream_t* stream) {
   stream->caller_open = false;
   stream->published = false;
+  loom_serve_speech_input_release(stream->input);
+  stream->input = NULL;
   loom_serve_speech_stream_release(stream);
 }
