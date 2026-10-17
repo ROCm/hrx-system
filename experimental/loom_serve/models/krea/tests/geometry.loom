@@ -1,0 +1,181 @@
+func.decl @krea2.image_geometry_valid(%height: i64, %width: i64, %text: i64) -> (i1)
+
+check.case public @geometry_square {
+  %height = check.literal value(1024) : i64
+  %width = check.literal value(1024) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(true) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_landscape {
+  %height = check.literal value(1024) : i64
+  %width = check.literal value(1536) : i64
+  %text = check.literal value(128) : i64
+  %expected = check.literal value(true) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_portrait {
+  %height = check.literal value(1536) : i64
+  %width = check.literal value(1024) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(true) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_small {
+  %height = check.literal value(64) : i64
+  %width = check.literal value(64) : i64
+  %text = check.literal value(16) : i64
+  %expected = check.literal value(true) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_narrow {
+  %height = check.literal value(16) : i64
+  %width = check.literal value(256) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(true) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_maximum_axis {
+  %height = check.literal value(8192) : i64
+  %width = check.literal value(16) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(true) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_combined_token_limit {
+  %height = check.literal value(4096) : i64
+  %width = check.literal value(4080) : i64
+  %text = check.literal value(256) : i64
+  %expected = check.literal value(true) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_zero_height {
+  %height = check.literal value(0) : i64
+  %width = check.literal value(1024) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_zero_width {
+  %height = check.literal value(1024) : i64
+  %width = check.literal value(0) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_unaligned_axis {
+  %height = check.literal value(1024) : i64
+  %width = check.literal value(1025) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_excessive_axis {
+  %height = check.literal value(8208) : i64
+  %width = check.literal value(16) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_insufficient_patches {
+  %height = check.literal value(16) : i64
+  %width = check.literal value(16) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_unaligned_patches {
+  %height = check.literal value(16) : i64
+  %width = check.literal value(240) : i64
+  %text = check.literal value(512) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_zero_text {
+  %height = check.literal value(1024) : i64
+  %width = check.literal value(1024) : i64
+  %text = check.literal value(0) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_unaligned_text {
+  %height = check.literal value(1024) : i64
+  %width = check.literal value(1024) : i64
+  %text = check.literal value(17) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_excessive_combined_tokens {
+  %height = check.literal value(4096) : i64
+  %width = check.literal value(4096) : i64
+  %text = check.literal value(16) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_excessive_text {
+  %height = check.literal value(1024) : i64
+  %width = check.literal value(1024) : i64
+  %text = check.literal value(65536) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
+
+check.case public @geometry_rejected_unsigned_overflow {
+  %height = check.literal value(-1) : i64
+  %width = check.literal value(-1) : i64
+  %text = check.literal value(-1) : i64
+  %expected = check.literal value(false) : i1
+  %valid = func.call @krea2.image_geometry_valid(%height, %width, %text) : (i64, i64, i64) -> (i1)
+  check.expect.equal actual(%valid) expected(%expected) : i1
+  check.return
+}
