@@ -275,16 +275,14 @@ class PresubmitTest(unittest.TestCase):
                 presubmit.run_build_filename_check(["runtime/deleted/BUILD"])
             )
 
-    def test_project_build_tools_route_only_their_owning_project(self):
+    def test_project_selection_uses_product_ownership(self):
         cases = (
             ("runtime/build_tools/presubmit.py", {"runtime"}),
             ("libamdf/build_tools/presubmit.py", {"libamdf"}),
             ("libhrx/build_tools/presubmit.py", {"libhrx"}),
             ("loom/build_tools/presubmit.py", {"loom"}),
-            (
-                "build_tools/devtools/project_presubmit.py",
-                {"runtime", "libamdf", "libhrx", "loom"},
-            ),
+            ("build_tools/devtools/project_presubmit.py", set()),
+            ("build_tools/cmake/iree_cc_test.cmake", set()),
         )
         for path, expected_projects in cases:
             with self.subTest(path=path):
@@ -292,6 +290,30 @@ class PresubmitTest(unittest.TestCase):
                     {project.name for project in presubmit.projects_for_paths([path])},
                     expected_projects,
                 )
+
+    def test_repository_graph_inputs_route_all_projects(self):
+        expected_projects = {"runtime", "libamdf", "libhrx", "loom"}
+        for path in (
+            "MODULE.bazel",
+            ".bazelrc",
+            "requirements-dev.lock.txt",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    {project.name for project in presubmit.projects_for_paths([path])},
+                    expected_projects,
+                )
+
+    def test_root_tools_do_not_broaden_affected_product_projects(self):
+        projects = presubmit.projects_for_paths(
+            [
+                "build_tools/devtools/ci.py",
+                "build_tools/cmake/iree_cc_test.cmake",
+                "loom/src/loom/context.c",
+            ]
+        )
+
+        self.assertEqual({project.name for project in projects}, {"loom"})
 
     def test_semgrep_candidates_require_configured_prefix_and_extension(self):
         with (
@@ -1855,6 +1877,50 @@ class PresubmitTest(unittest.TestCase):
         self.assertEqual(command[:3], ["bazel", "test", "--config=presubmit"])
         self.assertIn("--config=remote-execution", command)
         self.assertIn("--config=local-tests", command)
+
+    def test_cmake_tool_inputs_run_the_owned_ctest_package(self):
+        build_dir = Path("build/cmake-test")
+        with (
+            mock.patch.object(
+                presubmit.project_presubmit,
+                "cmake_build_dir",
+                return_value=build_dir,
+            ),
+            mock.patch.object(
+                presubmit.project_presubmit,
+                "validate_cmake_build_tree",
+                return_value=True,
+            ) as validate_cmake_build_tree,
+            mock.patch.object(
+                presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_repository_tool_tests_for_lane(
+                    ["build_tools/cmake/iree_cc_test.cmake"],
+                    lane="cmake",
+                    verbose=False,
+                )
+            )
+
+        validate_cmake_build_tree.assert_called_once_with("repository tools", build_dir)
+        command, description, verbose = run_command.call_args.args
+        self.assertEqual(
+            command,
+            [
+                sys.executable,
+                "dev.py",
+                "--cmake-build-dir",
+                str(build_dir),
+                "cmake",
+                "test",
+                "-R",
+                presubmit.CMAKE_TOOL_TEST_REGEX,
+                "--no-tests=error",
+            ],
+        )
+        self.assertEqual(description, "Root CMake integration tests")
+        self.assertFalse(verbose)
 
     def test_project_hygiene_dispatch_uses_project_presubmit_interface(self):
         project = presubmit.Project(

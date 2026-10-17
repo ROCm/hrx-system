@@ -280,6 +280,8 @@ ROCM_ENVIRONMENT_TEST_PATHS = frozenset(
     }
 )
 ROCM_ENVIRONMENT_TEST_TARGET = "//build_tools/ci:rocm_environment_test"
+CMAKE_TOOL_TEST_PATH_PREFIX = "build_tools/cmake/"
+CMAKE_TOOL_TEST_REGEX = "^build_tools/cmake/"
 CLANG_TIDY_FULL_SCOPE_EXACT_PATHS = {
     ".bazelrc",
     ".bazelversion",
@@ -1617,8 +1619,10 @@ def existing_project_scripts() -> list[Project]:
 
 def projects_for_paths(paths: list[str]) -> list[Project]:
     projects = existing_project_scripts()
-    if any(is_global_trigger(path) for path in paths):
+    if any(is_global_project_trigger(path) for path in paths):
         return projects
+    # Repository-root tools own focused test and CI contracts; they are not
+    # part of every product's local test contract.
     selected = []
     for project in projects:
         if any(path.startswith(project.root) for path in paths):
@@ -1626,9 +1630,7 @@ def projects_for_paths(paths: list[str]) -> list[Project]:
     return selected
 
 
-def is_global_trigger(path: str) -> bool:
-    if path.startswith("build_tools/"):
-        return True
+def is_global_project_trigger(path: str) -> bool:
     if path.startswith("requirements") and path.endswith(".txt"):
         return True
     return any(
@@ -1752,23 +1754,59 @@ def run_repository_tool_tests_for_lane(
         return run_repository_tool_tests(paths, verbose)
     if lane != "cmake":
         raise ValueError(f"unknown lane: {lane}")
-    if not any(is_devtools_test_trigger(path) for path in paths):
-        return skip_step("Repository tool tests", "no devtools inputs")
-    return run_command(
-        [
-            "python",
-            "-B",
-            "-m",
-            "unittest",
-            "build_tools.devtools.cli_test",
-            "build_tools.devtools.command_plan_test",
-            "build_tools.devtools.environment_test",
-            "build_tools.devtools.install_test",
-            "build_tools.devtools.setup_test",
-        ],
-        "Root devtools Python tests",
-        verbose,
+    has_devtools_inputs = any(is_devtools_test_trigger(path) for path in paths)
+    has_cmake_tool_inputs = any(
+        path.startswith(CMAKE_TOOL_TEST_PATH_PREFIX) for path in paths
     )
+    if not has_devtools_inputs and not has_cmake_tool_inputs:
+        return skip_step("Repository tool tests", "no CMake repository tool inputs")
+
+    ok = True
+    if has_devtools_inputs:
+        ok = (
+            run_command(
+                [
+                    "python",
+                    "-B",
+                    "-m",
+                    "unittest",
+                    "build_tools.devtools.cli_test",
+                    "build_tools.devtools.command_plan_test",
+                    "build_tools.devtools.environment_test",
+                    "build_tools.devtools.install_test",
+                    "build_tools.devtools.setup_test",
+                ],
+                "Root devtools Python tests",
+                verbose,
+            )
+            and ok
+        )
+    if has_cmake_tool_inputs:
+        build_dir = project_presubmit.cmake_build_dir(REPO_ROOT)
+        if not project_presubmit.validate_cmake_build_tree(
+            "repository tools", build_dir
+        ):
+            ok = False
+        else:
+            ok = (
+                run_command(
+                    [
+                        sys.executable,
+                        "dev.py",
+                        "--cmake-build-dir",
+                        str(build_dir),
+                        "cmake",
+                        "test",
+                        "-R",
+                        CMAKE_TOOL_TEST_REGEX,
+                        "--no-tests=error",
+                    ],
+                    "Root CMake integration tests",
+                    verbose,
+                )
+                and ok
+            )
+    return ok
 
 
 def is_devtools_test_trigger(path: str) -> bool:
