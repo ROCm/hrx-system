@@ -34,7 +34,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 
 // Feature overlays reuse the same constructor vocabulary through their own
 // descriptor-set ordinal.
-x86.target<avx2> @target {contract_feature_bits = 256, contract_set_key = "x86.avx2_features.core"}
+x86.target<avx2> @target {features = [avxneconvert]}
 
 func.def target(@target) @construct_avx2_feature_view(%w0: bf16, %w1: bf16, %w2: bf16, %w3: bf16) -> (vector<4xbf16>) {
   %result = vector.from_elements %w0, %w1, %w2, %w3 : vector<4xbf16>
@@ -109,7 +109,7 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
 
 // Native scalar FP16 arrives in XMM; later lanes expose their low payload once
 // before word insertion.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @construct_native_fp16(%h0: f16, %h1: f16, %h2: f16, %h3: f16) -> (vector<4xf16>) {
   %result = vector.from_elements %h0, %h1, %h2, %h3 : vector<4xf16>

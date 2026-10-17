@@ -1,0 +1,9 @@
+// RUN: roundtrip
+
+x86.target<avx512> @feature_vocabulary {features = [avx512vnni, -avx512vl, avxvnni, -avxvnniint8, avxvnniint16, -avx10.2, avx512bf16, -avx512fp16, avxneconvert, -f16c, bmi2]}
+
+x86.target<avx512> @inverse_feature_vocabulary {features = [-avx512vnni, avx512vl, -avxvnni, avxvnniint8, -avxvnniint16, avx10.2, -avx512bf16, avx512fp16, -avxneconvert, f16c, -bmi2]}
+
+x86.target<avx2> @explicit_empty {features = []}
+
+x86.target<scalar> @omitted

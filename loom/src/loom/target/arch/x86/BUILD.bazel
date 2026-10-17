@@ -50,7 +50,9 @@ loom_cc_library(
     hdrs = ["facts.h"],
     visibility = _X86_FACTS_VISIBILITY,
     deps = [
+        ":feature_bits",
         "//loom/src/loom/target:facts",
+        "//loom/src/loom/target/arch/x86/records:target_records",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:cpu_data",
     ],
@@ -59,7 +61,11 @@ loom_cc_library(
 loom_cc_library(
     name = "feature_bits",
     hdrs = ["feature_bits.h"],
-    visibility = _X86_LOWER_VISIBILITY + _X86_RECORDS_VISIBILITY,
+    visibility = (
+        _X86_LOWER_VISIBILITY +
+        _X86_OPS_VISIBILITY +
+        _X86_RECORDS_VISIBILITY
+    ),
     deps = ["//runtime/src/iree/base"],
 )
 
@@ -114,6 +120,7 @@ loom_cc_test(
     name = "register_classes_test",
     srcs = ["register_classes_test.cc"],
     deps = [
+        ":feature_bits",
         ":register_classes",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:descriptors",
@@ -212,7 +219,11 @@ loom_cc_test(
         ":facts",
         ":feature_bits",
         ":provider",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target/arch/x86/ops",
+        "//loom/src/loom/target/arch/x86/records:target_records",
+        "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base:cpu_data",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -245,6 +256,7 @@ loom_check_test_suite(
         "test/hal_query.loom-test",
         "test/instruction_immediates.loom-test",
         "test/low_avx512_bf16.loom-test",
+        "test/low_bmi2_variable_shift.loom-test",
         "test/register_classes.loom-test",
         "test/source_low/allocation.loom-test",
         "test/source_low/buffer_bulk.loom-test",
@@ -334,6 +346,7 @@ loom_check_test_suite(
         "test/source_low/source_low_avx512_reductions.loom-test",
         "test/source_low/source_low_avx_ne_convert.loom-test",
         "test/source_low/source_low_avx_vnni.loom-test",
+        "test/source_low/source_low_bmi2_variable_shift.loom-test",
         "test/source_low/source_low_contraction.loom-test",
         "test/source_low/source_low_float_roots.loom-test",
         "test/source_low/source_low_invoke.loom-test",
@@ -362,6 +375,8 @@ loom_check_test_suite(
         "test/source_low/view_carrier.loom-test",
         "test/source_low/view_carriers.loom-test",
         "test/source_low/view_transport.loom-test",
+        "test/target_feature_diagnostics.loom-test",
+        "test/target_features.loom-test",
     ],
     test_name_prefix_to_strip = "test/source_low/",
 )

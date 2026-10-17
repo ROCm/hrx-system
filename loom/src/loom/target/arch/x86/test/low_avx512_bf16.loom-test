@@ -2,7 +2,7 @@
 // authorable in target assembly.
 // RUN: roundtrip
 
-x86.target<packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_bf16.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 low.func.def target<x86.avx512_bf16.core>(@target) @conversion_forms(%xmm: reg<x86.xmm>, %ymm: reg<x86.ymm>, %zmm: reg<x86.zmm>, %mask: reg<x86.k>, %base: reg<x86.gpr64>, %index: reg<x86.gpr64>) asm {
   %narrow128 = avx512_bf16.vcvtneps2bf16.xmm.xmm %xmm

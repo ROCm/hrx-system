@@ -40,7 +40,7 @@ func.def target(@target) @fp16_root_requires_avx512_fp16(%input: f16) -> (f16) {
 
 // ====
 
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @bf16_root_is_not_implicitly_widened(%input: bf16) -> (bf16) {
   // ERROR@+1: LOWERING/036 {op_name="scalar.sqrtf", element_type="bf16", constraint_key="math.element.native_float"}
@@ -50,7 +50,7 @@ func.def target(@target) @bf16_root_is_not_implicitly_widened(%input: bf16) -> (
 
 // ====
 
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @fp8_root_is_not_implicitly_widened(%input: f8E4M3) -> (f8E4M3) {
   // ERROR@+1: LOWERING/036 {op_name="scalar.rsqrtf", element_type="f8E4M3", constraint_key="math.element.native_float"}

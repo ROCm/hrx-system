@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "iree/base/cpu_data.h"
 #include "loom/target/arch/x86/feature_bits.h"
 
 #define LOOM_X86_LOW_SNAPSHOT(symbol, snapshot_name)           \
@@ -33,9 +34,11 @@
           },                                                   \
   }
 
-#define LOOM_X86_NATIVE_TARGET_PROFILE(                           \
-    symbol_suffix, target_kind, selector_name, native_bundle_key, \
-    snapshot_name, descriptor_set_key, feature_bits)              \
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                                     \
+    symbol_suffix, target_kind, selector_name, native_bundle_key,           \
+    snapshot_name, descriptor_set_key, feature_contract_set_key,            \
+    default_feature_bits, supported_feature_bits, required_cpu_field0_bits, \
+    automatic_priority)                                                     \
   LOOM_X86_LOW_SNAPSHOT(kX86##symbol_suffix##Snapshot, snapshot_name);
 #include "loom/target/arch/x86/records/target_profiles.inl"
 #undef LOOM_X86_NATIVE_TARGET_PROFILE
@@ -48,34 +51,40 @@ static const loom_target_export_plan_t kX86_64ObjectExportPlan = {
     .linkage = LOOM_TARGET_LINKAGE_DSO_LOCAL,
 };
 
-#define LOOM_X86_NATIVE_TARGET_PROFILE(                             \
-    symbol_suffix, target_kind, selector_name, native_bundle_key,   \
-    snapshot_name, descriptor_set_key, feature_bits)                \
-  static const loom_target_config_t kX86##symbol_suffix##Config = { \
-      .name = IREE_SVL(descriptor_set_key),                         \
-      .contract_set_key = IREE_SVL(descriptor_set_key),             \
-      .contract_feature_bits = feature_bits,                        \
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                                     \
+    symbol_suffix, target_kind, selector_name, native_bundle_key,           \
+    snapshot_name, descriptor_set_key, feature_contract_set_key,            \
+    default_feature_bits, supported_feature_bits, required_cpu_field0_bits, \
+    automatic_priority)                                                     \
+  static const loom_target_config_t kX86##symbol_suffix##Config = {         \
+      .name = IREE_SVL(descriptor_set_key),                                 \
+      .contract_set_key = IREE_SVL(descriptor_set_key),                     \
+      .contract_feature_bits = default_feature_bits,                        \
   };
 #include "loom/target/arch/x86/records/target_profiles.inl"
 #undef LOOM_X86_NATIVE_TARGET_PROFILE
 
-#define LOOM_X86_NATIVE_TARGET_PROFILE(                             \
-    symbol_suffix, target_kind, selector_name, native_bundle_key,   \
-    snapshot_name, descriptor_set_key, feature_bits)                \
-  const loom_target_bundle_t kX86LowTargetBundle##symbol_suffix = { \
-      .name = IREE_SVL(native_bundle_key),                          \
-      .snapshot = &kX86##symbol_suffix##Snapshot,                   \
-      .export_plan = &kX86_64ObjectExportPlan,                      \
-      .config = &kX86##symbol_suffix##Config,                       \
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                                     \
+    symbol_suffix, target_kind, selector_name, native_bundle_key,           \
+    snapshot_name, descriptor_set_key, feature_contract_set_key,            \
+    default_feature_bits, supported_feature_bits, required_cpu_field0_bits, \
+    automatic_priority)                                                     \
+  const loom_target_bundle_t kX86LowTargetBundle##symbol_suffix = {         \
+      .name = IREE_SVL(native_bundle_key),                                  \
+      .snapshot = &kX86##symbol_suffix##Snapshot,                           \
+      .export_plan = &kX86_64ObjectExportPlan,                              \
+      .config = &kX86##symbol_suffix##Config,                               \
   };
 #include "loom/target/arch/x86/records/target_profiles.inl"
 #undef LOOM_X86_NATIVE_TARGET_PROFILE
 
 static const loom_target_bundle_t* const kX86TargetBundleValues[] = {
     NULL,
-#define LOOM_X86_NATIVE_TARGET_PROFILE(                           \
-    symbol_suffix, target_kind, selector_name, native_bundle_key, \
-    snapshot_name, descriptor_set_key, feature_bits)              \
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                                     \
+    symbol_suffix, target_kind, selector_name, native_bundle_key,           \
+    snapshot_name, descriptor_set_key, feature_contract_set_key,            \
+    default_feature_bits, supported_feature_bits, required_cpu_field0_bits, \
+    automatic_priority)                                                     \
   &kX86LowTargetBundle##symbol_suffix,
 #include "loom/target/arch/x86/records/target_profiles.inl"
 #undef LOOM_X86_NATIVE_TARGET_PROFILE
@@ -85,3 +94,51 @@ const loom_target_bundle_table_t loom_x86_target_bundles = {
     .values = kX86TargetBundleValues,
     .count = IREE_ARRAYSIZE(kX86TargetBundleValues),
 };
+
+static const loom_x86_target_policy_t kX86TargetPolicies[] = {
+    {.feature_contract_set_key = {0}},
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                                  \
+    symbol_suffix, target_kind, selector_name, native_bundle_key,        \
+    snapshot_name, descriptor_set_key, feature_contract_key_arg,         \
+    default_feature_bits, supported_features_arg, required_cpu_bits_arg, \
+    automatic_priority_arg)                                              \
+  [target_kind] = {                                                      \
+      .feature_contract_set_key = IREE_SVL(feature_contract_key_arg),    \
+      .supported_feature_bits = supported_features_arg,                  \
+      .required_cpu_field0_bits = required_cpu_bits_arg,                 \
+      .automatic_priority = automatic_priority_arg,                      \
+  },
+#include "loom/target/arch/x86/records/target_profiles.inl"
+#undef LOOM_X86_NATIVE_TARGET_PROFILE
+};
+
+// Runtime CPU capability bit indexed by the corresponding dense target feature
+// ordinal. A zero entry identifies a target-only feature.
+static const uint64_t kX86CpuFeatureBitsByTargetOrdinal[] = {
+#define LOOM_X86_CPU_FEATURE_MAPPING(cpu_field0_bit) cpu_field0_bit,
+#include "loom/target/arch/x86/records/target_profiles.inl"
+#undef LOOM_X86_CPU_FEATURE_MAPPING
+};
+static_assert(
+    (1u << IREE_ARRAYSIZE(kX86CpuFeatureBitsByTargetOrdinal)) - 1 ==
+        LOOM_X86_FEATURE_KNOWN_BITS,
+    "x86 CPU feature projection must cover every target feature ordinal");
+
+const loom_x86_target_policy_t* loom_x86_target_policy_lookup(
+    uint8_t selector) {
+  IREE_ASSERT(selector > 0 && selector < IREE_ARRAYSIZE(kX86TargetPolicies));
+  return &kX86TargetPolicies[selector];
+}
+
+loom_x86_feature_bits_t loom_x86_target_policy_project_cpu_features(
+    const loom_x86_target_policy_t* policy, uint64_t cpu_field0_bits) {
+  loom_x86_feature_bits_t feature_bits = 0;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kX86CpuFeatureBitsByTargetOrdinal); ++i) {
+    if (iree_any_bit_set(cpu_field0_bits,
+                         kX86CpuFeatureBitsByTargetOrdinal[i])) {
+      feature_bits |= (loom_x86_feature_bits_t)(1u << i);
+    }
+  }
+  return feature_bits & policy->supported_feature_bits;
+}

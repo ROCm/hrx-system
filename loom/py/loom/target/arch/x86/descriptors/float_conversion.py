@@ -15,6 +15,7 @@ from .common import (
     _SCHEDULE_VECTOR_F32_YMM,
     _SCHEDULE_VECTOR_F32_ZMM,
     _asm,
+    _avx512_descriptor,
     _vector_operand,
     _vector_result,
     _xmm_operand,
@@ -30,7 +31,6 @@ _SCHEDULES = {
 
 
 def float_conversion_descriptors(*, evex: bool) -> tuple[Descriptor, ...]:
-    prefix = VectorEncodingPrefix.EVEX if evex else VectorEncodingPrefix.VEX
     feature = "avx512" if evex else "avx2"
     assembly_prefix = "avx512." if evex else ""
     descriptors = []
@@ -55,10 +55,11 @@ def float_conversion_descriptors(*, evex: bool) -> tuple[Descriptor, ...]:
             schedule_class=_SCHEDULE_VECTOR_F32_XMM,
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         )
+        scalar_instruction = float_conversion_instruction(narrow=narrow, scalar=True)
         descriptors.append(
-            float_conversion_instruction(narrow=narrow, scalar=True).bind(
-                scalar, prefix
-            )
+            _avx512_descriptor(scalar, scalar_instruction, scalar=True)
+            if evex
+            else scalar_instruction.bind(scalar, VectorEncodingPrefix.VEX)
         )
 
         mnemonic = "vcvtpd2ps" if narrow else "vcvtps2pd"
@@ -92,5 +93,9 @@ def float_conversion_descriptors(*, evex: bool) -> tuple[Descriptor, ...]:
                 schedule_class=_SCHEDULES[double_width],
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             )
-            descriptors.append(instruction.bind(descriptor, prefix))
+            descriptors.append(
+                _avx512_descriptor(descriptor, instruction, scalar=False)
+                if evex
+                else instruction.bind(descriptor, VectorEncodingPrefix.VEX)
+            )
     return tuple(descriptors)

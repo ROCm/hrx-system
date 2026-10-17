@@ -422,6 +422,8 @@ typedef struct loom_target_contract_binding_t {
   const loom_target_contract_fragment_t* fragment;
   // Policy rule-set ordinal corresponding to |fragment|'s descriptor-rule rows.
   uint16_t rule_set_index;
+  // Primary-descriptor feature class shared by every lowering rule, or zero.
+  uint8_t required_primary_feature_class;
 } loom_target_contract_binding_t;
 
 typedef struct loom_target_contract_index_t {

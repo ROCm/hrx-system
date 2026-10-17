@@ -15,6 +15,8 @@ constexpr uint64_t kSseFeatures =
     IREE_CPU_DATA0_X86_64_SSE3 | IREE_CPU_DATA0_X86_64_SSSE3 |
     IREE_CPU_DATA0_X86_64_SSE41 | IREE_CPU_DATA0_X86_64_SSE42 |
     IREE_CPU_DATA0_X86_64_SSE4A;
+constexpr uint64_t kScalarFeatures =
+    kSseFeatures | IREE_CPU_DATA0_X86_64_BMI | IREE_CPU_DATA0_X86_64_BMI2;
 constexpr uint64_t kAvxFeatures =
     IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
     IREE_CPU_DATA0_X86_64_FMA4 | IREE_CPU_DATA0_X86_64_XOP |
@@ -39,8 +41,9 @@ iree_cpu_x86_64_capabilities_t InstructionCapabilities() {
   capabilities.leaf1.ecx = (1u << 0) | (1u << 9) | (1u << 12) | (1u << 19) |
                            (1u << 20) | (1u << 26) | (1u << 27) | (1u << 28) |
                            (1u << 29);
-  capabilities.leaf7_0.ebx = (1u << 5) | (1u << 16) | (1u << 17) | (1u << 21) |
-                             (1u << 28) | (1u << 30) | (1u << 31);
+  capabilities.leaf7_0.ebx = (1u << 3) | (1u << 5) | (1u << 8) | (1u << 16) |
+                             (1u << 17) | (1u << 21) | (1u << 28) | (1u << 30) |
+                             (1u << 31);
   capabilities.leaf7_0.ecx =
       (1u << 1) | (1u << 6) | (1u << 11) | (1u << 12) | (1u << 14);
   capabilities.leaf7_0.edx = (1u << 22) | (1u << 23) | (1u << 24) | (1u << 25);
@@ -60,7 +63,17 @@ TEST(CpuX86_64Test, UnsupportedLeaves) {
 
 TEST(CpuX86_64Test, InstructionSupportDoesNotEnableOsState) {
   auto capabilities = InstructionCapabilities();
-  EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), kSseFeatures);
+  EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), kScalarFeatures);
+}
+
+TEST(CpuX86_64Test, ScalarInstructionFeaturesRemainIndependent) {
+  iree_cpu_x86_64_capabilities_t capabilities = {};
+  capabilities.leaf7_0.ebx = 1u << 3;
+  EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
+            IREE_CPU_DATA0_X86_64_BMI);
+  capabilities.leaf7_0.ebx = 1u << 8;
+  EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
+            IREE_CPU_DATA0_X86_64_BMI2);
 }
 
 TEST(CpuX86_64Test, XsaveAndOsxsaveAreRequired) {
@@ -69,7 +82,7 @@ TEST(CpuX86_64Test, XsaveAndOsxsaveAreRequired) {
     capabilities.leaf1.ecx &= ~(1u << missing_bit);
     capabilities.enabled_xstate = 0x600E7;
     capabilities.permitted_xstate = 0x600E7;
-    EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), kSseFeatures);
+    EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), kScalarFeatures);
   }
 }
 
@@ -77,19 +90,19 @@ TEST(CpuX86_64Test, AvxRequiresXmmAndYmmState) {
   for (uint64_t xstate : {0u, 1u, 3u, 5u}) {
     auto capabilities = InstructionCapabilities();
     capabilities.enabled_xstate = xstate;
-    EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), kSseFeatures);
+    EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), kScalarFeatures);
   }
   auto capabilities = InstructionCapabilities();
   capabilities.enabled_xstate = 7;
   EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
-            kSseFeatures | kAvxFeatures);
+            kScalarFeatures | kAvxFeatures);
 }
 
 TEST(CpuX86_64Test, VectorStateDoesNotImplyAvxInstructions) {
   auto capabilities = InstructionCapabilities();
   capabilities.enabled_xstate = 0xE7;
   capabilities.leaf1.ecx &= ~(1u << 28);
-  EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), kSseFeatures);
+  EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities), kScalarFeatures);
 }
 
 TEST(CpuX86_64Test, Avx512RequiresAllZmmStateComponents) {
@@ -97,15 +110,15 @@ TEST(CpuX86_64Test, Avx512RequiresAllZmmStateComponents) {
     auto capabilities = InstructionCapabilities();
     capabilities.enabled_xstate = 0xE7 & ~(1u << missing_bit);
     EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
-              kSseFeatures | kAvxFeatures);
+              kScalarFeatures | kAvxFeatures);
   }
   auto capabilities = InstructionCapabilities();
   capabilities.enabled_xstate = 0xE7;
   EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
-            kSseFeatures | kAvxFeatures | kAvx512Features);
+            kScalarFeatures | kAvxFeatures | kAvx512Features);
   capabilities.leaf7_0.ebx &= ~(1u << 16);
   EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
-            kSseFeatures | kAvxFeatures);
+            kScalarFeatures | kAvxFeatures);
 }
 
 TEST(CpuX86_64Test, InstructionFeaturesRemainIndependent) {
@@ -118,7 +131,7 @@ TEST(CpuX86_64Test, InstructionFeaturesRemainIndependent) {
   capabilities.leaf7_1.edx = 0;
   capabilities.leaf7_0.edx &= ~(1u << 23);
   EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
-            kSseFeatures | IREE_CPU_DATA0_X86_64_AVX |
+            kScalarFeatures | IREE_CPU_DATA0_X86_64_AVX |
                 (kAvx512Features & ~(IREE_CPU_DATA0_X86_64_AVX512BF16 |
                                      IREE_CPU_DATA0_X86_64_AVX512FP16)));
 }
@@ -132,7 +145,7 @@ TEST(CpuX86_64Test, AmxRequiresBothEnabledStateAndProcessPermission) {
       const uint64_t expected_amx =
           xstate == 0x60000 && permission == 0x60000 ? kAmxFeatures : 0;
       EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
-                kSseFeatures | kAvxFeatures | expected_amx);
+                kScalarFeatures | kAvxFeatures | expected_amx);
     }
   }
 }
@@ -143,21 +156,26 @@ TEST(CpuX86_64Test, AmxInstructionFamiliesRequireTileSupport) {
   capabilities.permitted_xstate = 0x60000;
   capabilities.leaf7_0.edx &= ~(1u << 24);
   EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
-            kSseFeatures | kAvxFeatures);
+            kScalarFeatures | kAvxFeatures);
   capabilities.leaf7_0.edx = 1u << 24;
   EXPECT_EQ(iree_cpu_x86_64_decode_features(&capabilities),
-            kSseFeatures | kAvxFeatures | IREE_CPU_DATA0_X86_64_AMXTILE);
+            kScalarFeatures | kAvxFeatures | IREE_CPU_DATA0_X86_64_AMXTILE);
 }
 
 #if defined(IREE_ARCH_X86_64) && defined(IREE_PLATFORM_LINUX) && \
     defined(__GNUC__)
-TEST(CpuX86_64Test, HostQueryMatchesCompilerVectorCapabilities) {
-  // The Linux compiler runtime independently handles CPUID and OS vector state.
-  // Compare through the public discovery path without executing vector code.
+TEST(CpuX86_64Test, HostQueryMatchesCompilerCapabilities) {
+  // The Linux compiler runtime independently handles CPUID and OS state.
+  // Compare through the public discovery path without executing ISA-specific
+  // code.
   __builtin_cpu_init();
   iree_cpu_data_t cpu_data;
   iree_cpu_query_data(iree_allocator_system(), &cpu_data);
   EXPECT_EQ(cpu_data.architecture, IREE_CPU_ARCHITECTURE_X86_64);
+  EXPECT_EQ((cpu_data.fields[0] & IREE_CPU_DATA0_X86_64_BMI) != 0,
+            __builtin_cpu_supports("bmi") != 0);
+  EXPECT_EQ((cpu_data.fields[0] & IREE_CPU_DATA0_X86_64_BMI2) != 0,
+            __builtin_cpu_supports("bmi2") != 0);
   EXPECT_EQ((cpu_data.fields[0] & IREE_CPU_DATA0_X86_64_AVX) != 0,
             __builtin_cpu_supports("avx") != 0);
   EXPECT_EQ((cpu_data.fields[0] & IREE_CPU_DATA0_X86_64_AVX2) != 0,

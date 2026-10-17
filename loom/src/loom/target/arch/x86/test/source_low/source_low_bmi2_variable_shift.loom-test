@@ -1,0 +1,102 @@
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target {features = [bmi2]}
+
+func.def target(@target) @bmi2_variable_shift_family(%lhs32: i32, %rhs32: i32, %lhs64: i64, %rhs64: i64, %lhs_index: index, %rhs_index: index) -> (i32, i32, i32, i64, i64, i64, index, index, index) {
+  %shlx32 = scalar.shli %lhs32, %rhs32 : i32
+  %sarx32 = scalar.shrsi %lhs32, %rhs32 : i32
+  %shrx32 = scalar.shrui %lhs32, %rhs32 : i32
+  %shlx64 = scalar.shli %lhs64, %rhs64 : i64
+  %sarx64 = scalar.shrsi %lhs64, %rhs64 : i64
+  %shrx64 = scalar.shrui %lhs64, %rhs64 : i64
+  %shlx_index = index.shli %lhs_index, %rhs_index : index
+  %sarx_index = index.shrsi %lhs_index, %rhs_index : index
+  %shrx_index = index.shrui %lhs_index, %rhs_index : index
+  func.return %shlx32, %sarx32, %shrx32, %shlx64, %sarx64, %shrx64, %shlx_index, %sarx_index, %shrx_index : i32, i32, i32, i64, i64, i64, index, index, index
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @bmi2_variable_shift_family(%lhs32: reg<x86.gpr32>, %rhs32: reg<x86.gpr32>, %lhs64: reg<x86.gpr64>, %rhs64: reg<x86.gpr64>, %lhs_index: reg<x86.gpr64>, %rhs_index: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %shlx32 = shlx.gpr32 %lhs32, %rhs32
+  %sarx32 = sarx.gpr32 %lhs32, %rhs32
+  %shrx32 = shrx.gpr32 %lhs32, %rhs32
+  %shlx64 = shlx.gpr64 %lhs64, %rhs64
+  %sarx64 = sarx.gpr64 %lhs64, %rhs64
+  %shrx64 = shrx.gpr64 %lhs64, %rhs64
+  %shlx_index = shlx.gpr64 %lhs_index, %rhs_index
+  %sarx_index = sarx.gpr64 %lhs_index, %rhs_index
+  %shrx_index = shrx.gpr64 %lhs_index, %rhs_index
+  return %shlx32, %sarx32, %shrx32, %shlx64, %sarx64, %shrx64, %shlx_index, %sarx_index, %shrx_index
+}
+
+// ====
+
+x86.target<scalar> @target {features = [bmi2]}
+
+func.def target(@target) @bmi2_preserves_immediate_selection(%value: i64) -> (i64, i64, i64) {
+  %left_count = scalar.constant 3 : i64
+  %signed_count = scalar.constant 1 : i64
+  %unsigned_count = scalar.constant 2 : i64
+  %left = scalar.shli %value, %left_count : i64
+  %signed = scalar.shrsi %value, %signed_count : i64
+  %unsigned = scalar.shrui %value, %unsigned_count : i64
+  func.return %left, %signed, %unsigned : i64, i64, i64
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @bmi2_preserves_immediate_selection(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %14 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %left = shl.imm.gpr64 %14 {shift = 3}
+  %16 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %signed = sar.imm.gpr64 %16 {shift = 1}
+  %18 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %unsigned = shr.imm.gpr64 %18 {shift = 2}
+  return %left, %signed, %unsigned
+}
+
+// ====
+
+x86.target<scalar> @target {features = []}
+
+func.def target(@target) @scalar_variable_shift_fallback(%value: i32, %count: i32) -> (i32) {
+  %result = scalar.shli %value, %count : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_variable_shift_fallback(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %7 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %8 = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %result = shl.cl.gpr32 %7, %8
+  return %result
+}
+
+// ====
+
+x86.target<avx2> @target {features = [bmi2]}
+
+func.def target(@target) @avx2_bmi2_variable_shift(%value: i64, %count: i64) -> (i64) {
+  %result = scalar.shrsi %value, %count : i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<x86.avx2_features.core>(@target) abi(object_function) @avx2_bmi2_variable_shift(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %result = sarx.gpr64 %value, %count
+  return %result
+}
+
+// ====
+
+x86.target<avx512> @target {features = [bmi2]}
+
+func.def target(@target) @avx512_bmi2_variable_shift(%value: index, %count: index) -> (index) {
+  %result = index.shrui %value, %count : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @avx512_bmi2_variable_shift(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %result = shrx.gpr64 %value, %count
+  return %result
+}

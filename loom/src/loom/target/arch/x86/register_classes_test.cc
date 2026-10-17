@@ -24,6 +24,7 @@
 #include "loom/target/arch/x86/descriptors/packed_dot_descriptors.h"
 #include "loom/target/arch/x86/descriptors/scalar_descriptors.h"
 #include "loom/target/arch/x86/descriptors/simd128_descriptors.h"
+#include "loom/target/arch/x86/feature_bits.h"
 
 namespace loom {
 namespace {
@@ -79,6 +80,31 @@ void ExpectOperandAddressMap(const loom_low_descriptor_set_t* descriptor_set,
   }
   ADD_FAILURE() << "descriptor " << ToString(descriptor_key)
                 << " has no operand field " << ToString(field_name);
+}
+
+uint64_t DescriptorFeatureBits(const loom_low_descriptor_set_t* descriptor_set,
+                               iree_string_view_t descriptor_key) {
+  const uint32_t ordinal =
+      loom_low_descriptor_set_lookup_descriptor(descriptor_set, descriptor_key);
+  if (ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE ||
+      ordinal >= descriptor_set->descriptor_ordinal_count) {
+    ADD_FAILURE() << "missing descriptor " << ToString(descriptor_key);
+    return 0;
+  }
+  const loom_low_descriptor_t& descriptor =
+      descriptor_set->descriptors[ordinal];
+  const loom_low_descriptor_layout_t& layout =
+      descriptor_set->descriptor_layouts[descriptor.layout_index];
+  if (layout.feature_mask_word_count == 0) {
+    return 0;
+  }
+  if (layout.feature_mask_word_count != 1 ||
+      layout.feature_mask_word_start >=
+          descriptor_set->feature_mask_word_count) {
+    ADD_FAILURE() << "invalid feature mask for " << ToString(descriptor_key);
+    return 0;
+  }
+  return descriptor_set->feature_mask_words[layout.feature_mask_word_start];
 }
 
 TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
@@ -213,6 +239,26 @@ TEST(X86RegisterClassesTest, VexRowsImportedIntoWideViewsStayLow16) {
   ExpectOperandAddressMap(
       avx512_features_descriptor_set, IREE_SV("x86.avx512_vnni.vpdpbusd.zmm"),
       IREE_SV("dst"), LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT, 0);
+}
+
+TEST(X86RegisterClassesTest, Avx512VectorLengthRequirementFollowsEncodedWidth) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_x86_avx512_core_descriptor_set();
+  EXPECT_EQ(DescriptorFeatureBits(descriptor_set,
+                                  IREE_SV("x86.avx512.vcvtss2sd.xmm")),
+            0u);
+  EXPECT_EQ(DescriptorFeatureBits(descriptor_set,
+                                  IREE_SV("x86.avx512.vcvtps2pd.xmm.xmm")),
+            LOOM_X86_FEATURE_AVX512_VL);
+  EXPECT_EQ(DescriptorFeatureBits(descriptor_set,
+                                  IREE_SV("x86.avx512.vcvtps2pd.ymm.xmm")),
+            LOOM_X86_FEATURE_AVX512_VL);
+  EXPECT_EQ(DescriptorFeatureBits(descriptor_set,
+                                  IREE_SV("x86.avx512.vcvtps2pd.zmm.ymm")),
+            0u);
+  EXPECT_EQ(DescriptorFeatureBits(descriptor_set,
+                                  IREE_SV("x86.avx512.vcvtpd2ps.ymm.zmm")),
+            0u);
 }
 
 TEST(X86RegisterClassesTest, ExplicitWritemasksUseSevenLocationWindow) {

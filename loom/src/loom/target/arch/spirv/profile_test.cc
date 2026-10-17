@@ -258,21 +258,18 @@ TEST(SpirvTargetProfileTest, SelectsSupportedSubgroupsPerRoot) {
     IREE_ASSERT_OK(
         loom_target_facts_builder_clone(available, &arena, &constrained));
     loom_target_facts_builder_apply_requirement(requirement, constrained);
+    EXPECT_EQ(constrained->storage.snapshot.subgroup_size, width);
+    EXPECT_EQ(constrained->storage.snapshot.subgroup_partition,
+              LOOM_TARGET_SUBGROUP_PARTITION_WORKGROUP_X_ALIGNED);
+    EXPECT_EQ(constrained->storage.snapshot.max_flat_workgroup_size,
+              width == 64 ? 4096u : width * 16);
+    EXPECT_EQ(loom_target_facts_field_is_explicit(
+                  constrained, LOOM_TARGET_FACT_FIELD_MAX_FLAT_WORKGROUP_SIZE),
+              width != 64);
     const loom_target_facts_t* selected = nullptr;
     IREE_ASSERT_OK(loom_target_facts_builder_select_execution(
         constrained, &arena, &selected));
-    EXPECT_EQ(selected->storage.snapshot.subgroup_size, width);
-    EXPECT_EQ(selected->storage.snapshot.subgroup_partition,
-              LOOM_TARGET_SUBGROUP_PARTITION_WORKGROUP_X_ALIGNED);
-    EXPECT_EQ(selected->storage.snapshot.max_flat_workgroup_size,
-              width == 64 ? 4096u : width * 16);
-    EXPECT_EQ(loom_target_facts_field_is_explicit(
-                  selected, LOOM_TARGET_FACT_FIELD_MAX_FLAT_WORKGROUP_SIZE),
-              width != 64);
-    const loom_target_facts_t* repeated = nullptr;
-    IREE_ASSERT_OK(loom_target_facts_builder_select_execution(selected, &arena,
-                                                              &repeated));
-    EXPECT_EQ(repeated, selected);
+    EXPECT_EQ(selected, constrained);
   }
   EXPECT_EQ(available->storage.snapshot.subgroup_size, 0u);
   iree_arena_deinitialize(&arena);

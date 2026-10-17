@@ -35,6 +35,22 @@ typedef enum loom_x86_target_kind_e {
   LOOM_X86_TARGET_KIND_COUNT_ = 7,
 } loom_x86_target_kind_t;
 
+// Optional x86 instruction-set feature.
+typedef enum loom_x86_target_features_e {
+  LOOM_X86_TARGET_FEATURES_AVX512VNNI = 0,
+  LOOM_X86_TARGET_FEATURES_AVX512VL = 1,
+  LOOM_X86_TARGET_FEATURES_AVXVNNI = 2,
+  LOOM_X86_TARGET_FEATURES_AVXVNNIINT8 = 3,
+  LOOM_X86_TARGET_FEATURES_AVXVNNIINT16 = 4,
+  LOOM_X86_TARGET_FEATURES_AVX10_2 = 5,
+  LOOM_X86_TARGET_FEATURES_AVX512BF16 = 6,
+  LOOM_X86_TARGET_FEATURES_AVX512FP16 = 7,
+  LOOM_X86_TARGET_FEATURES_AVXNECONVERT = 8,
+  LOOM_X86_TARGET_FEATURES_F16C = 9,
+  LOOM_X86_TARGET_FEATURES_BMI2 = 10,
+  LOOM_X86_TARGET_FEATURES_COUNT_ = 11,
+} loom_x86_target_features_t;
+
 // LOOM_OP_X86_TARGET: x86 target-family record. The selector chooses an authored CPU row; optional attrs structurally override common target fields.
 // x86.target<scalar> @host
 LOOM_DEFINE_ISA(loom_x86_target_isa, LOOM_OP_X86_TARGET)
@@ -70,6 +86,7 @@ LOOM_DEFINE_ATTR_STRING(loom_x86_target_export_symbol, 28)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_x86_target_linkage, 29, loom_target_linkage_t)
 LOOM_DEFINE_ATTR_STRING(loom_x86_target_contract_set_key, 30)
 LOOM_DEFINE_ATTR_I64(loom_x86_target_contract_feature_bits, 31)
+LOOM_DEFINE_ATTR_SIGNED_ENUM_SET(loom_x86_target_features, 32)
 enum loom_x86_target_build_flag_bits_e {
   LOOM_X86_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT = 1u << 0,
   LOOM_X86_TARGET_BUILD_FLAG_HAS_ARTIFACT_FORMAT = 1u << 1,
@@ -101,6 +118,7 @@ enum loom_x86_target_build_flag_bits_e {
   LOOM_X86_TARGET_BUILD_FLAG_HAS_LINKAGE = 1u << 27,
   LOOM_X86_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY = 1u << 28,
   LOOM_X86_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS = 1u << 29,
+  LOOM_X86_TARGET_BUILD_FLAG_HAS_FEATURES = 1u << 30,
 };
 typedef uint32_t loom_x86_target_build_flags_t;
 iree_status_t loom_x86_target_build(
@@ -138,9 +156,10 @@ iree_status_t loom_x86_target_build(
     loom_optional uint8_t linkage,
     loom_optional loom_string_id_t contract_set_key,
     loom_optional int64_t contract_feature_bits,
+    loom_optional loom_signed_enum_set_t features,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_target_record_verify(
+iree_status_t loom_x86_target_record_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

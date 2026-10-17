@@ -20,6 +20,8 @@
 #include "loom/target/arch/x86/contracts/avx512_lower_rules.h"
 #include "loom/target/arch/x86/contracts/avx_ne_convert.h"
 #include "loom/target/arch/x86/contracts/avx_ne_convert_lower_rules.h"
+#include "loom/target/arch/x86/contracts/bmi2.h"
+#include "loom/target/arch/x86/contracts/bmi2_lower_rules.h"
 #include "loom/target/arch/x86/contracts/f16c.h"
 #include "loom/target/arch/x86/contracts/f16c_lower_rules.h"
 #include "loom/target/arch/x86/contracts/packed_dot.h"

@@ -2,7 +2,7 @@
 
 // The production dequantization shape fuses a dynamic scalar half load,
 // extension, and four-lane splat into one memory broadcast.
-x86.target<avx2> @target {contract_feature_bits = 256, contract_set_key = "x86.avx2_features.core"}
+x86.target<avx2> @target {features = [avxneconvert]}
 
 func.def target(@target) @broadcast_f16x4_dynamic(%input: buffer, %position0: index) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
@@ -23,7 +23,7 @@ low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_la
 // ====
 
 // A static bfloat load exercises the eight-lane broadcast form.
-x86.target<avx2> @target {contract_feature_bits = 256, contract_set_key = "x86.avx2_features.core"}
+x86.target<avx2> @target {features = [avxneconvert]}
 
 func.def target(@target) @broadcast_bf16x8_static(%input: buffer) -> (vector<8xf32>) {
   %base = index.constant 0 : offset
@@ -43,7 +43,7 @@ low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_la
 // ====
 
 // Even-lane conversion reads the full interleaved source packet directly.
-x86.target<avx2> @target {contract_feature_bits = 256, contract_set_key = "x86.avx2_features.core"}
+x86.target<avx2> @target {features = [avxneconvert]}
 
 func.def target(@target) @even_bf16x8_dynamic(%input: buffer, %position0: index) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
@@ -64,7 +64,7 @@ low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_la
 // ====
 
 // Odd-lane conversion covers the full-width half source packet.
-x86.target<avx2> @target {contract_feature_bits = 256, contract_set_key = "x86.avx2_features.core"}
+x86.target<avx2> @target {features = [avxneconvert]}
 
 func.def target(@target) @odd_f16x16_static(%input: buffer) -> (vector<8xf32>) {
   %base = index.constant 0 : offset
@@ -85,7 +85,7 @@ low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_la
 
 // AVX-NE-CONVERT can directly narrow either native AVX2 vector width when the
 // source author permits the instruction's input-subnormal behavior.
-x86.target<avx2> @target {contract_feature_bits = 256, contract_set_key = "x86.avx2_features.core"}
+x86.target<avx2> @target {features = [avxneconvert]}
 
 func.def target(@target) @narrow_bf16_vectors(%xmm: vector<4xf32>, %ymm: vector<8xf32>) -> (vector<4xbf16>, vector<8xbf16>) {
   %xmm_result = vector.fptrunc<daz> %xmm : vector<4xf32> to vector<4xbf16>
@@ -104,7 +104,7 @@ low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_la
 
 // The feature-aware contract must not select AVX-NE-CONVERT instructions
 // when the target does not advertise the extension.
-x86.target<avx2> @target {contract_feature_bits = 0, contract_set_key = "x86.avx2_features.core"}
+x86.target<avx2> @target {features = []}
 
 func.def target(@target) @broadcast_f16x4_without_feature(%input: buffer) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
@@ -114,4 +114,19 @@ func.def target(@target) @broadcast_f16x4_without_feature(%input: buffer) -> (ve
   %wide = scalar.extf %narrow : f16 to f32
   %result = vector.splat %wide : vector<4xf32>
   func.return %result : vector<4xf32>
+}
+
+// ====
+
+x86.target<avx2> @target {features = [f16c]}
+
+func.def target(@target) @widen_f16_vector(%input: vector<8xf16>) -> (vector<8xf32>) {
+  %result = vector.extf %input : vector<8xf16> to vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_layout({signature = (vector<8xf16>) -> (vector<8xf32>)}) @widen_f16_vector(%input: reg<x86.xmm>) -> (reg<x86.ymm>) asm {
+  %result = vcvtph2ps.ymm.xmm %input
+  return %result
 }

@@ -143,6 +143,20 @@ def _primary_descriptor_feature_classes(
     return tuple(masks), tuple(rule_classes), has_dynamic_class
 
 
+def required_primary_descriptor_feature_class(
+    table: CompiledLowerRuleSet,
+) -> int:
+    """Returns one feature class required by every rule, or zero if mixed."""
+
+    _, rule_classes, _ = _primary_descriptor_feature_classes(table)
+    if not rule_classes:
+        return 0
+    required_class = rule_classes[0]
+    if required_class in (0, _U8_MAX):
+        return 0
+    return required_class if all(rule_class == required_class for rule_class in rule_classes) else 0
+
+
 def _intern_optional_rows[RowT: Hashable](
     rows: Sequence[RowT | None],
 ) -> tuple[tuple[RowT, ...], tuple[int, ...]]:

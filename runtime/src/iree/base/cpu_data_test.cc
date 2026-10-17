@@ -14,10 +14,15 @@ namespace {
 TEST(CpuDataTest, QueriesSyntheticFeatures) {
   iree_cpu_data_t cpu_data = {
       .architecture = IREE_CPU_ARCHITECTURE_X86_64,
-      .fields = {IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVXVNNI |
+      .fields = {IREE_CPU_DATA0_X86_64_BMI | IREE_CPU_DATA0_X86_64_BMI2 |
+                 IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVXVNNI |
                  IREE_CPU_DATA0_X86_64_AVXVNNIINT8 |
                  IREE_CPU_DATA0_X86_64_AVXVNNIINT16},
   };
+  EXPECT_EQ(IREE_CPU_FEATURE_AVAILABILITY_AVAILABLE,
+            iree_cpu_data_query_feature(&cpu_data, IREE_SV("bmi")));
+  EXPECT_EQ(IREE_CPU_FEATURE_AVAILABILITY_AVAILABLE,
+            iree_cpu_data_query_feature(&cpu_data, IREE_SV("bmi2")));
   EXPECT_EQ(IREE_CPU_FEATURE_AVAILABILITY_AVAILABLE,
             iree_cpu_data_query_feature(&cpu_data, IREE_SV("avx2")));
   EXPECT_EQ(IREE_CPU_FEATURE_AVAILABILITY_AVAILABLE,
@@ -43,16 +48,18 @@ TEST(CpuDataTest, QueriesSyntheticFeatures) {
 TEST(CpuDataTest, ParsesAndFormatsCanonicalTargetKeys) {
   iree_cpu_data_t cpu_data = {};
   IREE_ASSERT_OK(iree_cpu_data_parse_target_key(
-      IREE_SV("x86_64:+avxvnniint16:+avxvnniint8:+avxvnni:+avx2:+avx"),
+      IREE_SV("x86_64:+avxvnniint16:+bmi2:+avxvnniint8:+avxvnni:+bmi:+avx2:"
+              "+avx"),
       &cpu_data));
   EXPECT_EQ(IREE_CPU_ARCHITECTURE_X86_64, cpu_data.architecture);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   IREE_ASSERT_OK(iree_cpu_data_append_target_key(&cpu_data, &builder));
-  EXPECT_TRUE(iree_string_view_equal(iree_string_builder_view(&builder),
-                                     IREE_SV("x86_64:+avx:+avx2:+avxvnni:"
-                                             "+avxvnniint8:+avxvnniint16")));
+  EXPECT_TRUE(
+      iree_string_view_equal(iree_string_builder_view(&builder),
+                             IREE_SV("x86_64:+bmi:+bmi2:+avx:+avx2:+avxvnni:"
+                                     "+avxvnniint8:+avxvnniint16")));
   iree_string_builder_deinitialize(&builder);
 }
 

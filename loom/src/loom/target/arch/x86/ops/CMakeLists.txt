@@ -16,7 +16,9 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_x86_generator
   SRCS
+    "fact_projection.c"
     "registry.c"
+    "target.c"
   TEXTUAL_HDRS
     "ops.inc"
   GENERATED_SRC_FLAGS
@@ -28,6 +30,7 @@ loom_generated_cc_library(
   HDRS
     "ops.h"
     "registry.h"
+    "target.h"
   ARGS
     "--dialect=x86"
   EXTRA_OUTPUT_FLAGS
@@ -37,11 +40,15 @@ loom_generated_cc_library(
   DEPS
     iree::base
     loom::error::error_defs
+    loom::error::parameter
+    loom::error::x86_error_defs
     loom::ir
     loom::ops::op_defs
     loom::ops::target
     loom::target::arch::x86::facts
+    loom::target::arch::x86::feature_bits
     loom::target::arch::x86::records::target_records
+    loom::target::resolved_target
     loom::target::types
 )
 endif()

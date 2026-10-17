@@ -8,18 +8,11 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from loom.target.arch.x86 import native_vector as native
-from loom.target.arch.x86.feature_bits import (
-    FEATURE_AVX512_FP16,
-    FEATURE_AVX512_VL,
-)
-from loom.target.arch.x86.vector_encoding import (
-    VectorEncodingPrefix,
-    VectorMachineInstruction,
-)
+from loom.target.arch.x86.feature_bits import FEATURE_AVX512_FP16
+from loom.target.arch.x86.vector_encoding import VectorMachineInstruction
 from loom.target.arch.x86.vector_families import (
     AVX512_FP16_FLOAT_BINARY_FAMILIES,
     AVX512_FP16_FLOAT_COMPARE_MNEMONIC,
@@ -42,6 +35,7 @@ from .avx512 import X86_AVX512_CORE_DESCRIPTOR_SET
 from .common import (
     _SCHEDULE_VECTOR_F32_XMM,
     _asm,
+    _avx512_descriptor,
     _descriptor_support_tables,
     _scalar_float_binary_descriptor,
     _scalar_float_unary_descriptor,
@@ -61,25 +55,20 @@ _REGISTER_SUFFIXES = {64: "xmm", 128: "xmm", 256: "ymm", 512: "zmm"}
 _VECTOR_BIT_WIDTHS = (128, 256, 512)
 
 
-def _required_feature_bits(vector_bit_width: int, *, scalar: bool = False) -> int:
-    bits = FEATURE_AVX512_FP16
-    if not scalar and vector_bit_width < 512:
-        bits |= FEATURE_AVX512_VL
-    return bits
-
-
 def _bind(
     descriptor: Descriptor,
     instruction: VectorMachineInstruction,
     *,
     vector_bit_width: int,
-    scalar: bool = False,
+    scalar: bool,
 ) -> Descriptor:
-    descriptor = replace(
+    return _avx512_descriptor(
         descriptor,
-        feature_mask_words=(_required_feature_bits(vector_bit_width, scalar=scalar),),
+        instruction,
+        scalar=scalar,
+        vector_bit_width=vector_bit_width,
+        required_feature_bits=FEATURE_AVX512_FP16,
     )
-    return instruction.bind(descriptor, VectorEncodingPrefix.EVEX)
 
 
 def _conversion_descriptor(
@@ -143,6 +132,7 @@ def _descriptors() -> tuple[Descriptor, ...]:
             ),
             instruction,
             vector_bit_width=vector_bit_width,
+            scalar=False,
         )
         for family, instruction in zip(
             AVX512_FP16_FLOAT_BINARY_FAMILIES,
@@ -181,6 +171,7 @@ def _descriptors() -> tuple[Descriptor, ...]:
             ),
             instruction,
             vector_bit_width=vector_bit_width,
+            scalar=False,
         )
         for family, instruction in zip(
             AVX512_FP16_FLOAT_ROOT_FAMILIES,
@@ -219,6 +210,7 @@ def _descriptors() -> tuple[Descriptor, ...]:
             ),
             native.AVX512_FP16_FLOAT_FMA,
             vector_bit_width=vector_bit_width,
+            scalar=False,
         )
         for vector_bit_width in _VECTOR_BIT_WIDTHS
     )
@@ -247,6 +239,7 @@ def _descriptors() -> tuple[Descriptor, ...]:
             ),
             native.AVX512_FP16_FLOAT_COMPARE,
             vector_bit_width=vector_bit_width,
+            scalar=False,
         )
         for vector_bit_width in _VECTOR_BIT_WIDTHS
     )
@@ -273,6 +266,7 @@ def _descriptors() -> tuple[Descriptor, ...]:
             ),
             instruction,
             vector_bit_width=vector_bit_width,
+            scalar=False,
         )
         for mnemonic, instruction in zip(
             (
@@ -310,6 +304,7 @@ def _descriptors() -> tuple[Descriptor, ...]:
                 _conversion_descriptor("vcvtph2psx", result_width, input_width),
                 native.VCVTPH2PSX,
                 vector_bit_width=max(result_width, input_width),
+                scalar=False,
             )
             for result_width, input_width in ((128, 64), (256, 128), (512, 256))
         ),
@@ -318,6 +313,7 @@ def _descriptors() -> tuple[Descriptor, ...]:
                 _conversion_descriptor("vcvtps2phx", result_width, input_width),
                 native.VCVTPS2PHX,
                 vector_bit_width=max(result_width, input_width),
+                scalar=False,
             )
             for result_width, input_width in ((64, 128), (128, 256), (256, 512))
         ),
@@ -348,6 +344,7 @@ def _descriptors() -> tuple[Descriptor, ...]:
         ),
         native.VPBROADCASTW_VECTOR_UNARY,
         vector_bit_width=512,
+        scalar=False,
     )
     return (
         *packed_binary,

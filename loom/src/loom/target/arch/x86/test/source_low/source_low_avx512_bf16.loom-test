@@ -2,7 +2,7 @@
 
 // AVX-NE remains the compact choice for its supported register widths while
 // AVX512-BF16 supplies the previously unreachable ZMM conversion.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 322, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16, avxneconvert]}
 
 func.def target(@target) @narrow_register_widths(%xmm: vector<4xf32>, %ymm: vector<8xf32>, %zmm: vector<16xf32>) -> (vector<4xbf16>, vector<8xbf16>, vector<16xbf16>) {
   %x4 = vector.fptrunc<daz> %xmm : vector<4xf32> to vector<4xbf16>
@@ -23,7 +23,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // Two independently produced halves map directly to the packed two-source
 // conversion without first constructing a wider F32 carrier.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @narrow_and_concat(%low: vector<16xf32>, %high: vector<16xf32>) -> (vector<32xbf16>) {
   %low_bf16 = vector.fptrunc<daz> %low : vector<16xf32> to vector<16xbf16>
@@ -41,7 +41,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 // ====
 
 // Callable predicate arguments compress once before a merge-masked narrowing.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @masked_narrow_argument(%condition: vector<16xi1>, %input: vector<16xf32>, %passthrough: vector<16xbf16>) -> (vector<16xbf16>) {
   %narrow = vector.fptrunc<daz> %input : vector<16xf32> to vector<16xbf16>
@@ -61,7 +61,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // An internal predicate stays in K form and a zero false arm selects EVEX
 // zero masking instead of materializing a merge passthrough.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @zero_masked_narrow(%lhs: vector<8xf32>, %rhs: vector<8xf32>, %input: vector<8xf32>) -> (vector<8xbf16>) {
   %condition = vector.cmpf olt, %lhs, %rhs : vector<8xf32> -> vector<8xi1>
@@ -83,7 +83,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 // A dynamic full-width low half folds into the two-source conversion's memory
 // operand. The high half remains available across more than the planner's
 // adjacent-source window and is still claimed by the fused rule.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @narrow_concat_memory(%input: buffer, %position0: index, %high: vector<8xf32>, %noise0: i32, %noise_step: i32) -> (vector<16xbf16>, i32) {
   %high_bf16 = vector.fptrunc<daz> %high : vector<8xf32> to vector<8xbf16>
@@ -133,7 +133,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // Overlapping unary load-convert graphs do not prevent the later paired
 // conversion from claiming the high half while folding the low load.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @narrow_two_loads(%input: buffer, %position0: index) -> (vector<16xbf16>) {
   %origin = index.constant 0 : offset
@@ -158,7 +158,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // A memory graph may emit at the first later graph node where its register
 // operand is available. Its folded load retains the original memory origin.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @narrow_two_loads_delayed(%input: buffer, %position0: index) -> (vector<16xbf16>) {
   %origin = index.constant 0 : offset
@@ -183,7 +183,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // An overlapping write keeps the first load at its original position. The
 // paired conversion cannot fold that load at the later high-load anchor.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @narrow_two_loads_across_write(%input: buffer, %position0: index, %replacement: vector<8xf32>) -> (vector<16xbf16>) {
   %origin = index.constant 0 : offset
@@ -211,7 +211,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // The widest indexed memory form preserves a dynamic merge value and converts
 // a callable predicate carrier before the five-input instruction.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @masked_narrow_concat_memory(%input: buffer, %position0: index, %high: vector<16xf32>, %condition: vector<32xi1>, %passthrough: vector<32xbf16>) -> (vector<32xbf16>) {
   %base = index.constant 0 : offset
@@ -236,7 +236,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 // ====
 
 // Scalar loads use the EVEX m32bcst form instead of a separate broadcast.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @broadcast_narrow(%input: buffer, %position0: index) -> (vector<4xbf16>) {
   %base = index.constant 0 : offset
@@ -257,7 +257,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 // ====
 
 // AVX512VL directly narrows the four-lane carrier without AVX-NE.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 66, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512bf16]}
 
 func.def target(@target) @narrow_xmm(%input: vector<4xf32>) -> (vector<4xbf16>) {
   %result = vector.fptrunc<daz> %input : vector<4xf32> to vector<4xbf16>
@@ -274,7 +274,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 
 // Core AVX-512 integer instructions preserve packed conversion when the
 // optional BF16 instruction is unavailable.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 2, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = []}
 
 func.def target(@target) @narrow_zmm_without_bf16(%input: vector<16xf32>) -> (vector<16xbf16>) {
   %result = vector.fptrunc<daz> %input : vector<16xf32> to vector<16xbf16>

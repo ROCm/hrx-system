@@ -11,8 +11,15 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from loom.target.arch.x86 import native_vector as native
+from loom.target.arch.x86.feature_bits import FEATURE_BMI2
 from loom.target.arch.x86.scalar_families import (
     X86_SCALAR_READ_MEMORY_FAMILIES,
+    X86_SCALAR_VARIABLE_SHIFT_FAMILIES,
+)
+from loom.target.arch.x86.vector_encoding import (
+    VectorEncodingPrefix,
+    VectorMachineInstruction,
 )
 from loom.target.low_descriptors import (
     Constraint,
@@ -534,6 +541,32 @@ def _gpr_count_shift_descriptor(
         schedule_class=_SCHEDULE_SCALAR,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
+
+
+def _gpr_variable_shift_descriptor(
+    *,
+    descriptor_operation: str,
+    semantic: str,
+    bit_count: int,
+    native_instruction: VectorMachineInstruction,
+) -> Descriptor:
+    result = _gpr32_result() if bit_count == 32 else _gpr64_result()
+    operand = _gpr32_operand if bit_count == 32 else _gpr64_operand
+    descriptor = Descriptor(
+        key=f"x86.bmi2.{descriptor_operation}.gpr{bit_count}",
+        mnemonic=descriptor_operation,
+        semantic_tag=f"integer.{semantic}.i{bit_count}",
+        operands=(result, operand("lhs"), operand("rhs")),
+        asm_forms=_asm(
+            mnemonic=f"{descriptor_operation}.gpr{bit_count}",
+            results=("dst",),
+            operands=("lhs", "rhs"),
+        ),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE, DescriptorFlag.SAFE_TO_SPECULATE),
+        feature_mask_words=(FEATURE_BMI2,),
+    )
+    return native_instruction.bind(descriptor, VectorEncodingPrefix.VEX)
 
 
 def _gpr_destructive_immediate_descriptor(
@@ -1529,9 +1562,30 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = tuple(
     _with_scalar_speculation_facts(descriptor)
     for descriptor in _X86_SCALAR_SUFFIX_DESCRIPTORS
 )
-X86_SCALAR_DESCRIPTORS = (
+X86_SCALAR_BASE_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
     *X86_SCALAR_SUFFIX_DESCRIPTORS,
+)
+X86_SCALAR_BMI2_DESCRIPTORS = tuple(
+    _gpr_variable_shift_descriptor(
+        descriptor_operation=family.descriptor_operation,
+        semantic=family.semantic,
+        bit_count=bit_count,
+        native_instruction=native_instruction,
+    )
+    for (bit_count, family), native_instruction in zip(
+        (
+            (bit_count, family)
+            for bit_count in (32, 64)
+            for family in X86_SCALAR_VARIABLE_SHIFT_FAMILIES
+        ),
+        native.BMI2_VARIABLE_SHIFT,
+        strict=True,
+    )
+)
+X86_SCALAR_DESCRIPTORS = (
+    *X86_SCALAR_BASE_DESCRIPTORS,
+    *X86_SCALAR_BMI2_DESCRIPTORS,
 )
 
 X86_SCALAR_DESCRIPTOR_SET = DescriptorSet(
@@ -1748,4 +1802,9 @@ X86_SCALAR_DESCRIPTOR_SET = DescriptorSet(
         ),
     ),
     descriptors=X86_SCALAR_DESCRIPTORS,
+)
+
+X86_SCALAR_BASE_DESCRIPTOR_SET = replace(
+    X86_SCALAR_DESCRIPTOR_SET,
+    descriptors=X86_SCALAR_BASE_DESCRIPTORS,
 )

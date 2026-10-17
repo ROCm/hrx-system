@@ -18,8 +18,10 @@ from loom.gen.target.low import compiler
 from loom.target.arch.x86 import descriptors as x86_descriptor_data
 from loom.target.arch.x86 import native_vector
 from loom.target.arch.x86.descriptors.encoding import Flag, Form, encoding
+from loom.target.arch.x86.feature_bits import FEATURE_BMI2
 from loom.target.arch.x86.scalar_families import (
     X86_SCALAR_READ_MEMORY_FAMILIES,
+    X86_SCALAR_VARIABLE_SHIFT_FAMILIES,
 )
 from loom.target.arch.x86.target_info import (
     sorted_descriptor_set_infos,
@@ -186,7 +188,7 @@ def test_scalar_speculation_facts_cover_total_integer_forms() -> None:
         Form.COMPARE_BRANCH,
         Form.COMPARE_IMMEDIATE_BRANCH,
     }
-    descriptors = x86_descriptor_data.X86_SCALAR_DESCRIPTOR_SET.descriptors
+    descriptors = tuple(descriptor for descriptor in x86_descriptor_data.X86_SCALAR_DESCRIPTOR_SET.descriptors if not descriptor.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER)
     observed_forms = {Form(descriptor.encoding_format_id) for descriptor in descriptors}
     assert total_forms.isdisjoint(trapping_or_effecting_forms)
     assert observed_forms == total_forms | trapping_or_effecting_forms
@@ -200,6 +202,41 @@ def test_scalar_speculation_facts_cover_total_integer_forms() -> None:
             assert DescriptorFlag.DEAD_REMOVABLE in descriptor.flags
             assert not descriptor.effects
             assert not descriptor.storage_leases
+
+
+def test_bmi2_variable_shifts_are_one_feature_qualified_physical_family() -> None:
+    expected_keys = {f"x86.bmi2.{family.descriptor_operation}.gpr{bit_count}" for bit_count in (32, 64) for family in X86_SCALAR_VARIABLE_SHIFT_FAMILIES}
+    assert len(expected_keys) == 6
+
+    feature_views = (
+        x86_descriptor_data.X86_SCALAR_DESCRIPTOR_SET,
+        x86_descriptor_data.X86_AVX2_FEATURES_DESCRIPTOR_SET,
+        x86_descriptor_data.X86_AVX512_FEATURES_DESCRIPTOR_SET,
+    )
+    core_views = (
+        x86_descriptor_data.X86_SIMD128_DESCRIPTOR_SET,
+        x86_descriptor_data.X86_AVX2_DESCRIPTOR_SET,
+        x86_descriptor_data.X86_AVX512_CORE_DESCRIPTOR_SET,
+    )
+    for descriptor_set in feature_views:
+        descriptors = {descriptor.key: descriptor for descriptor in descriptor_set.descriptors if descriptor.key.startswith("x86.bmi2.")}
+        assert descriptors.keys() == expected_keys
+        for descriptor in descriptors.values():
+            assert descriptor.feature_mask_words == (FEATURE_BMI2,)
+            assert descriptor.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER
+            assert descriptor.constraints == ()
+            assert descriptor.flags == (
+                DescriptorFlag.DEAD_REMOVABLE,
+                DescriptorFlag.SAFE_TO_SPECULATE,
+            )
+    for descriptor_set in core_views:
+        assert expected_keys.isdisjoint(descriptor.key for descriptor in descriptor_set.descriptors)
+
+    storage = x86_descriptors._shared_storage_descriptor_set(
+        x86_descriptor_data.X86_AVX512_FEATURES_DESCRIPTOR_SET,
+        feature_views,
+    )
+    assert {key: sum(descriptor.key == key for descriptor in storage.descriptors) for key in expected_keys} == dict.fromkeys(expected_keys, 1)
 
 
 def test_native_facts_cover_core_profiles() -> None:
@@ -506,7 +543,8 @@ def test_storage_generation_emits_current_public_views() -> None:
     assert source.count(".descriptor_refs = kX86Avx512FeaturesCoreStorageDescriptorRefs,") == 9
     assert "kX86Avx2FeaturesCoreDescriptorMembershipWords" in source
     assert "kX86PackedDotCoreDescriptorMembershipWords" in source
-    assert source.count(".descriptor_membership_words = kX86ScalarCoreDescriptorMembershipWords,") == 2
+    assert source.count(".descriptor_membership_words = kX86ScalarCoreDescriptorMembershipWords,") == 1
+    assert source.count(".descriptor_membership_words = kX86Simd128CoreDescriptorMembershipWords,") == 1
     # A shared spelling may span adjacent literals in the compact byte pool.
     string_data = source.replace('"\n    "', "")
     assert "avx_vnni.vpdpbusd.ymm" in string_data
@@ -533,6 +571,8 @@ def test_storage_generation_emits_current_public_views() -> None:
         "X86_AVX_VNNI_CORE_DESCRIPTOR_REF_AVX_VNNI_VPDPBUSD_YMM",
     )
     _assert_descriptor_ref(scalar_header, "X86_SCALAR_CORE_DESCRIPTOR_REF_SCALAR_LEA_ADD_GPR64")
+    _assert_descriptor_ref(scalar_header, "X86_SCALAR_CORE_DESCRIPTOR_REF_BMI2_SHLX_GPR32")
+    assert "BMI2_SHLX" not in simd128_header
     _assert_descriptor_ref(
         packed_dot_header,
         "X86_PACKED_DOT_CORE_DESCRIPTOR_REF_AVX512_BF16_VDPBF16PS_YMM",

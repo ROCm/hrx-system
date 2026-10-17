@@ -11,10 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from loom.target.arch.x86 import native_vector as native
-from loom.target.arch.x86.vector_encoding import (
-    VectorEncodingPrefix,
-    VectorMachineInstruction,
-)
+from loom.target.arch.x86.vector_encoding import VectorMachineInstruction
 from loom.target.arch.x86.vector_families import (
     AVX2_BITWISE_FAMILIES,
     AVX2_FLOAT_BINARY_FAMILIES,
@@ -1262,7 +1259,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
         assembly_suffix=".xmm",
         vector_instructions=native.VECTOR_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+        vector_binder=_vex_descriptor,
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
@@ -1276,7 +1273,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
         assembly_suffix=".xmm",
         vector_instructions=native.XMM_DWORD_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+        vector_binder=_vex_descriptor,
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
@@ -1290,7 +1287,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
         assembly_suffix=".xmm",
         vector_instructions=native.XMM_QWORD_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+        vector_binder=_vex_descriptor,
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
@@ -1304,7 +1301,7 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         store_schedule_class=_SCHEDULE_MEMORY_STORE_YMM,
         assembly_suffix=".ymm",
         vector_instructions=native.VECTOR_MEMORY,
-        vector_prefix=VectorEncodingPrefix.VEX,
+        vector_binder=_vex_descriptor,
     ),
 )
 

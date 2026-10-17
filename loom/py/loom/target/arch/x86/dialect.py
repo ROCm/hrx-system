@@ -9,7 +9,9 @@
 from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
+    ATTR_TYPE_SIGNED_ENUM_SET,
     SYMBOL_DEFINE,
+    AttrDef,
     Dialect,
     EnumCase,
     EnumDef,
@@ -18,6 +20,7 @@ from loom.dsl import (
     SymbolDefinition,
     TargetLikeInterface,
 )
+from loom.target.arch.x86.feature_catalog import X86_FEATURE_INFOS
 
 x86_ops = Dialect(
     "x86",
@@ -45,6 +48,15 @@ X86TargetKind = EnumDef(
     doc="x86 target row selected by x86.target.",
 )
 
+X86TargetFeature = EnumDef(
+    "X86TargetFeature",
+    [
+        EnumCase(info.spelling, ordinal, doc=info.doc)
+        for ordinal, info in enumerate(X86_FEATURE_INFOS)
+    ],
+    doc="Optional x86 instruction-set feature.",
+)
+
 x86_target = Op(
     "x86.target",
     group=x86_ops,
@@ -59,6 +71,7 @@ x86_target = Op(
             selector="kind",
             bundle_table="loom_x86_target_bundles",
             fact_type="loom_x86_target_fact_type",
+            fact_projector="loom_x86_target_fact_projector",
         )
     ],
     symbol_def=SymbolDefinition(
@@ -68,8 +81,20 @@ x86_target = Op(
         bytecode_kind="LOOM_SYMBOL_RECORD",
         fact_domain="loom_target_symbol_fact_domain",
     ),
-    attrs=target_record_attrs(X86TargetKind),
-    verify="loom_target_record_verify",
+    attrs=[
+        *target_record_attrs(X86TargetKind),
+        AttrDef(
+            "features",
+            ATTR_TYPE_SIGNED_ENUM_SET,
+            enum_def=X86TargetFeature,
+            optional=True,
+            doc=(
+                "Explicit optional instruction-set assertions. Bare members "
+                "enable features and negative members disable them."
+            ),
+        ),
+    ],
+    verify="loom_x86_target_record_verify",
     format=[
         TemplateParam("kind"),
         SymbolRef("symbol"),
@@ -81,6 +106,7 @@ x86_target = Op(
         "x86.target<avx2> @host",
         "x86.target<avx512> @host",
         "x86.target<packed_dot> @host",
+        "x86.target<avx512> @host {features = [avx512bf16, -avx512vl]}",
     ],
 )
 

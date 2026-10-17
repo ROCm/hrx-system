@@ -37,5 +37,10 @@ typedef uint64_t loom_x86_feature_bits_t;
 #define LOOM_X86_FEATURE_AVX_NE_CONVERT (UINT64_C(1) << 8)
 // Target supports VEX F16C half/single-precision conversions.
 #define LOOM_X86_FEATURE_F16C (UINT64_C(1) << 9)
+// Target supports BMI2 scalar bit manipulation instructions.
+#define LOOM_X86_FEATURE_BMI2 (UINT64_C(1) << 10)
+
+// All optional x86 features understood by target contracts.
+#define LOOM_X86_FEATURE_KNOWN_BITS ((UINT64_C(1) << 11) - 1)
 
 #endif  // LOOM_TARGET_ARCH_X86_FEATURE_BITS_H_

@@ -10,6 +10,7 @@
 #define LOOM_TARGET_ARCH_X86_FACTS_H_
 
 #include "iree/base/cpu_data.h"
+#include "loom/target/arch/x86/feature_bits.h"
 #include "loom/target/facts.h"
 
 #ifdef __cplusplus
@@ -22,6 +23,12 @@ typedef struct loom_x86_target_facts_t {
 
   // Complete execution-device CPU facts, or UNKNOWN for authored profiles.
   iree_cpu_data_t cpu_data;
+
+  // Optional instruction features explicitly enabled by the source facts.
+  loom_x86_feature_bits_t positive_feature_assertions;
+
+  // Optional instruction features explicitly disabled by the source facts.
+  loom_x86_feature_bits_t negative_feature_assertions;
 } loom_x86_target_facts_t;
 
 // Static fact type used by x86 target projection and structured profiles.

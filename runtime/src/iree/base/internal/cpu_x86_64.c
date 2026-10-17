@@ -29,6 +29,10 @@ uint64_t iree_cpu_x86_64_decode_features(
                  1 << 20);
   IREE_COPY_BITS(features, IREE_CPU_DATA0_X86_64_SSE4A,
                  capabilities->extended_leaf1.ecx, 1 << 6);
+  IREE_COPY_BITS(features, IREE_CPU_DATA0_X86_64_BMI, capabilities->leaf7_0.ebx,
+                 1 << 3);
+  IREE_COPY_BITS(features, IREE_CPU_DATA0_X86_64_BMI2,
+                 capabilities->leaf7_0.ebx, 1 << 8);
 
   const uint32_t xsave_bits = (1u << 26) | (1u << 27);
   const bool has_xsave = iree_all_bits_set(capabilities->leaf1.ecx, xsave_bits);

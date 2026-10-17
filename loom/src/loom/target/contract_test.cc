@@ -23,7 +23,7 @@ const loom_target_contract_fragment_t kContractFragment = {
     .descriptor_rule_count = 1,
     .descriptor_rules = kDescriptorRules,
 };
-const loom_target_contract_binding_t kBindings[] = {{&kContractFragment, 5}};
+const loom_target_contract_binding_t kBindings[] = {{&kContractFragment, 5, 0}};
 const loom_target_contract_case_t kCases[] = {
     {LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_RULE, 0, 0},
 };

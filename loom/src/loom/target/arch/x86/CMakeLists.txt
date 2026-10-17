@@ -18,8 +18,10 @@ loom_cc_library(
   SRCS
     "facts.c"
   DEPS
+    ::feature_bits
     iree::base
     iree::base::cpu_data
+    loom::target::arch::x86::records::target_records
     loom::target::facts
   PUBLIC
 )
@@ -109,6 +111,7 @@ loom_cc_test(
   SRCS
     "register_classes_test.cc"
   DEPS
+    ::feature_bits
     ::register_classes
     iree::testing::gtest
     iree::testing::gtest_main
@@ -233,7 +236,11 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::ir
     loom::target::arch::x86::ops
+    loom::target::arch::x86::records::target_records
+    loom::target::facts_builder
+    loom::testing::module_ptr
   LABELS
     "iree-build-requirement=loom.target.arch.x86"
 )
@@ -267,6 +274,7 @@ loom_check_test_suite(
     "test/hal_query.loom-test"
     "test/instruction_immediates.loom-test"
     "test/low_avx512_bf16.loom-test"
+    "test/low_bmi2_variable_shift.loom-test"
     "test/register_classes.loom-test"
     "test/source_low/allocation.loom-test"
     "test/source_low/buffer_bulk.loom-test"
@@ -356,6 +364,7 @@ loom_check_test_suite(
     "test/source_low/source_low_avx512_reductions.loom-test"
     "test/source_low/source_low_avx_ne_convert.loom-test"
     "test/source_low/source_low_avx_vnni.loom-test"
+    "test/source_low/source_low_bmi2_variable_shift.loom-test"
     "test/source_low/source_low_contraction.loom-test"
     "test/source_low/source_low_float_roots.loom-test"
     "test/source_low/source_low_invoke.loom-test"
@@ -384,6 +393,8 @@ loom_check_test_suite(
     "test/source_low/view_carrier.loom-test"
     "test/source_low/view_carriers.loom-test"
     "test/source_low/view_transport.loom-test"
+    "test/target_feature_diagnostics.loom-test"
+    "test/target_features.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )

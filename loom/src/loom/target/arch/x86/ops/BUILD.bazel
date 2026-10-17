@@ -20,11 +20,14 @@ _X86_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/x86:__pkg__"]
 loom_generated_cc_library(
     name = "ops",
     srcs = [
+        "fact_projection.c",
         "registry.c",
+        "target.c",
     ],
     hdrs = [
         "ops.h",
         "registry.h",
+        "target.h",
     ],
     args = ["--dialect=x86"],
     extra_output_flags = ["--ops-include"],
@@ -42,11 +45,15 @@ loom_generated_cc_library(
     visibility = _X86_ROOT_VISIBILITY,
     deps = [
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/error:x86_error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:resolved_target",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/x86:facts",
+        "//loom/src/loom/target/arch/x86:feature_bits",
         "//loom/src/loom/target/arch/x86/records:target_records",
         "//runtime/src/iree/base",
     ],

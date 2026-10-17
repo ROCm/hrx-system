@@ -12,6 +12,7 @@ from enum import Enum
 
 from loom.target.low_descriptors import ImmediateKind, OperandRole
 
+from .scalar_families import X86_SCALAR_VARIABLE_SHIFT_FAMILIES
 from .vector_encoding import (
     VectorEncoding,
     VectorEncodingBehavior,
@@ -290,6 +291,30 @@ def avx512_bf16_conversion_instruction(
             (128, 256, 512),
         ),
     )
+
+
+BMI2_VARIABLE_SHIFT = tuple(
+    _instruction(
+        family.descriptor_operation,
+        _NDS_SWAPPED_INPUTS,
+        (
+            _operand(OperandRole.RESULT, _GPR32 if bit_count == 32 else _GPR64),
+            _operand(OperandRole.OPERAND, _GPR32 if bit_count == 32 else _GPR64),
+            _operand(OperandRole.OPERAND, _GPR32 if bit_count == 32 else _GPR64),
+        ),
+        _IMMEDIATES_0,
+        _encoding(
+            _VEX,
+            _MAP_2,
+            family.mandatory_prefix,
+            int(bit_count == 64),
+            0xF7,
+            fixed=0,
+        ),
+    )
+    for bit_count in (32, 64)
+    for family in X86_SCALAR_VARIABLE_SHIFT_FAMILIES
+)
 
 
 KANDQ = _instruction(

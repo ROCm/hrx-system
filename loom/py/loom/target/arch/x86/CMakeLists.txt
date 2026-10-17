@@ -30,12 +30,22 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    feature_catalog
+  SRCS
+    "feature_catalog.py"
+  DEPS
+    loom::py::loom::target::arch::x86::package_init
+)
+
+iree_py_library(
+  NAME
     target_info
   SRCS
     "feature_bits.py"
     "packed_dot_data.py"
     "target_info.py"
   DEPS
+    loom::py::loom::target::arch::x86::feature_catalog
     loom::py::loom::target::arch::x86::package_init
     loom::py::loom::target::native_contraction_layout
     loom::py::loom::target::native_layout_facts
@@ -68,6 +78,7 @@ iree_py_library(
     "vector_encoding.py"
   DEPS
     loom::py::loom::target::arch::x86::package_init
+    loom::py::loom::target::arch::x86::scalar_families
     loom::py::loom::target::low_descriptors
 )
 
@@ -77,6 +88,7 @@ iree_py_library(
   SRCS
     "dialect.py"
   DEPS
+    loom::py::loom::target::arch::x86::feature_catalog
     loom::py::loom::target::arch::x86::package_init
     loom::py::loom::core
     loom::py::loom::dialect::target::target

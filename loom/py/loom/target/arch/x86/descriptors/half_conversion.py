@@ -21,6 +21,7 @@ from .common import (
     _SCHEDULE_VECTOR_F32_YMM,
     _SCHEDULE_VECTOR_F32_ZMM,
     _asm,
+    _avx512_descriptor,
     _vector_operand,
     _vector_result,
 )
@@ -35,7 +36,6 @@ _ROUNDING = Immediate("rounding", ImmediateKind.UNSIGNED, bit_width=8, unsigned_
 
 
 def half_conversion_descriptors(*, evex: bool) -> tuple[Descriptor, ...]:
-    prefix = VectorEncodingPrefix.EVEX if evex else VectorEncodingPrefix.VEX
     feature = "avx512" if evex else "f16c"
     assembly_prefix = "avx512." if evex else ""
     descriptors = []
@@ -73,5 +73,9 @@ def half_conversion_descriptors(*, evex: bool) -> tuple[Descriptor, ...]:
                 feature_mask_words=() if evex else (FEATURE_F16C,),
                 flags=(DescriptorFlag.DEAD_REMOVABLE,),
             )
-            descriptors.append(instruction.bind(descriptor, prefix))
+            descriptors.append(
+                _avx512_descriptor(descriptor, instruction, scalar=False)
+                if evex
+                else instruction.bind(descriptor, VectorEncodingPrefix.VEX)
+            )
     return tuple(descriptors)
