@@ -388,14 +388,6 @@ TEST(LoomcCpuIreeHalTargetTest, CompilesSerializedAvxVnniInt8ProfileToObject) {
   for (iree_host_size_t i = 0; i < IREE_CPU_DATA_FIELD_COUNT; ++i) {
     EXPECT_EQ(facts->cpu_data.fields[i], cpu_data.fields[i]);
   }
-  EXPECT_TRUE(
-      iree_string_view_equal(facts->base.storage.config.contract_set_key,
-                             IREE_SV("x86.avx2_features.core")));
-  EXPECT_NE(facts->base.storage.config.contract_feature_bits, 0u);
-  EXPECT_TRUE(loom_target_facts_field_is_explicit(
-      &facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_SET_KEY));
-  EXPECT_TRUE(loom_target_facts_field_is_explicit(
-      &facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_FEATURE_BITS));
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 

@@ -18,8 +18,10 @@ loom_cc_library(
   SRCS
     "facts.c"
   DEPS
+    ::feature_bits
     iree::base
     iree::base::cpu_data
+    loom::target::arch::x86::records::target_records
     loom::target::facts
   PUBLIC
 )
@@ -234,7 +236,11 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::ir
     loom::target::arch::x86::ops
+    loom::target::arch::x86::records::target_records
+    loom::target::facts_builder
+    loom::testing::module_ptr
   LABELS
     "iree-build-requirement=loom.target.arch.x86"
 )
@@ -385,6 +391,8 @@ loom_check_test_suite(
     "test/source_low/view_carrier.loom-test"
     "test/source_low/view_carriers.loom-test"
     "test/source_low/view_transport.loom-test"
+    "test/target_feature_diagnostics.loom-test"
+    "test/target_features.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )

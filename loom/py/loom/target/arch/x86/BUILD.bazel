@@ -27,6 +27,12 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "feature_catalog",
+    srcs = ["feature_catalog.py"],
+    deps = [":package_init"],
+)
+
+iree_py_library(
     name = "target_info",
     srcs = [
         "feature_bits.py",
@@ -34,6 +40,7 @@ iree_py_library(
         "target_info.py",
     ],
     deps = [
+        ":feature_catalog",
         ":package_init",
         "//loom/py/loom/target:native_contraction_layout",
         "//loom/py/loom/target:native_layout_facts",
@@ -69,6 +76,7 @@ iree_py_library(
     name = "dialect",
     srcs = ["dialect.py"],
     deps = [
+        ":feature_catalog",
         ":package_init",
         "//loom/py/loom:core",
         "//loom/py/loom/dialect/target",

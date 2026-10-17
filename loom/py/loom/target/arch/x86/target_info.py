@@ -21,9 +21,13 @@ from loom.target.arch.x86.feature_bits import (
     FEATURE_AVX512_FP16,
     FEATURE_AVX512_VL,
     FEATURE_AVX512_VNNI,
+    FEATURE_AVX_NE_CONVERT,
     FEATURE_AVX_VNNI,
     FEATURE_AVX_VNNI_INT8,
     FEATURE_AVX_VNNI_INT16,
+    FEATURE_BMI2,
+    FEATURE_F16C,
+    X86_KNOWN_FEATURE_BITS,
 )
 
 X86_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
@@ -70,6 +74,10 @@ class X86TargetProfileInfo:
     register_classes: tuple[str, ...]
     contract_feature_bits: int = 0
     native_bundle_key: str | None = None
+    feature_contract_set_key: str | None = None
+    supported_feature_bits: int = 0
+    required_cpu_features: tuple[str, ...] = ()
+    automatic_priority: int = 0
 
 
 def _with_base_registers(*register_classes: str) -> tuple[str, ...]:
@@ -224,6 +232,9 @@ X86_TARGET_PROFILE_INFOS: tuple[X86TargetProfileInfo, ...] = (
         descriptor_set_key="x86.scalar.core",
         register_classes=_with_base_registers(),
         native_bundle_key="x86-scalar",
+        feature_contract_set_key="x86.scalar.core",
+        supported_feature_bits=FEATURE_BMI2,
+        automatic_priority=1,
     ),
     X86TargetProfileInfo(
         profile_key="x86.simd128",
@@ -231,6 +242,8 @@ X86_TARGET_PROFILE_INFOS: tuple[X86TargetProfileInfo, ...] = (
         descriptor_set_key="x86.simd128.core",
         register_classes=_with_base_registers(X86_REG_CLASS_XMM),
         native_bundle_key="x86-simd128",
+        feature_contract_set_key="x86.simd128.core",
+        required_cpu_features=("AVX",),
     ),
     X86TargetProfileInfo(
         profile_key="x86.avx2",
@@ -238,6 +251,17 @@ X86_TARGET_PROFILE_INFOS: tuple[X86TargetProfileInfo, ...] = (
         descriptor_set_key="x86.avx2.core",
         register_classes=_with_base_registers(X86_REG_CLASS_XMM, X86_REG_CLASS_YMM),
         native_bundle_key="x86-avx2",
+        feature_contract_set_key="x86.avx2_features.core",
+        supported_feature_bits=(
+            FEATURE_AVX_VNNI
+            | FEATURE_AVX_VNNI_INT8
+            | FEATURE_AVX_VNNI_INT16
+            | FEATURE_AVX_NE_CONVERT
+            | FEATURE_F16C
+            | FEATURE_BMI2
+        ),
+        required_cpu_features=("AVX", "FMA", "AVX2"),
+        automatic_priority=3,
     ),
     X86TargetProfileInfo(
         profile_key="x86.avx512",
@@ -251,6 +275,17 @@ X86_TARGET_PROFILE_INFOS: tuple[X86TargetProfileInfo, ...] = (
         ),
         contract_feature_bits=FEATURE_AVX512_VL,
         native_bundle_key="x86-avx512",
+        feature_contract_set_key="x86.avx512_features.core",
+        supported_feature_bits=X86_KNOWN_FEATURE_BITS,
+        required_cpu_features=(
+            "AVX",
+            "FMA",
+            "AVX2",
+            "AVX512F",
+            "AVX512DQ",
+            "AVX512BW",
+        ),
+        automatic_priority=4,
     ),
     X86TargetProfileInfo(
         profile_key="x86.packed_dot",
@@ -264,6 +299,16 @@ X86_TARGET_PROFILE_INFOS: tuple[X86TargetProfileInfo, ...] = (
             | FEATURE_AVX_VNNI_INT8
         ),
         native_bundle_key="x86-packed-dot",
+        feature_contract_set_key="x86.packed_dot.core",
+        supported_feature_bits=(
+            FEATURE_AVX512_VNNI
+            | FEATURE_AVX512_VL
+            | FEATURE_AVX512_BF16
+            | FEATURE_AVX_VNNI
+            | FEATURE_AVX_VNNI_INT8
+            | FEATURE_AVX_VNNI_INT16
+            | FEATURE_AVX10_2
+        ),
     ),
     X86TargetProfileInfo(
         profile_key="x86.avx512_packed_dot",
@@ -283,6 +328,8 @@ X86_TARGET_PROFILE_INFOS: tuple[X86TargetProfileInfo, ...] = (
             | FEATURE_AVX_VNNI_INT8
         ),
         native_bundle_key="x86-avx512-packed-dot",
+        feature_contract_set_key="x86.avx512_features.core",
+        supported_feature_bits=X86_KNOWN_FEATURE_BITS,
     ),
     X86TargetProfileInfo(
         profile_key="x86.avx512_vnni",
@@ -434,6 +481,26 @@ def validate_x86_target_info_tables(
         if selector_profile_info.native_bundle_key is None:
             raise ValueError(
                 f"x86 native selector profile '{profile_key}' has no native bundle key"
+            )
+        if selector_profile_info.feature_contract_set_key is None:
+            raise ValueError(
+                f"x86 native selector profile '{profile_key}' has no feature contract"
+            )
+        if selector_profile_info.feature_contract_set_key not in descriptor_sets_by_key:
+            raise ValueError(
+                f"x86 native selector profile '{profile_key}' references unknown "
+                f"feature contract '{selector_profile_info.feature_contract_set_key}'"
+            )
+        if selector_profile_info.supported_feature_bits & ~X86_KNOWN_FEATURE_BITS:
+            raise ValueError(
+                f"x86 native selector profile '{profile_key}' supports unknown features"
+            )
+        if selector_profile_info.contract_feature_bits & ~(
+            selector_profile_info.supported_feature_bits
+        ):
+            raise ValueError(
+                f"x86 native selector profile '{profile_key}' defaults "
+                "unsupported features"
             )
 
 

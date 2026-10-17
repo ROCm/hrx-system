@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-x86.target<packed_dot> @target {contract_feature_bits = 4, contract_set_key = "x86.avx_vnni.core"}
+x86.target<avx2> @target {features = [avxvnni]}
 
 func.def target(@target) @dot4i_u8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8>, %acc: vector<8xi32>) -> (vector<8xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<32xi8>, vector<32xi8>, vector<8xi32>
@@ -8,15 +8,15 @@ func.def target(@target) @dot4i_u8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8
 }
 
 // ----
-low.func.def target<x86.avx_vnni.core>(@target) abi(object_function) abi_layout({signature = (vector<32xi8>, vector<32xi8>, vector<8xi32>) -> (vector<8xi32>)}) @dot4i_u8s8_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_layout({signature = (vector<32xi8>, vector<32xi8>, vector<8xi32>) -> (vector<8xi32>)}) @dot4i_u8s8_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %9 = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
-  %dot = vpdpbusd.ymm %9, %lhs, %rhs
+  %dot = avx_vnni.vpdpbusd.ymm %9, %lhs, %rhs
   return %dot
 }
 
 // ====
 
-x86.target<packed_dot> @target {contract_feature_bits = 8, contract_set_key = "x86.avx_vnni_int8.core"}
+x86.target<avx2> @target {features = [avxvnniint8]}
 
 func.def target(@target) @dot8i4_u4s4_rejected(%lhs: vector<8xi32>, %rhs: vector<8xi32>, %acc: vector<8xi32>) -> (vector<8xi32>) {
   // ERROR@+1: TARGET/001 {op_name="vector.dot8i4"}

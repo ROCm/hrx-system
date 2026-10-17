@@ -85,7 +85,7 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 
 // RUN: emit source-low output=low
 
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @avx512_low_f16(%a: vector<2xf16>, %b: vector<2xf16>, %c: vector<2xf16>) -> (vector<2xf16>) {
   %product = vector.mulf<contract> %a, %b : vector<2xf16>
@@ -105,7 +105,7 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
 // RUN: emit source-low output=low
 
 // Scalar and full-width half arithmetic do not require AVX512-VL.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 128, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [-avx512vl, avx512fp16]}
 
 func.def target(@target) @avx512_fp16_without_vl(%a: f16, %b: f16, %c: f16, %x: vector<32xf16>, %y: vector<32xf16>, %z: vector<32xf16>) -> (f16, vector<32xf16>) {
   %product = scalar.mulf<contract> %a, %b : f16

@@ -53,6 +53,7 @@ iree_py_library(
     "x86_target_profiles.py"
   DEPS
     loom::py::loom::gen::support::support
+    loom::py::loom::target::arch::x86::feature_catalog
     loom::py::loom::target::arch::x86::target_info
 )
 

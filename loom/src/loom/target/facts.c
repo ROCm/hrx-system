@@ -54,10 +54,14 @@ bool loom_target_facts_are_equivalent(const loom_target_facts_t* lhs,
   if (lhs == rhs) {
     return true;
   }
-  return lhs->fact_type == rhs->fact_type &&
-         lhs->explicit_fields == rhs->explicit_fields &&
-         loom_target_facts_satisfy_specialization_requirement(lhs, rhs) &&
-         loom_target_facts_satisfy_specialization_requirement(rhs, lhs);
+  if (lhs->fact_type != rhs->fact_type ||
+      lhs->explicit_fields != rhs->explicit_fields ||
+      !loom_target_facts_satisfy_specialization_requirement(lhs, rhs) ||
+      !loom_target_facts_satisfy_specialization_requirement(rhs, lhs)) {
+    return false;
+  }
+  return lhs->fact_type->family_state_equivalent == NULL ||
+         lhs->fact_type->family_state_equivalent(lhs, rhs);
 }
 
 bool loom_target_facts_structural_satisfy_specialization_requirement(

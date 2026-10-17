@@ -90,6 +90,11 @@ typedef bool (*loom_target_fact_satisfies_specialization_requirement_fn_t)(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
 
+// Returns whether family-owned state has the same durable semantics after
+// common explicitness and mutual specialization have matched.
+typedef bool (*loom_target_fact_family_state_equivalent_fn_t)(
+    const loom_target_facts_t* lhs, const loom_target_facts_t* rhs);
+
 // Completes family-owned state and derived common facts after applying a
 // satisfied same-type specialization requirement.
 typedef void (*loom_target_fact_apply_specialization_requirement_fn_t)(
@@ -138,6 +143,10 @@ struct loom_target_fact_type_t {
   // Optional full specialization relation for distinct same-type fact values.
   loom_target_fact_satisfies_specialization_requirement_fn_t
       satisfies_specialization_requirement;
+
+  // Optional exact equivalence check for family-owned state not captured by
+  // mutual specialization. This relation must be symmetric.
+  loom_target_fact_family_state_equivalent_fn_t family_state_equivalent;
 
   // Optional family-owned completion used only while constructing facts.
   loom_target_fact_apply_specialization_requirement_fn_t

@@ -91,7 +91,7 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
 
 // AVX-512 FP16 supplies native roots across scalar, low-XMM, XMM, YMM, and ZMM
 // forms. Strict reciprocal root remains the source-level composition.
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @avx512_fp16_root_family(%scalar_value: f16, %low_value: vector<2xf16>, %xmm_value: vector<8xf16>, %ymm_value: vector<16xf16>, %zmm_value: vector<32xf16>) -> (f16, f16, f16, vector<2xf16>, vector<8xf16>, vector<16xf16>, vector<32xf16>) {
   %scalar_sqrt = scalar.sqrtf %scalar_value : f16

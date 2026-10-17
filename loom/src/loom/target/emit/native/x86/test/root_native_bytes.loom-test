@@ -78,7 +78,7 @@ code: 62 f1 7c 48 51 c0 62 f1 fd 48 51 c0 62 f2 7d 48 4e c0 62 f2 fd 48 4e c0 c3
 // ====
 
 // RUN: emit x86-native-bytes @fp16_xmm
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 low.func.def target<x86.avx512_features.core>(@target) @fp16_xmm(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %sqrt = vsqrtph.xmm %input
@@ -94,7 +94,7 @@ code: 62 f5 7c 08 51 c0 62 f6 7d 08 4e c0 62 f5 7e 08 51 c0 62 f6 7d 08 4f c0 c3
 // ====
 
 // RUN: emit x86-native-bytes @fp16_ymm
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 low.func.def target<x86.avx512_features.core>(@target) @fp16_ymm(%input: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %sqrt = vsqrtph.ymm %input
@@ -108,7 +108,7 @@ code: 62 f5 7c 28 51 c0 62 f6 7d 28 4e c0 c3
 // ====
 
 // RUN: emit x86-native-bytes @fp16_zmm
-x86.target<avx512_packed_dot> @target {contract_feature_bits = 130, contract_set_key = "x86.avx512_features.core"}
+x86.target<avx512> @target {features = [avx512fp16]}
 
 low.func.def target<x86.avx512_features.core>(@target) @fp16_zmm(%input: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
   %sqrt = vsqrtph %input
