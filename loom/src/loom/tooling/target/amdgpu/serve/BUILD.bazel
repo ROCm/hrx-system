@@ -76,6 +76,21 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "execution_queues_test",
+    args = ["--execution_device_uri=amdgpu://0?queue_count=2"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _ROCR_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":test_device",
+        "//loom/src/loom/serve/runtime/execution:queues_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "finite_component_test",
     data = COMPONENT_SOURCES,
     env = {
@@ -112,6 +127,7 @@ loom_cc_test(
         ":test_device",
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:queues",
         "//loom/src/loom/serve/runtime/execution:workspace",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/program:jit",

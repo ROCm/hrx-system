@@ -17,6 +17,7 @@
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/queues.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/program/jit.h"
 #include "loom/serve/runtime/program/module.h"
@@ -88,7 +89,9 @@ class ControlTest
     }
     IREE_ASSERT_OK(loom_serve_workspace_create(
         group_, storage_pool_, &asan_options, host_allocator_, &workspace_));
-    IREE_ASSERT_OK(loom_serve_execution_create(dispatch, transfer, workspace_,
+    IREE_ASSERT_OK(loom_serve_execution_queues_create(
+        family, transfer_family, host_allocator_, &execution_queues_));
+    IREE_ASSERT_OK(loom_serve_execution_create(execution_queues_, workspace_,
                                                host_allocator_, &execution_));
     directory_ =
         std::filesystem::path(FLAG_control_sources).parent_path().string();
@@ -157,6 +160,7 @@ class ControlTest
     }
     loom_serve_jit_release(jit_);
     loom_serve_execution_release(execution_);
+    loom_serve_execution_queues_release(execution_queues_);
     loom_serve_workspace_release(workspace_);
     iree_hal_pool_release(storage_pool_);
     iree_hal_device_group_release(group_);
@@ -363,6 +367,8 @@ class ControlTest
   iree_hal_pool_t* storage_pool_ = nullptr;
   // Shared command backing independent of model ordering.
   loom_serve_workspace_t* workspace_ = nullptr;
+  // Fixed queue inventory retained by each model execution.
+  loom_serve_execution_queues_t* execution_queues_ = nullptr;
   // Owned model execution capability.
   loom_serve_execution_t* execution_ = nullptr;
   // Source directory shared by the catalog and VM program.

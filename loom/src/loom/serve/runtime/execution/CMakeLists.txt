@@ -32,12 +32,28 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    queues
+  HDRS
+    "queues.h"
+  SRCS
+    "queues.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     execution
   HDRS
     "execution.h"
   SRCS
     "execution.c"
   DEPS
+    ::queues
     ::retirement
     ::workspace
     iree::base
@@ -86,6 +102,7 @@ loom_cc_test(
     "workspace_test.cc"
   DEPS
     ::execution
+    ::queues
     ::workspace
     iree::base
     iree::hal
@@ -110,6 +127,29 @@ loom_cc_library(
     iree::base
     iree::base::threading
     iree::hal
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    queues_tests
+  SRCS
+    "queues_test.cc"
+  DEPS
+    ::execution
+    ::queues
+    ::workspace
+    iree::base
+    iree::base::tooling::flags
+    iree::hal
+    iree::testing::gtest
+    loom::serve::runtime::device
+    loom::serve::runtime::host
+    loom::serve::testing::device
+  TESTONLY
+  ALWAYSLINK
   PUBLIC
 )
 endif()

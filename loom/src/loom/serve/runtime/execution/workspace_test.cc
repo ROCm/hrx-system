@@ -15,6 +15,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/queues.h"
 
 namespace {
 
@@ -57,6 +58,9 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
       ASSERT_EQ(
           families[i].family,
           iree_hal_queue_family(loom_serve_device_transfer_queue(device)));
+      IREE_ASSERT_OK(loom_serve_execution_queues_create(
+          families[i].family, families[i].family, iree_allocator_system(),
+          &execution_queues_[i]));
     }
     const iree_hal_pool_scope_t scope = {families.size(), families.data()};
     const iree_hal_slab_pool_options_t pool_options = {};
@@ -93,11 +97,9 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
     loom_serve_test_workspace_domain_t* domains[] = {&producer_, &consumer_,
                                                      &independent_};
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(domains); ++i) {
-      auto* device = loom_serve_device_group_at(group_, i % 2);
       IREE_ASSERT_OK(loom_serve_execution_create(
-          loom_serve_device_dispatch_queue(device),
-          loom_serve_device_transfer_queue(device), workspace_,
-          iree_allocator_system(), &domains[i]->execution));
+          execution_queues_[i % 2], workspace_, iree_allocator_system(),
+          &domains[i]->execution));
     }
     IREE_ASSERT_OK(iree_hal_semaphore_create(
         loom_serve_device_handle(loom_serve_device_group_at(group_, 1)),
@@ -121,6 +123,9 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
         IREE_EXPECT_OK(loom_serve_execution_drain(domain->execution));
         loom_serve_execution_release(domain->execution);
       }
+    }
+    for (auto* queues : execution_queues_) {
+      loom_serve_execution_queues_release(queues);
     }
     iree_hal_semaphore_release(gate_);
     loom_serve_workspace_release(workspace_);
@@ -187,6 +192,8 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
   loom_serve_device_group_t* group_ = nullptr;
   // Owned only until its reference transfers to the shared workspace.
   iree_hal_pool_t* backing_pool_ = nullptr;
+  // Separate device inventories sharing the same physical workspace scope.
+  std::array<loom_serve_execution_queues_t*, 2> execution_queues_ = {};
   // Shared geometry/accounting owner, independent of device records.
   loom_serve_workspace_t* workspace_ = nullptr;
   // First-device producer of an escaping allocation.
