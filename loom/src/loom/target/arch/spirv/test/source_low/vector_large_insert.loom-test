@@ -125,29 +125,29 @@ func.def target(@target) @insert_tail(%input: buffer, %output: buffer, %value: i
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @insert_tail(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %value: reg<spirv.id : i32>) asm {
-  %45 = OpConstant.offset64 0
-  %46 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %45
-  %47 = OpLoad.storage_buffer.i32 %46
-  %48 = OpConstant.offset64 4
-  %49 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %48
-  %50 = OpLoad.storage_buffer.i32 %49
-  %51 = OpConstant.offset64 8
-  %52 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %51
-  %53 = OpLoad.storage_buffer.i32 %52
-  %54 = OpConstant.offset64 12
-  %55 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %54
-  %56 = OpLoad.storage_buffer.i32 %55
-  %58 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %45
-  OpStore.storage_buffer.i32 %58, %47
-  %60 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %48
-  OpStore.storage_buffer.i32 %60, %50
-  %62 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %51
-  OpStore.storage_buffer.i32 %62, %53
-  %64 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %54
-  OpStore.storage_buffer.i32 %64, %56
-  %65 = OpConstant.offset64 16
-  %66 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %65
-  OpStore.storage_buffer.i32 %66, %value
+  %21 = OpConstant.offset64 0
+  %22 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %21
+  %23 = OpLoad.storage_buffer.i32 %22
+  %24 = OpConstant.offset64 4
+  %25 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %24
+  %26 = OpLoad.storage_buffer.i32 %25
+  %27 = OpConstant.offset64 8
+  %28 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %27
+  %29 = OpLoad.storage_buffer.i32 %28
+  %30 = OpConstant.offset64 12
+  %31 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %30
+  %32 = OpLoad.storage_buffer.i32 %31
+  %34 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %21
+  OpStore.storage_buffer.i32 %34, %23
+  %36 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %24
+  OpStore.storage_buffer.i32 %36, %26
+  %38 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %27
+  OpStore.storage_buffer.i32 %38, %29
+  %40 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %30
+  OpStore.storage_buffer.i32 %40, %32
+  %41 = OpConstant.offset64 16
+  %42 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %41
+  OpStore.storage_buffer.i32 %42, %value
   return
 }
 
@@ -168,53 +168,53 @@ func.def target(@target) @insert_dynamic(%input: buffer, %output: buffer, %value
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @insert_dynamic(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %value: reg<spirv.id : i64>, %position: reg<spirv.id : index>) where [range(%position, 0, 4)] asm {
-  %80 = OpConstant.offset64 0
-  %81 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %80
-  %82 = OpLoad.storage_buffer.i64 %81
-  %83 = OpConstant.offset64 8
-  %84 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %83
-  %85 = OpLoad.storage_buffer.i64 %84
-  %86 = OpConstant.offset64 16
-  %87 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %86
-  %88 = OpLoad.storage_buffer.i64 %87
-  %89 = OpConstant.offset64 24
-  %90 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %89
-  %91 = OpLoad.storage_buffer.i64 %90
-  %92 = OpConstant.offset64 32
-  %93 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %92
-  %94 = OpLoad.storage_buffer.i64 %93
-  %95 = OpConstant.i32 0 : reg<spirv.id : index>
-  %96 = OpConstant.i32 4 : reg<spirv.id : index>
-  %97 = OpBitcast.i32.u32 %position
-  %98 = OpBitcast.i32.u32 %96
-  %99 = OpULessThan.u32 %97, %98
-  %102 = OpUGreaterThanEqual.u32 %97, %98
-  %103 = OpSelect %99, %position, %95 : reg<spirv.id : index>
-  %104 = OpIEqual %95, %103
-  %105 = OpSelect.i64 %104, %value, %82
-  %106 = OpSelect.i64 %99, %105, %82
-  %107 = OpConstant.i32 1 : reg<spirv.id : index>
-  %108 = OpIEqual %107, %103
-  %109 = OpSelect.i64 %108, %value, %85
-  %110 = OpSelect.i64 %99, %109, %85
-  %111 = OpConstant.i32 2 : reg<spirv.id : index>
-  %112 = OpIEqual %111, %103
-  %113 = OpSelect.i64 %112, %value, %88
-  %114 = OpSelect.i64 %99, %113, %88
-  %115 = OpConstant.i32 3 : reg<spirv.id : index>
-  %116 = OpIEqual %115, %103
-  %117 = OpSelect.i64 %116, %value, %91
-  %118 = OpSelect.i64 %99, %117, %91
-  %119 = OpSelect.i64 %102, %value, %94
-  %121 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %80
-  OpStore.storage_buffer.i64 %121, %106
-  %123 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %83
-  OpStore.storage_buffer.i64 %123, %110
-  %125 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %86
-  OpStore.storage_buffer.i64 %125, %114
-  %127 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %89
-  OpStore.storage_buffer.i64 %127, %118
-  %129 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %92
-  OpStore.storage_buffer.i64 %129, %119
+  %56 = OpConstant.offset64 0
+  %57 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %56
+  %58 = OpLoad.storage_buffer.i64 %57
+  %59 = OpConstant.offset64 8
+  %60 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %59
+  %61 = OpLoad.storage_buffer.i64 %60
+  %62 = OpConstant.offset64 16
+  %63 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %62
+  %64 = OpLoad.storage_buffer.i64 %63
+  %65 = OpConstant.offset64 24
+  %66 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %65
+  %67 = OpLoad.storage_buffer.i64 %66
+  %68 = OpConstant.offset64 32
+  %69 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %68
+  %70 = OpLoad.storage_buffer.i64 %69
+  %71 = OpConstant.i32 0 : reg<spirv.id : index>
+  %72 = OpConstant.i32 4 : reg<spirv.id : index>
+  %73 = OpBitcast.i32.u32 %position
+  %74 = OpBitcast.i32.u32 %72
+  %75 = OpULessThan.u32 %73, %74
+  %78 = OpUGreaterThanEqual.u32 %73, %74
+  %79 = OpSelect %75, %position, %71 : reg<spirv.id : index>
+  %80 = OpIEqual %71, %79
+  %81 = OpSelect.i64 %80, %value, %58
+  %82 = OpSelect.i64 %75, %81, %58
+  %83 = OpConstant.i32 1 : reg<spirv.id : index>
+  %84 = OpIEqual %83, %79
+  %85 = OpSelect.i64 %84, %value, %61
+  %86 = OpSelect.i64 %75, %85, %61
+  %87 = OpConstant.i32 2 : reg<spirv.id : index>
+  %88 = OpIEqual %87, %79
+  %89 = OpSelect.i64 %88, %value, %64
+  %90 = OpSelect.i64 %75, %89, %64
+  %91 = OpConstant.i32 3 : reg<spirv.id : index>
+  %92 = OpIEqual %91, %79
+  %93 = OpSelect.i64 %92, %value, %67
+  %94 = OpSelect.i64 %75, %93, %67
+  %95 = OpSelect.i64 %78, %value, %70
+  %97 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %56
+  OpStore.storage_buffer.i64 %97, %82
+  %99 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %59
+  OpStore.storage_buffer.i64 %99, %86
+  %101 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %62
+  OpStore.storage_buffer.i64 %101, %90
+  %103 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %65
+  OpStore.storage_buffer.i64 %103, %94
+  %105 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %68
+  OpStore.storage_buffer.i64 %105, %95
   return
 }

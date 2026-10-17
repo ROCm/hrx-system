@@ -421,11 +421,14 @@ static iree_status_t loom_vector_legalize_shift(
       loom_module_value_type(context->module, loom_op_results(op)[0]);
   const int32_t bit_width =
       loom_scalar_type_bitwidth(loom_type_element_type(result_type));
+  // Normalize counts only within a supported value carrier. An oversized
+  // vector still needs packetization; composing its truncate/extend pair can
+  // otherwise recreate the same rejected shift without changing its carrier.
   // Fixed counts already expose their immediate value to target contracts.
-  // Narrowing them through a truncate/extend pair would recreate extraction
-  // shifts when conversion composition folds that pair.
-  if (bit_width == 64 && !loom_vector_shift_count_is_fixed(
-                             context->rewriter, loom_op_operands(op)[1])) {
+  if (bit_width == 64 &&
+      loom_target_legalization_op_has_source_vector_carriers(context, op) &&
+      !loom_vector_shift_count_is_fixed(context->rewriter,
+                                        loom_op_operands(op)[1])) {
     const loom_value_id_t count = loom_op_operands(op)[1];
     loom_value_fact_exact_lane_origin_t count_origin = {0};
     const bool has_i32_count_origin =
