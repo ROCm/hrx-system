@@ -89,10 +89,10 @@ class Intrinsics {
                    DecodeIntrinsic, FragmentIntrinsic, BufferIntrinsic,
                    ViewIntrinsic, VectorArithmeticIntrinsic,
                    VectorMemoryIntrinsic, AsyncIntrinsic, AtomicIntrinsic,
-                   FenceIntrinsic, KernelCollectiveIntrinsic, BarrierIntrinsic,
-                   TargetIntrinsic, AssemblyIntrinsic, TemplateApplyIntrinsic,
-                   CheckIntrinsic, AddressIntrinsic,
-                   NumericConversionIntrinsic>;
+                   FenceIntrinsic, KernelCollectiveIntrinsic,
+                   SubgroupShuffleIntrinsic, BarrierIntrinsic, TargetIntrinsic,
+                   AssemblyIntrinsic, TemplateApplyIntrinsic, CheckIntrinsic,
+                   AddressIntrinsic, NumericConversionIntrinsic>;
 
   Intrinsics(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
              Scalars& scalars, Vectors& vectors, Locations& locations,

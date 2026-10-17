@@ -2495,14 +2495,14 @@ class Translator final : private Initialization::Evaluation {
       auto* binding = intrinsics_.lookup(function, ast);
       if (binding &&
           (std::holds_alternative<KernelCollectiveIntrinsic>(*binding) ||
+           std::holds_alternative<SubgroupShuffleIntrinsic>(*binding) ||
            std::holds_alternative<AsyncIntrinsic>(*binding))) {
         require_kernel_context(ast);
       }
       if (binding && std::holds_alternative<TargetIntrinsic>(*binding)) {
         require_launch_configuration_context(ast);
       }
-      const bool shuffle_xor = annotated(function, "shuffle_xor");
-      if (!binding && !shuffle_xor) {
+      if (!binding) {
         if (annotated(function, "kernel")) {
           fail(ast, "kernels require an explicit launch operation");
         }
@@ -2512,8 +2512,7 @@ class Translator final : private Initialization::Evaluation {
         }
         return *called;
       }
-      auto* assembly =
-          binding ? std::get_if<AssemblyIntrinsic>(binding) : nullptr;
+      auto* assembly = std::get_if<AssemblyIntrinsic>(binding);
       loom_symbol_ref_t fragment = {};
       auto* expressions = call->expressionList;
       if (assembly) {
@@ -2529,36 +2528,13 @@ class Translator final : private Initialization::Evaluation {
       if (assembly) {
         return *assembly->call(fragment, source_arguments, &builder_, source);
       }
-      auto flatten_arguments = [&] {
-        std::vector<loom_value_id_t> arguments;
-        for (auto argument : source_arguments) {
-          argument.append_to(arguments);
-        }
-        return arguments;
-      };
-      loom_op_t* op;
-      if (shuffle_xor) {
-        require_kernel_context(ast);
-        auto arguments = flatten_arguments();
-        if (arguments.size() != 3) {
-          fail(ast, "shuffle_xor requires three scalar operands");
-        }
-        check(loom_kernel_subgroup_shuffle_build(
-            &builder_, LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_XOR, arguments[0],
-            arguments[1], arguments[2], types_.get(ast->type, ast), source,
-            &op));
-        return result(op);
+      auto called =
+          intrinsics_.call(*binding, source_arguments, value_arena_, storage_,
+                           ast, lexical_fastmath_flags_, &builder_, source);
+      if (!called.value) {
+        fail(ast, "void intrinsic cannot be used as a value");
       }
-      if (binding) {
-        auto called =
-            intrinsics_.call(*binding, source_arguments, value_arena_, storage_,
-                             ast, lexical_fastmath_flags_, &builder_, source);
-        if (!called.value) {
-          fail(ast, "void intrinsic cannot be used as a value");
-        }
-        return *called.value;
-      }
-      fail(ast, "call has no admitted Loom binding");
+      return *called.value;
     }
     fail(ast,
          "unsupported expression: " + std::string(cxx::to_string(ast->kind())));

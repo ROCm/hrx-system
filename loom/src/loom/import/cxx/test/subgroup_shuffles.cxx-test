@@ -1,0 +1,711 @@
+// RUN: roundtrip
+// Every mode preserves the payload and source-participation result together.
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+#include <stdfloat>
+
+using namespace loom::kernel::subgroup;
+
+#define SHUFFLES(Name, Type)                                                  \
+  [[loom::force_inline]] shuffle_result<Type> Name##_xor(                       \
+      Type value, unsigned offset, unsigned width) {                           \
+    return shuffle_xor(value, offset, width);                                  \
+  }                                                                           \
+  [[loom::force_inline]] shuffle_result<Type> Name##_up(                        \
+      Type value, unsigned offset, unsigned width) {                           \
+    return shuffle_up(value, offset, width);                                   \
+  }                                                                           \
+  [[loom::force_inline]] shuffle_result<Type> Name##_down(                      \
+      Type value, unsigned offset, unsigned width) {                           \
+    return shuffle_down(value, offset, width);                                 \
+  }                                                                           \
+  [[loom::force_inline]] shuffle_result<Type> Name##_index(                     \
+      Type value, unsigned offset, unsigned width) {                           \
+    return shuffle_index(value, offset, width);                                \
+  }
+
+SHUFFLES(boolean, bool)
+SHUFFLES(signed8, signed char)
+SHUFFLES(unsigned8, unsigned char)
+SHUFFLES(signed16, short)
+SHUFFLES(unsigned16, unsigned short)
+SHUFFLES(signed32, int)
+SHUFFLES(unsigned32, unsigned)
+SHUFFLES(signed64, long long)
+SHUFFLES(unsigned64, unsigned long long)
+SHUFFLES(float8_e4m3, loom::type::float8_e4m3fn_t)
+SHUFFLES(float8_e5m2, loom::type::float8_e5m2_t)
+SHUFFLES(float16, std::float16_t)
+SHUFFLES(bfloat16, std::bfloat16_t)
+SHUFFLES(float32, float)
+SHUFFLES(float64, double)
+
+#define VECTOR_SHUFFLES(Name, Type, Width)                                    \
+  using Name = Type __attribute__((ext_vector_type(Width)));                  \
+  SHUFFLES(Name, Name)
+
+VECTOR_SHUFFLES(Signed8x4, signed char, 4)
+VECTOR_SHUFFLES(Unsigned8x4, unsigned char, 4)
+VECTOR_SHUFFLES(Signed16x4, short, 4)
+VECTOR_SHUFFLES(Unsigned16x4, unsigned short, 4)
+VECTOR_SHUFFLES(Signed32x4, int, 4)
+VECTOR_SHUFFLES(Unsigned32x4, unsigned, 4)
+VECTOR_SHUFFLES(Signed64x2, long long, 2)
+VECTOR_SHUFFLES(Unsigned64x2, unsigned long long, 2)
+VECTOR_SHUFFLES(Float8E4M3x4, loom::type::float8_e4m3fn_t, 4)
+VECTOR_SHUFFLES(Float8E5M2x4, loom::type::float8_e5m2_t, 4)
+VECTOR_SHUFFLES(Float16x4, std::float16_t, 4)
+VECTOR_SHUFFLES(BFloat16x4, std::bfloat16_t, 4)
+VECTOR_SHUFFLES(Float32x4, float, 4)
+VECTOR_SHUFFLES(Float64x2, double, 2)
+
+using Static = loom::type::vector<loom::type::shape<3>, unsigned>;
+using Dynamic = loom::type::vector<loom::type::shape<loom::type::dynamic>, float>;
+using Predicate = loom::type::vector<loom::type::shape<4>, bool>;
+SHUFFLES(predicate_vector, Predicate)
+SHUFFLES(static_vector, Static)
+SHUFFLES(dynamic_vector, Dynamic)
+
+#undef VECTOR_SHUFFLES
+#undef SHUFFLES
+// ----
+func.def public inline @boolean_xor(%value: i1, %offset: i32, %width: i32) -> (i1, i1) {
+  %5, %6 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i1, i32, i32
+  func.return %5, %6 : i1, i1
+}
+
+func.def public inline @boolean_up(%value: i1, %offset: i32, %width: i32) -> (i1, i1) {
+  %12, %13 = kernel.subgroup.shuffle<up> %value, %offset, %width : i1, i32, i32
+  func.return %12, %13 : i1, i1
+}
+
+func.def public inline @boolean_down(%value: i1, %offset: i32, %width: i32) -> (i1, i1) {
+  %19, %20 = kernel.subgroup.shuffle<down> %value, %offset, %width : i1, i32, i32
+  func.return %19, %20 : i1, i1
+}
+
+func.def public inline @boolean_index(%value: i1, %offset: i32, %width: i32) -> (i1, i1) {
+  %26, %27 = kernel.subgroup.shuffle<index> %value, %offset, %width : i1, i32, i32
+  func.return %26, %27 : i1, i1
+}
+
+func.def public inline @signed8_xor(%value: i8, %offset: i32, %width: i32) -> (i8, i1) {
+  %33, %34 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i8, i32, i32
+  func.return %33, %34 : i8, i1
+}
+
+func.def public inline @signed8_up(%value: i8, %offset: i32, %width: i32) -> (i8, i1) {
+  %40, %41 = kernel.subgroup.shuffle<up> %value, %offset, %width : i8, i32, i32
+  func.return %40, %41 : i8, i1
+}
+
+func.def public inline @signed8_down(%value: i8, %offset: i32, %width: i32) -> (i8, i1) {
+  %47, %48 = kernel.subgroup.shuffle<down> %value, %offset, %width : i8, i32, i32
+  func.return %47, %48 : i8, i1
+}
+
+func.def public inline @signed8_index(%value: i8, %offset: i32, %width: i32) -> (i8, i1) {
+  %54, %55 = kernel.subgroup.shuffle<index> %value, %offset, %width : i8, i32, i32
+  func.return %54, %55 : i8, i1
+}
+
+func.def public inline @unsigned8_xor(%value: i8, %offset: i32, %width: i32) -> (i8, i1) {
+  %61, %62 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i8, i32, i32
+  func.return %61, %62 : i8, i1
+}
+
+func.def public inline @unsigned8_up(%value: i8, %offset: i32, %width: i32) -> (i8, i1) {
+  %68, %69 = kernel.subgroup.shuffle<up> %value, %offset, %width : i8, i32, i32
+  func.return %68, %69 : i8, i1
+}
+
+func.def public inline @unsigned8_down(%value: i8, %offset: i32, %width: i32) -> (i8, i1) {
+  %75, %76 = kernel.subgroup.shuffle<down> %value, %offset, %width : i8, i32, i32
+  func.return %75, %76 : i8, i1
+}
+
+func.def public inline @unsigned8_index(%value: i8, %offset: i32, %width: i32) -> (i8, i1) {
+  %82, %83 = kernel.subgroup.shuffle<index> %value, %offset, %width : i8, i32, i32
+  func.return %82, %83 : i8, i1
+}
+
+func.def public inline @signed16_xor(%value: i16, %offset: i32, %width: i32) -> (i16, i1) {
+  %89, %90 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i16, i32, i32
+  func.return %89, %90 : i16, i1
+}
+
+func.def public inline @signed16_up(%value: i16, %offset: i32, %width: i32) -> (i16, i1) {
+  %96, %97 = kernel.subgroup.shuffle<up> %value, %offset, %width : i16, i32, i32
+  func.return %96, %97 : i16, i1
+}
+
+func.def public inline @signed16_down(%value: i16, %offset: i32, %width: i32) -> (i16, i1) {
+  %103, %104 = kernel.subgroup.shuffle<down> %value, %offset, %width : i16, i32, i32
+  func.return %103, %104 : i16, i1
+}
+
+func.def public inline @signed16_index(%value: i16, %offset: i32, %width: i32) -> (i16, i1) {
+  %110, %111 = kernel.subgroup.shuffle<index> %value, %offset, %width : i16, i32, i32
+  func.return %110, %111 : i16, i1
+}
+
+func.def public inline @unsigned16_xor(%value: i16, %offset: i32, %width: i32) -> (i16, i1) {
+  %117, %118 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i16, i32, i32
+  func.return %117, %118 : i16, i1
+}
+
+func.def public inline @unsigned16_up(%value: i16, %offset: i32, %width: i32) -> (i16, i1) {
+  %124, %125 = kernel.subgroup.shuffle<up> %value, %offset, %width : i16, i32, i32
+  func.return %124, %125 : i16, i1
+}
+
+func.def public inline @unsigned16_down(%value: i16, %offset: i32, %width: i32) -> (i16, i1) {
+  %131, %132 = kernel.subgroup.shuffle<down> %value, %offset, %width : i16, i32, i32
+  func.return %131, %132 : i16, i1
+}
+
+func.def public inline @unsigned16_index(%value: i16, %offset: i32, %width: i32) -> (i16, i1) {
+  %138, %139 = kernel.subgroup.shuffle<index> %value, %offset, %width : i16, i32, i32
+  func.return %138, %139 : i16, i1
+}
+
+func.def public inline @signed32_xor(%value: i32, %offset: i32, %width: i32) -> (i32, i1) {
+  %145, %146 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i32, i32, i32
+  func.return %145, %146 : i32, i1
+}
+
+func.def public inline @signed32_up(%value: i32, %offset: i32, %width: i32) -> (i32, i1) {
+  %152, %153 = kernel.subgroup.shuffle<up> %value, %offset, %width : i32, i32, i32
+  func.return %152, %153 : i32, i1
+}
+
+func.def public inline @signed32_down(%value: i32, %offset: i32, %width: i32) -> (i32, i1) {
+  %159, %160 = kernel.subgroup.shuffle<down> %value, %offset, %width : i32, i32, i32
+  func.return %159, %160 : i32, i1
+}
+
+func.def public inline @signed32_index(%value: i32, %offset: i32, %width: i32) -> (i32, i1) {
+  %166, %167 = kernel.subgroup.shuffle<index> %value, %offset, %width : i32, i32, i32
+  func.return %166, %167 : i32, i1
+}
+
+func.def public inline @unsigned32_xor(%value: i32, %offset: i32, %width: i32) -> (i32, i1) {
+  %173, %174 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i32, i32, i32
+  func.return %173, %174 : i32, i1
+}
+
+func.def public inline @unsigned32_up(%value: i32, %offset: i32, %width: i32) -> (i32, i1) {
+  %180, %181 = kernel.subgroup.shuffle<up> %value, %offset, %width : i32, i32, i32
+  func.return %180, %181 : i32, i1
+}
+
+func.def public inline @unsigned32_down(%value: i32, %offset: i32, %width: i32) -> (i32, i1) {
+  %187, %188 = kernel.subgroup.shuffle<down> %value, %offset, %width : i32, i32, i32
+  func.return %187, %188 : i32, i1
+}
+
+func.def public inline @unsigned32_index(%value: i32, %offset: i32, %width: i32) -> (i32, i1) {
+  %194, %195 = kernel.subgroup.shuffle<index> %value, %offset, %width : i32, i32, i32
+  func.return %194, %195 : i32, i1
+}
+
+func.def public inline @signed64_xor(%value: i64, %offset: i32, %width: i32) -> (i64, i1) {
+  %201, %202 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i64, i32, i32
+  func.return %201, %202 : i64, i1
+}
+
+func.def public inline @signed64_up(%value: i64, %offset: i32, %width: i32) -> (i64, i1) {
+  %208, %209 = kernel.subgroup.shuffle<up> %value, %offset, %width : i64, i32, i32
+  func.return %208, %209 : i64, i1
+}
+
+func.def public inline @signed64_down(%value: i64, %offset: i32, %width: i32) -> (i64, i1) {
+  %215, %216 = kernel.subgroup.shuffle<down> %value, %offset, %width : i64, i32, i32
+  func.return %215, %216 : i64, i1
+}
+
+func.def public inline @signed64_index(%value: i64, %offset: i32, %width: i32) -> (i64, i1) {
+  %222, %223 = kernel.subgroup.shuffle<index> %value, %offset, %width : i64, i32, i32
+  func.return %222, %223 : i64, i1
+}
+
+func.def public inline @unsigned64_xor(%value: i64, %offset: i32, %width: i32) -> (i64, i1) {
+  %229, %230 = kernel.subgroup.shuffle<xor> %value, %offset, %width : i64, i32, i32
+  func.return %229, %230 : i64, i1
+}
+
+func.def public inline @unsigned64_up(%value: i64, %offset: i32, %width: i32) -> (i64, i1) {
+  %236, %237 = kernel.subgroup.shuffle<up> %value, %offset, %width : i64, i32, i32
+  func.return %236, %237 : i64, i1
+}
+
+func.def public inline @unsigned64_down(%value: i64, %offset: i32, %width: i32) -> (i64, i1) {
+  %243, %244 = kernel.subgroup.shuffle<down> %value, %offset, %width : i64, i32, i32
+  func.return %243, %244 : i64, i1
+}
+
+func.def public inline @unsigned64_index(%value: i64, %offset: i32, %width: i32) -> (i64, i1) {
+  %250, %251 = kernel.subgroup.shuffle<index> %value, %offset, %width : i64, i32, i32
+  func.return %250, %251 : i64, i1
+}
+
+func.def public inline @float8_e4m3_xor(%value: f8E4M3, %offset: i32, %width: i32) -> (f8E4M3, i1) {
+  %257, %258 = kernel.subgroup.shuffle<xor> %value, %offset, %width : f8E4M3, i32, i32
+  func.return %257, %258 : f8E4M3, i1
+}
+
+func.def public inline @float8_e4m3_up(%value: f8E4M3, %offset: i32, %width: i32) -> (f8E4M3, i1) {
+  %264, %265 = kernel.subgroup.shuffle<up> %value, %offset, %width : f8E4M3, i32, i32
+  func.return %264, %265 : f8E4M3, i1
+}
+
+func.def public inline @float8_e4m3_down(%value: f8E4M3, %offset: i32, %width: i32) -> (f8E4M3, i1) {
+  %271, %272 = kernel.subgroup.shuffle<down> %value, %offset, %width : f8E4M3, i32, i32
+  func.return %271, %272 : f8E4M3, i1
+}
+
+func.def public inline @float8_e4m3_index(%value: f8E4M3, %offset: i32, %width: i32) -> (f8E4M3, i1) {
+  %278, %279 = kernel.subgroup.shuffle<index> %value, %offset, %width : f8E4M3, i32, i32
+  func.return %278, %279 : f8E4M3, i1
+}
+
+func.def public inline @float8_e5m2_xor(%value: f8E5M2, %offset: i32, %width: i32) -> (f8E5M2, i1) {
+  %285, %286 = kernel.subgroup.shuffle<xor> %value, %offset, %width : f8E5M2, i32, i32
+  func.return %285, %286 : f8E5M2, i1
+}
+
+func.def public inline @float8_e5m2_up(%value: f8E5M2, %offset: i32, %width: i32) -> (f8E5M2, i1) {
+  %292, %293 = kernel.subgroup.shuffle<up> %value, %offset, %width : f8E5M2, i32, i32
+  func.return %292, %293 : f8E5M2, i1
+}
+
+func.def public inline @float8_e5m2_down(%value: f8E5M2, %offset: i32, %width: i32) -> (f8E5M2, i1) {
+  %299, %300 = kernel.subgroup.shuffle<down> %value, %offset, %width : f8E5M2, i32, i32
+  func.return %299, %300 : f8E5M2, i1
+}
+
+func.def public inline @float8_e5m2_index(%value: f8E5M2, %offset: i32, %width: i32) -> (f8E5M2, i1) {
+  %306, %307 = kernel.subgroup.shuffle<index> %value, %offset, %width : f8E5M2, i32, i32
+  func.return %306, %307 : f8E5M2, i1
+}
+
+func.def public inline @float16_xor(%value: f16, %offset: i32, %width: i32) -> (f16, i1) {
+  %313, %314 = kernel.subgroup.shuffle<xor> %value, %offset, %width : f16, i32, i32
+  func.return %313, %314 : f16, i1
+}
+
+func.def public inline @float16_up(%value: f16, %offset: i32, %width: i32) -> (f16, i1) {
+  %320, %321 = kernel.subgroup.shuffle<up> %value, %offset, %width : f16, i32, i32
+  func.return %320, %321 : f16, i1
+}
+
+func.def public inline @float16_down(%value: f16, %offset: i32, %width: i32) -> (f16, i1) {
+  %327, %328 = kernel.subgroup.shuffle<down> %value, %offset, %width : f16, i32, i32
+  func.return %327, %328 : f16, i1
+}
+
+func.def public inline @float16_index(%value: f16, %offset: i32, %width: i32) -> (f16, i1) {
+  %334, %335 = kernel.subgroup.shuffle<index> %value, %offset, %width : f16, i32, i32
+  func.return %334, %335 : f16, i1
+}
+
+func.def public inline @bfloat16_xor(%value: bf16, %offset: i32, %width: i32) -> (bf16, i1) {
+  %341, %342 = kernel.subgroup.shuffle<xor> %value, %offset, %width : bf16, i32, i32
+  func.return %341, %342 : bf16, i1
+}
+
+func.def public inline @bfloat16_up(%value: bf16, %offset: i32, %width: i32) -> (bf16, i1) {
+  %348, %349 = kernel.subgroup.shuffle<up> %value, %offset, %width : bf16, i32, i32
+  func.return %348, %349 : bf16, i1
+}
+
+func.def public inline @bfloat16_down(%value: bf16, %offset: i32, %width: i32) -> (bf16, i1) {
+  %355, %356 = kernel.subgroup.shuffle<down> %value, %offset, %width : bf16, i32, i32
+  func.return %355, %356 : bf16, i1
+}
+
+func.def public inline @bfloat16_index(%value: bf16, %offset: i32, %width: i32) -> (bf16, i1) {
+  %362, %363 = kernel.subgroup.shuffle<index> %value, %offset, %width : bf16, i32, i32
+  func.return %362, %363 : bf16, i1
+}
+
+func.def public inline @float32_xor(%value: f32, %offset: i32, %width: i32) -> (f32, i1) {
+  %369, %370 = kernel.subgroup.shuffle<xor> %value, %offset, %width : f32, i32, i32
+  func.return %369, %370 : f32, i1
+}
+
+func.def public inline @float32_up(%value: f32, %offset: i32, %width: i32) -> (f32, i1) {
+  %376, %377 = kernel.subgroup.shuffle<up> %value, %offset, %width : f32, i32, i32
+  func.return %376, %377 : f32, i1
+}
+
+func.def public inline @float32_down(%value: f32, %offset: i32, %width: i32) -> (f32, i1) {
+  %383, %384 = kernel.subgroup.shuffle<down> %value, %offset, %width : f32, i32, i32
+  func.return %383, %384 : f32, i1
+}
+
+func.def public inline @float32_index(%value: f32, %offset: i32, %width: i32) -> (f32, i1) {
+  %390, %391 = kernel.subgroup.shuffle<index> %value, %offset, %width : f32, i32, i32
+  func.return %390, %391 : f32, i1
+}
+
+func.def public inline @float64_xor(%value: f64, %offset: i32, %width: i32) -> (f64, i1) {
+  %397, %398 = kernel.subgroup.shuffle<xor> %value, %offset, %width : f64, i32, i32
+  func.return %397, %398 : f64, i1
+}
+
+func.def public inline @float64_up(%value: f64, %offset: i32, %width: i32) -> (f64, i1) {
+  %404, %405 = kernel.subgroup.shuffle<up> %value, %offset, %width : f64, i32, i32
+  func.return %404, %405 : f64, i1
+}
+
+func.def public inline @float64_down(%value: f64, %offset: i32, %width: i32) -> (f64, i1) {
+  %411, %412 = kernel.subgroup.shuffle<down> %value, %offset, %width : f64, i32, i32
+  func.return %411, %412 : f64, i1
+}
+
+func.def public inline @float64_index(%value: f64, %offset: i32, %width: i32) -> (f64, i1) {
+  %418, %419 = kernel.subgroup.shuffle<index> %value, %offset, %width : f64, i32, i32
+  func.return %418, %419 : f64, i1
+}
+
+func.def public inline @Signed8x4_xor(%value: vector<4xi8>, %offset: i32, %width: i32) -> (vector<4xi8>, i1) {
+  %425, %426 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xi8>, i32, i32
+  func.return %425, %426 : vector<4xi8>, i1
+}
+
+func.def public inline @Signed8x4_up(%value: vector<4xi8>, %offset: i32, %width: i32) -> (vector<4xi8>, i1) {
+  %432, %433 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xi8>, i32, i32
+  func.return %432, %433 : vector<4xi8>, i1
+}
+
+func.def public inline @Signed8x4_down(%value: vector<4xi8>, %offset: i32, %width: i32) -> (vector<4xi8>, i1) {
+  %439, %440 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xi8>, i32, i32
+  func.return %439, %440 : vector<4xi8>, i1
+}
+
+func.def public inline @Signed8x4_index(%value: vector<4xi8>, %offset: i32, %width: i32) -> (vector<4xi8>, i1) {
+  %446, %447 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi8>, i32, i32
+  func.return %446, %447 : vector<4xi8>, i1
+}
+
+func.def public inline @Unsigned8x4_xor(%value: vector<4xi8>, %offset: i32, %width: i32) -> (vector<4xi8>, i1) {
+  %453, %454 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xi8>, i32, i32
+  func.return %453, %454 : vector<4xi8>, i1
+}
+
+func.def public inline @Unsigned8x4_up(%value: vector<4xi8>, %offset: i32, %width: i32) -> (vector<4xi8>, i1) {
+  %460, %461 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xi8>, i32, i32
+  func.return %460, %461 : vector<4xi8>, i1
+}
+
+func.def public inline @Unsigned8x4_down(%value: vector<4xi8>, %offset: i32, %width: i32) -> (vector<4xi8>, i1) {
+  %467, %468 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xi8>, i32, i32
+  func.return %467, %468 : vector<4xi8>, i1
+}
+
+func.def public inline @Unsigned8x4_index(%value: vector<4xi8>, %offset: i32, %width: i32) -> (vector<4xi8>, i1) {
+  %474, %475 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi8>, i32, i32
+  func.return %474, %475 : vector<4xi8>, i1
+}
+
+func.def public inline @Signed16x4_xor(%value: vector<4xi16>, %offset: i32, %width: i32) -> (vector<4xi16>, i1) {
+  %481, %482 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xi16>, i32, i32
+  func.return %481, %482 : vector<4xi16>, i1
+}
+
+func.def public inline @Signed16x4_up(%value: vector<4xi16>, %offset: i32, %width: i32) -> (vector<4xi16>, i1) {
+  %488, %489 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xi16>, i32, i32
+  func.return %488, %489 : vector<4xi16>, i1
+}
+
+func.def public inline @Signed16x4_down(%value: vector<4xi16>, %offset: i32, %width: i32) -> (vector<4xi16>, i1) {
+  %495, %496 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xi16>, i32, i32
+  func.return %495, %496 : vector<4xi16>, i1
+}
+
+func.def public inline @Signed16x4_index(%value: vector<4xi16>, %offset: i32, %width: i32) -> (vector<4xi16>, i1) {
+  %502, %503 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi16>, i32, i32
+  func.return %502, %503 : vector<4xi16>, i1
+}
+
+func.def public inline @Unsigned16x4_xor(%value: vector<4xi16>, %offset: i32, %width: i32) -> (vector<4xi16>, i1) {
+  %509, %510 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xi16>, i32, i32
+  func.return %509, %510 : vector<4xi16>, i1
+}
+
+func.def public inline @Unsigned16x4_up(%value: vector<4xi16>, %offset: i32, %width: i32) -> (vector<4xi16>, i1) {
+  %516, %517 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xi16>, i32, i32
+  func.return %516, %517 : vector<4xi16>, i1
+}
+
+func.def public inline @Unsigned16x4_down(%value: vector<4xi16>, %offset: i32, %width: i32) -> (vector<4xi16>, i1) {
+  %523, %524 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xi16>, i32, i32
+  func.return %523, %524 : vector<4xi16>, i1
+}
+
+func.def public inline @Unsigned16x4_index(%value: vector<4xi16>, %offset: i32, %width: i32) -> (vector<4xi16>, i1) {
+  %530, %531 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi16>, i32, i32
+  func.return %530, %531 : vector<4xi16>, i1
+}
+
+func.def public inline @Signed32x4_xor(%value: vector<4xi32>, %offset: i32, %width: i32) -> (vector<4xi32>, i1) {
+  %537, %538 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xi32>, i32, i32
+  func.return %537, %538 : vector<4xi32>, i1
+}
+
+func.def public inline @Signed32x4_up(%value: vector<4xi32>, %offset: i32, %width: i32) -> (vector<4xi32>, i1) {
+  %544, %545 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xi32>, i32, i32
+  func.return %544, %545 : vector<4xi32>, i1
+}
+
+func.def public inline @Signed32x4_down(%value: vector<4xi32>, %offset: i32, %width: i32) -> (vector<4xi32>, i1) {
+  %551, %552 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xi32>, i32, i32
+  func.return %551, %552 : vector<4xi32>, i1
+}
+
+func.def public inline @Signed32x4_index(%value: vector<4xi32>, %offset: i32, %width: i32) -> (vector<4xi32>, i1) {
+  %558, %559 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi32>, i32, i32
+  func.return %558, %559 : vector<4xi32>, i1
+}
+
+func.def public inline @Unsigned32x4_xor(%value: vector<4xi32>, %offset: i32, %width: i32) -> (vector<4xi32>, i1) {
+  %565, %566 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xi32>, i32, i32
+  func.return %565, %566 : vector<4xi32>, i1
+}
+
+func.def public inline @Unsigned32x4_up(%value: vector<4xi32>, %offset: i32, %width: i32) -> (vector<4xi32>, i1) {
+  %572, %573 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xi32>, i32, i32
+  func.return %572, %573 : vector<4xi32>, i1
+}
+
+func.def public inline @Unsigned32x4_down(%value: vector<4xi32>, %offset: i32, %width: i32) -> (vector<4xi32>, i1) {
+  %579, %580 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xi32>, i32, i32
+  func.return %579, %580 : vector<4xi32>, i1
+}
+
+func.def public inline @Unsigned32x4_index(%value: vector<4xi32>, %offset: i32, %width: i32) -> (vector<4xi32>, i1) {
+  %586, %587 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi32>, i32, i32
+  func.return %586, %587 : vector<4xi32>, i1
+}
+
+func.def public inline @Signed64x2_xor(%value: vector<2xi64>, %offset: i32, %width: i32) -> (vector<2xi64>, i1) {
+  %593, %594 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<2xi64>, i32, i32
+  func.return %593, %594 : vector<2xi64>, i1
+}
+
+func.def public inline @Signed64x2_up(%value: vector<2xi64>, %offset: i32, %width: i32) -> (vector<2xi64>, i1) {
+  %600, %601 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<2xi64>, i32, i32
+  func.return %600, %601 : vector<2xi64>, i1
+}
+
+func.def public inline @Signed64x2_down(%value: vector<2xi64>, %offset: i32, %width: i32) -> (vector<2xi64>, i1) {
+  %607, %608 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<2xi64>, i32, i32
+  func.return %607, %608 : vector<2xi64>, i1
+}
+
+func.def public inline @Signed64x2_index(%value: vector<2xi64>, %offset: i32, %width: i32) -> (vector<2xi64>, i1) {
+  %614, %615 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<2xi64>, i32, i32
+  func.return %614, %615 : vector<2xi64>, i1
+}
+
+func.def public inline @Unsigned64x2_xor(%value: vector<2xi64>, %offset: i32, %width: i32) -> (vector<2xi64>, i1) {
+  %621, %622 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<2xi64>, i32, i32
+  func.return %621, %622 : vector<2xi64>, i1
+}
+
+func.def public inline @Unsigned64x2_up(%value: vector<2xi64>, %offset: i32, %width: i32) -> (vector<2xi64>, i1) {
+  %628, %629 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<2xi64>, i32, i32
+  func.return %628, %629 : vector<2xi64>, i1
+}
+
+func.def public inline @Unsigned64x2_down(%value: vector<2xi64>, %offset: i32, %width: i32) -> (vector<2xi64>, i1) {
+  %635, %636 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<2xi64>, i32, i32
+  func.return %635, %636 : vector<2xi64>, i1
+}
+
+func.def public inline @Unsigned64x2_index(%value: vector<2xi64>, %offset: i32, %width: i32) -> (vector<2xi64>, i1) {
+  %642, %643 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<2xi64>, i32, i32
+  func.return %642, %643 : vector<2xi64>, i1
+}
+
+func.def public inline @Float8E4M3x4_xor(%value: vector<4xf8E4M3>, %offset: i32, %width: i32) -> (vector<4xf8E4M3>, i1) {
+  %649, %650 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xf8E4M3>, i32, i32
+  func.return %649, %650 : vector<4xf8E4M3>, i1
+}
+
+func.def public inline @Float8E4M3x4_up(%value: vector<4xf8E4M3>, %offset: i32, %width: i32) -> (vector<4xf8E4M3>, i1) {
+  %656, %657 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xf8E4M3>, i32, i32
+  func.return %656, %657 : vector<4xf8E4M3>, i1
+}
+
+func.def public inline @Float8E4M3x4_down(%value: vector<4xf8E4M3>, %offset: i32, %width: i32) -> (vector<4xf8E4M3>, i1) {
+  %663, %664 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xf8E4M3>, i32, i32
+  func.return %663, %664 : vector<4xf8E4M3>, i1
+}
+
+func.def public inline @Float8E4M3x4_index(%value: vector<4xf8E4M3>, %offset: i32, %width: i32) -> (vector<4xf8E4M3>, i1) {
+  %670, %671 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xf8E4M3>, i32, i32
+  func.return %670, %671 : vector<4xf8E4M3>, i1
+}
+
+func.def public inline @Float8E5M2x4_xor(%value: vector<4xf8E5M2>, %offset: i32, %width: i32) -> (vector<4xf8E5M2>, i1) {
+  %677, %678 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xf8E5M2>, i32, i32
+  func.return %677, %678 : vector<4xf8E5M2>, i1
+}
+
+func.def public inline @Float8E5M2x4_up(%value: vector<4xf8E5M2>, %offset: i32, %width: i32) -> (vector<4xf8E5M2>, i1) {
+  %684, %685 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xf8E5M2>, i32, i32
+  func.return %684, %685 : vector<4xf8E5M2>, i1
+}
+
+func.def public inline @Float8E5M2x4_down(%value: vector<4xf8E5M2>, %offset: i32, %width: i32) -> (vector<4xf8E5M2>, i1) {
+  %691, %692 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xf8E5M2>, i32, i32
+  func.return %691, %692 : vector<4xf8E5M2>, i1
+}
+
+func.def public inline @Float8E5M2x4_index(%value: vector<4xf8E5M2>, %offset: i32, %width: i32) -> (vector<4xf8E5M2>, i1) {
+  %698, %699 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xf8E5M2>, i32, i32
+  func.return %698, %699 : vector<4xf8E5M2>, i1
+}
+
+func.def public inline @Float16x4_xor(%value: vector<4xf16>, %offset: i32, %width: i32) -> (vector<4xf16>, i1) {
+  %705, %706 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xf16>, i32, i32
+  func.return %705, %706 : vector<4xf16>, i1
+}
+
+func.def public inline @Float16x4_up(%value: vector<4xf16>, %offset: i32, %width: i32) -> (vector<4xf16>, i1) {
+  %712, %713 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xf16>, i32, i32
+  func.return %712, %713 : vector<4xf16>, i1
+}
+
+func.def public inline @Float16x4_down(%value: vector<4xf16>, %offset: i32, %width: i32) -> (vector<4xf16>, i1) {
+  %719, %720 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xf16>, i32, i32
+  func.return %719, %720 : vector<4xf16>, i1
+}
+
+func.def public inline @Float16x4_index(%value: vector<4xf16>, %offset: i32, %width: i32) -> (vector<4xf16>, i1) {
+  %726, %727 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xf16>, i32, i32
+  func.return %726, %727 : vector<4xf16>, i1
+}
+
+func.def public inline @BFloat16x4_xor(%value: vector<4xbf16>, %offset: i32, %width: i32) -> (vector<4xbf16>, i1) {
+  %733, %734 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xbf16>, i32, i32
+  func.return %733, %734 : vector<4xbf16>, i1
+}
+
+func.def public inline @BFloat16x4_up(%value: vector<4xbf16>, %offset: i32, %width: i32) -> (vector<4xbf16>, i1) {
+  %740, %741 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xbf16>, i32, i32
+  func.return %740, %741 : vector<4xbf16>, i1
+}
+
+func.def public inline @BFloat16x4_down(%value: vector<4xbf16>, %offset: i32, %width: i32) -> (vector<4xbf16>, i1) {
+  %747, %748 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xbf16>, i32, i32
+  func.return %747, %748 : vector<4xbf16>, i1
+}
+
+func.def public inline @BFloat16x4_index(%value: vector<4xbf16>, %offset: i32, %width: i32) -> (vector<4xbf16>, i1) {
+  %754, %755 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xbf16>, i32, i32
+  func.return %754, %755 : vector<4xbf16>, i1
+}
+
+func.def public inline @Float32x4_xor(%value: vector<4xf32>, %offset: i32, %width: i32) -> (vector<4xf32>, i1) {
+  %761, %762 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xf32>, i32, i32
+  func.return %761, %762 : vector<4xf32>, i1
+}
+
+func.def public inline @Float32x4_up(%value: vector<4xf32>, %offset: i32, %width: i32) -> (vector<4xf32>, i1) {
+  %768, %769 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xf32>, i32, i32
+  func.return %768, %769 : vector<4xf32>, i1
+}
+
+func.def public inline @Float32x4_down(%value: vector<4xf32>, %offset: i32, %width: i32) -> (vector<4xf32>, i1) {
+  %775, %776 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xf32>, i32, i32
+  func.return %775, %776 : vector<4xf32>, i1
+}
+
+func.def public inline @Float32x4_index(%value: vector<4xf32>, %offset: i32, %width: i32) -> (vector<4xf32>, i1) {
+  %782, %783 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xf32>, i32, i32
+  func.return %782, %783 : vector<4xf32>, i1
+}
+
+func.def public inline @Float64x2_xor(%value: vector<2xf64>, %offset: i32, %width: i32) -> (vector<2xf64>, i1) {
+  %789, %790 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<2xf64>, i32, i32
+  func.return %789, %790 : vector<2xf64>, i1
+}
+
+func.def public inline @Float64x2_up(%value: vector<2xf64>, %offset: i32, %width: i32) -> (vector<2xf64>, i1) {
+  %796, %797 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<2xf64>, i32, i32
+  func.return %796, %797 : vector<2xf64>, i1
+}
+
+func.def public inline @Float64x2_down(%value: vector<2xf64>, %offset: i32, %width: i32) -> (vector<2xf64>, i1) {
+  %803, %804 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<2xf64>, i32, i32
+  func.return %803, %804 : vector<2xf64>, i1
+}
+
+func.def public inline @Float64x2_index(%value: vector<2xf64>, %offset: i32, %width: i32) -> (vector<2xf64>, i1) {
+  %810, %811 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<2xf64>, i32, i32
+  func.return %810, %811 : vector<2xf64>, i1
+}
+
+func.def public inline @predicate_vector_xor(%value: vector<4xi1>, %offset: i32, %width: i32) -> (vector<4xi1>, i1) {
+  %817, %818 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<4xi1>, i32, i32
+  func.return %817, %818 : vector<4xi1>, i1
+}
+
+func.def public inline @predicate_vector_up(%value: vector<4xi1>, %offset: i32, %width: i32) -> (vector<4xi1>, i1) {
+  %824, %825 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<4xi1>, i32, i32
+  func.return %824, %825 : vector<4xi1>, i1
+}
+
+func.def public inline @predicate_vector_down(%value: vector<4xi1>, %offset: i32, %width: i32) -> (vector<4xi1>, i1) {
+  %831, %832 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<4xi1>, i32, i32
+  func.return %831, %832 : vector<4xi1>, i1
+}
+
+func.def public inline @predicate_vector_index(%value: vector<4xi1>, %offset: i32, %width: i32) -> (vector<4xi1>, i1) {
+  %838, %839 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<4xi1>, i32, i32
+  func.return %838, %839 : vector<4xi1>, i1
+}
+
+func.def public inline @static_vector_xor(%value: vector<3xi32>, %offset: i32, %width: i32) -> (vector<3xi32>, i1) {
+  %845, %846 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<3xi32>, i32, i32
+  func.return %845, %846 : vector<3xi32>, i1
+}
+
+func.def public inline @static_vector_up(%value: vector<3xi32>, %offset: i32, %width: i32) -> (vector<3xi32>, i1) {
+  %852, %853 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<3xi32>, i32, i32
+  func.return %852, %853 : vector<3xi32>, i1
+}
+
+func.def public inline @static_vector_down(%value: vector<3xi32>, %offset: i32, %width: i32) -> (vector<3xi32>, i1) {
+  %859, %860 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<3xi32>, i32, i32
+  func.return %859, %860 : vector<3xi32>, i1
+}
+
+func.def public inline @static_vector_index(%value: vector<3xi32>, %offset: i32, %width: i32) -> (vector<3xi32>, i1) {
+  %866, %867 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<3xi32>, i32, i32
+  func.return %866, %867 : vector<3xi32>, i1
+}
+
+func.def public inline @dynamic_vector_xor(%value_dim0: index, %value: vector<[%value_dim0]xf32>, %offset: i32, %width: i32) -> (%872: index, vector<[%872]xf32>, i1) {
+  %875, %876 = kernel.subgroup.shuffle<xor> %value, %offset, %width : vector<[%value_dim0]xf32>, i32, i32
+  func.return %value_dim0, %875, %876 : index, vector<[%value_dim0]xf32>, i1
+}
+
+func.def public inline @dynamic_vector_up(%value_dim0: index, %value: vector<[%value_dim0]xf32>, %offset: i32, %width: i32) -> (%881: index, vector<[%881]xf32>, i1) {
+  %884, %885 = kernel.subgroup.shuffle<up> %value, %offset, %width : vector<[%value_dim0]xf32>, i32, i32
+  func.return %value_dim0, %884, %885 : index, vector<[%value_dim0]xf32>, i1
+}
+
+func.def public inline @dynamic_vector_down(%value_dim0: index, %value: vector<[%value_dim0]xf32>, %offset: i32, %width: i32) -> (%890: index, vector<[%890]xf32>, i1) {
+  %893, %894 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<[%value_dim0]xf32>, i32, i32
+  func.return %value_dim0, %893, %894 : index, vector<[%value_dim0]xf32>, i1
+}
+
+func.def public inline @dynamic_vector_index(%value_dim0: index, %value: vector<[%value_dim0]xf32>, %offset: i32, %width: i32) -> (%899: index, vector<[%899]xf32>, i1) {
+  %902, %903 = kernel.subgroup.shuffle<index> %value, %offset, %width : vector<[%value_dim0]xf32>, i32, i32
+  func.return %value_dim0, %902, %903 : index, vector<[%value_dim0]xf32>, i1
+}

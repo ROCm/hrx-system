@@ -1,0 +1,81 @@
+// RUN: verify
+#include <loomcxx/kernel.h>
+// ERROR@+1: LOWERING/059 "subgroup shuffle requires one mode and three operands"
+[[loom::op("kernel.subgroup.shuffle")]] unsigned missing_mode(unsigned, unsigned, unsigned);
+
+// ====
+#include <loomcxx/kernel.h>
+// ERROR@+1: LOWERING/059 "unknown subgroup shuffle mode"
+[[loom::op("kernel.subgroup.shuffle", "rotate")]] unsigned unknown_mode(unsigned, unsigned, unsigned);
+
+// ====
+#include <loomcxx/kernel.h>
+// ERROR@+1: LOWERING/059 "subgroup shuffle requires one mode and three operands"
+[[loom::op("kernel.subgroup.shuffle", "up")]] unsigned missing_width(unsigned, unsigned);
+
+// ====
+#include <loomcxx/kernel.h>
+// ERROR@+1: LOWERING/059 "subgroup shuffle result must be a flat value/bool record matching the payload type"
+[[loom::op("kernel.subgroup.shuffle", "up")]] unsigned missing_valid(unsigned, unsigned, unsigned);
+
+// ====
+struct Result { unsigned value; unsigned valid; };
+// ERROR@+1: LOWERING/059 "subgroup shuffle result must be a flat value/bool record matching the payload type"
+[[loom::op("kernel.subgroup.shuffle", "up")]] Result integer_valid(unsigned, unsigned, unsigned);
+
+// ====
+struct Result { float value; bool valid; };
+// ERROR@+1: LOWERING/059 "subgroup shuffle result must be a flat value/bool record matching the payload type"
+[[loom::op("kernel.subgroup.shuffle", "up")]] Result different_payload(unsigned, unsigned, unsigned);
+
+// ====
+struct Result { unsigned value; bool valid; unsigned extra; };
+// ERROR@+1: LOWERING/059 "subgroup shuffle result must be a flat value/bool record matching the payload type"
+[[loom::op("kernel.subgroup.shuffle", "up")]] Result extra_result(unsigned, unsigned, unsigned);
+
+// ====
+struct Result { unsigned* value; bool valid; };
+// ERROR@+1: LOWERING/059 "subgroup shuffle requires a scalar or rank-one vector payload"
+[[loom::op("kernel.subgroup.shuffle", "up")]] Result pointer_payload(unsigned*, unsigned, unsigned);
+
+// ====
+struct Payload { unsigned first; unsigned second; };
+struct Result { Payload value; bool valid; };
+// ERROR@+1: LOWERING/059 "subgroup shuffle requires a scalar or rank-one vector payload"
+[[loom::op("kernel.subgroup.shuffle", "up")]] Result record_payload(Payload, unsigned, unsigned);
+
+// ====
+struct Result { unsigned value; bool valid; };
+// ERROR@+1: LOWERING/059 "subgroup shuffle offset and width must be i32"
+[[loom::op("kernel.subgroup.shuffle", "up")]] Result wide_offset(unsigned, unsigned long long, unsigned);
+
+// ====
+struct Result { unsigned value; bool valid; };
+// ERROR@+1: LOWERING/059 "subgroup shuffle offset and width must be i32"
+[[loom::op("kernel.subgroup.shuffle", "up")]] Result floating_width(unsigned, unsigned, float);
+
+// ====
+#include <loomcxx/kernel.h>
+#include <loomcxx/vector.h>
+using Matrix = loom::type::vector<loom::type::shape<2, 4>, unsigned>;
+[[loom::force_inline]] Matrix rank_two(Matrix value) {
+  // ERROR@+1: LOWERING/059 "subgroup shuffle requires a scalar or rank-one vector payload"
+  return loom::kernel::subgroup::shuffle_up(value, 1, 32).value;
+}
+
+// ====
+#include <loomcxx/kernel.h>
+unsigned missing_kernel(unsigned value) {
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  return loom::kernel::subgroup::shuffle_index(value, 0, 32).value;
+}
+
+// ====
+// Native C++ bool vectors have a packed object representation. Predicate
+// vectors use loom::type::vector instead of changing that source contract.
+#include <loomcxx/kernel.h>
+using Packed = bool __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes without object padding"
+[[loom::force_inline]] Packed packed_boolean(Packed value) {
+  return loom::kernel::subgroup::shuffle_up(value, 1, 32).value;
+}

@@ -11,6 +11,7 @@
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <utility>
@@ -22,6 +23,86 @@
 #include "loom/ops/kernel/ops.h"
 
 namespace loom::cxx_import {
+
+std::optional<SubgroupShuffleIntrinsic> SubgroupShuffleIntrinsic::resolve(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
+    cxx::FunctionSymbol* function, const cxx::Attribute& attribute,
+    cxx::AST* owner) {
+  if (!supports(attribute.arguments[0]->name())) {
+    return std::nullopt;
+  }
+  auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+  auto parameters = signature->parameterTypes();
+  if (attribute.arguments.size() != 2 || signature->isVariadic() ||
+      parameters.size() != 3) {
+    diagnostics.reject(unit, owner,
+                       "subgroup shuffle requires one mode and three operands");
+  }
+  const auto* descriptor = loom_kernel_dialect_vtables(
+      nullptr)[loom_op_dialect_index(LOOM_OP_KERNEL_SUBGROUP_SHUFFLE)];
+  const auto mode_field = loom_kernel_subgroup_shuffle_mode_diagnostic_ref();
+  uint8_t mode;
+  if (!loom_attr_descriptor_find_enum_case(
+          &descriptor->attr_descriptors[mode_field.index],
+          view(attribute.arguments[1]->name()), &mode)) {
+    diagnostics.reject(unit, owner, "unknown subgroup shuffle mode");
+  }
+  const auto& payload = types.partition(parameters[0], owner);
+  bool supported_payload = false;
+  if (payload.kind == ValueKind::SSA) {
+    const auto value_type = types.get(parameters[0], owner);
+    supported_payload =
+        loom_type_is_scalar(value_type) ||
+        (loom_type_is_vector(value_type) && loom_type_rank(value_type) == 1);
+  } else if (payload.kind == ValueKind::Vector) {
+    supported_payload =
+        static_cast<const VectorPartition&>(payload).extents.size() == 1;
+  }
+  if (!supported_payload) {
+    diagnostics.reject(unit, owner,
+                       "subgroup shuffle requires a scalar or rank-one vector "
+                       "payload");
+  }
+  const auto i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  if (!loom_type_equal(types.get(parameters[1], owner), i32) ||
+      !loom_type_equal(types.get(parameters[2], owner), i32)) {
+    diagnostics.reject(unit, owner,
+                       "subgroup shuffle offset and width must be i32");
+  }
+  const auto* result = types.record(signature->returnType(), owner);
+  if (!result || result->members.size() != 2 ||
+      types.unqualified(result->members[0].field->type()) !=
+          types.unqualified(parameters[0]) ||
+      types.unqualified(result->members[1].field->type())->kind() !=
+          cxx::TypeKind::kBool) {
+    diagnostics.reject(unit, owner,
+                       "subgroup shuffle result must be a flat value/bool "
+                       "record matching the payload type");
+  }
+  return SubgroupShuffleIntrinsic(mode, result);
+}
+
+Value SubgroupShuffleIntrinsic::call(std::span<const Value> arguments,
+                                     ValueArena& arena, loom_builder_t* builder,
+                                     loom_location_id_t location) const {
+  loom_op_t* op;
+  const auto payload = arguments[0].components();
+  const auto value = payload.back();
+  check(loom_kernel_subgroup_shuffle_build(
+      builder, static_cast<loom_kernel_subgroup_shuffle_mode_t>(mode_), value,
+      arguments[1].ssa(), arguments[2].ssa(),
+      loom_module_value_type(builder->module, value), location, &op));
+  // Rank-one vectors carry at most one dynamic extent ahead of their value.
+  // Preserve that identity before appending the exchanged value and validity.
+  const auto dimensions = payload.first(payload.size() - 1);
+  std::array<loom_value_id_t, 3> components;
+  std::copy(dimensions.begin(), dimensions.end(), components.begin());
+  components[dimensions.size()] = loom_op_results(op)[0];
+  components[dimensions.size() + 1] = loom_op_results(op)[1];
+  return arena.capture(*result_partition_,
+                       std::span<const loom_value_id_t>(components)
+                           .first(dimensions.size() + 2));
+}
 
 std::optional<KernelCollectiveIntrinsic::Operation>
 KernelCollectiveIntrinsic::find(std::string_view name) {

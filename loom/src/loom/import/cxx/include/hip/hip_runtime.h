@@ -29,7 +29,7 @@ using uint3 = loom::kernel::uint3;
 
 [[loom::device, loom::force_inline]] static inline float __shfl_xor(
     float value, int mask, int width = warpSize) {
-  return loom::kernel::subgroup::shuffle_xor(value, mask, width);
+  return loom::kernel::subgroup::shuffle_xor(value, mask, width).value;
 }
 
 [[loom::device, loom::force_inline]] static inline float __expf(float value) {

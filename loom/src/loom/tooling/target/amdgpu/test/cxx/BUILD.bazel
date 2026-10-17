@@ -91,6 +91,7 @@ _MODULES = [
     "storage_updates",
     "structured_break",
     "structured_continue",
+    "subgroup_shuffles",
     "symbol_exports",
     "typed_views",
     "vector_depth",

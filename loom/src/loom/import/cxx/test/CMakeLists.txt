@@ -168,6 +168,8 @@ loom_check_test_suite(
     "storage_updates.cxx-test"
     "subgroup_reductions.cxx-test"
     "subgroup_reductions_invalid.cxx-test"
+    "subgroup_shuffles.cxx-test"
+    "subgroup_shuffles_invalid.cxx-test"
     "subgroups.cxx-test"
     "subgroups_invalid.cxx-test"
     "symbols.cxx-test"
@@ -1351,6 +1353,15 @@ loom_test_module(
     structured_break_module
   SRCS
     "structured_break.cxx"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    subgroup_shuffles_module
+  SRCS
+    "subgroup_shuffles.cxx"
 )
 endif()
 

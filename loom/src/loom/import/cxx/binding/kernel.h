@@ -21,6 +21,38 @@
 
 namespace loom::cxx_import {
 
+// Lane exchange retains both High results in an ordinary source record. The
+// admitted record partition supplies member identity at every source use;
+// inactive-source handling remains explicit in the caller.
+class SubgroupShuffleIntrinsic {
+ public:
+  static bool supports(std::string_view name) {
+    return name == "kernel.subgroup.shuffle";
+  }
+
+  static std::optional<SubgroupShuffleIntrinsic> resolve(
+      cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
+      cxx::FunctionSymbol* function, const cxx::Attribute& attribute,
+      cxx::AST* owner);
+
+  Value call(std::span<const Value> arguments, ValueArena& arena,
+             loom_builder_t* builder, loom_location_id_t location) const;
+
+  bool equivalent(const SubgroupShuffleIntrinsic& other) const {
+    return mode_ == other.mode_ && result_partition_ == other.result_partition_;
+  }
+
+ private:
+  SubgroupShuffleIntrinsic(uint8_t mode,
+                           const RecordPartition* result_partition)
+      : mode_(mode), result_partition_(result_partition) {}
+
+  // Lane addressing mode in the canonical High enum representation.
+  uint8_t mode_;
+  // Admitted value/bool record, owned by the source Types instance.
+  const RecordPartition* result_partition_;
+};
+
 // Typed source projection of kernel topology, votes, broadcasts, reductions,
 // and scans. Calls require a kernel or required-inline helper; the translation
 // driver owns that placement check. Collective participation and convergence

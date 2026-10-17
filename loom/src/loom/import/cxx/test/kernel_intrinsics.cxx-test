@@ -11,7 +11,7 @@ void entry(unsigned* coordinates, float* output, float value) {
                         loom::kernel::workgroup::size.x +
                         loom::kernel::workgroup::count.x +
                         loom::kernel::subgroup::size();
-    output[lane] = loom::kernel::subgroup::shuffle_xor(value, 1, 32);
+    output[lane] = loom::kernel::subgroup::shuffle_xor(value, 1, 32).value;
   }
   synchronize();
 }
@@ -102,7 +102,7 @@ kernel.def @guarded_barrier() {
          loom::kernel::subgroup::size();
 }
 [[loom::device, loom::force_inline]] static float exchange(float value) {
-  return loom::kernel::subgroup::shuffle_xor(value, 1, 32);
+  return loom::kernel::subgroup::shuffle_xor(value, 1, 32).value;
 }
 [[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
 void entry(unsigned* coordinates, float* output, float value) {

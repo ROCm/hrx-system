@@ -158,6 +158,8 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
       diagnostics_.reject(unit_, owner,
                           "template.apply requires an ordinary function");
     } else if (KernelCollectiveIntrinsic::supports(
+                   selected->arguments[0]->name()) ||
+               SubgroupShuffleIntrinsic::supports(
                    selected->arguments[0]->name())) {
       // Concrete specialization owns source type and template-argument
       // validation. Retain the complete descriptor until those are known.
@@ -283,6 +285,10 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
   if (auto memory = VectorMemoryIntrinsic::resolve(
           unit_, diagnostics_, types_, signature, attribute, owner)) {
     return *memory;
+  }
+  if (auto shuffle = SubgroupShuffleIntrinsic::resolve(
+          unit_, diagnostics_, types_, function, attribute, owner)) {
+    return *shuffle;
   }
   if (auto collective = KernelCollectiveIntrinsic::resolve(
           unit_, diagnostics_, types_, function, attribute, owner)) {
@@ -483,6 +489,9 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
   }
   if (auto* collective = std::get_if<KernelCollectiveIntrinsic>(binding)) {
     return {Value(collective->call(arguments, builder, location))};
+  }
+  if (auto* shuffle = std::get_if<SubgroupShuffleIntrinsic>(binding)) {
+    return {shuffle->call(arguments, arena, builder, location)};
   }
   if (auto* target = std::get_if<TargetIntrinsic>(binding)) {
     return {Value(target->call(builder, location))};

@@ -40,5 +40,5 @@ unsigned subgroup_size() {
 #include <loomcxx/kernel.h>
 float exchange(float value) {
   // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
-  return loom::kernel::subgroup::shuffle_xor(value, 1, 32);
+  return loom::kernel::subgroup::shuffle_xor(value, 1, 32).value;
 }

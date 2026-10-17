@@ -1316,8 +1316,8 @@ the corresponding High operation.
 
 ## Subgroup cooperation
 
-`<loomcxx/kernel.h>` exposes subgroup topology, votes, and broadcasts as typed
-High operations. `loom::kernel::subgroup::{id,count,size,lane_id}()` return
+`<loomcxx/kernel.h>` exposes subgroup topology, votes, broadcasts, and shuffles
+as typed High operations. `loom::kernel::subgroup::{id,count,size,lane_id}()` return
 unsigned coordinates. The execution width includes inactive lanes and can
 exceed the number of invocations in a partial subgroup.
 
@@ -1335,6 +1335,14 @@ requirements. `loom::kernel::subgroup::broadcast_first(value)` selects the
 first active lane, including inside divergent control flow; that lane need not
 be lane zero.
 
+`shuffle_xor`, `shuffle_up`, `shuffle_down`, and `shuffle_index` preserve scalar
+and explicit rank-one vector payloads, including their floating-point object
+bits. Each takes a value, an unsigned lane selector or offset, and an unsigned
+logical width, and returns `shuffle_result<T>{value, valid}`. The validity bit
+reports whether the selected source is within the logical subgroup and
+participated in the exchange. Callers consume `value` only when `valid` is true;
+inactive lanes and partial subgroups do not supply an implicit identity.
+
 ```cpp
 #include <loomcxx/kernel.h>
 using UInt4 = unsigned __attribute__((ext_vector_type(4)));
@@ -1346,10 +1354,18 @@ using UInt4 = unsigned __attribute__((ext_vector_type(4)));
 [[loom::force_inline]] unsigned long long ready_streams(bool ready) {
   return loom::kernel::subgroup::vote::ballot(ready);
 }
+
+[[loom::force_inline]] UInt4 predecessor_or(UInt4 local, UInt4 identity) {
+  auto previous = loom::kernel::subgroup::shuffle_up(
+      local, 1u, loom::kernel::subgroup::size());
+  return previous.valid ? previous.value : identity;
+}
 ```
 
-These become `kernel.subgroup.broadcast ... : vector<4xi32>, i32` and
-`kernel.subgroup.vote.ballot ... : i1 -> i64`. Declarations use ordinary
+These become `kernel.subgroup.broadcast ... : vector<4xi32>, i32`,
+`kernel.subgroup.vote.ballot ... : i1 -> i64`, and
+`kernel.subgroup.shuffle<up> ... : vector<4xi32>, i32, i32`. A shuffle binds
+both High results directly to the source record. Declarations use ordinary
 `[[loom::op("kernel.subgroup.broadcast")]]` bindings; custom names and concrete
 template instances use the same admission path. Calls require a kernel body or
 a `loom::force_inline` helper. Each argument is evaluated once, and the shared

@@ -547,8 +547,37 @@ template <class T>
 template <class T>
 [[loom::op("kernel.subgroup.broadcast.first")]] T broadcast_first(T value);
 
-// Exchanges values across lanes selected by XOR within the given width.
-[[loom::shuffle_xor]] float shuffle_xor(float value, int mask, int width);
+// Result of an exchange within a logical subgroup. The payload is usable only
+// when the selected source lane participates in the exchange.
+template <class T>
+struct shuffle_result {
+  // Value read from the selected source lane when valid is true.
+  T value;
+  // Whether the source lies within the logical width and participates.
+  bool valid;
+};
+
+// Exchanges a scalar or explicit rank-one vector with lane id XOR mask within
+// the logical width. Physical subgroup size and participation remain separate.
+template <class T>
+[[loom::op("kernel.subgroup.shuffle", "xor")]]
+shuffle_result<T> shuffle_xor(T value, unsigned mask, unsigned width);
+
+// Reads a lower-numbered lane in the logical subgroup, or returns valid=false
+// when the offset crosses its boundary or the source does not participate.
+template <class T>
+[[loom::op("kernel.subgroup.shuffle", "up")]]
+shuffle_result<T> shuffle_up(T value, unsigned offset, unsigned width);
+
+// Reads a higher-numbered lane with the same range and participation contract.
+template <class T>
+[[loom::op("kernel.subgroup.shuffle", "down")]]
+shuffle_result<T> shuffle_down(T value, unsigned offset, unsigned width);
+
+// Reads the named lane relative to this invocation's logical subgroup.
+template <class T>
+[[loom::op("kernel.subgroup.shuffle", "index")]]
+shuffle_result<T> shuffle_index(T value, unsigned lane, unsigned width);
 
 }  // namespace subgroup
 

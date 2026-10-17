@@ -144,6 +144,7 @@ loom_test(
         "packed_byte_arithmetic",
         "packed_float8_conversion",
         "pointer_origins",
+        "subgroup_shuffles",
         "vector_lookup",
         "workload_configuration",
     ]
