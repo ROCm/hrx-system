@@ -92,7 +92,7 @@ extern const loom_aie2p_native_memory_layout_t loom_aie2p_sram_memory;
 typedef struct loom_aie2p_native_dma_sequence_t {
   // First descriptor in the contiguous allocation owned by this sequence.
   uint16_t descriptor;
-  // Number of descriptors, including any separately terminating final prefix.
+  // Number of descriptors, including a separate prefix for a partial rotation.
   uint16_t descriptor_count;
   // Number of autonomous start tasks, bounded by the hardware queue depth.
   uint8_t task_count;

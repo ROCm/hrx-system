@@ -306,8 +306,8 @@ bool loom_aie2p_native_encode_ingress(const loom_xdna_array_family_t* family,
 }
 
 // A finite DMA sequence fits all its tasks in the hardware queue before any
-// completion wait. Fixed-slot chains cover whole ring rotations; a separate
-// terminating prefix preserves the exact final record count.
+// completion wait. Fixed-slot chains cover whole ring rotations. A final task
+// reuses an aligned suffix or uses a separate prefix for a partial rotation.
 iree_status_t loom_aie2p_native_build_sequence(
     const loom_xdna_dma_facts_t* dma,
     const loom_aie2p_native_memory_layout_t* layout, uint16_t first_descriptor,
@@ -328,6 +328,7 @@ iree_status_t loom_aie2p_native_build_sequence(
   const uint32_t queue_depth = dma->task_queue_depth;
   uint32_t chain_length = 1;
   uint32_t tail_length = 0;
+  uint32_t tail_descriptor = 0;
   uint32_t cycles = repetitions;
   uint32_t required_descriptors = 1;
   uint32_t task_count =
@@ -338,7 +339,9 @@ iree_status_t loom_aie2p_native_build_sequence(
          span += capacity) {
       const uint32_t candidate_cycles = repetitions / span;
       const uint32_t candidate_tail = repetitions % span;
-      const uint32_t candidate_descriptors = span + candidate_tail;
+      const bool separate_tail = candidate_tail % capacity != 0;
+      const uint32_t candidate_descriptors =
+          span + (separate_tail ? candidate_tail : 0);
       const uint32_t candidate_tasks =
           (uint32_t)iree_host_size_ceil_div(candidate_cycles, repeat_limit) +
           (candidate_tail != 0);
@@ -350,6 +353,7 @@ iree_status_t loom_aie2p_native_build_sequence(
       }
       chain_length = span;
       tail_length = candidate_tail;
+      tail_descriptor = separate_tail ? span : span - candidate_tail;
       cycles = candidate_cycles;
       required_descriptors = candidate_descriptors;
       task_count = candidate_tasks;
@@ -433,7 +437,7 @@ iree_status_t loom_aie2p_native_build_sequence(
   }
   if (tail_length) {
     out_sequence->tasks[task] = loom_xdna_register_field_encode_admitted(
-        start, out_sequence->descriptor + chain_length);
+        start, out_sequence->descriptor + tail_descriptor);
   }
   *out_valid = true;
   return iree_ok_status();

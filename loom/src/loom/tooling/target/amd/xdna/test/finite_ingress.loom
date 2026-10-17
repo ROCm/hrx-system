@@ -1,5 +1,5 @@
 // Immutable external sequences feed credited SRAM and compute rings. Native
-// task boundaries and final prefixes preserve record order across replay.
+// task boundaries and final tails preserve record order across replay.
 aie2p.target<array> @array_target
 
 pipeline.def<kernel> @finite_ingress(%record_count: index, %capacity: index, %record_stride: index) run(%input_arg: buffer, %output_arg: buffer) {
@@ -252,6 +252,68 @@ check.scenario public @fixed_3361_replay {
     check.compare<@fixed_3361, @fixed_3361_reference>(%input, %output) : (tensor<20xi32>, tensor<53776xi32>) -> () {
       check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<52xi32>
       check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<53808xi32>
+    }
+  }
+  check.return
+}
+
+// A six-descriptor chain repeats 512 times, then its three-descriptor suffix
+// completes one ring rotation. Changing records expose any reordered slots.
+pipeline.def<kernel> public retain target(@array_target) @strided_3075() run(%input: buffer, %output: buffer) {
+  %records = index.constant 3075 : index
+  %capacity = index.constant 3 : index
+  %record_stride = index.constant 128 : index
+  pipeline.compose @finite_ingress[%records, %capacity, %record_stride](%input, %output) : [index, index, index](buffer, buffer)
+}
+
+func.def @strided_3075_reference(%input: buffer, %output: buffer) {
+  %records = index.constant 3075 : index
+  %record_stride = index.constant 128 : index
+  func.call @reference(%input, %output, %records, %record_stride) : (buffer, buffer, index, index)
+  func.return
+}
+
+check.scenario public @strided_3075_replay {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<98420xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<98420xi32> -> tensor<98388xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<49232xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<49232xi32> -> tensor<49200xi32>
+    check.compare<@strided_3075, @strided_3075_reference>(%input, %output) : (tensor<98388xi32>, tensor<49200xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<98420xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<49232xi32>
+    }
+  }
+  check.return
+}
+
+// Fixed external ingress and local capacity-one rings share the final four
+// descriptors of a six-descriptor chain instead of allocating a separate tail.
+pipeline.def<kernel> public retain target(@array_target) @fixed_4294() run(%input: buffer, %output: buffer) {
+  %records = index.constant 4294 : index
+  %capacity = index.constant 1 : index
+  %record_stride = index.constant 0 : index
+  pipeline.compose @finite_ingress[%records, %capacity, %record_stride](%input, %output) : [index, index, index](buffer, buffer)
+}
+
+func.def @fixed_4294_reference(%input: buffer, %output: buffer) {
+  %records = index.constant 4294 : index
+  %record_stride = index.constant 0 : index
+  func.call @reference(%input, %output, %records, %record_stride) : (buffer, buffer, index, index)
+  func.return
+}
+
+check.scenario public @fixed_4294_replay {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<52xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<52xi32> -> tensor<20xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<68736xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<68736xi32> -> tensor<68704xi32>
+    check.compare<@fixed_4294, @fixed_4294_reference>(%input, %output) : (tensor<20xi32>, tensor<68704xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<52xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<68736xi32>
     }
   }
   check.return
