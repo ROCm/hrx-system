@@ -135,6 +135,9 @@ loom_generated_cc_library(
     loom::error::parameter
     loom::ir
     loom::ir::facts
+    loom::ops::index
+    loom::ops::index::cast
+    loom::ops::index::comparison
     loom::ops::op_defs
     loom::ops::scalar
     loom::rewrite::remap

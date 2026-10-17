@@ -75,6 +75,7 @@ loom_check_test_suite(
         "class_conversions.cxx-test",
         "class_conversions_invalid.cxx-test",
         "condition_declarations.cxx-test",
+        "condition_loop_cleanup.cxx-test",
         "conditionals.cxx-test",
         "config.cxx-test",
         "config_cleanup.cxx-test",
