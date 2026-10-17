@@ -292,6 +292,9 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_scopes_t scopes;
   // Stable dependency graph accumulated while building the schedule DAG.
   loom_low_schedule_dependency_graph_t dependencies;
+  // New dependency segment storage. Effect construction uses result storage;
+  // other phases use scratch unless full inspection retains the graph.
+  iree_arena_allocator_t* dependency_arena;
   // Contiguous effect dependencies produced by effect-frontier construction.
   loom_low_schedule_dependency_range_t effect_dependencies;
   // Producer-retained setup fan-out for exclusive storage and allocation

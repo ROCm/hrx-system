@@ -199,7 +199,8 @@ uint32_t FindFreeLocationWithPlacement(
     loom_module_t* module, iree_arena_allocator_t* arena,
     loom_value_id_t candidate_value, loom_value_id_t counterpart_value,
     uint32_t max_units, loom_low_placement_relation_t* relation,
-    const loom_low_descriptor_set_t* physical_descriptor_set = nullptr) {
+    const loom_low_descriptor_set_t* physical_descriptor_set = nullptr,
+    const loom_low_allocation_assignment_t* retained_assignment = nullptr) {
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, candidate_value,
                                         /*ordinal=*/0);
@@ -315,6 +316,11 @@ uint32_t FindFreeLocationWithPlacement(
       .active_set = &active_set,
       .storage_leases = &storage_leases,
   };
+  const loom_low_allocation_assignment_t* retained_assignments[] = {
+      retained_assignment, &assignments[0]};
+  if (retained_assignment != nullptr) {
+    context.retained_assignments_by_value_ordinal = retained_assignments;
+  }
 
   const loom_low_placement_value_ref_t refs[] = {
       {0, LOOM_LOW_PLACEMENT_VALUE_RESULT, 0},
@@ -357,8 +363,10 @@ uint32_t FindFreeLocationWithPlacement(
   }
 
   uint32_t location_base = UINT32_MAX;
-  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
-      &context, &intervals[0], Capacity(max_units), &location_base));
+  if (!loom_low_allocation_search_find_free_location(
+          &context, &intervals[0], Capacity(max_units), &location_base)) {
+    location_base = UINT32_MAX;
+  }
 
   loom_module_value_ordinal_scratch_clear(module, candidate_value);
   loom_module_value_ordinal_scratch_clear(module, counterpart_value);
@@ -594,6 +602,31 @@ TEST_F(LowAllocationSearchTest, PreservesFirstFitWithoutPlacementPreference) {
   loom_module_free(module);
 }
 
+TEST_F(LowAllocationSearchTest,
+       RetainsLocationInsteadOfSearchingLowerRegisters) {
+  loom_module_t* module = AllocateModule();
+  const loom_value_id_t candidate_value = DefineValue(module);
+  const loom_value_id_t counterpart_value = DefineValue(module);
+  const auto retained = Assignment(candidate_value, 2, 6, RegisterValueClass(5),
+                                   /*location_base=*/3, /*location_count=*/1,
+                                   /*unit_point_start=*/0);
+
+  EXPECT_EQ(FindFreeLocationWithPlacement(
+                module, &arena_, candidate_value, counterpart_value,
+                /*max_units=*/4, /*relation=*/nullptr,
+                /*physical_descriptor_set=*/nullptr, &retained),
+            3u);
+  // A tighter current budget rejects the replay even though lower locations
+  // are free. Choosing another location would not preserve the allocation.
+  EXPECT_EQ(FindFreeLocationWithPlacement(
+                module, &arena_, candidate_value, counterpart_value,
+                /*max_units=*/3, /*relation=*/nullptr,
+                /*physical_descriptor_set=*/nullptr, &retained),
+            UINT32_MAX);
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAllocationSearchTest, ExplicitCandidateOrderAndSoftPreference) {
   loom_module_t* module = AllocateModule();
   const loom_value_id_t candidate_value = DefineValue(module);
@@ -650,6 +683,21 @@ TEST_F(LowAllocationSearchTest, ExplicitCandidateOrderAndSoftPreference) {
                 module, &arena_, candidate_value, counterpart_value,
                 /*max_units=*/1, /*relation=*/nullptr, &descriptor_set),
             2u);
+  const auto retained = Assignment(candidate_value, 2, 6, RegisterValueClass(5),
+                                   /*location_base=*/3, /*location_count=*/1,
+                                   /*unit_point_start=*/0);
+  EXPECT_EQ(FindFreeLocationWithPlacement(module, &arena_, candidate_value,
+                                          counterpart_value,
+                                          /*max_units=*/4, /*relation=*/nullptr,
+                                          &descriptor_set, &retained),
+            3u);
+  // Physical IDs retain their declared candidate domains: a valid ID can
+  // still lie outside the current allocation window.
+  EXPECT_EQ(FindFreeLocationWithPlacement(module, &arena_, candidate_value,
+                                          counterpart_value,
+                                          /*max_units=*/1, /*relation=*/nullptr,
+                                          &descriptor_set, &retained),
+            UINT32_MAX);
   loom_module_free(module);
 }
 

@@ -979,7 +979,8 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
       .emitter = emitter,
       .diagnostic_flags = diagnostic_flags,
       .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS |
-               LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS,
+               LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS |
+               LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES,
       .strategy = strategy,
   };
   loom_low_function_model_t model = {0};

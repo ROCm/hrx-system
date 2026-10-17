@@ -595,7 +595,7 @@ loom_target_compile_report_record_low_emission_frame_with_dynamic_context(
   }
   loom_target_compile_report_record_schedule(
       report, frame->schedule.node_count, frame->schedule.scheduled_node_count,
-      frame->schedule.dependencies.count, frame->schedule.scopes.scope_count,
+      frame->schedule.dependency_count, frame->schedule.scopes.scope_count,
       frame->schedule.resource_use_count, frame->schedule.hazard_gap_count,
       frame->schedule.model_summary_count, liveness->pressure_summary_count,
       peak_live_units);

@@ -183,6 +183,8 @@ enum loom_low_schedule_flag_bits_e {
   // external prerequisites. Allocation repair enables this while retrying a
   // rematerialized program; spill insertion resets that scheduling policy.
   LOOM_LOW_SCHEDULE_FLAG_ORDER_STRUCTURAL_SETUP = 1u << 7,
+  // Retains every raw dependency row for complete schedule inspection.
+  LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCIES = 1u << 8,
 };
 typedef uint32_t loom_low_schedule_flags_t;
 
@@ -873,11 +875,12 @@ typedef struct loom_low_schedule_table_t {
   iree_host_size_t call_node_count;
   // Authored per-instance scope identities and control-flow entry states.
   loom_low_schedule_scopes_t scopes;
-  // Stable ordering dependency graph consumed by scheduling and target
-  // planning.
-  loom_low_schedule_dependency_graph_t dependencies;
-  // Exact contiguous range of memory-effect dependency rows.
-  loom_low_schedule_dependency_range_t effect_dependencies;
+  // Number of raw ordering dependencies used to construct the schedule.
+  iree_host_size_t dependency_count;
+  // Complete raw dependency graph, present only with RETAIN_DEPENDENCIES.
+  const loom_low_schedule_dependency_graph_t* dependency_graph;
+  // Exact memory-effect range with segments owned by this schedule's arena.
+  loom_low_schedule_dependency_slice_t effect_dependencies;
   // Immutable outgoing groups owned by the scheduling arena. Present only
   // when RETAIN_DEPENDENCY_INDEX was requested; construction never rebuilds it.
   const loom_low_schedule_dependency_index_t* dependency_index;

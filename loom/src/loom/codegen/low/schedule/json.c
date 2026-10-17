@@ -263,7 +263,7 @@ iree_status_t loom_low_schedule_format_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       &object, IREE_SV("node_count"), table->node_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      &object, IREE_SV("dependency_count"), table->dependencies.count));
+      &object, IREE_SV("dependency_count"), table->dependency_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &object, IREE_SV("dependency_group_count"),
       table->dependency_group_count));
@@ -558,10 +558,10 @@ iree_status_t loom_low_schedule_format_json(
       loom_json_object_begin_field(&object, IREE_SV("dependencies")));
   loom_json_array_writer_t dependencies;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &dependencies));
-  for (uint32_t i = 0; i < table->dependencies.count; ++i) {
+  for (uint32_t i = 0; i < table->dependency_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&dependencies));
     const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_graph_at(&table->dependencies, i);
+        loom_low_schedule_dependency_graph_at(table->dependency_graph, i);
     loom_json_object_writer_t dependency_object;
     IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &dependency_object));
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(

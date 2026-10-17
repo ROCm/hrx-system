@@ -320,6 +320,20 @@ bool loom_low_allocation_search_assignment_conflicts(
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
     loom_low_allocation_storage_release_policy_t release_policy) {
+  // Optional coalescing must respect replay before publishing a location.
+  // A different legal location is not a replay of the retained allocation.
+  if (context->retained_assignments_by_value_ordinal != NULL) {
+    const loom_value_ordinal_t value_ordinal =
+        loom_module_value_ordinal_scratch_lookup(context->module,
+                                                 candidate->value_id);
+    const loom_low_allocation_assignment_t* retained =
+        context->retained_assignments_by_value_ordinal[value_ordinal];
+    if (retained == NULL || candidate->unit_count != retained->unit_count ||
+        !loom_low_allocation_assignment_location_range_equal(candidate,
+                                                             retained)) {
+      return true;
+    }
+  }
   return loom_low_allocation_search_storage_conflicts(
              context, candidate, ignored_value_ids, ignored_value_count,
              ignored_storage_lease_value_ids, ignored_storage_lease_value_count,
@@ -951,6 +965,35 @@ bool loom_low_allocation_search_find_free_location(
   const uint32_t alignment = loom_low_allocation_live_range_interval_alignment(
       context->descriptor_set, context->liveness,
       context->placement->operand_constraints_by_interval, interval);
+  if (context->retained_assignments_by_value_ordinal != NULL) {
+    const loom_value_ordinal_t value_ordinal =
+        loom_module_value_ordinal_scratch_lookup(context->module,
+                                                 interval->value_id);
+    const loom_low_allocation_assignment_t* retained =
+        context->retained_assignments_by_value_ordinal[value_ordinal];
+    if (retained == NULL ||
+        retained->descriptor_reg_class_id != capacity.descriptor_reg_class_id ||
+        retained->unit_count != interval->unit_count ||
+        retained->location_kind != capacity.location_kind ||
+        retained->location_count != interval->unit_count ||
+        !loom_low_allocation_target_constraints_location_range_fits_capacity(
+            context->descriptor_set, &capacity, retained->location_kind,
+            retained->location_base, retained->location_count) ||
+        (!uses_explicit_physical_registers &&
+         retained->location_base % alignment != 0) ||
+        loom_low_allocation_search_location_conflicts(
+            context, interval, retained->descriptor_reg_class_id,
+            retained->location_kind, retained->location_base,
+            retained->location_count,
+            /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
+            /*ignored_storage_lease_value_ids=*/NULL,
+            /*ignored_storage_lease_value_count=*/0,
+            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED)) {
+      return false;
+    }
+    *out_base = retained->location_base;
+    return true;
+  }
   uint32_t last_base = 0;
   if (!uses_explicit_physical_registers && capacity.is_bounded) {
     last_base = capacity.max_units - interval->unit_count;
