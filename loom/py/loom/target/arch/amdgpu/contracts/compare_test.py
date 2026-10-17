@@ -25,12 +25,10 @@ from loom.target.contracts import (
     compile_lower_rule_set,
 )
 
-
-def _compiled_rules() -> CompiledLowerRuleSet:
-    return compile_lower_rule_set(
-        AMDGPU_COMPARE_CONTRACT_FRAGMENT,
-        dialect_ops=AMDGPU_COMPARE_CONTRACT_DIALECT_OPS,
-    )
+_COMPILED_RULES = compile_lower_rule_set(
+    AMDGPU_COMPARE_CONTRACT_FRAGMENT,
+    dialect_ops=AMDGPU_COMPARE_CONTRACT_DIALECT_OPS,
+)
 
 
 def _rules_for_source_op(
@@ -55,7 +53,7 @@ def _descriptor_sequences(
 
 
 def test_scalar_float_classification_selects_cheapest_constant_form() -> None:
-    compiled = _compiled_rules()
+    compiled = _COMPILED_RULES
     assert _descriptor_sequences(compiled, scalar.scalar_isnanf) == tuple(
         (f"amdgpu.v_cmp_class_f{bit_width}.classes_inline",)
         for bit_width in (16, 32, 64)
@@ -72,7 +70,7 @@ def test_scalar_float_classification_selects_cheapest_constant_form() -> None:
 
 
 def test_vector_float_classification_publishes_all_native_widths() -> None:
-    compiled = _compiled_rules()
+    compiled = _COMPILED_RULES
     for source_op in (
         vector.vector_isnanf,
         vector.vector_isinff,
@@ -84,7 +82,7 @@ def test_vector_float_classification_publishes_all_native_widths() -> None:
 
 
 def test_scalar_address_comparisons_materialize_source_carriers() -> None:
-    compiled = _compiled_rules()
+    compiled = _COMPILED_RULES
     address_patterns = {Scalar("index"), Scalar("offset")}
     address_sgpr_materializer_index = next(
         materializer_index

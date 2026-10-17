@@ -48,18 +48,15 @@ _NNAN_FASTMATH_FLAG = scalar_defs.FastMathFlags.case("nnan").value
 _NSZ_FASTMATH_FLAG = scalar_defs.FastMathFlags.case("nsz").value
 
 
-def _compiled_arithmetic_rules() -> CompiledLowerRuleSet:
-    return compile_lower_rule_set(
-        AMDGPU_ARITHMETIC_CONTRACT_FRAGMENT,
-        dialect_ops=AMDGPU_ARITHMETIC_CONTRACT_DIALECT_OPS,
-    )
+_COMPILED_ARITHMETIC_RULES = compile_lower_rule_set(
+    AMDGPU_ARITHMETIC_CONTRACT_FRAGMENT,
+    dialect_ops=AMDGPU_ARITHMETIC_CONTRACT_DIALECT_OPS,
+)
 
-
-def _compiled_integer_rules() -> CompiledLowerRuleSet:
-    return compile_lower_rule_set(
-        AMDGPU_INTEGER_CONTRACT_FRAGMENT,
-        dialect_ops=AMDGPU_INTEGER_CONTRACT_DIALECT_OPS,
-    )
+_COMPILED_INTEGER_RULES = compile_lower_rule_set(
+    AMDGPU_INTEGER_CONTRACT_FRAGMENT,
+    dialect_ops=AMDGPU_INTEGER_CONTRACT_DIALECT_OPS,
+)
 
 
 def _rules_for_source_op(
@@ -199,7 +196,7 @@ def _lhs_range_guards(
 
 
 def test_whole_value_select_publishes_complete_recipe_family() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
     rules = _rules_for_source_op(compiled, scf.scf_select)
 
     payload_types = (
@@ -278,7 +275,7 @@ def test_whole_value_select_publishes_complete_recipe_family() -> None:
 
 
 def test_index_madd_rules_accept_wrapping_carrier_results() -> None:
-    for compiled in (_compiled_arithmetic_rules(), _compiled_integer_rules()):
+    for compiled in (_COMPILED_ARITHMETIC_RULES, _COMPILED_INTEGER_RULES):
         for rule in _rules_for_source_op(compiled, index.index_madd):
             guards = compiled.guards[
                 rule.guard_start : rule.guard_start + rule.guard_count
@@ -297,12 +294,12 @@ def test_index_madd_rules_accept_wrapping_carrier_results() -> None:
 
 
 def test_narrow_address_rules_materialize_source_carriers() -> None:
-    _assert_address_operands_use_materializers(_compiled_arithmetic_rules())
-    _assert_address_operands_use_materializers(_compiled_integer_rules())
+    _assert_address_operands_use_materializers(_COMPILED_ARITHMETIC_RULES)
+    _assert_address_operands_use_materializers(_COMPILED_INTEGER_RULES)
 
 
 def test_nonhomomorphic_index_rules_guard_projected_source_widths() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
     signed32 = GuardKind.VALUE_SIGNED_BIT_COUNT
     for source_op in (index.index_min, index.index_max):
         for rule in _rules_for_source_op(compiled, source_op):
@@ -325,7 +322,7 @@ def test_nonhomomorphic_index_rules_guard_projected_source_widths() -> None:
 
 
 def test_index_bit_operations_cover_scalar_and_vector_registers() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
     for source_op, scalar_sequence, vector_sequence in (
         (
             index.index_ctlzi,
@@ -359,7 +356,7 @@ def test_index_bit_operations_cover_scalar_and_vector_registers() -> None:
 
 
 def test_constant_unsigned_quotients_cover_both_register_classes() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
     scalar_rules = tuple(
         rule
         for rule in _rules_for_source_op(compiled, scalar_arithmetic.scalar_divui)
@@ -403,7 +400,7 @@ def test_constant_unsigned_quotients_cover_both_register_classes() -> None:
 
 
 def test_dynamic_integer_division_recipes_cover_banks_and_result_forms() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
     common_descriptors = {
         "amdgpu.v_cvt_f32_u32",
         "amdgpu.v_rcp_f32",
@@ -491,7 +488,7 @@ def test_dynamic_integer_division_recipes_cover_banks_and_result_forms() -> None
 
 def test_unsigned_bitfield_extract_rules_try_native_bfe_before_shift_mask() -> None:
     positions = _descriptor_sequence_positions(
-        _compiled_arithmetic_rules(),
+        _COMPILED_ARITHMETIC_RULES,
         vector.vector_bitfield_extractu,
     )
 
@@ -517,7 +514,7 @@ def test_unsigned_bitfield_extract_rules_try_native_bfe_before_shift_mask() -> N
 
 def test_signed_bitfield_extract_rules_try_native_bfe_before_shift_pair() -> None:
     positions = _descriptor_sequence_positions(
-        _compiled_arithmetic_rules(),
+        _COMPILED_ARITHMETIC_RULES,
         vector.vector_bitfield_extracts,
     )
 
@@ -533,7 +530,7 @@ def test_signed_bitfield_extract_rules_try_native_bfe_before_shift_pair() -> Non
 
 
 def test_scalar_bitfield_controls_use_isa_offset_and_width_fields() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
     for source_op, descriptor_key in (
         (scalar_bitwise.scalar_bitfield_extractu, "amdgpu.s_bfe_u32.lit"),
         (scalar_bitwise.scalar_bitfield_extracts, "amdgpu.s_bfe_i32.lit"),
@@ -555,7 +552,7 @@ def test_scalar_bitfield_controls_use_isa_offset_and_width_fields() -> None:
 
 def test_bitfield_insert_rules_try_native_bfi_before_mask_merge_fallback() -> None:
     positions = _descriptor_sequence_positions(
-        _compiled_arithmetic_rules(),
+        _COMPILED_ARITHMETIC_RULES,
         vector.vector_bitfield_insert,
     )
 
@@ -588,7 +585,7 @@ def test_bitfield_insert_rules_try_native_bfi_before_mask_merge_fallback() -> No
 
 
 def test_f32_copysign_rules_try_literal_bfi_before_register_mask() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     for source_op in (
         scalar_arithmetic.scalar_copysignf,
@@ -612,7 +609,7 @@ def test_f32_copysign_rules_try_literal_bfi_before_register_mask() -> None:
 
 
 def test_i64_to_f32_rules_preserve_single_rounding() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     expected_sequences = {
         scalar_conversion.scalar_sitofp: (
             "amdgpu.v_xor_b32",
@@ -651,7 +648,7 @@ def test_i64_to_f32_rules_preserve_single_rounding() -> None:
 
 
 def test_integer_extrema_rules_prefer_encoded_constants() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
 
     for source_op, suffix in (
         (scalar_arithmetic.scalar_minsi, "min_i32"),
@@ -678,7 +675,7 @@ def test_integer_extrema_rules_prefer_encoded_constants() -> None:
 
 
 def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
 
     for source_op, suffix in (
         (scalar_bitwise.scalar_andi, "and_b32"),
@@ -705,7 +702,7 @@ def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
 
 
 def test_mixed_scalar_bool_mask_rules_precede_mask_materialization() -> None:
-    compiled = _compiled_integer_rules()
+    compiled = _COMPILED_INTEGER_RULES
 
     for source_op, direct_sequences, fallback in (
         (
@@ -761,7 +758,7 @@ def test_mixed_scalar_bool_mask_rules_precede_mask_materialization() -> None:
 
 
 def test_packed_i16_arithmetic_rules_try_native_pk_ops_before_word_ops() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     arithmetic_cases = (
         (vector.vector_addi, "amdgpu.v_pk_add_u16", "amdgpu.v_add_u32"),
@@ -799,7 +796,7 @@ def test_packed_i16_arithmetic_rules_try_native_pk_ops_before_word_ops() -> None
 
 
 def test_i64_vector_shifts_bind_exact_i32_count_origins() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     i32_vector = TypePattern.vector(
         "i32",
         minimum_static_elements=1,
@@ -883,7 +880,7 @@ def test_i64_vector_shifts_bind_exact_i32_count_origins() -> None:
 
 
 def test_vector_vop2_rules_materialize_vsrc1_as_vgpr() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     register_cases = (
         (vector.vector_addi, "amdgpu.v_add_u32", 1),
         (vector.vector_subi, "amdgpu.v_sub_u32", 1),
@@ -939,7 +936,7 @@ def test_vector_vop2_rules_materialize_vsrc1_as_vgpr() -> None:
 
 
 def test_packed_bf16_arithmetic_rules_publish_native_pk_ops() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     add_positions = _descriptor_sequence_positions(compiled, vector.vector_addf)
     assert (
@@ -958,7 +955,7 @@ def test_packed_bf16_arithmetic_rules_publish_native_pk_ops() -> None:
 
 
 def test_native_reciprocal_root_rules_require_approximate_functions() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     expected_descriptors = {
         scalar_math.scalar_rsqrtf: {
             ("amdgpu.v_rsq_f32",),
@@ -981,7 +978,7 @@ def test_native_reciprocal_root_rules_require_approximate_functions() -> None:
 
 
 def test_f32_literal_fma_product_flushing_forms_require_afn() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     product_flushing_key = "amdgpu.v_fmamk_f32.flush_product"
 
     for source_op in (scalar_math.scalar_fmaf, vector.vector_fmaf):
@@ -1080,7 +1077,7 @@ def test_f32_literal_fma_product_flushing_forms_require_afn() -> None:
 
 
 def test_fp64_binary_rules_legalize_packet_sources() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     for source_op, descriptor_key in (
         (scalar_arithmetic.scalar_addf, "amdgpu.v_add_f64"),
         (scalar_arithmetic.scalar_subf, "amdgpu.v_sub_f64"),
@@ -1108,7 +1105,7 @@ def test_fp64_binary_rules_legalize_packet_sources() -> None:
 
 
 def test_exact_f32_division_uses_negated_fma_residuals() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     for source_op in (scalar_arithmetic.scalar_divf, vector.vector_divf):
         exact_rules = tuple(
@@ -1134,7 +1131,7 @@ def test_exact_f32_division_uses_negated_fma_residuals() -> None:
 
 
 def test_packed_f16_arithmetic_rules_publish_native_pk_ops() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     arithmetic_cases = (
         (vector.vector_addf, "amdgpu.v_pk_add_f16", "amdgpu.v_add_f32"),
@@ -1156,7 +1153,7 @@ def test_packed_f16_arithmetic_rules_publish_native_pk_ops() -> None:
 
 
 def test_ieee_minmax_rules_publish_direct_scalar_and_vector_ops() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     for source_op, descriptors in (
         (
@@ -1201,7 +1198,7 @@ def test_ieee_minmax_rules_publish_direct_scalar_and_vector_ops() -> None:
 
 
 def test_clamp_rules_publish_distinct_number_and_ieee_ops() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     scalar_positions = _descriptor_sequence_positions(
         compiled, scalar_arithmetic.scalar_clampf
@@ -1223,7 +1220,7 @@ def test_clamp_rules_publish_distinct_number_and_ieee_ops() -> None:
 
 
 def test_clamp_rules_publish_existing_f32_fallback_recipes() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     expected_descriptors = {
         0: {
@@ -1276,7 +1273,7 @@ def test_clamp_rules_publish_existing_f32_fallback_recipes() -> None:
 
 
 def test_packed_f32_arithmetic_rules_publish_native_pk_ops() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     for source_op, packed_descriptor, scalar_descriptor in (
         (vector.vector_addf, "amdgpu.v_pk_add_f32", "amdgpu.v_add_f32"),
@@ -1292,7 +1289,7 @@ def test_packed_f32_arithmetic_rules_publish_native_pk_ops() -> None:
 
 
 def test_packed_f32_broadcast_rules_materialize_before_packet_repetition() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     for source_op in (vector.vector_addf, vector.vector_mulf):
         rules = tuple(
             rule
@@ -1320,7 +1317,7 @@ def test_packed_f32_broadcast_rules_materialize_before_packet_repetition() -> No
 
 
 def test_packed_narrow_binary_broadcasts_cover_operations_and_source_roles() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     families = (
         (vector.vector_addf, "add_f16"),
         (vector.vector_subf, "add_f16"),
@@ -1391,7 +1388,7 @@ def test_packed_narrow_binary_broadcasts_cover_operations_and_source_roles() -> 
 
 
 def test_packed_narrow_clamp_broadcasts_compose_both_selectors() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     for maximum, minimum in (("maxnum", "minnum"), ("maximum", "minimum")):
         masks = set()
         for rule in _rules_for_source_op(compiled, vector.vector_clampf):
@@ -1431,7 +1428,7 @@ def test_packed_narrow_clamp_broadcasts_compose_both_selectors() -> None:
 
 
 def test_32bit_vector_shape_contracts_match_lane_semantics() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     rank1_i32_source_ops: set[Op] = set()
     rank1_f32_descriptors: set[str] = set()
     static_i32_source_ops: set[Op] = set()
@@ -1487,7 +1484,7 @@ def test_32bit_vector_shape_contracts_match_lane_semantics() -> None:
 
 
 def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     rules = _rules_for_source_op(compiled, vector.vector_extract)
     contract_rules = tuple(
         rule for rule in rules if rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY
@@ -1507,7 +1504,7 @@ def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
 
 
 def test_vector_construct_rules_publish_contract_only_storage_rows() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     expected_rule_counts = {
         vector.vector_from_elements: 12,
@@ -1536,7 +1533,7 @@ def test_vector_construct_rules_publish_contract_only_storage_rows() -> None:
 
 
 def test_insertion_uses_the_complete_construction_storage_family() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     insertion = {
         pattern.elements[0]: pattern
         for rule in _rules_for_source_op(compiled, vector.vector_insert)
@@ -1569,7 +1566,7 @@ def test_insertion_uses_the_complete_construction_storage_family() -> None:
 def test_vector_packed_float_conversion_rules_publish_contract_only_shape_rows() -> (
     None
 ):
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     expected_rule_counts = {
         vector.vector_extf: 8,
@@ -1595,7 +1592,7 @@ def test_vector_packed_float_conversion_rules_publish_contract_only_shape_rows()
 
 
 def test_vector_integer_conversion_contracts_preserve_storage_and_lane_counts() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     widening = {
         ("i8", "i16"),
         ("i8", "i32"),
@@ -1652,7 +1649,7 @@ def test_vector_integer_conversion_contracts_preserve_storage_and_lane_counts() 
 
 
 def test_bitunpack_contract_preserves_packed_result_capacity() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
 
     for source_op in (vector.vector_bitunpacku, vector.vector_bitunpacks):
         maximum_lane_counts: list[int] = []
@@ -1669,7 +1666,7 @@ def test_bitunpack_contract_preserves_packed_result_capacity() -> None:
 
 
 def test_bitpack_contract_covers_word_and_predicate_lanes() -> None:
-    compiled = _compiled_arithmetic_rules()
+    compiled = _COMPILED_ARITHMETIC_RULES
     cases: set[tuple[str, str, int]] = set()
 
     for rule in _rules_for_source_op(compiled, vector.vector_bitpack):
