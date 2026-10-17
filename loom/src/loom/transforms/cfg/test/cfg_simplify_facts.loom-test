@@ -1,5 +1,122 @@
 // RUN: pass cfg-simplify
 
+// Independent strands share a captured condition. Constant folding and
+// dependent Boolean replacement preserve the unchanged sibling's analysis,
+// including when the replacements introduce new values into the local domain.
+pipeline.def @sibling_regions() run(%choose: i1, %value: i32) {
+  %yes = scalar.constant true : i1
+  pipeline.strand workers([0], [1], [1]) {
+    cfg.cond_br %yes, ^selected, ^unused
+  ^selected:
+    test.use %value : i32
+  ^unused:
+    test.use %choose : i1
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    cfg.cond_br %choose, ^selected, ^other
+  ^selected:
+    test.use %value : i32
+    cfg.br ^exit
+  ^other:
+    test.use %choose : i1
+    cfg.br ^exit
+  ^exit:
+  }
+  pipeline.strand workers([2], [1], [1]) {
+    cfg.cond_br %choose, ^selected, ^exit
+  ^selected:
+    %known = scalar.andi %choose, %choose : i1
+    test.use %known : i1
+    %propagated = scalar.andi %known, %choose : i1
+    test.use %propagated : i1
+    cfg.br ^exit
+  ^exit:
+  }
+}
+
+// ----
+pipeline.def @sibling_regions() run(%choose: i1, %value: i32) {
+  pipeline.strand workers([0], [1], [1]) {
+    test.use %value : i32
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    cfg.cond_br %choose, ^selected, ^other
+  ^selected:
+    test.use %value : i32
+    cfg.br ^exit
+  ^other:
+    test.use %choose : i1
+    cfg.br ^exit
+  ^exit:
+  }
+  pipeline.strand workers([2], [1], [1]) {
+    cfg.cond_br %choose, ^selected, ^exit
+  ^selected:
+    %known = scalar.constant true : i1
+    test.use %known : i1
+    %propagated = scalar.constant true : i1
+    test.use %propagated : i1
+    cfg.br ^exit
+  ^exit:
+  }
+}
+
+// ====
+
+// Removing a parent block retires its entire nested region tree. Surviving
+// descendants consume the next snapshot after their captured argument is
+// replaced, while another sibling still has independent CFG edits.
+pipeline.def @changed_parent_regions() run(%choose: i1, %value: i32) {
+  %yes = scalar.constant true : i1
+  pipeline.strand workers([0], [1], [1]) {
+    cfg.cond_br %yes, ^selected, ^unused
+  ^selected:
+    cfg.br ^join(%value: i32)
+  ^unused:
+    pipeline.strand workers([1], [1], [1]) {
+      cfg.br ^nested
+    ^nested:
+      test.use %choose : i1
+    }
+    cfg.br ^join(%value: i32)
+  ^join(%captured: i32):
+    pipeline.strand workers([2], [1], [1]) {
+      cfg.br ^nested
+    ^nested:
+      test.use %captured : i32
+    }
+    pipeline.strand workers([3], [1], [1]) {
+      cfg.cond_br %yes, ^nested, ^unused
+    ^nested:
+      test.use %captured : i32
+    ^unused:
+      test.use %choose : i1
+    }
+  }
+  pipeline.strand workers([4], [1], [1]) {
+    cfg.br ^forward
+  ^forward:
+    test.use %value : i32
+  }
+}
+
+// ----
+pipeline.def @changed_parent_regions() run(%choose: i1, %value: i32) {
+  pipeline.strand workers([0], [1], [1]) {
+    pipeline.strand workers([2], [1], [1]) {
+      test.use %value : i32
+    }
+    pipeline.strand workers([3], [1], [1]) {
+      test.use %value : i32
+    }
+  }
+  pipeline.strand workers([4], [1], [1]) {
+    test.use %value : i32
+  }
+}
+
+// ====
+
 func.def @changed_predecessor(%choose: i1, %left_value: i32, %right_value: i32) -> (i32) {
   %true = scalar.constant true : i1
   cfg.cond_br %true, ^select, ^dead

@@ -1779,22 +1779,33 @@ static iree_status_t loom_cfg_simplify_process_function_once(
     if (branches_folded != 0) {
       state->statistics->branches_folded += branches_folded;
       *out_changed = true;
-      return loom_rewriter_refresh_cfg_facts(state->rewriter, region);
+      IREE_RETURN_IF_ERROR(
+          loom_rewriter_refresh_cfg_facts(state->rewriter, region));
+      continue;
     }
 
+    if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
+      bool region_changed = false;
+      IREE_RETURN_IF_ERROR(
+          loom_cfg_simplify_process_cfg_region(state, region, &region_changed));
+      if (region_changed) {
+        *out_changed = true;
+        IREE_RETURN_IF_ERROR(
+            loom_rewriter_refresh_cfg_facts(state->rewriter, region));
+        continue;
+      }
+    }
+
+    // Only unchanged ancestors publish children into this round. A CFG edit
+    // can delete nested regions or invalidate their ancestor dominance, so
+    // those descendants wait for the next analysis snapshot. Pending siblings
+    // retain their structure, and operation folding stays deferred until the
+    // next round's worklist drain.
     loom_block_t* block = NULL;
     loom_region_for_each_block(region, block) {
       loom_op_t* op = NULL;
       loom_block_for_each_op(block, op) {
         IREE_RETURN_IF_ERROR(loom_cfg_simplify_push_child_regions(state, op));
-      }
-    }
-
-    if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-      IREE_RETURN_IF_ERROR(
-          loom_cfg_simplify_process_cfg_region(state, region, out_changed));
-      if (*out_changed) {
-        return loom_rewriter_refresh_cfg_facts(state->rewriter, region);
       }
     }
   }
