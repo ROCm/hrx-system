@@ -13,8 +13,10 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/spirv/bda_abi.h"
+#include "loom/target/arch/spirv/cooperative_properties.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/error_catalog.h"
+#include "loom/target/arch/spirv/facts.h"
 #include "loom/target/arch/spirv/module_contract.h"
 #include "loom/target/arch/spirv/packet_rows.h"
 #include "loom/target/arch/spirv/registers.h"
@@ -355,12 +357,46 @@ static iree_status_t loom_spirv_low_emit_unsupported_register_type(
                              IREE_ARRAYSIZE(params));
 }
 
+static iree_status_t loom_spirv_low_verify_value_type_support(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
+    const loom_op_t* op, loom_spirv_value_type_t value_type) {
+  if (value_type.value_class != LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX) {
+    return iree_ok_status();
+  }
+  const loom_spirv_target_facts_t* facts =
+      loom_spirv_target_facts_cast(state->target->target_facts);
+  // An unbound representation contract has no device properties to check.
+  if (facts == NULL ||
+      loom_spirv_cooperative_matrix_type_is_supported(
+          &facts->cooperative_properties, value_type.cooperative_matrix.rows,
+          value_type.cooperative_matrix.columns, value_type.scalar_type,
+          value_type.cooperative_matrix.scope,
+          value_type.cooperative_matrix.use)) {
+    return iree_ok_status();
+  }
+  static const char* const use_names[] = {"matrix_a", "matrix_b",
+                                          "matrix_accumulator"};
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(state->function_name),
+      loom_param_u32(value_type.cooperative_matrix.rows),
+      loom_param_u32(value_type.cooperative_matrix.columns),
+      loom_param_string(loom_spirv_scalar_type_name(value_type.scalar_type)),
+      loom_param_string(
+          loom_spirv_scope_name(value_type.cooperative_matrix.scope)),
+      loom_param_string(
+          iree_make_cstring_view(use_names[value_type.cooperative_matrix.use])),
+  };
+  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_032, params,
+                             IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_spirv_low_decode_boundary_value_type(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t* out_value_type) {
   const loom_type_t low_type = loom_module_value_type(state->module, value_id);
   if (loom_spirv_value_type_from_low_register_type(low_type, out_value_type)) {
-    return iree_ok_status();
+    return loom_spirv_low_verify_value_type_support(
+        context, state, state->function_op, *out_value_type);
   }
   IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
       context, state, state->function_op, value_id, low_type));
@@ -885,16 +921,19 @@ static iree_status_t loom_spirv_low_verify_packet_operands(
 }
 
 static iree_status_t loom_spirv_low_define_packet_results(
-    loom_spirv_low_verify_state_t* state,
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   if (row->result_type_ref == LOOM_SPIRV_PACKET_VALUE_TYPE_REF_UNKNOWN) {
     return iree_ok_status();
   }
   const loom_value_id_t* results = loom_op_const_results(packet->op);
-  return loom_spirv_low_value_type_table_define(
-      &state->value_types, results[0], loom_spirv_packet_row_result_type(row),
-      state->arena);
+  const loom_spirv_value_type_t result_type =
+      loom_spirv_packet_row_result_type(row);
+  IREE_RETURN_IF_ERROR(loom_spirv_low_verify_value_type_support(
+      context, state, packet->op, result_type));
+  return loom_spirv_low_value_type_table_define(&state->value_types, results[0],
+                                                result_type, state->arena);
 }
 
 static iree_status_t loom_spirv_low_verify_packet(
@@ -913,7 +952,7 @@ static iree_status_t loom_spirv_low_verify_packet(
   }
   IREE_RETURN_IF_ERROR(
       loom_spirv_low_verify_packet_operands(context, state, packet, row));
-  return loom_spirv_low_define_packet_results(state, packet, row);
+  return loom_spirv_low_define_packet_results(context, state, packet, row);
 }
 
 static iree_status_t loom_spirv_low_verify_transfer(

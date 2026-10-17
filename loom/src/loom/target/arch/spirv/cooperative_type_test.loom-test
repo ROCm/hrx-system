@@ -1,0 +1,115 @@
+// RUN: verify
+
+spirv.target<vulkan1_3> @target {abi = object_function}
+
+// Even a catalog type needs the cooperative-matrix capability.
+// ERROR@+1: SPIRV/032 {function_name="missing_capability", rows="16", columns="16", component_type="f32", scope="subgroup", matrix_use="matrix_accumulator"}
+low.func.def target<spirv.logical.core>(@target) @missing_capability(%matrix: reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>) asm {
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=COOPERATIVE_MATRIX_KHR
+
+// ERROR@+1: SPIRV/032 {function_name="unsupported_shape", rows="31", columns="17", component_type="f32", scope="subgroup", matrix_use="matrix_accumulator"}
+low.func.def target<spirv.logical.core> abi(object_function) @unsupported_shape(%matrix: reg<spirv.id : spirv.cooperative_matrix<31x17xf32, subgroup, matrix_accumulator>>) asm {
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=COOPERATIVE_MATRIX_KHR
+
+// F32 is advertised as an accumulator, not as a MatrixA component.
+// ERROR@+1: SPIRV/032 {function_name="unsupported_role", rows="16", columns="16", component_type="f32", scope="subgroup", matrix_use="matrix_a"}
+low.func.def target<spirv.logical.core> abi(object_function) @unsupported_role(%matrix: reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_a>>) asm {
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=COOPERATIVE_MATRIX_KHR
+
+// ERROR@+1: SPIRV/032 {function_name="unsupported_scope", rows="16", columns="16", component_type="f32", scope="workgroup", matrix_use="matrix_accumulator"}
+low.func.def target<spirv.logical.core> abi(object_function) @unsupported_scope(%matrix: reg<spirv.id : spirv.cooperative_matrix<16x16xf32, workgroup, matrix_accumulator>>) asm {
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=COOPERATIVE_MATRIX_KHR
+
+// The diagnostic retains scope names even when no matrix property uses them.
+// ERROR@+1: SPIRV/032 {function_name="unavailable_execution_scope", scope="invocation"}
+low.func.def target<spirv.logical.core> abi(object_function) @unavailable_execution_scope(%matrix: reg<spirv.id : spirv.cooperative_matrix<16x16xf32, invocation, matrix_accumulator>>) asm {
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=FLOAT64,COOPERATIVE_MATRIX_KHR
+
+// Scalar support alone does not provide an F64 matrix property.
+// ERROR@+1: SPIRV/032 {function_name="unsupported_component", rows="16", columns="16", component_type="f64", scope="subgroup", matrix_use="matrix_accumulator"}
+low.func.def target<spirv.logical.core> abi(object_function) @unsupported_component(%matrix: reg<spirv.id : spirv.cooperative_matrix<16x16xf64, subgroup, matrix_accumulator>>) asm {
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=COOPERATIVE_MATRIX_KHR
+
+// The F16 type exists in the catalog but its component capability is absent.
+// ERROR@+1: SPIRV/032 {function_name="missing_component_capability", rows="16", columns="16", component_type="f16", scope="subgroup", matrix_use="matrix_a"}
+low.func.def target<spirv.logical.core> abi(object_function) @missing_component_capability(%matrix: reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>) asm {
+  return
+}
+
+// ====
+
+// RUN: verify
+
+// An unbound representation contract defers profile-dependent availability.
+low.func.def target<spirv.logical.core> abi(object_function) @unbound_type(%matrix: reg<spirv.id : spirv.cooperative_matrix<31x17xf64, subgroup, matrix_accumulator>>) asm {
+  return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target {abi = object_function}
+
+// Result definitions are checked even when the value never reaches a boundary.
+low.func.def target<spirv.logical.core>(@target) @unavailable_packet_result(%value: reg<spirv.id : f32>) asm {
+  // ERROR@+2: TARGET/046 {function_name="unavailable_packet_result"}
+  // ERROR@+1: SPIRV/032 {function_name="unavailable_packet_result", component_type="f32", matrix_use="matrix_accumulator"}
+  %matrix = OpCompositeConstruct.cooperative.f32.16x16.accumulator %value : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=COOPERATIVE_MATRIX_KHR
+
+// Both the argument and the return type independently require admission.
+// ERROR@+2: SPIRV/032 {function_name="unavailable_return", rows="31", columns="17"}
+// ERROR@+1: SPIRV/032 {function_name="unavailable_return", rows="31", columns="17"}
+low.func.def target<spirv.logical.core> abi(object_function) @unavailable_return(%matrix: reg<spirv.id : spirv.cooperative_matrix<31x17xf32, subgroup, matrix_accumulator>>) -> (reg<spirv.id : spirv.cooperative_matrix<31x17xf32, subgroup, matrix_accumulator>>) asm {
+  return %matrix
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda features=COOPERATIVE_MATRIX_KHR
+
+// A supported accumulator does not require its property's F16 MMA operands.
+low.func.def target<spirv.logical.core> abi(object_function) @supported_accumulator(%matrix: reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>) -> (reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>) asm {
+  return %matrix
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(object_function) @supported_accumulator(%matrix: reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>) -> (reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>) asm {
+  return %matrix
+}

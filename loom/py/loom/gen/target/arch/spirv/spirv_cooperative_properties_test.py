@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from loom.gen.target.arch.spirv.spirv_cooperative_properties import (
     _descriptor_ref_constant_name,
+    _matrix_type_shapes,
     _mul_add_descriptor_key,
     generate_tables,
 )
@@ -58,3 +61,21 @@ def test_generation_maps_vector_properties_to_component_rows() -> None:
     assert "{.shape_key = UINT64_C(0x00100010), .start = 0, .count = 1}" in tables
     assert "{.shape_key = UINT64_C(0x00100020), .start = 1, .count = 1}" in tables
     assert "{.shape_key = UINT64_C(0x00200020), .start = 2, .count = 2}" in tables
+
+
+def test_native_type_index_preserves_roles_and_accumulator_endpoints() -> None:
+    case = replace(
+        COOPERATIVE_MATRIX_CASES[0],
+        m_size=8,
+        n_size=16,
+        k_size=32,
+        lhs_scalar_suffix="u8",
+        rhs_scalar_suffix="i16",
+        accumulator_scalar_suffix="f16",
+        result_scalar_suffix="f32",
+    )
+    assert _matrix_type_shapes((case, case)) == {
+        (8, 16): (set(), set(), {"LOOM_SPIRV_SCALAR_TYPE_F16", "LOOM_SPIRV_SCALAR_TYPE_F32"}),
+        (8, 32): ({"LOOM_SPIRV_SCALAR_TYPE_S8"}, set(), set()),
+        (32, 16): (set(), {"LOOM_SPIRV_SCALAR_TYPE_S16"}, set()),
+    }

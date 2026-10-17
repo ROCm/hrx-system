@@ -292,6 +292,7 @@ loom_cc_test(
   SRCS
     "profile_test.cc"
   DEPS
+    ::cooperative_properties
     ::profile
     iree::base::internal::arena
     iree::testing::gtest
@@ -343,7 +344,9 @@ loom_cc_library(
     "low_verify.c"
   DEPS
     ::bda_abi
+    ::cooperative_properties
     ::error_defs
+    ::facts
     ::module_contract
     ::packet_rows
     ::registers
@@ -453,6 +456,7 @@ loom_cc_test(
   DEPS
     ::cooperative_properties
     ::features
+    ::scalar_types
     iree::testing::gtest
     iree::testing::gtest_main
     loom::target::arch::spirv::descriptors::descriptors_ids
@@ -534,6 +538,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "cooperative_type_test.loom-test"
     "test/source_low/barrier.loom-test"
     "test/source_low/baseline.loom-test"
     "test/source_low/buffer_bulk.loom-test"

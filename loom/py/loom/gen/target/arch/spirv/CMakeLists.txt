@@ -192,6 +192,7 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::cooperative_vector
     loom::py::loom::target::arch::spirv::descriptors
+    loom::py::loom::target::arch::spirv::scalar_memory
 )
 
 iree_py_test(

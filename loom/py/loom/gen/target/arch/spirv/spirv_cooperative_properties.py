@@ -37,6 +37,7 @@ from loom.target.arch.spirv.cooperative_vector import (  # noqa: E402
     CooperativeVectorCase,
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET  # noqa: E402
+from loom.target.arch.spirv.scalar_memory import storage_buffer_scalar_by_source_type  # noqa: E402
 from loom.target.low_descriptors import descriptor_set_relative_name  # noqa: E402
 
 
@@ -124,6 +125,42 @@ def _shape_span_row(shape_key: int, start: int, count: int, hex_digits: int) -> 
     return f"    {{.shape_key = UINT64_C(0x{shape_key:0{hex_digits}x}), .start = {start}, .count = {count}}},"
 
 
+def _matrix_type_shapes(
+    cases: Sequence[CooperativeMatrixCase],
+) -> dict[tuple[int, int], tuple[set[str], set[str], set[str]]]:
+    shapes: dict[tuple[int, int], tuple[set[str], set[str], set[str]]] = {}
+    for case in cases:
+        for rows, columns, use, scalar in (
+            (case.m_size, case.k_size, 0, case.lhs_scalar),
+            (case.k_size, case.n_size, 1, case.rhs_scalar),
+            (case.m_size, case.n_size, 2, case.accumulator_scalar),
+            (case.m_size, case.n_size, 2, case.result_scalar),
+        ):
+            components = shapes.setdefault((rows, columns), (set(), set(), set()))
+            # Integer properties match either OpTypeInt signedness. The source
+            # scalar vocabulary groups signed/unsigned carriers by width.
+            canonical_scalar = storage_buffer_scalar_by_source_type(scalar.source_type)
+            assert canonical_scalar is not None
+            components[use].add(canonical_scalar.scalar_enum)
+    return dict(sorted(shapes.items()))
+
+
+def _matrix_type_shape_rows(cases: Sequence[CooperativeMatrixCase]) -> list[str]:
+    lines = ["static const loom_spirv_cooperative_matrix_type_shape_t kCooperativeMatrixTypeShapes[] = {"]
+    for (rows, columns), uses in _matrix_type_shapes(cases).items():
+        masks = [" | ".join(f"(1u << {scalar})" for scalar in sorted(components)) or "0" for components in uses]
+        lines.extend(
+            (
+                "    {",
+                f"        .shape_key = UINT64_C(0x{rows:04x}{columns:04x}00000000) | LOOM_SPIRV_SCOPE_SUBGROUP,",
+                f"        .component_types = {{{', '.join(masks)}}},",
+                "    },",
+            )
+        )
+    lines.extend(("};", ""))
+    return lines
+
+
 def _validate_matrix_cases(cases: Sequence[CooperativeMatrixCase]) -> None:
     descriptor_keys = {descriptor.key for descriptor in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors}
     names: set[str] = set()
@@ -179,10 +216,10 @@ def generate_tables() -> str:
     )
     for shape_key, start, count in _shape_spans(COOPERATIVE_MATRIX_CASES):
         lines.append(_shape_span_row(shape_key, start, count, 12))
+    lines.extend(("};", ""))
+    lines.extend(_matrix_type_shape_rows(COOPERATIVE_MATRIX_CASES))
     lines.extend(
         [
-            "};",
-            "",
             ("static const loom_spirv_cooperative_vector_property_t kCooperativeVectorProperties[] = {"),
         ]
     )
