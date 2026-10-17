@@ -324,13 +324,13 @@ static void iree_tokenizer_bpe_model_destroy(
 // BPE State Operations
 //===----------------------------------------------------------------------===//
 
-static iree_status_t iree_tokenizer_bpe_state_initialize(
-    const iree_tokenizer_model_t* base_model, void* storage,
-    iree_tokenizer_model_state_t** out_state) {
+static void iree_tokenizer_bpe_state_reset(
+    iree_tokenizer_model_state_t* base_state) {
+  const iree_tokenizer_model_t* base_model = base_state->model;
+  iree_tokenizer_bpe_state_t* state = (iree_tokenizer_bpe_state_t*)base_state;
   IREE_TRACE_ZONE_BEGIN(z0);
   const iree_tokenizer_bpe_model_t* model =
       (const iree_tokenizer_bpe_model_t*)base_model;
-  iree_tokenizer_bpe_state_t* state = (iree_tokenizer_bpe_state_t*)storage;
 
   memset(state, 0, sizeof(*state));
   state->base.model = base_model;
@@ -370,9 +370,18 @@ static iree_status_t iree_tokenizer_bpe_state_initialize(
                sizeof(iree_tokenizer_bpe_pair_cache_entry_t));
   }
 
-  *out_state = &state->base;
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+}
+
+static void iree_tokenizer_bpe_state_initialize(
+    const iree_tokenizer_model_t* base_model, void* storage,
+    iree_allocator_t workspace_allocator,
+    iree_tokenizer_model_state_t** out_state) {
+  (void)workspace_allocator;
+  iree_tokenizer_model_state_t* state = (iree_tokenizer_model_state_t*)storage;
+  state->model = base_model;
+  iree_tokenizer_bpe_state_reset(state);
+  *out_state = state;
 }
 
 static void iree_tokenizer_bpe_state_deinitialize(
@@ -454,6 +463,7 @@ static iree_status_t iree_tokenizer_bpe_get_token_string(
 static const iree_tokenizer_model_vtable_t iree_tokenizer_bpe_model_vtable = {
     .destroy = iree_tokenizer_bpe_model_destroy,
     .state_initialize = iree_tokenizer_bpe_state_initialize,
+    .state_reset = iree_tokenizer_bpe_state_reset,
     .state_deinitialize = iree_tokenizer_bpe_state_deinitialize,
     .state_encode = iree_tokenizer_bpe_state_encode,
     .state_finalize = iree_tokenizer_bpe_state_finalize,

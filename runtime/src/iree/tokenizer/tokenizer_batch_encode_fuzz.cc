@@ -159,7 +159,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                           buffer_size),
       iree_tokenizer_fuzz_track_offsets()
           ? offset_run_list
-          : iree_tokenizer_offset_run_list_empty());
+          : iree_tokenizer_offset_run_list_empty(),
+      iree_allocator_system());
   // RESOURCE_EXHAUSTED is expected when output buffers are too small.
   iree_status_ignore(status);
 

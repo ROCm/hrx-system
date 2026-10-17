@@ -220,14 +220,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
 
   iree_tokenizer_model_state_t* state = NULL;
-  status = iree_tokenizer_model_state_initialize(model, state_storage, &state);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(iree_allocator_system(), state_storage);
-    iree_tokenizer_model_free(model);
-    iree_tokenizer_vocab_free(vocab);
-    iree_status_ignore(status);
-    return 0;
-  }
+  iree_tokenizer_model_state_initialize(model, state_storage,
+                                        iree_allocator_system(), &state);
 
   // Output buffer.
   iree_tokenizer_token_id_t tokens[256];
@@ -262,9 +256,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Test 2: Multiple small segments (simulates word boundaries)
   //===--------------------------------------------------------------------===//
 
-  iree_tokenizer_model_state_deinitialize(state);
-  status = iree_tokenizer_model_state_initialize(model, state_storage, &state);
-  if (iree_status_is_ok(status) && available_input >= 2) {
+  iree_tokenizer_model_state_reset(state);
+  if (available_input >= 2) {
     // Create segments of varying sizes (1-4 bytes each).
     iree_tokenizer_segment_t segments_array[64];
     iree_host_size_t segment_count = 0;
@@ -304,9 +297,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Test 3: Limited output capacity (stress pending token resume)
   //===--------------------------------------------------------------------===//
 
-  iree_tokenizer_model_state_deinitialize(state);
-  status = iree_tokenizer_model_state_initialize(model, state_storage, &state);
-  if (iree_status_is_ok(status) && available_input > 0) {
+  iree_tokenizer_model_state_reset(state);
+  if (available_input > 0) {
     // Output buffer of size 1.
     iree_tokenizer_token_id_t single_token[1];
     iree_tokenizer_token_output_t small_output =
@@ -360,9 +352,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Test 4: Long word triggering max_input_chars_per_word
   //===--------------------------------------------------------------------===//
 
-  iree_tokenizer_model_state_deinitialize(state);
-  status = iree_tokenizer_model_state_initialize(model, state_storage, &state);
-  if (iree_status_is_ok(status) && available_input > 0) {
+  iree_tokenizer_model_state_reset(state);
+  if (available_input > 0) {
     // Use entire input as one segment - tests character counting and UNK path.
     iree_tokenizer_segment_t segment = {0, (uint32_t)available_input};
     iree_tokenizer_segment_list_t segments =
