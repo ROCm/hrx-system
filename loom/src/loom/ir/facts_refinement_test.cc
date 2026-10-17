@@ -435,6 +435,8 @@ TEST(FactsApplyPredicate, BoundsRetainDivisibility) {
       {LOOM_PREDICATE_GT, -64, -60, 64},  {LOOM_PREDICATE_GE, -63, -60, 64},
       {LOOM_PREDICATE_GT, 60, 64, 64},    {LOOM_PREDICATE_GE, 61, 64, 64},
       {LOOM_PREDICATE_NE, -64, -60, 64},  {LOOM_PREDICATE_NE, 64, -64, 60},
+      {LOOM_PREDICATE_ULT, 64, 0, 60},    {LOOM_PREDICATE_ULE, 63, 0, 60},
+      {LOOM_PREDICATE_UGT, -64, -60, -4}, {LOOM_PREDICATE_UGE, -61, -60, -4},
   };
   for (const TestCase& test_case : cases) {
     SCOPED_TRACE(test_case.kind);
@@ -592,6 +594,153 @@ TEST(FactsRefineRelation, NarrowingRetainsExplicitNonzeroFacts) {
   EXPECT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_LE, lower,
                                                nonzero, nullptr, &nonzero));
   EXPECT_TRUE(loom_value_facts_is_non_zero(nonzero));
+}
+
+static bool unsigned_relation_holds(loom_predicate_kind_t kind, int64_t lhs,
+                                    int64_t rhs) {
+  switch (kind) {
+    case LOOM_PREDICATE_ULT:
+      return static_cast<uint64_t>(lhs) < static_cast<uint64_t>(rhs);
+    case LOOM_PREDICATE_ULE:
+      return static_cast<uint64_t>(lhs) <= static_cast<uint64_t>(rhs);
+    case LOOM_PREDICATE_UGT:
+      return static_cast<uint64_t>(lhs) > static_cast<uint64_t>(rhs);
+    case LOOM_PREDICATE_UGE:
+      return static_cast<uint64_t>(lhs) >= static_cast<uint64_t>(rhs);
+    default:
+      ADD_FAILURE() << "expected an unsigned comparison";
+      return false;
+  }
+}
+
+static void expect_unsigned_refinement(loom_predicate_kind_t kind,
+                                       loom_value_facts_t lhs,
+                                       loom_value_facts_t rhs,
+                                       loom_value_facts_t expected_lhs,
+                                       loom_value_facts_t expected_rhs) {
+  loom_value_facts_t refined_lhs = lhs;
+  loom_value_facts_t refined_rhs = rhs;
+  ASSERT_TRUE(loom_value_facts_refine_relation(kind, lhs, rhs, &refined_lhs,
+                                               &refined_rhs));
+  EXPECT_EQ(refined_lhs.range_lo, expected_lhs.range_lo);
+  EXPECT_EQ(refined_lhs.range_hi, expected_lhs.range_hi);
+  EXPECT_EQ(refined_rhs.range_lo, expected_rhs.range_lo);
+  EXPECT_EQ(refined_rhs.range_hi, expected_rhs.range_hi);
+  if (loom_value_facts_is_exact(rhs)) {
+    // Literal predicates reach the same transfer through apply_predicate.
+    const auto predicate = make_predicate_1(kind, rhs.range_lo);
+    auto literal_lhs = lhs;
+    loom_value_facts_apply_predicate(&literal_lhs, &predicate);
+    EXPECT_EQ(literal_lhs.range_lo, expected_lhs.range_lo);
+    EXPECT_EQ(literal_lhs.range_hi, expected_lhs.range_hi);
+  }
+
+  // Snapshot inputs and one-sided alias updates have the same meaning as a
+  // two-sided refinement. Neither consumer needs a writable counterpart.
+  auto lhs_only = lhs;
+  auto rhs_only = rhs;
+  ASSERT_TRUE(loom_value_facts_refine_relation(kind, lhs_only, rhs, &lhs_only,
+                                               nullptr));
+  ASSERT_TRUE(loom_value_facts_refine_relation(kind, lhs, rhs_only, nullptr,
+                                               &rhs_only));
+  EXPECT_EQ(lhs_only.range_lo, expected_lhs.range_lo);
+  EXPECT_EQ(lhs_only.range_hi, expected_lhs.range_hi);
+  EXPECT_EQ(rhs_only.range_lo, expected_rhs.range_lo);
+  EXPECT_EQ(rhs_only.range_hi, expected_rhs.range_hi);
+}
+
+TEST(FactsRefineRelation, UnsignedOrdersMatchEverySmallIntervalPair) {
+  for (loom_predicate_kind_t kind : {LOOM_PREDICATE_ULT, LOOM_PREDICATE_ULE,
+                                     LOOM_PREDICATE_UGT, LOOM_PREDICATE_UGE}) {
+    SCOPED_TRACE(kind);
+    for (int64_t lhs_lo = -8; lhs_lo <= 7; ++lhs_lo) {
+      for (int64_t lhs_hi = lhs_lo; lhs_hi <= 7; ++lhs_hi) {
+        for (int64_t rhs_lo = -8; rhs_lo <= 7; ++rhs_lo) {
+          for (int64_t rhs_hi = rhs_lo; rhs_hi <= 7; ++rhs_hi) {
+            SCOPED_TRACE(::testing::Message() << lhs_lo << ":" << lhs_hi << " "
+                                              << rhs_lo << ":" << rhs_hi);
+            int64_t surviving_lhs_lo = INT64_MAX;
+            int64_t surviving_lhs_hi = INT64_MIN;
+            int64_t surviving_rhs_lo = INT64_MAX;
+            int64_t surviving_rhs_hi = INT64_MIN;
+            for (int64_t lhs = lhs_lo; lhs <= lhs_hi; ++lhs) {
+              for (int64_t rhs = rhs_lo; rhs <= rhs_hi; ++rhs) {
+                if (!unsigned_relation_holds(kind, lhs, rhs)) {
+                  continue;
+                }
+                surviving_lhs_lo = iree_min(surviving_lhs_lo, lhs);
+                surviving_lhs_hi = iree_max(surviving_lhs_hi, lhs);
+                surviving_rhs_lo = iree_min(surviving_rhs_lo, rhs);
+                surviving_rhs_hi = iree_max(surviving_rhs_hi, rhs);
+              }
+            }
+            const auto lhs = loom_value_facts_make(lhs_lo, lhs_hi, 1);
+            const auto rhs = loom_value_facts_make(rhs_lo, rhs_hi, 1);
+            const bool satisfiable = surviving_lhs_lo <= surviving_lhs_hi;
+            expect_unsigned_refinement(
+                kind, lhs, rhs,
+                satisfiable ? loom_value_facts_make(surviving_lhs_lo,
+                                                    surviving_lhs_hi, 1)
+                            : lhs,
+                satisfiable ? loom_value_facts_make(surviving_rhs_lo,
+                                                    surviving_rhs_hi, 1)
+                            : rhs);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(FactsRefineRelation, UnsignedOrdersCoverCarrierExtrema) {
+  for (int bit_count : {8, 16, 32, 64}) {
+    SCOPED_TRACE(bit_count);
+    const int64_t minimum =
+        bit_count == 64 ? INT64_MIN : -(INT64_C(1) << (bit_count - 1));
+    const int64_t maximum = -(minimum + 1);
+    const auto domain = loom_value_facts_make(minimum, maximum, 1);
+    const auto zero = loom_value_facts_exact_i64(0);
+    const auto all_ones = loom_value_facts_exact_i64(-1);
+    expect_unsigned_refinement(LOOM_PREDICATE_ULT, domain, zero, domain, zero);
+    expect_unsigned_refinement(LOOM_PREDICATE_ULE, domain, zero, zero, zero);
+    expect_unsigned_refinement(LOOM_PREDICATE_UGT, domain, all_ones, domain,
+                               all_ones);
+    expect_unsigned_refinement(LOOM_PREDICATE_UGE, domain, all_ones, all_ones,
+                               all_ones);
+
+    const auto positive_bound = loom_value_facts_make(1, 6, 1);
+    expect_unsigned_refinement(LOOM_PREDICATE_ULT, domain, positive_bound,
+                               loom_value_facts_make(0, 5, 1), positive_bound);
+    const auto negative_bound = loom_value_facts_make(-6, -2, 1);
+    expect_unsigned_refinement(LOOM_PREDICATE_UGT, domain, negative_bound,
+                               loom_value_facts_make(-5, -1, 1),
+                               negative_bound);
+
+    const auto lower_partition = loom_value_facts_make(0, maximum, 1);
+    const auto sign_bit = loom_value_facts_exact_i64(minimum);
+    expect_unsigned_refinement(LOOM_PREDICATE_ULT, domain, sign_bit,
+                               lower_partition, sign_bit);
+    const auto upper_partition = loom_value_facts_make(minimum, -1, 1);
+    const auto below_sign_bit = loom_value_facts_exact_i64(maximum);
+    expect_unsigned_refinement(LOOM_PREDICATE_UGT, domain, below_sign_bit,
+                               upper_partition, below_sign_bit);
+  }
+}
+
+TEST(FactsApplyPredicate, UnsignedBoundsRetainIndependentFactsAndDivisibility) {
+  loom_value_facts_t facts = loom_value_facts_make(-64, 64, 4);
+  facts.flags |= LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_mark_workgroup_uniform(&facts);
+  facts.extension_id = 7;
+  const auto predicate = make_predicate_1(LOOM_PREDICATE_ULT, 6);
+  loom_value_facts_apply_predicate(&facts, &predicate);
+  EXPECT_EQ(facts.range_lo, 0);
+  EXPECT_EQ(facts.range_hi, 4);
+  EXPECT_EQ(facts.known_divisor, 4);
+  EXPECT_EQ(facts.extension_id, 7);
+  EXPECT_TRUE(loom_value_facts_is_non_zero(facts));
+  EXPECT_TRUE(loom_value_facts_is_power_of_two(facts));
+  EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(facts));
 }
 
 TEST(ElementCountFacts, DynamicShapeUsesPredicateRefinedFacts) {

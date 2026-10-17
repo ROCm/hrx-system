@@ -138,7 +138,7 @@ func.def @unsigned_relation_orientation(%less: i32, %less_equal: i32, %greater: 
 // ----
 func.def @unsigned_relation_orientation(%less: i32, %less_equal: i32, %greater: i32, %greater_equal: i32) {
   %less_anchor = scalar.constant 1 : i32
-  %less_refined = scalar.assume %less [ult(%less, 1)] : i32
+  %less_refined = scalar.constant 0 : i32
   test.use %less_anchor, %less_refined : i32, i32
   %less_equal_anchor = scalar.constant 2 : i32
   %less_equal_refined = scalar.assume %less_equal [ule(%less_equal, 2)] : i32
