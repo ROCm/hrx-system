@@ -378,6 +378,12 @@ IREE_API_EXPORT bool iree_vm_variant_ref_isa(iree_vm_variant_t variant,
 IREE_API_EXPORT iree_vm_variant_t
 iree_vm_variant_retain(iree_vm_variant_t variant);
 
+// Returns a non-owning copy of |variant| without changing its owner. A non-null
+// ref borrows the source object's lifetime; all other carriers copy directly.
+// The returned carrier may be consumed/reset independently of the source.
+IREE_API_EXPORT iree_vm_variant_t
+iree_vm_variant_borrow(iree_vm_variant_t variant);
+
 // Moves |variant| and leaves its source empty. A borrowed ref is promoted
 // before clearing.
 IREE_API_EXPORT iree_vm_variant_t

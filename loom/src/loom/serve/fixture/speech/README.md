@@ -32,8 +32,11 @@ The two voice gains are immutable conditioning entries shared across requests.
 The first device stage initializes fresh stream state and emits no feedback.
 Later units alternate capacities of three and five frames, with an empty
 nonterminal second block and a shortened final block. Generation and publication
-use two kernels sharing compiler-private command workspace. Native serving
-code has no fixture selector, sample formula or special-case response.
+use two kernels sharing compiler-private command workspace. The source retains
+its output position as a scalar and replaces its phase buffer on collection,
+exercising typed request-state ownership independently of device history.
+Native serving code has no fixture selector, sample formula or special-case
+response.
 
 The [speech service contract](../../service/speech/README.md) describes ownership
 and the explicit PCM format. The [model header](../../service/speech/model.h)
