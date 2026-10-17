@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
@@ -80,12 +80,23 @@ loom_test(
 
 loom_test(
     name = "vae_workspace_test",
-    srcs = [
-        "prepare.loom",
-        "tests/vae_workspace.loom",
-    ],
+    srcs = ["tests/vae_workspace.loom"],
     benchmark_smoke = False,
     execution_profiles = [VM_REFERENCE_PROFILE],
+    deps = [":geometry_library"],
+)
+
+loom_library(
+    name = "geometry_library",
+    srcs = ["geometry.loom"],
+)
+
+loom_test(
+    name = "geometry_test",
+    srcs = ["tests/geometry.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [VM_REFERENCE_PROFILE],
+    deps = [":geometry_library"],
 )
 
 loom_test(
