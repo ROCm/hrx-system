@@ -148,3 +148,153 @@ func.def @bf16_origin_closure_with_early_native_use(%input: vector<64xbf16>, %bi
   %rounded = vector.concat<0> %31, %32 : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
   func.return %early, %rounded : vector<64xf32>, vector<64xbf16>
 }
+
+// ====
+
+// Shape-alias packet reuse is independent of rank and element type. Other
+// shaped inputs retain the ordinary rank-one slicing path.
+func.def @rank3_i8_add(%quarter0: vector<32xi8>, %quarter1: vector<32xi8>, %quarter2: vector<32xi8>, %quarter3: vector<32xi8>, %bias: vector<2x2x32xi8>) -> (vector<2x2x32xi8>) {
+  %flat = vector.concat<0> %quarter0, %quarter1, %quarter2, %quarter3 : vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8> -> vector<128xi8>
+  %shaped = vector.bitcast %flat : vector<128xi8> to vector<2x2x32xi8>
+  %result = vector.addi %shaped, %bias : vector<2x2x32xi8>
+  func.return %result : vector<2x2x32xi8>
+}
+
+// ----
+func.def @rank3_i8_add(%quarter0: vector<32xi8>, %quarter1: vector<32xi8>, %quarter2: vector<32xi8>, %quarter3: vector<32xi8>, %bias: vector<2x2x32xi8>) -> (vector<2x2x32xi8>) {
+  %9 = vector.concat<0> %quarter0, %quarter1 : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %10 = vector.bitcast %bias : vector<2x2x32xi8> to vector<128xi8>
+  %11 = vector.slice %10[0] : vector<128xi8> -> vector<64xi8>
+  %12 = vector.addi %9, %11 : vector<64xi8>
+  %13 = vector.concat<0> %quarter2, %quarter3 : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %14 = vector.slice %10[64] : vector<128xi8> -> vector<64xi8>
+  %15 = vector.addi %13, %14 : vector<64xi8>
+  %16 = vector.concat<0> %12, %15 : vector<64xi8>, vector<64xi8> -> vector<128xi8>
+  %result = vector.bitcast %16 : vector<128xi8> to vector<2x2x32xi8>
+  func.return %result : vector<2x2x32xi8>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=eager}
+
+// Packetizing another component invalidates transient query state. The shaped
+// load component remains authored for later view access linearization.
+func.def @eager_shaped_load_deferral(%input: buffer, %output: buffer, %values: vector<64xbf16>) -> (vector<64xbf16>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<8x8xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<8x8xbf16>
+  %loaded = vector.load %input_view[0, 0] : view<8x8xf32> -> vector<8x8xf32>
+  %narrow = vector.fptrunc<daz> %loaded : vector<8x8xf32> to vector<8x8xbf16>
+  vector.store %narrow, %output_view[0, 0] : vector<8x8xbf16>, view<8x8xbf16>
+  %negated = vector.negf %values : vector<64xbf16>
+  func.return %negated : vector<64xbf16>
+}
+
+// ----
+func.def @eager_shaped_load_deferral(%input: buffer, %output: buffer, %values: vector<64xbf16>) -> (vector<64xbf16>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<8x8xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<8x8xbf16>
+  %loaded = vector.load %input_view[0, 0] : view<8x8xf32> -> vector<8x8xf32>
+  %narrow = vector.fptrunc<daz> %loaded : vector<8x8xf32> to vector<8x8xbf16>
+  vector.store %narrow, %output_view[0, 0] : vector<8x8xbf16>, view<8x8xbf16>
+  %10 = vector.slice %values[0] : vector<64xbf16> -> vector<32xbf16>
+  %11 = vector.negf %10 : vector<32xbf16>
+  %12 = vector.slice %values[32] : vector<64xbf16> -> vector<32xbf16>
+  %13 = vector.negf %12 : vector<32xbf16>
+  %negated = vector.concat<0> %11, %13 : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  func.return %negated : vector<64xbf16>
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+// Proven row-contiguous tile loads enter legalization as native row packets.
+// Conversion groups those packets without scalar extraction and reconstruction.
+func.def target(@target) @shaped_convert_transpose_store(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<8x8xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<32x128xbf16>
+  %loaded = vector.load %input_view[0, 0] : view<8x8xf32> -> vector<8x8xf32>
+  %narrow = vector.fptrunc<daz> %loaded : vector<8x8xf32> to vector<8x8xbf16>
+  %transposed = vector.transpose<[1, 0]> %narrow : vector<8x8xbf16> -> vector<8x8xbf16>
+  vector.store %transposed, %output_view[0, 0] : vector<8x8xbf16>, view<32x128xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @shaped_convert_transpose_store() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %47 = vlda.256.f32x8 %input_view, 0
+  %52 = vlda.256.f32x8 %input_view, 32
+  %57 = vlda.256.f32x8 %input_view, 64
+  %62 = vlda.256.f32x8 %input_view, 96
+  %67 = vlda.256.f32x8 %input_view, 128
+  %72 = vlda.256.f32x8 %input_view, 160
+  %77 = vlda.256.f32x8 %input_view, 192
+  %82 = vlda.256.f32x8 %input_view, 224
+  %86 = concat(%47, %52) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %89 = concat(%57, %62) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %92 = concat(%67, %72) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %95 = concat(%77, %82) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %96 = vmov.vector512.to.accumulator512 %86
+  %97 = vmov.vector512.to.accumulator512 %89
+  %98 = concat(%96, %97) : (reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x2>
+  %99 = vmov.vector512.to.accumulator512 %92
+  %100 = vmov.vector512.to.accumulator512 %95
+  %101 = concat(%99, %100) : (reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x2>
+  set.rounding 12
+  %102 = vconv.bf16.fp32 %98
+  %103 = vconv.bf16.fp32 %101
+  %107 = mova.i32 52
+  %108 = vshuffle %102, %103, %107
+  %109 = mova.i32 53
+  %110 = vshuffle %102, %103, %109
+  %transposed = concat(%108, %110) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %158 = slice %transposed[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256>
+  vst.128.bf16x8 %158, %output_view, 0
+  %116 = mova.i32 16
+  %117 = vshift %108, %110, %116
+  %118 = slice %117[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %119 = mov.static-byte-offset 256
+  %120 = mov.address-index %119
+  vst.128.bf16x8.index %118, %output_view, %120
+  %123 = mova.i32 32
+  %124 = vshift %108, %110, %123
+  %125 = slice %124[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %126 = mov.static-byte-offset 512
+  %127 = mov.address-index %126
+  vst.128.bf16x8.index %125, %output_view, %127
+  %130 = mova.i32 48
+  %131 = vshift %108, %110, %130
+  %132 = slice %131[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %133 = mov.static-byte-offset 768
+  %134 = mov.address-index %133
+  vst.128.bf16x8.index %132, %output_view, %134
+  %157 = slice %transposed[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256>
+  %137 = mov.static-byte-offset 1024
+  %138 = mov.address-index %137
+  vst.128.bf16x8.index %157, %output_view, %138
+  %141 = vshift %110, %110, %116
+  %142 = slice %141[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %143 = mov.static-byte-offset 1280
+  %144 = mov.address-index %143
+  vst.128.bf16x8.index %142, %output_view, %144
+  %147 = vshift %110, %110, %123
+  %148 = slice %147[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %149 = mov.static-byte-offset 1536
+  %150 = mov.address-index %149
+  vst.128.bf16x8.index %148, %output_view, %150
+  %153 = vshift %110, %110, %130
+  %154 = slice %153[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %155 = mov.static-byte-offset 1792
+  %156 = mov.address-index %155
+  vst.128.bf16x8.index %154, %output_view, %156
+  return
+}

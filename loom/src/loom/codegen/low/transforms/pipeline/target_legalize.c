@@ -129,6 +129,14 @@ typedef struct loom_low_target_legalize_function_state_t {
     // Allocated entry capacity.
     iree_host_size_t capacity;
   } pending_packet_plan_values;
+  // Selected operations retained across eager legalization so the later view
+  // linearizer can expose their shaped load roots as row packets.
+  struct {
+    // Dense deferral markers indexed by stable module value ID.
+    uint8_t* by_value_id;
+    // Number of value IDs backed by |by_value_id|.
+    iree_host_size_t capacity;
+  } deferred_shaped_component_ops;
   // Optional compile report receiving cold legalization decision rows.
   loom_target_compile_report_t* compile_report;
   // Original source decisions, indexed once before the function is mutated.
@@ -330,6 +338,41 @@ static uint32_t loom_low_target_legalize_report_lineage_hash(
   uint64_t value = (uint64_t)(uintptr_t)op >> 4;
   value ^= value >> 16;
   return (uint32_t)(value * UINT64_C(0x9e3779b97f4a7c15));
+}
+
+static bool loom_low_target_legalize_op_is_deferred_for_shaped_load(
+    const loom_low_target_legalize_function_state_t* state,
+    const loom_op_t* op) {
+  if (op->result_count != 1) {
+    return false;
+  }
+  const loom_value_id_t result = loom_op_const_results(op)[0];
+  return result < state->deferred_shaped_component_ops.capacity &&
+         state->deferred_shaped_component_ops.by_value_id[result] != 0;
+}
+
+static iree_status_t loom_low_target_legalize_defer_shaped_component_op(
+    void* user_data, const loom_op_t* op) {
+  loom_low_target_legalize_function_state_t* state =
+      (loom_low_target_legalize_function_state_t*)user_data;
+  IREE_ASSERT_EQ(op->result_count, 1u);
+  const loom_value_id_t result = loom_op_const_results(op)[0];
+  if (result >= state->deferred_shaped_component_ops.capacity) {
+    const iree_host_size_t old_capacity =
+        state->deferred_shaped_component_ops.capacity;
+    const iree_host_size_t minimum_capacity =
+        iree_max(state->module->values.count, (iree_host_size_t)result + 1u);
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        state->query_scope_arena, old_capacity, minimum_capacity,
+        sizeof(*state->deferred_shaped_component_ops.by_value_id),
+        &state->deferred_shaped_component_ops.capacity,
+        (void**)&state->deferred_shaped_component_ops.by_value_id));
+    memset(state->deferred_shaped_component_ops.by_value_id + old_capacity, 0,
+           (state->deferred_shaped_component_ops.capacity - old_capacity) *
+               sizeof(*state->deferred_shaped_component_ops.by_value_id));
+  }
+  state->deferred_shaped_component_ops.by_value_id[result] = 1;
+  return iree_ok_status();
 }
 
 static bool loom_low_target_legalize_report_lineage_equal(const void* context,
@@ -1234,6 +1277,18 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
         &state->legalization_context, op, &query_result_storage));
     query_result = &query_result_storage;
   }
+  if (state->legalization_context.mode == LOOM_TARGET_LEGALIZATION_MODE_EAGER &&
+      loom_low_target_legalize_op_is_deferred_for_shaped_load(state, op)) {
+    if (is_report_source) {
+      IREE_RETURN_IF_ERROR(loom_low_target_legalize_retain_report_decision(
+          state, report_decision, source_op_name, source_op_kind,
+          LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_DEFERRED, query_result,
+          /*legalizer_entry=*/NULL, /*scalarized=*/false,
+          /*created_op_count=*/0, /*erased_op_count=*/0));
+    }
+    ++state->statistics->ops_deferred;
+    return iree_ok_status();
+  }
   // Packet materialization earlier in this worklist can create a
   // shape-preserving vector operation after the iteration's component plan has
   // run. Give the next plan first claim when the target admits a multi-lane
@@ -1487,14 +1542,14 @@ static iree_status_t loom_low_target_legalize_packet_components(
   uint32_t rewritten_op_count = 0;
   iree_status_t packet_status = loom_vector_component_packet_legalize(
       &state->legalization_context,
-      state->compile_report != NULL
-          ? (loom_vector_component_packet_rewrite_callback_t){
-                .fn = loom_low_target_legalize_report_packet_rewrite,
-                .user_data = state,
-            }
-          : (loom_vector_component_packet_rewrite_callback_t){0},
-      &state->packet_query_cache,
-      &rewritten_op_count);
+      (loom_vector_component_packet_callbacks_t){
+          .user_data = state,
+          .rewritten_fn = state->compile_report != NULL
+                              ? loom_low_target_legalize_report_packet_rewrite
+                              : NULL,
+          .deferred_fn = loom_low_target_legalize_defer_shaped_component_op,
+      },
+      &state->packet_query_cache, &rewritten_op_count);
   if (state->report_lineage.initialized) {
     loom_rewriter_set_operation_creation_source(&driver->rewriter, NULL);
   }
