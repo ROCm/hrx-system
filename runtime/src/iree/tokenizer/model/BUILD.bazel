@@ -165,6 +165,7 @@ iree_runtime_cc_library(
     hdrs = ["unigram.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/tokenizer:model",
         "//runtime/src/iree/tokenizer:types",
         "//runtime/src/iree/tokenizer/vocab",
@@ -175,6 +176,18 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "unigram_test",
     srcs = ["unigram_test.cc"],
+    deps = [
+        ":model_test_util",
+        ":unigram",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "unigram_streaming_test",
+    srcs = ["unigram_streaming_test.cc"],
     deps = [
         ":model_test_util",
         ":unigram",

@@ -221,14 +221,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
 
   iree_tokenizer_model_state_t* state = NULL;
-  status = iree_tokenizer_model_state_initialize(model, state_storage, &state);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(iree_allocator_system(), state_storage);
-    iree_tokenizer_model_free(model);
-    iree_tokenizer_vocab_free(vocab);
-    iree_status_ignore(status);
-    return 0;
-  }
+  iree_tokenizer_model_state_initialize(model, state_storage,
+                                        iree_allocator_system(), &state);
 
   // Output buffer.
   iree_tokenizer_token_id_t tokens[512];
@@ -264,9 +258,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   //===--------------------------------------------------------------------===//
 
   // Reinitialize state.
-  iree_tokenizer_model_state_deinitialize(state);
-  status = iree_tokenizer_model_state_initialize(model, state_storage, &state);
-  if (iree_status_is_ok(status) && available_input >= 4) {
+  iree_tokenizer_model_state_reset(state);
+  if (available_input >= 4) {
     // Create segments of varying sizes: 1, 2, 1, 2, ...
     iree_tokenizer_segment_t segments_array[64];
     iree_host_size_t segment_count = 0;
@@ -306,9 +299,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Test 3: Partial segment processing (streaming simulation)
   //===--------------------------------------------------------------------===//
 
-  iree_tokenizer_model_state_deinitialize(state);
-  status = iree_tokenizer_model_state_initialize(model, state_storage, &state);
-  if (iree_status_is_ok(status) && available_input >= 8) {
+  iree_tokenizer_model_state_reset(state);
+  if (available_input >= 8) {
     // Simulate partial segment: first half, then second half.
     iree_const_byte_span_t transform_buffer = iree_make_const_byte_span(
         reinterpret_cast<const uint8_t*>(input_data), available_input);
@@ -348,9 +340,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Test 4: Limited output capacity (stress output buffering)
   //===--------------------------------------------------------------------===//
 
-  iree_tokenizer_model_state_deinitialize(state);
-  status = iree_tokenizer_model_state_initialize(model, state_storage, &state);
-  if (iree_status_is_ok(status) && available_input > 0) {
+  iree_tokenizer_model_state_reset(state);
+  if (available_input > 0) {
     // Output buffer of size 1 to force multiple encode calls.
     iree_tokenizer_token_id_t single_token[1];
     iree_tokenizer_token_output_t small_output =
