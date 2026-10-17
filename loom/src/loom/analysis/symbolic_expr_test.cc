@@ -12,6 +12,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbolic_congruence.h"
 #include "loom/analysis/symbolic_expr_test_fixture.h"
+#include "loom/analysis/symbolic_integer_cast.h"
 #include "loom/analysis/symbolic_projection.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
@@ -312,6 +313,300 @@ TEST_F(SymbolicExprTest, ScalarCastsExpandOnlyWhenTheyPreserveNumericValue) {
     EXPECT_EQ(expression.terms[0].coefficient, 1);
     EXPECT_EQ(expression.terms[0].value_id,
               test_case.preserves_value ? input : result);
+  }
+}
+
+TEST_F(SymbolicExprTest,
+       UnsignedNarrowingRoundTripsPreserveRepresentableSourceWidths) {
+  const struct {
+    // Fixed-width payload used by the narrowing and extension pair.
+    loom_scalar_type_t payload_type;
+    // Largest value represented by the unsigned payload.
+    int64_t maximum;
+  } cases[] = {
+      {LOOM_SCALAR_TYPE_I1, 1},
+      {LOOM_SCALAR_TYPE_I8, UINT8_MAX},
+      {LOOM_SCALAR_TYPE_I16, UINT16_MAX},
+      {LOOM_SCALAR_TYPE_I32, UINT32_MAX},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(static_cast<int>(test_case.payload_type));
+    for (bool representable : {true, false}) {
+      SCOPED_TRACE(representable);
+      loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+      IREE_ASSERT_OK(loom_builder_define_value(
+          &builder_, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), &source));
+      DefineFacts(source,
+                  loom_value_facts_make(
+                      0, test_case.maximum + (representable ? 0 : 1), 1));
+
+      loom_op_t* narrow = nullptr;
+      IREE_ASSERT_OK(loom_index_cast_build(
+          &builder_, source, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+          loom_type_scalar(test_case.payload_type), LOOM_LOCATION_UNKNOWN,
+          &narrow));
+      ComputeFacts(narrow);
+      loom_op_t* extend = nullptr;
+      IREE_ASSERT_OK(
+          loom_scalar_extui_build(&builder_, loom_index_cast_result(narrow),
+                                  loom_type_scalar(test_case.payload_type),
+                                  loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+                                  LOOM_LOCATION_UNKNOWN, &extend));
+      ComputeFacts(extend);
+
+      const loom_value_id_t result = loom_scalar_extui_result(extend);
+      loom_symbolic_expr_t expression = {};
+      IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, result,
+                                                   &expression));
+      ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+      ASSERT_EQ(expression.term_count, 1);
+      const loom_value_id_t unrepresentable_term =
+          test_case.payload_type == LOOM_SCALAR_TYPE_I1
+              ? loom_index_cast_result(narrow)
+              : result;
+      EXPECT_EQ(expression.terms[0].value_id,
+                representable ? source : unrepresentable_term);
+
+      loom_symbolic_expr_summary_t summary = {};
+      ASSERT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+          &expression_context_, expression.terms[0].value_id, &summary));
+      if (representable) {
+        EXPECT_EQ(summary.integer_cast, nullptr);
+      } else {
+        ASSERT_NE(summary.integer_cast, nullptr);
+        EXPECT_EQ(summary.integer_cast->source_value_id, source);
+        EXPECT_EQ(summary.integer_cast->bit_count,
+                  loom_scalar_type_bitwidth(test_case.payload_type));
+        EXPECT_EQ(summary.integer_cast->kind,
+                  LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED);
+      }
+    }
+  }
+}
+
+TEST_F(SymbolicExprTest,
+       SignedNarrowingRoundTripsRejectUnrepresentableSourceWidths) {
+  const struct {
+    // Fixed-width payload used by the narrowing and extension pair.
+    loom_scalar_type_t payload_type;
+    // Inclusive mathematical domain preserved by signed extension.
+    int64_t minimum;
+    int64_t maximum;
+  } cases[] = {
+      {LOOM_SCALAR_TYPE_I1, -1, 0},
+      {LOOM_SCALAR_TYPE_I8, INT8_MIN, INT8_MAX},
+      {LOOM_SCALAR_TYPE_I16, INT16_MIN, INT16_MAX},
+      {LOOM_SCALAR_TYPE_I32, INT32_MIN, INT32_MAX},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(static_cast<int>(test_case.payload_type));
+    for (bool representable : {true, false}) {
+      SCOPED_TRACE(representable);
+      loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+      IREE_ASSERT_OK(loom_builder_define_value(
+          &builder_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &source));
+      DefineFacts(source, loom_value_facts_make(
+                              test_case.minimum,
+                              test_case.maximum + (representable ? 0 : 1), 1));
+
+      loom_op_t* narrow = nullptr;
+      IREE_ASSERT_OK(loom_index_cast_build(
+          &builder_, source, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+          loom_type_scalar(test_case.payload_type), LOOM_LOCATION_UNKNOWN,
+          &narrow));
+      ComputeFacts(narrow);
+      loom_op_t* extend = nullptr;
+      IREE_ASSERT_OK(
+          loom_scalar_extsi_build(&builder_, loom_index_cast_result(narrow),
+                                  loom_type_scalar(test_case.payload_type),
+                                  loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+                                  LOOM_LOCATION_UNKNOWN, &extend));
+      ComputeFacts(extend);
+
+      const loom_value_id_t result = loom_scalar_extsi_result(extend);
+      loom_symbolic_expr_t expression = {};
+      IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, result,
+                                                   &expression));
+      ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+      ASSERT_EQ(expression.term_count, 1);
+      const loom_value_id_t unrepresentable_term =
+          test_case.payload_type == LOOM_SCALAR_TYPE_I1
+              ? result
+              : loom_index_cast_result(narrow);
+      EXPECT_EQ(expression.terms[0].value_id,
+                representable ? source : unrepresentable_term);
+    }
+  }
+}
+
+TEST_F(SymbolicExprTest,
+       ScalarTruncationRoundTripsPreserveEachIntegerInterpretation) {
+  const struct {
+    // Fixed-width payload used by the truncation and extension pair.
+    loom_scalar_type_t payload_type;
+    // Inclusive signed payload domain.
+    int64_t signed_minimum;
+    int64_t signed_maximum;
+    // Inclusive unsigned payload maximum.
+    int64_t unsigned_maximum;
+  } cases[] = {
+      {LOOM_SCALAR_TYPE_I1, -1, 0, 1},
+      {LOOM_SCALAR_TYPE_I8, INT8_MIN, INT8_MAX, UINT8_MAX},
+      {LOOM_SCALAR_TYPE_I16, INT16_MIN, INT16_MAX, UINT16_MAX},
+      {LOOM_SCALAR_TYPE_I32, INT32_MIN, INT32_MAX, UINT32_MAX},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(static_cast<int>(test_case.payload_type));
+    for (const loom_symbolic_integer_cast_kind_t kind : {
+             LOOM_SYMBOLIC_INTEGER_CAST_SIGNED,
+             LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED,
+         }) {
+      SCOPED_TRACE(static_cast<int>(kind));
+      for (bool representable : {true, false}) {
+        SCOPED_TRACE(representable);
+        const bool is_unsigned = kind == LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED;
+        loom_value_id_t source = DefineI64Value();
+        DefineFacts(source, loom_value_facts_make(
+                                is_unsigned ? 0 : test_case.signed_minimum,
+                                (is_unsigned ? test_case.unsigned_maximum
+                                             : test_case.signed_maximum) +
+                                    (representable ? 0 : 1),
+                                1));
+
+        loom_op_t* narrow = nullptr;
+        IREE_ASSERT_OK(loom_scalar_trunci_build(
+            &builder_, source, loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+            loom_type_scalar(test_case.payload_type), LOOM_LOCATION_UNKNOWN,
+            &narrow));
+        ComputeFacts(narrow);
+        loom_op_t* extend = nullptr;
+        if (is_unsigned) {
+          IREE_ASSERT_OK(loom_scalar_extui_build(
+              &builder_, loom_scalar_trunci_result(narrow),
+              loom_type_scalar(test_case.payload_type),
+              loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+              &extend));
+        } else {
+          IREE_ASSERT_OK(loom_scalar_extsi_build(
+              &builder_, loom_scalar_trunci_result(narrow),
+              loom_type_scalar(test_case.payload_type),
+              loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+              &extend));
+        }
+        ComputeFacts(extend);
+
+        const loom_value_id_t result = loom_op_const_results(extend)[0];
+        loom_symbolic_expr_t expression = {};
+        IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_,
+                                                     result, &expression));
+        ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+        ASSERT_EQ(expression.term_count, 1);
+        const bool projection_owned_by_extension =
+            is_unsigned != (test_case.payload_type == LOOM_SCALAR_TYPE_I1);
+        const loom_value_id_t unrepresentable_term =
+            projection_owned_by_extension ? result
+                                          : loom_scalar_trunci_result(narrow);
+        EXPECT_EQ(expression.terms[0].value_id,
+                  representable ? source : unrepresentable_term);
+
+        loom_symbolic_expr_summary_t summary = {};
+        ASSERT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+            &expression_context_, expression.terms[0].value_id, &summary));
+        if (representable) {
+          EXPECT_EQ(summary.integer_cast, nullptr);
+        } else {
+          ASSERT_NE(summary.integer_cast, nullptr);
+          EXPECT_EQ(summary.integer_cast->source_value_id, source);
+          EXPECT_EQ(summary.integer_cast->bit_count,
+                    loom_scalar_type_bitwidth(test_case.payload_type));
+          EXPECT_EQ(summary.integer_cast->kind, kind);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(SymbolicExprTest,
+       NestedTruncationsRetainTheOriginalPayloadAcrossAllWidthPairs) {
+  const struct {
+    // First fixed-width payload in the narrowing chain.
+    loom_scalar_type_t intermediate_type;
+    // Final fixed-width payload interpreted by the extension.
+    loom_scalar_type_t payload_type;
+  } cases[] = {
+      {LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I1},
+      {LOOM_SCALAR_TYPE_I16, LOOM_SCALAR_TYPE_I1},
+      {LOOM_SCALAR_TYPE_I16, LOOM_SCALAR_TYPE_I8},
+      {LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I1},
+      {LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I8},
+      {LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I16},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(static_cast<int>(test_case.intermediate_type));
+    SCOPED_TRACE(static_cast<int>(test_case.payload_type));
+    for (const loom_symbolic_integer_cast_kind_t kind : {
+             LOOM_SYMBOLIC_INTEGER_CAST_SIGNED,
+             LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED,
+         }) {
+      SCOPED_TRACE(static_cast<int>(kind));
+      int64_t signed_minimum = 0;
+      int64_t signed_maximum = 0;
+      ASSERT_TRUE(loom_value_facts_scalar_type_domain(
+          test_case.intermediate_type, &signed_minimum, &signed_maximum));
+      const int32_t intermediate_bit_count =
+          loom_scalar_type_bitwidth(test_case.intermediate_type);
+      const int64_t unsigned_maximum =
+          (INT64_C(1) << intermediate_bit_count) - 1;
+      const bool is_unsigned = kind == LOOM_SYMBOLIC_INTEGER_CAST_UNSIGNED;
+      const loom_value_id_t source = DefineI64Value();
+      DefineFacts(source,
+                  loom_value_facts_make(
+                      is_unsigned ? 0 : signed_minimum,
+                      is_unsigned ? unsigned_maximum : signed_maximum + 1, 1));
+
+      loom_op_t* first_narrow = nullptr;
+      IREE_ASSERT_OK(loom_scalar_trunci_build(
+          &builder_, source, loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+          loom_type_scalar(test_case.intermediate_type), LOOM_LOCATION_UNKNOWN,
+          &first_narrow));
+      ComputeFacts(first_narrow);
+      loom_op_t* second_narrow = nullptr;
+      IREE_ASSERT_OK(loom_scalar_trunci_build(
+          &builder_, loom_scalar_trunci_result(first_narrow),
+          loom_type_scalar(test_case.intermediate_type),
+          loom_type_scalar(test_case.payload_type), LOOM_LOCATION_UNKNOWN,
+          &second_narrow));
+      ComputeFacts(second_narrow);
+      loom_op_t* extend = nullptr;
+      if (is_unsigned) {
+        IREE_ASSERT_OK(loom_scalar_extui_build(
+            &builder_, loom_scalar_trunci_result(second_narrow),
+            loom_type_scalar(test_case.payload_type),
+            loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+            &extend));
+      } else {
+        IREE_ASSERT_OK(loom_scalar_extsi_build(
+            &builder_, loom_scalar_trunci_result(second_narrow),
+            loom_type_scalar(test_case.payload_type),
+            loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+            &extend));
+      }
+      ComputeFacts(extend);
+
+      loom_symbolic_expr_t expression = {};
+      IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+          &expression_context_, loom_op_const_results(extend)[0], &expression));
+      ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+      ASSERT_EQ(expression.term_count, 1);
+      loom_symbolic_expr_summary_t summary = {};
+      ASSERT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+          &expression_context_, expression.terms[0].value_id, &summary));
+      ASSERT_NE(summary.integer_cast, nullptr);
+      EXPECT_EQ(summary.integer_cast->source_value_id, source);
+      EXPECT_EQ(summary.integer_cast->bit_count,
+                loom_scalar_type_bitwidth(test_case.payload_type));
+      EXPECT_EQ(summary.integer_cast->kind, kind);
+    }
   }
 }
 

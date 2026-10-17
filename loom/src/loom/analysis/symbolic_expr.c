@@ -12,6 +12,7 @@
 #include "loom/analysis/cfg_value_identity.h"
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/symbolic_congruence.h"
+#include "loom/analysis/symbolic_integer_cast.h"
 #include "loom/analysis/symbolic_product.h"
 #include "loom/analysis/symbolic_projection.h"
 #include "loom/ir/attribute.h"
@@ -33,6 +34,7 @@ enum loom_symbolic_expr_memo_state_e {
   LOOM_SYMBOLIC_EXPR_MEMO_READY_COMPONENT = 3,
   LOOM_SYMBOLIC_EXPR_MEMO_PROJECTED = 4,
   LOOM_SYMBOLIC_EXPR_MEMO_PRODUCT = 5,
+  LOOM_SYMBOLIC_EXPR_MEMO_INTEGER_CAST = 6,
 };
 
 struct loom_symbolic_expr_materialization_t {
@@ -44,17 +46,18 @@ struct loom_symbolic_expr_memo_entry_t {
   // Current memo state for this value ID.
   uint8_t state;
 
-  // Projected and product values materialize themselves: their expressions
-  // are one SSA term with no constant and need only a retained proof index.
+  // Projected, product, and integer-cast values materialize themselves: their
+  // expressions are one SSA term with no constant and need only a retained
+  // proof index.
   union {
     // SSA value materializing the dynamic terms, or invalid, for READY.
     loom_value_id_t materialized_dynamic_value_id;
-    // Index into context materializations, projections, or products, selected
-    // by state.
+    // Index into context materializations, projections, products, or integer
+    // casts, selected by state.
     uint32_t proof_index;
   } result;
 
-  // Cached expression when state is READY, PROJECTED, or PRODUCT.
+  // Cached expression when state is ready in any retained representation.
   loom_symbolic_expr_t expression;
 };
 
@@ -139,6 +142,18 @@ const loom_symbolic_projection_t* loom_symbolic_expr_lookup_projection(
              : NULL;
 }
 
+const loom_symbolic_integer_cast_t* loom_symbolic_expr_lookup_integer_cast(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
+  if (context->integer_casts.count == 0) {
+    return NULL;
+  }
+  const loom_symbolic_expr_memo_entry_t* entry =
+      loom_symbolic_expr_ready_memo_entry(context, value_id);
+  return entry && entry->state == LOOM_SYMBOLIC_EXPR_MEMO_INTEGER_CAST
+             ? &context->integer_casts.values[entry->result.proof_index]
+             : NULL;
+}
+
 const loom_symbolic_product_t* loom_symbolic_expr_lookup_product(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
   if (context->products.count == 0) {
@@ -207,6 +222,7 @@ void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context) {
   context->memo.count = 0;
   context->materializations.count = 0;
   context->projections.count = 0;
+  context->integer_casts.count = 0;
   context->products.count = 0;
   for (iree_host_size_t i = 0;
        i < context->touched_condition_fact_memo_ordinal_count; ++i) {
@@ -235,6 +251,7 @@ bool loom_symbolic_expr_context_try_lookup_summary(
           loom_symbolic_expr_memo_materialized_component_value(context, entry),
       .projection =
           loom_symbolic_expr_lookup_projection(context, &entry->expression),
+      .integer_cast = loom_symbolic_expr_lookup_integer_cast(context, value_id),
   };
   return true;
 }
@@ -817,6 +834,7 @@ typedef enum loom_symbolic_expr_expansion_kind_e {
   LOOM_SYMBOLIC_EXPR_EXPANSION_REMAINDER,
   LOOM_SYMBOLIC_EXPR_EXPANSION_UNSIGNED_REMAINDER,
   LOOM_SYMBOLIC_EXPR_EXPANSION_MASK,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_INTEGER_CAST,
 } loom_symbolic_expr_expansion_kind_t;
 
 typedef enum loom_symbolic_expr_expansion_stage_e {
@@ -846,6 +864,12 @@ typedef struct loom_symbolic_expr_expansion_frame_t {
   // Fixed-width result domain that must preserve the mathematical expression,
   // or zero for nonwrapping arithmetic.
   uint8_t integer_bit_count;
+
+  // Low payload width retained by an integer cast projection.
+  uint8_t cast_bit_count;
+
+  // loom_symbolic_integer_cast_kind_t selecting the payload interpretation.
+  uint8_t cast_kind;
 
   // Completed proof's memo state, or EMPTY while no proof is retained.
   uint8_t proof_state;
@@ -926,6 +950,7 @@ static loom_value_id_t loom_symbolic_expr_expansion_materialized_dynamic_value(
     case LOOM_SYMBOLIC_EXPR_EXPANSION_REMAINDER:
     case LOOM_SYMBOLIC_EXPR_EXPANSION_UNSIGNED_REMAINDER:
     case LOOM_SYMBOLIC_EXPR_EXPANSION_MASK:
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_INTEGER_CAST:
       break;
   }
   return source_entry ? loom_symbolic_expr_memo_materialized_dynamic_value(
@@ -1043,6 +1068,7 @@ loom_symbolic_expr_expansion_materialized_component_value(
     case LOOM_SYMBOLIC_EXPR_EXPANSION_REMAINDER:
     case LOOM_SYMBOLIC_EXPR_EXPANSION_UNSIGNED_REMAINDER:
     case LOOM_SYMBOLIC_EXPR_EXPANSION_MASK:
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_INTEGER_CAST:
       return LOOM_VALUE_ID_INVALID;
   }
   loom_value_id_t component = loom_symbolic_expr_select_materialized_component(
@@ -1231,9 +1257,18 @@ static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
       // identity; otherwise its result remains an independent symbolic term.
       if (input_facts.range_lo < result_lower_bound ||
           input_facts.range_hi > result_upper_bound) {
-        *out_complete = true;
-        return loom_symbolic_expr_value(context, frame->value_id,
-                                        out_expression);
+        loom_symbolic_integer_cast_t cast = {0};
+        if (!loom_symbolic_integer_cast_from_op(context->module, defining_op,
+                                                &cast)) {
+          *out_complete = true;
+          return loom_symbolic_expr_value(context, frame->value_id,
+                                          out_expression);
+        }
+        frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_INTEGER_CAST;
+        frame->operand_values[0] = input;
+        frame->cast_bit_count = cast.bit_count;
+        frame->cast_kind = cast.kind;
+        break;
       }
       frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY;
       frame->operand_values[0] = input;
@@ -1380,6 +1415,7 @@ static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
           (uint8_t)(target_bit_count > 0 ? target_bit_count : 64);
     } else if (loom_scalar_type_is_integer(scalar_type) &&
                frame->kind != LOOM_SYMBOLIC_EXPR_EXPANSION_ASSUME &&
+               frame->kind != LOOM_SYMBOLIC_EXPR_EXPANSION_INTEGER_CAST &&
                !no_signed_wrap) {
       frame->integer_bit_count =
           (uint8_t)loom_scalar_type_bitwidth(scalar_type);
@@ -1445,6 +1481,56 @@ static iree_status_t loom_symbolic_expr_retain_projection(
     context->projections.values[context->projections.count++] = projection;
     frame->proof_state = LOOM_SYMBOLIC_EXPR_MEMO_PROJECTED;
   }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_symbolic_expr_apply_integer_cast(
+    loom_symbolic_expr_context_t* context,
+    loom_symbolic_expr_expansion_frame_t* frame,
+    const loom_symbolic_expr_t* input_expression,
+    loom_symbolic_expr_t* out_expression) {
+  const loom_value_id_t input_value = frame->operand_values[0];
+  loom_symbolic_integer_cast_t cast = {
+      .source_value_id = input_value,
+      .bit_count = frame->cast_bit_count,
+      .kind = frame->cast_kind,
+  };
+  const loom_symbolic_integer_cast_t* input_cast =
+      loom_symbolic_expr_lookup_integer_cast(context, input_value);
+  // A second interpretation of an equal or narrower low-bit payload replaces
+  // the first interpretation. Wider interpretations must retain the
+  // intermediate value because its sign or zero extension supplies new bits.
+  if (input_cast && cast.bit_count <= input_cast->bit_count) {
+    cast.source_value_id = input_cast->source_value_id;
+  }
+
+  loom_value_facts_t source_facts = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
+      context, cast.source_value_id, &source_facts));
+  if (loom_symbolic_integer_cast_is_identity(&cast, source_facts)) {
+    frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY;
+    frame->operand_values[0] = cast.source_value_id;
+    if (cast.source_value_id == input_value) {
+      *out_expression = *input_expression;
+      return iree_ok_status();
+    }
+    return loom_symbolic_expr_from_value(context, cast.source_value_id,
+                                         out_expression);
+  }
+
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_value(context, frame->value_id, out_expression));
+  if (context->integer_casts.count == context->integer_casts.capacity) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_grow_array(context->arena, context->integer_casts.count,
+                              context->integer_casts.count + 1,
+                              sizeof(*context->integer_casts.values),
+                              &context->integer_casts.capacity,
+                              (void**)&context->integer_casts.values));
+  }
+  frame->retained.proof_index = (uint32_t)context->integer_casts.count;
+  context->integer_casts.values[context->integer_casts.count++] = cast;
+  frame->proof_state = LOOM_SYMBOLIC_EXPR_MEMO_INTEGER_CAST;
   return iree_ok_status();
 }
 
@@ -1542,7 +1628,8 @@ static iree_status_t loom_symbolic_expr_expansion_step(
       switch (frame->kind) {
         case LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY:
         case LOOM_SYMBOLIC_EXPR_EXPANSION_ASSUME:
-        case LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE: {
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE:
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_INTEGER_CAST: {
           IREE_RETURN_IF_ERROR(loom_symbolic_expr_expansion_request_value(
               context, transient_arena, frame->operand_values[0], inout_frames,
               inout_frame_count, inout_frame_capacity, &operand_expression,
@@ -1558,6 +1645,9 @@ static iree_status_t loom_symbolic_expr_expansion_step(
           } else if (frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE) {
             IREE_RETURN_IF_ERROR(loom_symbolic_expr_mul_i64(
                 context, &operand_expression, -1, out_expression));
+          } else if (frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_INTEGER_CAST) {
+            IREE_RETURN_IF_ERROR(loom_symbolic_expr_apply_integer_cast(
+                context, frame, &operand_expression, out_expression));
           }
           *out_complete = true;
           return iree_ok_status();

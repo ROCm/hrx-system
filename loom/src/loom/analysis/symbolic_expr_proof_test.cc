@@ -13,6 +13,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/symbolic_expr_test_fixture.h"
+#include "loom/analysis/symbolic_integer_cast.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -149,6 +150,24 @@ static iree_status_t ProveSemanticallyEquivalentUpperBound(
   return status;
 }
 
+static iree_status_t ProveSemanticallyEquivalentRelativeUpperBound(
+    loom_symbolic_expr_context_t* context, loom_value_id_t lower_value,
+    loom_value_id_t relation_upper_value, loom_value_id_t query_upper_value,
+    loom_symbolic_proof_result_t* out_result) {
+  loom_condition_integer_relation_t relation = ValueRelation(
+      LOOM_SYMBOLIC_INTEGER_RELATION_LE, lower_value, relation_upper_value);
+  loom_condition_fact_set_t condition_facts = SingleRelationFacts(&relation);
+  ScopedConditionFacts condition_scope(context, &condition_facts);
+
+  loom_symbolic_expr_t lower = {};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_from_value(context, lower_value, &lower));
+  loom_symbolic_expr_t upper = {};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_from_value(context, query_upper_value, &upper));
+  return loom_symbolic_expr_prove_le(context, &lower, &upper, out_result);
+}
+
 TEST_F(SymbolicExprTest, AddSubNormalizeAndCancelTerms) {
   loom_value_id_t value_id = DefineIndexValue();
   loom_symbolic_expr_t value_expression = {0};
@@ -238,6 +257,193 @@ TEST_F(SymbolicExprTest, SemanticMatchRetainsProducerDepthLimit) {
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   IREE_ASSERT_OK(ProveSemanticallyEquivalentUpperBound(&expression_context_,
                                                        left, right, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
+}
+
+TEST_F(SymbolicExprTest, UnsignedExtensionsMatchOffsetEntryAcrossFixedWidths) {
+  for (const loom_scalar_type_t source_type : {
+           LOOM_SCALAR_TYPE_I1,
+           LOOM_SCALAR_TYPE_I8,
+           LOOM_SCALAR_TYPE_I16,
+           LOOM_SCALAR_TYPE_I32,
+       }) {
+    SCOPED_TRACE(static_cast<int>(source_type));
+    loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_define_value(
+        &builder_, loom_type_scalar(source_type), &source));
+    int64_t lower_bound = 0;
+    int64_t upper_bound = 0;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(source_type, &lower_bound,
+                                                    &upper_bound));
+    DefineFacts(source, loom_value_facts_make(lower_bound, upper_bound, 1));
+
+    loom_op_t* extension = nullptr;
+    IREE_ASSERT_OK(loom_scalar_extui_build(
+        &builder_, source, loom_type_scalar(source_type),
+        loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+        &extension));
+    ComputeFacts(extension);
+    loom_op_t* offset = nullptr;
+    IREE_ASSERT_OK(
+        loom_index_cast_build(&builder_, source, loom_type_scalar(source_type),
+                              loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+                              LOOM_LOCATION_UNKNOWN, &offset));
+    ComputeFacts(offset);
+
+    const loom_value_id_t lower = DefineI64Value();
+    loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_ASSERT_OK(ProveSemanticallyEquivalentRelativeUpperBound(
+        &expression_context_, lower, loom_scalar_extui_result(extension),
+        loom_index_cast_result(offset), &proof));
+    EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+  }
+}
+
+TEST_F(SymbolicExprTest,
+       SignedExtensionsMatchIndexEntryExceptPredicateInterpretation) {
+  for (const loom_scalar_type_t source_type : {
+           LOOM_SCALAR_TYPE_I1,
+           LOOM_SCALAR_TYPE_I8,
+           LOOM_SCALAR_TYPE_I16,
+           LOOM_SCALAR_TYPE_I32,
+       }) {
+    SCOPED_TRACE(static_cast<int>(source_type));
+    loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_define_value(
+        &builder_, loom_type_scalar(source_type), &source));
+    int64_t lower_bound = 0;
+    int64_t upper_bound = 0;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(source_type, &lower_bound,
+                                                    &upper_bound));
+    DefineFacts(source, loom_value_facts_make(lower_bound, upper_bound, 1));
+
+    loom_op_t* extension = nullptr;
+    IREE_ASSERT_OK(loom_scalar_extsi_build(
+        &builder_, source, loom_type_scalar(source_type),
+        loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+        &extension));
+    ComputeFacts(extension);
+    loom_op_t* index = nullptr;
+    IREE_ASSERT_OK(
+        loom_index_cast_build(&builder_, source, loom_type_scalar(source_type),
+                              loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                              LOOM_LOCATION_UNKNOWN, &index));
+    ComputeFacts(index);
+
+    const loom_value_id_t lower = DefineI64Value();
+    loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_ASSERT_OK(ProveSemanticallyEquivalentRelativeUpperBound(
+        &expression_context_, lower, loom_index_cast_result(index),
+        loom_scalar_extsi_result(extension), &proof));
+    EXPECT_EQ(proof, source_type == LOOM_SCALAR_TYPE_I1
+                         ? LOOM_SYMBOLIC_PROOF_UNKNOWN
+                         : LOOM_SYMBOLIC_PROOF_TRUE);
+  }
+}
+
+TEST_F(SymbolicExprTest,
+       SignedAndUnsignedExtensionsRemainDistinctAcrossNegativeDomains) {
+  for (const loom_scalar_type_t source_type : {
+           LOOM_SCALAR_TYPE_I8,
+           LOOM_SCALAR_TYPE_I16,
+           LOOM_SCALAR_TYPE_I32,
+       }) {
+    SCOPED_TRACE(static_cast<int>(source_type));
+    loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_define_value(
+        &builder_, loom_type_scalar(source_type), &source));
+    int64_t lower_bound = 0;
+    int64_t upper_bound = 0;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(source_type, &lower_bound,
+                                                    &upper_bound));
+    DefineFacts(source, loom_value_facts_make(lower_bound, upper_bound, 1));
+
+    loom_op_t* signed_extension = nullptr;
+    IREE_ASSERT_OK(loom_scalar_extsi_build(
+        &builder_, source, loom_type_scalar(source_type),
+        loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+        &signed_extension));
+    ComputeFacts(signed_extension);
+    loom_op_t* unsigned_extension = nullptr;
+    IREE_ASSERT_OK(loom_scalar_extui_build(
+        &builder_, source, loom_type_scalar(source_type),
+        loom_type_scalar(LOOM_SCALAR_TYPE_I64), LOOM_LOCATION_UNKNOWN,
+        &unsigned_extension));
+    ComputeFacts(unsigned_extension);
+
+    const loom_value_id_t lower = DefineI64Value();
+    loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_TRUE;
+    IREE_ASSERT_OK(ProveSemanticallyEquivalentRelativeUpperBound(
+        &expression_context_, lower, loom_scalar_extsi_result(signed_extension),
+        loom_scalar_extui_result(unsigned_extension), &proof));
+    EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
+  }
+}
+
+TEST_F(SymbolicExprTest, UnsignedCastFunctionsMatchEquivalentPayloads) {
+  loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  IREE_ASSERT_OK(loom_builder_define_value(&builder_, i32, &source));
+  DefineFacts(source, loom_value_facts_make(INT32_MIN, INT32_MAX, 1));
+  loom_op_t* zero = nullptr;
+  IREE_ASSERT_OK(loom_scalar_constant_build(&builder_, loom_attr_i64(0), i32,
+                                            LOOM_LOCATION_UNKNOWN, &zero));
+  ComputeFacts(zero);
+  loom_op_t* alias = nullptr;
+  IREE_ASSERT_OK(loom_scalar_addi_build(&builder_, 0, source,
+                                        loom_scalar_constant_result(zero), i32,
+                                        LOOM_LOCATION_UNKNOWN, &alias));
+  ComputeFacts(alias);
+
+  loom_op_t* source_extension = nullptr;
+  IREE_ASSERT_OK(loom_scalar_extui_build(
+      &builder_, source, i32, loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+      LOOM_LOCATION_UNKNOWN, &source_extension));
+  ComputeFacts(source_extension);
+  loom_op_t* alias_extension = nullptr;
+  IREE_ASSERT_OK(
+      loom_scalar_extui_build(&builder_, loom_scalar_addi_result(alias), i32,
+                              loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+                              LOOM_LOCATION_UNKNOWN, &alias_extension));
+  ComputeFacts(alias_extension);
+
+  const loom_value_id_t lower = DefineI64Value();
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(ProveSemanticallyEquivalentRelativeUpperBound(
+      &expression_context_, lower, loom_scalar_extui_result(source_extension),
+      loom_scalar_extui_result(alias_extension), &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+}
+
+TEST_F(SymbolicExprTest, UnsignedCastFunctionsKeepPayloadWidthsDistinct) {
+  loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+  const loom_type_t i16 = loom_type_scalar(LOOM_SCALAR_TYPE_I16);
+  IREE_ASSERT_OK(loom_builder_define_value(&builder_, i16, &source));
+  DefineFacts(source, loom_value_facts_make(INT16_MIN, INT16_MAX, 1));
+
+  loom_op_t* wide_extension = nullptr;
+  IREE_ASSERT_OK(loom_scalar_extui_build(
+      &builder_, source, i16, loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+      LOOM_LOCATION_UNKNOWN, &wide_extension));
+  ComputeFacts(wide_extension);
+  loom_op_t* narrow = nullptr;
+  IREE_ASSERT_OK(loom_scalar_trunci_build(&builder_, source, i16,
+                                          loom_type_scalar(LOOM_SCALAR_TYPE_I8),
+                                          LOOM_LOCATION_UNKNOWN, &narrow));
+  ComputeFacts(narrow);
+  loom_op_t* narrow_extension = nullptr;
+  IREE_ASSERT_OK(
+      loom_scalar_extui_build(&builder_, loom_scalar_trunci_result(narrow),
+                              loom_type_scalar(LOOM_SCALAR_TYPE_I8),
+                              loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+                              LOOM_LOCATION_UNKNOWN, &narrow_extension));
+  ComputeFacts(narrow_extension);
+
+  const loom_value_id_t lower = DefineI64Value();
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_TRUE;
+  IREE_ASSERT_OK(ProveSemanticallyEquivalentRelativeUpperBound(
+      &expression_context_, lower, loom_scalar_extui_result(wide_extension),
+      loom_scalar_extui_result(narrow_extension), &proof));
   EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
 }
 
