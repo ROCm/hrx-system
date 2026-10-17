@@ -16,6 +16,7 @@
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/execution_reconfiguration.h"
+#include "loom/serve/service/kind.h"
 #include "loom/serve/service/text/admission.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/checkpoint_http.h"
@@ -2238,8 +2239,8 @@ loom_serve_service_t loom_serve_text_service_interface(
       .try_open_text_checkpoint = loom_serve_text_open_checkpoint,
       .advance = loom_serve_text_advance,
       .tokenizer = loom_serve_text_model_tokenizer(service->model),
-      .kind = "text",
-      .endpoint = "/v1/chat/completions",
+      .kind = LOOM_SERVE_MODEL_KIND_TEXT,
+      .endpoint = loom_serve_model_kind_endpoint(LOOM_SERVE_MODEL_KIND_TEXT),
       .capabilities =
           {.input_modalities = {images ? IREE_ARRAYSIZE(image_modalities)
                                        : IREE_ARRAYSIZE(modalities),

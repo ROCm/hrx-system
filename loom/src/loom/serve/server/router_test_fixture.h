@@ -366,7 +366,7 @@ struct loom_serve_test_model_service_t {
             .accept = Accept,
             .advance = Advance,
             .tokenizer = tokenizer,
-            .kind = "fixture",
+            .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING,
             .endpoint = "/v1/test",
             .snapshot = Snapshot,
             .capacity_domain = capacity_domain,
