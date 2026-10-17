@@ -456,6 +456,57 @@ static iree_status_t iree_hal_amdgpu_driver_dump_device_info(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_amdgpu_driver_parse_queue_count(
+    iree_string_view_t value, iree_host_size_t* out_count) {
+  iree_host_size_t count = 0;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < value.size && iree_status_is_ok(status);
+       ++i) {
+    const uint32_t digit = (uint32_t)(value.data[i] - '0');
+    if (digit > 9) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "queue_count must be a decimal integer");
+    } else if (count > (IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT - digit) / 10) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "queue_count must be between 1 and %" PRIhsz,
+                                IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT);
+    } else {
+      count = count * 10 + digit;
+    }
+  }
+  if (iree_status_is_ok(status) && count == 0) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "queue_count must be between 1 and %" PRIhsz,
+                              IREE_HAL_AMDGPU_MAX_QUEUE_AXIS_COUNT);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_count = count;
+  }
+  return status;
+}
+
+// Construction parameters describe the topology owned by this driver. Direct
+// logical-device callers retain authority over their explicitly supplied one.
+static iree_status_t iree_hal_amdgpu_driver_parse_device_params(
+    iree_string_pair_list_t params,
+    iree_hal_amdgpu_logical_device_options_t* options,
+    iree_host_size_t* out_queue_count) {
+  *out_queue_count = IREE_HAL_AMDGPU_DEFAULT_GPU_AGENT_QUEUE_COUNT;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < params.count && iree_status_is_ok(status);
+       ++i) {
+    const iree_string_pair_t* param = &params.pairs[i];
+    if (iree_string_view_equal(param->key, IREE_SV("queue_count"))) {
+      status = iree_hal_amdgpu_driver_parse_queue_count(param->value,
+                                                        out_queue_count);
+    } else {
+      status = iree_hal_amdgpu_logical_device_options_parse(
+          options, (iree_string_pair_list_t){.count = 1, .pairs = param});
+    }
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amdgpu_driver_create_device_by_id(
     iree_hal_driver_t* base_driver, iree_hal_device_id_t device_id,
     iree_host_size_t param_count, const iree_string_pair_t* params,
@@ -471,12 +522,11 @@ static iree_status_t iree_hal_amdgpu_driver_create_device_by_id(
   // access them during the create call below.
   iree_hal_amdgpu_logical_device_options_t options =
       driver->options.default_device_options;
+  iree_host_size_t queue_count = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_logical_device_options_parse(
-              &options, (iree_string_pair_list_t){
-                            .count = param_count,
-                            .pairs = params,
-                        }));
+      z0, iree_hal_amdgpu_driver_parse_device_params(
+              (iree_string_pair_list_t){.count = param_count, .pairs = params},
+              &options, &queue_count));
 
   // ROCR lazily allocates global singleton state during agent enumeration,
   // memory pool queries, and ISA iteration. These allocations are never freed
@@ -495,6 +545,7 @@ static iree_status_t iree_hal_amdgpu_driver_create_device_by_id(
 
   // Create the logical device composed of all physical devices specified.
   if (iree_status_is_ok(status)) {
+    topology.gpu_agent_queue_count = queue_count;
     status = iree_hal_amdgpu_logical_device_create(
         driver->identifier, &options, &driver->libhsa, &topology, create_params,
         host_allocator, out_device);
@@ -523,12 +574,11 @@ static iree_status_t iree_hal_amdgpu_driver_create_device_by_path(
   // access them during the create call below.
   iree_hal_amdgpu_logical_device_options_t options =
       driver->options.default_device_options;
+  iree_host_size_t queue_count = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_logical_device_options_parse(
-              &options, (iree_string_pair_list_t){
-                            .count = param_count,
-                            .pairs = params,
-                        }));
+      z0, iree_hal_amdgpu_driver_parse_device_params(
+              (iree_string_pair_list_t){.count = param_count, .pairs = params},
+              &options, &queue_count));
 
   // Load HSA. HSA may already be loaded and we retain a copy during creation to
   // ensure it doesn't get unloaded.
@@ -551,6 +601,7 @@ static iree_status_t iree_hal_amdgpu_driver_create_device_by_path(
 
   // Create the logical device composed of all physical devices specified.
   if (iree_status_is_ok(status)) {
+    topology.gpu_agent_queue_count = queue_count;
     status = iree_hal_amdgpu_logical_device_create(
         driver->identifier, &options, &libhsa, &topology, create_params,
         host_allocator, out_device);
