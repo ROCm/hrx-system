@@ -21,8 +21,10 @@ typedef struct loom_serve_speech_job_t {
   uint64_t id;
   // Receipt time retained across queueing, execution and retirement.
   iree_time_t arrival_time;
-  // Owned decoded source input retained through CPU preparation.
+  // Owned immutable source options retained through request retirement.
   loom_serve_speech_request_t request;
+  // Service-owned text, retained through every accepted CPU snapshot borrower.
+  loom_serve_speech_input_t* input;
   // Completed model units, independently of waveform block count.
   uint64_t completed_parts;
   // At least one nonempty waveform block has reached the consumer.
@@ -41,14 +43,15 @@ typedef enum loom_serve_speech_row_phase_e {
   SPEECH_ROW_QUEUED,
   SPEECH_ROW_WAITING,
   SPEECH_ROW_READY,
+  SPEECH_ROW_INPUT,
   SPEECH_ROW_EXECUTING,
   SPEECH_ROW_DELIVERING,
   SPEECH_ROW_COMPLETE,
 } loom_serve_speech_row_phase_t;
 
 static const char* const speech_row_phases[] = {
-    "idle",       "queued",     "waiting", "ready",
-    "generating", "delivering", "complete"};
+    "idle",  "queued",     "waiting",    "ready",
+    "input", "generating", "delivering", "complete"};
 
 typedef struct loom_serve_speech_row_t {
   // Stable resident row, independent of selected batch ordinal.
@@ -67,7 +70,20 @@ typedef struct loom_serve_speech_row_t {
   bool last_block;
   // The encoded block contains waveform frames, not only source progress.
   bool has_audio;
+  // Request-local source rejection retained through asynchronous row release.
+  iree_status_t rejection;
 } loom_serve_speech_row_t;
+
+typedef struct loom_serve_speech_candidate_t {
+  // Stable row retained until this CPU candidate retires.
+  loom_serve_speech_row_t* row;
+  // Owner-captured complete-scalar window, immutable through task retirement.
+  loom_serve_speech_input_block_t input;
+  // CPU acceptance and next operation, separate from numerical membership.
+  loom_serve_speech_work_t work;
+  // Owned INVALID_ARGUMENT outcome; other failures terminate the model task.
+  iree_status_t rejection;
+} loom_serve_speech_candidate_t;
 
 typedef enum loom_serve_speech_phase_e {
   SPEECH_PHASE_IDLE = 0,
@@ -137,13 +153,20 @@ struct loom_serve_speech_service_t {
     // Immutable operation selector while the task is live.
     loom_serve_speech_phase_t phase;
   } cpu;
-  // Candidate snapshot becomes the original selected numerical cohort.
+  // Every CPU candidate survives numerical compaction until task retirement.
   struct {
-    // CPU task compacts candidates to selected members before publishing.
+    // Owner-captured rows/input and worker-written acceptance/outcomes.
+    loom_serve_speech_candidate_t* values;
+    // Immutable extent for one CPU task; zero after owner collection.
+    iree_host_size_t count;
+  } candidates;
+  // Nonempty numerical cohort selected from the independent CPU candidates.
+  struct {
+    // Selected members in their original packed order.
     loom_serve_speech_row_t** rows;
     // Selected source arguments, retained through the batch's completion.
     void** invocations;
-    // Candidate/selected count; only the CPU task mutates while it is live.
+    // Selected count; only the CPU task mutates while it is live.
     iree_host_size_t count;
   } batch;
   // One accepted ALL wait, including admission uploads and batch retirement.
@@ -263,24 +286,40 @@ static iree_status_t loom_serve_speech_cpu_run(
     iree_host_size_t selected = 0;
     iree_status_t status = iree_ok_status();
     for (iree_host_size_t i = 0;
-         i < service->batch.count && iree_status_is_ok(status); ++i) {
-      loom_serve_speech_row_t* row = service->batch.rows[i];
-      loom_serve_speech_work_t work;
-      status = service->generator.prepare_work(service->generator.self,
-                                               row->invocation, &work);
+         i < service->candidates.count && iree_status_is_ok(status); ++i) {
+      loom_serve_speech_candidate_t* candidate = &service->candidates.values[i];
+      loom_serve_speech_row_t* row = candidate->row;
+      status = service->generator.prepare_work(
+          service->generator.self, row->invocation, &candidate->input,
+          &candidate->work);
+      if (iree_status_is_invalid_argument(status)) {
+        candidate->rejection = status;
+        status = iree_ok_status();
+        continue;
+      }
       if (iree_status_is_ok(status)) {
-        if (!selected) {
-          tag = work.tag;
-        }
-        if (work.tag == tag && work.units <= remaining) {
-          remaining -= work.units;
-          service->batch.rows[selected] = row;
-          service->batch.invocations[selected++] = row->invocation;
+        const loom_serve_speech_work_t work = candidate->work;
+        if (work.kind == LOOM_SERVE_SPEECH_WORK_NUMERICAL) {
+          if (!selected) {
+            tag = work.data.numerical.tag;
+          }
+          if (work.data.numerical.tag == tag &&
+              work.data.numerical.units <= remaining) {
+            remaining -= work.data.numerical.units;
+            service->batch.rows[selected] = row;
+            service->batch.invocations[selected++] = row->invocation;
+          }
+        } else if (work.kind == LOOM_SERVE_SPEECH_WORK_COMPLETE) {
+          const loom_serve_speech_block_t block = {
+              .position = work.data.frame_position, .complete = true};
+          status = row->consumer.encode(row->consumer.self, &block);
+          row->last_block = true;
+          row->has_audio = false;
         }
       }
     }
     service->batch.count = selected;
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && selected) {
       status = service->generator.prepare_batch(
           service->generator.self, selected, service->batch.invocations);
     }
@@ -387,19 +426,30 @@ static void loom_serve_speech_finish(loom_serve_speech_service_t* service,
                                      loom_serve_speech_row_t* row,
                                      loom_serve_telemetry_outcome_t outcome,
                                      const iree_status_t request_status) {
+  const bool rejected = outcome == LOOM_SERVE_TELEMETRY_COMPLETED &&
+                        !iree_status_is_ok(row->rejection);
+  if (rejected) {
+    outcome = LOOM_SERVE_TELEMETRY_REJECTED;
+  }
   if (!row->consumer.is_open(row->consumer.self) &&
-      outcome == LOOM_SERVE_TELEMETRY_COMPLETED) {
+      (outcome == LOOM_SERVE_TELEMETRY_COMPLETED ||
+       outcome == LOOM_SERVE_TELEMETRY_REJECTED)) {
     outcome = !iree_status_is_ok(service->failure)
                   ? LOOM_SERVE_TELEMETRY_FAILED
                   : LOOM_SERVE_TELEMETRY_CANCELLED;
   }
-  loom_serve_speech_request_end(service, &row->job, outcome, request_status);
+  loom_serve_speech_request_end(service, &row->job, outcome,
+                                rejected ? row->rejection : request_status);
   service->status = iree_status_join(
       service->status,
-      row->consumer.end(row->consumer.self, outcome, request_status));
+      row->consumer.end(row->consumer.self, outcome,
+                        rejected ? row->rejection : request_status));
   row->consumer = (loom_serve_speech_consumer_t){0};
   row->cancelled = false;
+  iree_status_free(row->rejection);
+  row->rejection = iree_ok_status();
   loom_serve_speech_request_deinitialize(&row->job.request);
+  loom_serve_speech_input_release(row->job.input);
   memset(&row->job, 0, sizeof(row->job));
   row->invocation = NULL;
   row->phase = SPEECH_ROW_EMPTY;
@@ -560,6 +610,28 @@ static void loom_serve_speech_collect(loom_serve_speech_service_t* service,
     iree_status_free(cpu_status);
     return;
   }
+  if (phase == SPEECH_PHASE_PREPARING_BATCH) {
+    // Every candidate returns CPU input credit, including numerical offers
+    // excluded from this cohort. No worker or plan borrows the mutable ring.
+    for (iree_host_size_t i = 0; i < service->candidates.count; ++i) {
+      loom_serve_speech_candidate_t* candidate = &service->candidates.values[i];
+      loom_serve_speech_row_t* row = candidate->row;
+      loom_serve_speech_input_consume(row->job.input,
+                                      candidate->work.consumed_bytes);
+      if (!iree_status_is_ok(candidate->rejection)) {
+        row->rejection = candidate->rejection;
+        candidate->rejection = iree_ok_status();
+        loom_serve_speech_diagnose(service, row->job.id, row->rejection);
+        row->phase = SPEECH_ROW_COMPLETE;
+      } else if (candidate->work.kind == LOOM_SERVE_SPEECH_WORK_INPUT) {
+        row->phase = SPEECH_ROW_INPUT;
+      } else if (candidate->work.kind == LOOM_SERVE_SPEECH_WORK_COMPLETE) {
+        row->phase = SPEECH_ROW_DELIVERING;
+      }
+    }
+    service->candidates.count = 0;
+    service->admit_next = true;
+  }
   service->status = iree_status_join(service->status, cpu_status);
   if (!iree_status_is_ok(service->status)) {
     service->retiring = NULL;
@@ -591,6 +663,9 @@ static void loom_serve_speech_collect(loom_serve_speech_service_t* service,
                                   service->telemetry.counters.batches);
     loom_serve_speech_schedule_cpu(service, SPEECH_PHASE_ENCODING);
   } else if (phase == SPEECH_PHASE_PREPARING_BATCH) {
+    if (!service->batch.count) {
+      return;
+    }
     bool cancelled = service->stopping;
     for (iree_host_size_t i = 0; i < service->batch.count; ++i) {
       const loom_serve_speech_consumer_t consumer =
@@ -604,6 +679,9 @@ static void loom_serve_speech_collect(loom_serve_speech_service_t* service,
       for (iree_host_size_t i = 0; i < service->batch.count; ++i) {
         service->batch.rows[i]->phase = SPEECH_ROW_EXECUTING;
       }
+      // CPU-only turns preserve numerical priority. Rotating by candidates
+      // instead of selected work can starve a phase alternating CPU/numerical
+      // steps while a different phase keeps winning compatible cohorts.
       service->cursor = (service->batch.rows[0]->index + 1) %
                         service->generator.request_capacity;
       service->status = service->generator.submit(service->generator.self,
@@ -686,6 +764,7 @@ static void loom_serve_speech_prune(loom_serve_speech_service_t* service,
                                                 LOOM_SERVE_TELEMETRY_CANCELLED,
                                                 iree_ok_status()));
       loom_serve_speech_request_deinitialize(&pending.job.request);
+      loom_serve_speech_input_release(pending.job.input);
       *progress = true;
     } else {
       service->pending[retained++] = pending;
@@ -742,11 +821,12 @@ iree_status_t loom_serve_speech_service_try_open(
   loom_serve_speech_pending_t pending = {0};
   IREE_RETURN_IF_ERROR(loom_serve_speech_stream_allocate(
       service->generator.format, service->generator.block_capacity,
-      service->host_allocator, out_stream, &pending.consumer));
-  pending.job =
-      (loom_serve_speech_job_t){.id = ++service->telemetry.counters.requests,
-                                .arrival_time = iree_time_now(),
-                                .request = *request};
+      service->generator.text_capacity, service->generator.text_limit, request,
+      service->host_allocator, out_stream, &pending.job.input,
+      &pending.consumer));
+  pending.job.id = ++service->telemetry.counters.requests;
+  pending.job.arrival_time = iree_time_now();
+  pending.job.request = *request;
   *request = (loom_serve_speech_request_t){0};
   loom_serve_speech_event(service, &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
                           pending.job.id);
@@ -811,11 +891,19 @@ static iree_status_t loom_serve_speech_accept(
                                     "503 Service Unavailable",
                                     IREE_SV("speech admission queue is full"));
   }
-  status = loom_serve_speech_http_consumer_allocate(
-      connection, service->generator.format, service->generator.block_capacity,
-      service->host_allocator, &pending.consumer);
+  status = loom_serve_speech_input_allocate(
+      service->generator.text_capacity, service->generator.text_limit,
+      &pending.job.request.input, true, service->host_allocator,
+      &pending.job.input);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_speech_http_consumer_allocate(
+        connection, service->generator.format,
+        service->generator.block_capacity, service->host_allocator,
+        &pending.consumer);
+  }
   if (!iree_status_is_ok(status)) {
     loom_serve_speech_request_deinitialize(&pending.job.request);
+    loom_serve_speech_input_release(pending.job.input);
     iree_status_t response_status = loom_serve_speech_reject(
         service, connection, &pending.job,
         iree_status_is_invalid_argument(status) ? "400 Bad Request"
@@ -945,6 +1033,7 @@ static void loom_serve_speech_stop(loom_serve_speech_service_t* service) {
         service->status, pending->consumer.end(pending->consumer.self, outcome,
                                                service->status));
     loom_serve_speech_request_deinitialize(&pending->job.request);
+    loom_serve_speech_input_release(pending->job.input);
   }
   service->pending_count = 0;
   for (iree_host_size_t i = 0;
@@ -992,6 +1081,7 @@ static void loom_serve_speech_schedule(loom_serve_speech_service_t* service,
   }
   loom_serve_speech_row_t* queued = NULL;
   service->batch.count = 0;
+  service->candidates.count = 0;
   for (iree_host_size_t i = 0; i < service->generator.request_capacity; ++i) {
     const iree_host_size_t index =
         (service->cursor + i) % service->generator.request_capacity;
@@ -1000,17 +1090,25 @@ static void loom_serve_speech_schedule(loom_serve_speech_service_t* service,
         (!queued || row->job.id < queued->job.id)) {
       queued = row;
     }
-    if (row->phase == SPEECH_ROW_READY && !row->cancelled &&
-        row->consumer.can_write(row->consumer.self)) {
-      service->batch.rows[service->batch.count++] = row;
+    if ((row->phase == SPEECH_ROW_READY || row->phase == SPEECH_ROW_INPUT) &&
+        !row->cancelled && row->consumer.can_write(row->consumer.self)) {
+      const loom_serve_speech_input_block_t input =
+          loom_serve_speech_input_peek(row->job.input);
+      if (row->phase == SPEECH_ROW_INPUT && !input.byte_count &&
+          !input.complete) {
+        continue;
+      }
+      row->phase = SPEECH_ROW_READY;
+      service->candidates.values[service->candidates.count++] =
+          (loom_serve_speech_candidate_t){.row = row, .input = input};
     }
   }
   if (!service->admission && queued &&
-      (service->admit_next || !service->batch.count)) {
-    service->batch.count = 0;
+      (service->admit_next || !service->candidates.count)) {
+    service->candidates.count = 0;
     loom_serve_speech_start(service, queued);
     *progress = true;
-  } else if (service->batch.count) {
+  } else if (service->candidates.count) {
     loom_serve_speech_schedule_cpu(service, SPEECH_PHASE_PREPARING_BATCH);
     *progress = true;
   }
@@ -1127,6 +1225,7 @@ void loom_serve_speech_service_free(loom_serve_speech_service_t* service) {
   }
   iree_status_free(service->failure);
   iree_allocator_free(host_allocator, service->rows);
+  iree_allocator_free(host_allocator, service->candidates.values);
   iree_allocator_free(host_allocator, service->batch.rows);
   iree_allocator_free(host_allocator, service->batch.invocations);
   iree_allocator_free(host_allocator, service->pending);
@@ -1148,9 +1247,12 @@ iree_status_t loom_serve_speech_service_allocate(
       !generator.prepare_batch || !generator.submit || !generator.collect ||
       !generator.release_batch || !generator.release ||
       !generator.block_capacity || !generator.request_capacity ||
-      !generator.batch_units || !generator.format.sample_rate ||
+      !generator.batch_units || generator.text_capacity < 4 ||
+      !generator.text_limit || !generator.format.sample_rate ||
       !generator.format.channels ||
       generator.request_capacity > SIZE_MAX / sizeof(loom_serve_speech_row_t) ||
+      generator.request_capacity >
+          SIZE_MAX / sizeof(loom_serve_speech_candidate_t) ||
       generator.request_capacity > SIZE_MAX / sizeof(void*) ||
       !options->name.size || !options->pending_capacity ||
       options->pending_capacity >
@@ -1182,6 +1284,12 @@ iree_status_t loom_serve_speech_service_allocate(
     status = iree_allocator_malloc_array(
         host_allocator, generator.request_capacity,
         sizeof(*service->batch.rows), (void**)&service->batch.rows);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc_array(host_allocator, generator.request_capacity,
+                                    sizeof(*service->candidates.values),
+                                    (void**)&service->candidates.values);
   }
   if (iree_status_is_ok(status)) {
     status =

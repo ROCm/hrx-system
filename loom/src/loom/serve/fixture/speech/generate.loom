@@ -16,8 +16,8 @@ kernel.def target(@speech_target) @audio_block() {
   %selected = index.cmp ult, %ordinal, %count : index
   scf.if %selected {
     %map_offset = index.constant 8 : offset
-    %map = buffer.view %work[%map_offset] : buffer -> view<4xi32>
-    %row32 = view.load %map[%ordinal] : view<4xi32> -> i32
+    %map = buffer.view %work[%map_offset] : buffer -> view<4x2xi32>
+    %row32 = view.load %map[%ordinal, 0] : view<4x2xi32> -> i32
     %bounded_row = scalar.assume %row32 [range(%row32, 0, 3)] : i32
     %row = index.cast %bounded_row : i32 to index
     %row_stride = index.constant 16 : offset
@@ -31,7 +31,7 @@ kernel.def target(@speech_target) @audio_block() {
     %header_bytes = index.constant 16 : offset
     %samples_offset = index.add %output_offset, %header_bytes : offset
     %samples = buffer.view %output[%samples_offset] : buffer -> view<5xf32>
-    %total = view.load %input[0] : view<4xi32> -> i32
+    %total = view.load %map[%ordinal, 1] : view<4x2xi32> -> i32
     %seed = view.load %input[1] : view<4xi32> -> i32
     %position = view.load %stream[0] : view<2xi32> -> i32
     %block = view.load %stream[1] : view<2xi32> -> i32
@@ -134,8 +134,8 @@ kernel.def target(@speech_target) @initialize() {
   %selected = index.cmp ult, %ordinal, %count : index
   scf.if %selected {
     %map_offset = index.constant 8 : offset
-    %map = buffer.view %work[%map_offset] : buffer -> view<4xi32>
-    %row32 = view.load %map[%ordinal] : view<4xi32> -> i32
+    %map = buffer.view %work[%map_offset] : buffer -> view<4x2xi32>
+    %row32 = view.load %map[%ordinal, 0] : view<4x2xi32> -> i32
     %bounded_row = scalar.assume %row32 [range(%row32, 0, 3)] : i32
     %row = index.cast %bounded_row : i32 to index
     %row_stride = index.constant 16 : offset
