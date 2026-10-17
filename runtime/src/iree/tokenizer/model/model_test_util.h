@@ -79,7 +79,7 @@ class ScopedVocabBuilder {
   }
 
   // Adds a token with explicit ID and score (for Unigram models).
-  void AddTokenWithScore(int32_t id, const char* text, float score,
+  void AddTokenWithScore(int32_t id, const char* text, double score,
                          iree_tokenizer_token_attr_t attrs = 0) {
     IREE_CHECK_OK(iree_tokenizer_vocab_builder_add_token_with_id(
         builder_, id, iree_make_cstring_view(text), score, attrs));
