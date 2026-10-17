@@ -15,7 +15,7 @@
 // Design principles:
 // - Pull-based: output buffer capacity drives processing
 // - Streaming: each model determines which prefixes can be committed
-// - Zero allocation: state lives in caller-provided storage
+// - Caller-owned state storage and explicit workspace allocation policy
 //
 // Streaming model:
 // - Model tracks position within current segment
@@ -118,22 +118,32 @@ struct iree_tokenizer_model_state_t {
 // - Output credit controls when determined tokens can be delivered
 // - state_finalize() handles any trailing bytes that need special handling
 struct iree_tokenizer_model_vtable_t {
+  // Releases the immutable model and its owned tables.
   void (*destroy)(iree_tokenizer_model_t* model);
-  iree_status_t (*state_initialize)(const iree_tokenizer_model_t* model,
-                                    void* storage,
-                                    iree_tokenizer_model_state_t** out_state);
+  // Initializes caller storage without allocating workspace.
+  void (*state_initialize)(const iree_tokenizer_model_t* model, void* storage,
+                           iree_allocator_t workspace_allocator,
+                           iree_tokenizer_model_state_t** out_state);
+  // Discards progress while retaining allocated workspace for reuse.
+  void (*state_reset)(iree_tokenizer_model_state_t* state);
+  // Releases workspace without freeing the caller's fixed storage.
   void (*state_deinitialize)(iree_tokenizer_model_state_t* state);
+  // Advances input selection and delivers tokens within the supplied credit.
   iree_status_t (*state_encode)(iree_tokenizer_model_state_t* state,
                                 iree_const_byte_span_t transform_buffer,
                                 iree_tokenizer_segment_list_t segments,
                                 iree_tokenizer_token_output_t output,
                                 iree_host_size_t* out_segments_consumed,
                                 iree_host_size_t* out_token_count);
+  // Ends input and drains any retained selection and output.
   iree_status_t (*state_finalize)(iree_tokenizer_model_state_t* state,
                                   iree_tokenizer_token_output_t output,
                                   iree_host_size_t* out_token_count);
+  // Reports unresolved input or retained output awaiting completion.
   bool (*state_has_pending)(const iree_tokenizer_model_state_t* state);
+  // Releases leading input bytes without changing logical token coordinates.
   iree_host_size_t (*state_reclaim)(iree_tokenizer_model_state_t* state);
+  // Borrows the vocabulary spelling for a valid token ID.
   iree_status_t (*get_token_string)(const iree_tokenizer_model_t* model,
                                     iree_tokenizer_token_id_t token_id,
                                     iree_string_view_t* out_string);
@@ -161,10 +171,22 @@ static inline iree_host_size_t iree_tokenizer_model_state_size(
 
 // Initializes streaming state in caller-provided storage.
 // |storage| must be at least iree_tokenizer_model_state_size() bytes.
-static inline iree_status_t iree_tokenizer_model_state_initialize(
+// Initialization allocates nothing. Encoding may grow retained workspace
+// through |workspace_allocator|, which must remain valid until deinitialize. A
+// null or bounded allocator rejects growth when inline storage is insufficient.
+static inline void iree_tokenizer_model_state_initialize(
     const iree_tokenizer_model_t* model, void* storage,
+    iree_allocator_t workspace_allocator,
     iree_tokenizer_model_state_t** out_state) {
-  return model->vtable->state_initialize(model, storage, out_state);
+  model->vtable->state_initialize(model, storage, workspace_allocator,
+                                  out_state);
+}
+
+// Discards retained progress and output while preserving workspace capacity.
+// Reset allocates nothing and starts a new logical input coordinate space.
+static inline void iree_tokenizer_model_state_reset(
+    iree_tokenizer_model_state_t* state) {
+  state->model->vtable->state_reset(state);
 }
 
 // Deinitializes streaming state (does not free storage).
@@ -202,10 +224,9 @@ static inline iree_status_t iree_tokenizer_model_state_encode(
                                             out_token_count);
 }
 
-// Finalizes encoding, handling any trailing state. Call after all segments
-// have been provided via state_encode(). Most models produce no output here
-// since greedy emits as it goes; some may emit a final token for incomplete
-// sequences. May need multiple calls if the output buffer is too small.
+// Ends input and drains retained selection/output state. Call after all input
+// has been accepted via state_encode(). May require multiple calls as output
+// credit arrives. After an encoding error, reset or deinitialize the state.
 static inline iree_status_t iree_tokenizer_model_state_finalize(
     iree_tokenizer_model_state_t* state, iree_tokenizer_token_output_t output,
     iree_host_size_t* out_token_count) {
@@ -219,16 +240,11 @@ static inline bool iree_tokenizer_model_state_has_pending(
   return state->model->vtable->state_has_pending(state);
 }
 
-// Reclaims committed bytes from the current partial segment.
-//
-// When processing a partial segment (last_is_partial=true), the model
-// accumulates frozen tokens in its window. This computes how many leading
-// segment bytes are fully committed (all tokens covering those bytes have
-// been emitted), adjusts all internal byte position tracking by subtracting
-// the committed count, and returns the number of bytes reclaimed. The caller
-// advances the ring buffer's read position by the returned count. Returns 0
-// if no bytes can be reclaimed or the model is not processing a partial
-// segment.
+// Releases the model's borrow of leading bytes in the current partial segment.
+// The returned count advances the caller's segment start and input buffer
+// origin. It never changes logical output coordinates. Retained selection and
+// output may outlive these input bytes; the model owns all information needed
+// after reclamation. Returns zero when no further input can be released.
 static inline iree_host_size_t iree_tokenizer_model_state_reclaim(
     iree_tokenizer_model_state_t* state) {
   return state->model->vtable->state_reclaim(state);

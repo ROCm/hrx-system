@@ -482,7 +482,7 @@ static iree_status_t iree_tooling_tokenize_stdin_streaming(
   iree_tokenizer_encode_state_t* state = NULL;
   iree_status_t status = iree_tokenizer_encode_state_initialize(
       tokenizer, state_span, transform_span,
-      iree_tokenizer_offset_run_list_empty(), flags, &state);
+      iree_tokenizer_offset_run_list_empty(), flags, allocator, &state);
 
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(allocator, storage);
@@ -819,7 +819,7 @@ static iree_status_t iree_tooling_benchmark_stream(
     iree_tokenizer_encode_state_t* state = NULL;
     status = iree_tokenizer_encode_state_initialize(
         tokenizer, state_span, transform_span,
-        iree_tokenizer_offset_run_list_empty(), flags, &state);
+        iree_tokenizer_offset_run_list_empty(), flags, allocator, &state);
     if (!iree_status_is_ok(status)) {
       break;
     }

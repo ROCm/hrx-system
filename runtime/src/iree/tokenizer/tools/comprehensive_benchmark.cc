@@ -440,7 +440,8 @@ iree_host_size_t DoEncodeStreaming(iree_string_view_t text,
       iree_make_byte_span(g_state.transform_buffer.data(),
                           g_state.transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &encode_state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &encode_state));
 
   iree_string_view_t remaining = text;
   iree_host_size_t total_tokens = 0;
@@ -745,7 +746,8 @@ iree_host_size_t DoEncodeStreamingWithBuffer(iree_string_view_t text,
                           g_state.state_storage.size()),
       iree_make_byte_span(local_buffer.data(), local_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &encode_state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &encode_state));
 
   iree_string_view_t remaining = text;
   iree_host_size_t total_tokens = 0;
@@ -1260,7 +1262,8 @@ void BM_StateInitDeinit(benchmark::State& state) {
         iree_make_byte_span(g_state.transform_buffer.data(),
                             g_state.transform_buffer.size()),
         iree_tokenizer_offset_run_list_empty(),
-        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &encode_state));
+        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+        &encode_state));
     iree_tokenizer_encode_state_deinitialize(encode_state);
   }
 }

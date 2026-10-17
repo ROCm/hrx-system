@@ -45,7 +45,7 @@ class TokenizerInputTokensTest : public ::testing::Test {
         iree_make_byte_span(transform_storage_.data(),
                             transform_storage_.size()),
         iree_tokenizer_offset_run_list_empty(), IREE_TOKENIZER_ENCODE_FLAG_NONE,
-        &state_));
+        iree_allocator_system(), &state_));
   }
 
   void TearDown() override {
@@ -195,7 +195,7 @@ TEST_F(TokenizerInputTokensTest, CompleteInputRejectsTruncatedUTF8) {
               iree_make_byte_span(batch_state.data(), batch_state.size()),
               iree_make_byte_span(batch_transform.data(),
                                   batch_transform.size()),
-              iree_tokenizer_offset_run_list_empty()));
+              iree_tokenizer_offset_run_list_empty(), iree_allocator_system()));
     }
   }
 }
