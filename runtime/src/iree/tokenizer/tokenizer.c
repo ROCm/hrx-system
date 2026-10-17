@@ -534,7 +534,8 @@ iree_status_t iree_tokenizer_encode(const iree_tokenizer_t* tokenizer,
     status = iree_tokenizer_encode_state_initialize(
         tokenizer, iree_make_byte_span(buffer, state_size),
         iree_make_byte_span(buffer + transform_offset, transform_size),
-        iree_tokenizer_offset_run_list_empty(), effective_flags, &state);
+        iree_tokenizer_offset_run_list_empty(), effective_flags, allocator,
+        &state);
   }
 
   // Feed all input, collecting tokens.
@@ -623,8 +624,11 @@ static iree_status_t iree_tokenizer_encode_state_reset_internal(
   }
   const iree_tokenizer_t* tokenizer = state->tokenizer;
 
-  // Deinitialize and re-initialize pipeline stage states.
-  iree_tokenizer_model_state_deinitialize(state->model_state);
+  // Reset model progress while retaining its workspace capacity.
+  if (state->model_state) {
+    iree_tokenizer_model_state_reset(state->model_state);
+  }
+  // Reinitialize the fixed-size transform stages.
   iree_tokenizer_segmenter_state_deinitialize(state->segmenter_state);
   iree_tokenizer_normalizer_state_deinitialize(state->normalizer_state);
 
@@ -646,10 +650,6 @@ static iree_status_t iree_tokenizer_encode_state_reset_internal(
     IREE_RETURN_IF_ERROR(iree_tokenizer_segmenter_state_initialize(
         tokenizer->segmenter, (void*)state->segmenter_state,
         &state->segmenter_state));
-  }
-  if (state->model_state) {
-    IREE_RETURN_IF_ERROR(iree_tokenizer_model_state_initialize(
-        tokenizer->model, (void*)state->model_state, &state->model_state));
   }
 
   // Reset special token match states.
@@ -744,7 +744,8 @@ iree_status_t iree_tokenizer_encode_batch(
     iree_tokenizer_encode_batch_item_t* items, iree_host_size_t item_count,
     iree_tokenizer_encode_flags_t flags, iree_byte_span_t state_storage,
     iree_byte_span_t transform_buffer,
-    iree_tokenizer_offset_run_list_t offset_runs) {
+    iree_tokenizer_offset_run_list_t offset_runs,
+    iree_allocator_t workspace_allocator) {
   IREE_ASSERT_ARGUMENT(tokenizer);
   IREE_ASSERT_ARGUMENT(items || item_count == 0);
 
@@ -789,7 +790,7 @@ iree_status_t iree_tokenizer_encode_batch(
     if (iree_status_is_ok(status) && state == NULL) {
       status = iree_tokenizer_encode_state_initialize(
           tokenizer, state_storage, transform_buffer, offset_runs,
-          effective_flags, &state);
+          effective_flags, workspace_allocator, &state);
     } else if (iree_status_is_ok(status)) {
       status = iree_tokenizer_encode_state_reset(state, effective_flags);
     }
@@ -902,7 +903,7 @@ iree_status_t iree_tokenizer_encode_state_initialize(
     const iree_tokenizer_t* tokenizer, iree_byte_span_t state_storage,
     iree_byte_span_t transform_buffer,
     iree_tokenizer_offset_run_list_t offset_runs,
-    iree_tokenizer_encode_flags_t flags,
+    iree_tokenizer_encode_flags_t flags, iree_allocator_t workspace_allocator,
     iree_tokenizer_encode_state_t** out_state) {
   IREE_ASSERT_ARGUMENT(tokenizer);
   IREE_ASSERT_ARGUMENT(state_storage.data);
@@ -1022,8 +1023,9 @@ iree_status_t iree_tokenizer_encode_state_initialize(
   // Initialize model state at computed offset.
   if (iree_status_is_ok(status) && tokenizer->model) {
     uint8_t* base = (uint8_t*)state_storage.data;
-    status = iree_tokenizer_model_state_initialize(
-        tokenizer->model, base + model_offset, &state->model_state);
+    iree_tokenizer_model_state_initialize(tokenizer->model, base + model_offset,
+                                          workspace_allocator,
+                                          &state->model_state);
   }
 
   if (iree_status_is_ok(status)) {

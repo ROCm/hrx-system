@@ -168,6 +168,7 @@ iree_cc_library(
     "unigram.c"
   DEPS
     iree::base
+    iree::base::internal::unicode
     iree::tokenizer::model
     iree::tokenizer::types
     iree::tokenizer::vocab
@@ -180,6 +181,19 @@ iree_cc_test(
     unigram_test
   SRCS
     "unigram_test.cc"
+  DEPS
+    ::model_test_util
+    ::unigram
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    unigram_streaming_test
+  SRCS
+    "unigram_streaming_test.cc"
   DEPS
     ::model_test_util
     ::unigram

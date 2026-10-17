@@ -62,7 +62,7 @@ void ExpectStreamingEncoding(iree_tokenizer_t* tokenizer,
         iree_make_byte_span(state_storage.data(), state_storage.size()),
         iree_make_byte_span(transform_storage.data(), transform_storage.size()),
         iree_tokenizer_offset_run_list_empty(), IREE_TOKENIZER_ENCODE_FLAG_NONE,
-        &state));
+        iree_allocator_system(), &state));
     std::vector<int32_t> actual;
     size_t position = 0;
     size_t capacity = 0;

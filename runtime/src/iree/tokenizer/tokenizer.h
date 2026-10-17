@@ -428,6 +428,8 @@ typedef struct iree_tokenizer_encode_batch_item_t {
 // Caller provides |state_storage| (at least encode_state_calculate_size bytes)
 // and |transform_buffer| for scratch space. For offset tracking across all
 // items, provide |offset_runs| storage; otherwise pass an empty list.
+// |workspace_allocator| owns model workspace growth and remains valid for this
+// call. Capacity is reused across items and released before returning.
 //
 // Each item in |items| must have valid text and output.token_ids pointer. If
 // any item's output.token_offsets is non-NULL, offset tracking is enabled for
@@ -442,7 +444,8 @@ iree_status_t iree_tokenizer_encode_batch(
     iree_tokenizer_encode_batch_item_t* items, iree_host_size_t item_count,
     iree_tokenizer_encode_flags_t flags, iree_byte_span_t state_storage,
     iree_byte_span_t transform_buffer,
-    iree_tokenizer_offset_run_list_t offset_runs);
+    iree_tokenizer_offset_run_list_t offset_runs,
+    iree_allocator_t workspace_allocator);
 
 // Input/output item for multi-item batch decoding. Caller allocates arrays of
 // these items, fills in the inputs (tokens, text_output), and the batch
@@ -548,13 +551,15 @@ static inline iree_host_size_t iree_tokenizer_transform_buffer_oneshot_size(
 // list.
 //
 // The initialized state is returned in |out_state|. The state does not own the
-// storage buffers; the caller is responsible for keeping them valid until
-// deinitialize is called.
+// storage buffers; the caller keeps them valid until deinitialize. Model work
+// may grow through |workspace_allocator|, which must also outlive the state.
+// Reset retains that workspace; deinitialize releases it. A null or bounded
+// allocator can explicitly reject growth beyond the model's inline storage.
 iree_status_t iree_tokenizer_encode_state_initialize(
     const iree_tokenizer_t* tokenizer, iree_byte_span_t state_storage,
     iree_byte_span_t transform_buffer,
     iree_tokenizer_offset_run_list_t offset_runs,
-    iree_tokenizer_encode_flags_t flags,
+    iree_tokenizer_encode_flags_t flags, iree_allocator_t workspace_allocator,
     iree_tokenizer_encode_state_t** out_state);
 
 // Cleans up encode state. Does not free |state_storage| or other buffers

@@ -238,6 +238,7 @@ iree_cc_test(
   DEPS
     ::model
     ::tokenizer
+    ::tokenizer_test_util
     iree::base
     iree::testing::gtest
     iree::testing::gtest_main

@@ -103,7 +103,8 @@ class TokenizerFinalizationTest : public ::testing::Test {
             tokenizer_, iree_make_byte_span(storage_.data(), storage_.size()),
             iree_make_byte_span(transform_.data(), transform_.size()),
             iree_tokenizer_offset_run_list_empty(),
-            IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS, &state_));
+            IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
+            iree_allocator_system(), &state_));
         std::vector<int32_t> actual, types;
         int32_t output[1024];
         uint8_t type_ids[1024];
