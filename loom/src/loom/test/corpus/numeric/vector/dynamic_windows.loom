@@ -716,3 +716,117 @@ check.scenario @rectangle_snapshot_values {
   }
   check.return
 }
+
+// Four element widths capture the same bytes before the entire source is
+// overwritten. Each captured value serves two separately positioned windows.
+func.def @shared_snapshot_windows(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 8)] : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %byte_position = index.mul %ordinal, %c2 : index
+  %word_position = index.div %ordinal, %c2 : index
+  %byte_tail = index.add %byte_position, %c32 : index
+  %half_tail = index.add %ordinal, %c16 : index
+  %word_tail = index.add %word_position, %c8 : index
+  %base = index.constant 0 : offset
+  %bytes = buffer.view %input[%base] : buffer -> view<128xi8>
+  %halves = buffer.view %input[%base] : buffer -> view<64xi16>
+  %words = buffer.view %input[%base] : buffer -> view<32xi32>
+  %wide = buffer.view %input[%base] : buffer -> view<16xi64>
+  %byte_source = vector.load %bytes[0] : view<128xi8> -> vector<64xi8>
+  %half_source = vector.load %halves[0] : view<64xi16> -> vector<32xi16>
+  %word_source = vector.load %words[0] : view<32xi32> -> vector<16xi32>
+  %wide_source = vector.load %wide[0] : view<16xi64> -> vector<16xi64>
+  %cleared = vector.constant 0 : vector<128xi8>
+  vector.store %cleared, %bytes[0] : vector<128xi8>, view<128xi8>
+  %byte_head = vector.slice %byte_source[%byte_position] : vector<64xi8> -> vector<16xi8>
+  %byte_last = vector.slice %byte_source[%byte_tail] : vector<64xi8> -> vector<16xi8>
+  %byte_result = vector.concat<0> %byte_head, %byte_last : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  %half_head = vector.slice %half_source[%ordinal] : vector<32xi16> -> vector<8xi16>
+  %half_last = vector.slice %half_source[%half_tail] : vector<32xi16> -> vector<8xi16>
+  %half_result = vector.concat<0> %half_head, %half_last : vector<8xi16>, vector<8xi16> -> vector<16xi16>
+  %word_head = vector.slice %word_source[%word_position] : vector<16xi32> -> vector<4xi32>
+  %word_last = vector.slice %word_source[%word_tail] : vector<16xi32> -> vector<4xi32>
+  %word_result = vector.concat<0> %word_head, %word_last : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %wide_head = vector.slice %wide_source[%word_position] : vector<16xi64> -> vector<4xi64>
+  %wide_last = vector.slice %wide_source[%word_tail] : vector<16xi64> -> vector<4xi64>
+  %wide_result = vector.concat<0> %wide_head, %wide_last : vector<4xi64>, vector<4xi64> -> vector<8xi64>
+  %byte_base = index.constant 8 : offset
+  %half_base = index.constant 48 : offset
+  %word_base = index.constant 88 : offset
+  %wide_base = index.constant 128 : offset
+  %byte_output = buffer.view %output[%byte_base] : buffer -> view<32xi8>
+  %half_output = buffer.view %output[%half_base] : buffer -> view<16xi16>
+  %word_output = buffer.view %output[%word_base] : buffer -> view<8xi32>
+  %wide_output = buffer.view %output[%wide_base] : buffer -> view<8xi64>
+  vector.store %byte_result, %byte_output[0] : vector<32xi8>, view<32xi8>
+  vector.store %half_result, %half_output[0] : vector<16xi16>, view<16xi16>
+  vector.store %word_result, %word_output[0] : vector<8xi32>, view<8xi32>
+  vector.store %wide_result, %wide_output[0] : vector<8xi64>, view<8xi64>
+  func.return
+}
+
+func.def @shared_snapshot_windows_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %ordinal = index.assume %trial [range(%trial, 0, 8)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c48 = index.constant 48 : index
+  %c64 = index.constant 64 : index
+  %c88 = index.constant 88 : index
+  %c128 = index.constant 128 : index
+  %byte_position = index.mul %ordinal, %c2 : index
+  %word_position = index.div %ordinal, %c2 : index
+  %word_byte_position = index.mul %word_position, %c4 : index
+  %wide_byte_position = index.mul %word_position, %c8 : index
+  %base = index.constant 0 : offset
+  %bytes = buffer.view %input[%base] : buffer -> view<128xi8>
+  %result = buffer.view %output[%base] : buffer -> view<200xi8>
+  scf.for %i = [%c0 to %c32 step %c1] {
+    %tail = index.cmp sge, %i, %c16 : index
+    %gap = scf.select %tail, %c16, %c0 : index
+    %relative = index.add %i, %gap : index
+    %byte_index = index.add %byte_position, %relative : index
+    %word_index = index.add %word_byte_position, %relative : index
+    %byte_value = view.load %bytes[%byte_index] : view<128xi8> -> i8
+    %word_value = view.load %bytes[%word_index] : view<128xi8> -> i8
+    %byte_destination = index.add %i, %c8 : index
+    %half_destination = index.add %i, %c48 : index
+    %word_destination = index.add %i, %c88 : index
+    view.store %byte_value, %result[%byte_destination] : i8, view<200xi8>
+    view.store %byte_value, %result[%half_destination] : i8, view<200xi8>
+    view.store %word_value, %result[%word_destination] : i8, view<200xi8>
+  }
+  scf.for %i = [%c0 to %c64 step %c1] {
+    %tail = index.cmp sge, %i, %c32 : index
+    %gap = scf.select %tail, %c32, %c0 : index
+    %relative = index.add %i, %gap : index
+    %source_index = index.add %wide_byte_position, %relative : index
+    %destination_index = index.add %i, %c128 : index
+    %value = view.load %bytes[%source_index] : view<128xi8> -> i8
+    view.store %value, %result[%destination_index] : i8, view<200xi8>
+  }
+  %cleared_byte = scalar.constant 0 : i8
+  scf.for %i = [%c0 to %c128 step %c1] {
+    view.store %cleared_byte, %bytes[%i] : i8, view<128xi8>
+  }
+  func.return
+}
+
+check.scenario @shared_snapshot_window_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(2) : tensor<128xi8>
+    %output = check.generate.fill value(85) : tensor<200xi8>
+    check.compare<@shared_snapshot_windows, @shared_snapshot_windows_oracle>(%trial, %input, %output) : (index, tensor<128xi8>, tensor<200xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<128xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<200xi8>
+    }
+  }
+  check.return
+}

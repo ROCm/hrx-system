@@ -1237,6 +1237,11 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
     *out_changed = true;
     return iree_ok_status();
   }
+  // Replacements requeue their users. Refresh the retained facts before any
+  // legality query consumes them; no constant materializer is installed here.
+  bool folded = false;
+  IREE_RETURN_IF_ERROR(loom_rewriter_try_fold(&driver->rewriter, op, &folded));
+  loom_greedy_rewrite_result_record_rewriter_flags(result, &driver->rewriter);
   if (state->preflight.error_count != 0) {
     return iree_ok_status();
   }
