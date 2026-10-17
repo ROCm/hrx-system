@@ -21,6 +21,7 @@ iree_py_library(
         "avx512_fp16.py",
         "avx512_predicate.py",
         "avx_ne_convert.py",
+        "bmi2.py",
         "constants.py",
         "f16c.py",
         "float_conversion.py",

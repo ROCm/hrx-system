@@ -25,6 +25,7 @@ loom_target_contract_file_family(
     "avx512_bf16=x86.avx512_bf16"
     "avx512_fp16=x86.avx512_fp16"
     "avx_ne_convert=x86.avx_ne_convert"
+    "bmi2=x86.bmi2"
     "f16c=x86.f16c"
     "packed_dot=x86.packed_dot"
     "scalar=x86.scalar"
@@ -32,12 +33,12 @@ loom_target_contract_file_family(
   ARGS
     "--shared-strings-public-header=loom/target/arch/x86/contracts/instruction_strings.h"
     "--shared-strings-symbol=loom_x86_instruction_strings"
-    "--contract-index=LOOM_X86_SCALAR_CONTRACT:x86.scalar,x86.scalar.read_memory"
+    "--contract-index=LOOM_X86_SCALAR_CONTRACT:x86.bmi2,x86.scalar,x86.scalar.read_memory"
     "--contract-index=LOOM_X86_AVX2_CONTRACT:x86.scalar,x86.scalar.read_memory,x86.avx2"
     "--contract-index=LOOM_X86_AVX512_CONTRACT:x86.scalar,x86.scalar.read_memory,x86.avx2,x86.avx512"
     "--contract-index=LOOM_X86_PACKED_DOT_CONTRACT:x86.packed_dot"
-    "--contract-index=LOOM_X86_AVX2_FEATURES_CONTRACT:x86.scalar,x86.scalar.read_memory,x86.avx2,x86.f16c,x86.avx_ne_convert,x86.packed_dot"
-    "--contract-index=LOOM_X86_AVX512_FEATURES_CONTRACT:x86.scalar,x86.scalar.read_memory,x86.avx2,x86.avx512,x86.avx512_fp16,x86.avx_ne_convert,x86.avx512_bf16,x86.packed_dot"
+    "--contract-index=LOOM_X86_AVX2_FEATURES_CONTRACT:x86.bmi2,x86.scalar,x86.scalar.read_memory,x86.avx2,x86.f16c,x86.avx_ne_convert,x86.packed_dot"
+    "--contract-index=LOOM_X86_AVX512_FEATURES_CONTRACT:x86.bmi2,x86.scalar,x86.scalar.read_memory,x86.avx2,x86.avx512,x86.avx512_fp16,x86.avx_ne_convert,x86.avx512_bf16,x86.packed_dot"
   COMMENT
     "Generating x86 contract table families"
 )
@@ -54,6 +55,19 @@ loom_cc_library(
   DEPS
 
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_target_contract_cc_libraries(
+  NAME
+    bmi2
+  CONTRACT_DEPS
+    loom::target::contract
+  LOWER_RULE_DEPS
+    loom::codegen::low::lower
+    loom::ops::index
+    loom::ops::scalar
 )
 endif()
 
@@ -204,6 +218,8 @@ loom_cc_library(
     "avx512_lower_rules.h"
     "avx_ne_convert.h"
     "avx_ne_convert_lower_rules.h"
+    "bmi2.h"
+    "bmi2_lower_rules.h"
     "f16c.h"
     "f16c_lower_rules.h"
     "packed_dot.h"
@@ -223,6 +239,8 @@ loom_cc_library(
     ::avx512_lower_rules
     ::avx_ne_convert
     ::avx_ne_convert_lower_rules
+    ::bmi2
+    ::bmi2_lower_rules
     ::f16c
     ::f16c_lower_rules
     ::packed_dot
