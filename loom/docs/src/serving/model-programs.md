@@ -235,8 +235,9 @@ complete HTTP caller and a package whose output is independently checkable.
 
 Cold preparation declares numerical stages and parameter domains, plus resident
 request capacity, additive batch capacity, input/state strides, conditioning
-storage, bounded output/feedback storage and waveform geometry. Those declarations
-separate persistent request storage from temporary batch geometry. A larger
+storage, bounded output/feedback storage, waveform geometry, and separate CPU
+text-window and total-text limits. Those declarations separate persistent
+request storage from temporary batch geometry. A larger
 model can change its vocoder, diffusion schedule, cache layout or block size
 without teaching the HTTP service its architecture.
 
@@ -244,8 +245,9 @@ The warm source exports these operations:
 
 | Operation | Source-owned result |
 | --- | --- |
-| `prepare_request` | Validate text, voice, instructions, seed and speed; return retained CPU state and immutable request bytes. |
-| `prepare_work` | Describe one request's next operation with compact work bytes, positive additive units and a compatibility tag, without advancing it. |
+| `prepare_request` | Validate voice, instructions, seed and speed; return retained CPU state and immutable device input. |
+| `prepare_input` | Accept a complete-scalar prefix of an immutable text window and return independently retained CPU state. |
+| `prepare_work` | Select numerical work, another bounded CPU step, waiting for text, or completion. Numerical work supplies compact bytes, positive additive units and a compatibility tag. |
 | `prepare_batch` | Pack a compatible cohort and retain its plan, using explicit resident-row and byte-range records. |
 | `generate` | Execute the plan through the prepared runner stages, optionally requesting bounded feedback. |
 | `complete` | Interpret retired feedback for one original batch ordinal; publish playback position, sample range, frame count and EOF. |
@@ -254,6 +256,14 @@ The [model declaration](https://github.com/ROCm/hrx-system/blob/main/loom/src/lo
 owns the exact signatures, scalar widths and buffer layouts. `prepare_batch`
 receives the prepared stage-tag catalog separately from the packed request work;
 the source chooses its numerical stage and packing representation.
+
+Native callers can append text while audio is being produced. Input credit
+returns when a retired CPU task has accepted those bytes, independently of
+numerical completion. Source can retain its own tokenizer, normalization, and
+sentence state across calls; the input ring never becomes a mutable VM alias.
+A request waiting for text sleeps until complete UTF-8 characters or EOF arrive,
+and EOF after the last audio block completes without an extra device submission.
+The ordinary speech HTTP endpoint still receives one complete JSON request.
 
 Consider a request A already decoding when B arrives with another voice and a
 longer prefix. B first runs its required conditioning and prefix work. At a

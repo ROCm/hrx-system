@@ -70,20 +70,25 @@ iree_status_t loom_serve_speech_load_free(loom_serve_speech_load_t* load);
 // Source ABI: cold prepare(asset_root, options: buffer) ->
 //   (request_capacity, batch_units, input_stride, conditioning_capacity,
 //    stream_stride, batch_input_capacity, output_capacity, feedback_capacity,
-//    block_frames, sample_rate, channels: i64,
+//    block_frames, sample_rate, channels, text_capacity, text_limit: i64,
 //    tokenizer_asset, name, model_state, initial_conditioning: buffer).
-// Capacities and geometry are positive host sizes. Input/stream strides are
-// alignment multiples; whole arenas fit signed device offsets. Tokenizer is
+// Capacities and geometry are positive host sizes; text_capacity is at least
+// four bytes and bounds each CPU text window. text_limit bounds total raw input
+// bytes. These CPU bounds are independent of device input/stream strides, which
+// are alignment multiples; whole arenas fit signed device offsets. Tokenizer is
 // optional and relative to asset_root. Opaque model_state and
 // initial_conditioning survive the cold program. Empty initial conditioning
 // requires source to initialize its device bank before use. Checkpoints use
 // prepare.parameter.
 //
-// Warm prepare_request(model_state, input, voice, instructions: buffer,
+// Warm prepare_request(model_state, voice, instructions: buffer,
 //                      seed: i64, speed: f32)
 //   -> (request_state..., payload: buffer).
+// prepare_input(model_state: buffer, request_state..., text: buffer,
+//               byte_offset: i64, complete: i32)
+//   -> (request_state..., consumed_bytes: i64).
 // prepare_work(model_state: buffer, request_state...)
-//   -> (work: buffer, units, compatibility_tag: i64).
+//   -> (kind: i32, work: buffer, units, compatibility_tag: i64).
 // prepare_batch(model_state, stage_tags, ranges, packed_work: buffer)
 //   -> (payload, plan: buffer).
 // generate(plan: buffer, work, requests, conditioning, streams,
@@ -95,20 +100,38 @@ iree_status_t loom_serve_speech_load_free(loom_serve_speech_load_t* load);
 //
 // request_state... is the source-selected ordered scalar/reference prefix of
 // prepare_request's results. All consumers declare exactly that prefix, and
-// complete returns its replacement with the same types. Zero state values and
-// null references are valid; function values are not part of this ABI. Binding
-// checks the entire contract before service publication. Each request owns its
-// values independently of call carriers; source can replace a buffer while
-// retaining other state objects. Failure preserves prior ownership for teardown
+// prepare_input and complete return replacements with the same types. Zero
+// state values and null references are valid; function values are not part of
+// this ABI. Binding checks the entire contract before service publication.
+// Each request owns its values independently of call carriers; source can
+// replace a buffer while retaining other state objects. Failure preserves prior
+// ownership for teardown
 // but does not roll back mutations the source made inside retained objects.
 //
 // Request payload may be empty when source carries all request inputs in its
 // host state or subsequent work. Admission uploads only nonempty payloads and
 // conditioning, while still retiring accepted residency activation.
 //
+// prepare_input receives one immutable complete-scalar window at a byte offset.
+// It may accept a prefix ending on a scalar boundary, retain the VM buffer, or
+// take bounded CPU steps with zero acceptance. The adapter reuses that buffer
+// until drained and returns input-ring credit after CPU retirement, before
+// numerical work. complete marks the final input window, including empty EOF;
+// EOF can arrive while a previously nonfinal window is still being consumed.
+// Source owns normalization, tokenization, packet construction, and
+// continuation state. INVALID_ARGUMENT from input/work preparation rejects only
+// this request.
+//
 // prepare_work is CPU-only and does not advance request progress. Offers are
-// refreshed at a retired model cut. Equal tags and additive units fitting
-// batch_units permit a cohort; different progress alone need not separate it.
+// refreshed after each prepare_input at a retired model cut. kind selects
+// numerical work (0), another bounded CPU step (1), waiting for input (2), or
+// completion (3). Waiting requires the current source window fully accepted
+// without EOF; completion requires all final input accepted. Completion emits
+// an empty final block at the validated playback position without a device
+// submission. Only numerical work uses the remaining result fields: equal tags
+// and positive additive units fitting batch_units permit a cohort; different
+// progress alone need not separate it. CPU-only outcomes never form empty
+// numerical cohorts.
 // ranges has one little-endian i64 triple (resident_row, byte_offset,
 // byte_length) per selected request, indexing packed_work. The service owns
 // eligibility and selects distinct admitted rows; source owns shape/phase

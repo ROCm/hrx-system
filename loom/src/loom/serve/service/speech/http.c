@@ -124,7 +124,8 @@ static iree_status_t loom_serve_speech_http_end(
   if (consumer->connection) {
     if (outcome == LOOM_SERVE_TELEMETRY_COMPLETED) {
       loom_serve_http_connection_finish(consumer->connection);
-    } else if (outcome == LOOM_SERVE_TELEMETRY_REJECTED) {
+    } else if (outcome == LOOM_SERVE_TELEMETRY_REJECTED &&
+               !consumer->header_sent) {
       iree_string_view_t message = iree_status_message(request_status);
       if (!message.size) {
         message = IREE_SV("source rejected speech input");

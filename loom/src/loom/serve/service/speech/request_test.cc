@@ -34,6 +34,27 @@ TEST(SpeechRequestTest, RetainsNativeInputWithoutJsonEscaping) {
             "softly");
   EXPECT_EQ(request.speed, 0.25f);
   EXPECT_EQ(request.seed, UINT64_MAX);
+  EXPECT_TRUE(request.input_complete);
+  loom_serve_speech_request_deinitialize(&request);
+}
+
+TEST(SpeechRequestTest, ContinuingInputRetainsOnlyImmutableOptions) {
+  loom_serve_speech_request_t request;
+  IREE_ASSERT_OK(loom_serve_speech_request_initialize_stream(
+      IREE_SV("alba"), IREE_SV("softly"), 42, 2.0f, iree_allocator_system(),
+      &request));
+  EXPECT_FALSE(request.input_complete);
+  EXPECT_EQ(iree_string_builder_size(&request.input), 0u);
+  EXPECT_EQ(std::string(iree_string_builder_buffer(&request.voice)), "alba");
+  EXPECT_EQ(std::string(iree_string_builder_buffer(&request.instructions)),
+            "softly");
+  EXPECT_EQ(request.seed, 42u);
+  EXPECT_EQ(request.speed, 2.0f);
+  loom_serve_speech_request_deinitialize(&request);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_speech_request_initialize_stream(
+          IREE_SV(""), {}, 0, 1.0f, iree_allocator_system(), &request));
   loom_serve_speech_request_deinitialize(&request);
 }
 
