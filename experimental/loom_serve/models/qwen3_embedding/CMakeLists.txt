@@ -40,13 +40,4 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
     "${CMAKE_CURRENT_BINARY_DIR}/model.stamp"
 )
 
-iree_py_library(
-  NAME
-    check_service
-  MAIN
-    "check_service.py"
-  SRCS
-    "check_service.py"
-)
-
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
