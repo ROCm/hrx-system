@@ -14,13 +14,13 @@
 //
 // Design principles:
 // - Pull-based: output buffer capacity drives processing
-// - Streaming: can process segments incrementally (greedy left-to-right)
+// - Streaming: each model determines which prefixes can be committed
 // - Zero allocation: state lives in caller-provided storage
 //
 // Streaming model:
 // - Model tracks position within current segment
-// - Greedy longest-match emits tokens as they're determined
-// - No need to see entire segment before emitting tokens
+// - Tokens are emitted only when additional input cannot change their selection
+// - Ambiguous paths stay owned until input or a boundary resolves them
 
 #ifndef IREE_TOKENIZER_MODEL_H_
 #define IREE_TOKENIZER_MODEL_H_
@@ -41,10 +41,12 @@ typedef struct iree_tokenizer_model_vtable_t iree_tokenizer_model_vtable_t;
 // Segment List (for batched input)
 //===----------------------------------------------------------------------===//
 
-// List of segments for batched model input.
-// Segments are byte ranges into the transform buffer.
+// List of segments for batched model input. Positions use logical transformed-
+// input coordinates, independent of the current buffer's storage location.
 typedef struct iree_tokenizer_segment_list_t {
+  // Number of segments in values.
   iree_host_size_t count;
+  // Borrowed segment ranges, in the same coordinate space as buffer_offset.
   const iree_tokenizer_segment_t* values;
   // When true, the last segment in the list is incomplete — more bytes will be
   // appended in subsequent calls. The model must use an incremental processing
@@ -54,23 +56,28 @@ typedef struct iree_tokenizer_segment_list_t {
   //
   // This enables streaming encode for inputs that exceed the ring buffer's
   // capacity, such as split=false models where the entire input is one segment.
-  // The frozen token theorem guarantees correctness: tokens sufficiently far
-  // from the processing frontier are emitted incrementally.
+  // The model owns the proof that an emitted prefix cannot change.
   bool last_is_partial;
+  // Logical position of transform_buffer[0]. A segment's first byte is at
+  // transform_buffer.data + (segment.start - buffer_offset). Retained/output
+  // offsets remain logical when the caller compacts or reclaims the buffer.
+  iree_host_size_t buffer_offset;
 } iree_tokenizer_segment_list_t;
 
 // Creates a segment list from an array and count.
 static inline iree_tokenizer_segment_list_t iree_tokenizer_make_segment_list(
     const iree_tokenizer_segment_t* values, iree_host_size_t count) {
   iree_tokenizer_segment_list_t list = {count, values,
-                                        /*last_is_partial=*/false};
+                                        /*last_is_partial=*/false,
+                                        /*buffer_offset=*/0};
   return list;
 }
 
 // Returns an empty segment list.
 static inline iree_tokenizer_segment_list_t iree_tokenizer_segment_list_empty(
     void) {
-  iree_tokenizer_segment_list_t list = {0, NULL, /*last_is_partial=*/false};
+  iree_tokenizer_segment_list_t list = {0, NULL, /*last_is_partial=*/false,
+                                        /*buffer_offset=*/0};
   return list;
 }
 
@@ -92,10 +99,10 @@ struct iree_tokenizer_model_t {
 // Base streaming state structure. All concrete state types embed this at
 // offset 0. The model back-pointer enables vtable dispatch from state.
 //
-// Model state tracks position within the current segment for streaming
-// tokenization. Greedy BPE processes left-to-right, emitting tokens as they
-// become determined, so state is O(1) - just position tracking.
+// Concrete states own progress within the current segment and any retained
+// tokenization work across input arrivals and output backpressure.
 struct iree_tokenizer_model_state_t {
+  // Borrowed immutable model, which outlives this state.
   const iree_tokenizer_model_t* model;
 };
 
@@ -107,9 +114,8 @@ struct iree_tokenizer_model_state_t {
 //
 // Streaming model:
 // - state_encode() processes segments incrementally
-// - Model tracks current segment index and position within segment
-// - Greedy longest-match determines tokens left-to-right
-// - Tokens emitted immediately as they're determined (no buffering)
+// - Model retains selection progress and pending output independently
+// - Output credit controls when determined tokens can be delivered
 // - state_finalize() handles any trailing bytes that need special handling
 struct iree_tokenizer_model_vtable_t {
   void (*destroy)(iree_tokenizer_model_t* model);
@@ -171,11 +177,12 @@ static inline void iree_tokenizer_model_state_deinitialize(
 
 // Encodes segments to token IDs, streaming within each segment.
 //
-// |transform_buffer| is the normalized text backing the |segments| indices.
-// All segment start/end offsets must be valid indices into this buffer.
-// Processes segments using greedy longest-match, tracking current segment
-// index and byte position in state. Tokens are emitted as they're determined
-// without future lookahead.
+// |transform_buffer| is the normalized text backing |segments|, beginning at
+// segments.buffer_offset in logical transformed-input coordinates. Every
+// segment must fit within that span. Model output offsets use the same logical
+// coordinates; mapping them back through normalization belongs to the caller.
+// The model retains unresolved work and emits tokens as their selection becomes
+// independent of future input.
 //
 // Returns the number of fully-processed segments in |out_segments_consumed|
 // and the number of tokens written in |out_token_count|. May consume fewer

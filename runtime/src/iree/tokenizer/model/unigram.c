@@ -643,7 +643,7 @@ static iree_host_size_t iree_tokenizer_unigram_emit_pending(
 static iree_status_t iree_tokenizer_unigram_process_segment(
     iree_tokenizer_unigram_state_t* state,
     const iree_tokenizer_unigram_model_t* model,
-    iree_const_byte_span_t transform_buffer,
+    iree_const_byte_span_t transform_buffer, iree_host_size_t buffer_offset,
     const iree_tokenizer_segment_t* segment, bool is_partial,
     iree_tokenizer_token_output_t output, iree_host_size_t* in_out_token_count,
     bool* out_segment_complete) {
@@ -651,16 +651,18 @@ static iree_status_t iree_tokenizer_unigram_process_segment(
   *out_segment_complete = false;
 
   // Validate segment bounds.
-  if (segment->end > transform_buffer.data_length ||
-      segment->start > segment->end) {
+  if (segment->start < buffer_offset || segment->start > segment->end ||
+      segment->end - buffer_offset > transform_buffer.data_length) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "segment bounds out of range: [%" PRIhsz
-                            ", %" PRIhsz ") in buffer of %" PRIhsz " bytes",
-                            segment->start, segment->end,
+                            ", %" PRIhsz ") in buffer at %" PRIhsz
+                            " of %" PRIhsz " bytes",
+                            segment->start, segment->end, buffer_offset,
                             transform_buffer.data_length);
   }
 
-  const uint8_t* segment_data = transform_buffer.data + segment->start;
+  const uint8_t* segment_data =
+      transform_buffer.data + (segment->start - buffer_offset);
   iree_host_size_t segment_length = segment->end - segment->start;
 
   // Update segment base offset (may have changed due to reclaim).
@@ -819,8 +821,9 @@ static iree_status_t iree_tokenizer_unigram_state_encode(
     bool segment_complete = false;
 
     IREE_RETURN_IF_ERROR(iree_tokenizer_unigram_process_segment(
-        state, model, transform_buffer, &segments.values[segment_index],
-        is_partial, output, &token_count, &segment_complete));
+        state, model, transform_buffer, segments.buffer_offset,
+        &segments.values[segment_index], is_partial, output, &token_count,
+        &segment_complete));
 
     if (segment_complete && !is_partial) {
       ++segments_consumed;
