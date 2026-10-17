@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "predicate_lifetimes.loom-test"
     "projection.loom-test"
     "projection_branch.loom-test"
 )

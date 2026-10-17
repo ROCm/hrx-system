@@ -1,0 +1,259 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+// Values computed in the header and rotated through CFG arguments retain
+// the last value of every lane after reconvergence. Internal mask uses remain
+// in their native representation.
+kernel.def target(@target) @predicate_lifetime() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64x3xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x6xi32>
+  %limit = view.load %inputs[%lane, 0] : view<64x3xi32> -> i32
+  %first_word = view.load %inputs[%lane, 1] : view<64x3xi32> -> i32
+  %second_word = view.load %inputs[%lane, 2] : view<64x3xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %first = scalar.cmpi ne, %first_word, %c0 : i32
+  %second = scalar.cmpi ne, %second_word, %c0 : i32
+  cfg.br ^loop(%c0: i32, %first: i1, %second: i1)
+^loop(%iteration: i32, %head: i1, %tail: i1):
+  %at_begin = scalar.cmpi eq, %iteration, %c0 : i32
+  %pair = vector.from_elements %iteration, %c0 : vector<2xi32>
+  %limits = vector.splat %limit : vector<2xi32>
+  %predicates = vector.cmpi slt, %pair, %limits : vector<2xi32> -> vector<2xi1>
+  %again = scalar.cmpi slt, %iteration, %limit : i32
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %iteration, %c1 : i32
+  cfg.br ^loop(%next: i32, %tail: i1, %head: i1)
+^exit:
+  %head_word = scf.select %head, %c1, %c0 : i32
+  %tail_word = scf.select %tail, %c1, %c0 : i32
+  %begin_word = scf.select %at_begin, %c1, %c0 : i32
+  %true_words = vector.constant 1 : vector<2xi32>
+  %false_words = vector.constant 0 : vector<2xi32>
+  %predicate_words = vector.select %predicates, %true_words, %false_words : vector<2xi32>
+  view.store %iteration, %outputs[%lane, 0] : i32, view<64x6xi32>
+  view.store %head_word, %outputs[%lane, 1] : i32, view<64x6xi32>
+  view.store %tail_word, %outputs[%lane, 2] : i32, view<64x6xi32>
+  view.store %begin_word, %outputs[%lane, 3] : i32, view<64x6xi32>
+  vector.store %predicate_words, %outputs[%lane, 4] : vector<2xi32>, view<64x6xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @predicate_lifetime() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %inputs = resource<hal_binding> {extent = 768, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %outputs = resource<hal_binding> {extent = 1536, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %98 = v_mov_b32 12
+  %99 = v_mul_lo_u32 %lane, %98
+  %limit = global_load_b32_saddr %99, %inputs
+  %first_word = global_load_b32_saddr %99, %inputs {offset = 4}
+  %second_word = global_load_b32_saddr %99, %inputs {offset = 8}
+  %first = v_cmp_ne_i32_src1_inline %first_word {rhs = 0}
+  %second = v_cmp_ne_i32_src1_inline %second_word {rhs = 0}
+  %111 = v_mov_b32 0
+  %143 = s_mov_b64_exec_read
+  low.br ^loop(%111: reg<amdgpu.vgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
+^loop(%iteration: reg<amdgpu.vgpr>, %head: reg<amdgpu.sgpr x2>, %tail: reg<amdgpu.sgpr x2>):
+  %114 = v_cndmask_b32_src0_lit_src1_inline %head {imm32 = 0, true_value = 1}
+  %117 = v_cndmask_b32_src0_lit_src1_inline %tail {imm32 = 0, true_value = 1}
+  %at_begin = v_cmp_eq_i32_src1_inline %iteration {rhs = 0}
+  %121 = v_cndmask_b32_src0_lit_src1_inline %at_begin {imm32 = 0, true_value = 1}
+  %127 = v_cmp_lt_i32 %iteration, %limit
+  %129 = v_cmp_lt_i32_src0_inline %limit {lhs = 0}
+  %138 = v_cndmask_b32_src0_lit_src1_inline %127 {imm32 = 0, true_value = 1}
+  %140 = v_cndmask_b32_src0_lit_src1_inline %129 {imm32 = 0, true_value = 1}
+  %144, %145 = s_and_saveexec_b64 %127
+  low.cond_br %145, ^body, ^_bb3 : reg<amdgpu.scc>
+^body:
+  %146 = v_mov_b32 1
+  %next = v_add_u32 %iteration, %146
+  low.br ^loop(%next: reg<amdgpu.vgpr>, %tail: reg<amdgpu.sgpr x2>, %head: reg<amdgpu.sgpr x2>)
+^_bb3:
+  s_mov_b64_exec %143
+  %148 = v_cmp_ne_i32_src1_inline %114 {rhs = 0}
+  %149 = v_cmp_ne_i32_src1_inline %117 {rhs = 0}
+  %150 = v_cmp_ne_i32_src1_inline %121 {rhs = 0}
+  %155 = v_cmp_ne_i32_src1_inline %138 {rhs = 0}
+  %157 = v_cmp_ne_i32_src1_inline %140 {rhs = 0}
+  %head_word = v_cndmask_b32_src0_lit_src1_inline %148 {imm32 = 0, true_value = 1}
+  %tail_word = v_cndmask_b32_src0_lit_src1_inline %149 {imm32 = 0, true_value = 1}
+  %begin_word = v_cndmask_b32_src0_lit_src1_inline %150 {imm32 = 0, true_value = 1}
+  %169 = v_cndmask_b32_src0_lit_src1_inline %155 {imm32 = 0, true_value = 1}
+  %171 = v_cndmask_b32_src0_lit_src1_inline %157 {imm32 = 0, true_value = 1}
+  %predicate_words = concat(%169, %171) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %173 = v_mov_b32 24
+  %174 = v_mul_lo_u32 %lane, %173
+  global_store_b32_saddr %174, %iteration, %outputs
+  global_store_b32_saddr %174, %head_word, %outputs {offset = 4}
+  global_store_b32_saddr %174, %tail_word, %outputs {offset = 8}
+  global_store_b32_saddr %174, %begin_word, %outputs {offset = 12}
+  global_store_b64_saddr %174, %predicate_words, %outputs {offset = 16}
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+// Values computed in the header and rotated through CFG arguments retain
+// the last value of every lane after reconvergence. Internal mask uses remain
+// in their native representation.
+kernel.def target(@target) @predicate_lifetime() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<64x3xi32>
+  %outputs = buffer.view %output[%base] : buffer -> view<64x6xi32>
+  %limit = view.load %inputs[%lane, 0] : view<64x3xi32> -> i32
+  %first_word = view.load %inputs[%lane, 1] : view<64x3xi32> -> i32
+  %second_word = view.load %inputs[%lane, 2] : view<64x3xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %first = scalar.cmpi ne, %first_word, %c0 : i32
+  %second = scalar.cmpi ne, %second_word, %c0 : i32
+  cfg.br ^loop(%c0: i32, %first: i1, %second: i1)
+^loop(%iteration: i32, %head: i1, %tail: i1):
+  %at_begin = scalar.cmpi eq, %iteration, %c0 : i32
+  %pair = vector.from_elements %iteration, %c0 : vector<2xi32>
+  %limits = vector.splat %limit : vector<2xi32>
+  %predicates = vector.cmpi slt, %pair, %limits : vector<2xi32> -> vector<2xi1>
+  %again = scalar.cmpi slt, %iteration, %limit : i32
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %iteration, %c1 : i32
+  cfg.br ^loop(%next: i32, %tail: i1, %head: i1)
+^exit:
+  %head_word = scf.select %head, %c1, %c0 : i32
+  %tail_word = scf.select %tail, %c1, %c0 : i32
+  %begin_word = scf.select %at_begin, %c1, %c0 : i32
+  %true_words = vector.constant 1 : vector<2xi32>
+  %false_words = vector.constant 0 : vector<2xi32>
+  %predicate_words = vector.select %predicates, %true_words, %false_words : vector<2xi32>
+  view.store %iteration, %outputs[%lane, 0] : i32, view<64x6xi32>
+  view.store %head_word, %outputs[%lane, 1] : i32, view<64x6xi32>
+  view.store %tail_word, %outputs[%lane, 2] : i32, view<64x6xi32>
+  view.store %begin_word, %outputs[%lane, 3] : i32, view<64x6xi32>
+  vector.store %predicate_words, %outputs[%lane, 4] : vector<2xi32>, view<64x6xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @predicate_lifetime() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %inputs = resource<hal_binding> {extent = 768, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %outputs = resource<hal_binding> {extent = 1536, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %98 = v_mov_b32 12
+  %99 = v_mul_lo_u32 %lane, %98
+  %limit = global_load_b32_saddr %99, %inputs
+  %first_word = global_load_b32_saddr %99, %inputs {offset = 4}
+  %second_word = global_load_b32_saddr %99, %inputs {offset = 8}
+  %first = v_cmp_ne_i32_src1_inline %first_word {rhs = 0}
+  %second = v_cmp_ne_i32_src1_inline %second_word {rhs = 0}
+  %111 = v_mov_b32 0
+  %143 = s_mov_b64_exec_read
+  low.br ^loop(%111: reg<amdgpu.vgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
+^loop(%iteration: reg<amdgpu.vgpr>, %head: reg<amdgpu.sgpr x2>, %tail: reg<amdgpu.sgpr x2>):
+  %114 = v_cndmask_b32_src0_lit_src1_inline %head {imm32 = 0, true_value = 1}
+  %117 = v_cndmask_b32_src0_lit_src1_inline %tail {imm32 = 0, true_value = 1}
+  %at_begin = v_cmp_eq_i32_src1_inline %iteration {rhs = 0}
+  %121 = v_cndmask_b32_src0_lit_src1_inline %at_begin {imm32 = 0, true_value = 1}
+  %127 = v_cmp_lt_i32 %iteration, %limit
+  %129 = v_cmp_lt_i32_src0_inline %limit {lhs = 0}
+  %138 = v_cndmask_b32_src0_lit_src1_inline %127 {imm32 = 0, true_value = 1}
+  %140 = v_cndmask_b32_src0_lit_src1_inline %129 {imm32 = 0, true_value = 1}
+  %144, %145 = s_and_saveexec_b64 %127
+  low.cond_br %145, ^body, ^_bb3 : reg<amdgpu.scc>
+^body:
+  %146 = v_mov_b32 1
+  %next = v_add_u32 %iteration, %146
+  low.br ^loop(%next: reg<amdgpu.vgpr>, %tail: reg<amdgpu.sgpr x2>, %head: reg<amdgpu.sgpr x2>)
+^_bb3:
+  s_mov_b64_exec %143
+  %148 = v_cmp_ne_i32_src1_inline %114 {rhs = 0}
+  %149 = v_cmp_ne_i32_src1_inline %117 {rhs = 0}
+  %150 = v_cmp_ne_i32_src1_inline %121 {rhs = 0}
+  %155 = v_cmp_ne_i32_src1_inline %138 {rhs = 0}
+  %157 = v_cmp_ne_i32_src1_inline %140 {rhs = 0}
+  %head_word = v_cndmask_b32_src0_lit_src1_inline %148 {imm32 = 0, true_value = 1}
+  %tail_word = v_cndmask_b32_src0_lit_src1_inline %149 {imm32 = 0, true_value = 1}
+  %begin_word = v_cndmask_b32_src0_lit_src1_inline %150 {imm32 = 0, true_value = 1}
+  %169 = v_cndmask_b32_src0_lit_src1_inline %155 {imm32 = 0, true_value = 1}
+  %171 = v_cndmask_b32_src0_lit_src1_inline %157 {imm32 = 0, true_value = 1}
+  %predicate_words = concat(%169, %171) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %173 = v_mov_b32 24
+  %174 = v_mul_lo_u32 %lane, %173
+  global_store_b32_saddr %174, %iteration, %outputs
+  global_store_b32_saddr %174, %head_word, %outputs {offset = 4}
+  global_store_b32_saddr %174, %tail_word, %outputs {offset = 8}
+  global_store_b32_saddr %174, %begin_word, %outputs {offset = 12}
+  global_store_b64_saddr %174, %predicate_words, %outputs {offset = 16}
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+// The bound is launch-uniform, so every lane observes each comparison in the
+// final iteration. The predicate can remain a native mask across the exit.
+kernel.def target(@target) @uniform_predicate_lifetime() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%output: buffer, %limit: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_word = index.cast %lane : index to i32
+  %base = index.constant 0 : offset
+  %outputs = buffer.view %output[%base] : buffer -> view<64xi32>
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  cfg.br ^loop(%c0: i32)
+^loop(%iteration: i32):
+  %predicate = scalar.cmpi slt, %lane_word, %iteration : i32
+  %again = scalar.cmpi slt, %iteration, %limit : i32
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %iteration, %c1 : i32
+  cfg.br ^loop(%next: i32)
+^exit:
+  %word = scf.select %predicate, %c1, %c0 : i32
+  view.store %word, %outputs[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_predicate_lifetime(%limit: reg<amdgpu.sgpr>) asm {
+  %lane_word = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %outputs = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0 = s_mov_b32 0
+  %c1 = s_mov_b32 1
+  low.br ^loop(%c0: reg<amdgpu.sgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>):
+  %predicate = v_cmp_lt_i32 %lane_word, %iteration
+  %again = s_cmp_lt_i32 %iteration, %limit
+  low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
+^body:
+  %next = s_add_u32 %iteration, %c1
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^exit:
+  %word = v_cndmask_b32_src0_lit_src1_inline %predicate {imm32 = 0, true_value = 1}
+  %25 = v_lshlrev_b32_src0_inline %lane_word, 2
+  global_store_b32_saddr %25, %word, %outputs
+  return
+}

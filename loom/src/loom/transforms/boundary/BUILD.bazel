@@ -96,6 +96,7 @@ loom_cc_library(
         "projection.h",
     ],
     deps = [
+        ":predicate_word",
         ":projection_core",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/scalar",
@@ -109,5 +110,38 @@ loom_cc_library(
         "//loom/src/loom/transforms/vector:packet_boundary_projection",
         "//loom/src/loom/transforms/view:boundary_projection",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "predicate_word",
+    srcs = ["predicate_word.c"],
+    hdrs = ["predicate_word.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "predicate_lifetimes",
+    srcs = ["predicate_lifetimes.c"],
+    hdrs = ["predicate_lifetimes.h"],
+    deps = [
+        ":predicate_word",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )

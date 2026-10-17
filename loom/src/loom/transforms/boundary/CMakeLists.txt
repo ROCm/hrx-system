@@ -93,6 +93,7 @@ loom_cc_library(
     "loop_predicate_projection.c"
     "projection.c"
   DEPS
+    ::predicate_word
     ::projection_core
     iree::base
     loom::ir
@@ -106,6 +107,45 @@ loom_cc_library(
     loom::transforms::encoding::layout_projection
     loom::transforms::vector::packet_boundary_projection
     loom::transforms::view::boundary_projection
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    predicate_word
+  HDRS
+    "predicate_word.h"
+  SRCS
+    "predicate_word.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::ops::op_defs
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::vector
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    predicate_lifetimes
+  HDRS
+    "predicate_lifetimes.h"
+  SRCS
+    "predicate_lifetimes.c"
+  DEPS
+    ::predicate_word
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::op_defs
+    loom::pass::types
+    loom::pass::value_facts
+    loom::rewrite::rewriter
+    loom::target::function_version
+    loom::target::provider
+    loom::util::fact_table
   PUBLIC
 )
 

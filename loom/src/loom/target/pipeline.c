@@ -602,6 +602,13 @@ static iree_status_t loom_target_pipeline_build_boundary_projection(
       user_data, &projection_changed_op);
 }
 
+static iree_status_t loom_target_pipeline_build_predicate_lifetimes(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_run(
+      builder, IREE_SV("project-loop-predicate-lifetimes"));
+}
+
 static iree_status_t loom_target_pipeline_build_source_low_artifact_preparation(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
@@ -814,6 +821,9 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
         loom_target_pipeline_build_structured_source_finalization, user_data,
         &for_op));
   }
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"),
+      loom_target_pipeline_build_predicate_lifetimes, NULL, &for_op));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_source_to_low(builder, context->options));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(
@@ -852,6 +862,9 @@ loom_target_pipeline_build_source_low_diagnostic_artifacts_body(
       loom_target_pipeline_build_required_source_inlining(builder, user_data));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_boundary_projection(builder, user_data));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"),
+      loom_target_pipeline_build_predicate_lifetimes, NULL, &for_op));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_source_to_low(builder, context->options));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(

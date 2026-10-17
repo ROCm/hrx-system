@@ -323,6 +323,7 @@ loom_cc_library(
         "//loom/src/loom/target:callgraph_specialization",
         "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target:pass_requirements",
+        "//loom/src/loom/transforms/boundary:predicate_lifetimes",
         "//loom/src/loom/transforms/boundary:projection",
         "//loom/src/loom/transforms/cfg:branch_fusion",
         "//loom/src/loom/transforms/cfg:branch_sink",
