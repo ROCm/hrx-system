@@ -2,16 +2,24 @@
 // empty state prefix without retaining a placeholder CPU buffer.
 global.rodata.def @work = bytes("00000000")
 
-func.def public @prepare_request(%model: buffer, %text: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer) {
+func.def public @prepare_request(%model: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer) {
   %work = global.load @work : buffer
   func.return %work : buffer
 }
 
-func.def public @prepare_work(%model: buffer) -> (buffer, i64, i64) {
+func.def public @prepare_input(%model: buffer, %text: buffer, %offset: i64, %complete: i32) -> (i64) {
+  %length = buffer.length %text
+  %length64 = index.cast %length : offset to i64
+  %remaining = scalar.subi %length64, %offset : i64
+  func.return %remaining : i64
+}
+
+func.def public @prepare_work(%model: buffer) -> (i32, buffer, i64, i64) {
   %work = global.load @work : buffer
-  %unit = scalar.constant 1 : i64
+  %kind = scalar.constant 3 : i32
+  %unit = scalar.constant 0 : i64
   %tag = scalar.constant 0 : i64
-  func.return %work, %unit, %tag : buffer, i64, i64
+  func.return %kind, %work, %unit, %tag : i32, buffer, i64, i64
 }
 
 func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
