@@ -303,6 +303,7 @@ loom_cc_library(
     loom::serve::service::speech::request
     loom::serve::service::speech::stream
     loom::serve::telemetry::record
+    loom::serve::telemetry::stream
     loom::serve::testing::http_harness
     loom::serve::testing::service_application
     loom::serve::transport::http::listener

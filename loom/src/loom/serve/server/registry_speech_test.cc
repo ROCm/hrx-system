@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 #include <thread>
@@ -22,6 +24,7 @@
 #include "loom/serve/service/speech/request.h"
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/telemetry/record.h"
+#include "loom/serve/telemetry/stream.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/transport/http/listener.h"
@@ -33,6 +36,8 @@ IREE_FLAG(string, model, "",
           "Speech model document for registry qualification.");
 IREE_FLAG(string, voice, "positive", "Primary model voice selector.");
 IREE_FLAG(string, alternate_voice, "negative", "Second model voice selector.");
+IREE_FLAG(string, third_voice, "positive", "Third model voice selector.");
+IREE_FLAG(string, fourth_voice, "negative", "Fourth model voice selector.");
 IREE_FLAG(string, text, "Hello.", "Text shared by native and HTTP requests.");
 IREE_FLAG(int32_t, test_workers, 1, "Shared application worker count.");
 
@@ -95,6 +100,8 @@ class RegistrySpeechTest : public ::testing::Test {
         loom_serve_registry_register(registry_, &configuration, &index_);
     loom_serve_model_configuration_deinitialize(&configuration);
     IREE_ASSERT_OK(status);
+    telemetry_cursor_ = 0;
+    largest_batch_ = 0;
   }
 
   loom_serve_registered_model_t* Model() {
@@ -119,6 +126,17 @@ class RegistrySpeechTest : public ::testing::Test {
         status = service.advance(service.self,
                                  loom_serve_registry_service_flags(Model()),
                                  &progress);
+        loom_serve_telemetry_record_t record;
+        loom_serve_telemetry_read_t result;
+        while ((result = loom_serve_telemetry_stream_read(
+                    service.telemetry.stream, &telemetry_cursor_, &record)) ==
+               LOOM_SERVE_TELEMETRY_READ_RECORD) {
+          if (record.event == &LOOM_SERVE_TELEMETRY_BATCH_SUBMIT) {
+            largest_batch_ =
+                std::max(largest_batch_, record.data.batch.requests);
+          }
+        }
+        EXPECT_EQ(result, LOOM_SERVE_TELEMETRY_READ_EMPTY);
       }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
@@ -137,17 +155,29 @@ class RegistrySpeechTest : public ::testing::Test {
     }
   }
 
-  iree_status_t Open(const char* voice, SpeechStream* out_stream) {
+  iree_status_t Open(const char* voice, SpeechStream* out_stream,
+                     const char* text = FLAG_text, uint64_t seed = 73) {
     loom_serve_speech_request_t request;
     IREE_RETURN_IF_ERROR(loom_serve_speech_request_initialize_text(
-        iree_make_cstring_view(FLAG_text), iree_make_cstring_view(voice), {},
-        73, 1.0f, allocator_, &request));
+        iree_make_cstring_view(text), iree_make_cstring_view(voice), {}, seed,
+        1.0f, allocator_, &request));
     loom_serve_speech_stream_t* stream = nullptr;
     iree_status_t status = loom_serve_registry_try_open_speech(
         registry_, iree_make_cstring_view(name_.c_str()), &request, &stream);
     loom_serve_speech_request_deinitialize(&request);
     out_stream->reset(stream);
     return status;
+  }
+
+  void AppendPcm(const loom_serve_speech_block_t* block, std::string* output) {
+    EXPECT_EQ(block->position, output->size() / sizeof(int16_t));
+    std::vector<char> samples(block->frame_count * sizeof(int16_t) + 1);
+    iree_string_builder_t pcm;
+    iree_string_builder_initialize_with_storage(samples.data(), samples.size(),
+                                                &pcm);
+    IREE_ASSERT_OK(loom_serve_speech_encode_pcm16(block->samples, &pcm));
+    output->append(iree_string_builder_buffer(&pcm),
+                   iree_string_builder_size(&pcm));
   }
 
   void AwaitOutput(loom_serve_speech_stream_t* stream) {
@@ -164,25 +194,16 @@ class RegistrySpeechTest : public ::testing::Test {
     const auto format = loom_serve_speech_stream_format(stream);
     ASSERT_EQ(format.sample_rate, 24000u);
     ASSERT_EQ(format.channels, 1u);
-    uint64_t position = 0;
     while (true) {
       ASSERT_NO_FATAL_FAILURE(AwaitOutput(stream));
       const auto* block = loom_serve_speech_stream_peek(stream);
-      EXPECT_EQ(block->position, position);
-      position += block->frame_count;
-      std::vector<char> samples(block->frame_count * sizeof(int16_t) + 1);
-      iree_string_builder_t pcm;
-      iree_string_builder_initialize_with_storage(samples.data(),
-                                                  samples.size(), &pcm);
-      IREE_ASSERT_OK(loom_serve_speech_encode_pcm16(block->samples, &pcm));
-      output->append(iree_string_builder_buffer(&pcm),
-                     iree_string_builder_size(&pcm));
+      ASSERT_NO_FATAL_FAILURE(AppendPcm(block, output));
       if (block->complete) {
         break;
       }
       loom_serve_speech_stream_consume(stream);
     }
-    EXPECT_GT(position, 0u);
+    EXPECT_FALSE(output->empty());
   }
 
   void StartHttp() {
@@ -233,6 +254,10 @@ class RegistrySpeechTest : public ::testing::Test {
   // Model document's name, copied before its declaration moves into the
   // registry.
   std::string name_;
+  // Absolute read position in the current registration's telemetry stream.
+  uint64_t telemetry_cursor_ = 0;
+  // Largest accepted cohort observed since registration or explicit reset.
+  uint64_t largest_batch_ = 0;
   // Shared asynchronous network owner, outliving its listener and requests.
   loom_serve_http_server_t* server_ = nullptr;
   // Actual loopback endpoint for the HTTP peer.
@@ -349,6 +374,155 @@ TEST_F(RegistrySpeechTest, AbortDetachesLiveStreamsBeforeModelRetirement) {
   registry_ = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
                         loom_serve_speech_stream_status(first.get()));
+}
+
+TEST_F(RegistrySpeechTest,
+       StaggeredStreamsPreserveOutputAcrossCancelledSlotReuse) {
+  Model()->closed = false;
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
+  const std::array<const char*, 4> voices = {
+      FLAG_voice, FLAG_alternate_voice, FLAG_third_voice, FLAG_fourth_voice};
+  const std::string text = FLAG_text;
+  const std::array<std::string, 4> texts = {
+      text + " We can keep speaking while another voice finishes.", text,
+      text + " Each voice keeps its own place.",
+      text + " A new turn can join while the conversation is already running."};
+  std::array<std::string, 4> expected;
+  for (size_t i = 0; i < voices.size(); ++i) {
+    SCOPED_TRACE(i);
+    SpeechStream stream(nullptr, loom_serve_speech_stream_close);
+    IREE_ASSERT_OK(Open(voices[i], &stream, texts[i].c_str(), 73 + i));
+    ASSERT_NE(stream, nullptr);
+    ASSERT_NO_FATAL_FAILURE(ReadPcm(stream.get(), &expected[i]));
+    loom_serve_speech_stream_consume(stream.get());
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        [&] { return loom_serve_speech_stream_is_complete(stream.get()); }));
+    IREE_ASSERT_OK(loom_serve_speech_stream_status(stream.get()));
+  }
+
+  std::array<SpeechStream, 4> streams = {
+      SpeechStream(nullptr, loom_serve_speech_stream_close),
+      SpeechStream(nullptr, loom_serve_speech_stream_close),
+      SpeechStream(nullptr, loom_serve_speech_stream_close),
+      SpeechStream(nullptr, loom_serve_speech_stream_close)};
+  IREE_ASSERT_OK(Open(voices[0], &streams[0], texts[0].c_str(), 73));
+  ASSERT_NE(streams[0], nullptr);
+  ASSERT_NO_FATAL_FAILURE(AwaitOutput(streams[0].get()));
+  const auto* held_block = loom_serve_speech_stream_peek(streams[0].get());
+  ASSERT_FALSE(held_block->complete);
+  const std::vector<uint8_t> held_samples(
+      held_block->samples.data,
+      held_block->samples.data + held_block->samples.data_length);
+
+  IREE_ASSERT_OK(Open(voices[1], &streams[1], texts[1].c_str(), 74));
+  ASSERT_NE(streams[1], nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return std::string(
+               Model()->service.snapshot(Model()->service.self).phase) ==
+               "generating" ||
+           loom_serve_speech_stream_is_complete(streams[1].get());
+  }));
+  IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[1].get()));
+  ASSERT_STREQ(Model()->service.snapshot(Model()->service.self).phase,
+               "generating");
+  for (size_t i = 2; i < streams.size(); ++i) {
+    IREE_ASSERT_OK(Open(voices[i], &streams[i], texts[i].c_str(), 73 + i));
+    ASSERT_NE(streams[i], nullptr);
+  }
+  for (auto& stream : streams) {
+    ASSERT_NO_FATAL_FAILURE(AwaitOutput(stream.get()));
+    ASSERT_FALSE(loom_serve_speech_stream_peek(stream.get())->complete);
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return std::string(
+               Model()->service.snapshot(Model()->service.self).phase) ==
+           "delivering";
+  }));
+  ASSERT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
+            4u);
+
+  // With every peer holding output, only this request can submit new work.
+  // Closing before another owner turn leaves its accepted borrower retained.
+  loom_serve_speech_stream_consume(streams[2].get());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return std::string(
+               Model()->service.snapshot(Model()->service.self).phase) ==
+               "generating" ||
+           loom_serve_speech_stream_is_complete(streams[2].get());
+  }));
+  IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[2].get()));
+  ASSERT_STREQ(Model()->service.snapshot(Model()->service.self).phase,
+               "generating");
+  streams[2].reset();
+  EXPECT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
+            4u);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return Model()->service.telemetry.counters->cancelled == 1; }));
+  ASSERT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
+            3u);
+  IREE_ASSERT_OK(Open(voices[2], &streams[2], texts[2].c_str(), 75));
+  ASSERT_NE(streams[2], nullptr);
+  ASSERT_NO_FATAL_FAILURE(AwaitOutput(streams[2].get()));
+  ASSERT_FALSE(loom_serve_speech_stream_peek(streams[2].get())->complete);
+  EXPECT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
+            4u);
+
+  // The short peer can finish while all other consumers withhold credit.
+  std::array<std::string, 4> actual;
+  ASSERT_NO_FATAL_FAILURE(ReadPcm(streams[1].get(), &actual[1]));
+  loom_serve_speech_stream_consume(streams[1].get());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return loom_serve_speech_stream_is_complete(streams[1].get()); }));
+  IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[1].get()));
+  EXPECT_EQ(actual[1], expected[1]);
+  streams[1].reset();
+
+  // Both ready voices now share execution while retaining independent output
+  // positions and completion. No reader waits for a peer's next audio block.
+  largest_batch_ = 0;
+  while (streams[2] || streams[3]) {
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+      for (size_t i = 2; i < streams.size(); ++i) {
+        if (streams[i] &&
+            (loom_serve_speech_stream_peek(streams[i].get()) ||
+             loom_serve_speech_stream_is_complete(streams[i].get()))) {
+          return true;
+        }
+      }
+      return false;
+    }));
+    for (size_t i = 2; i < streams.size(); ++i) {
+      if (!streams[i]) {
+        continue;
+      }
+      if (const auto* block = loom_serve_speech_stream_peek(streams[i].get())) {
+        ASSERT_NO_FATAL_FAILURE(AppendPcm(block, &actual[i]));
+        loom_serve_speech_stream_consume(streams[i].get());
+      }
+      if (loom_serve_speech_stream_is_complete(streams[i].get())) {
+        IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[i].get()));
+        EXPECT_EQ(actual[i], expected[i]);
+        streams[i].reset();
+      }
+    }
+  }
+  EXPECT_GE(largest_batch_, 2u);
+  ASSERT_EQ(loom_serve_speech_stream_peek(streams[0].get()), held_block);
+  EXPECT_EQ(std::vector<uint8_t>(
+                held_block->samples.data,
+                held_block->samples.data + held_block->samples.data_length),
+            held_samples);
+  ASSERT_NO_FATAL_FAILURE(ReadPcm(streams[0].get(), &actual[0]));
+  loom_serve_speech_stream_consume(streams[0].get());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return loom_serve_speech_stream_is_complete(streams[0].get()); }));
+  IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[0].get()));
+  EXPECT_EQ(actual[0], expected[0]);
+  EXPECT_EQ(Model()->service.telemetry.counters->completed, 8u);
+  EXPECT_EQ(Model()->service.telemetry.counters->cancelled, 1u);
+  EXPECT_EQ(Model()->service.telemetry.counters->failed, 0u);
+  EXPECT_EQ(Model()->service.telemetry.counters->rejected, 0u);
 }
 
 }  // namespace
