@@ -3,10 +3,14 @@ func.decl @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed
 func.decl @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64)
 
 // Replace only the native declaration sink. The returned observation includes
-// every shape argument supplied by the real cohort planner.
+// every shape argument in separate bits, preserving their order.
 func.def @qwen38_vision_stage(%height: i64, %width: i64, %count: i64) -> (i32) {
-  %axes = scalar.addi %height, %width : i64
-  %value = scalar.addi %axes, %count : i64
+  %height_shift = scalar.constant 16 : i64
+  %width_shift = scalar.constant 3 : i64
+  %height_bits = scalar.shli %height, %height_shift : i64
+  %width_bits = scalar.shli %width, %width_shift : i64
+  %axes = scalar.ori %height_bits, %width_bits : i64
+  %value = scalar.ori %axes, %count : i64
   %stage = scalar.trunci %value : i64 to i32
   func.return %stage : i32
 }
@@ -87,8 +91,12 @@ func.def @vision_cohort_observation(%count: index, %width: i32, %height: i32) ->
   %order = buffer.compare %payload[%origin], %packed[%origin], %input_bytes
   %payload_valid = scalar.cmpi eq, %order, %zero32 : i32
   %count32 = index.cast %count : index to i32
-  %axes = scalar.addi %width, %height : i32
-  %expected_stage = scalar.addi %count32, %axes : i32
+  %height_shift = scalar.constant 16 : i32
+  %width_shift = scalar.constant 3 : i32
+  %height_bits = scalar.shli %height, %height_shift : i32
+  %width_bits = scalar.shli %width, %width_shift : i32
+  %axes = scalar.ori %height_bits, %width_bits : i32
+  %expected_stage = scalar.ori %count32, %axes : i32
   %stage_valid = scalar.cmpi eq, %stage, %expected_stage : i32
   %valid0 = scalar.andi %length_valid, %payload_valid : i1
   %valid1 = scalar.andi %valid0, %stage_valid : i1
@@ -98,11 +106,11 @@ func.def @vision_cohort_observation(%count: index, %width: i32, %height: i32) ->
   %image_output_bytes = scalar.muli %image_rows, %feature_bytes : i64
   %expected_bytes = scalar.muli %count64, %image_output_bytes : i64
   %expected_rows = scalar.muli %count64, %image_rows : i64
-  %header = buffer.view %plan[%origin] : buffer -> view<4xi64>
-  %physical_bytes = view.load %header[0] : view<4xi64> -> i64
-  %live_bytes = view.load %header[1] : view<4xi64> -> i64
-  %requests = view.load %header[2] : view<4xi64> -> i64
-  %rows = view.load %header[3] : view<4xi64> -> i64
+  %plan_header = buffer.view %plan[%origin] : buffer -> view<4xi64>
+  %physical_bytes = view.load %plan_header[0] : view<4xi64> -> i64
+  %live_bytes = view.load %plan_header[1] : view<4xi64> -> i64
+  %requests = view.load %plan_header[2] : view<4xi64> -> i64
+  %rows = view.load %plan_header[3] : view<4xi64> -> i64
   %physical_valid = scalar.cmpi eq, %physical_bytes, %expected_bytes : i64
   %live_valid = scalar.cmpi eq, %live_bytes, %expected_bytes : i64
   %count_valid = scalar.cmpi eq, %requests, %count64 : i64

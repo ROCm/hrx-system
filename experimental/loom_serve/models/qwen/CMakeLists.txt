@@ -373,7 +373,7 @@ loom_module(
 
 loom_module(
   NAME
-    vision_geometry
+    vision_geometry_library
   SRCS
     "vision_geometry.loom"
   MODE merge
@@ -383,7 +383,7 @@ loom_module(
 
 loom_module(
   NAME
-    vision_pixels
+    vision_pixels_library
   SRCS
     "vision_pixels.loom"
   MODE merge
@@ -393,7 +393,7 @@ loom_module(
 
 loom_module(
   NAME
-    vision_stages
+    vision_stages_library
   SRCS
     "vision_stages.loom"
   MODE merge
@@ -431,7 +431,7 @@ loom_test_module(
   SRCS
     "tests/vision_geometry.loom"
   LIBRARIES
-    "::vision_geometry"
+    "::vision_geometry_library"
 )
 
 if(LOOM_TARGET_ARCH_VM)
@@ -457,7 +457,7 @@ loom_test_module(
     "tests/vision_resize.loom"
   LIBRARIES
     "::vision_kernels"
-    "::vision_pixels"
+    "::vision_pixels_library"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -519,7 +519,7 @@ loom_test_module(
     "tests/vision_control.loom"
     "vision_control.loom"
   LIBRARIES
-    "::vision_pixels"
+    "::vision_pixels_library"
 )
 
 if(LOOM_TARGET_ARCH_VM)
@@ -1895,7 +1895,7 @@ loom_module(
   SRCS
     "control.loom"
   LIBRARIES
-    "::vision_geometry"
+    "::vision_geometry_library"
   MODE
     "link"
   OUTPUT
@@ -1903,7 +1903,6 @@ loom_module(
   OUTPUT_FORMAT
     "bc"
   INCLUDE_INPUT_EXPORTS
-  STRICT_DEPS
 )
 
 loom_module(
@@ -1912,7 +1911,7 @@ loom_module(
   SRCS
     "vision_prepare.loom"
   LIBRARIES
-    "::vision_stages"
+    "::vision_stages_library"
   MODE
     "link"
   OUTPUT
@@ -1920,7 +1919,6 @@ loom_module(
   OUTPUT_FORMAT
     "bc"
   INCLUDE_INPUT_EXPORTS
-  STRICT_DEPS
 )
 
 loom_module(
@@ -1929,8 +1927,8 @@ loom_module(
   SRCS
     "vision_control.loom"
   LIBRARIES
-    "::vision_pixels"
-    "::vision_stages"
+    "::vision_pixels_library"
+    "::vision_stages_library"
   MODE
     "link"
   OUTPUT
@@ -1938,7 +1936,6 @@ loom_module(
   OUTPUT_FORMAT
     "bc"
   INCLUDE_INPUT_EXPORTS
-  STRICT_DEPS
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
