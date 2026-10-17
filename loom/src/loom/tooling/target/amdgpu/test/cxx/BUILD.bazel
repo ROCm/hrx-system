@@ -275,6 +275,19 @@ loom_test(
 )
 
 loom_test(
+    name = "vector_slices_test",
+    benchmark_smoke = False,
+    execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:vector_slices_module",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    variants = {
+        "width_12": {"configs": {"test.vector.slice.width": "12"}},
+        "width_16": {"configs": {"test.vector.slice.width": "16"}},
+        "width_4": {"configs": {"test.vector.slice.width": "4"}},
+    },
+)
+
+loom_test(
     name = "nvfp4_matrix_test",
     srcs = [
         "nvfp4_matrix.cxx",

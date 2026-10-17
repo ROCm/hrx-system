@@ -2158,11 +2158,38 @@ side effects retain the source evaluation order for plain and compound updates.
 Native vectors are the register-resident spelling for dynamically selected
 fixed lanes; C++ arrays retain their object-storage and aliasing contract.
 
-Admission requires non-boolean lanes and an object layout with no padding beyond
-the lanes. Packed boolean vectors and padded three-lane objects need separate
-storage projections. Lane addresses, swizzles, vector `&&`/`||`, and
-vector-conditioned `?:` produce source diagnostics: they require additional
-address or lane-selection projections. Target support remains a separate
+`loom::vector::slice<Result>(source, offsets)` extracts a register subvector
+while preserving rank and element type. Native vectors and semantic
+`loom::type::vector` values can be mixed at rank one. A scalar integer or
+logical index selects a rank-one offset; a coordinate record supplies one
+offset per axis for larger shapes. Dynamic result dimensions are explicit:
+
+```cpp
+using Values = loom::type::vector<
+    loom::type::shape<loom::type::dynamic>, unsigned>;
+using Pair = unsigned __attribute__((ext_vector_type(2)));
+
+Pair record(Values values, unsigned position) {
+  return loom::vector::slice<Pair>(values, position * 2);
+}
+
+Values prefix(Values values, loom::type::index count) {
+  return loom::vector::slice<Values>(values, 0u, {count});
+}
+```
+
+Source dimensions remain attached to `values`, while `count` describes the
+result. Those identities survive import and ordinary bytecode linking, so
+configuration can choose the register widths later. Each result extent must
+fit within the source at its selected offset; slicing neither pads nor clamps.
+For a two-dimensional source, `{row, column}` selects the origin and the result
+type selects the rectangle, with one explicit index per dynamic result axis.
+
+Native C++ vector admission requires non-boolean lanes and an object layout
+with no padding beyond the lanes. Packed boolean vectors and padded three-lane
+objects need separate storage projections. Lane addresses, swizzles, vector
+`&&`/`||`, and vector-conditioned `?:` produce source diagnostics: they require
+additional address or lane-selection projections. Target support remains a separate
 compilation boundary. For example, the VM can execute extracted lane programs
 but currently rejects vector aggregate transport across loop/branch arguments;
 that requires a shared aggregate representation through control flow.

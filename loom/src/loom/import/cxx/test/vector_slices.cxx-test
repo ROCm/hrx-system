@@ -1,0 +1,154 @@
+// RUN: roundtrip
+// The four representation pairs retain the same register-slice operation.
+#include <loomcxx/vector.h>
+namespace loomt = loom::type;
+using Native8 = unsigned __attribute__((ext_vector_type(8)));
+using Native2 = unsigned __attribute__((ext_vector_type(2)));
+using Static8 = loomt::vector<loomt::shape<8>, unsigned>;
+using Static2 = loomt::vector<loomt::shape<2>, unsigned>;
+using Dynamic = loomt::vector<loomt::shape<loomt::dynamic>, unsigned>;
+
+Native2 native_to_native(Native8 source, unsigned offset) {
+  return loom::vector::slice<Native2>(source, offset);
+}
+Static2 native_to_semantic(Native8 source, int offset) {
+  return loom::vector::slice<Static2>(source, offset);
+}
+Native2 semantic_to_native(Dynamic source, loomt::index offset) {
+  return loom::vector::slice<Native2>(source, offset);
+}
+Static2 semantic_to_semantic(Static8 source, unsigned short offset) {
+  return loom::vector::slice<Static2>(source, {offset});
+}
+Dynamic dynamic_result(Native8 source, loomt::index offset,
+                       loomt::index count) {
+  return loom::vector::slice<Dynamic>(source, offset, {count});
+}
+Dynamic dynamic_to_dynamic(Dynamic source, unsigned offset,
+                           loomt::index count) {
+  return loom::vector::slice<Dynamic>(source, {offset}, {count});
+}
+Static2 empty_dimensions(Static8 source, loomt::index offset) {
+  return loom::vector::slice<Static2>(source, offset, {});
+}
+
+// ----
+func.def public @native_to_native(%source: vector<8xi32>, %offset: i32) -> (vector<2xi32>) {
+  %3 = scalar.extui %offset : i32 to i64
+  %4 = index.cast %3 : i64 to index
+  %5 = vector.slice %source[%4] : vector<8xi32> -> vector<2xi32>
+  func.return %5 : vector<2xi32>
+}
+
+func.def public @native_to_semantic(%source: vector<8xi32>, %offset: i32) -> (vector<2xi32>) {
+  %9 = index.cast %offset : i32 to index
+  %10 = vector.slice %source[%9] : vector<8xi32> -> vector<2xi32>
+  func.return %10 : vector<2xi32>
+}
+
+func.def public @semantic_to_native(%source_dim0: index, %source: vector<[%source_dim0]xi32>, %offset: index) -> (vector<2xi32>) {
+  %15 = vector.slice %source[%offset] : vector<[%source_dim0]xi32> -> vector<2xi32>
+  func.return %15 : vector<2xi32>
+}
+
+func.def public @semantic_to_semantic(%source: vector<8xi32>, %offset: i16) -> (vector<2xi32>) {
+  %19 = scalar.extui %offset : i16 to i64
+  %20 = index.cast %19 : i64 to index
+  %21 = vector.slice %source[%20] : vector<8xi32> -> vector<2xi32>
+  func.return %21 : vector<2xi32>
+}
+
+func.def public @dynamic_result(%source: vector<8xi32>, %offset: index, %count: index) -> (%25: index, vector<[%25]xi32>) {
+  %27 = vector.slice %source[%offset] : vector<8xi32> -> vector<[%count]xi32>
+  func.return %count, %27 : index, vector<[%count]xi32>
+}
+
+func.def public @dynamic_to_dynamic(%source_dim0: index, %source: vector<[%source_dim0]xi32>, %offset: i32, %count: index) -> (%32: index, vector<[%32]xi32>) {
+  %34 = scalar.extui %offset : i32 to i64
+  %35 = index.cast %34 : i64 to index
+  %36 = vector.slice %source[%35] : vector<[%source_dim0]xi32> -> vector<[%count]xi32>
+  func.return %count, %36 : index, vector<[%count]xi32>
+}
+
+func.def public @empty_dimensions(%source: vector<8xi32>, %offset: index) -> (vector<2xi32>) {
+  %40 = vector.slice %source[%offset] : vector<8xi32> -> vector<2xi32>
+  func.return %40 : vector<2xi32>
+}
+
+// ====
+// Each dynamic result axis has its own explicit identity, independently of
+// source dimensions and offsets. Integer offsets retain their signedness.
+#include <loomcxx/vector.h>
+namespace loomt = loom::type;
+using Source = loomt::vector<loomt::shape<loomt::dynamic, 8, loomt::dynamic>, float>;
+using Result = loomt::vector<loomt::shape<loomt::dynamic, 2, loomt::dynamic>, float>;
+struct Offsets {
+  // Signed offset along the first source axis.
+  short row;
+  // Unsigned offset along the static middle axis.
+  unsigned column;
+  // Retained logical index along the last source axis.
+  loomt::index depth;
+};
+Result tile(Source source, Offsets offsets, loomt::index rows,
+             loomt::index depths) {
+  return loom::vector::slice<Result>(source, offsets, {rows, depths});
+}
+
+// ----
+func.def public @tile(%source_dim0: index, %source_dim2: index, %source: vector<[%source_dim0]x8x[%source_dim2]xf32>, %offsets_row: i16, %offsets_column: i32, %offsets_depth: index, %rows: index, %depths: index) -> (%8: index, %9: index, vector<[%8]x2x[%9]xf32>) {
+  %11 = index.cast %offsets_row : i16 to index
+  %12 = scalar.extui %offsets_column : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = vector.slice %source[%11, %13, %offsets_depth] : vector<[%source_dim0]x8x[%source_dim2]xf32> -> vector<[%rows]x2x[%depths]xf32>
+  func.return %rows, %depths, %14 : index, index, vector<[%rows]x2x[%depths]xf32>
+}
+
+// ====
+// Static semantic results require no dimension transport. Braced full-rank
+// coordinates infer their rank from the semantic source type.
+#include <loomcxx/vector.h>
+namespace loomt = loom::type;
+using Source = loomt::vector<loomt::shape<8, 16>, __bf16>;
+using Result = loomt::vector<loomt::shape<2, 4>, __bf16>;
+Result tile(Source source, unsigned row, unsigned column) {
+  return loom::vector::slice<Result>(source, {row, column});
+}
+
+// ----
+func.def public @tile(%source: vector<8x16xbf16>, %row: i32, %column: i32) -> (vector<2x4xbf16>) {
+  %4 = scalar.extui %row : i32 to i64
+  %5 = scalar.extui %column : i32 to i64
+  %6 = index.cast %4 : i64 to index
+  %7 = index.cast %5 : i64 to index
+  %8 = vector.slice %source[%6, %7] : vector<8x16xbf16> -> vector<2x4xbf16>
+  func.return %8 : vector<2x4xbf16>
+}
+
+// ====
+// A custom binding follows the same source contract. Nested records flatten
+// offsets once at signature admission, including index and integer fields.
+#include <loomcxx/vector.h>
+namespace loomt = loom::type;
+using Source = loomt::vector<loomt::shape<4, 8>, loomt::index>;
+using Result = loomt::vector<loomt::shape<2, 2>, loomt::index>;
+struct Offsets {
+  struct Axis {
+    // Logical offset for the first axis.
+    loomt::index row;
+  };
+  // Nested record containing the first axis coordinate.
+  Axis first;
+  // Narrow unsigned offset for the second axis.
+  unsigned char column;
+};
+[[loom::op("vector.slice")]] Result custom(Source, Offsets);
+Result tile(Source source, Offsets offsets) { return custom(source, offsets); }
+
+// ----
+func.def public @tile(%source: vector<4x8xindex>, %offsets_first_row: index, %offsets_column: i8) -> (vector<2x2xindex>) {
+  %4 = scalar.extui %offsets_column : i8 to i64
+  %5 = index.cast %4 : i64 to index
+  %6 = vector.slice %source[%offsets_first_row, %5] : vector<4x8xindex> -> vector<2x2xindex>
+  func.return %6 : vector<2x2xindex>
+}

@@ -85,10 +85,15 @@ template <class Shape, class T>
 namespace loom::detail {
 
 template <class Vector>
-struct vector_traits;
+struct vector_traits {
+  // Native C++ vectors have one axis; source admission rejects other types.
+  static constexpr loom::type::size_type rank = 1;
+};
 
 template <loom::type::size_type... Extents, class T>
 struct vector_traits<loom::type::vector<loom::type::shape<Extents...>, T>> {
+  // Number of logical axes, including those with dependent extents.
+  static constexpr loom::type::size_type rank = sizeof...(Extents);
   using element_type = T;
   using dimensions_type = loom::type::indices<(
       loom::type::size_type{0} + ... +
@@ -179,18 +184,23 @@ template <class Vector, class T, loom::type::size_type... Extents,
     loom::type::view<loom::type::shape<Extents...>, T, Role> destination,
     Origin origin, Mask mask);
 
-// Extracts a contiguous register subvector at a dynamic lane offset. Result
-// selects the retained lane count while preserving the source element type.
-template <class Result, class Source>
-[[loom::op("vector.slice")]] Result slice(Source source,
-                                          loom::type::size_type offset);
+// Extracts a rank-preserving register subvector. Offsets supplies one index or
+// integer per source axis; rank-one vectors also accept a scalar offset.
+// Result keeps the source element type and selects the retained static shape.
+template <class Result, class Source,
+          class Offsets = loom::type::coordinates<
+              loom::detail::vector_traits<Source>::rank>>
+[[loom::op("vector.slice")]] Result slice(Source source, Offsets offsets);
 
-// Extracts a contiguous register subvector at an address-domain lane offset.
-// This overload retains an index value produced by Loom control flow without
-// converting it through the host C++ size type.
-template <class Result, class Source>
-[[loom::op("vector.slice")]] Result slice(Source source,
-                                          loom::type::index offset);
+// Supplies one logical index for each dynamic result axis in source-axis
+// order. Source dimensions remain attached to source; they do not determine
+// how much of each axis the result retains.
+template <class Result, class Source,
+          class Offsets = loom::type::coordinates<
+              loom::detail::vector_traits<Source>::rank>>
+[[loom::op("vector.slice")]] Result slice(
+    Source source, Offsets offsets,
+    loom::detail::vector_dimensions<Result> dimensions);
 
 // Computes the absolute value of every floating-point lane.
 template <class Vector>
