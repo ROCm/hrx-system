@@ -9,6 +9,7 @@
 
 #include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/service.h"
+#include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/stream.h"
@@ -78,6 +79,16 @@ iree_status_t loom_serve_text_service_allocate(
 iree_status_t loom_serve_text_service_try_open(
     loom_serve_text_service_t* service, loom_serve_text_request_t* request,
     loom_serve_text_stream_t** out_stream);
+
+// Enqueues one native checkpoint control beside the generation queue. A full
+// control slot returns OK/NULL without counting a receipt. Acceptance copies
+// validated identifiers; source lookup and native state changes occur only at
+// an unborrowed model boundary. The caller owns its detached result until
+// close.
+iree_status_t loom_serve_text_service_try_open_checkpoint(
+    loom_serve_text_service_t* service,
+    const loom_serve_text_checkpoint_request_t* request,
+    loom_serve_text_checkpoint_control_t** out_control);
 
 // Returns borrowed callbacks for the shared owner loop. HTTP and native
 // admission preserve model-local sessions/checkpoints. Each epoch gathers
