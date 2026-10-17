@@ -52,6 +52,7 @@ loom_cc_library(
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::telemetry
     loom::serve::service
+    loom::serve::service::kind
     loom::serve::telemetry::latency
     loom::serve::telemetry::record
     loom::serve::telemetry::stream

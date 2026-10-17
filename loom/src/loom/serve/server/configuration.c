@@ -12,6 +12,7 @@
 #include "iree/base/internal/path.h"
 #include "iree/base/internal/unicode.h"
 #include "iree/io/file_contents.h"
+#include "loom/serve/service/kind.h"
 
 typedef struct loom_serve_model_configuration_field_t {
   // Literal model key; escaped keys are rejected.
@@ -359,7 +360,8 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
                                  (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
                                  (1u << LOOM_SERVE_MODEL_KIND_DECISION) |
                                  (1u << LOOM_SERVE_MODEL_KIND_SPEECH) |
-                                 (1u << LOOM_SERVE_MODEL_KIND_RECOGNITION)},
+                                 (1u << LOOM_SERVE_MODEL_KIND_RECOGNITION) |
+                                 (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY)},
       [DEFINITION_OPTIONS] = {"options", IREE_JSON_VALUE_TYPE_OBJECT},
       [DEFINITION_SOURCES] = {"sources", IREE_JSON_VALUE_TYPE_ARRAY},
       [DEFINITION_SESSION_CACHE_CAPACITY] =
@@ -392,27 +394,12 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
                                                      fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, loom_serve_model_configuration_field_visit, &context));
-  if (iree_string_view_equal(fields[DEFINITION_KIND].value, IREE_SV("text"))) {
-    model->kind = LOOM_SERVE_MODEL_KIND_TEXT;
-  } else if (iree_string_view_equal(fields[DEFINITION_KIND].value,
-                                    IREE_SV("image"))) {
-    model->kind = LOOM_SERVE_MODEL_KIND_IMAGE;
-  } else if (iree_string_view_equal(fields[DEFINITION_KIND].value,
-                                    IREE_SV("embedding"))) {
-    model->kind = LOOM_SERVE_MODEL_KIND_EMBEDDING;
-  } else if (iree_string_view_equal(fields[DEFINITION_KIND].value,
-                                    IREE_SV("decision"))) {
-    model->kind = LOOM_SERVE_MODEL_KIND_DECISION;
-  } else if (iree_string_view_equal(fields[DEFINITION_KIND].value,
-                                    IREE_SV("speech"))) {
-    model->kind = LOOM_SERVE_MODEL_KIND_SPEECH;
-  } else if (iree_string_view_equal(fields[DEFINITION_KIND].value,
-                                    IREE_SV("recognition"))) {
-    model->kind = LOOM_SERVE_MODEL_KIND_RECOGNITION;
-  } else {
+  if (!loom_serve_model_kind_parse(fields[DEFINITION_KIND].value,
+                                   &model->kind)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "model kind must be text, image, embedding, "
-                            "decision, speech or recognition");
+                            "unknown model kind '%.*s'",
+                            (int)fields[DEFINITION_KIND].value.size,
+                            fields[DEFINITION_KIND].value.data);
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(fields); ++i) {
     if (fields[i].value.data && fields[i].kinds &&
@@ -444,10 +431,8 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_PENDING_REQUESTS], 1, IREE_HOST_SIZE_MAX,
       &model->pending_requests));
-  model->variant_capacity = (model->kind == LOOM_SERVE_MODEL_KIND_SPEECH ||
-                             model->kind == LOOM_SERVE_MODEL_KIND_RECOGNITION)
-                                ? 0
-                                : 16;
+  model->variant_capacity =
+      fields[DEFINITION_VARIANT_CAPACITY].kinds & (1u << model->kind) ? 16 : 0;
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_VARIANT_CAPACITY], 0, INT32_MAX,
       &model->variant_capacity));
@@ -497,10 +482,7 @@ void loom_serve_model_configuration_deinitialize(
   } else if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
     iree_allocator_free(host_allocator, (void*)model->image.checkpoint.data);
     iree_allocator_free(host_allocator, (void*)model->image.adapter.data);
-  } else if (model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||
-             model->kind == LOOM_SERVE_MODEL_KIND_DECISION ||
-             model->kind == LOOM_SERVE_MODEL_KIND_SPEECH ||
-             model->kind == LOOM_SERVE_MODEL_KIND_RECOGNITION) {
+  } else {
     iree_allocator_free(host_allocator, (void*)model->assets.data);
   }
   memset(model, 0, sizeof(*model));

@@ -17,6 +17,7 @@ loom_cc_library(
     "service.h"
   DEPS
     ::inspection
+    ::kind
     ::reconfiguration
     iree::base
     iree::tokenizer
@@ -25,6 +26,36 @@ loom_cc_library(
     loom::serve::telemetry::stream
     loom::serve::transport::http::server
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    kind
+  HDRS
+    "kind.h"
+  SRCS
+    "kind.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    kind_test
+  SRCS
+    "kind_test.cc"
+  DEPS
+    ::kind
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
 )
 endif()
 

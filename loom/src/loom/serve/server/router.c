@@ -18,6 +18,7 @@
 #include "loom/serve/server/http/tokenization.h"
 #include "loom/serve/server/http/variants.h"
 #include "loom/serve/server/maintenance.h"
+#include "loom/serve/service/kind.h"
 #include "loom/serve/transport/http/multipart.h"
 #include "loom/util/json.h"
 
@@ -612,12 +613,15 @@ static iree_status_t loom_serve_router_describe_service(
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, ",\"loom\":{\"kind\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_router_quote(output, iree_make_cstring_view(service->kind)));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"endpoint\":"));
   IREE_RETURN_IF_ERROR(loom_serve_router_quote(
-      output, iree_make_cstring_view(service->endpoint)));
+      output,
+      iree_make_cstring_view(loom_serve_model_kind_name(service->kind))));
+  if (service->endpoint) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(output, ",\"endpoint\":"));
+    IREE_RETURN_IF_ERROR(loom_serve_router_quote(
+        output, iree_make_cstring_view(service->endpoint)));
+  }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, ",\"tokenize\":%s", service->tokenizer ? "true" : "false"));
   if (service->capabilities.input_token_count) {
@@ -1400,6 +1404,13 @@ static iree_status_t loom_serve_router_accept(
         return loom_serve_http_response_reject(
             router->server, connection, 503, "Service Unavailable",
             IREE_SV("model is unavailable; inspect /v1/status"), output);
+      }
+      if (!state->service.endpoint &&
+          !iree_string_view_equal(request->target, IREE_SV("/tokenize")) &&
+          !iree_string_view_equal(request->target, IREE_SV("/detokenize"))) {
+        return loom_serve_http_response_reject(
+            router->server, connection, 404, "Not Found",
+            IREE_SV("model has no HTTP inference endpoint"), output);
       }
       if (state->closed || state->held_count ||
           state->phase != LOOM_SERVE_REGISTRATION_READY) {

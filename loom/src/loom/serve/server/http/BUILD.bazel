@@ -18,6 +18,7 @@ loom_cc_library(
     hdrs = ["metrics.h"],
     deps = [
         "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service:kind",
         "//loom/src/loom/serve/telemetry:latency",
         "//loom/src/loom/serve/telemetry:record",
         "//runtime/src/iree/base",
