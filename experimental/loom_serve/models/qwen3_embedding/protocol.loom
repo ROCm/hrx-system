@@ -1,0 +1,20 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// A two-direction barrier retires each layer before shared state is reused.
+func.def public inline @qwen3_embedding.signal(%channel: channel<tile<16xi32>>) {
+  %zero = vector.constant 0 : vector<16xi32>
+  %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  vector.store %zero, %payload[0] : vector<16xi32>, view<16xi32>
+  channel.publish %write : write<tile<16xi32>>
+  func.return
+}
+
+func.def public inline @qwen3_embedding.wait(%channel: channel<tile<16xi32>>) {
+  %read, %payload = channel.acquire %channel : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  channel.release %read : read<tile<16xi32>>
+  func.return
+}

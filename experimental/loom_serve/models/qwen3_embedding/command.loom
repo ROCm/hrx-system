@@ -1,0 +1,15 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+pipeline.decl<kernel> @qwen3_embedding.cohort() run(%weights: buffer, %metadata: buffer, %output: buffer, %state: buffer)
+
+command.program.def public @qwen3_embedding.embed() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weights = command.parameter %parameters, "resident" : view<808069120xi8>
+  %state_bytes = index.constant 2924544 : offset
+  %state = buffer.alloca<global> align(64) %state_bytes : buffer
+  kernel.launch @qwen3_embedding.cohort(%weights, %input, %output, %state) : (view<808069120xi8>, buffer, buffer, buffer)
+  command.return
+}
