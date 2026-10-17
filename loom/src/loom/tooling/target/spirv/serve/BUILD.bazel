@@ -64,6 +64,21 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "execution_queues_test",
+    args = ["--vulkan_dedicated_compute_queue=false"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = ["iree-run-requirement=vulkan.resource.device"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_vulkan",
+    ]),
+    deps = [
+        ":test_device",
+        "//loom/src/loom/serve/runtime/execution:queues_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "control_test",
     srcs = ["//loom/src/loom/serve/runtime/program:control_test.cc"],
     args = ["--control_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/control/kernels.loom)"],
@@ -86,6 +101,7 @@ loom_cc_test(
         ":test_device",
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:queues",
         "//loom/src/loom/serve/runtime/execution:workspace",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/program:jit",

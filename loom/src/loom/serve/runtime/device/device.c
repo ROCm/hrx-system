@@ -8,6 +8,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/tooling/device_profiling.h"
+#include "loom/serve/runtime/execution/queues.h"
 
 struct loom_serve_device_t {
   // Borrowed enclosing application group, owning this record's storage.
@@ -18,6 +19,8 @@ struct loom_serve_device_t {
   iree_hal_queue_t* dispatch;
   // Exact transfer queue borrowed from the device.
   iree_hal_queue_t* transfer;
+  // Fixed inventory shared by independently retained model executions.
+  loom_serve_execution_queues_t* execution_queues;
   // Native retained storage qualified for both execution and transfer.
   iree_hal_pool_t* storage_pool;
   // Shared private command backing, independent of model timelines.
@@ -114,6 +117,9 @@ static iree_status_t loom_serve_device_initialize(
       iree_hal_queue_family(device->dispatch);
   const iree_hal_queue_family_t* transfer_family =
       iree_hal_queue_family(device->transfer);
+  IREE_RETURN_IF_ERROR(loom_serve_execution_queues_create(
+      dispatch_family, transfer_family, group->host_allocator,
+      &device->execution_queues));
   // Source programs may carry indirect launch counts in retained buffers or
   // execution workspace, both allocated from this dispatch-visible domain.
   const iree_hal_pool_family_access_t families[] = {
@@ -239,6 +245,7 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group) {
     loom_serve_memory_pool_free(device->memory_pool);
     loom_serve_workspace_release(device->workspace);
     iree_hal_pool_release(device->storage_pool);
+    loom_serve_execution_queues_release(device->execution_queues);
   }
   iree_hal_device_group_release(group->handle);
   for (iree_host_size_t i = 0; i < group->device_count; ++i) {
@@ -335,7 +342,7 @@ iree_hal_queue_t* loom_serve_device_transfer_queue(
 iree_status_t loom_serve_device_create_execution(
     loom_serve_device_t* device, loom_serve_execution_t** out_execution) {
   return loom_serve_execution_create(
-      device->dispatch, device->transfer, device->workspace,
+      device->execution_queues, device->workspace,
       device->owner->host_allocator, out_execution);
 }
 
