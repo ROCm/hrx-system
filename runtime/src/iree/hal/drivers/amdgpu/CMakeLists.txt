@@ -259,6 +259,41 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    hsa_queue
+  HDRS
+    "hsa_queue.h"
+  SRCS
+    "hsa_queue.c"
+  DEPS
+    iree::base
+    iree::hal::drivers::amdgpu::util::libhsa
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hsa_queue_test
+  SRCS
+    "hsa_queue_test.cc"
+  DEPS
+    ::hsa_queue
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     amdgpu
   HDRS
     "allocator.h"
@@ -344,8 +379,6 @@ iree_cc_library(
     "host_queue_waits.h"
     "hostcall_provider.c"
     "hostcall_provider.h"
-    "hsa_queue.c"
-    "hsa_queue.h"
     "logical_device.c"
     "logical_device.h"
     "memory_backend.c"
@@ -407,6 +440,7 @@ iree_cc_library(
     ::executable_metadata
     ::executable_metadata_hsaco
     ::host_memory_pools
+    ::hsa_queue
     ::kernarg_layout
     ::profile_events
     ::queue_execution_resources

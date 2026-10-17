@@ -8,6 +8,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/testing/dynamic_library_test_library_embed.h"
+#include "iree/hal/drivers/amdgpu/util/libhsa_without_descriptor_queue_create_embed.h"
 #include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -47,6 +48,34 @@ TEST(LibHSATest, DeviceFailureStatusesPreserveCause) {
       iree_status_from_hsa_status(__FILE__, __LINE__, HSA_STATUS_ERROR_FATAL,
                                   "fatal", nullptr));
 }
+
+#if !IREE_HAL_AMDGPU_LIBHSA_STATIC
+TEST(LibHSATest, LoadsWithoutOptionalDescriptorQueueFactory) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  static constexpr const char* extension = ".dll";
+#else
+  static constexpr const char* extension = ".so";
+#endif  // IREE_PLATFORM_WINDOWS
+  iree::testing::TempFilePath library_path(
+      "iree_libhsa_without_descriptor_queue_create", extension);
+  const iree_file_toc_t* file_toc =
+      libhsa_without_descriptor_queue_create_create();
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      library_path.path_view(),
+      iree_make_const_byte_span(file_toc->data, file_toc->size),
+      iree_allocator_system()));
+
+  const iree_string_view_t search_path = library_path.path_view();
+  const iree_string_view_list_t search_paths = {1, &search_path};
+  iree_hal_amdgpu_libhsa_t libhsa;
+  IREE_ASSERT_OK(iree_hal_amdgpu_libhsa_initialize(
+      IREE_HAL_AMDGPU_LIBHSA_FLAG_NONE, search_paths, iree_allocator_system(),
+      &libhsa));
+  EXPECT_NE(libhsa.hsa_queue_create, nullptr);
+  EXPECT_FALSE(iree_hal_amdgpu_libhsa_has_hsa_amd_queue_create(&libhsa));
+  iree_hal_amdgpu_libhsa_deinitialize(&libhsa);
+}
+#endif  // !IREE_HAL_AMDGPU_LIBHSA_STATIC
 
 // Tests that we can find, load, and unload HSA.
 // In ASAN builds it tests that we don't leak the library (though ROCR itself

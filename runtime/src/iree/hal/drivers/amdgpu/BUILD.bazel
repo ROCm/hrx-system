@@ -196,6 +196,28 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "hsa_queue",
+    srcs = ["hsa_queue.c"],
+    hdrs = ["hsa_queue.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "hsa_queue_test",
+    srcs = ["hsa_queue_test.cc"],
+    deps = [
+        ":hsa_queue",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "amdgpu",
     srcs = [
         "allocation_queue.c",
@@ -278,8 +300,6 @@ iree_runtime_cc_library(
         "host_queue_waits.h",
         "hostcall_provider.c",
         "hostcall_provider.h",
-        "hsa_queue.c",
-        "hsa_queue.h",
         "logical_device.c",
         "logical_device.h",
         "memory_backend.c",
@@ -345,6 +365,7 @@ iree_runtime_cc_library(
         ":executable_metadata",
         ":executable_metadata_hsaco",
         ":host_memory_pools",
+        ":hsa_queue",
         ":kernarg_layout",
         ":profile_events",
         ":queue_execution_resources",

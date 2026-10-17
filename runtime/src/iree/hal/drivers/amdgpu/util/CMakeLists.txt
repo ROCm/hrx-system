@@ -35,6 +35,38 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    libhsa_without_descriptor_queue_create.so
+  SRCS
+    "libhsa.h"
+    "libhsa_tables.h"
+    "libhsa_without_descriptor_queue_create.c"
+  DEPS
+    iree::base
+    iree::third_party::hsa_runtime_headers
+  TESTONLY
+  SHARED
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_c_embed_data(
+  NAME
+    libhsa_without_descriptor_queue_create
+  SRCS
+    "$<TARGET_FILE:iree::hal::drivers::amdgpu::util::libhsa_without_descriptor_queue_create.so>"
+  C_FILE_OUTPUT
+    "libhsa_without_descriptor_queue_create_embed.c"
+  H_FILE_OUTPUT
+    "libhsa_without_descriptor_queue_create_embed.h"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     libaqlprofile
   HDRS
     "libaqlprofile.h"
@@ -61,6 +93,7 @@ iree_cc_test(
     "libhsa_test.cc"
   DEPS
     ::libhsa
+    ::libhsa_without_descriptor_queue_create
     iree::base
     iree::base::testing::dynamic_library_test_library
     iree::io::file_handle

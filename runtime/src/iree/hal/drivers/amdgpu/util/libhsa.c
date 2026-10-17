@@ -244,6 +244,10 @@ static iree_status_t iree_hal_amdgpu_libhsa_load_symbols(
 #define IREE_HAL_AMDGPU_LIBHSA_PFN(trace_category, result_type, symbol, ...) \
   IREE_RETURN_IF_ERROR(iree_dynamic_library_lookup_symbol(                   \
       library, #symbol, (void**)&out_libhsa->symbol));
+#define IREE_HAL_AMDGPU_LIBHSA_OPTIONAL_LEAK_CHECK_DISABLED_PFN( \
+    trace_category, result_type, symbol, ...)                    \
+  *(void**)&out_libhsa->symbol =                                 \
+      iree_dynamic_library_try_lookup_symbol(library, #symbol);
 #include "iree/hal/drivers/amdgpu/util/libhsa_tables.h"  // IWYU pragma: keep
   return iree_ok_status();
 }

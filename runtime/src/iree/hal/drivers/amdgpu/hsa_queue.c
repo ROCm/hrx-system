@@ -21,8 +21,11 @@ iree_status_t iree_hal_amdgpu_hsa_queue_allocate(
         "native compute-unit mask bit count %u is not a multiple of 32",
         params->compute_unit_mask_bit_count);
   }
-  if (IREE_UNLIKELY(params->packet_count >
-                    UINT32_MAX / sizeof(hsa_kernel_dispatch_packet_t))) {
+  const bool use_descriptor_factory =
+      iree_hal_amdgpu_libhsa_has_hsa_amd_queue_create(params->libhsa);
+  if (IREE_UNLIKELY(use_descriptor_factory &&
+                    params->packet_count >
+                        UINT32_MAX / sizeof(hsa_kernel_dispatch_packet_t))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "HSA queue packet capacity %u exceeds the native "
                             "queue byte-length limit",
@@ -42,30 +45,52 @@ iree_status_t iree_hal_amdgpu_hsa_queue_allocate(
         "native cooperative queues require normal scheduling priority");
   }
 
-  hsa_amd_queue_create_desc_t descriptor = {
-      .version = HSA_AMD_QUEUE_CREATE_DESC_VERSION,
-      .flags = HSA_AMD_QUEUE_CREATE_SYSTEM_MEM,
-      .engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE,
-      .queue_size_bytes = (uint32_t)(params->packet_count *
-                                     sizeof(hsa_kernel_dispatch_packet_t)),
-      .priority = params->priority,
-      .callback = params->error_callback,
-      .callback_data = params->error_callback_data,
-      .engine.compute =
-          {
-              .cu_mask = NULL,
-              .type = params->type,
-              .private_segment_size = HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT,
-              .cu_mask_count = 0,
-          },
-  };
-  iree_status_t status = iree_hsa_amd_queue_create(IREE_LIBHSA(params->libhsa),
-                                                   params->agent, &descriptor,
-                                                   /*num_descs=*/1);
-  if (iree_status_is_ok(status) && IREE_UNLIKELY(!descriptor.queue)) {
+  hsa_queue_t* queue = NULL;
+  iree_status_t status;
+#if IREE_HAL_AMDGPU_HAVE_HSA_AMD_QUEUE_CREATE
+  if (use_descriptor_factory) {
+    hsa_amd_queue_create_desc_t descriptor = {
+        .version = HSA_AMD_QUEUE_CREATE_DESC_VERSION,
+        .flags = HSA_AMD_QUEUE_CREATE_SYSTEM_MEM,
+        .engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE,
+        .queue_size_bytes = (uint32_t)(params->packet_count *
+                                       sizeof(hsa_kernel_dispatch_packet_t)),
+        .priority = params->priority,
+        .callback = params->error_callback,
+        .callback_data = params->error_callback_data,
+        .engine.compute =
+            {
+                .cu_mask = NULL,
+                .type = params->type,
+                .private_segment_size = HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT,
+                .cu_mask_count = 0,
+            },
+    };
+    status = iree_hsa_amd_queue_create(IREE_LIBHSA(params->libhsa),
+                                       params->agent, &descriptor,
+                                       /*num_descs=*/1);
+    queue = descriptor.queue;
+  } else
+#endif  // IREE_HAL_AMDGPU_HAVE_HSA_AMD_QUEUE_CREATE
+  {
+    // A runtime may implement the stable HSA factory without the newer AMD
+    // descriptor extension declared by the build headers. Create the same
+    // queue through the stable entry point and apply extension properties
+    // before publishing it to the HAL.
+    status = iree_hsa_queue_create(
+        IREE_LIBHSA(params->libhsa), params->agent, params->packet_count,
+        params->type, params->error_callback, params->error_callback_data,
+        /*private_segment_size=*/UINT32_MAX,
+        /*group_segment_size=*/UINT32_MAX, &queue);
+  }
+  if (iree_status_is_ok(status) && IREE_UNLIKELY(!queue)) {
     status = iree_make_status(
         IREE_STATUS_INTERNAL,
         "HSA reported successful queue creation without returning a queue");
+  }
+  if (iree_status_is_ok(status) && !use_descriptor_factory && !is_cooperative) {
+    status = iree_hsa_amd_queue_set_priority(IREE_LIBHSA(params->libhsa), queue,
+                                             params->priority);
   }
   // The descriptor mask is not honored by all ROCr implementations exposing
   // hsa_amd_queue_create. Apply the mask through the dedicated queue operation
@@ -75,15 +100,15 @@ iree_status_t iree_hal_amdgpu_hsa_queue_allocate(
   // mask; cooperative callers are restricted to the complete resource set.
   if (iree_status_is_ok(status) && !is_cooperative &&
       params->compute_unit_mask_bit_count) {
-    status = iree_hsa_amd_queue_cu_set_mask(
-        IREE_LIBHSA(params->libhsa), descriptor.queue,
-        params->compute_unit_mask_bit_count, params->compute_unit_mask);
+    status = iree_hsa_amd_queue_cu_set_mask(IREE_LIBHSA(params->libhsa), queue,
+                                            params->compute_unit_mask_bit_count,
+                                            params->compute_unit_mask);
   }
 
   if (iree_status_is_ok(status)) {
-    *out_queue = descriptor.queue;
-  } else if (descriptor.queue) {
-    iree_hal_amdgpu_hsa_queue_free(params->libhsa, descriptor.queue);
+    *out_queue = queue;
+  } else if (queue) {
+    iree_hal_amdgpu_hsa_queue_free(params->libhsa, queue);
   }
   return status;
 }

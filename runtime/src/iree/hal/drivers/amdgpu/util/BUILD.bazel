@@ -5,12 +5,17 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/amdgpu:cts.bzl", "iree_amdgpu_hal_cts_testdata")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//build_tools/sanitizer:suppressions.bzl", "hsa_suppressions")
 load(
     "//runtime/build_tools/bazel:amdgpu_binary.bzl",
     "iree_amdgpu_binary_variants_embed_data",
 )
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load(
+    "//runtime/build_tools/bazel:cc.bzl",
+    "iree_runtime_cc_binary",
+    "iree_runtime_cc_library",
+)
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -46,6 +51,36 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_binary(
+    name = "libhsa_without_descriptor_queue_create.so",
+    testonly = True,
+    srcs = [
+        "libhsa.h",
+        "libhsa_tables.h",
+        "libhsa_without_descriptor_queue_create.c",
+    ],
+    linkshared = True,
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//third_party:hsa_runtime_headers",
+    ],
+)
+
+iree_c_embed_data(
+    name = "libhsa_without_descriptor_queue_create",
+    testonly = True,
+    srcs = [":libhsa_without_descriptor_queue_create.so"],
+    c_file_output = "libhsa_without_descriptor_queue_create_embed.c",
+    flatten = True,
+    h_file_output = "libhsa_without_descriptor_queue_create_embed.h",
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amdgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:private"],
+)
+
 iree_runtime_cc_library(
     name = "libaqlprofile",
     srcs = [
@@ -71,6 +106,7 @@ iree_runtime_cc_test(
     srcs = ["libhsa_test.cc"],
     deps = [
         ":libhsa",
+        ":libhsa_without_descriptor_queue_create",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/testing:dynamic_library_test_library",
         "//runtime/src/iree/io:file_handle",
