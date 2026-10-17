@@ -26,6 +26,7 @@ from loom.dialect.func import ALL_FUNC_OPS
 from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.hal import ALL_HAL_TYPES
 from loom.dialect.index import ALL_INDEX_OPS
+from loom.dialect.input import ALL_INPUT_TYPES
 from loom.dialect.kernel import ALL_KERNEL_OPS, ALL_KERNEL_TYPES
 from loom.dialect.pool import ALL_POOL_OPS
 from loom.dialect.sanitizer import ALL_SANITIZER_OPS
@@ -64,6 +65,7 @@ ALL_TYPES = (
     *ALL_BUILTIN_TYPES,
     *ALL_CHECK_TYPES,
     *ALL_HAL_TYPES,
+    *ALL_INPUT_TYPES,
     *ALL_KERNEL_TYPES,
 )
 

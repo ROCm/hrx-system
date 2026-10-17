@@ -25,3 +25,59 @@ func.def public @check(%condition: i32, %diagnostic: buffer) {
   func.call @require(%condition, %diagnostic) : (i32, buffer)
   func.return
 }
+
+func.decl import("input") @encoder_create(%flags: i32, %transform_capacity: i64, %token_capacity: i64) -> (input.encoder)
+
+func.decl import("input") @encoder_reset(%state: input.encoder, %flags: i32)
+
+func.decl import("input") @encoder_feed(%state: input.encoder, %input: buffer, %input_offset: i64, %input_length: i64, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i64)
+
+func.decl import("input") @encoder_finalize(%state: input.encoder, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i32)
+
+func.decl import("input") @decoder_create(%flags: i32, %token_capacity: i64) -> (input.decoder)
+
+func.decl import("input") @decoder_reset(%state: input.decoder, %flags: i32)
+
+func.decl import("input") @decoder_feed(%state: input.decoder, %input: buffer, %input_offset: i64, %input_length: i64, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i64)
+
+func.decl import("input") @decoder_finalize(%state: input.decoder, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i32)
+
+func.def public @new_encoder(%flags: i32, %transform_capacity: i64, %token_capacity: i64) -> (input.encoder) {
+  %state = func.call @encoder_create(%flags, %transform_capacity, %token_capacity) : (i32, i64, i64) -> (input.encoder)
+  func.return %state : input.encoder
+}
+
+func.def public @reset_encoder(%state: input.encoder, %flags: i32) {
+  func.call @encoder_reset(%state, %flags) : (input.encoder, i32)
+  func.return
+}
+
+func.def public @feed_encoder(%state: input.encoder, %input: buffer, %input_offset: i64, %input_length: i64, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i64) {
+  %consumed, %written = func.call @encoder_feed(%state, %input, %input_offset, %input_length, %output, %output_offset, %output_capacity) : (input.encoder, buffer, i64, i64, buffer, i64, i64) -> (i64, i64)
+  func.return %consumed, %written : i64, i64
+}
+
+func.def public @finish_encoder(%state: input.encoder, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i32) {
+  %written, %complete = func.call @encoder_finalize(%state, %output, %output_offset, %output_capacity) : (input.encoder, buffer, i64, i64) -> (i64, i32)
+  func.return %written, %complete : i64, i32
+}
+
+func.def public @new_decoder(%flags: i32, %token_capacity: i64) -> (input.decoder) {
+  %state = func.call @decoder_create(%flags, %token_capacity) : (i32, i64) -> (input.decoder)
+  func.return %state : input.decoder
+}
+
+func.def public @reset_decoder(%state: input.decoder, %flags: i32) {
+  func.call @decoder_reset(%state, %flags) : (input.decoder, i32)
+  func.return
+}
+
+func.def public @feed_decoder(%state: input.decoder, %input: buffer, %input_offset: i64, %input_length: i64, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i64) {
+  %consumed, %written = func.call @decoder_feed(%state, %input, %input_offset, %input_length, %output, %output_offset, %output_capacity) : (input.decoder, buffer, i64, i64, buffer, i64, i64) -> (i64, i64)
+  func.return %consumed, %written : i64, i64
+}
+
+func.def public @finish_decoder(%state: input.decoder, %output: buffer, %output_offset: i64, %output_capacity: i64) -> (i64, i32) {
+  %written, %complete = func.call @decoder_finalize(%state, %output, %output_offset, %output_capacity) : (input.decoder, buffer, i64, i64) -> (i64, i32)
+  func.return %written, %complete : i64, i32
+}
