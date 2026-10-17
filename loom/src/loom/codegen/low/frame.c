@@ -1176,14 +1176,19 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       return iree_ok_status();
     }
     IREE_ASSERT_EQ((iree_host_size_t)result.storage_count, storage_plan_count);
-    IREE_RETURN_IF_ERROR(loom_low_emission_frame_record_value_list(
-        result.required_register_values.values,
-        result.required_register_values.count, repair_arena,
-        &required_register_values));
-    IREE_RETURN_IF_ERROR(loom_low_emission_frame_record_value_list(
-        result.per_user_placement_values.values,
-        result.per_user_placement_values.count, repair_arena,
-        &rematerialization.per_user_values));
+    // Retain facts from the representation used by the next frame. A target
+    // callback replaces this traffic and publishes its own register helpers;
+    // incoming edge payloads remain independently spillable after that rewrite.
+    if (spill_free_options->lower_spill_traffic == NULL) {
+      IREE_RETURN_IF_ERROR(loom_low_emission_frame_record_value_list(
+          result.required_register_values.values,
+          result.required_register_values.count, repair_arena,
+          &required_register_values));
+      IREE_RETURN_IF_ERROR(loom_low_emission_frame_record_value_list(
+          result.per_user_placement_values.values,
+          result.per_user_placement_values.count, repair_arena,
+          &rematerialization.per_user_values));
+    }
     if (statistics != NULL) {
       ++statistics->repair.spill_materialization_batch_count;
     }

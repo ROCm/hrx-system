@@ -192,6 +192,7 @@ loom_check_test_suite(
     "test/replay_clauses.loom-test"
     "test/shift_allocation.loom-test"
     "test/short_wait_windows.loom-test"
+    "test/spill_fact_lifetime.loom-test"
     "test/spill_lowering.loom-test"
     "test/structural_delay_alu.loom-test"
     "test/target_requirement.loom-test"

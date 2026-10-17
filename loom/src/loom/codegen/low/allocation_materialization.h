@@ -116,10 +116,13 @@ typedef struct loom_low_allocation_materialization_options_t {
 typedef struct loom_low_allocation_materialization_result_t {
   // Number of error diagnostics emitted before mutating the low function.
   uint32_t error_count;
-  // Register values that generated spill traffic requires in later frames.
-  // Includes low.reload results and values newly consumed by low.spill.
+  // Register requirements while the generated low.spill/low.reload ops survive.
+  // Includes reload results and values newly consumed by spills. Target
+  // lowering that replaces these ops supplies the replacement representation's
+  // facts.
   loom_low_allocation_materialized_value_list_t required_register_values;
-  // Single-consumer low.reload results private to their consumer setup chain.
+  // Single-consumer low.reload results private to their consumer setup chain
+  // while the generated reloads survive.
   loom_low_allocation_materialized_value_list_t per_user_placement_values;
   // Number of low.storage.reserve ops created from spill plans.
   uint32_t storage_count;

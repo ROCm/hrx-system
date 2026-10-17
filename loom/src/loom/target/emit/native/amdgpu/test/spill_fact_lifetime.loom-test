@@ -1,0 +1,176 @@
+// Spilling a loop argument must leave its incoming payload independently
+// spillable after native lowering replaces the abstract edge store. The
+// three recurrences share one loaded seed and need successive repair rounds.
+// RUN: emit amdgpu-assembly @shared_loop_payload amdgpu.vgpr=4 strategy=resource-stall
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @shared_loop_payload(%source: reg<amdgpu.sgpr x2>, %destination: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+  %initial = s_mov_b32 0
+  %one = s_mov_b32 1
+  %offset = v_mov_b32 0
+  %shared = global_load_dword_saddr %offset, %source : reg<amdgpu.vgpr>
+  low.br ^loop(%initial: reg<amdgpu.sgpr>, %shared: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>, %shared: reg<amdgpu.vgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>, %state0: reg<amdgpu.vgpr>, %state1: reg<amdgpu.vgpr>, %state2: reg<amdgpu.vgpr>):
+  %next_value0 = v_add_u32 %state0, %shared
+  global_store_dword_saddr %offset, %next_value0, %destination
+  %next_value1 = v_add_u32 %state1, %shared
+  global_store_dword_saddr %offset, %next_value1, %destination {offset = 4}
+  %next_value2 = v_add_u32 %state2, %shared
+  global_store_dword_saddr %offset, %next_value2, %destination {offset = 8}
+  %next = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_u32 %next, %limit
+  low.cond_br %again, ^latch, ^exit : reg<amdgpu.scc>
+^latch:
+  low.br ^loop(%next: reg<amdgpu.sgpr>, %next_value0: reg<amdgpu.vgpr>, %next_value1: reg<amdgpu.vgpr>, %next_value2: reg<amdgpu.vgpr>)
+^exit:
+  return
+}
+
+// ----
+  v_mov_b32 v0, 0
+  global_load_dword v0, v0, s[0:1] offset:0
+  v_mov_b32 v1, 8
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dword v1, v0, off offset:0
+  v_mov_b32 v1, 12
+  s_mov_b32 s0, 0
+  s_mov_b32 s1, 1
+  scratch_store_dword v1, v0, off offset:0
+  v_mov_b32 v1, v0
+.Lbb1:
+  v_add_u32 v1, v1, v0
+  s_add_u32 s0, s0, s1
+  s_cmp_lt_u32 s0, s4
+  v_mov_b32 v2, 12
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_load_dword v2, v2, off offset:0
+  v_mov_b32 v3, 0
+  scratch_store_dword v3, v1, off offset:0
+  v_mov_b32 v1, 0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_u32 v2, v2, v0
+  global_store_dword v1, v2, s[2:3] offset:0
+  v_mov_b32 v1, 0
+  scratch_load_dword v1, v1, off offset:0
+  v_mov_b32 v2, 0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dword v2, v1, s[2:3] offset:4
+  v_mov_b32 v1, 8
+  scratch_load_dword v1, v1, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_u32 v1, v1, v0
+  v_mov_b32 v2, 4
+  scratch_store_dword v2, v1, off offset:0
+  v_mov_b32 v1, 0
+  v_mov_b32 v2, 4
+  scratch_load_dword v2, v2, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dword v1, v2, s[2:3] offset:8
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  v_mov_b32 v1, 12
+  scratch_load_dword v1, v1, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_u32 v1, v1, v0
+  v_mov_b32 v2, 16
+  scratch_store_dword v2, v1, off offset:0
+  v_mov_b32 v1, 0
+  v_mov_b32 v2, 4
+  scratch_load_dword v2, v2, off offset:0
+  v_mov_b32 v3, 8
+  scratch_load_dword v1, v1, off offset:0
+  s_waitcnt vmcnt(1) lgkmcnt(15)
+  scratch_store_dword v3, v2, off offset:0
+  v_mov_b32 v2, 12
+  v_mov_b32 v3, 16
+  scratch_load_dword v3, v3, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dword v2, v3, off offset:0
+  s_branch .Lbb1
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+
+// Multiword loop payloads need contiguous reload storage plus a scratch
+// address. Requirements belonging to removed abstract stores must not pin
+// the incoming values throughout subsequent allocation rounds.
+// RUN: emit amdgpu-assembly @shared_wide_loop_payload amdgpu.vgpr=6 strategy=source
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @shared_wide_loop_payload(%source: reg<amdgpu.sgpr x2>, %destination: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+  %initial = s_mov_b32 0
+  %one = s_mov_b32 1
+  %offset = v_mov_b32 0
+  %shared = global_load_dwordx2_saddr %offset, %source : reg<amdgpu.vgpr x2>
+  low.br ^loop(%initial: reg<amdgpu.sgpr>, %shared: reg<amdgpu.vgpr x2>, %shared: reg<amdgpu.vgpr x2>)
+^loop(%iteration: reg<amdgpu.sgpr>, %state0: reg<amdgpu.vgpr x2>, %state1: reg<amdgpu.vgpr x2>):
+  %next_value0 = v_add_f64 %state0, %shared
+  global_store_dwordx2_saddr %offset, %next_value0, %destination
+  %next_value1 = v_add_f64 %state1, %shared
+  global_store_dwordx2_saddr %offset, %next_value1, %destination {offset = 8}
+  %next = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_u32 %next, %limit
+  low.cond_br %again, ^latch, ^exit : reg<amdgpu.scc>
+^latch:
+  low.br ^loop(%next: reg<amdgpu.sgpr>, %next_value0: reg<amdgpu.vgpr x2>, %next_value1: reg<amdgpu.vgpr x2>)
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s5, 0
+  s_mov_b32 s6, 1
+  v_mov_b32 v0, 0
+  global_load_dwordx2 v[0:1], v0, s[0:1] offset:0
+  v_mov_b32 v2, 0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dwordx2 v2, v[0:1], off offset:0
+  v_mov_b32 v2, 8
+  scratch_store_dwordx2 v2, v[0:1], off offset:0
+.Lbb1:
+  v_mov_b32 v2, 8
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_load_dwordx2 v[2:3], v2, off offset:0
+  v_mov_b32 v4, 0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_f64 v[2:3], v[2:3], v[0:1]
+  global_store_dwordx2 v4, v[2:3], s[2:3] offset:0
+  v_mov_b32 v2, 0
+  scratch_load_dwordx2 v[2:3], v2, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_f64 v[2:3], v[2:3], v[0:1]
+  v_mov_b32 v4, 24
+  scratch_store_dwordx2 v4, v[2:3], off offset:0
+  v_mov_b32 v2, 0
+  v_mov_b32 v3, 24
+  scratch_load_dwordx2 v[4:5], v3, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dwordx2 v2, v[4:5], s[2:3] offset:8
+  s_add_u32 s5, s5, s6
+  s_cmp_lt_u32 s5, s4
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  v_mov_b32 v2, 8
+  scratch_load_dwordx2 v[2:3], v2, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_f64 v[2:3], v[2:3], v[0:1]
+  v_mov_b32 v4, 16
+  scratch_store_dwordx2 v4, v[2:3], off offset:0
+  v_mov_b32 v2, 0
+  v_mov_b32 v3, 24
+  scratch_load_dwordx2 v[4:5], v3, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dwordx2 v2, v[4:5], off offset:0
+  v_mov_b32 v2, 8
+  v_mov_b32 v3, 16
+  scratch_load_dwordx2 v[4:5], v3, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dwordx2 v2, v[4:5], off offset:0
+  s_branch .Lbb1
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
