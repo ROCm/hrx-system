@@ -918,48 +918,58 @@ iree_status_t loom_low_schedule_format_json(
     for (iree_host_size_t i = 0; i < table->hazard_use_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&hazard_uses));
       const loom_low_schedule_hazard_use_t* hazard_use = &table->hazard_uses[i];
+      const loom_low_schedule_node_t* node =
+          &table->nodes[hazard_use->node_index];
+      const loom_low_descriptor_set_t* descriptor_set =
+          table->target.descriptor_set;
+      const loom_low_hazard_t* hazard =
+          &descriptor_set->hazards[hazard_use->hazard_index];
+      iree_string_view_t resource_name = iree_string_view_empty();
+      if (hazard->reference_kind == LOOM_LOW_HAZARD_REFERENCE_KIND_RESOURCE) {
+        resource_name = loom_low_descriptor_set_string(
+            descriptor_set,
+            descriptor_set->resources[hazard->reference_id].name_string_ref);
+      }
       iree_string_view_t hazard_kind_name =
-          loom_low_hazard_kind_name(hazard_use->kind);
+          loom_low_hazard_kind_name(hazard->kind);
       iree_string_view_t reference_kind_name =
-          loom_low_hazard_reference_kind_name(hazard_use->reference_kind);
+          loom_low_hazard_reference_kind_name(hazard->reference_kind);
       loom_json_object_writer_t hazard_object;
       IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &hazard_object));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
           &hazard_object, IREE_SV("node"), hazard_use->node_index));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-          &hazard_object, IREE_SV("block"), hazard_use->block_index));
+          &hazard_object, IREE_SV("block"), node->block_index));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
           &hazard_object, IREE_SV("scheduled_ordinal"),
-          hazard_use->scheduled_ordinal));
+          node->scheduled_ordinal));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-          &hazard_object, IREE_SV("issue_cycle"), hazard_use->issue_cycle));
+          &hazard_object, IREE_SV("issue_cycle"), node->issue_cycle));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
           &hazard_object, IREE_SV("hazard_ordinal"),
-          hazard_use->hazard_ordinal));
+          hazard_use->hazard_index - node->schedule_class->hazard_start));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-          &hazard_object, IREE_SV("kind"), (uint32_t)hazard_use->kind));
+          &hazard_object, IREE_SV("kind"), (uint32_t)hazard->kind));
       IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
           &hazard_object, IREE_SV("kind_name"), hazard_kind_name));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
           &hazard_object, IREE_SV("reference_kind"),
-          (uint32_t)hazard_use->reference_kind));
+          (uint32_t)hazard->reference_kind));
       IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
           &hazard_object, IREE_SV("reference_kind_name"), reference_kind_name));
       IREE_RETURN_IF_ERROR(
           loom_json_object_begin_field(&hazard_object, IREE_SV("reference")));
       IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_hazard_reference(
-          &stream, hazard_use->reference_kind, hazard_use->reference_id,
-          hazard_use->resource_name));
+          &stream, hazard->reference_kind, hazard->reference_id,
+          resource_name));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-          &hazard_object, IREE_SV("producer_stage"),
-          hazard_use->producer_stage));
+          &hazard_object, IREE_SV("producer_stage"), hazard->producer_stage));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-          &hazard_object, IREE_SV("consumer_stage"),
-          hazard_use->consumer_stage));
+          &hazard_object, IREE_SV("consumer_stage"), hazard->consumer_stage));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-          &hazard_object, IREE_SV("distance"), hazard_use->distance));
+          &hazard_object, IREE_SV("distance"), hazard->distance));
       IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-          &hazard_object, IREE_SV("hazard_flags"), hazard_use->hazard_flags));
+          &hazard_object, IREE_SV("hazard_flags"), hazard->flags));
       IREE_RETURN_IF_ERROR(loom_json_object_end(&hazard_object));
     }
     IREE_RETURN_IF_ERROR(loom_json_array_end(&hazard_uses));

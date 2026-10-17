@@ -1306,6 +1306,7 @@ TEST_F(LowEmissionFrameTest, GuardedMotionReplaysRetainedLocations) {
   ModulePtr module = ParseModule(R"(
 low.func.def target<test.low.core> @guarded_store(%base: reg<test.ptr>, %origin: reg<test.i32>, %pixel: reg<test.i32>, %color: reg<test.i32 x4>) asm {
   test.store.index.v4i32 %base, %origin, %color
+  %loaded = test.counter_load.v4i32 %base
   %condition = test.event.fast.i32 %origin, %pixel
   low.cond_br %condition, ^store, ^done : reg<test.i32>
 ^store:
@@ -1321,6 +1322,7 @@ low.func.def target<test.low.core> @guarded_store(%base: reg<test.ptr>, %origin:
   loom_block_t* entry_block = loom_region_block(body, 0);
   loom_block_t* guarded_block = loom_region_block(body, 1);
   loom_op_t* initial_store = entry_block->first_op;
+  loom_op_t* load = loom_block_op(entry_block, 1);
   loom_op_t* branch = entry_block->last_op;
   loom_op_t* index = loom_block_op(guarded_block, 0);
 
@@ -1343,14 +1345,25 @@ low.func.def target<test.low.core> @guarded_store(%base: reg<test.ptr>, %origin:
   EXPECT_EQ(statistics.retained_location_replay_count, 1u);
 
   // Accepted motion retires the original frame. Its replacement owns the
-  // effect rows consumed after trial and scheduling scratch are released.
+  // effect and hazard rows consumed after trial and scheduling scratch expire.
   iree_arena_block_pool_trim(&block_pool_);
-  ASSERT_EQ(frame.schedule.effect_dependencies.count, 1u);
+  ASSERT_EQ(frame.schedule.effect_dependencies.count, 2u);
   const auto* dependency = loom_low_schedule_dependency_slice_at(
       &frame.schedule.effect_dependencies, 0);
   EXPECT_EQ(frame.schedule.nodes[dependency->producer_node].op, initial_store);
+  EXPECT_EQ(frame.schedule.nodes[dependency->consumer_node].op, load);
+  dependency = loom_low_schedule_dependency_slice_at(
+      &frame.schedule.effect_dependencies, 1);
+  EXPECT_EQ(frame.schedule.nodes[dependency->producer_node].op, initial_store);
   // Cross-block effect timing is enforced at the source terminator.
   EXPECT_EQ(frame.schedule.nodes[dependency->consumer_node].op, branch);
+  ASSERT_EQ(frame.schedule.hazard_use_count, 1u);
+  const auto& hazard_use = frame.schedule.hazard_uses[0];
+  EXPECT_EQ(frame.schedule.nodes[hazard_use.node_index].op, load);
+  const auto& hazard =
+      frame.schedule.target.descriptor_set->hazards[hazard_use.hazard_index];
+  EXPECT_EQ(hazard.kind, LOOM_LOW_HAZARD_KIND_WAIT_COUNTER);
+  EXPECT_EQ(hazard.reference_id, 0u);
 }
 
 TEST_F(LowEmissionFrameTest, ProvenNoOpGuardedMotionSkipsTrialFrame) {

@@ -222,7 +222,6 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
 
     loom_builder_set_block(&builder_, successor);
     const uint32_t consumer_effect = static_cast<uint32_t>(effects_.size());
-    const iree_host_size_t consumer_hazard = hazards_.size();
     Tensor();
     const uint32_t consumer_node = static_cast<uint32_t>(nodes_.size() - 1);
     nodes_[consumer_node].block_index = 1;
@@ -231,10 +230,6 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
       effects_[i].block_index = 1;
       effects_[i].scheduled_ordinal = 0;
       effects_[i].flags |= LOOM_LOW_SCHEDULE_EFFECT_USE_FLAG_REFINED_MEMORY;
-    }
-    for (iree_host_size_t i = consumer_hazard; i < hazards_.size(); ++i) {
-      hazards_[i].block_index = 1;
-      hazards_[i].scheduled_ordinal = 0;
     }
 
     FinalizeSchedule();
@@ -402,19 +397,10 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
       effects_.push_back(use);
     }
     for (uint16_t i = 0; i < node.schedule_class->hazard_count; ++i) {
-      const auto& hazard =
-          descriptors_->hazards[node.schedule_class->hazard_start + i];
       loom_low_schedule_hazard_use_t use = {
           .node_index = node.source_ordinal,
-          .scheduled_ordinal = node.scheduled_ordinal,
-          .hazard_ordinal = i,
-          .kind = hazard.kind,
-          .reference_kind = hazard.reference_kind,
-          .reference_id = hazard.reference_id,
-          .producer_stage = hazard.producer_stage,
-          .consumer_stage = hazard.consumer_stage,
-          .distance = hazard.distance,
-          .hazard_flags = hazard.flags,
+          .hazard_index =
+              static_cast<uint32_t>(node.schedule_class->hazard_start + i),
       };
       hazards_.push_back(use);
     }

@@ -143,18 +143,19 @@ loom_amdgpu_wait_classification_classify_hazards(
     loom_amdgpu_wait_classification_t* classification) {
   const loom_low_schedule_hazard_use_t* hazard_uses = schedule->hazard_uses;
   const iree_host_size_t hazard_use_count = schedule->hazard_use_count;
+  const loom_low_hazard_t* hazards = schedule->target.descriptor_set->hazards;
   for (iree_host_size_t i = 0; i < hazard_use_count; ++i) {
-    const loom_low_schedule_hazard_use_t* hazard = &hazard_uses[i];
+    const loom_low_schedule_hazard_use_t* hazard_use = &hazard_uses[i];
+    const loom_low_hazard_t* hazard = &hazards[hazard_use->hazard_index];
     if (hazard->kind != LOOM_LOW_HAZARD_KIND_WAIT_COUNTER) {
       continue;
     }
     IREE_ASSERT_EQ(hazard->reference_kind,
                    LOOM_LOW_HAZARD_REFERENCE_KIND_COUNTER);
-    IREE_ASSERT_LT(hazard->node_index, schedule->node_count);
     const uint32_t counter_mask =
         loom_amdgpu_wait_counter_mask(hazard->reference_id);
-    classification->completion_nodes[hazard->node_index].hazard_counter_mask |=
-        counter_mask;
+    classification->completion_nodes[hazard_use->node_index]
+        .hazard_counter_mask |= counter_mask;
   }
 }
 

@@ -50,23 +50,15 @@ static iree_status_t loom_low_schedule_append_effect_use(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_schedule_append_hazard_use(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_hazard_use_t hazard_use) {
-  IREE_ASSERT(state->hazard_use_count < state->hazard_use_capacity,
-              "precomputed hazard-use capacity must cover all rows");
-  state->hazard_uses[state->hazard_use_count++] = hazard_use;
-  return iree_ok_status();
-}
-
 static bool loom_low_schedule_hazard_state_matches(
     const loom_low_schedule_hazard_state_t* hazard_state,
-    const loom_low_schedule_hazard_use_t* hazard_use, uint16_t producer_stage) {
-  return hazard_state->kind == hazard_use->kind &&
-         hazard_state->reference_kind == hazard_use->reference_kind &&
-         hazard_state->reference_id == hazard_use->reference_id &&
+    const loom_low_hazard_t* hazard, uint32_t block_index,
+    uint16_t producer_stage) {
+  return hazard_state->kind == hazard->kind &&
+         hazard_state->reference_kind == hazard->reference_kind &&
+         hazard_state->reference_id == hazard->reference_id &&
          hazard_state->producer_stage == producer_stage &&
-         hazard_state->block_index == hazard_use->block_index;
+         hazard_state->block_index == block_index;
 }
 
 static iree_status_t loom_low_schedule_append_hazard_gap(
@@ -83,20 +75,21 @@ static iree_status_t loom_low_schedule_append_hazard_gap(
 }
 
 static iree_status_t loom_low_schedule_update_hazard_state(
-    loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_hazard_use_t* hazard_use) {
+    loom_low_schedule_build_state_t* state, uint32_t node_index,
+    uint16_t hazard_ordinal, const loom_low_hazard_t* hazard) {
+  const loom_low_schedule_node_t* node = &state->nodes[node_index];
   for (iree_host_size_t i = 0; i < state->hazard_state_count; ++i) {
     loom_low_schedule_hazard_state_t* hazard_state = &state->hazard_states[i];
-    if (!loom_low_schedule_hazard_state_matches(hazard_state, hazard_use,
-                                                hazard_use->producer_stage)) {
+    if (!loom_low_schedule_hazard_state_matches(
+            hazard_state, hazard, node->block_index, hazard->producer_stage)) {
       continue;
     }
-    hazard_state->node_index = hazard_use->node_index;
-    hazard_state->scheduled_ordinal = hazard_use->scheduled_ordinal;
-    hazard_state->issue_cycle = hazard_use->issue_cycle;
-    hazard_state->hazard_ordinal = hazard_use->hazard_ordinal;
-    hazard_state->distance = hazard_use->distance;
-    hazard_state->hazard_flags = hazard_use->hazard_flags;
+    hazard_state->node_index = node_index;
+    hazard_state->scheduled_ordinal = node->scheduled_ordinal;
+    hazard_state->issue_cycle = node->issue_cycle;
+    hazard_state->hazard_ordinal = hazard_ordinal;
+    hazard_state->distance = hazard->distance;
+    hazard_state->hazard_flags = hazard->flags;
     return iree_ok_status();
   }
 
@@ -108,69 +101,77 @@ static iree_status_t loom_low_schedule_update_hazard_state(
   }
   state->hazard_states[state->hazard_state_count++] =
       (loom_low_schedule_hazard_state_t){
-          .kind = hazard_use->kind,
-          .reference_kind = hazard_use->reference_kind,
-          .reference_id = hazard_use->reference_id,
-          .producer_stage = hazard_use->producer_stage,
-          .block_index = hazard_use->block_index,
-          .node_index = hazard_use->node_index,
-          .scheduled_ordinal = hazard_use->scheduled_ordinal,
-          .issue_cycle = hazard_use->issue_cycle,
-          .hazard_ordinal = hazard_use->hazard_ordinal,
-          .distance = hazard_use->distance,
-          .hazard_flags = hazard_use->hazard_flags,
+          .kind = hazard->kind,
+          .reference_kind = hazard->reference_kind,
+          .reference_id = hazard->reference_id,
+          .producer_stage = hazard->producer_stage,
+          .block_index = node->block_index,
+          .node_index = node_index,
+          .scheduled_ordinal = node->scheduled_ordinal,
+          .issue_cycle = node->issue_cycle,
+          .hazard_ordinal = hazard_ordinal,
+          .distance = hazard->distance,
+          .hazard_flags = hazard->flags,
       };
   return iree_ok_status();
 }
 
 static iree_status_t loom_low_schedule_note_min_distance_hazard(
-    loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_hazard_use_t* hazard_use) {
-  if (hazard_use->kind != LOOM_LOW_HAZARD_KIND_MIN_DISTANCE) {
+    loom_low_schedule_build_state_t* state, uint32_t node_index,
+    uint16_t hazard_ordinal, const loom_low_hazard_t* hazard) {
+  const loom_low_schedule_node_t* node = &state->nodes[node_index];
+  if (hazard->kind != LOOM_LOW_HAZARD_KIND_MIN_DISTANCE) {
     return iree_ok_status();
   }
 
   for (iree_host_size_t i = 0; i < state->hazard_state_count; ++i) {
     const loom_low_schedule_hazard_state_t* hazard_state =
         &state->hazard_states[i];
-    if (!loom_low_schedule_hazard_state_matches(hazard_state, hazard_use,
-                                                hazard_use->consumer_stage)) {
+    if (!loom_low_schedule_hazard_state_matches(
+            hazard_state, hazard, node->block_index, hazard->consumer_stage)) {
       continue;
     }
     const uint32_t actual_distance =
-        hazard_use->issue_cycle - hazard_state->issue_cycle;
-    const uint16_t required_distance =
-        hazard_state->distance > hazard_use->distance ? hazard_state->distance
-                                                      : hazard_use->distance;
+        node->issue_cycle - hazard_state->issue_cycle;
+    const uint16_t required_distance = hazard_state->distance > hazard->distance
+                                           ? hazard_state->distance
+                                           : hazard->distance;
     if (actual_distance < required_distance) {
+      iree_string_view_t resource_name = iree_string_view_empty();
+      if (hazard->reference_kind == LOOM_LOW_HAZARD_REFERENCE_KIND_RESOURCE) {
+        const loom_low_resource_t* resource =
+            &state->target.descriptor_set->resources[hazard->reference_id];
+        resource_name = loom_low_descriptor_set_string(
+            state->target.descriptor_set, resource->name_string_ref);
+      }
       IREE_RETURN_IF_ERROR(loom_low_schedule_append_hazard_gap(
           state,
           (loom_low_schedule_hazard_gap_t){
               .producer_node = hazard_state->node_index,
-              .consumer_node = hazard_use->node_index,
-              .block_index = hazard_use->block_index,
+              .consumer_node = node_index,
+              .block_index = node->block_index,
               .producer_scheduled_ordinal = hazard_state->scheduled_ordinal,
-              .consumer_scheduled_ordinal = hazard_use->scheduled_ordinal,
+              .consumer_scheduled_ordinal = node->scheduled_ordinal,
               .producer_issue_cycle = hazard_state->issue_cycle,
-              .consumer_issue_cycle = hazard_use->issue_cycle,
+              .consumer_issue_cycle = node->issue_cycle,
               .producer_hazard_ordinal = hazard_state->hazard_ordinal,
-              .consumer_hazard_ordinal = hazard_use->hazard_ordinal,
-              .kind = hazard_use->kind,
-              .reference_kind = hazard_use->reference_kind,
-              .reference_id = hazard_use->reference_id,
-              .resource_name = hazard_use->resource_name,
+              .consumer_hazard_ordinal = hazard_ordinal,
+              .kind = hazard->kind,
+              .reference_kind = hazard->reference_kind,
+              .reference_id = hazard->reference_id,
+              .resource_name = resource_name,
               .producer_stage = hazard_state->producer_stage,
-              .consumer_stage = hazard_use->consumer_stage,
+              .consumer_stage = hazard->consumer_stage,
               .required_distance = required_distance,
               .actual_distance = actual_distance,
               .required_delay = (uint16_t)(required_distance - actual_distance),
-              .hazard_flags =
-                  hazard_state->hazard_flags | hazard_use->hazard_flags,
+              .hazard_flags = hazard_state->hazard_flags | hazard->flags,
           }));
     }
     break;
   }
-  return loom_low_schedule_update_hazard_state(state, hazard_use);
+  return loom_low_schedule_update_hazard_state(state, node_index,
+                                               hazard_ordinal, hazard);
 }
 
 void loom_low_schedule_compact_resource_summaries(
@@ -286,36 +287,17 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
     IREE_RETURN_IF_ERROR(loom_low_schedule_note_resource_use(state, issue_use));
   }
   for (uint16_t i = 0; i < schedule_class->hazard_count; ++i) {
-    const loom_low_hazard_t* hazard =
-        &state->target.descriptor_set
-             ->hazards[schedule_class->hazard_start + i];
-    iree_string_view_t resource_name = iree_string_view_empty();
-    if (hazard->reference_kind == LOOM_LOW_HAZARD_REFERENCE_KIND_RESOURCE) {
-      IREE_ASSERT(hazard->reference_id <
-                  state->target.descriptor_set->resource_count);
-      const loom_low_resource_t* resource =
-          &state->target.descriptor_set->resources[hazard->reference_id];
-      resource_name = loom_low_descriptor_set_string(
-          state->target.descriptor_set, resource->name_string_ref);
-    }
-    IREE_RETURN_IF_ERROR(loom_low_schedule_append_hazard_use(
-        state, (loom_low_schedule_hazard_use_t){
-                   .node_index = node_index,
-                   .block_index = node->block_index,
-                   .scheduled_ordinal = node->scheduled_ordinal,
-                   .issue_cycle = node->issue_cycle,
-                   .hazard_ordinal = i,
-                   .kind = hazard->kind,
-                   .reference_kind = hazard->reference_kind,
-                   .reference_id = hazard->reference_id,
-                   .resource_name = resource_name,
-                   .producer_stage = hazard->producer_stage,
-                   .consumer_stage = hazard->consumer_stage,
-                   .distance = hazard->distance,
-                   .hazard_flags = hazard->flags,
-               }));
+    const uint32_t hazard_index = schedule_class->hazard_start + i;
+    IREE_ASSERT(state->hazard_use_count < state->hazard_use_capacity,
+                "precomputed hazard-use capacity must cover all rows");
+    state->hazard_uses[state->hazard_use_count++] =
+        (loom_low_schedule_hazard_use_t){
+            .node_index = node_index,
+            .hazard_index = hazard_index,
+        };
     IREE_RETURN_IF_ERROR(loom_low_schedule_note_min_distance_hazard(
-        state, &state->hazard_uses[state->hazard_use_count - 1]));
+        state, node_index, i,
+        &state->target.descriptor_set->hazards[hazard_index]));
   }
   return iree_ok_status();
 }
