@@ -8,7 +8,7 @@
 
 #include "iree/base/api.h"
 #include "iree/tokenizer/vocab/vocab_hash.h"
-#include "iree/tokenizer/vocab/vocab_internal.h"
+#include "iree/tokenizer/vocab/vocab_storage.h"
 
 //===----------------------------------------------------------------------===//
 // Limits
@@ -18,7 +18,7 @@
 // This prevents memory exhaustion attacks where a malicious input specifies
 // a small number of tokens with extremely large IDs (e.g., ID 0 and ID 2B
 // would attempt to allocate ~40GB for just 2 tokens).
-// A gap of 1M allows ~12MB of wasted storage, which is acceptable for
+// A gap of 1M allows up to ~16MB of unused token/score storage, which permits
 // legitimate sparse vocabs like ConvBERT.
 #define IREE_TOKENIZER_MAX_VOCAB_SPARSITY 1000000
 
@@ -27,13 +27,18 @@
 //===----------------------------------------------------------------------===//
 
 struct iree_tokenizer_vocab_builder_t {
+  // Allocator owning builder storage until build transfers it to the vocab.
   iree_allocator_t allocator;
 
-  // Token arrays stored in a single slab allocation via IREE_STRUCT_LAYOUT.
-  void* token_slab;                // Combined [tokens][scores] allocation.
-  iree_tokenizer_token_t* tokens;  // = token_slab + 0
-  float* scores;                   // = token_slab + tokens_size
+  // Owned combined [tokens][optional scores] allocation.
+  void* token_slab;
+  // Slab token array in insertion order until sorting by explicit ID.
+  iree_tokenizer_token_t* tokens;
+  // Slab score array, or NULL while all supplied scores are zero.
+  double* scores;
+  // Number of initialized token entries.
   iree_host_size_t token_count;
+  // Allocated capacity of each present token array.
   iree_host_size_t token_capacity;
 
   // Target IDs for out-of-order insertion (lazily allocated, separate).
@@ -44,7 +49,9 @@ struct iree_tokenizer_vocab_builder_t {
 
   // Growable string table.
   uint8_t* string_data;
+  // Number of initialized string bytes.
   iree_host_size_t string_size;
+  // Allocated capacity of the string table in bytes.
   iree_host_size_t string_capacity;
 
   // Special token IDs.
@@ -52,7 +59,9 @@ struct iree_tokenizer_vocab_builder_t {
 
   // Growable BPE merge array (NULL if no merges added).
   iree_tokenizer_merge_t* merges;
+  // Number of initialized merge entries.
   iree_host_size_t merge_count;
+  // Allocated capacity of the merge array.
   iree_host_size_t merge_capacity;
 
   // Maximum token text length seen so far.
@@ -64,25 +73,26 @@ struct iree_tokenizer_vocab_builder_t {
 //===----------------------------------------------------------------------===//
 
 // Ensures token arrays have capacity for at least |min_capacity| tokens.
-// tokens and scores are stored in a single slab for cache efficiency.
+// Materializes scores only when needed; absent scores are implicitly zero.
+// Tokens and scores are stored in a single slab.
 // target_ids is managed separately (lazily allocated for explicit ID mode).
 static iree_status_t iree_tokenizer_vocab_builder_reserve_tokens(
-    iree_tokenizer_vocab_builder_t* builder, iree_host_size_t min_capacity) {
-  if (builder->token_capacity >= min_capacity) {
+    iree_tokenizer_vocab_builder_t* builder, iree_host_size_t min_capacity,
+    bool needs_scores) {
+  needs_scores |= builder->scores != NULL;
+  if (builder->token_capacity >= min_capacity &&
+      (!needs_scores || builder->scores)) {
     return iree_ok_status();
   }
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Grow by 2x or to min_capacity, whichever is larger.
-  iree_host_size_t new_capacity = 0;
-  if (!iree_host_size_checked_mul(builder->token_capacity, 2, &new_capacity)) {
-    new_capacity = min_capacity;  // Overflow, just use min_capacity.
-  }
+  iree_host_size_t new_capacity = builder->token_capacity;
   if (new_capacity < min_capacity) {
-    new_capacity = min_capacity;
-  }
-  if (new_capacity < 16) {
-    new_capacity = 16;
+    if (!iree_host_size_checked_mul(new_capacity, 2, &new_capacity)) {
+      new_capacity = min_capacity;
+    }
+    new_capacity = iree_max(16, iree_max(new_capacity, min_capacity));
   }
 
   // Calculate slab layout: [tokens][scores].
@@ -92,7 +102,8 @@ static iree_status_t iree_tokenizer_vocab_builder_reserve_tokens(
   iree_status_t status = IREE_STRUCT_LAYOUT(
       /*base_size=*/0, &total_size,
       IREE_STRUCT_FIELD(new_capacity, iree_tokenizer_token_t, &tokens_offset),
-      IREE_STRUCT_FIELD(new_capacity, float, &scores_offset));
+      IREE_STRUCT_FIELD(needs_scores ? new_capacity : 0, double,
+                        &scores_offset));
   if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
     return status;
@@ -110,13 +121,30 @@ static iree_status_t iree_tokenizer_vocab_builder_reserve_tokens(
   uint8_t* base = (uint8_t*)new_slab;
   iree_tokenizer_token_t* new_tokens =
       (iree_tokenizer_token_t*)(base + tokens_offset);
-  float* new_scores = (float*)(base + scores_offset);
+  double* new_scores = needs_scores ? (double*)(base + scores_offset) : NULL;
 
   // Copy existing data from old slab.
   if (builder->token_count > 0) {
     memcpy(new_tokens, builder->tokens,
            builder->token_count * sizeof(iree_tokenizer_token_t));
-    memcpy(new_scores, builder->scores, builder->token_count * sizeof(float));
+    // A newly materialized score array retains the allocator's zero fill for
+    // all previously added, unscored tokens.
+    if (builder->scores) {
+      memcpy(new_scores, builder->scores,
+             builder->token_count * sizeof(double));
+    }
+  }
+
+  // Grow explicit IDs before publishing the new shared token capacity.
+  if (builder->target_ids && new_capacity > builder->token_capacity) {
+    status = iree_allocator_realloc_array(builder->allocator, new_capacity,
+                                          sizeof(int32_t),
+                                          (void**)&builder->target_ids);
+    if (!iree_status_is_ok(status)) {
+      iree_allocator_free(builder->allocator, new_slab);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
   }
 
   // Free old slab and commit new pointers.
@@ -127,14 +155,6 @@ static iree_status_t iree_tokenizer_vocab_builder_reserve_tokens(
   builder->tokens = new_tokens;
   builder->scores = new_scores;
   builder->token_capacity = new_capacity;
-
-  // Grow target_ids if it exists (explicit ID mode).
-  if (builder->target_ids) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_allocator_realloc_array(builder->allocator, new_capacity,
-                                         sizeof(int32_t),
-                                         (void**)&builder->target_ids));
-  }
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -247,7 +267,8 @@ iree_status_t iree_tokenizer_vocab_builder_allocate(
   // Pre-allocate if hint provided.
   if (capacity_hint > 0) {
     iree_status_t status =
-        iree_tokenizer_vocab_builder_reserve_tokens(builder, capacity_hint);
+        iree_tokenizer_vocab_builder_reserve_tokens(builder, capacity_hint,
+                                                    /*needs_scores=*/false);
     if (!iree_status_is_ok(status)) {
       iree_tokenizer_vocab_builder_free(builder);
       IREE_TRACE_ZONE_END(z0);
@@ -275,7 +296,7 @@ iree_status_t iree_tokenizer_vocab_builder_allocate(
 
 iree_status_t iree_tokenizer_vocab_builder_add_token(
     iree_tokenizer_vocab_builder_t* builder, iree_string_view_t text,
-    float score, iree_tokenizer_token_attr_t attrs) {
+    double score, iree_tokenizer_token_attr_t attrs) {
   IREE_ASSERT_ARGUMENT(builder);
 
   // Validate text.size fits in uint16_t (max token length).
@@ -299,7 +320,7 @@ iree_status_t iree_tokenizer_vocab_builder_add_token(
 
   // Ensure capacity for one more token.
   IREE_RETURN_IF_ERROR(iree_tokenizer_vocab_builder_reserve_tokens(
-      builder, builder->token_count + 1));
+      builder, builder->token_count + 1, /*needs_scores=*/score != 0.0));
 
   // Ensure capacity for the string (always reserve at least 1 byte to avoid
   // NULL string_data when all tokens are empty strings).
@@ -323,7 +344,9 @@ iree_status_t iree_tokenizer_vocab_builder_add_token(
   };
 
   builder->tokens[builder->token_count] = token;
-  builder->scores[builder->token_count] = score;
+  if (builder->scores) {
+    builder->scores[builder->token_count] = score;
+  }
 
   // If explicit IDs are being used (target_ids exists), record implicit ID.
   // This allows mixing add_token() and add_token_with_id() freely.
@@ -344,7 +367,7 @@ iree_status_t iree_tokenizer_vocab_builder_add_token(
 
 iree_status_t iree_tokenizer_vocab_builder_add_token_with_id(
     iree_tokenizer_vocab_builder_t* builder, int32_t token_id,
-    iree_string_view_t text, float score, iree_tokenizer_token_attr_t attrs) {
+    iree_string_view_t text, double score, iree_tokenizer_token_attr_t attrs) {
   IREE_ASSERT_ARGUMENT(builder);
 
   // Lazily allocate target_ids array on first use.
@@ -463,7 +486,8 @@ static iree_status_t iree_tokenizer_vocab_builder_sort(
   iree_status_t status = IREE_STRUCT_LAYOUT(
       /*base_size=*/0, &total_size,
       IREE_STRUCT_FIELD(array_size, iree_tokenizer_token_t, &tokens_offset),
-      IREE_STRUCT_FIELD(array_size, float, &scores_offset));
+      IREE_STRUCT_FIELD(builder->scores ? array_size : 0, double,
+                        &scores_offset));
   void* new_slab = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(builder->allocator, total_size, &new_slab);
@@ -472,7 +496,8 @@ static iree_status_t iree_tokenizer_vocab_builder_sort(
     uint8_t* base = (uint8_t*)new_slab;
     iree_tokenizer_token_t* new_tokens =
         (iree_tokenizer_token_t*)(base + tokens_offset);
-    float* new_scores = (float*)(base + scores_offset);
+    double* new_scores =
+        builder->scores ? (double*)(base + scores_offset) : NULL;
 
     // Populate arrays - real tokens from perm, gaps marked UNUSED.
     for (iree_host_size_t i = 0; i < array_size; ++i) {
@@ -480,13 +505,14 @@ static iree_status_t iree_tokenizer_vocab_builder_sort(
       if (src != IREE_HOST_SIZE_MAX) {
         // Real token at this ID.
         new_tokens[i] = builder->tokens[src];
-        new_scores[i] = builder->scores[src];
+        if (new_scores) {
+          new_scores[i] = builder->scores[src];
+        }
       } else {
         // Gap in ID space - mark as unused.
         new_tokens[i].string_offset = 0;
         new_tokens[i].string_length = 0;
         new_tokens[i].attributes = IREE_TOKENIZER_TOKEN_ATTR_UNUSED;
-        new_scores[i] = 0.0f;
       }
     }
 
@@ -559,7 +585,7 @@ iree_status_t iree_tokenizer_vocab_builder_add_token_attrs(
 
 iree_status_t iree_tokenizer_vocab_builder_ensure_token(
     iree_tokenizer_vocab_builder_t* builder, int32_t token_id,
-    iree_string_view_t text, float score, iree_tokenizer_token_attr_t attrs) {
+    iree_string_view_t text, double score, iree_tokenizer_token_attr_t attrs) {
   IREE_ASSERT_ARGUMENT(builder);
 
   // Try to update attributes on existing token first.

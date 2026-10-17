@@ -8,9 +8,9 @@
 //
 // ALGORITHM:
 // For each segment, process in chunk_size-byte chunks:
-//   1. Initialize DP: best_score[0] = 0, all others = -FLT_MAX
+//   1. Initialize DP: best_score[0] = 0, all others = -DBL_MAX
 //   2. For each byte position (advancing by UTF-8 character):
-//      a. Skip unreachable positions (best_score == -FLT_MAX)
+//      a. Skip unreachable positions (best_score == -DBL_MAX)
 //      b. Walk prefix trie from position, finding all matching tokens
 //         (capped at chunk boundary)
 //      c. For each match: update DP if score improvement found
@@ -70,7 +70,7 @@ typedef struct iree_tokenizer_unigram_model_t {
   iree_tokenizer_vocab_trie_t* trie;    // OWNED.
 
   iree_tokenizer_token_id_t unk_token_id;
-  float unk_score;
+  double unk_score;
 
   // Pre-computed byte fallback table: byte value → <0xXX> token ID.
   // IREE_TOKENIZER_TOKEN_ID_INVALID if no such token exists.
@@ -116,7 +116,7 @@ typedef struct iree_tokenizer_unigram_state_t {
   iree_host_size_t segment_base_offset;
 
   // Trailing buffers (accessed via model offsets):
-  //   float best_score[chunk_size + 1]
+  //   double best_score[chunk_size + 1]
   //   int32_t best_token_id[chunk_size + 1]
   //   uint16_t best_length[chunk_size + 1]
   //   iree_tokenizer_unigram_pending_token_t
@@ -127,10 +127,10 @@ typedef struct iree_tokenizer_unigram_state_t {
 // Trailing Buffer Accessors
 //===----------------------------------------------------------------------===//
 
-static inline float* iree_tokenizer_unigram_state_best_score(
+static inline double* iree_tokenizer_unigram_state_best_score(
     iree_tokenizer_unigram_state_t* state,
     const iree_tokenizer_unigram_model_t* model) {
-  return (float*)((uint8_t*)state + model->best_score_offset);
+  return (double*)((uint8_t*)state + model->best_score_offset);
 }
 
 static inline int32_t* iree_tokenizer_unigram_state_best_token_id(
@@ -210,7 +210,7 @@ static void iree_tokenizer_unigram_build_byte_to_token(
 static bool iree_tokenizer_unigram_insert_fallback_candidates(
     const iree_tokenizer_unigram_model_t* model, const uint8_t* chunk_data,
     iree_host_size_t position, iree_host_size_t char_length,
-    iree_host_size_t chunk_length, float* best_score, int32_t* best_token_id,
+    iree_host_size_t chunk_length, double* best_score, int32_t* best_token_id,
     uint16_t* best_length) {
   // Try byte fallback first.
   if (!iree_any_bit_set(model->flags,
@@ -226,13 +226,13 @@ static bool iree_tokenizer_unigram_insert_fallback_candidates(
     }
     if (all_bytes_available) {
       // Insert byte token candidates for each byte of the character.
-      float running_score = best_score[position];
+      double running_score = best_score[position];
       for (iree_host_size_t b = 0; b < char_length; ++b) {
         int32_t byte_token = model->byte_to_token[chunk_data[position + b]];
-        float byte_score =
+        double byte_score =
             iree_tokenizer_vocab_token_score(model->vocab, byte_token);
         iree_host_size_t byte_end = position + b + 1;
-        float new_score = running_score + byte_score;
+        double new_score = running_score + byte_score;
         if (new_score > best_score[byte_end]) {
           best_score[byte_end] = new_score;
           best_token_id[byte_end] = byte_token;
@@ -247,7 +247,7 @@ static bool iree_tokenizer_unigram_insert_fallback_candidates(
   // Fall back to UNK for the whole character.
   if (model->unk_token_id != IREE_TOKENIZER_TOKEN_ID_INVALID) {
     iree_host_size_t end = position + char_length;
-    float score = best_score[position] + model->unk_score;
+    double score = best_score[position] + model->unk_score;
     if (score > best_score[end]) {
       best_score[end] = score;
       best_token_id[end] = model->unk_token_id;
@@ -276,7 +276,7 @@ static iree_host_size_t iree_tokenizer_unigram_viterbi(
     const iree_tokenizer_unigram_model_t* model,
     iree_tokenizer_unigram_state_t* state, const uint8_t* chunk_data,
     iree_host_size_t chunk_length, iree_host_size_t segment_byte_offset) {
-  float* best_score = iree_tokenizer_unigram_state_best_score(state, model);
+  double* best_score = iree_tokenizer_unigram_state_best_score(state, model);
   int32_t* best_token_id =
       iree_tokenizer_unigram_state_best_token_id(state, model);
   uint16_t* best_length =
@@ -289,7 +289,7 @@ static iree_host_size_t iree_tokenizer_unigram_viterbi(
   best_token_id[0] = IREE_TOKENIZER_TOKEN_ID_INVALID;
   best_length[0] = 0;
   for (iree_host_size_t i = 1; i <= chunk_length; ++i) {
-    best_score[i] = -FLT_MAX;
+    best_score[i] = -DBL_MAX;
     best_token_id[i] = IREE_TOKENIZER_TOKEN_ID_INVALID;
     best_length[i] = 0;
   }
@@ -305,7 +305,7 @@ static iree_host_size_t iree_tokenizer_unigram_viterbi(
     }
 
     // Skip unreachable positions.
-    if (best_score[position] == -FLT_MAX) {
+    if (best_score[position] == -DBL_MAX) {
       position += char_length;
       continue;
     }
@@ -324,8 +324,8 @@ static iree_host_size_t iree_tokenizer_unigram_viterbi(
       if (token_id >= 0) {
         iree_host_size_t end = i + 1;
         iree_host_size_t token_length = end - position;
-        float score = best_score[position] +
-                      iree_tokenizer_vocab_token_score(model->vocab, token_id);
+        double score = best_score[position] +
+                       iree_tokenizer_vocab_token_score(model->vocab, token_id);
         if (score > best_score[end]) {
           best_score[end] = score;
           best_token_id[end] = token_id;
@@ -483,7 +483,7 @@ static void iree_tokenizer_unigram_model_destroy(
 
 iree_status_t iree_tokenizer_unigram_model_allocate(
     const iree_tokenizer_vocab_t* vocab, iree_tokenizer_token_id_t unk_token_id,
-    float unk_score, iree_tokenizer_unigram_flags_t flags,
+    double unk_score, iree_tokenizer_unigram_flags_t flags,
     iree_allocator_t allocator, iree_tokenizer_model_t** out_model) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_ASSERT_ARGUMENT(vocab);
@@ -528,7 +528,7 @@ iree_status_t iree_tokenizer_unigram_model_allocate(
       z0,
       IREE_STRUCT_LAYOUT(
           sizeof(iree_tokenizer_unigram_state_t), &state_size,
-          IREE_STRUCT_FIELD(chunk_size + 1, float, &best_score_offset),
+          IREE_STRUCT_FIELD(chunk_size + 1, double, &best_score_offset),
           IREE_STRUCT_FIELD(chunk_size + 1, int32_t, &best_token_id_offset),
           IREE_STRUCT_FIELD(chunk_size + 1, uint16_t, &best_length_offset),
           IREE_STRUCT_FIELD(chunk_size, iree_tokenizer_unigram_pending_token_t,

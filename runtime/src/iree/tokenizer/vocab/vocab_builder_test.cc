@@ -6,6 +6,8 @@
 
 #include "iree/tokenizer/vocab/vocab_builder.h"
 
+#include <string>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -45,7 +47,7 @@ TEST(VocabBuilderTest, SingleToken) {
   iree_string_view_t text = iree_tokenizer_vocab_token_text(vocab, 0);
   EXPECT_EQ(iree_string_view_compare(text, IREE_SVL("hello")), 0);
 
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, 0), 1.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, 0), 1.0f);
 
   iree_tokenizer_vocab_free(vocab);
 }
@@ -81,12 +83,98 @@ TEST(VocabBuilderTest, MultipleTokens) {
 
   // Verify scores.
   for (int i = 0; i < 5; ++i) {
-    EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, i), (float)i);
+    EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, i), (float)i);
   }
 
   // Non-existent tokens.
   EXPECT_EQ(iree_tokenizer_vocab_lookup(vocab, IREE_SVL("lazy")), -1);
 
+  iree_tokenizer_vocab_free(vocab);
+}
+
+TEST(VocabBuilderTest, ScoresSurviveGrowthAndSorting) {
+  // Exercise all-zero scores and the first nonzero score both within existing
+  // capacity and on a growth boundary. Explicit IDs also introduce sparse gaps.
+  for (bool explicit_ids : {false, true}) {
+    for (int score_position : {-1, 8, 32}) {
+      SCOPED_TRACE(explicit_ids);
+      SCOPED_TRACE(score_position);
+      constexpr int kCount = 35;
+      constexpr double kScore = -2.00000001;
+      iree_tokenizer_vocab_builder_t* builder = nullptr;
+      IREE_ASSERT_OK(iree_tokenizer_vocab_builder_allocate(
+          4, iree_allocator_system(), &builder));
+      for (int i = 0; i < kCount; ++i) {
+        std::string text = "token" + std::to_string(i);
+        auto view = iree_make_string_view(text.data(), text.size());
+        double score = i == score_position ? kScore : 0.0;
+        if (explicit_ids) {
+          IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token_with_id(
+              builder, 2 * (kCount - i - 1), view, score,
+              IREE_TOKENIZER_TOKEN_ATTR_NONE));
+        } else {
+          IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token(
+              builder, view, score, IREE_TOKENIZER_TOKEN_ATTR_NONE));
+        }
+      }
+      iree_tokenizer_vocab_t* vocab = nullptr;
+      IREE_ASSERT_OK(iree_tokenizer_vocab_builder_build(builder, &vocab));
+      for (int i = 0; i < kCount; ++i) {
+        int id = explicit_ids ? 2 * (kCount - i - 1) : i;
+        std::string text = "token" + std::to_string(i);
+        EXPECT_EQ(iree_tokenizer_vocab_lookup(
+                      vocab, iree_make_string_view(text.data(), text.size())),
+                  id);
+        EXPECT_EQ(iree_tokenizer_vocab_token_score(vocab, id),
+                  i == score_position ? kScore : 0.0);
+        if (explicit_ids && id > 0) {
+          EXPECT_EQ(iree_tokenizer_vocab_token_score(vocab, id - 1), 0.0);
+        }
+      }
+      iree_tokenizer_vocab_free(vocab);
+    }
+  }
+}
+
+TEST(VocabBuilderTest, ExplicitIdGrowthFailurePreservesCapacity) {
+  bool fail_reallocation = false;
+  iree_allocator_t allocator = {
+      &fail_reallocation,
+      [](void* self, iree_allocator_command_t command, const void* params,
+         void** inout_ptr) -> iree_status_t {
+        if (*static_cast<bool*>(self) &&
+            command == IREE_ALLOCATOR_COMMAND_REALLOC) {
+          return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
+        }
+        auto system = iree_allocator_system();
+        return system.ctl(system.self, command, params, inout_ptr);
+      }};
+  iree_tokenizer_vocab_builder_t* builder = nullptr;
+  IREE_ASSERT_OK(
+      iree_tokenizer_vocab_builder_allocate(16, allocator, &builder));
+  for (int i = 0; i < 16; ++i) {
+    std::string text = "token" + std::to_string(i);
+    IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token_with_id(
+        builder, i, iree_make_string_view(text.data(), text.size()), 0.0,
+        IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  }
+
+  // Materializing scores and growing tokens succeeds, but growing explicit IDs
+  // fails. A retry must retain one shared capacity for all present arrays.
+  fail_reallocation = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_tokenizer_vocab_builder_add_token_with_id(
+                            builder, 16, IREE_SVL("scored"), -2.00000001,
+                            IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  fail_reallocation = false;
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_add_token_with_id(
+      builder, 16, IREE_SVL("scored"), -2.00000001,
+      IREE_TOKENIZER_TOKEN_ATTR_NONE));
+  iree_tokenizer_vocab_t* vocab = nullptr;
+  IREE_ASSERT_OK(iree_tokenizer_vocab_builder_build(builder, &vocab));
+  EXPECT_EQ(iree_tokenizer_vocab_token_count(vocab), 17u);
+  EXPECT_EQ(iree_tokenizer_vocab_lookup(vocab, IREE_SVL("scored")), 16);
+  EXPECT_EQ(iree_tokenizer_vocab_token_score(vocab, 16), -2.00000001);
   iree_tokenizer_vocab_free(vocab);
 }
 
@@ -227,9 +315,9 @@ TEST(VocabBuilderTest, AddTokenWithIdAutoSorted) {
   EXPECT_EQ(iree_string_view_compare(text2, IREE_SVL("gamma")), 0);
 
   // Verify scores follow tokens.
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, 0), 0.0f);
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, 1), 1.0f);
-  EXPECT_FLOAT_EQ(iree_tokenizer_vocab_token_score(vocab, 2), 2.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, 0), 0.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, 1), 1.0f);
+  EXPECT_DOUBLE_EQ(iree_tokenizer_vocab_token_score(vocab, 2), 2.0f);
 
   // Verify lookups work.
   EXPECT_EQ(iree_tokenizer_vocab_lookup(vocab, IREE_SVL("alpha")), 0);
