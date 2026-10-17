@@ -1,4 +1,4 @@
-# Stream recognition into owned transcripts
+# Stream recognition into owned transcripts and activity events
 
 A `recognition` deployment accepts finite uploads at
 `POST /v1/audio/transcriptions` and continuing audio through native stream
@@ -13,8 +13,11 @@ supply their own frontend, acoustic state, decoder, and transcript policy.
 ## Native input and output
 
 The serving owner calls `loom_serve_registry_try_open_recognition` with the
-deployment name and borrowed language/prompt options. A successful admission
-copies those options and returns a caller-owned
+deployment name, borrowed language/prompt options, and an explicit nonempty
+selection of supported outputs. `LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT`
+selects revisions; `LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY` selects speech
+probabilities. A compound source supports both in one request. A successful
+admission copies those options and returns a caller-owned
 [`loom_serve_recognition_stream_t`](stream.h). Success with a NULL handle means
 preparation or bounded admission pressure; the caller retries when the owner
 has new readiness. Existing HTTP admissions retain their queue position.
@@ -27,19 +30,25 @@ one input's pressure does not consume another's credit. The caller supplies
 explicit EOF with `stream_finish` after its final accepted frame. Packet
 boundaries never imply padding, endpoint detection, or EOF.
 
-`stream_peek` borrows one replacement transcript revision. Its segment identity
-and increasing revision number identify which hypothesis it replaces. A final
-flag commits that segment; it need not finish the entire recognition request.
+`stream_peek` borrows the next typed event from one source-ordered packet. A
+completion can produce several observations, including multiple replacements of
+one transcript segment. The event kind selects its transcript or activity
+payload. A transcript's segment identity and increasing revision number identify
+which hypothesis it replaces. A final flag commits that segment; it need not
+finish the entire recognition request.
 Sample intervals, optional speaker labels, and optional word alignment retain
 the source's evidence. The service does not invent diarization or alignment.
-`stream_consume` releases the revision's output credit. A stalled provisional
-revision makes only that request ineligible for further model work.
+An activity event carries a finite speech probability in `[0,1]` and the input
+interval it covers. It does not select a turn threshold or claim exact onset.
+`stream_consume` advances to the next event; the request becomes eligible for
+more model work after the entire packet is consumed. A stalled reader makes
+only that request ineligible.
 
-After execution ownership ends and the last revision is consumed,
+After execution ownership ends and the last event is consumed,
 `stream_is_complete` becomes true. `stream_status` returns an owned terminal
-status. On success, `stream_document` borrows all finalized segments without
-copying the transcript again. The caller closes its handle after consuming
-that result, including on failure or cancellation.
+status. On success with transcripts selected, `stream_document` borrows all
+finalized segments without copying the transcript again. The caller closes its
+handle after consuming that result, including on failure or cancellation.
 
 ## Ownership across model changes
 
@@ -50,8 +59,8 @@ until retirement. Source row identity remains separate from packed batch
 position throughout that interval.
 
 Successful retirement returns the numerical slot and frees the input ring.
-The final document, pending final revision, input geometry, and terminal status
-remain with the caller. They can outlive model removal, a new registration
+The final document, pending final event packet, input geometry, and terminal
+status remain with the caller. They can outlive model removal, a new registration
 using the same name, and registry destruction. Retaining a completed transcript
 does not pin model weights or reserve a source row. A release failure remains
 visible even if the source produced its final transcript before that failure.
@@ -90,9 +99,14 @@ Compatible next operations batch within source-defined work capacity; different
 input positions or hypothesis lengths can remain independent. Source kernels
 execute on the selected device. After both numerical and feedback frontiers
 retire, shared workers collect every original member and update its bounded
-document. The serialized owner publishes results and returns input credit.
+document. Each request allocates one packet and decoded-event array at admission.
+Collection copies the produced source extent into that storage before the source
+can reuse its buffer for another ordinal. The copy preserves earlier revisions
+independently of the latest document value, without allocating a new VM buffer
+per completion. The serialized owner publishes results and returns input credit.
 
 No service worker waits for a device or socket. The model package determines
 its input quantum, lookahead, revision cadence, and numerical phases. Native
 admission exposes those continuing-input semantics to an in-process caller;
-the finite HTTP upload endpoint returns a finalized JSON or text document.
+the finite HTTP upload endpoint selects transcript output and returns a finalized
+JSON or text document. Its response does not expose activity events.
