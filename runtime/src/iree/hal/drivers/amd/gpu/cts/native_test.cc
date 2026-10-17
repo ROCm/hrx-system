@@ -1175,94 +1175,15 @@ TEST_F(GpuNativeTest, LastReleaseFromCompletionCallback) {
   allocator_.reclaimed.acquire();
 }
 
-// Gate the actual native allocation dependency while forwarding every call to
-// libamdf. This qualifies HAL execution ownership, not kernel lock isolation.
-// GTest runs these fixtures serially; native borrowers join before active_ is
-// cleared and the forwarding API table is destroyed.
 class GpuNativeMemoryProgressTest : public GpuNativeAllocationTest {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST,
-                       &native_api_),
-        "amdf_query_api"));
-    forwarding_api_ = *native_api_;
-    forwarding_api_.memory_create = CreateMemory;
-    active_ = this;
-    IREE_ASSERT_OK(iree_hal_amd_fabric_create(
-        &forwarding_api_, AMDF_NATIVE_LIFETIME_INSTANCE,
-        iree_allocator_system(), &fabric_));
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
     GpuNativeAllocationTest::SetUp();
   }
 
-  void TearDown() override {
-    GpuNativeAllocationTest::TearDown();
-    active_ = nullptr;
-  }
-
-  static amdf_status_t AMDF_CALL CreateMemory(
-      amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
-      amdf_memory_t** out_memory) {
-    auto* self = active_;
-    const bool held = self->hold_.exchange(false);
-    if (held) {
-      self->native_thread_ = std::this_thread::get_id();
-      self->entered_.release();
-      self->resume_.acquire();
-    }
-    const amdf_status_t status =
-        self->native_api_->memory_create(scope, info, out_memory);
-    if (held) {
-      self->returned_.release();
-    }
-    return status;
-  }
-
-  class NativeHold {
-   public:
-    explicit NativeHold(GpuNativeMemoryProgressTest* owner) : owner_(owner) {
-      owner_->hold_ = true;
-    }
-    ~NativeHold() {
-      // An admission failure can leave the gate unused. A consumed gate must
-      // join its actual native call before any callback state is destroyed.
-      if (!owner_->hold_.exchange(false)) {
-        owner_->resume_.release();
-        owner_->returned_.acquire();
-      }
-    }
-    void WaitEntered() { owner_->entered_.acquire(); }
-    void ReleaseAndHoldNext() {
-      // Arm the next native step before releasing the current one. This leaves
-      // a mapping's consumer free to progress during the subsequent allocation.
-      owner_->hold_ = true;
-      owner_->resume_.release();
-      owner_->returned_.acquire();
-      owner_->entered_.acquire();
-    }
-
-   private:
-    // Borrowed fixture outliving the native call and its explicit gate.
-    GpuNativeMemoryProgressTest* owner_;
-  };
-
-  // Exact native API table, borrowed for all forwarded calls.
-  const amdf_api_t* native_api_ = nullptr;
-  // Same native API with an allocation-entry gate, never a substitute
-  // allocator.
-  amdf_api_t forwarding_api_ = {};
-  // Serial fixture identity required by the native ABI's context-free table.
-  inline static GpuNativeMemoryProgressTest* active_ = nullptr;
-  // One-shot hold consumed by the next native backing acquisition.
-  std::atomic<bool> hold_{false};
-  // Publishes entry and thread identity of the held native call.
-  std::binary_semaphore entered_{0};
-  // Permission to continue the native call after independent work completes.
-  std::binary_semaphore resume_{0};
-  // Joins the forwarding function's final fixture access.
-  std::binary_semaphore returned_{0};
-  // Observed allocation owner, read only after entered_.
-  std::thread::id native_thread_;
+  // Native dependency gate, joined by base TearDown before table destruction.
+  iree::hal::amd::gpu::cts::NativeMemoryGate memory_gate_;
 };
 
 TEST_F(GpuNativeMemoryProgressTest,
@@ -1277,7 +1198,7 @@ TEST_F(GpuNativeMemoryProgressTest,
     CreateSemaphore(allocated.out());
     Ref<iree_hal_buffer_t> cold;
     {
-      NativeHold hold(this);
+      iree::hal::amd::gpu::cts::NativeMemoryGate::Hold hold(&memory_gate_);
       const auto request = iree_hal_make_pool_reservation_request(4096, 64);
       uint64_t allocation_value = 1;
       iree_hal_semaphore_t* allocated_handle = allocated;
@@ -1313,7 +1234,7 @@ TEST_F(GpuNativeMemoryProgressTest,
       IREE_ASSERT_OK(iree_hal_queue_host_call(
           queues_[0], {}, {1, &done_handle, &value}, call, arguments, flags));
       callback.called.acquire();
-      EXPECT_NE(callback.thread, native_thread_);
+      EXPECT_NE(callback.thread, memory_gate_.native_thread());
       EXPECT_NE(callback.thread, std::this_thread::get_id());
       IREE_ASSERT_OK(
           iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(), 0));
@@ -1349,7 +1270,7 @@ TEST_F(GpuNativeMemoryProgressTest,
 
   Ref<iree_hal_buffer_t> cold;
   {
-    NativeHold hold(this);
+    iree::hal::amd::gpu::cts::NativeMemoryGate::Hold hold(&memory_gate_);
     IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], {},
                                          {1, &semaphores_[3], &one}, pool_, 1,
                                          &request, cold.out()));
@@ -1461,7 +1382,7 @@ TEST_F(GpuNativeMemoryProgressTest,
   }
   uint64_t one = 1, two = 2;
   {
-    NativeHold hold(this);
+    iree::hal::amd::gpu::cts::NativeMemoryGate::Hold hold(&memory_gate_);
     IREE_ASSERT_OK(
         iree_hal_queue_alloca(queues_[0], {}, {1, &semaphores_[3], &one}, pool_,
                               requests.size(), requests.data(), cold.data()));

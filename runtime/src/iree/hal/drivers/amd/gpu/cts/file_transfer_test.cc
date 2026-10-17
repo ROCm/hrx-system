@@ -432,7 +432,86 @@ TEST_P(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
   ReleaseSources();
 }
 
+class GpuNativeFileProgressTest : public GpuNativeFileTest {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
+    GpuNativeFileTest::SetUp();
+  }
+
+  // Native dependency gate, joined by base TearDown before table destruction.
+  iree::hal::amd::gpu::cts::NativeMemoryGate memory_gate_;
+};
+
+TEST_P(GpuNativeFileProgressTest,
+       ReadShaderAndWriteCompleteWhileUnrelatedAllocationIsHeld) {
+  Ref<iree_hal_buffer_t> buffer;
+  ASSERT_NO_FATAL_FAILURE(Allocate(kLength + 256, buffer.out()));
+  std::vector<uint32_t> expected(kLength / 4 + 32);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = uint32_t(i * 37 + 3);
+  }
+  Ref<iree_hal_file_t> file;
+  ASSERT_NO_FATAL_FAILURE(Open(expected, file.out()));
+  auto* semaphore = timeline_.get();
+  auto read_update_write = [&](uint64_t before) {
+    uint64_t read = before + 1, dispatch = before + 2, write = before + 3;
+    IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {1, &semaphore, &before},
+                                       {1, &semaphore, &read}, file, 64, buffer,
+                                       kBufferOffset, kLength, &barriers_, 0));
+    ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, read, dispatch, 19));
+    IREE_ASSERT_OK(iree_hal_queue_write(
+        queues_[0], {1, &semaphore, &dispatch}, {1, &semaphore, &write}, buffer,
+        kBufferOffset, file, 64, kLength, &barriers_, 0));
+    ASSERT_NO_FATAL_FAILURE(Wait(write));
+    expected[16] += 19;
+    ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
+  };
+  // Establish reusable native capacity before modeling another model's growth.
+  ASSERT_NO_FATAL_FAILURE(read_update_write(0));
+  // Change every source word so the held-allocation cycle must perform its
+  // real file read; replaying the already resident bytes cannot pass.
+  for (auto& value : expected) {
+    value ^= 0xA5F03219u;
+  }
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path_.path_view(),
+      iree_make_const_byte_span(expected.data(), expected.size() * 4),
+      iree_allocator_system()));
+
+  Ref<iree_hal_buffer_t> cold;
+  Ref<iree_hal_semaphore_t> allocated;
+  CreateSemaphore(allocated.out());
+  auto* allocated_handle = allocated.get();
+  uint64_t one = 1, two = 2;
+  {
+    iree::hal::amd::gpu::cts::NativeMemoryGate::Hold hold(&memory_gate_);
+    const auto request = iree_hal_make_pool_reservation_request(4096, 64);
+    IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[1], {},
+                                         {1, &allocated_handle, &one}, pool_, 1,
+                                         &request, cold.out()));
+    hold.WaitEntered();
+    ASSERT_NO_FATAL_FAILURE(read_update_write(3));
+    uint64_t observed = UINT64_MAX;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(allocated, &observed));
+    EXPECT_EQ(observed, 0u);
+  }
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(allocated, one, iree_infinite_timeout(), 0));
+  auto* cold_handle = cold.get();
+  IREE_ASSERT_OK(
+      iree_hal_queue_dealloca(queues_[1], {1, &allocated_handle, &one},
+                              {1, &allocated_handle, &two}, 1, &cold_handle));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(allocated, two, iree_infinite_timeout(), 0));
+}
+
 INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeFileTest,
+                         ::testing::Values(FileBacking::kPhysicalHost,
+                                           FileBacking::kVirtualHost,
+                                           FileBacking::kVirtualPrivate));
+
+INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeFileProgressTest,
                          ::testing::Values(FileBacking::kPhysicalHost,
                                            FileBacking::kVirtualHost,
                                            FileBacking::kVirtualPrivate));

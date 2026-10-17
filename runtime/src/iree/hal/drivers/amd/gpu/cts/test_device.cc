@@ -37,6 +37,68 @@ iree_status_t DeviceAllocator::Control(void* self_pointer,
   return status;
 }
 
+NativeMemoryGate::~NativeMemoryGate() {
+  if (active_ == this) {
+    active_ = nullptr;
+  }
+}
+
+iree_status_t NativeMemoryGate::CreateFabric(
+    iree_hal_amd_fabric_t** out_fabric) {
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      amdf_query_api(AMDF_ABI_VERSION_LATEST, AMDF_ABI_VERSION_LATEST,
+                     &native_api_),
+      "amdf_query_api"));
+  forwarding_api_ = *native_api_;
+  forwarding_api_.memory_create = CreateMemory;
+  active_ = this;
+  return iree_hal_amd_fabric_create(&forwarding_api_,
+                                    AMDF_NATIVE_LIFETIME_INSTANCE,
+                                    iree_allocator_system(), out_fabric);
+}
+
+amdf_status_t AMDF_CALL NativeMemoryGate::CreateMemory(
+    amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
+    amdf_memory_t** out_memory) {
+  auto* self = active_;
+  const bool held = self->hold_.exchange(false);
+  if (held) {
+    self->native_thread_ = std::this_thread::get_id();
+    self->entered_.release();
+    self->resume_.acquire();
+  }
+  const amdf_status_t status =
+      self->native_api_->memory_create(scope, info, out_memory);
+  if (held) {
+    self->returned_.release();
+  }
+  return status;
+}
+
+NativeMemoryGate::Hold::Hold(NativeMemoryGate* owner) : owner_(owner) {
+  owner_->hold_ = true;
+}
+
+NativeMemoryGate::Hold::~Hold() {
+  // An admission failure can leave the gate unused. A consumed gate must join
+  // its actual native call before any callback state is destroyed.
+  if (!owner_->hold_.exchange(false)) {
+    owner_->resume_.release();
+    owner_->returned_.acquire();
+  }
+}
+
+void NativeMemoryGate::Hold::WaitEntered() { owner_->entered_.acquire(); }
+
+void NativeMemoryGate::Hold::ReleaseAndHoldNext() {
+  // Arm the next native step before releasing the current one. A mapping's
+  // consumer can progress during the subsequent allocation.
+  owner_->hold_ = true;
+  owner_->resume_.release();
+  owner_->returned_.acquire();
+  owner_->entered_.acquire();
+}
+
 void GpuNativeTest::SetUp() {
   const amdf_api_t* api = nullptr;
   IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(

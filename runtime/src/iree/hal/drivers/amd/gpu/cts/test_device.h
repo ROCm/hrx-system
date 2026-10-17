@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <semaphore>
+#include <thread>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -33,6 +34,55 @@ struct DeviceAllocator {
   static iree_status_t Control(void* self_pointer,
                                iree_allocator_command_t command,
                                const void* params, void** inout_pointer);
+};
+
+// Holds the real allocation dependency while forwarding all native calls.
+// Fixtures run serially and join fabric/device borrowers before destroying
+// this table. The gate qualifies HAL ownership, not kernel lock isolation.
+class NativeMemoryGate {
+ public:
+  ~NativeMemoryGate();
+
+  iree_status_t CreateFabric(iree_hal_amd_fabric_t** out_fabric);
+
+  // Read only after Hold::WaitEntered has published the native caller.
+  std::thread::id native_thread() const { return native_thread_; }
+
+  class Hold {
+   public:
+    explicit Hold(NativeMemoryGate* owner);
+    ~Hold();
+
+    void WaitEntered();
+    void ReleaseAndHoldNext();
+
+   private:
+    // Borrowed gate outliving the native call and its explicit hold.
+    NativeMemoryGate* owner_;
+  };
+
+ private:
+  static amdf_status_t AMDF_CALL CreateMemory(
+      amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
+      amdf_memory_t** out_memory);
+
+  // Exact native API table, borrowed for all forwarded calls.
+  const amdf_api_t* native_api_ = nullptr;
+  // Same native API with an allocation-entry gate, never a substitute
+  // allocator.
+  amdf_api_t forwarding_api_ = {};
+  // Serial fixture identity required by the native ABI's context-free table.
+  inline static NativeMemoryGate* active_ = nullptr;
+  // One-shot hold consumed by the next native backing acquisition.
+  std::atomic<bool> hold_{false};
+  // Publishes entry and thread identity of the held native call.
+  std::binary_semaphore entered_{0};
+  // Permission to continue the native call after independent work completes.
+  std::binary_semaphore resume_{0};
+  // Joins the forwarding function's final fixture access.
+  std::binary_semaphore returned_{0};
+  // Observed allocation owner, read only after entered_.
+  std::thread::id native_thread_;
 };
 
 class GpuNativeTest : public ::testing::Test {
