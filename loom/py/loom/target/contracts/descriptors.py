@@ -29,10 +29,12 @@ from loom.target.low_descriptors import (
 def descriptor_by_key(descriptor_set: DescriptorSet, key: str) -> Descriptor:
     """Returns the descriptor with the stable key, failing on missing keys."""
 
-    for descriptor in descriptor_set.descriptors:
-        if descriptor.key == key:
-            return descriptor
-    raise ValueError(f"descriptor set '{descriptor_set.key}' has no descriptor '{key}'")
+    descriptor = descriptor_set.descriptor_by_key(key)
+    if descriptor is None:
+        raise ValueError(
+            f"descriptor set '{descriptor_set.key}' has no descriptor '{key}'"
+        )
+    return descriptor
 
 
 def descriptor_by_semantic_tag(
