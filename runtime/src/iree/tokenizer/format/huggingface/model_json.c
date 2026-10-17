@@ -6,6 +6,8 @@
 
 #include "iree/tokenizer/format/huggingface/model_json.h"
 
+#include <float.h>
+
 #include "iree/base/internal/json.h"
 #include "iree/tokenizer/model/bpe.h"
 #include "iree/tokenizer/model/unigram.h"
@@ -846,8 +848,13 @@ iree_status_t iree_tokenizer_huggingface_parse_wordpiece_model(
 
 // Context for Unigram vocab array enumeration.
 typedef struct iree_tokenizer_unigram_vocab_parse_context_t {
+  // Borrowed destination for original model vocabulary entries.
   iree_tokenizer_vocab_builder_t* builder;
+  // Smallest original model score, before added tokens extend the vocabulary.
+  double minimum_score;
+  // Scratch spelling for the current parsed token.
   char unescape_buffer[IREE_TOKENIZER_MAX_MERGE_TOKEN_LENGTH];
+  // First parse/build failure retained across enumeration cancellation.
   iree_status_t status;
 } iree_tokenizer_unigram_vocab_parse_context_t;
 
@@ -910,6 +917,10 @@ static iree_status_t iree_tokenizer_unigram_vocab_entry_visitor(
     return iree_status_from_code(IREE_STATUS_CANCELLED);
   }
 
+  if (score_value < context->minimum_score) {
+    context->minimum_score = score_value;
+  }
+
   // Add token with index as ID and parsed score.
   status = iree_tokenizer_vocab_builder_add_token_with_id(
       context->builder, (int32_t)index, token_text, score_value,
@@ -925,10 +936,10 @@ static iree_status_t iree_tokenizer_unigram_vocab_entry_visitor(
 // Parses Unigram vocab array into a vocab builder.
 static iree_status_t iree_tokenizer_parse_unigram_vocab_array(
     iree_string_view_t vocab_json, iree_tokenizer_vocab_builder_t* builder,
-    iree_allocator_t allocator) {
-  (void)allocator;  // Unused after removing dynamic buffer.
+    double* out_minimum_score) {
   iree_tokenizer_unigram_vocab_parse_context_t context = {
       .builder = builder,
+      .minimum_score = DBL_MAX,
       .unescape_buffer = {0},
       .status = iree_ok_status(),
   };
@@ -951,6 +962,9 @@ static iree_status_t iree_tokenizer_parse_unigram_vocab_array(
     return iree_ok_status();
   }
 
+  if (iree_status_is_ok(status)) {
+    *out_minimum_score = context.minimum_score;
+  }
   return status;
 }
 
@@ -1006,10 +1020,11 @@ iree_status_t iree_tokenizer_huggingface_parse_unigram_model(
   iree_status_t status =
       iree_tokenizer_vocab_builder_allocate(capacity, allocator, &builder);
 
+  double minimum_score = 0.0;
   // Parse vocab array into builder.
   if (iree_status_is_ok(status)) {
     status = iree_tokenizer_parse_unigram_vocab_array(vocab_json, builder,
-                                                      allocator);
+                                                      &minimum_score);
   }
 
   // Process added_tokens.
@@ -1044,12 +1059,8 @@ iree_status_t iree_tokenizer_huggingface_parse_unigram_model(
     }
   }
 
-  // Get UNK score from vocab (for model allocation).
-  double unk_score = -10.0;  // Default if no UNK.
-  if (iree_status_is_ok(status) &&
-      unk_token_id != IREE_TOKENIZER_TOKEN_ID_INVALID) {
-    unk_score = iree_tokenizer_vocab_token_score(vocab, unk_token_id);
-  }
+  // Character-level unknown transitions use the original model's minimum score.
+  double unk_score = minimum_score - 10.0;
 
   // Map flags.
   iree_tokenizer_unigram_flags_t flags = IREE_TOKENIZER_UNIGRAM_FLAG_NONE;

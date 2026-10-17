@@ -15,6 +15,7 @@
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/model.h"
 #include "iree/tokenizer/tokenizer.h"
+#include "iree/tokenizer/tokenizer_test_util.h"
 
 namespace {
 
@@ -128,7 +129,7 @@ TEST(TokenizerOffsetsTest, LogicalPositionsSurviveWrapAndReset) {
     IREE_ASSERT_OK(iree_tokenizer_encode_state_initialize(
         tokenizer, iree_make_byte_span(storage.data(), storage.size()),
         iree_make_byte_span(transform, sizeof(transform)),
-        {IREE_ARRAYSIZE(runs), runs}, flags, &state));
+        {IREE_ARRAYSIZE(runs), runs}, flags, iree_allocator_system(), &state));
     std::unique_ptr<iree_tokenizer_encode_state_t,
                     decltype(&iree_tokenizer_encode_state_deinitialize)>
         state_owner(state, iree_tokenizer_encode_state_deinitialize);
@@ -157,8 +158,8 @@ TEST(TokenizerOffsetsTest, ModelRetainsOffsetsAcrossBufferRelocation) {
     std::vector<uint8_t> storage(
         iree_tokenizer_model_state_size(builder.model));
     iree_tokenizer_model_state_t* state = nullptr;
-    IREE_ASSERT_OK(iree_tokenizer_model_state_initialize(
-        builder.model, storage.data(), &state));
+    iree_tokenizer_model_state_initialize(builder.model, storage.data(),
+                                          iree_allocator_system(), &state);
     std::unique_ptr<iree_tokenizer_model_state_t,
                     decltype(&iree_tokenizer_model_state_deinitialize)>
         state_owner(state, iree_tokenizer_model_state_deinitialize);
@@ -183,6 +184,46 @@ TEST(TokenizerOffsetsTest, ModelRetainsOffsetsAcrossBufferRelocation) {
       EXPECT_EQ(consumed, i == 1 ? 1u : 0u);
     }
   }
+}
+
+TEST(TokenizerOffsetsTest, UnresolvedUnigramPathOutlivesTinyRing) {
+  auto json = IREE_SV(R"({"model":{"type":"Unigram","unk_id":0,
+    "byte_fallback":false,"vocab":[["<unk>",0],["a",-1],["aa",-1.5]]}})");
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+      json, iree_allocator_system(), &tokenizer));
+  std::unique_ptr<iree_tokenizer_t, decltype(&iree_tokenizer_free)> owner(
+      tokenizer, iree_tokenizer_free);
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto storage, iree::tokenizer::testing::EncodeStateStorage::Allocate(
+                        tokenizer, 16, 0, IREE_TOKENIZER_ENCODE_FLAG_NONE));
+  std::string text(257, 'a');
+  size_t position = 0, tokens = 0;
+  int32_t token = -1;
+  iree_tokenizer_offset_t offset = {};
+  auto output = iree_tokenizer_make_token_output(&token, &offset, nullptr, 1);
+  while (position < text.size()) {
+    size_t consumed = 0, count = 0;
+    IREE_ASSERT_OK(iree_tokenizer_encode_state_feed(
+        storage.state(),
+        iree_make_string_view(text.data() + position, text.size() - position),
+        output, &consumed, &count));
+    ASSERT_GT(consumed, 0u);
+    EXPECT_EQ(count, 0u);
+    position += consumed;
+  }
+  do {
+    size_t count = 0;
+    IREE_ASSERT_OK(
+        iree_tokenizer_encode_state_finalize(storage.state(), output, &count));
+    if (count) {
+      EXPECT_EQ(token, tokens == 0 ? 1 : 2);
+      EXPECT_EQ(offset.start, tokens == 0 ? 0 : tokens * 2 - 1);
+      EXPECT_EQ(offset.end, tokens * 2 + 1);
+      ++tokens;
+    }
+  } while (iree_tokenizer_encode_state_has_pending(storage.state()));
+  EXPECT_EQ(tokens, 129u);
 }
 
 }  // namespace

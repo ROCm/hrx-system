@@ -64,7 +64,7 @@ std::vector<std::vector<iree_tokenizer_token_id_t>> EncodeBatch(
     IREE_CHECK_OK(iree_tokenizer_encode_batch(
         tokenizer, items.data(), 0, IREE_TOKENIZER_ENCODE_FLAG_NONE,
         iree_byte_span_empty(), iree_byte_span_empty(),
-        iree_tokenizer_offset_run_list_empty()));
+        iree_tokenizer_offset_run_list_empty(), iree_allocator_system()));
     return {};
   }
 
@@ -100,7 +100,7 @@ std::vector<std::vector<iree_tokenizer_token_id_t>> EncodeBatch(
       tokenizer, items.data(), items.size(), IREE_TOKENIZER_ENCODE_FLAG_NONE,
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
-      iree_tokenizer_offset_run_list_empty()));
+      iree_tokenizer_offset_run_list_empty(), iree_allocator_system()));
 
   // Resize to actual token counts.
   for (size_t i = 0; i < texts.size(); ++i) {
@@ -498,7 +498,8 @@ TEST_F(TokenizerUTF8Test, MultiByteCharacterSplitAcrossChunks) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   // Feed "café" in two chunks, splitting in the middle of the é (0xC3 0xA9).
   const char* full_text = "café";  // 5 bytes total: c a f 0xC3 0xA9
@@ -577,7 +578,8 @@ TEST_F(TokenizerUTF8Test, MultiCallFinalizeWithSmallCapacity) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   // Feed input but don't collect tokens during feed.
   const char* text = "a b c";
@@ -668,7 +670,8 @@ TEST_F(TokenizerUTF8Test, TransformBufferExhaustionMakesProgress) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   const char* text = "a b c a b c a b c";
   iree_string_view_t chunk = iree_make_cstring_view(text);
@@ -937,7 +940,8 @@ TEST_F(TokenizerStreamingTest, CJKTextWithSmallBuffer) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(1024);
   iree_host_size_t total_tokens = 0;
@@ -1026,7 +1030,8 @@ TEST_F(TokenizerStreamingTest, LongLetterRunWithoutPunctuation) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(4096);
   iree_host_size_t total_tokens = 0;
@@ -1128,7 +1133,8 @@ TEST_F(TokenizerStreamingTest, LargeCJKTextWithCappedBuffer) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(cjk_text.size());
   iree_host_size_t total_tokens = 0;
@@ -1289,7 +1295,8 @@ TEST_F(TokenizerStreamingTest, SmallBufferDataDependentChunks) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(1024);
   iree_host_size_t total_tokens = 0;
@@ -1709,7 +1716,8 @@ iree::StatusOr<std::vector<iree_tokenizer_token_id_t>> EncodeWithBufferSize(
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(text.size() * 2 + 64);
   iree_host_size_t total_tokens = 0;
@@ -2013,7 +2021,8 @@ TEST_F(TokenizerPartialSegmentTest, OutputBufferExhaustion) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> all_tokens;
   iree_tokenizer_token_id_t batch[10];
@@ -2152,7 +2161,8 @@ TEST_F(TokenizerPartialSegmentTest, SingleByteChunkedFeed) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(200);
   iree_host_size_t total_tokens = 0;
@@ -2810,7 +2820,8 @@ TEST_F(TokenizerSplitTrailingTextTest, StreamingNoMatchLargeInput) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(512);
   iree_host_size_t total_tokens = 0;
@@ -2905,7 +2916,8 @@ TEST_F(TokenizerSpecialTokenStreamingTest, PartialMatchDrainsCorrectBytes) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   // Input: "<|xyz" - starts matching "<|endoftext|>" but fails at 'x'.
   // Expected tokens: '<' (60), '|' (124), 'x' (120), 'y' (121), 'z' (122)
@@ -3011,7 +3023,8 @@ TEST_F(TokenizerSpecialTokenStreamingTest, LongSpecialTokenNoOverflow) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   // Input: long token prefix (98 bytes) + "yz" -> partial match fails.
   // This exercises the drain path with >64 bytes.
@@ -3103,7 +3116,8 @@ TEST_F(TokenizerSpecialTokenStreamingTest, FinalizeDoesNotSilentlyDropPartial) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   // Feed input that creates a partial special token match ("<|end").
   // The partial bytes will need to be written during finalize.
@@ -3419,7 +3433,8 @@ TEST_F(TokenizerStripNormalizerSpecialTokenTest,
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(64);
   iree_host_size_t total_tokens = 0;
@@ -3704,7 +3719,8 @@ TEST_F(TokenizerNFCNormalizerSpecialTokenTest,
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(64);
   iree_host_size_t total_tokens = 0;
@@ -3806,7 +3822,8 @@ TEST_F(TokenizerNFCNormalizerSpecialTokenTest,
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> tokens(64);
   iree_host_size_t total_tokens = 0;
@@ -4786,7 +4803,8 @@ TEST_F(ByteLevelBPEEncodeTest, StreamingByteLevel) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   const char* text = "hello";
   std::vector<iree_tokenizer_token_id_t> streaming_tokens(64);
@@ -5083,7 +5101,8 @@ TEST_F(PostNormSpecialTokenTest, StreamingPostNorm) {
       iree_make_byte_span(streaming_transform_buffer.data(),
                           streaming_transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   std::vector<iree_tokenizer_token_id_t> streaming_tokens(256);
   iree_host_size_t total_tokens = 0;
@@ -5936,7 +5955,8 @@ TEST_F(TokenizerAlbertTest, SmallBufferRingWrap) {
       iree_make_byte_span(state_storage.data(), state_storage.size()),
       iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
       iree_tokenizer_offset_run_list_empty(),
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, &state));
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START, iree_allocator_system(),
+      &state));
 
   // Feed input and collect tokens.
   const char* input = "a b a b a b";

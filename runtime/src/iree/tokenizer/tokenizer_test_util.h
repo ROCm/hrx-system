@@ -281,7 +281,7 @@ class EncodeStateStorage {
         iree_make_byte_span(storage.storage_.data(), storage.storage_.size()),
         iree_make_byte_span(storage.transform_buffer_.data(),
                             storage.transform_buffer_.size()),
-        offset_runs, flags, &storage.state_));
+        offset_runs, flags, iree_allocator_system(), &storage.state_));
 
     return storage;
   }
