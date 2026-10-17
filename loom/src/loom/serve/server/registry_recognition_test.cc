@@ -202,7 +202,9 @@ class RegistryRecognitionTest : public ::testing::Test {
   }
 
   iree_status_t Open(loom_serve_recognition_test_input_t* input) {
-    const loom_serve_recognition_request_t request = {};
+    const loom_serve_recognition_request_t request = {
+        .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+    };
     loom_serve_recognition_stream_t* stream = nullptr;
     iree_status_t status = loom_serve_registry_try_open_recognition(
         registry_, iree_make_cstring_view(name_.c_str()), &request, &stream);
@@ -349,8 +351,10 @@ TEST_F(RegistryRecognitionTest, NativeDrainAndHttpPeerPreserveFinalDocument) {
   EXPECT_EQ(loom_serve_registry_snapshot(Model()).active_requests, 1u);
   ASSERT_NO_FATAL_FAILURE(AwaitRevision(&input));
   const auto* first = loom_serve_recognition_stream_peek(input.stream.get());
-  ASSERT_FALSE(first->flags & LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL);
-  const std::string held(first->text.data, first->text.size);
+  ASSERT_FALSE(first->transcript.flags &
+               LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL);
+  const std::string held(first->transcript.text.data,
+                         first->transcript.text.size);
   ASSERT_NO_FATAL_FAILURE(StartHttp());
   EXPECT_EQ(loom_serve_registry_snapshot(Model()).queued_requests, 1u);
   EXPECT_EQ(loom_serve_registry_snapshot(Model()).active_requests, 1u);
@@ -368,7 +372,9 @@ TEST_F(RegistryRecognitionTest, NativeDrainAndHttpPeerPreserveFinalDocument) {
   IREE_ASSERT_OK(iree_status_clone(read_status_));
   ASSERT_EQ(response_.find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(loom_serve_recognition_stream_peek(input.stream.get()), first);
-  EXPECT_EQ(std::string(first->text.data, first->text.size), held);
+  EXPECT_EQ(
+      std::string(first->transcript.text.data, first->transcript.text.size),
+      held);
   const uint64_t incarnation = Model()->incarnation;
   IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_DRAIN));
   EXPECT_EQ(loom_serve_registry_snapshot(Model()).active_requests, 1u);
@@ -440,7 +446,10 @@ TEST_F(RegistryRecognitionTest, AbortRetiresNativeLedgerAndRetainsStatus) {
 
 TEST_F(RegistryRecognitionTest, InvalidOptionsLeaveAdmissionAvailable) {
   ASSERT_NO_FATAL_FAILURE(Prepare());
-  const loom_serve_recognition_request_t request = {.temperature = -1.0f};
+  const loom_serve_recognition_request_t request = {
+      .temperature = -1.0f,
+      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+  };
   loom_serve_recognition_stream_t* stream = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,

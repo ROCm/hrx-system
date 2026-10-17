@@ -344,6 +344,8 @@ A recognition package accepts a continuing sequence of normalized F32 PCM frames
 and explicit end-of-input. Input packet boundaries do not pad audio or finalize
 an utterance. Each request retains its own sample clock, convolution history,
 encoder state, decoder cache and transcript revisions as batch membership changes.
+A source can also publish speech activity probabilities, either alone or together
+with transcripts. Native callers explicitly select supported output types.
 
 The [recognition model declaration](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/recognition/model.h)
 owns entry signatures and binary layouts. Cold preparation declares stages,
@@ -352,19 +354,33 @@ resident rows and additive batch capacity. Warm source operations are:
 
 | Operation | Source-owned result |
 | --- | --- |
-| `prepare_request` | Validate language, prompt and temperature; retain independent request state and immutable conditioning. |
+| `prepare_request` | Validate language, prompt and temperature; receive the selected output types and retain independent request state and immutable conditioning. |
 | `prepare_work` | Inspect a bounded PCM snapshot with its absolute sample position and EOF flag; offer compatible numerical work or zero units while awaiting input. |
 | `prepare_batch` | Pack ready work using explicit resident-row and byte-range records, retaining original cohort order. |
 | `generate` | Submit one source-selected numerical phase without waiting for device completion. |
-| `complete` | Acknowledge consumed input and optionally publish a transcript revision, independently of request completion. |
+| `complete` | Acknowledge consumed input and publish a bounded ordered packet of typed events, independently of request completion. |
 
 Acknowledgement returns input credit only after actual execution retirement.
 Source code owns any PCM needed beyond `prepare_work`; the snapshot itself is
 borrowed only during that call. Every accepted cohort member is collected,
 including cancelled requests, before shared feedback or request rows can be
-reused. A stalled transcript consumer excludes only its own request from new
+reused. A stalled event consumer excludes only its own request from new
 work. Source-defined compatibility permits requests at different sample or token
 positions to share a batch when their next operations support it.
+
+Cold preparation declares supported output types, maximum packet bytes, and
+maximum events per completion. A request selects a nonempty subset; an unrequested
+event is a source error. The completion buffer and its produced byte extent are
+separate, allowing the source to reuse output capacity across different counts.
+Native collection copies the packet into reusable request-owned storage before
+another source call can overwrite it. Events remain independently observable,
+even when several revise the same transcript segment. Consuming the entire packet
+returns that request's output credit. Final events can outlive model removal.
+
+An activity event covers a positive interval of actual input and supplies a finite
+speech probability in `[0,1]`. Its coverage is not an exact onset, offset, or word
+boundary. Turn thresholds and hangover belong to the caller's policy; source code
+owns lookahead, numerical state, and EOF handling.
 
 Each transcript segment has a stable request-local identity, increasing revision,
 covered sample interval and replacement UTF-8 text. Finalizing a segment makes
@@ -385,12 +401,14 @@ batch membership, and accepted decode work retains that state until retirement.
 Packet and worker boundaries preserve filter history. Explicit input EOF flushes
 lookahead without extending the recording's duration.
 
-The adapter consumes revisions and returns the completed document. Typed
-consumers can apply revisions as they arrive and independently supply more PCM.
+The adapter selects transcript output, consumes revisions, and returns the
+completed document. Typed consumers can apply revisions as they arrive and
+independently supply more PCM.
 Qualify a model with isolated reference transcripts, staggered arrivals,
 different recording lengths, a stalled reader,
-accepted-work cancellation and row reuse. Compare text and sample clocks across
-changing cohorts, including a final partial model frame.
+accepted-work cancellation and row reuse. Compound-output sources also preserve
+event ordering and earlier revisions within a single packet. Compare text and
+sample clocks across changing cohorts, including a final partial model frame.
 
 ## Make parameters and temporaries visible
 

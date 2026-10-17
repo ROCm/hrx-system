@@ -57,12 +57,12 @@ The shared foundation consists of:
   and FLAC conversion with independent codec and resampler state. The caller
   owns workers, decoded-frame credit, and the encoded bytes' lifetime.
 - [`service/recognition`](service/recognition/README.md): continuing PCM input,
-  source-defined numerical batches, and revisable transcript segments. Its
-  [service](service/recognition/service.h) shares one request ledger between
-  native conversations and finite HTTP uploads. Bounded decoding runs on the
+  source-defined numerical batches, revisable transcript segments, and typed
+  activity observations. Its [service](service/recognition/service.h) shares one
+  request ledger between native conversations and finite HTTP uploads. Bounded decoding runs on the
   shared CPU executor. [Stream handles](service/recognition/stream.h) retain
-  final documents and failures independently of model removal; input rings and
-  numerical slots retire as soon as accepted work permits.
+  final event packets, documents, and failures independently of model removal;
+  input rings and numerical slots retire as soon as accepted work permits.
 - [`service/speech`](service/speech/README.md): incremental waveform output with
   separate conditioning and request state, bounded PCM delivery, and explicit
   work/feedback retirement on EOF, disconnect and shutdown.
