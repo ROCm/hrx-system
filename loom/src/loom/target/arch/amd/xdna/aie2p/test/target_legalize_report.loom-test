@@ -278,7 +278,7 @@ func.def @float_partial_reduction_family(%values: vector<2x2xf32>, %init: vector
 
 // ----
 CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=6 scalarized=1 target_rewritten=6 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=6 *
-CHECK: COMPILE-REPORT: target_legalization[*] function=float_partial_reduction_family source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=true * created_ops=32 erased_ops=10
+CHECK: COMPILE-REPORT: target_legalization[*] function=float_partial_reduction_family source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=true * created_ops=24 erased_ops=10
 CHECK: COMPILE-REPORT: target_legalization[*] function=float_partial_reduction_family source_op=vector.reduce.axes * action=rewritten * legalizer=aie2p strategy=target * scalarized=false * created_ops=5 erased_ops=1
 
 // ====

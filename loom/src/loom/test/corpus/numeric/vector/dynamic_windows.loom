@@ -386,3 +386,122 @@ check.scenario @dynamic_register_window_values {
   }
   check.return
 }
+
+// The write after the tile load requires an immutable snapshot. Runtime
+// windows cross row boundaries, and their concatenation has an interior
+// partial register. Output guards and the changed input are both observable.
+func.def @reshaped_byte_windows(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 8)] : index
+  %c5 = index.constant 5 : index
+  %tail_position = index.add %position, %c5 : index
+  %base = index.constant 0 : offset
+  %tile_view = buffer.view %input[%base] : buffer -> view<4x4xi8>
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<10xi8>
+  %tile = vector.load %tile_view[0, 0] : view<4x4xi8> -> vector<4x4xi8>
+  %changed = scalar.constant 91 : i8
+  view.store %changed, %input_view[0] : i8, view<16xi8>
+  %flat = vector.bitcast %tile : vector<4x4xi8> to vector<16xi8>
+  %head = vector.slice %flat[%position] : vector<16xi8> -> vector<3xi8>
+  %tail = vector.slice %flat[%tail_position] : vector<16xi8> -> vector<3xi8>
+  %joined = vector.concat<0> %head, %tail : vector<3xi8>, vector<3xi8> -> vector<6xi8>
+  vector.store %joined, %output_view[2] : vector<6xi8>, view<10xi8>
+  func.return
+}
+
+func.def @reshaped_byte_windows_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<10xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 6 : index
+  %step = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c2 = index.constant 2 : index
+  %c0 = index.constant 0 : index
+  scf.for %i = [%begin to %end step %step] {
+    %tail = index.cmp sge, %i, %c3 : index
+    %gap = scf.select %tail, %c2, %c0 : index
+    %relative = index.add %i, %gap : index
+    %source_index = index.add %position, %relative : index
+    %destination_index = index.add %i, %c2 : index
+    %value = view.load %input_view[%source_index] : view<16xi8> -> i8
+    view.store %value, %output_view[%destination_index] : i8, view<10xi8>
+  }
+  %changed = scalar.constant 91 : i8
+  view.store %changed, %input_view[0] : i8, view<16xi8>
+  func.return
+}
+
+check.scenario @reshaped_byte_window_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(17) : tensor<16xi8>
+    %output = check.generate.fill value(-85) : tensor<10xi8>
+    check.compare<@reshaped_byte_windows, @reshaped_byte_windows_oracle>(%trial, %input, %output) : (index, tensor<16xi8>, tensor<10xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10xi8>
+    }
+  }
+  check.return
+}
+
+// A reshape also changes the lane interpretation. Loading raw integer bits
+// before the write and reinterpreting through f16 preserves signed zero and
+// NaN payloads without floating-point arithmetic.
+func.def @reshaped_half_windows(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 8)] : index
+  %c5 = index.constant 5 : index
+  %tail_position = index.add %position, %c5 : index
+  %base = index.constant 0 : offset
+  %tile_view = buffer.view %input[%base] : buffer -> view<4x4xi16>
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi16>
+  %output_view = buffer.view %output[%base] : buffer -> view<10xi16>
+  %tile = vector.load %tile_view[0, 0] : view<4x4xi16> -> vector<4x4xi16>
+  %changed = scalar.constant 91 : i16
+  view.store %changed, %input_view[0] : i16, view<16xi16>
+  %flat = vector.bitcast %tile : vector<4x4xi16> to vector<16xf16>
+  %head = vector.slice %flat[%position] : vector<16xf16> -> vector<3xf16>
+  %tail = vector.slice %flat[%tail_position] : vector<16xf16> -> vector<3xf16>
+  %joined = vector.concat<0> %head, %tail : vector<3xf16>, vector<3xf16> -> vector<6xf16>
+  %bits = vector.bitcast %joined : vector<6xf16> to vector<6xi16>
+  vector.store %bits, %output_view[2] : vector<6xi16>, view<10xi16>
+  func.return
+}
+
+func.def @reshaped_half_windows_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %position = index.assume %trial [range(%trial, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi16>
+  %output_view = buffer.view %output[%base] : buffer -> view<10xi16>
+  %begin = index.constant 0 : index
+  %end = index.constant 6 : index
+  %step = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c2 = index.constant 2 : index
+  %c0 = index.constant 0 : index
+  scf.for %i = [%begin to %end step %step] {
+    %tail = index.cmp sge, %i, %c3 : index
+    %gap = scf.select %tail, %c2, %c0 : index
+    %relative = index.add %i, %gap : index
+    %source_index = index.add %position, %relative : index
+    %destination_index = index.add %i, %c2 : index
+    %value = view.load %input_view[%source_index] : view<16xi16> -> i16
+    view.store %value, %output_view[%destination_index] : i16, view<10xi16>
+  }
+  %changed = scalar.constant 91 : i16
+  view.store %changed, %input_view[0] : i16, view<16xi16>
+  func.return
+}
+
+check.scenario @reshaped_half_window_values {
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(4369) : tensor<16xi16>
+    %output = check.generate.fill value(23130) : tensor<10xi16>
+    check.compare<@reshaped_half_windows, @reshaped_half_windows_oracle>(%trial, %input, %output) : (index, tensor<16xi16>, tensor<10xi16>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi16>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10xi16>
+    }
+  }
+  check.return
+}
