@@ -148,6 +148,27 @@ endif()
 if(AMDF_BUILD)
 iree_cc_test(
   NAME
+    allocation_queue_test
+  SRCS
+    "allocation_queue_test.cc"
+  DEPS
+    ::memory
+    ::slab_provider
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::memory::slab_provider
+    iree::hal::testing::mock_device
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
     slab_provider_test
   SRCS
     "slab_provider_test.cc"

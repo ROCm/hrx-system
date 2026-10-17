@@ -119,6 +119,22 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
+    name = "allocation_queue_test",
+    srcs = ["allocation_queue_test.cc"],
+    deps = [
+        ":memory",
+        ":slab_provider",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:slab_provider",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "slab_provider_test",
     srcs = ["slab_provider_test.cc"],
     deps = [
