@@ -49,6 +49,7 @@ from loom.gen.target.contracts.lower_rules import (
     diagnostic_descriptor_names,
     generate_lower_rule_set,
     generate_lower_rule_set_from_compiled,
+    required_primary_descriptor_feature_class,
 )
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
@@ -456,6 +457,14 @@ def test_primary_descriptor_feature_classes_intern_masks() -> None:
     assert "LOOM_LOW_LOWER_RULE_SET_FLAG_DYNAMIC_PRIMARY_DESCRIPTOR_FEATURES" in generated.source
     assert "LOOM_LOW_LOWER_RULE_PRIMARY_EMIT(0, 255)" in generated.source
 
+    assert required_primary_descriptor_feature_class(table) == 0
+
+    uniform_table = replace(
+        table,
+        rules=(table.rules[0], replace(table.rules[1], emit_start=2)),
+    )
+    assert required_primary_descriptor_feature_class(uniform_table) == 1
+
 
 def test_primary_descriptor_feature_classes_ignore_featureless_wide_primary() -> None:
     descriptor_emit = LowerEmit(
@@ -482,6 +491,7 @@ def test_primary_descriptor_feature_classes_ignore_featureless_wide_primary() ->
     assert masks == ()
     assert classes == (0xFF,)
     assert not has_dynamic_class
+    assert required_primary_descriptor_feature_class(table) == 0
 
 
 def test_validate_c_table_shape_accepts_structural_emit_without_primary() -> None:

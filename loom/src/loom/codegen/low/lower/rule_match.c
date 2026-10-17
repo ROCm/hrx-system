@@ -158,7 +158,7 @@ static bool loom_low_lower_rule_descriptor_features_available(
   return true;
 }
 
-static bool loom_low_lower_rule_primary_feature_class_available(
+bool loom_low_lower_rule_primary_feature_class_available(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, uint8_t feature_class) {
   if (feature_class == 0) {
