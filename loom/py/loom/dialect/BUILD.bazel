@@ -27,6 +27,7 @@ iree_py_library(
         "//loom/py/loom/dialect/group",
         "//loom/py/loom/dialect/hal",
         "//loom/py/loom/dialect/index",
+        "//loom/py/loom/dialect/input",
         "//loom/py/loom/dialect/kernel",
         "//loom/py/loom/dialect/low",
         "//loom/py/loom/dialect/pass_",
