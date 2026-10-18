@@ -160,7 +160,7 @@ loom_test(
     benchmark_smoke = False,
     configs = {
         "pocket.batch_capacity": "4",
-        "pocket.request_capacity": "6",
+        "pocket.request_capacity": "16",
         "pocket.threads": "128",
     },
     execution_profiles = [

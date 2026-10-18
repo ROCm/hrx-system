@@ -4,40 +4,464 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Projection reduces each packed row independently. Shared BF16 weights and
-// biases have zero stride; each output element has one writer.
-template.decl @pocket.element() -> (index)
-
-template.decl @pocket.batch.member(%membership: buffer) -> (i1, index, index)
-
-template.decl pure @pocket.batch.origin(%row: index, %offset: offset, %stride: offset) -> (offset)
-
-template.decl @pocket.projection(%wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %row: index, %time: index, %input: buffer, %weight: buffer, %bias: buffer, %input_origin: offset, %weight_origin: offset, %bias_origin: offset) -> (f32)
-
+// Each 128-workitem group owns sixteen output rows and four packed/time
+// positions. Eight channel lanes per output retain four accumulators across
+// 128-channel input panels; zero-stride weights are reused across positions.
+// Packed activations and strided parameters remain independent. The first
+// channel lane reduces its eight partials and is the sole output writer.
 template.decl @pocket.batch.project(%membership: buffer, %wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset)
 
 template.def<@pocket.batch.project> device @pocket_batch_project(%membership: buffer, %wide: i1, %biased: i1, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
-  %active, %packed, %resident = template.apply<@pocket.batch.member>(%membership) : (buffer) -> (i1, index, index)
+  %time_count = index.assume %times [ge(%times, 1)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %panel = index.constant 128 : index
+  %origin = index.constant 0 : offset
+  %batch = config.get @pocket.batch_capacity : index
+  %map_length = index.add %batch, %one : index
+  %map = buffer.view %membership[%origin] : buffer -> view<[%map_length]xi32>
+  %count32 = view.load %map[0] : view<[%map_length]xi32> -> i32
+  %count_value = index.cast %count32 : i32 to index
+  %count = index.assume %count_value [ge(%count_value, 0), le(%count_value, %batch)] : index
+  %positions = index.mul %count, %time_count : index
+  %position_group = kernel.workgroup.id<y> : index
+  %position_base = index.mul %position_group, %four : index
+  %active = index.cmp ult, %position_base, %positions : index
   scf.if %active {
-    %element = template.apply<@pocket.element>() : () -> (index)
-    %live = index.cmp ult, %element, %outputs : index
-    scf.if %live {
-      %row = index.assume %element [ge(%element, 0), lt(%element, %outputs)] : index
-      %time_value = kernel.workgroup.id<y> : index
-      %time = index.assume %time_value [ge(%time_value, 0), lt(%time_value, %times)] : index
-      %input_origin = template.apply<@pocket.batch.origin>(%packed, %input_offset, %input_stride) pure : (index, offset, offset) -> (offset)
-      %weight_origin = template.apply<@pocket.batch.origin>(%packed, %weight_offset, %weight_stride) pure : (index, offset, offset) -> (offset)
-      %bias_origin = template.apply<@pocket.batch.origin>(%packed, %bias_offset, %bias_stride) pure : (index, offset, offset) -> (offset)
-      %output_origin = template.apply<@pocket.batch.origin>(%packed, %output_offset, %output_stride) pure : (index, offset, offset) -> (offset)
-      %result = template.apply<@pocket.projection>(%wide, %biased, %inputs, %outputs, %times, %row, %time, %input, %weight, %bias, %input_origin, %weight_origin, %bias_origin) : (i1, i1, index, index, index, index, index, buffer, buffer, buffer, offset, offset, offset) -> (f32)
-      %view = buffer.view %output[%output_origin] : buffer -> view<[%outputs]x[%times]xf32>
-      view.store %result, %view[%row, %time] : f32, view<[%outputs]x[%times]xf32>
+    %lane = kernel.workitem.id<x> : index
+    %output_group = kernel.workgroup.id<x> : index
+    %output_base = index.mul %output_group, %sixteen : index
+    %output_local = index.div %lane, %eight : index
+    %channel_lane = index.rem %lane, %eight : index
+    %output_row = index.add %output_base, %output_local : index
+    %output_live = index.cmp ult, %output_row, %outputs : index
+    %shared = index.cmp eq, %weight_stride, %origin : offset
+    // A padded column separates adjacent channel rows in the shared bank.
+    // Once the final input panel retires, the same allocation holds partials.
+    %stage_bytes = index.constant 4096 : offset
+    %stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+    %stage_view = buffer.view %stage[%origin] : buffer -> view<128x5xf32>
+    %zero32 = scalar.constant 0.0 : f32
+    %column0 = index.constant 0 : index
+    %position0 = index.add %position_base, %column0 : index
+    %live0 = index.cmp ult, %position0, %positions : index
+    %packed0 = index.div %position0, %time_count : index
+    %time0 = index.rem %position0, %time_count : index
+    %weight_relative0 = index.scale %packed0, %weight_stride : index, offset -> offset
+    %weight_origin0 = index.add %weight_offset, %weight_relative0 : offset
+    %column1 = index.constant 1 : index
+    %position1 = index.add %position_base, %column1 : index
+    %live1 = index.cmp ult, %position1, %positions : index
+    %packed1 = index.div %position1, %time_count : index
+    %time1 = index.rem %position1, %time_count : index
+    %weight_relative1 = index.scale %packed1, %weight_stride : index, offset -> offset
+    %weight_origin1 = index.add %weight_offset, %weight_relative1 : offset
+    %column2 = index.constant 2 : index
+    %position2 = index.add %position_base, %column2 : index
+    %live2 = index.cmp ult, %position2, %positions : index
+    %packed2 = index.div %position2, %time_count : index
+    %time2 = index.rem %position2, %time_count : index
+    %weight_relative2 = index.scale %packed2, %weight_stride : index, offset -> offset
+    %weight_origin2 = index.add %weight_offset, %weight_relative2 : offset
+    %column3 = index.constant 3 : index
+    %position3 = index.add %position_base, %column3 : index
+    %live3 = index.cmp ult, %position3, %positions : index
+    %packed3 = index.div %position3, %time_count : index
+    %time3 = index.rem %position3, %time_count : index
+    %weight_relative3 = index.scale %packed3, %weight_stride : index, offset -> offset
+    %weight_origin3 = index.add %weight_offset, %weight_relative3 : offset
+    %result0, %result1, %result2, %result3 = scf.if %wide -> (f32, f32, f32, f32) {
+      %initial = scalar.constant 0.0 : f64
+      %total0, %total1, %total2, %total3 = scf.for %begin = [%zero to %inputs step %panel](%acc0 = %initial : f64, %acc1 = %initial : f64, %acc2 = %initial : f64, %acc3 = %initial : f64) -> (f64, f64, f64, f64) {
+        scf.for %slot = [%zero to %four step %one] unroll schedule(linear) {
+          %element = index.madd %slot, %panel, %lane : index
+          %stage_channel = index.div %element, %four : index
+          %stage_column = index.rem %element, %four : index
+          %channel = index.add %begin, %stage_channel : index
+          %position = index.add %position_base, %stage_column : index
+          %channel_live = index.cmp ult, %channel, %inputs : index
+          %position_live = index.cmp ult, %position, %positions : index
+          %load_live = scalar.andi %channel_live, %position_live : i1
+          %value = scf.if %load_live -> (f32) {
+            %packed = index.div %position, %time_count : index
+            %time_value = index.rem %position, %time_count : index
+            %time = index.assume %time_value [ge(%time_value, 0), lt(%time_value, %time_count)] : index
+            %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+            %relative = index.scale %packed, %input_stride : index, offset -> offset
+            %input_origin = index.add %input_offset, %relative : offset
+            %view = buffer.view %input[%input_origin] : buffer -> view<[%inputs]x[%time_count]xf32>
+            %loaded = view.load %view[%bounded_channel, %time] : view<[%inputs]x[%time_count]xf32> -> f32
+            scf.yield %loaded : f32
+          } else {
+            scf.yield %zero32 : f32
+          }
+          view.store %value, %stage_view[%stage_channel, %stage_column] : f32, view<128x5xf32>
+        }
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        %next0, %next1, %next2, %next3 = scf.for %round = [%zero to %sixteen step %one](%sum0 = %acc0 : f64, %sum1 = %acc1 : f64, %sum2 = %acc2 : f64, %sum3 = %acc3 : f64) -> (f64, f64, f64, f64) {
+          %stage_channel = index.madd %round, %eight, %channel_lane : index
+          %channel = index.add %begin, %stage_channel : index
+          %channel_live = index.cmp ult, %channel, %inputs : index
+          %weight_live = scalar.andi %channel_live, %output_live : i1
+          %weight0 = scf.if %weight_live -> (f32) {
+            %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+            %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+            %view = buffer.view %weight[%weight_origin0] : buffer -> view<[%outputs]x[%inputs]xbf16>
+            %stored = view.load %view[%row, %bounded_channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+            %value = scalar.extf %stored : bf16 to f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %zero32 : f32
+          }
+          %value0 = scf.if %live0 -> (f64) {
+            %input0 = view.load %stage_view[%stage_channel, %column0] : view<128x5xf32> -> f32
+            %wide_input0 = scalar.extf %input0 : f32 to f64
+            %wide_weight0 = scalar.extf %weight0 : f32 to f64
+            %value = scalar.fmaf %wide_input0, %wide_weight0, %sum0 : f64
+            scf.yield %value : f64
+          } else {
+            scf.yield %sum0 : f64
+          }
+          %value1 = scf.if %live1 -> (f64) {
+            %weight1 = scf.if %shared -> (f32) {
+              scf.yield %weight0 : f32
+            } else {
+              %value = scf.if %weight_live -> (f32) {
+                %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+                %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+                %view = buffer.view %weight[%weight_origin1] : buffer -> view<[%outputs]x[%inputs]xbf16>
+                %stored = view.load %view[%row, %bounded_channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+                %extended = scalar.extf %stored : bf16 to f32
+                scf.yield %extended : f32
+              } else {
+                scf.yield %zero32 : f32
+              }
+              scf.yield %value : f32
+            }
+            %input1 = view.load %stage_view[%stage_channel, %column1] : view<128x5xf32> -> f32
+            %wide_input1 = scalar.extf %input1 : f32 to f64
+            %wide_weight1 = scalar.extf %weight1 : f32 to f64
+            %value = scalar.fmaf %wide_input1, %wide_weight1, %sum1 : f64
+            scf.yield %value : f64
+          } else {
+            scf.yield %sum1 : f64
+          }
+          %value2 = scf.if %live2 -> (f64) {
+            %weight2 = scf.if %shared -> (f32) {
+              scf.yield %weight0 : f32
+            } else {
+              %value = scf.if %weight_live -> (f32) {
+                %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+                %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+                %view = buffer.view %weight[%weight_origin2] : buffer -> view<[%outputs]x[%inputs]xbf16>
+                %stored = view.load %view[%row, %bounded_channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+                %extended = scalar.extf %stored : bf16 to f32
+                scf.yield %extended : f32
+              } else {
+                scf.yield %zero32 : f32
+              }
+              scf.yield %value : f32
+            }
+            %input2 = view.load %stage_view[%stage_channel, %column2] : view<128x5xf32> -> f32
+            %wide_input2 = scalar.extf %input2 : f32 to f64
+            %wide_weight2 = scalar.extf %weight2 : f32 to f64
+            %value = scalar.fmaf %wide_input2, %wide_weight2, %sum2 : f64
+            scf.yield %value : f64
+          } else {
+            scf.yield %sum2 : f64
+          }
+          %value3 = scf.if %live3 -> (f64) {
+            %weight3 = scf.if %shared -> (f32) {
+              scf.yield %weight0 : f32
+            } else {
+              %value = scf.if %weight_live -> (f32) {
+                %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+                %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+                %view = buffer.view %weight[%weight_origin3] : buffer -> view<[%outputs]x[%inputs]xbf16>
+                %stored = view.load %view[%row, %bounded_channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+                %extended = scalar.extf %stored : bf16 to f32
+                scf.yield %extended : f32
+              } else {
+                scf.yield %zero32 : f32
+              }
+              scf.yield %value : f32
+            }
+            %input3 = view.load %stage_view[%stage_channel, %column3] : view<128x5xf32> -> f32
+            %wide_input3 = scalar.extf %input3 : f32 to f64
+            %wide_weight3 = scalar.extf %weight3 : f32 to f64
+            %value = scalar.fmaf %wide_input3, %wide_weight3, %sum3 : f64
+            scf.yield %value : f64
+          } else {
+            scf.yield %sum3 : f64
+          }
+          scf.yield %value0, %value1, %value2, %value3 : f64, f64, f64, f64
+        }
+        // Every reader finishes before the next panel or partials overwrite it.
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        scf.yield %next0, %next1, %next2, %next3 : f64, f64, f64, f64
+      }
+      %partials = buffer.view %stage[%origin] : buffer -> view<128x4xf64>
+      view.store %total0, %partials[%lane, %column0] : f64, view<128x4xf64>
+      view.store %total1, %partials[%lane, %column1] : f64, view<128x4xf64>
+      view.store %total2, %partials[%lane, %column2] : f64, view<128x4xf64>
+      view.store %total3, %partials[%lane, %column3] : f64, view<128x4xf64>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %leader = index.cmp eq, %channel_lane, %zero : index
+      %reduced0, %reduced1, %reduced2, %reduced3 = scf.if %leader -> (f64, f64, f64, f64) {
+        %first = index.mul %output_local, %eight : index
+        %end = index.add %first, %eight : index
+        %sum0, %sum1, %sum2, %sum3 = scf.for %item = [%first to %end step %one](%acc0 = %initial : f64, %acc1 = %initial : f64, %acc2 = %initial : f64, %acc3 = %initial : f64) -> (f64, f64, f64, f64) {
+          %value0 = view.load %partials[%item, %column0] : view<128x4xf64> -> f64
+          %next0 = scalar.addf %acc0, %value0 : f64
+          %value1 = view.load %partials[%item, %column1] : view<128x4xf64> -> f64
+          %next1 = scalar.addf %acc1, %value1 : f64
+          %value2 = view.load %partials[%item, %column2] : view<128x4xf64> -> f64
+          %next2 = scalar.addf %acc2, %value2 : f64
+          %value3 = view.load %partials[%item, %column3] : view<128x4xf64> -> f64
+          %next3 = scalar.addf %acc3, %value3 : f64
+          scf.yield %next0, %next1, %next2, %next3 : f64, f64, f64, f64
+        }
+        scf.yield %sum0, %sum1, %sum2, %sum3 : f64, f64, f64, f64
+      } else {
+        scf.yield %initial, %initial, %initial, %initial : f64, f64, f64, f64
+      }
+      %rounded0 = scalar.fptrunc %reduced0 : f64 to f32
+      %rounded1 = scalar.fptrunc %reduced1 : f64 to f32
+      %rounded2 = scalar.fptrunc %reduced2 : f64 to f32
+      %rounded3 = scalar.fptrunc %reduced3 : f64 to f32
+      scf.yield %rounded0, %rounded1, %rounded2, %rounded3 : f32, f32, f32, f32
+    } else {
+      %initial = scalar.constant 0.0 : f32
+      %total0, %total1, %total2, %total3 = scf.for %begin = [%zero to %inputs step %panel](%acc0 = %initial : f32, %acc1 = %initial : f32, %acc2 = %initial : f32, %acc3 = %initial : f32) -> (f32, f32, f32, f32) {
+        scf.for %slot = [%zero to %four step %one] unroll schedule(linear) {
+          %element = index.madd %slot, %panel, %lane : index
+          %stage_channel = index.div %element, %four : index
+          %stage_column = index.rem %element, %four : index
+          %channel = index.add %begin, %stage_channel : index
+          %position = index.add %position_base, %stage_column : index
+          %channel_live = index.cmp ult, %channel, %inputs : index
+          %position_live = index.cmp ult, %position, %positions : index
+          %load_live = scalar.andi %channel_live, %position_live : i1
+          %value = scf.if %load_live -> (f32) {
+            %packed = index.div %position, %time_count : index
+            %time_value = index.rem %position, %time_count : index
+            %time = index.assume %time_value [ge(%time_value, 0), lt(%time_value, %time_count)] : index
+            %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+            %relative = index.scale %packed, %input_stride : index, offset -> offset
+            %input_origin = index.add %input_offset, %relative : offset
+            %view = buffer.view %input[%input_origin] : buffer -> view<[%inputs]x[%time_count]xf32>
+            %loaded = view.load %view[%bounded_channel, %time] : view<[%inputs]x[%time_count]xf32> -> f32
+            scf.yield %loaded : f32
+          } else {
+            scf.yield %zero32 : f32
+          }
+          view.store %value, %stage_view[%stage_channel, %stage_column] : f32, view<128x5xf32>
+        }
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        %next0, %next1, %next2, %next3 = scf.for %round = [%zero to %sixteen step %one](%sum0 = %acc0 : f32, %sum1 = %acc1 : f32, %sum2 = %acc2 : f32, %sum3 = %acc3 : f32) -> (f32, f32, f32, f32) {
+          %stage_channel = index.madd %round, %eight, %channel_lane : index
+          %channel = index.add %begin, %stage_channel : index
+          %channel_live = index.cmp ult, %channel, %inputs : index
+          %weight_live = scalar.andi %channel_live, %output_live : i1
+          %weight0 = scf.if %weight_live -> (f32) {
+            %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+            %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+            %view = buffer.view %weight[%weight_origin0] : buffer -> view<[%outputs]x[%inputs]xbf16>
+            %stored = view.load %view[%row, %bounded_channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+            %value = scalar.extf %stored : bf16 to f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %zero32 : f32
+          }
+          %value0 = scf.if %live0 -> (f32) {
+            %input0 = view.load %stage_view[%stage_channel, %column0] : view<128x5xf32> -> f32
+            %value = scalar.fmaf %input0, %weight0, %sum0 : f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %sum0 : f32
+          }
+          %value1 = scf.if %live1 -> (f32) {
+            %weight1 = scf.if %shared -> (f32) {
+              scf.yield %weight0 : f32
+            } else {
+              %value = scf.if %weight_live -> (f32) {
+                %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+                %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+                %view = buffer.view %weight[%weight_origin1] : buffer -> view<[%outputs]x[%inputs]xbf16>
+                %stored = view.load %view[%row, %bounded_channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+                %extended = scalar.extf %stored : bf16 to f32
+                scf.yield %extended : f32
+              } else {
+                scf.yield %zero32 : f32
+              }
+              scf.yield %value : f32
+            }
+            %input1 = view.load %stage_view[%stage_channel, %column1] : view<128x5xf32> -> f32
+            %value = scalar.fmaf %input1, %weight1, %sum1 : f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %sum1 : f32
+          }
+          %value2 = scf.if %live2 -> (f32) {
+            %weight2 = scf.if %shared -> (f32) {
+              scf.yield %weight0 : f32
+            } else {
+              %value = scf.if %weight_live -> (f32) {
+                %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+                %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+                %view = buffer.view %weight[%weight_origin2] : buffer -> view<[%outputs]x[%inputs]xbf16>
+                %stored = view.load %view[%row, %bounded_channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+                %extended = scalar.extf %stored : bf16 to f32
+                scf.yield %extended : f32
+              } else {
+                scf.yield %zero32 : f32
+              }
+              scf.yield %value : f32
+            }
+            %input2 = view.load %stage_view[%stage_channel, %column2] : view<128x5xf32> -> f32
+            %value = scalar.fmaf %input2, %weight2, %sum2 : f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %sum2 : f32
+          }
+          %value3 = scf.if %live3 -> (f32) {
+            %weight3 = scf.if %shared -> (f32) {
+              scf.yield %weight0 : f32
+            } else {
+              %value = scf.if %weight_live -> (f32) {
+                %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+                %bounded_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+                %view = buffer.view %weight[%weight_origin3] : buffer -> view<[%outputs]x[%inputs]xbf16>
+                %stored = view.load %view[%row, %bounded_channel] : view<[%outputs]x[%inputs]xbf16> -> bf16
+                %extended = scalar.extf %stored : bf16 to f32
+                scf.yield %extended : f32
+              } else {
+                scf.yield %zero32 : f32
+              }
+              scf.yield %value : f32
+            }
+            %input3 = view.load %stage_view[%stage_channel, %column3] : view<128x5xf32> -> f32
+            %value = scalar.fmaf %input3, %weight3, %sum3 : f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %sum3 : f32
+          }
+          scf.yield %value0, %value1, %value2, %value3 : f32, f32, f32, f32
+        }
+        // Every reader finishes before the next panel or partials overwrite it.
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        scf.yield %next0, %next1, %next2, %next3 : f32, f32, f32, f32
+      }
+      %partials = buffer.view %stage[%origin] : buffer -> view<128x4xf32>
+      view.store %total0, %partials[%lane, %column0] : f32, view<128x4xf32>
+      view.store %total1, %partials[%lane, %column1] : f32, view<128x4xf32>
+      view.store %total2, %partials[%lane, %column2] : f32, view<128x4xf32>
+      view.store %total3, %partials[%lane, %column3] : f32, view<128x4xf32>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %leader = index.cmp eq, %channel_lane, %zero : index
+      %reduced0, %reduced1, %reduced2, %reduced3 = scf.if %leader -> (f32, f32, f32, f32) {
+        %first = index.mul %output_local, %eight : index
+        %end = index.add %first, %eight : index
+        %sum0, %sum1, %sum2, %sum3 = scf.for %item = [%first to %end step %one](%acc0 = %initial : f32, %acc1 = %initial : f32, %acc2 = %initial : f32, %acc3 = %initial : f32) -> (f32, f32, f32, f32) {
+          %value0 = view.load %partials[%item, %column0] : view<128x4xf32> -> f32
+          %next0 = scalar.addf %acc0, %value0 : f32
+          %value1 = view.load %partials[%item, %column1] : view<128x4xf32> -> f32
+          %next1 = scalar.addf %acc1, %value1 : f32
+          %value2 = view.load %partials[%item, %column2] : view<128x4xf32> -> f32
+          %next2 = scalar.addf %acc2, %value2 : f32
+          %value3 = view.load %partials[%item, %column3] : view<128x4xf32> -> f32
+          %next3 = scalar.addf %acc3, %value3 : f32
+          scf.yield %next0, %next1, %next2, %next3 : f32, f32, f32, f32
+        }
+        scf.yield %sum0, %sum1, %sum2, %sum3 : f32, f32, f32, f32
+      } else {
+        scf.yield %initial, %initial, %initial, %initial : f32, f32, f32, f32
+      }
+      scf.yield %reduced0, %reduced1, %reduced2, %reduced3 : f32, f32, f32, f32
+    }
+    %first_lane = index.cmp eq, %channel_lane, %zero : index
+    %writer = scalar.andi %first_lane, %output_live : i1
+    scf.if %writer {
+      %row = index.assume %output_row [ge(%output_row, 0), lt(%output_row, %outputs)] : index
+      scf.if %live0 {
+        %time = index.assume %time0 [ge(%time0, 0), lt(%time0, %time_count)] : index
+        %value = scf.if %biased -> (f32) {
+          %bias_relative = index.scale %packed0, %bias_stride : index, offset -> offset
+          %bias_origin = index.add %bias_offset, %bias_relative : offset
+          %view = buffer.view %bias[%bias_origin] : buffer -> view<[%outputs]xbf16>
+          %stored = view.load %view[%row] : view<[%outputs]xbf16> -> bf16
+          %extended = scalar.extf %stored : bf16 to f32
+          %value = scalar.addf %result0, %extended : f32
+          scf.yield %value : f32
+        } else {
+          scf.yield %result0 : f32
+        }
+        %output_relative = index.scale %packed0, %output_stride : index, offset -> offset
+        %output_origin = index.add %output_offset, %output_relative : offset
+        %view = buffer.view %output[%output_origin] : buffer -> view<[%outputs]x[%time_count]xf32>
+        view.store %value, %view[%row, %time] : f32, view<[%outputs]x[%time_count]xf32>
+      }
+      scf.if %live1 {
+        %time = index.assume %time1 [ge(%time1, 0), lt(%time1, %time_count)] : index
+        %value = scf.if %biased -> (f32) {
+          %bias_relative = index.scale %packed1, %bias_stride : index, offset -> offset
+          %bias_origin = index.add %bias_offset, %bias_relative : offset
+          %view = buffer.view %bias[%bias_origin] : buffer -> view<[%outputs]xbf16>
+          %stored = view.load %view[%row] : view<[%outputs]xbf16> -> bf16
+          %extended = scalar.extf %stored : bf16 to f32
+          %value = scalar.addf %result1, %extended : f32
+          scf.yield %value : f32
+        } else {
+          scf.yield %result1 : f32
+        }
+        %output_relative = index.scale %packed1, %output_stride : index, offset -> offset
+        %output_origin = index.add %output_offset, %output_relative : offset
+        %view = buffer.view %output[%output_origin] : buffer -> view<[%outputs]x[%time_count]xf32>
+        view.store %value, %view[%row, %time] : f32, view<[%outputs]x[%time_count]xf32>
+      }
+      scf.if %live2 {
+        %time = index.assume %time2 [ge(%time2, 0), lt(%time2, %time_count)] : index
+        %value = scf.if %biased -> (f32) {
+          %bias_relative = index.scale %packed2, %bias_stride : index, offset -> offset
+          %bias_origin = index.add %bias_offset, %bias_relative : offset
+          %view = buffer.view %bias[%bias_origin] : buffer -> view<[%outputs]xbf16>
+          %stored = view.load %view[%row] : view<[%outputs]xbf16> -> bf16
+          %extended = scalar.extf %stored : bf16 to f32
+          %value = scalar.addf %result2, %extended : f32
+          scf.yield %value : f32
+        } else {
+          scf.yield %result2 : f32
+        }
+        %output_relative = index.scale %packed2, %output_stride : index, offset -> offset
+        %output_origin = index.add %output_offset, %output_relative : offset
+        %view = buffer.view %output[%output_origin] : buffer -> view<[%outputs]x[%time_count]xf32>
+        view.store %value, %view[%row, %time] : f32, view<[%outputs]x[%time_count]xf32>
+      }
+      scf.if %live3 {
+        %time = index.assume %time3 [ge(%time3, 0), lt(%time3, %time_count)] : index
+        %value = scf.if %biased -> (f32) {
+          %bias_relative = index.scale %packed3, %bias_stride : index, offset -> offset
+          %bias_origin = index.add %bias_offset, %bias_relative : offset
+          %view = buffer.view %bias[%bias_origin] : buffer -> view<[%outputs]xbf16>
+          %stored = view.load %view[%row] : view<[%outputs]xbf16> -> bf16
+          %extended = scalar.extf %stored : bf16 to f32
+          %value = scalar.addf %result3, %extended : f32
+          scf.yield %value : f32
+        } else {
+          scf.yield %result3 : f32
+        }
+        %output_relative = index.scale %packed3, %output_stride : index, offset -> offset
+        %output_origin = index.add %output_offset, %output_relative : offset
+        %view = buffer.view %output[%output_origin] : buffer -> view<[%outputs]x[%time_count]xf32>
+        view.store %value, %view[%row, %time] : f32, view<[%outputs]x[%time_count]xf32>
+      }
     }
   }
   template.return
 }
-
-config.decl @pocket.threads : %value: index where [range(%value, 1, 256)]
 
 // Dispatch entry points specialize source geometry. Membership remains a
 // runtime packet; changing request progress never changes the compiled shape.
@@ -46,13 +470,19 @@ target.decl @pocket
 config.decl @pocket.batch_capacity : %value: index where [range(%value, 1, 65536)]
 
 kernel.def target(@pocket) @pocket.batch.project_f32_kernel(%outputs: index, %times: index) {
-  %threads = config.get @pocket.threads : index
+  %threads = index.constant 128 : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %outputs, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %output_tile = index.constant 16 : index
+  %output_tail = index.constant 15 : index
+  %rounded = index.add %outputs, %output_tail : index
+  %groups = index.div %rounded, %output_tile : index
   %batch_capacity = config.get @pocket.batch_capacity : index
-  kernel.launch.config workgroups(%groups, %times, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+  %position_tile = index.constant 4 : index
+  %position_tail = index.constant 3 : index
+  %positions = index.mul %batch_capacity, %times : index
+  %rounded_positions = index.add %positions, %position_tail : index
+  %position_groups = index.div %rounded_positions, %position_tile : index
+  kernel.launch.config workgroups(%groups, %position_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
   %wide = scalar.constant false : i1
   %biased = scalar.constant false : i1
@@ -61,13 +491,19 @@ kernel.def target(@pocket) @pocket.batch.project_f32_kernel(%outputs: index, %ti
 }
 
 kernel.def target(@pocket) @pocket.batch.project_bias_f32_kernel(%outputs: index, %times: index) {
-  %threads = config.get @pocket.threads : index
+  %threads = index.constant 128 : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %outputs, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %output_tile = index.constant 16 : index
+  %output_tail = index.constant 15 : index
+  %rounded = index.add %outputs, %output_tail : index
+  %groups = index.div %rounded, %output_tile : index
   %batch_capacity = config.get @pocket.batch_capacity : index
-  kernel.launch.config workgroups(%groups, %times, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+  %position_tile = index.constant 4 : index
+  %position_tail = index.constant 3 : index
+  %positions = index.mul %batch_capacity, %times : index
+  %rounded_positions = index.add %positions, %position_tail : index
+  %position_groups = index.div %rounded_positions, %position_tile : index
+  kernel.launch.config workgroups(%groups, %position_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
   %wide = scalar.constant false : i1
   %biased = scalar.constant true : i1
@@ -76,13 +512,19 @@ kernel.def target(@pocket) @pocket.batch.project_bias_f32_kernel(%outputs: index
 }
 
 kernel.def target(@pocket) @pocket.batch.project_f64_kernel(%outputs: index, %times: index) {
-  %threads = config.get @pocket.threads : index
+  %threads = index.constant 128 : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %outputs, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %output_tile = index.constant 16 : index
+  %output_tail = index.constant 15 : index
+  %rounded = index.add %outputs, %output_tail : index
+  %groups = index.div %rounded, %output_tile : index
   %batch_capacity = config.get @pocket.batch_capacity : index
-  kernel.launch.config workgroups(%groups, %times, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+  %position_tile = index.constant 4 : index
+  %position_tail = index.constant 3 : index
+  %positions = index.mul %batch_capacity, %times : index
+  %rounded_positions = index.add %positions, %position_tail : index
+  %position_groups = index.div %rounded_positions, %position_tile : index
+  kernel.launch.config workgroups(%groups, %position_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
   %wide = scalar.constant true : i1
   %biased = scalar.constant false : i1
@@ -91,13 +533,19 @@ kernel.def target(@pocket) @pocket.batch.project_f64_kernel(%outputs: index, %ti
 }
 
 kernel.def target(@pocket) @pocket.batch.project_bias_f64_kernel(%outputs: index, %times: index) {
-  %threads = config.get @pocket.threads : index
+  %threads = index.constant 128 : index
   %one = index.constant 1 : index
-  %tail = index.sub %threads, %one : index
-  %rounded = index.add %outputs, %tail : index
-  %groups = index.div %rounded, %threads : index
+  %output_tile = index.constant 16 : index
+  %output_tail = index.constant 15 : index
+  %rounded = index.add %outputs, %output_tail : index
+  %groups = index.div %rounded, %output_tile : index
   %batch_capacity = config.get @pocket.batch_capacity : index
-  kernel.launch.config workgroups(%groups, %times, %batch_capacity) workgroup_size(%threads, %one, %one) : index
+  %position_tile = index.constant 4 : index
+  %position_tail = index.constant 3 : index
+  %positions = index.mul %batch_capacity, %times : index
+  %rounded_positions = index.add %positions, %position_tail : index
+  %position_groups = index.div %rounded_positions, %position_tile : index
+  kernel.launch.config workgroups(%groups, %position_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%membership: buffer, %inputs: index, %outputs: index, %times: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer, %input_offset: offset, %input_stride: offset, %weight_offset: offset, %weight_stride: offset, %bias_offset: offset, %bias_stride: offset, %output_offset: offset, %output_stride: offset) {
   %wide = scalar.constant true : i1
   %biased = scalar.constant true : i1

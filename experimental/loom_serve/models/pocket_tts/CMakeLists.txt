@@ -539,7 +539,7 @@ loom_execution_test(
   RUNNER_ARGS
     "--device=amdgpu"
     "--config=pocket.batch_capacity=4"
-    "--config=pocket.request_capacity=6"
+    "--config=pocket.request_capacity=16"
     "--config=pocket.threads=128"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -568,7 +568,7 @@ loom_execution_test(
     "--device=amdgpu"
     "--sanitizer=access"
     "--config=pocket.batch_capacity=4"
-    "--config=pocket.request_capacity=6"
+    "--config=pocket.request_capacity=16"
     "--config=pocket.threads=128"
   LABELS
     "notsan"
