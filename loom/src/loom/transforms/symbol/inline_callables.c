@@ -285,12 +285,9 @@ static bool loom_inline_target_requires_call_inline(
   if (!caller_version || !caller_version->resolved_target.provider) {
     return false;
   }
-  const loom_target_provider_t* provider =
-      caller_version->resolved_target.provider;
-  return provider->select_call_policy != NULL &&
-         provider->select_call_policy(&caller_version->resolved_target,
-                                      state->module, call_kind, call, callee) ==
-             LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+  return loom_target_provider_select_call_policy(
+             &caller_version->resolved_target, state->module, call_kind, call,
+             callee) == LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
 }
 
 static bool loom_inline_policy_is_inline(loom_inline_policy_t policy) {

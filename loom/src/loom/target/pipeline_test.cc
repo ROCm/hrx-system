@@ -31,8 +31,8 @@ typedef struct PipelineRunCounts {
   iree_string_view_t final_template_rewrite = iree_string_view_empty();
   // Number of retained call-graph specialization pass runs.
   int target_callgraph_specialization = 0;
-  // Lexical pass-run ordinal of retained call-graph specialization.
-  int target_callgraph_specialization_ordinal = 0;
+  // Lexical pass-run ordinals of the expected call-graph specializations.
+  int target_callgraph_specialization_ordinals[3] = {};
   // Lexical pass-run ordinal of the first target-required call inlining.
   int first_target_inlining_ordinal = 0;
   // Lexical pass-run ordinal of the last target-required call inlining.
@@ -51,10 +51,14 @@ typedef struct PipelineRunCounts {
   int vector_memory_to_scalar = 0;
   // Lexical pass-run ordinal of vector-memory scalarization.
   int vector_memory_to_scalar_ordinal = 0;
-  // Lexical pass position of pipeline-only source preparation.
-  int pipeline_preparation_ordinal = 0;
-  // Lexical pass position of worker outlining.
-  int worker_outlining_ordinal = 0;
+  // Number of pipeline-only source-preparation regions.
+  int pipeline_preparation = 0;
+  // Lexical positions of authored and realized pipeline preparation.
+  int pipeline_preparation_ordinals[2] = {};
+  // Number of worker-outlining pass runs.
+  int worker_outlining = 0;
+  // Lexical pass positions of authored and realized worker outlining.
+  int worker_outlining_ordinals[2] = {};
   // Number of source-loop unrolling pass runs.
   int source_loop_unrolling = 0;
   // Lexical pass-run ordinal of source-loop unrolling.
@@ -150,8 +154,13 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
           FindStringOption(count_context->module, loom_pass_where_attrs(op),
                            IREE_SV("name")),
           IREE_SV("pipeline.def"))) {
-    count_context->counts.pipeline_preparation_ordinal =
-        ++count_context->current_run_ordinal;
+    ++count_context->current_run_ordinal;
+    if (count_context->counts.pipeline_preparation < 2) {
+      count_context->counts.pipeline_preparation_ordinals
+          [count_context->counts.pipeline_preparation] =
+          count_context->current_run_ordinal;
+    }
+    ++count_context->counts.pipeline_preparation;
     *out_result = LOOM_WALK_SKIP;
     return iree_ok_status();
   }
@@ -163,7 +172,11 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
   iree_string_view_t key = loom_string_table_get(
       &count_context->module->strings, loom_pass_run_key(op));
   if (iree_string_view_equal(key, IREE_SV("outline-pipeline-strands"))) {
-    counts->worker_outlining_ordinal = count_context->current_run_ordinal;
+    if (counts->worker_outlining < 2) {
+      counts->worker_outlining_ordinals[counts->worker_outlining] =
+          count_context->current_run_ordinal;
+    }
+    ++counts->worker_outlining;
   } else if (iree_string_view_equal(key, IREE_SV("select-templates")) &&
              iree_string_view_equal(
                  FindStringOption(count_context->module,
@@ -176,9 +189,12 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
         count_context->module, loom_pass_run_options(op), IREE_SV("rewrite"));
   } else if (iree_string_view_equal(key,
                                     IREE_SV("specialize-target-callgraph"))) {
+    if (counts->target_callgraph_specialization < 3) {
+      counts->target_callgraph_specialization_ordinals
+          [counts->target_callgraph_specialization] =
+          count_context->current_run_ordinal;
+    }
     ++counts->target_callgraph_specialization;
-    counts->target_callgraph_specialization_ordinal =
-        count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key, IREE_SV("inline-callables")) &&
              iree_string_view_equal(
                  FindStringOption(count_context->module,
@@ -334,26 +350,36 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_EQ(counts.final_template_selection, 1);
   EXPECT_TRUE(
       iree_string_view_equal(counts.final_template_rewrite, IREE_SV("inline")));
-  EXPECT_EQ(counts.target_callgraph_specialization, 1);
+  EXPECT_EQ(counts.target_callgraph_specialization, 3);
+  EXPECT_EQ(counts.pipeline_preparation, 2);
+  EXPECT_EQ(counts.worker_outlining, 2);
   EXPECT_EQ(counts.boundary_projection, 1);
   EXPECT_EQ(counts.source_to_low, 1);
   EXPECT_EQ(counts.symbol_dce, 1);
   EXPECT_LT(counts.final_template_selection_ordinal,
-            counts.target_callgraph_specialization_ordinal);
-  EXPECT_LT(counts.target_callgraph_specialization_ordinal,
+            counts.target_callgraph_specialization_ordinals[0]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[0],
             counts.first_target_inlining_ordinal);
   EXPECT_LT(counts.first_target_inlining_ordinal,
             counts.last_source_combination_ordinal);
   EXPECT_LT(counts.last_source_combination_ordinal,
             counts.first_target_legalization_ordinal);
   EXPECT_LT(counts.first_target_inlining_ordinal,
-            counts.pipeline_preparation_ordinal);
-  EXPECT_LT(counts.pipeline_preparation_ordinal,
-            counts.worker_outlining_ordinal);
-  EXPECT_LT(counts.worker_outlining_ordinal,
+            counts.pipeline_preparation_ordinals[0]);
+  EXPECT_LT(counts.pipeline_preparation_ordinals[0],
+            counts.worker_outlining_ordinals[0]);
+  EXPECT_LT(counts.worker_outlining_ordinals[0],
+            counts.target_callgraph_specialization_ordinals[1]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[1],
+            counts.pipeline_preparation_ordinals[1]);
+  EXPECT_LT(counts.pipeline_preparation_ordinals[1],
+            counts.worker_outlining_ordinals[1]);
+  EXPECT_LT(counts.worker_outlining_ordinals[1],
+            counts.target_callgraph_specialization_ordinals[2]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[2],
             counts.first_target_legalization_ordinal);
   EXPECT_EQ(counts.view_transport_decomposition, 1);
-  EXPECT_LT(counts.worker_outlining_ordinal,
+  EXPECT_LT(counts.worker_outlining_ordinals[1],
             counts.view_transport_decomposition_ordinal);
   EXPECT_LT(counts.view_transport_decomposition_ordinal,
             counts.first_target_legalization_ordinal);
@@ -423,7 +449,7 @@ TEST_F(TargetPipelineTest, DiagnosticArtifactsPreserveRawSourceBoundary) {
   EXPECT_EQ(counts.boundary_projection, 1);
   EXPECT_EQ(counts.source_to_low, 1);
   EXPECT_EQ(counts.symbol_dce, 0);
-  EXPECT_LT(counts.target_callgraph_specialization_ordinal,
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[0],
             counts.first_target_inlining_ordinal);
   EXPECT_LT(counts.first_target_inlining_ordinal,
             counts.boundary_projection_ordinal);

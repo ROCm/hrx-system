@@ -458,6 +458,12 @@ struct loom_target_provider_t {
   loom_target_provider_select_cpu_profile_fn_t select_cpu_profile;
 };
 
+// Selects the emission policy for one call in |resolved_target|. Providers
+// without a selector permit direct calls.
+loom_target_call_policy_t loom_target_provider_select_call_policy(
+    const loom_resolved_target_t* resolved_target, const loom_module_t* module,
+    loom_call_like_kind_t kind, loom_call_like_t call, loom_func_like_t callee);
+
 // Static target provider table linked into a binary or embedding.
 typedef struct loom_target_provider_set_t {
   // Target provider contribution table.

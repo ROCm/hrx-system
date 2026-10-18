@@ -92,6 +92,11 @@ struct loom_target_callgraph_context_t {
   // Compilation-local identity retained by every version in this context.
   loom_target_context_ordinal_t target_context_ordinal;
 
+  // True when the context identity came from an existing function version.
+  // Authored roots without a version receive provisional ordinals that may be
+  // recreated by a later specialization pass.
+  bool version_owned;
+
   // Requirement applied to construct this context, or NULL when unconstrained.
   const loom_target_facts_t* applied_requirement;
 
@@ -395,14 +400,32 @@ static loom_target_callgraph_context_t* loom_target_callgraph_find_root_context(
   return NULL;
 }
 
+static loom_target_callgraph_context_t*
+loom_target_callgraph_find_version_root_context(
+    const loom_target_callgraph_state_t* state,
+    loom_resolved_target_t resolved_target,
+    loom_target_context_ordinal_t target_context_ordinal,
+    const loom_target_facts_t* requirement) {
+  for (loom_target_callgraph_context_t* context = state->root_contexts;
+       context != NULL; context = context->next_root) {
+    if (context->resolved_target.provider == resolved_target.provider &&
+        context->source_facts == resolved_target.facts &&
+        context->target_context_ordinal == target_context_ordinal &&
+        context->applied_requirement == requirement) {
+      return context;
+    }
+  }
+  return NULL;
+}
+
 static iree_status_t loom_target_callgraph_get_root_context(
     loom_target_callgraph_state_t* state,
     loom_resolved_target_t resolved_target,
     loom_target_context_ordinal_t target_context_ordinal,
     const loom_target_facts_t* requirement,
     loom_target_callgraph_context_t** out_context) {
-  *out_context = loom_target_callgraph_find_root_context(state, resolved_target,
-                                                         requirement);
+  *out_context = loom_target_callgraph_find_version_root_context(
+      state, resolved_target, target_context_ordinal, requirement);
   if (*out_context != NULL) {
     return iree_ok_status();
   }
@@ -648,6 +671,7 @@ static iree_status_t loom_target_callgraph_derive_context(
               .facts = derived_facts,
           },
       .target_context_ordinal = target_context_ordinal,
+      .version_owned = parent->version_owned,
       .applied_requirement = callee->authored_target_requirement,
       .parent = parent,
       .next_sibling = parent->first_child,
@@ -660,10 +684,7 @@ static iree_status_t loom_target_callgraph_derive_context(
 
 static loom_target_callgraph_row_id_t loom_target_callgraph_find_row(
     const loom_target_callgraph_state_t* state, loom_symbol_id_t source_symbol,
-    const loom_target_callgraph_context_t* context,
-    loom_call_like_kind_t call_kind) {
-  const bool exact_context = call_kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE ||
-                             call_kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL;
+    const loom_target_callgraph_context_t* context, bool exact_context) {
   loom_target_callgraph_row_id_t row_id =
       state->symbols[source_symbol].first_row_id;
   while (row_id != LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID) {
@@ -685,6 +706,29 @@ static loom_target_callgraph_row_id_t loom_target_callgraph_find_row(
     row_id = row->next_symbol_row_id;
   }
   return LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID;
+}
+
+static bool loom_target_callgraph_call_requires_exact_context(
+    const loom_target_callgraph_state_t* state,
+    const loom_target_callgraph_context_t* caller_context,
+    loom_call_like_t call, const loom_target_callgraph_symbol_t* callee) {
+  const loom_call_like_kind_t kind = loom_call_like_kind(call);
+  if (kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE ||
+      kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
+    return true;
+  }
+  if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC ||
+      caller_context->resolved_target.provider == NULL ||
+      !caller_context->version_owned || !callee->module_internal ||
+      !callee->function_facts->has_body ||
+      loom_call_like_inline_policy(call) == LOOM_INLINE_POLICY_INLINE ||
+      loom_func_like_inline_policy(callee->function) ==
+          LOOM_INLINE_POLICY_INLINE) {
+    return false;
+  }
+  return loom_target_provider_select_call_policy(
+             &caller_context->resolved_target, state->module, kind, call,
+             callee->function) == LOOM_TARGET_CALL_POLICY_DIRECT;
 }
 
 static iree_status_t loom_target_callgraph_emit_external_conflict(
@@ -769,6 +813,7 @@ static iree_status_t loom_target_callgraph_seed_versions(
     IREE_RETURN_IF_ERROR(loom_target_callgraph_get_root_context(
         state, version->resolved_target, version->target_context_ordinal,
         state->symbols[symbol_id].authored_target_requirement, &context));
+    context->version_owned = true;
     loom_target_callgraph_row_id_t row_id =
         LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_target_callgraph_append_row(
@@ -941,9 +986,10 @@ static iree_status_t loom_target_callgraph_plan_reachable_rows(
         continue;
       }
       loom_target_callgraph_row_id_t callee_row_id =
-          loom_target_callgraph_find_row(state, callee_symbol_id,
-                                         callee_context,
-                                         loom_call_like_kind(call));
+          loom_target_callgraph_find_row(
+              state, callee_symbol_id, callee_context,
+              loom_target_callgraph_call_requires_exact_context(
+                  state, execution_context, call, callee));
       if (callee_row_id == LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID) {
         IREE_RETURN_IF_ERROR(loom_target_callgraph_append_row(
             state, callee_symbol_id, callee_context, /*existing_version=*/NULL,
