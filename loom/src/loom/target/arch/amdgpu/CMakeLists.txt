@@ -534,6 +534,36 @@ loom_cc_test(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    sanitizer_race_lifetime_test
+  SRCS
+    "sanitizer_race_lifetime_test.cc"
+  DEPS
+    iree::base
+    iree::base::core_headers
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::pass_environment
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::op_registry
+    loom::pass::builtin_registry
+    loom::pass::tooling
+    loom::target::arch::amdgpu::abi::tsan
+    loom::target::arch::amdgpu::descriptors::low_registry
+    loom::target::arch::amdgpu::lower
+    loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     pass_registry

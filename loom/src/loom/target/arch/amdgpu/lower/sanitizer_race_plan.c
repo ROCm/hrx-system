@@ -17,6 +17,7 @@
 #include "loom/target/arch/amdgpu/lower/sanitizer_race.h"
 #include "loom/target/arch/amdgpu/lower/source_alloca_layout.h"
 #include "loom/target/arch/amdgpu/lower/sync.h"
+#include "loom/target/arch/amdgpu/lower/system_memory.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -72,7 +73,11 @@ static bool loom_amdgpu_sanitizer_race_required_descriptors_present(
   const loom_amdgpu_descriptor_ref_t required_refs[] = {
       LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B32_SADDR,
       LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B64_SADDR,
+      LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B64_SADDR,
+      LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B128_SADDR,
       LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_CMPSWAP_B64_RTN_SADDR,
+      LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_OR_B32_RTN_SADDR,
+      LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_OR_B32_SADDR,
       LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_U32,
       LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_CO_U32,
       LOOM_AMDGPU_DESCRIPTOR_REF_S_ADDC_U32,
@@ -95,6 +100,7 @@ static bool loom_amdgpu_sanitizer_race_required_descriptors_present(
       LOOM_AMDGPU_DESCRIPTOR_REF_S_LOAD_DWORD_OFFSET_ONLY,
       LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHL_B32,
       LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHR_B32,
+      LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHR_B64_RHS_INLINE,
       LOOM_AMDGPU_DESCRIPTOR_REF_S_MUL_HI_U32,
       LOOM_AMDGPU_DESCRIPTOR_REF_S_MUL_I32,
       LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
@@ -109,9 +115,11 @@ static bool loom_amdgpu_sanitizer_race_required_descriptors_present(
       LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+      LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULT_U32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+      LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_HI_U32,
@@ -127,6 +135,10 @@ static bool loom_amdgpu_sanitizer_race_required_descriptors_present(
   };
   if (!loom_amdgpu_descriptor_set_has_all_refs(descriptor_set, required_refs,
                                                IREE_ARRAYSIZE(required_refs))) {
+    return false;
+  }
+  if (!loom_amdgpu_system_memory_release_ordering_available(descriptor_set) ||
+      !loom_amdgpu_system_memory_acquire_ordering_available(descriptor_set)) {
     return false;
   }
   return loom_amdgpu_descriptor_set_has_ref(

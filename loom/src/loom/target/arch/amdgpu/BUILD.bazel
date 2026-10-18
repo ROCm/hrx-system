@@ -535,6 +535,31 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "sanitizer_race_lifetime_test",
+    srcs = ["sanitizer_race_lifetime_test.cc"],
+    deps = [
+        "//loom/src/loom/codegen:pass_environment",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/pass:tooling",
+        "//loom/src/loom/target/arch/amdgpu/abi:tsan",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/lower",
+        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "pass_registry",
     srcs = ["pass_registry.c"],

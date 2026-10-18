@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/target/arch/amdgpu/abi/tsan.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -98,6 +99,41 @@ static iree_status_t loom_amdgpu_select_sgpr64(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_emit_sgpr64_lshr_inline(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_value, uint32_t shift, loom_value_id_t* out_low_value) {
+  loom_named_attr_t shift_attr = {0};
+  iree_host_size_t shift_attr_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_append_i64_attr(context, IREE_SV("shift"), shift, &shift_attr,
+                                  /*attr_capacity=*/1, &shift_attr_count));
+  loom_type_t sgpr_x2_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_make_sgpr_range_type(context, 2, &sgpr_x2_type));
+  loom_op_t* shift_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHR_B64_RHS_INLINE,
+      &low_value, /*operand_count=*/1,
+      loom_make_named_attr_slice(&shift_attr, shift_attr_count), &sgpr_x2_type,
+      /*result_count=*/1, &shift_op));
+  *out_low_value = loom_value_slice_get(loom_low_op_results(shift_op), 0);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_sgpr64_ceil_div_pow2_checked(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_value, uint32_t shift, loom_value_id_t* out_low_result,
+    loom_value_id_t* out_overflow) {
+  loom_value_id_t rounding = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_constant_u64(
+      context, source_op, ((uint64_t)1u << shift) - 1u, &rounding));
+  loom_value_id_t rounded = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_add_checked(
+      context, source_op, low_value, rounding, &rounded, out_overflow));
+  return loom_amdgpu_emit_sgpr64_lshr_inline(context, source_op, rounded, shift,
+                                             out_low_result);
+}
+
 iree_status_t loom_amdgpu_build_sanitizer_race_shadow_layout(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_sanitizer_race_shadow_layout_config_t* config,
@@ -111,27 +147,77 @@ iree_status_t loom_amdgpu_build_sanitizer_race_shadow_layout(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_from_u32(
       context, source_op, layout.workgroup_local_memory_size,
       &entry_count_u64));
-  loom_value_id_t entry_size_u64 = LOOM_VALUE_ID_INVALID;
+
+  loom_value_id_t chunk_count_overflow = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_ceil_div_pow2_checked(
+      context, source_op, entry_count_u64,
+      LOOM_AMDGPU_TSAN_SHADOW_CHUNK_APPLICATION_BYTE_SHIFT,
+      &layout.workgroup_chunk_count, &chunk_count_overflow));
+  // Compute aligned bitmap blocks directly instead of materializing the
+  // unaligned word and byte counts in every instrumented kernel.
+  const uint32_t chunks_per_state_bitmap_block =
+      LOOM_AMDGPU_TSAN_SHADOW_CHUNKS_PER_STATE_WORD *
+      (LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BITMAP_ALIGNMENT /
+       LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_WORD_BYTE_LENGTH);
+  const uint32_t chunks_per_state_bitmap_block_shift =
+      (uint32_t)iree_math_count_trailing_zeros_u32(
+          chunks_per_state_bitmap_block);
+  loom_value_id_t state_bitmap_block_count = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t state_bitmap_block_count_overflow = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_ceil_div_pow2_checked(
+      context, source_op, layout.workgroup_chunk_count,
+      chunks_per_state_bitmap_block_shift, &state_bitmap_block_count,
+      &state_bitmap_block_count_overflow));
+  loom_value_id_t bitmap_alignment = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_constant_u64(
-      context, source_op, LOOM_AMDGPU_TSAN_SHADOW_CELL_BYTE_LENGTH,
-      &entry_size_u64));
+      context, source_op, LOOM_AMDGPU_TSAN_SHADOW_CHUNK_STATE_BITMAP_ALIGNMENT,
+      &bitmap_alignment));
+  loom_value_id_t state_bitmap_size_overflow = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_mul_checked(
+      context, source_op, state_bitmap_block_count, bitmap_alignment,
+      &layout.workgroup_chunk_state_bitmap_size, &state_bitmap_size_overflow));
+
+  loom_value_id_t padded_chunk_size = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_constant_u64(
+      context, source_op,
+      LOOM_AMDGPU_TSAN_SHADOW_CHUNK_APPLICATION_BYTE_LENGTH *
+          LOOM_AMDGPU_TSAN_SHADOW_CELL_BYTE_LENGTH,
+      &padded_chunk_size));
   loom_value_id_t shadow_data_size = LOOM_VALUE_ID_INVALID;
   loom_value_id_t data_size_overflow = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_mul_checked(
-      context, source_op, entry_count_u64, entry_size_u64, &shadow_data_size,
-      &data_size_overflow));
+      context, source_op, layout.workgroup_chunk_count, padded_chunk_size,
+      &shadow_data_size, &data_size_overflow));
   loom_value_id_t header_size = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_constant_u64(
       context, source_op, LOOM_AMDGPU_TSAN_WORKGROUP_SHADOW_HEADER_BYTE_LENGTH,
       &header_size));
+  loom_value_id_t history_offset_overflow = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_add_checked(
+      context, source_op, header_size, layout.workgroup_chunk_state_bitmap_size,
+      &layout.workgroup_history_data_offset, &history_offset_overflow));
   loom_value_id_t stride_overflow = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_add_checked(
-      context, source_op, shadow_data_size, header_size,
-      &layout.workgroup_shadow_stride, &stride_overflow));
+      context, source_op, shadow_data_size,
+      layout.workgroup_history_data_offset, &layout.workgroup_shadow_stride,
+      &stride_overflow));
   loom_value_id_t geometry_overflow = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_bool_binary(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B32,
-      data_size_overflow, stride_overflow, &geometry_overflow));
+      chunk_count_overflow, state_bitmap_block_count_overflow,
+      &geometry_overflow));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_bool_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B32,
+      geometry_overflow, state_bitmap_size_overflow, &geometry_overflow));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_bool_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B32,
+      geometry_overflow, data_size_overflow, &geometry_overflow));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_bool_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B32,
+      geometry_overflow, history_offset_overflow, &geometry_overflow));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_bool_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B32,
+      geometry_overflow, stride_overflow, &geometry_overflow));
 
   loom_value_id_t ordinal_overflow = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_current_workgroup_linear_id_u64_checked(

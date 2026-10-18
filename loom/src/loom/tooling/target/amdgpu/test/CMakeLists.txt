@@ -1174,7 +1174,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--amdgpu_tsan=true"
     "--amdgpu_tsan_report_policy=report-only"
-    "--amdgpu_tsan_shadow_size=2176"
+    "--amdgpu_tsan_shadow_size=1440"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
