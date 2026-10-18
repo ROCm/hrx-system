@@ -336,6 +336,32 @@ iree_cc_test(
 endif()
 
 if(AMDF_BUILD AND IREE_HAL_DRIVER_TASK)
+iree_cc_test(
+  NAME
+    file_transfer_ranges_test
+  SRCS
+    "file_transfer_ranges_test.cc"
+  DEPS
+    ::file_transfer
+    ::memory_backend
+    ::memory_backend_test_base
+    amdf::headers
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::utils::files
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD AND IREE_HAL_DRIVER_TASK)
 iree_cc_library(
   NAME
     memory_backend_test_base

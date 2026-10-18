@@ -15,10 +15,10 @@
 extern "C" {
 #endif
 
-// Device construction admits up to 256 native queues and allocation and mapping
-// result sources. Five words represent the complete ready set without a source
-// walk.
-#define IREE_HAL_AMD_GPU_PUBLICATION_MAX_SOURCES 258
+// Device construction admits up to 256 execution queues, one file-copy queue,
+// and allocation and mapping result sources. Five words represent the complete
+// ready set without a source walk.
+#define IREE_HAL_AMD_GPU_PUBLICATION_MAX_SOURCES 259
 
 // One fixed device progress source: a native queue, completed acquisition, or
 // mapping result publication. A turn processes a bounded ready prefix and

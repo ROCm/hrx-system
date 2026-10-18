@@ -11,6 +11,7 @@
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
+#include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
 
 #ifdef __cplusplus
@@ -27,6 +28,8 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   const iree_hal_amd_gpu_context_t* context;
   // Queue-owned reusable CPU metadata storage.
   iree_hal_amd_gpu_capture_pool_t* captures;
+  // Device-owned native file-copy pipeline, or NULL without a transfer family.
+  iree_hal_amd_gpu_file_staging_t* staging;
   // Queue-owned host dependency associations, finalized by their last borrower.
   iree_async_semaphore_wait_context_t* waits;
   // Optional device-owned session, stable while operations are in flight.

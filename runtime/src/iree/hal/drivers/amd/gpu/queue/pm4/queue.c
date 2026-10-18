@@ -2008,6 +2008,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .queue = &queue->base,
       .context = context,
       .captures = &queue->captures,
+      .staging = options->file_staging,
       .waits = &queue->wait_context,
       .queue_ordinal = options->queue_ordinal,
       .native_family_ordinal = options->family_ordinal,

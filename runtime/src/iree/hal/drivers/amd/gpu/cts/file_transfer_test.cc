@@ -19,6 +19,7 @@
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/memory/fixed_block_pool.h"
+#include "iree/hal/utils/fd_file.h"
 #include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
@@ -76,6 +77,7 @@ class GpuNativeFileTest : public GpuNativeTest,
     RecordProperty("gfx_ip_major", gfx_major);
     RecordProperty("gfx_ip_minor", context_->target_info.gfx_ip.minor);
     RecordProperty("gfx_ip_stepping", context_->target_info.gfx_ip.stepping);
+    native_device_ = context_->device;
     Create();
     if (HasFatalFailure() || IsSkipped()) {
       return;
@@ -309,7 +311,8 @@ class GpuNativeFileTest : public GpuNativeTest,
   }
 
   iree_status_t Open(const std::vector<uint32_t>& contents,
-                     iree_hal_file_t** out_file, bool direct = false) {
+                     iree_hal_file_t** out_file, bool direct = false,
+                     iree_async_proactor_t* proactor = nullptr) {
     IREE_RETURN_IF_ERROR(iree_io_file_contents_write(
         path_.path_view(),
         iree_make_const_byte_span(contents.data(), contents.size() * 4),
@@ -321,10 +324,15 @@ class GpuNativeFileTest : public GpuNativeTest,
             IREE_IO_FILE_MODE_SHARE_WRITE |
             (direct ? IREE_IO_FILE_MODE_DIRECT : 0),
         path_.path_view(), iree_allocator_system(), &handle));
-    iree_status_t status = iree_hal_file_import(
-        device_, nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-        IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle, 0,
-        out_file);
+    iree_status_t status =
+        proactor
+            ? iree_hal_fd_file_from_handle(
+                  IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+                  handle, proactor, iree_allocator_system(), out_file)
+            : iree_hal_file_import(
+                  device_, nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+                  IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+                  handle, 0, out_file);
     iree_io_file_handle_release(handle);
     return status;
   }
@@ -371,8 +379,12 @@ class GpuNativeFileTest : public GpuNativeTest,
     return count == 1 ? frontier.entries[0].epoch : 0;
   }
 
+  void BufferedRoundTrip();
+
   // Logical range begins inside the allocation, independently of file offset.
   static constexpr size_t kBufferOffset = 128;
+  // Native identity borrowed from the context transferred into the HAL device.
+  amdf_device_t* native_device_ = nullptr;
   // Several old staging chunks with a non-power-of-two final tail.
   static constexpr size_t kLength = 8 * 1024 * 1024 + 12;
   // Native file owns its path through independent output verification.
@@ -406,7 +418,7 @@ class GpuNativeFileTest : public GpuNativeTest,
   const iree_hal_queue_barriers_t barriers_ = {&empty_, &empty_};
 };
 
-TEST_P(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
+void GpuNativeFileTest::BufferedRoundTrip() {
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(Allocate(kLength + 256, buffer.out()));
   const uint64_t accumulate_offset =
@@ -572,7 +584,88 @@ TEST_P(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
   ReleaseSources();
 }
 
-class GpuNativeDirectFileTest : public GpuNativeFileTest {};
+class GpuNativeDirectFileTest : public GpuNativeFileTest {
+ protected:
+  void SetUp() override {
+    GpuNativeFileTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    const amdf_memory_device_access_t access = {
+        .device = native_device_,
+        .requirements =
+            {
+                .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+                .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                         AMDF_MEMORY_FLAG_HOST_COHERENT,
+                .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
+            },
+    };
+    amdf_memory_scope_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(info),
+    };
+    ASSERT_EQ(
+        fabric_->api->memory_scope_query_info(fabric_->system_scope, &info),
+        AMDF_STATUS_OK);
+    for (uint32_t i = 0; i < info.memory_profile_count; ++i) {
+      amdf_memory_profile_t profile = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+          .structure_size = sizeof(profile),
+      };
+      amdf_memory_access_capabilities_t capabilities = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+          .structure_size = sizeof(capabilities),
+      };
+      const auto status = fabric_->api->memory_scope_query_device_profile(
+          fabric_->system_scope, i, 1, &access, &profile, &capabilities);
+      if (amdf_status_code(status) == AMDF_STATUS_CODE_UNSUPPORTED) {
+        continue;
+      }
+      ASSERT_EQ(status, AMDF_STATUS_OK);
+      direct_staging_available_ |=
+          amdf_status_is_ok(profile.availability) &&
+          iree_all_bits_set(profile.roles,
+                            AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                                AMDF_MEMORY_PROFILE_ROLE_HOST_MAP) &&
+          iree_all_bits_set(
+              profile.supported_flags,
+              AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO);
+    }
+    RecordProperty("direct_staging_available", direct_staging_available_);
+  }
+
+  void RoundTrip();
+
+  // Exact native capability, including the selected lifetime and host services.
+  bool direct_staging_available_ = false;
+};
+
+// The registered driver uses process lifetime. Keep its fabric across device
+// recreation, matching the driver's ownership of the primary native VM binding.
+class GpuProcessDirectFileTest : public GpuNativeDirectFileTest {
+ public:
+  static void SetUpTestSuite() {
+    IREE_ASSERT_OK(
+        iree::hal::amd::gpu::cts::NativeMemoryGate::AcquireProcessFabric(
+            &shared_fabric_));
+  }
+  static void TearDownTestSuite() {
+    iree_hal_amd_fabric_release(shared_fabric_);
+    shared_fabric_ = nullptr;
+  }
+
+ protected:
+  void SetUp() override {
+    fabric_ = shared_fabric_;
+    iree_hal_amd_fabric_retain(fabric_);
+    GpuNativeDirectFileTest::SetUp();
+  }
+
+ private:
+  // Suite root retains the primary native connection through all child devices.
+  inline static iree_hal_amd_fabric_t* shared_fabric_ = nullptr;
+};
 
 class GpuNativeGlobalFileTest : public GpuNativeFileTest {};
 
@@ -638,12 +731,15 @@ TEST_P(GpuNativeGlobalFileTest, NestedExecutableGlobalRoundTrip) {
   EXPECT_EQ(observed_global, expected_global);
 }
 
-TEST_P(GpuNativeDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
+void GpuNativeDirectFileTest::RoundTrip() {
   constexpr size_t kAlignment = 4096;
   constexpr size_t kBytes = 8 * 1024 * 1024 + kAlignment;
   const size_t buffer_offset = kAlignment - (is_nested() ? 256 : 0);
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(Allocate(kBytes + 2 * kAlignment, buffer.out()));
+  if (!file_io_capable_) {
+    direct_io_available_ &= direct_staging_available_;
+  }
   std::vector<uint32_t> expected(kBytes / 4 + 2 * kAlignment / 4);
   for (size_t i = 0; i < expected.size(); ++i) {
     expected[i] = uint32_t(i * 37 + 3);
@@ -725,6 +821,14 @@ TEST_P(GpuNativeDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 }
 
+TEST_P(GpuNativeDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
+  ASSERT_NO_FATAL_FAILURE(RoundTrip());
+}
+
+TEST_P(GpuProcessDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
+  ASSERT_NO_FATAL_FAILURE(RoundTrip());
+}
+
 class GpuNativeFileProgressTest : public GpuNativeFileTest {
  protected:
   void SetUp() override {
@@ -735,6 +839,131 @@ class GpuNativeFileProgressTest : public GpuNativeFileTest {
   // Native dependency gate, joined by base TearDown before table destruction.
   iree::hal::amd::gpu::cts::NativeMemoryGate memory_gate_;
 };
+
+TEST_P(GpuNativeFileProgressTest,
+       PreparedSmallReadsProgressDuringStagingGrowth) {
+  constexpr size_t kSmall = 4096;
+  constexpr size_t kLarge = 128 * 1024;
+  Ref<iree_hal_buffer_t> buffer;
+  ASSERT_NO_FATAL_FAILURE(
+      Allocate(kBufferOffset + kSmall + kLarge, buffer.out()));
+  if (host_transfer_) {
+    GTEST_SKIP() << "This backing uses direct file I/O and needs no staging";
+  }
+  std::vector<uint32_t> expected((kLarge + kSmall) / 4);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = uint32_t(i * 37 + 3);
+  }
+  Ref<iree_hal_file_t> file;
+  IREE_ASSERT_OK(Open(expected, file.out()));
+  auto* small = timeline_.get();
+  uint64_t one = 1, two = 2, three = 3;
+  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &small, &one}, file, 0,
+                                     buffer, kBufferOffset, kSmall, &barriers_,
+                                     0));
+  ASSERT_NO_FATAL_FAILURE(Wait(one));
+
+  Ref<iree_hal_semaphore_t> large_completion;
+  CreateSemaphore(large_completion.out());
+  auto* large = large_completion.get();
+  std::vector<uint32_t> observed(kSmall / 4);
+  {
+    iree::hal::amd::gpu::cts::NativeMemoryGate::Hold hold(&memory_gate_);
+    IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &large, &one}, file,
+                                       0, buffer, kBufferOffset + kSmall,
+                                       kLarge, &barriers_, 0));
+    hold.WaitEntered();
+    IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {1, &small, &one},
+                                       {1, &small, &two}, file, kLarge, buffer,
+                                       kBufferOffset, kSmall, &barriers_, 0));
+    ASSERT_NO_FATAL_FAILURE(Wait(two));
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[0], {1, &small, &two}, {1, &small, &three}, buffer,
+        kBufferOffset, observed.data(), kSmall, nullptr));
+    ASSERT_NO_FATAL_FAILURE(Wait(three));
+    EXPECT_TRUE(std::equal(observed.begin(), observed.end(),
+                           expected.begin() + kLarge / 4));
+    uint64_t value = UINT64_MAX;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(large, &value));
+    EXPECT_EQ(value, 0u);
+  }
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(large, one, iree_infinite_timeout(), 0));
+  observed.resize(kLarge / 4);
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[0], {1, &large, &one}, {1, &large, &two}, buffer,
+      kBufferOffset + kSmall, observed.data(), kLarge, nullptr));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(large, two, iree_infinite_timeout(), 0));
+  EXPECT_TRUE(std::equal(observed.begin(), observed.end(), expected.begin()));
+}
+
+class GpuNativeFileLimitTest : public GpuNativeFileTest {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, 8 * 1024 * 1024));
+    GpuNativeFileTest::SetUp();
+  }
+
+  // Physical staging blocks obey the advertised native allocation limit.
+  iree::hal::amd::gpu::cts::NativeMemoryGate memory_gate_;
+};
+
+TEST_P(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
+  ASSERT_NO_FATAL_FAILURE(BufferedRoundTrip());
+}
+
+TEST_P(GpuNativeFileLimitTest, StagingFitsNativeBackingLimit) {
+  ASSERT_NO_FATAL_FAILURE(BufferedRoundTrip());
+}
+
+TEST_P(GpuNativeFileTest, ConcurrentRangesSurviveRingWrapAndTrim) {
+  constexpr size_t kLaneCount = 8;
+  constexpr size_t kLaneLength = 4096;
+  constexpr size_t kLength = kLaneCount * kLaneLength;
+  Ref<iree_hal_buffer_t> buffer;
+  ASSERT_NO_FATAL_FAILURE(Allocate(kBufferOffset + kLength, buffer.out()));
+  std::vector<uint32_t> expected(kLength / 4);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = uint32_t(i * 37 + 3);
+  }
+  Ref<iree_hal_file_t> file;
+  IREE_ASSERT_OK(Open(expected, file.out()));
+  std::array<Ref<iree_hal_semaphore_t>, kLaneCount> completions;
+  std::array<iree_hal_semaphore_t*, kLaneCount> semaphores;
+  std::array<uint64_t, kLaneCount> values;
+  for (size_t i = 0; i < kLaneCount; ++i) {
+    CreateSemaphore(completions[i].out());
+    semaphores[i] = completions[i].get();
+  }
+  // 1,024 independent copies wrap the primary command ring while reusing a
+  // finite slot set. Each cohort explicitly joins every lane: HAL queues do
+  // not imply submission order or make a larger signal prove earlier work.
+  for (uint64_t round = 0; round < 128; ++round) {
+    values.fill(round + 1);
+    for (size_t i = 0; i < kLaneCount; ++i) {
+      IREE_ASSERT_OK(iree_hal_queue_read(
+          queues_[0], {}, {1, &semaphores[i], &values[i]}, file,
+          i * kLaneLength, buffer, kBufferOffset + i * kLaneLength, kLaneLength,
+          &barriers_, 0));
+    }
+    if (round == 31) {
+      IREE_ASSERT_OK(iree_hal_device_trim(device_));
+    }
+    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+        {kLaneCount, semaphores.data(), values.data()}, iree_infinite_timeout(),
+        0));
+  }
+  std::vector<uint32_t> observed(expected.size());
+  auto* timeline = timeline_.get();
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[0], {kLaneCount, semaphores.data(), values.data()},
+      {1, &timeline, &one}, buffer, kBufferOffset, observed.data(), kLength,
+      nullptr));
+  ASSERT_NO_FATAL_FAILURE(Wait(one));
+  EXPECT_EQ(observed, expected);
+}
 
 // Holds a real polling callback and joins its final access on scope exit.
 class HeldFileOwner {
@@ -788,6 +1017,434 @@ class HeldFileOwner {
   // Callback made its final gate access while holding mutex_.
   bool exited_ = false;
 };
+
+// Delays one real registration-detach callback without blocking its poll owner.
+// The forwarding table is installed before the ordinary runner starts and
+// outlives that runner and all native proactor references.
+class FileDetachGate {
+ public:
+  FileDetachGate()
+      : runner_(iree_async_proactor_pool_options_default().runner) {}
+
+  iree_async_proactor_pool_runner_factory_t runner() {
+    return {
+        .user_data = this,
+        .create =
+            +[](void* user_data, iree_async_proactor_t* proactor,
+                uint32_t node_id, iree_allocator_t allocator,
+                void** out_runner) {
+              auto* self = static_cast<FileDetachGate*>(user_data);
+              self->native_ = proactor->vtable;
+              self->forwarding_.vtable = *proactor->vtable;
+              self->forwarding_.owner = self;
+              self->forwarding_.vtable.detach_buffer = Detach;
+              proactor->vtable = &self->forwarding_.vtable;
+              return self->runner_.create(self->runner_.user_data, proactor,
+                                          node_id, allocator, out_runner);
+            },
+        .request_stop =
+            +[](void* user_data, void* runner) {
+              auto* self = static_cast<FileDetachGate*>(user_data);
+              self->runner_.request_stop(self->runner_.user_data, runner);
+            },
+        .destroy =
+            +[](void* user_data, void* runner) {
+              auto* self = static_cast<FileDetachGate*>(user_data);
+              self->runner_.destroy(self->runner_.user_data, runner);
+            },
+    };
+  }
+
+  class Hold {
+   public:
+    explicit Hold(FileDetachGate* owner) : owner_(owner) {
+      std::lock_guard<std::mutex> lock(owner_->mutex_);
+      owner_->armed_ = true;
+      owner_->closed_ = true;
+    }
+    ~Hold() { owner_->Open(); }
+
+   private:
+    // Fixture-owned gate, alive until all proactor references are released.
+    FileDetachGate* owner_;
+  };
+
+  void WaitForCompletedDetach() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return completed_; });
+  }
+
+  void WaitForFollowingDetach() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return following_; });
+  }
+
+  uint32_t duplicates() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return duplicates_;
+  }
+
+  void Open() {
+    iree_async_buffer_registration_callback_t callback = {};
+    iree_status_t status = iree_ok_status();
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      closed_ = false;
+      if (completed_) {
+        callback = callback_;
+        callback_ = {};
+        status = status_;
+        status_ = iree_ok_status();
+      }
+    }
+    if (callback.fn) {
+      callback.fn(callback.user_data, status);
+    }
+  }
+
+ private:
+  static void Detach(iree_async_proactor_t* proactor,
+                     iree_async_buffer_registration_entry_t* entry,
+                     iree_async_buffer_registration_callback_t callback) {
+    auto* self = reinterpret_cast<const Forwarding*>(proactor->vtable)->owner;
+    bool held = false;
+    {
+      std::lock_guard<std::mutex> lock(self->mutex_);
+      held = self->armed_;
+      if (held) {
+        self->armed_ = false;
+        self->entry_ = entry;
+        self->callback_ = callback;
+      } else if (self->entry_) {
+        self->following_ = true;
+        self->duplicates_ += entry == self->entry_ && self->callback_.fn;
+        self->condition_.notify_all();
+      }
+    }
+    self->native_->detach_buffer(
+        proactor, entry,
+        held ? iree_async_buffer_registration_callback_t{Completed, self}
+             : callback);
+  }
+
+  static void Completed(void* user_data, iree_status_t status) {
+    auto* self = static_cast<FileDetachGate*>(user_data);
+    bool deliver = false;
+    {
+      std::lock_guard<std::mutex> lock(self->mutex_);
+      self->status_ = status;
+      self->completed_ = true;
+      deliver = !self->closed_;
+      self->condition_.notify_all();
+    }
+    if (deliver) {
+      self->Open();
+    }
+  }
+
+  struct Forwarding {
+    // Native operations with only registration detachment intercepted.
+    iree_async_proactor_vtable_t vtable = {};
+    // Fixture owning the callback hold and original native table.
+    FileDetachGate* owner = nullptr;
+  };
+  // Installed before polling and retained through native proactor destruction.
+  Forwarding forwarding_;
+  // Original backend operations; all work still uses the real proactor.
+  const iree_async_proactor_vtable_t* native_ = nullptr;
+  // Ordinary runner creation and teardown, including its locality contract.
+  iree_async_proactor_pool_runner_factory_t runner_;
+  // Serializes callback ownership and test observations.
+  std::mutex mutex_;
+  // Publishes actual native completion and subsequent detach attempts.
+  std::condition_variable condition_;
+  // Next detach is intercepted once after Hold begins.
+  bool armed_ = false;
+  // Prevents delivery of the intercepted completion until Open.
+  bool closed_ = false;
+  // Native detach has completed and published status_.
+  bool completed_ = false;
+  // Another detach was requested after the held one.
+  bool following_ = false;
+  // Number of duplicate requests while the original callback is retained.
+  uint32_t duplicates_ = 0;
+  // Identity of the intercepted registration, borrowed through completion.
+  iree_async_buffer_registration_entry_t* entry_ = nullptr;
+  // Original completion, consumed exactly once by Open.
+  iree_async_buffer_registration_callback_t callback_ = {};
+  // Owned native result until the original callback receives it.
+  iree_status_t status_ = iree_ok_status();
+};
+
+// Independent file owners use the ordinary imported-file contract. The last
+// completed file operation permits its caller to stop that file's poll runner.
+class GpuSharedFileStagingTest : public GpuNativeFileProgressTest {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, UINT64_MAX,
+                                             AMDF_NATIVE_LIFETIME_PROCESS));
+    GpuNativeFileTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    auto options = iree_async_proactor_pool_options_default();
+    options.runner = detach_gate_.runner();
+    IREE_ASSERT_OK(iree_async_proactor_pool_create(
+        1, nullptr, options, iree_allocator_system(), &extra_proactors_));
+    IREE_ASSERT_OK(
+        iree_async_proactor_pool_get(extra_proactors_, 0, &extra_proactor_));
+  }
+
+  void TearDown() override {
+    GpuNativeFileTest::TearDown();
+    iree_async_proactor_pool_release(extra_proactors_);
+  }
+
+  // Owned independent runner, released after its file operations complete.
+  iree_async_proactor_pool_t* extra_proactors_ = nullptr;
+  // Borrowed independent file I/O owner.
+  iree_async_proactor_t* extra_proactor_ = nullptr;
+  // Real dependency callback hold, alive through the independent runner.
+  FileDetachGate detach_gate_;
+};
+
+TEST_P(GpuSharedFileStagingTest,
+       SharedBackingGrowthAndTrimPreservePreparedWork) {
+  constexpr uint64_t kSmall = 1024 * 1024;
+  constexpr uint64_t kLarge = 4 * 1024 * 1024;
+  constexpr uint64_t kTotal = 2 * kSmall + kLarge;
+  Ref<iree_hal_buffer_t> buffer;
+  ASSERT_NO_FATAL_FAILURE(Allocate(kBufferOffset + kTotal, buffer.out()));
+  if (host_transfer_) {
+    GTEST_SKIP() << "Direct host ranges do not require physical staging";
+  }
+  std::vector<uint32_t> expected(kTotal / 4);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = uint32_t(i * 37 + 3);
+  }
+  Ref<iree_hal_file_t> primary_file, extra_file;
+  IREE_ASSERT_OK(Open(expected, primary_file.out()));
+  IREE_ASSERT_OK(Open(expected, extra_file.out(), false, extra_proactor_));
+  ASSERT_NE(iree_hal_file_async_handle(primary_file)->proactor,
+            iree_hal_file_async_handle(extra_file)->proactor);
+  // Provision the oracle before measuring staging. queue_download grows the
+  // PM4 argument/readback buffer independently of the file engine's budget.
+  const iree_hal_pool_family_access_t readback_family = {
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+  };
+  const iree_hal_pool_scope_t readback_scope = {
+      .family_count = 1,
+      .families = &readback_family,
+      .host =
+          {
+              .access = IREE_HAL_MEMORY_ACCESS_READ,
+              .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+          },
+  };
+  iree_hal_slab_pool_options_t readback_options;
+  iree_hal_slab_pool_options_initialize(&readback_options);
+  Ref<iree_hal_pool_t> readback_pool;
+  IREE_ASSERT_OK(
+      iree_hal_slab_pool_create(group_, readback_scope, &readback_options,
+                                iree_allocator_system(), readback_pool.out()));
+  Ref<iree_hal_buffer_t> readback;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      readback_pool, iree_hal_make_pool_reservation_request(kTotal, 64),
+      iree_infinite_timeout(), readback.out()));
+  const auto baseline = memory_gate_.ResetPeak();
+  auto* primary = timeline_.get();
+  uint64_t one = 1, two = 2, three = 3, four = 4, five = 5;
+  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &primary, &one},
+                                     primary_file, 0, buffer, kBufferOffset,
+                                     kSmall, &barriers_, 0));
+  ASSERT_NO_FATAL_FAILURE(Wait(one));
+  const auto prepared = memory_gate_.QueryUsage();
+  ASSERT_GT(prepared.live_bytes, baseline.live_bytes);
+  RecordProperty("staging_file_io_capable",
+                 iree_any_bit_set(prepared.last_allocation.flags,
+                                  AMDF_MEMORY_FLAG_HOST_FILE_IO));
+  const uint64_t granularity =
+      prepared.last_allocation.native_allocation_granularity;
+  const uint64_t prefix = prepared.last_allocation.source_byte_offset;
+  ASSERT_NE(granularity, 0u);
+  const uint64_t native_budget =
+      (16 * 1024 * 1024 + prefix + granularity - 1) / granularity * granularity;
+  Ref<iree_hal_semaphore_t> extra_completion, large_completion;
+  CreateSemaphore(extra_completion.out());
+  CreateSemaphore(large_completion.out());
+  auto* extra = extra_completion.get();
+  auto* large = large_completion.get();
+  IREE_ASSERT_OK(iree_hal_queue_read(
+      queues_[0], {}, {1, &extra, &one}, extra_file, kSmall, buffer,
+      kBufferOffset + kSmall, kSmall, &barriers_, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(extra, one, iree_infinite_timeout(), 0));
+  const auto shared = memory_gate_.QueryUsage();
+  EXPECT_EQ(shared.allocation_count, prepared.allocation_count);
+  EXPECT_EQ(shared.live_bytes, prepared.live_bytes);
+  {
+    iree::hal::amd::gpu::cts::NativeMemoryGate::Hold native(&memory_gate_);
+    IREE_ASSERT_OK(iree_hal_queue_read(
+        queues_[0], {}, {1, &large, &one}, primary_file, 2 * kSmall, buffer,
+        kBufferOffset + 2 * kSmall, kLarge, &barriers_, 0));
+    native.WaitEntered();
+    {
+      HeldFileOwner owner;
+      IREE_ASSERT_OK(owner.Hold(extra_proactor_));
+      IREE_ASSERT_OK(iree_hal_queue_read(
+          queues_[0], {1, &extra, &one}, {1, &extra, &two}, extra_file, kSmall,
+          buffer, kBufferOffset + kSmall, kSmall, &barriers_, 0));
+      IREE_ASSERT_OK(iree_hal_device_trim(device_));
+      IREE_ASSERT_OK(iree_hal_queue_read(
+          queues_[0], {1, &primary, &one}, {1, &primary, &two}, primary_file, 0,
+          buffer, kBufferOffset, kSmall, &barriers_, 0));
+      ASSERT_NO_FATAL_FAILURE(Wait(two));
+      EXPECT_EQ(memory_gate_.QueryUsage().allocation_count,
+                prepared.allocation_count);
+      uint64_t value = UINT64_MAX;
+      IREE_ASSERT_OK(iree_hal_semaphore_query(large, &value));
+      EXPECT_EQ(value, 0u);
+    }
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(extra, two, iree_infinite_timeout(), 0));
+  }
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(large, one, iree_infinite_timeout(), 0));
+  std::vector<uint32_t> observed(expected.size());
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      queues_[0], {1, &large, &one}, {1, &primary, &three}, buffer,
+      kBufferOffset, readback, 0, kTotal, nullptr, 0));
+  ASSERT_NO_FATAL_FAILURE(Wait(three));
+  IREE_ASSERT_OK(
+      iree_hal_buffer_map_read(readback, 0, observed.data(), kTotal));
+  EXPECT_EQ(observed, expected);
+  const auto trimmed = memory_gate_.WaitForBytes(baseline.live_bytes);
+  EXPECT_EQ(trimmed.destroy_failures, 0u);
+  EXPECT_LE(trimmed.peak_bytes - baseline.live_bytes, native_budget);
+  RecordProperty("staging_peak_native_bytes",
+                 trimmed.peak_bytes - baseline.live_bytes);
+  RecordProperty("staging_native_byte_budget", native_budget);
+  // A completed trim is one event, not a permanent no-cache policy. Rewarm a
+  // small window, then prove another proactor reuses it without native growth.
+  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &primary, &four},
+                                     primary_file, 0, buffer, kBufferOffset,
+                                     4096, &barriers_, 0));
+  ASSERT_NO_FATAL_FAILURE(Wait(four));
+  const auto rewarmed = memory_gate_.QueryUsage();
+  EXPECT_GT(rewarmed.live_bytes, baseline.live_bytes);
+  IREE_ASSERT_OK(
+      iree_hal_queue_read(queues_[0], {}, {1, &extra, &three}, extra_file, 0,
+                          buffer, kBufferOffset + kSmall, 4096, &barriers_, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(extra, three, iree_infinite_timeout(), 0));
+  EXPECT_EQ(memory_gate_.QueryUsage().allocation_count,
+            rewarmed.allocation_count);
+  std::vector<uint32_t> small(4096 / 4);
+  IREE_ASSERT_OK(iree_hal_queue_copy(
+      queues_[0], {1, &extra, &three}, {1, &primary, &five}, buffer,
+      kBufferOffset + kSmall, readback, 0, 4096, nullptr, 0));
+  ASSERT_NO_FATAL_FAILURE(Wait(five));
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(readback, 0, small.data(), 4096));
+  EXPECT_TRUE(std::equal(small.begin(), small.end(), expected.begin()));
+  // Completion relinquishes the foreign poll owner. Device trim must not
+  // require a future detach callback from this now-stopped runner.
+  extra_file.reset();
+  iree_async_proactor_pool_release(extra_proactors_);
+  extra_proactors_ = nullptr;
+  extra_proactor_ = nullptr;
+  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  EXPECT_EQ(memory_gate_.WaitForBytes(baseline.live_bytes).destroy_failures,
+            0u);
+}
+
+class GpuSharedVirtualFileStagingTest : public GpuSharedFileStagingTest {};
+
+TEST_P(GpuSharedVirtualFileStagingTest,
+       RetiredBackingDetachesOnceBeforeFileCompletion) {
+  constexpr uint64_t kSmall = 1024 * 1024;
+  Ref<iree_hal_buffer_t> buffer;
+  ASSERT_NO_FATAL_FAILURE(Allocate(kLength + 256, buffer.out()));
+  if (host_transfer_) {
+    GTEST_SKIP() << "Direct host ranges do not require physical staging";
+  }
+  ASSERT_GE(mappings_.size(), 2u);
+  ASSERT_GE(mappings_[1].target_range.byte_offset, kSmall);
+  ASSERT_GT(mappings_[1].target_range.byte_length, kSmall);
+  const uint64_t offset = mappings_[1].target_range.byte_offset - kSmall;
+  const uint64_t length = kSmall + mappings_[1].target_range.byte_length;
+  std::vector<uint32_t> expected(length / sizeof(uint32_t));
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = uint32_t(i * 37 + 3);
+  }
+  Ref<iree_hal_file_t> primary_file, extra_file;
+  IREE_ASSERT_OK(Open(expected, primary_file.out()));
+  IREE_ASSERT_OK(Open(expected, extra_file.out(), false, extra_proactor_));
+  auto* primary = timeline_.get();
+  uint64_t one = 1, two = 2;
+  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &primary, &one},
+                                     primary_file, 0, buffer, offset, kSmall,
+                                     &barriers_, 0));
+  ASSERT_NO_FATAL_FAILURE(Wait(one));
+  if (!iree_any_bit_set(memory_gate_.QueryUsage().last_allocation.flags,
+                        AMDF_MEMORY_FLAG_HOST_FILE_IO)) {
+    GTEST_SKIP() << "Native staging does not provide registered file backing";
+  }
+
+  Ref<iree_hal_semaphore_t> completed, allocated;
+  CreateSemaphore(completed.out());
+  CreateSemaphore(allocated.out());
+  auto* completed_handle = completed.get();
+  auto* allocated_handle = allocated.get();
+  Ref<iree_hal_buffer_t> cold;
+  {
+    FileDetachGate::Hold detach(&detach_gate_);
+    // One operation crosses physical ranges: the first uses the prepared small
+    // block, and the second grows staging while retaining the first view. Hold
+    // old-block detach until final completion also relinquishes the new view.
+    IREE_ASSERT_OK(iree_hal_queue_read(
+        queues_[0], {}, {1, &completed_handle, &one}, extra_file, 0, buffer,
+        offset, length, &barriers_, 0));
+    detach_gate_.WaitForCompletedDetach();
+    detach_gate_.WaitForFollowingDetach();
+    EXPECT_EQ(detach_gate_.duplicates(), 0u);
+    uint64_t value = UINT64_MAX;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(completed, &value));
+    EXPECT_EQ(value, 0u);
+
+    iree::hal::amd::gpu::cts::NativeMemoryGate::Hold allocation(&memory_gate_);
+    const auto request = iree_hal_make_pool_reservation_request(4096, 64);
+    IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[1], {},
+                                         {1, &allocated_handle, &one}, pool_, 1,
+                                         &request, cold.out()));
+    allocation.WaitEntered();
+    detach_gate_.Open();
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(completed, one, iree_infinite_timeout(), 0));
+    IREE_ASSERT_OK(iree_hal_semaphore_query(allocated, &value));
+    EXPECT_EQ(value, 0u);
+  }
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(allocated, one, iree_infinite_timeout(), 0));
+  auto* cold_handle = cold.get();
+  IREE_ASSERT_OK(
+      iree_hal_queue_dealloca(queues_[1], {1, &allocated_handle, &one},
+                              {1, &allocated_handle, &two}, 1, &cold_handle));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(allocated, two, iree_infinite_timeout(), 0));
+  std::vector<uint32_t> observed(expected.size());
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[0], {1, &completed_handle, &one}, {1, &primary, &two}, buffer,
+      offset, observed.data(), length, nullptr));
+  ASSERT_NO_FATAL_FAILURE(Wait(two));
+  EXPECT_EQ(observed, expected);
+  // Successful file completion has returned the foreign polling lifetime.
+  extra_file.reset();
+  iree_async_proactor_pool_release(extra_proactors_);
+  extra_proactors_ = nullptr;
+  extra_proactor_ = nullptr;
+  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+}
 
 class GpuNativeRegisteredFileProgressTest : public GpuNativeFileProgressTest {};
 
@@ -949,8 +1606,27 @@ INSTANTIATE_TEST_SUITE_P(
         FileBacking::kNestedPrivate, FileBacking::kNestedHost,
         FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
 
+INSTANTIATE_TEST_SUITE_P(
+    ProcessPhysicalAndVirtual, GpuProcessDirectFileTest,
+    ::testing::Values(
+        FileBacking::kPhysicalHost, FileBacking::kVirtualHost,
+        FileBacking::kVirtualPrivate, FileBacking::kPhysicalRegistered,
+        FileBacking::kVirtualRegistered, FileBacking::kPhysicalPrivate,
+        FileBacking::kNestedPrivate, FileBacking::kNestedHost,
+        FileBacking::kVirtualMixed, FileBacking::kVirtualMixedRegistered));
+
+INSTANTIATE_TEST_SUITE_P(PrivateBacking, GpuSharedFileStagingTest,
+                         ::testing::Values(FileBacking::kPhysicalPrivate,
+                                           FileBacking::kVirtualPrivate));
+
+INSTANTIATE_TEST_SUITE_P(VirtualPrivate, GpuSharedVirtualFileStagingTest,
+                         ::testing::Values(FileBacking::kVirtualPrivate));
+
 INSTANTIATE_TEST_SUITE_P(RegisteredVirtual, GpuNativeRegisteredFileProgressTest,
                          ::testing::Values(FileBacking::kVirtualRegistered));
+
+INSTANTIATE_TEST_SUITE_P(VirtualPrivate, GpuNativeFileLimitTest,
+                         ::testing::Values(FileBacking::kVirtualPrivate));
 
 INSTANTIATE_TEST_SUITE_P(Executable, GpuNativeGlobalFileTest,
                          ::testing::Values(FileBacking::kPhysicalHost));

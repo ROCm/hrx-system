@@ -9,8 +9,11 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <semaphore>
 #include <thread>
+#include <unordered_map>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -43,7 +46,33 @@ class NativeMemoryGate {
  public:
   ~NativeMemoryGate();
 
-  iree_status_t CreateFabric(iree_hal_amd_fabric_t** out_fabric);
+  // Optional allocation limit is both advertised and enforced by the native
+  // dependency; accepted backing still comes from the real driver.
+  iree_status_t CreateFabric(
+      iree_hal_amd_fabric_t** out_fabric,
+      uint64_t maximum_byte_length = UINT64_MAX,
+      amdf_native_lifetime_t lifetime = AMDF_NATIVE_LIFETIME_INSTANCE);
+
+  // PROCESS native bindings share one fabric across fixtures, as the registered
+  // driver does. Reopening a different render file cannot replace that VM.
+  static iree_status_t AcquireProcessFabric(iree_hal_amd_fabric_t** out_fabric);
+
+  struct MemoryUsage {
+    // Native payload bytes whose real destroy call has not yet returned.
+    uint64_t live_bytes = 0;
+    // Maximum simultaneously live payload since ResetPeak.
+    uint64_t peak_bytes = 0;
+    // Successful calls to the real native allocation dependency.
+    uint64_t allocation_count = 0;
+    // Native destroy failures, which cannot prove payload reclamation.
+    uint64_t destroy_failures = 0;
+    // Native extent geometry of the most recently created real allocation.
+    amdf_memory_info_t last_allocation = {};
+  };
+
+  MemoryUsage ResetPeak();
+  MemoryUsage QueryUsage();
+  MemoryUsage WaitForBytes(uint64_t byte_count);
 
   // Read only after Hold::WaitEntered has published the native caller.
   std::thread::id native_thread() const { return native_thread_; }
@@ -62,15 +91,25 @@ class NativeMemoryGate {
   };
 
  private:
+  static amdf_status_t AMDF_CALL QueryDeviceProfile(
+      amdf_memory_scope_t* scope, uint32_t profile_ordinal,
+      uint32_t access_count, const amdf_memory_device_access_t* accesses,
+      amdf_memory_profile_t* out_profile,
+      amdf_memory_access_capabilities_t* out_access_capabilities);
+
   static amdf_status_t AMDF_CALL CreateMemory(
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
       amdf_memory_t** out_memory);
 
+  static amdf_status_t AMDF_CALL DestroyMemory(amdf_memory_t* memory);
+
   // Exact native API table, borrowed for all forwarded calls.
-  const amdf_api_t* native_api_ = nullptr;
+  inline static const amdf_api_t* native_api_ = nullptr;
   // Same native API with an allocation-entry gate, never a substitute
   // allocator.
   amdf_api_t forwarding_api_ = {};
+  // Maximum backing size advertised and accepted by this native dependency.
+  uint64_t maximum_byte_length_ = UINT64_MAX;
   // Serial fixture identity required by the native ABI's context-free table.
   inline static NativeMemoryGate* active_ = nullptr;
   // One-shot hold consumed by the next native backing acquisition.
@@ -83,6 +122,14 @@ class NativeMemoryGate {
   std::binary_semaphore returned_{0};
   // Observed allocation owner, read only after entered_.
   std::thread::id native_thread_;
+  // Serializes observation only, never a real native allocation/free call.
+  std::mutex usage_mutex_;
+  // Publishes actual native destruction to tests awaiting quiescent trim.
+  std::condition_variable usage_changed_;
+  // Exact native extents of handles created through this forwarding table.
+  std::unordered_map<amdf_memory_t*, uint64_t> allocations_;
+  // Observed live/peak payload and native operation counts.
+  MemoryUsage usage_;
 };
 
 class GpuNativeTest : public ::testing::Test {

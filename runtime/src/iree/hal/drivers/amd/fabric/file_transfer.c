@@ -166,8 +166,9 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
     range->contents.data =
         (region ? (uint8_t*)region->base_ptr : storage->contents.data) +
         range->source_offset;
-    range->invalidate = invalidate;
-    range->flush = flush;
+    range->effects.bits =
+        (invalidate ? IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE : 0) |
+        (flush ? IREE_HAL_MEMORY_EFFECT_HOST_FLUSH : 0);
   }
   return iree_ok_status();
 }
@@ -354,7 +355,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_flush(
        i < transfer->sources.count && iree_status_is_ok(status); ++i) {
     const iree_hal_amd_fabric_file_range_t* range =
         &transfer->sources.ranges[i];
-    if (range->flush) {
+    if (range->effects.bits & IREE_HAL_MEMORY_EFFECT_HOST_FLUSH) {
       IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf.host_mapping_flush");
       IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, range->contents.data_length);
       status = IREE_HAL_AMD_STATUS_FROM_AMDF(
@@ -419,7 +420,8 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare_range(
     const iree_hal_amd_fabric_file_range_t* range) {
   const uint64_t position =
       iree_hal_amd_fabric_file_transfer_bytes_transferred(transfer);
-  if (position == range->offset && range->invalidate) {
+  if (position == range->offset &&
+      (range->effects.bits & IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE)) {
     IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf.host_mapping_invalidate");
     IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, range->contents.data_length);
     const amdf_status_t status =

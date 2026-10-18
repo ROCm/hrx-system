@@ -66,6 +66,7 @@ iree_cc_library(
     "file_transfer.c"
   DEPS
     ::capture_pool
+    ::file_staging
     ::host_wait
     iree::async
     iree::async::util::semaphore_wait
@@ -76,6 +77,29 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::profile
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    file_staging
+  HDRS
+    "file_staging.h"
+  SRCS
+    "file_staging.c"
+  DEPS
+    amdf::headers
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::fabric::file_transfer
+    iree::hal::drivers::amd::fabric::memory_transition
+    iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::queue::sdma::queue
+    iree::hal::drivers::amd::status
+    iree::hal::memory::tracing
   PUBLIC
 )
 endif()
@@ -165,34 +189,6 @@ iree_cc_test(
     iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
-)
-endif()
-
-if(IREE_HAL_DRIVER_TASK AND AMDF_BUILD)
-iree_cc_test(
-  NAME
-    file_transfer_ranges_test
-  SRCS
-    "file_transfer_ranges_test.cc"
-  DEPS
-    ::capture_pool
-    ::file_transfer
-    amdf::headers
-    iree::async
-    iree::async::platform
-    iree::async::util::semaphore_wait
-    iree::base
-    iree::hal
-    iree::hal::cts::util::test_base
-    iree::hal::drivers::amd::fabric::file_transfer
-    iree::hal::drivers::amd::fabric::memory_backend
-    iree::hal::drivers::amd::fabric::memory_backend_test_base
-    iree::hal::drivers::amd::gpu::context
-    iree::hal::utils::files
-    iree::io::file_handle
-    iree::testing::gtest
-    iree::testing::gtest_main
-    iree::testing::temp_file
 )
 endif()
 

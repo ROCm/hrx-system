@@ -325,6 +325,7 @@ iree_cc_test(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::gpu::image::hip_images
     iree::hal::memory::fixed_block_pool
+    iree::hal::utils::files
     iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main

@@ -1004,6 +1004,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::publication
     iree::hal::drivers::amd::gpu::queue::allocation
     iree::hal::drivers::amd::gpu::queue::capture_pool
+    iree::hal::drivers::amd::gpu::queue::file_staging
     iree::hal::drivers::amd::gpu::queue::file_transfer
     iree::hal::drivers::amd::gpu::queue::host_call
     iree::hal::drivers::amd::gpu::queue::host_wait

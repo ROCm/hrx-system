@@ -29,14 +29,14 @@ typedef enum iree_hal_amd_gpu_asan_shadow_backing_e {
 // RDNA/CDNA.
 typedef struct iree_hal_amd_gpu_device_options_t {
   // Exact native family ordinal, or UINT32_MAX to select the first supported
-  // PM4 family. No implicit SDMA queue is provisioned.
+  // PM4 family. File transfers separately select a native SDMA family.
   uint32_t queue_family_ordinal;
   // Number of provisioned queues in this family, between 1 and 256.
   uint32_t queue_count;
   // Host NUMA node for both device workers and the shared proactor. UINT32_MAX
   // leaves placement unspecified; GPU memory nodes are not CPU NUMA nodes.
   uint32_t host_numa_node;
-  // Initial per-queue storage. Growth is placed on the shared service worker.
+  // Initial per-queue storage. Native growth uses the fabric allocation owner.
   struct {
     // Native command storage capacity in bytes.
     uint64_t ring_byte_length;
@@ -74,10 +74,11 @@ void iree_hal_amd_gpu_device_options_initialize(
     iree_hal_amd_gpu_device_options_t* out_options);
 
 // Creates a refcounted HAL device with provisioned queues, one completion
-// worker, and one shared submission/memory service. Pools remain explicit.
-// Success transfers the unique context and returns one device reference.
-// Failure leaves out_device NULL and the context with the caller. Failed
-// native rollback latches context cleanup before returning an error.
+// worker and one deferred publisher. Blocking allocation uses the fabric's
+// shared NUMA allocation owner; file I/O uses its proactor. Pools remain
+// explicit. Success transfers the unique context and returns one device
+// reference. Failure leaves out_device NULL and the context with the caller.
+// Failed native rollback latches context cleanup before returning an error.
 //
 // Families, queues, and resources borrow their parent device. The final device
 // release closes admission and transfers cleanup to its completion worker;

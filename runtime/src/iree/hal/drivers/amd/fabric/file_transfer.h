@@ -88,10 +88,9 @@ typedef struct iree_hal_amd_fabric_file_range_t {
   uint64_t offset;
   // Exact native consumer of this source, established during resolution.
   uint32_t access_ordinal;
-  // Exact pair requires host invalidation before accessing device-written data.
-  bool invalidate;
-  // Exact pair requires host publication after native file reads.
-  bool flush;
+  // Qualified effects at the file engine: host cache actions for direct views,
+  // or copy-engine cache actions for ranges requiring native device copies.
+  iree_hal_memory_effects_t effects;
 } iree_hal_amd_fabric_file_range_t;
 
 // Placed state for a file transfer through a host execution binding or an

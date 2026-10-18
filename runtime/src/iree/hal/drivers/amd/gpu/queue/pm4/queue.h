@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
+#include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 
@@ -42,6 +43,8 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   iree_hal_amd_gpu_allocation_context_t* allocations;
   // Borrowed device-shared mapping admission and result publication.
   iree_hal_amd_gpu_memory_mapping_context_t* mappings;
+  // Borrowed shared file-copy pipeline, independent of this packet protocol.
+  iree_hal_amd_gpu_file_staging_t* file_staging;
   // Optional shared channel drained before host completion on the sole worker.
   iree_hal_amd_gpu_feedback_t* feedback;
   // Prepared physical cache-control encoding.

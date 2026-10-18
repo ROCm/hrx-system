@@ -65,12 +65,14 @@ iree_cc_library(
     iree::hal::drivers::amd::fabric::memory
     iree::hal::drivers::amd::fabric::memory_backend
     iree::hal::drivers::amd::gpu::queue::allocation
+    iree::hal::drivers::amd::gpu::queue::file_staging
     iree::hal::drivers::amd::gpu::queue::memory_mapping
     iree::hal::drivers::amd::gpu::queue::pm4::barrier
     iree::hal::drivers::amd::gpu::queue::pm4::command_buffer
     iree::hal::drivers::amd::gpu::queue::pm4::program
     iree::hal::drivers::amd::gpu::queue::pm4::queue
     iree::hal::drivers::amd::gpu::queue::pm4::semaphore
+    iree::hal::drivers::amd::gpu::queue::sdma::queue
     iree::hal::drivers::amd::gpu::target::identity
     iree::hal::drivers::amd::status
     iree::hal::utils::device_spec_builder

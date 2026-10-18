@@ -17,11 +17,13 @@
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 #include "iree/hal/drivers/amd/gpu/queue/allocation.h"
+#include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/semaphore.h"
+#include "iree/hal/drivers/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/hal/utils/file_registry.h"
@@ -54,6 +56,13 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_amd_gpu_publication_t publication;
   // Resident command programs, shared builtins, and idle-instance trimming.
   iree_hal_amd_gpu_pm4_program_pool_t programs;
+  // Required file copies share one native transfer queue and reusable backing.
+  struct {
+    // Native publication/retirement source, absent without an admitted family.
+    iree_hal_amd_gpu_sdma_queue_t* queue;
+    // Device-wide physical staging, shared by independent file proactors.
+    iree_hal_amd_gpu_file_staging_t* staging;
+  } files;
   // Sole native-event completion/retirement worker.
   iree_hal_amd_gpu_completion_t completion;
   // Optional shared shader reports, drained by the same completion worker.
@@ -367,7 +376,7 @@ static bool iree_hal_amd_gpu_device_is_idle(iree_hal_amd_gpu_device_t* device) {
       return false;
     }
   }
-  return true;
+  return iree_hal_amd_gpu_sdma_queue_is_idle(device->files.queue);
 }
 
 // Native callbacks can still make a final queue/source access after returning
@@ -380,8 +389,20 @@ static bool iree_hal_amd_gpu_device_release_children(
     // returning a queue. Its borrowed construction facts must also stay live.
     return false;
   }
+  if (!iree_hal_amd_gpu_file_staging_free(device->files.staging)) {
+    return false;
+  }
+  device->files.staging = NULL;
   iree_hal_amd_gpu_context_join_memory(device->context);
   iree_hal_amd_gpu_publication_deinitialize(&device->publication);
+  const amdf_status_t file_status =
+      iree_hal_amd_gpu_sdma_queue_free(device->files.queue);
+  if (!amdf_status_is_ok(file_status)) {
+    iree_hal_amd_gpu_context_report(device->context, file_status,
+                                    "SDMA file queue native ownership join");
+    return false;
+  }
+  device->files.queue = NULL;
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     if (!device->queues[i]) {
       continue;
@@ -518,10 +539,8 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
 // Queue protocol and publication are native family properties, independent of
 // the executable target. Prefer direct publication when this family exposes it.
 static amdf_queue_publication_modes_t
-iree_hal_amd_gpu_device_family_publication(
-    const amdf_queue_family_info_t* family) {
-  const amdf_queue_publication_modes_t modes =
-      iree_hal_amd_gpu_pm4_queue_publication_modes(family);
+iree_hal_amd_gpu_device_select_publication(
+    amdf_queue_publication_modes_t modes) {
   return (modes & AMDF_QUEUE_PUBLICATION_MODE_USER)
              ? AMDF_QUEUE_PUBLICATION_MODE_USER
              : modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
@@ -641,7 +660,7 @@ iree_status_t iree_hal_amd_gpu_device_create(
   uint32_t family_ordinal = options->queue_family_ordinal;
   if (family_ordinal == UINT32_MAX) {
     for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
-      if (iree_hal_amd_gpu_device_family_publication(&context->families[i])) {
+      if (iree_hal_amd_gpu_pm4_queue_publication_modes(&context->families[i])) {
         family_ordinal = i;
         break;
       }
@@ -658,15 +677,28 @@ iree_status_t iree_hal_amd_gpu_device_create(
                             "and 1 to 256 queues");
   }
   const amdf_queue_publication_modes_t publication_mode =
-      iree_hal_amd_gpu_device_family_publication(
-          &context->families[family_ordinal]);
+      iree_hal_amd_gpu_device_select_publication(
+          iree_hal_amd_gpu_pm4_queue_publication_modes(
+              &context->families[family_ordinal]));
   if (!publication_mode) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "GPU family has no supported PM4 publication");
   }
+  uint32_t file_family = UINT32_MAX;
+  amdf_queue_publication_modes_t file_publication_mode = 0;
+  for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
+    file_publication_mode = iree_hal_amd_gpu_device_select_publication(
+        iree_hal_amd_gpu_sdma_queue_publication_modes(&context->families[i]));
+    if (file_publication_mode) {
+      file_family = i;
+      break;
+    }
+  }
+  const bool has_file_queue = file_family != UINT32_MAX;
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_device_t);
-  const uint32_t source_count = options->queue_count + 1 + feedback_enabled;
-  const uint32_t publication_count = options->queue_count + 2;
+  const uint32_t source_count =
+      options->queue_count + 1 + feedback_enabled + has_file_queue;
+  const uint32_t publication_count = options->queue_count + 2 + has_file_queue;
   if (!iree_host_size_checked_mul_add(total_size, options->queue_count,
                                       sizeof(iree_hal_queue_t*), &total_size) ||
       !iree_host_size_checked_mul_add(
@@ -741,6 +773,20 @@ iree_status_t iree_hal_amd_gpu_device_create(
         iree_async_proactor_pool_entry_proactor(device->proactor_entry),
         IREE_ASYNC_NOTIFICATION_FLAG_NONE, &device->memory.notification);
   }
+  if (iree_status_is_ok(status) && has_file_queue) {
+    status = iree_hal_amd_gpu_sdma_queue_allocate(
+        context, file_family, file_publication_mode, &device->memory.control,
+        &device->publication, options->queue_count + 2, host_allocator,
+        &device->files.queue);
+  }
+  if (iree_status_is_ok(status) && has_file_queue) {
+    status = iree_hal_amd_gpu_file_staging_allocate(
+        (iree_hal_device_t*)device, context, file_family, device->files.queue,
+        iree_async_proactor_pool_entry_proactor(device->proactor_entry), 8,
+        2 * 1024 * 1024,
+        iree_async_proactor_pool_entry_node_id(device->proactor_entry),
+        host_allocator, &device->files.staging);
+  }
   iree_thread_affinity_t affinity = {0};
   if (device->proactor_entry) {
     const uint32_t node_id =
@@ -774,6 +820,7 @@ iree_status_t iree_hal_amd_gpu_device_create(
       .publication = &device->publication,
       .allocations = &device->memory.allocations,
       .mappings = &device->memory.mappings,
+      .file_staging = device->files.staging,
       .feedback = feedback_enabled ? &device->feedback : NULL,
       .retirement_capacity = options->pm4.retirement_capacity,
       .argument_capacity = options->pm4.argument_capacity,
@@ -813,16 +860,24 @@ iree_status_t iree_hal_amd_gpu_device_create(
     device->publication_sources[options->queue_count + 1] =
         iree_hal_amd_gpu_memory_mapping_context_publication_source(
             &device->memory.mappings);
+    if (has_file_queue) {
+      device->publication_sources[options->queue_count + 2] =
+          iree_hal_amd_gpu_sdma_queue_publication_source(device->files.queue);
+    }
     status = iree_hal_amd_gpu_publication_initialize(
         publication_count, device->publication_sources, affinity,
         host_allocator, &device->publication);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_device_initialize_memory(device, family_ordinal);
+    if (has_file_queue) {
+      device->sources[device->queue_count] =
+          iree_hal_amd_gpu_sdma_queue_completion_source(device->files.queue);
+    }
     // Queue retirement is observed before the final feedback drain so shutdown
     // cannot pass a report published between a drain and native completion.
     if (feedback_enabled) {
-      device->sources[device->queue_count] =
+      device->sources[device->queue_count + has_file_queue] =
           (iree_hal_amd_gpu_completion_source_t){iree_hal_amd_gpu_feedback_poll,
                                                  &device->feedback};
     }
@@ -859,6 +914,7 @@ static void iree_hal_amd_gpu_device_replace_channel_provider(
 
 static void iree_hal_amd_gpu_device_trim_caches(void* user_data) {
   iree_hal_amd_gpu_device_t* device = user_data;
+  iree_hal_amd_gpu_file_staging_trim(device->files.staging);
   iree_arena_block_pool_trim(&device->memory.allocations.blocks);
   iree_hal_amd_gpu_pm4_program_pool_trim(&device->programs);
   for (uint32_t i = 0; i < device->queue_count; ++i) {
