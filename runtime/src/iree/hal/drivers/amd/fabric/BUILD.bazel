@@ -243,7 +243,6 @@ iree_runtime_cc_test(
     name = "memory_backend_test",
     srcs = [
         "memory_backend_test.cc",
-        "memory_backend_test_base.h",
         "virtual_buffer_test.cc",
     ],
     target_compatible_with = select({
@@ -254,6 +253,7 @@ iree_runtime_cc_test(
         ":file_transfer",
         ":memory",
         ":memory_backend",
+        ":memory_backend_test_base",
         ":slab_provider",
         "//libamdf:headers",
         "//runtime/src/iree/async",
@@ -272,6 +272,32 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "memory_backend_test_base",
+    testonly = True,
+    hdrs = ["memory_backend_test_base.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_task": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":memory_backend",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task:device",
+        "//runtime/src/iree/hal/memory:fixed_block_pool",
+        "//runtime/src/iree/hal/memory:slab_cache",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
     ],
 )
 

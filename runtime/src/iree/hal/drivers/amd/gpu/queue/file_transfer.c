@@ -32,7 +32,7 @@ typedef struct iree_hal_amd_gpu_file_transfer_t {
   void* before;
   // Prepared cache boundary following every file and host effect.
   void* after;
-  // Buffered native I/O uses the buffer's qualified host execution view.
+  // Current chunk uses its source's qualified host execution view.
   bool host_transfer;
   // Joins each submitting call with its potentially immediate completion.
   iree_atomic_int32_t pending;
@@ -232,8 +232,10 @@ static void iree_hal_amd_gpu_file_transfer_copy(
   }
   iree_hal_amd_gpu_file_transfer_submit_native(
       operation, &copy,
-      transfer->async.chunk.offset == 0 ? operation->before : NULL, NULL,
-      iree_hal_amd_gpu_file_transfer_copy_complete);
+      transfer->async.chunk.offset == 0 && !transfer->sources.host_count
+          ? operation->before
+          : NULL,
+      NULL, iree_hal_amd_gpu_file_transfer_copy_complete);
 }
 
 static void iree_hal_amd_gpu_file_transfer_advance(
@@ -241,22 +243,32 @@ static void iree_hal_amd_gpu_file_transfer_advance(
   iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
   if (transfer->async.bytes_transferred == transfer->length) {
     iree_status_t status = iree_ok_status();
-    if (operation->host_transfer &&
+    if (transfer->sources.host_count &&
         transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
-      // Publish the complete host write once, after all I/O has retired and
-      // before the native consumer acquire. No GPU work occurs per file chunk.
+      // Publish every host-written range once, after all I/O and native copies
+      // have retired and before the final native consumer acquire.
       status = iree_hal_amd_fabric_file_transfer_flush(transfer);
     }
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
     return;
   }
-  iree_status_t status =
-      operation->host_transfer
-          ? iree_hal_amd_fabric_file_transfer_prepare(transfer)
-          : iree_hal_amd_fabric_file_transfer_prepare_chunk(
-                transfer,
-                iree_async_span_from_ptr(transfer->async.staging.data,
-                                         transfer->async.staging.data_length));
+  const iree_hal_amd_fabric_file_range_t* range =
+      iree_hal_amd_fabric_file_transfer_current_range(transfer);
+  operation->host_transfer = range && range->contents.data;
+  iree_status_t status = iree_ok_status();
+  if (operation->host_transfer) {
+    status = iree_hal_amd_fabric_file_transfer_prepare_range(transfer, range);
+  } else {
+    iree_host_size_t capacity = transfer->async.staging.data_length;
+    if (range) {
+      capacity =
+          iree_min(capacity, range->offset + range->contents.data_length -
+                                 transfer->async.bytes_transferred);
+    }
+    status = iree_hal_amd_fabric_file_transfer_prepare_chunk(
+        transfer,
+        iree_async_span_from_ptr(transfer->async.staging.data, capacity));
+  }
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
   } else if (operation->host_transfer ||
@@ -293,13 +305,37 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
   status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
       transfer, operation->executor->context->api,
       operation->executor->queue->queue_family,
-      operation->executor->native_family_ordinal, &before, &after,
-      &operation->host_transfer);
+      operation->executor->native_family_ordinal, &before, &after);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
     return;
   }
-  if (operation->host_transfer) {
+  if (!transfer->async.file) {
+    iree_hal_amd_gpu_file_transfer_copy(operation);
+    return;
+  }
+  if (transfer->sources.host_count != transfer->sources.count ||
+      !transfer->sources.count) {
+    const iree_async_file_requirements_t* requirements =
+        iree_hal_file_requirements(transfer->file);
+    const iree_host_size_t alignment = iree_max(
+        sizeof(void*), transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
+                           ? requirements->read.buffer_alignment
+                           : requirements->write.buffer_alignment);
+    const iree_host_size_t capacity =
+        iree_min(transfer->length, IREE_HAL_AMD_GPU_FILE_STAGING_CAPACITY);
+    status = iree_allocator_malloc_aligned(
+        transfer->host_allocator, capacity, alignment, 0,
+        (void**)&transfer->async.staging.data);
+    if (iree_status_is_ok(status)) {
+      transfer->async.staging.data_length = capacity;
+    }
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_file_transfer_complete(operation, status);
+    return;
+  }
+  if (transfer->sources.host_count) {
     operation->executor->add_effects(operation->executor->queue, before,
                                      operation->before);
     operation->executor->add_effects(operation->executor->queue, after,
@@ -307,28 +343,8 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
     iree_hal_amd_gpu_file_transfer_submit_native(
         operation, NULL, operation->before, NULL,
         iree_hal_amd_gpu_file_transfer_host_start);
-    return;
-  }
-  if (!transfer->async.file) {
-    iree_hal_amd_gpu_file_transfer_copy(operation);
-    return;
-  }
-  const iree_async_file_requirements_t* requirements =
-      iree_hal_file_requirements(transfer->file);
-  const iree_host_size_t alignment = iree_max(
-      sizeof(void*), transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
-                         ? requirements->read.buffer_alignment
-                         : requirements->write.buffer_alignment);
-  const iree_host_size_t capacity =
-      iree_min(transfer->length, IREE_HAL_AMD_GPU_FILE_STAGING_CAPACITY);
-  status = iree_allocator_malloc_aligned(transfer->host_allocator, capacity,
-                                         alignment, 0,
-                                         (void**)&transfer->async.staging.data);
-  if (iree_status_is_ok(status)) {
-    transfer->async.staging.data_length = capacity;
-    iree_hal_amd_gpu_file_transfer_advance(operation);
   } else {
-    iree_hal_amd_gpu_file_transfer_complete(operation, status);
+    iree_hal_amd_gpu_file_transfer_advance(operation);
   }
 }
 

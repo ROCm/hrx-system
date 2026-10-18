@@ -10,6 +10,7 @@
 #include "amdf/amdf.h"
 #include "iree/async/operations/file.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amd/fabric/memory.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,24 +26,28 @@ typedef struct iree_hal_amd_fabric_file_transfer_callback_t {
   void* user_data;
 } iree_hal_amd_fabric_file_transfer_callback_t;
 
-// One contiguous physical source of a file operation. Host views and optional
-// registrations are prepared by the backing owner and borrowed through I/O.
-typedef struct iree_hal_amd_fabric_file_host_range_t {
-  // Native view borrowing the application's installed physical source.
-  amdf_host_mapping_t* mapping;
-  // Borrowed retained registration, or NULL for an ordinary buffered view.
+// One contiguous physical source of a file operation. Source identity and
+// coordinates remain available when native copies are required. Host views
+// and optional registrations are prepared by the backing owner and borrowed.
+typedef struct iree_hal_amd_fabric_file_range_t {
+  // Borrowed physical source; installed aliases do not retain its lifetime.
+  const iree_hal_amd_fabric_memory_t* storage;
+  // Borrowed retained registration, or NULL for raw I/O and engine copies.
   iree_async_region_t* region;
-  // Host bytes corresponding exactly to this portion of the file operation.
+  // Exact extent of this source in the operation. A NULL data pointer requires
+  // an engine copy; otherwise native file I/O can access the bytes directly.
   iree_byte_span_t contents;
-  // Source-relative position in the whole-memory native host view.
-  uint64_t mapping_offset;
+  // Logical source-relative position, independent of native allocation padding.
+  uint64_t source_offset;
   // Transfer-relative first byte, independent of file and buffer offsets.
   uint64_t offset;
+  // Exact native consumer of this source, established during resolution.
+  uint32_t access_ordinal;
   // Exact pair requires host invalidation before accessing device-written data.
   bool invalidate;
   // Exact pair requires host publication after native file reads.
   bool flush;
-} iree_hal_amd_fabric_file_host_range_t;
+} iree_hal_amd_fabric_file_range_t;
 
 // Placed state for a file transfer through a host execution binding or an
 // engine's native buffer copy. The engine owns dependency resolution, staging,
@@ -68,21 +73,23 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
   iree_byte_span_t file_contents;
   // Host execution view resolved only after producer dependencies complete.
   iree_byte_span_t buffer_contents;
-  // Private views of physical backing, including sources installed in an
-  // execution-only virtual buffer. These views borrow the backing lifetimes.
+  // Physical ranges, including sources installed in an execution-only virtual
+  // buffer. These immutable descriptors borrow the backing lifetimes.
   struct {
     // Borrowed native API, dominated by the engine's retained device.
     const amdf_api_t* api;
     // File ranges in logical order, borrowing prepared views and optional
     // registrations. No physical backing is retained.
-    iree_hal_amd_fabric_file_host_range_t* ranges;
+    iree_hal_amd_fabric_file_range_t* ranges;
     // Number of initialized ranges, including any partially prepared tail.
     iree_host_size_t count;
+    // Number of ranges eligible for native I/O through prepared host views.
+    iree_host_size_t host_count;
     // Current I/O range; advances only after its complete extent retires.
     iree_host_size_t index;
     // Single-source operations use placed metadata without a heap allocation.
-    iree_hal_amd_fabric_file_host_range_t inline_range;
-  } host;
+    iree_hal_amd_fabric_file_range_t inline_range;
+  } sources;
   // Platform I/O state, unused for memory files.
   struct {
     // Native handle retained through |file|; its proactor remains borrowed.
@@ -131,20 +138,34 @@ void iree_hal_amd_fabric_file_transfer_deinitialize(
 // mapped source before the engine copies their bytes.
 // Queue visibility is combined over the entire operation; CPU actions are
 // qualified against each physical source and performed only when required.
-// Unsupported backing returns OK with available=false and no acquired views.
+// Platform files retain every source, including those requiring an engine copy.
+// Memory files and buffers without native metadata leave the range array empty.
 // Holes, native errors, and metadata allocation failures propagate.
 // Native file-capable host views support direct files. Registered sources also
 // retain fixed-buffer identity; registration is not required for an otherwise
 // capable view. Other host views support ordinary buffered I/O. A registration
-// for a different file proactor is an admission error. Success with
-// available=true borrows prepared host views until deinitialization,
-// without adding source ownership or public host-mapping permissions to the
-// buffer.
+// for a different file proactor is an admission error. Prepared host views are
+// borrowed until deinitialization, without adding source ownership or public
+// host-mapping permissions to the buffer.
 iree_status_t iree_hal_amd_fabric_file_transfer_prepare_ranges(
     iree_hal_amd_fabric_file_transfer_t* transfer, const amdf_api_t* api,
     const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
-    iree_hal_memory_effects_t* out_before, iree_hal_memory_effects_t* out_after,
-    bool* out_available);
+    iree_hal_memory_effects_t* out_before,
+    iree_hal_memory_effects_t* out_after);
+
+// Advances to the source containing the next uncompleted byte. The prior
+// chunk and any engine copy must have retired. Returns NULL when the buffer
+// has no native source metadata. Called only while bytes remain.
+const iree_hal_amd_fabric_file_range_t*
+iree_hal_amd_fabric_file_transfer_current_range(
+    iree_hal_amd_fabric_file_transfer_t* transfer);
+
+// Prepares native I/O through one qualified host range. The engine has already
+// applied the combined producer barrier. Acquires the host view on first entry
+// and bounds the request to this range and the native file geometry.
+iree_status_t iree_hal_amd_fabric_file_transfer_prepare_range(
+    iree_hal_amd_fabric_file_transfer_t* transfer,
+    const iree_hal_amd_fabric_file_range_t* range);
 
 // Publishes the complete direct-host read after every native file request has
 // retired. Private physical views use their exact pair recipes; ordinary host

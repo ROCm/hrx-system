@@ -250,14 +250,21 @@ TEST_F(MemoryBackendTest, FileTransfersQualifySourcesAfterDeviceOnlyPrefix) {
         IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
             file, access, 0, target, 0, 16384, allocator_, &transfer));
         iree_hal_memory_effects_t before, after;
-        bool available = true;
         IREE_EXPECT_STATUS_IS(
-            expected, iree_hal_amd_fabric_file_transfer_prepare_ranges(
-                          &transfer, &native_.api, families_[0],
-                          native_families_[0].queue_family_ordinal, &before,
-                          &after, &available));
-        EXPECT_FALSE(available);
-        EXPECT_EQ(transfer.host.count, 0u);
+            expected,
+            iree_hal_amd_fabric_file_transfer_prepare_ranges(
+                &transfer, &native_.api, families_[0],
+                native_families_[0].queue_family_ordinal, &before, &after));
+        EXPECT_EQ(transfer.sources.host_count, 0u);
+        if (expected == IREE_STATUS_OK && iree_hal_file_async_handle(file)) {
+          EXPECT_GE(transfer.sources.count, 1u);
+          for (size_t i = 0; i < transfer.sources.count; ++i) {
+            EXPECT_NE(transfer.sources.ranges[i].storage, nullptr);
+            EXPECT_EQ(transfer.sources.ranges[i].contents.data, nullptr);
+          }
+        } else {
+          EXPECT_EQ(transfer.sources.count, 0u);
+        }
         EXPECT_EQ(native_.map_count, 0);
         iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
       }

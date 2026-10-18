@@ -303,12 +303,12 @@ iree_cc_test(
     memory_backend_test
   SRCS
     "memory_backend_test.cc"
-    "memory_backend_test_base.h"
     "virtual_buffer_test.cc"
   DEPS
     ::file_transfer
     ::memory
     ::memory_backend
+    ::memory_backend_test_base
     ::slab_provider
     amdf::headers
     iree::async
@@ -329,6 +329,32 @@ iree_cc_test(
     iree::testing::temp_file
   LABELS
     "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD AND IREE_HAL_DRIVER_TASK)
+iree_cc_library(
+  NAME
+    memory_backend_test_base
+  HDRS
+    "memory_backend_test_base.h"
+  DEPS
+    ::memory_backend
+    amdf::headers
+    iree::async
+    iree::async::platform
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::task::device
+    iree::hal::memory::fixed_block_pool
+    iree::hal::memory::slab_cache
+    iree::hal::testing::mock_device
+    iree::task
+    iree::testing::gtest
+  TESTONLY
+  PUBLIC
 )
 endif()
 
