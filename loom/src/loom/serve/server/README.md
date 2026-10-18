@@ -80,10 +80,13 @@ does not wait for it.
 
 The [Realtime owner](realtime/server.h) binds an assistant composition to the
 original registration identities and keeps its upgraded HTTP claim through
-retirement. [Input conversion](realtime/input.h) holds detached WebSocket
-receipts while shared-worker tasks decode and resample PCM. Explicit commit is
-semantic EOF for one independently owned utterance. Later controls remain
-readable while earlier input work borrows its receipt.
+retirement. [Microphone capture](realtime/capture.h) decodes detached WebSocket
+receipts into bounded original-rate PCM storage on shared workers. Independent
+[input converters](realtime/input.h) borrow contiguous spans until their workers
+release them; clearing an item preserves accepted borrowers through retirement.
+Explicit commit seals the ordered audio frontier and delivers semantic EOF after
+its final PCM span. Later controls remain readable while earlier input work
+borrows its receipt or samples.
 
 [Generation](realtime/generation.h) feeds native text content spans into the
 continuing speech interface under bounded output credit. Its finite output task
@@ -97,8 +100,10 @@ The real CLI socket witness lives in [session_test.py](realtime/session_test.py)
 with physical execution registered by CPU, AMDGPU, and SPIR-V providers. It checks
 commit without later audio, exact text/PCM, voice changes, truncation with cache
 reuse, cancellation before native admission, cleanup through drain, and capture
-failure isolation. [Input lifetime tests](realtime/input_test.cc) hold every
-shared worker across cancellation and peer disconnect. The
+failure isolation. [Capture lifetime tests](realtime/capture_test.cc) cover ring
+wrap, out-of-order loan release, and accepted decoding across cancellation and
+peer disconnect. [Input lifetime tests](realtime/input_test.cc) retain borrowed
+PCM through conversion release and independently flush finite utterances. The
 [generation lifetime test](realtime/generation_test.cc) cancels an accepted
 conversion job while it borrows a real native waveform block. Numerical audio
 tests cover rate conversion, downmixing, packet boundaries, EOF, and saturation.
