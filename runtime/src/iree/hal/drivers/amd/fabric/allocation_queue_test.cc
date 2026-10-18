@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/fabric/slab_provider.h"
 #include "iree/hal/testing/mock_device.h"
 #include "iree/testing/gtest.h"
@@ -29,6 +30,9 @@ struct NativeAllocator {
     api.memory_create = Allocate;
     api.memory_query_info = Query;
     api.memory_destroy = Free;
+    api.memory_map = Map;
+    api.host_mapping_query_info = QueryMapping;
+    api.host_mapping_destroy = Unmap;
     options.scope = reinterpret_cast<amdf_memory_scope_t*>(this);
     options.profile.ordinal = 7;
     options.profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
@@ -43,6 +47,12 @@ struct NativeAllocator {
   static amdf_status_t AMDF_CALL Query(amdf_memory_t* memory,
                                        amdf_memory_info_t* out_info);
   static amdf_status_t AMDF_CALL Free(amdf_memory_t* memory);
+  static amdf_status_t AMDF_CALL Map(amdf_memory_t* memory,
+                                     const amdf_memory_map_info_t* info,
+                                     amdf_host_mapping_t** out_mapping);
+  static amdf_status_t AMDF_CALL QueryMapping(
+      amdf_host_mapping_t* mapping, amdf_host_mapping_info_t* out_info);
+  static amdf_status_t AMDF_CALL Unmap(amdf_host_mapping_t* mapping);
 
   // Native functions consumed by the production backing owner.
   amdf_api_t api = {};
@@ -73,6 +83,8 @@ struct NativeMemory {
   NativeAllocator* allocator;
   // Achieved geometry returned by native preparation.
   uint64_t byte_length;
+  // Ordinary host pages usable by the real proactor registration backend.
+  std::vector<uint8_t> contents;
 };
 
 amdf_status_t AMDF_CALL NativeAllocator::Allocate(
@@ -93,8 +105,8 @@ amdf_status_t AMDF_CALL NativeAllocator::Allocate(
   EXPECT_EQ(info->memory_profile_ordinal, 7u);
   EXPECT_EQ(info->byte_length % 64, 0u);
   EXPECT_GE(info->minimum_alignment, 64u);
-  *out_memory = reinterpret_cast<amdf_memory_t*>(
-      new NativeMemory{self, info->byte_length});
+  *out_memory = reinterpret_cast<amdf_memory_t*>(new NativeMemory{
+      self, info->byte_length, std::vector<uint8_t>(info->byte_length)});
   return AMDF_STATUS_OK;
 }
 
@@ -120,6 +132,29 @@ amdf_status_t AMDF_CALL NativeAllocator::Free(amdf_memory_t* handle) {
   }
   memory->allocator->threads.push_back(std::this_thread::get_id());
   delete memory;
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t AMDF_CALL
+NativeAllocator::Map(amdf_memory_t* handle, const amdf_memory_map_info_t* info,
+                     amdf_host_mapping_t** out_mapping) {
+  auto* memory = reinterpret_cast<NativeMemory*>(handle);
+  EXPECT_EQ(info->byte_length, memory->byte_length);
+  *out_mapping = reinterpret_cast<amdf_host_mapping_t*>(memory);
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t AMDF_CALL NativeAllocator::QueryMapping(
+    amdf_host_mapping_t* mapping, amdf_host_mapping_info_t* out_info) {
+  auto* memory = reinterpret_cast<NativeMemory*>(mapping);
+  out_info->pointer = memory->contents.data();
+  out_info->cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t AMDF_CALL NativeAllocator::Unmap(amdf_host_mapping_t* mapping) {
+  auto* memory = reinterpret_cast<NativeMemory*>(mapping);
+  memory->allocator->threads.push_back(std::this_thread::get_id());
   return AMDF_STATUS_OK;
 }
 
@@ -240,6 +275,146 @@ TEST_F(AllocationQueueTest, FailedPreparationReleasesItsNativeHandle) {
   for (auto& memory : acquire.memories) {
     EXPECT_EQ(memory.handle, nullptr);
   }
+}
+
+class RegisteredAllocationQueueTest : public AllocationQueueTest {
+ protected:
+  void SetUp() override {
+    AllocationQueueTest::SetUp();
+    IREE_ASSERT_OK(iree_async_proactor_pool_create(
+        2, nullptr, iree_async_proactor_pool_options_default(),
+        iree_allocator_system(), &pool_));
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(proactors_); ++i) {
+      IREE_ASSERT_OK(iree_async_proactor_pool_get(pool_, i, &proactors_[i]));
+      if (!iree_all_bits_set(
+              iree_async_proactor_query_capabilities(proactors_[i]),
+              IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+        GTEST_SKIP() << "Prepared buffer attachment is unavailable";
+      }
+    }
+    native_.options.host_access =
+        AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+    native_.options.io.proactor_count = IREE_ARRAYSIZE(proactors_);
+    native_.options.io.proactors = proactors_;
+  }
+
+  void TearDown() override {
+    AllocationQueueTest::TearDown();
+    iree_async_proactor_pool_release(pool_);
+  }
+
+  iree_status_t Transition(iree_async_buffer_registration_entry_t* entry,
+                           bool attach) {
+    std::promise<iree::Status> completed;
+    const iree_async_buffer_registration_callback_t callback = {
+        [](void* user_data, iree_status_t status) {
+          static_cast<std::promise<iree::Status>*>(user_data)->set_value(
+              iree::Status(std::move(status)));
+        },
+        &completed,
+    };
+    if (attach) {
+      iree_async_proactor_attach_buffer(entry->proactor, entry, callback);
+    } else {
+      iree_async_proactor_detach_buffer(entry->proactor, entry, callback);
+    }
+    return completed.get_future().get().release();
+  }
+
+  // Real I/O owners outlive native release and its prepared-pin cleanup.
+  iree_async_proactor_pool_t* pool_ = nullptr;
+  // Independent native registration tables for the same physical bytes.
+  iree_async_proactor_t* proactors_[2] = {};
+};
+
+TEST_F(RegisteredAllocationQueueTest, ConsumerAttachesPreparedBacking) {
+  Acquire acquire(&native_, 1);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &acquire.request);
+  IREE_ASSERT_OK(acquire.completed.get_future().get());
+  auto& memory = acquire.memories.front();
+  for (auto* proactor : proactors_) {
+    auto* entry = iree_async_buffer_registration_state_find(
+        &memory.registrations, proactor);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->region->base_ptr, memory.contents.data);
+    EXPECT_EQ(entry->region->length, memory.contents.data_length);
+    IREE_ASSERT_OK(Transition(entry, true));
+    IREE_ASSERT_OK(Transition(entry, false));
+  }
+  Release(acquire.memories.data(), acquire.memories.size());
+  EXPECT_EQ(memory.handle, nullptr);
+  EXPECT_TRUE(
+      iree_async_buffer_registration_state_is_empty(&memory.registrations));
+  EXPECT_EQ(native_.allocate_count, 1u);
+  EXPECT_EQ(native_.free_count, 1u);
+  for (auto thread : native_.threads) {
+    EXPECT_NE(thread, std::this_thread::get_id());
+    EXPECT_EQ(thread, native_.threads.front());
+  }
+}
+
+TEST_F(RegisteredAllocationQueueTest, FailedBatchReleasesPreparedPrefix) {
+  native_.fail_on_allocate = 2;
+  Acquire failed(&native_);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &failed.request);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        failed.completed.get_future().get());
+  for (const auto& memory : failed.memories) {
+    EXPECT_EQ(memory.handle, nullptr);
+    EXPECT_TRUE(
+        iree_async_buffer_registration_state_is_empty(&memory.registrations));
+  }
+  EXPECT_EQ(native_.allocate_count, 2u);
+  EXPECT_EQ(native_.free_count, 1u);
+
+  Acquire retry(&native_, 1);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &retry.request);
+  IREE_ASSERT_OK(retry.completed.get_future().get());
+  for (auto* proactor : proactors_) {
+    auto* entry = iree_async_buffer_registration_state_find(
+        &retry.memories.front().registrations, proactor);
+    ASSERT_NE(entry, nullptr);
+    IREE_ASSERT_OK(Transition(entry, true));
+    IREE_ASSERT_OK(Transition(entry, false));
+  }
+  Release(retry.memories.data(), retry.memories.size());
+  EXPECT_EQ(native_.allocate_count, 3u);
+  EXPECT_EQ(native_.free_count, 2u);
+}
+
+TEST_F(RegisteredAllocationQueueTest, FailedPinPreparationReleasesBacking) {
+  // The first proactor prepares real pins; the second models exhaustion at
+  // the backend boundary after native backing and the first pins exist.
+  static const iree_async_proactor_vtable_t exhausted_vtable = {
+      .prepare_buffer =
+          [](iree_async_proactor_t*, iree_async_buffer_registration_state_t*,
+             iree_byte_span_t, iree_async_buffer_access_flags_t,
+             iree_async_buffer_registration_entry_t**) {
+            return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
+          },
+  };
+  iree_async_proactor_t exhausted_proactor = {};
+  iree_async_proactor_initialize(&exhausted_vtable, IREE_SV("exhausted"),
+                                 iree_allocator_system(), &exhausted_proactor);
+  iree_async_proactor_t* proactors[] = {proactors_[0], &exhausted_proactor};
+  native_.options.io.proactors = proactors;
+  Acquire failed(&native_, 1);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &failed.request);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        failed.completed.get_future().get());
+  EXPECT_EQ(failed.memories.front().handle, nullptr);
+  EXPECT_TRUE(iree_async_buffer_registration_state_is_empty(
+      &failed.memories.front().registrations));
+  EXPECT_EQ(native_.allocate_count, 1u);
+  EXPECT_EQ(native_.free_count, 1u);
+
+  native_.options.io.proactors = proactors_;
+  Acquire retry(&native_, 1);
+  iree_hal_amd_fabric_allocation_queue_acquire_memory(queue_, &retry.request);
+  IREE_ASSERT_OK(retry.completed.get_future().get());
+  Release(retry.memories.data(), retry.memories.size());
+  EXPECT_EQ(native_.allocate_count, 2u);
+  EXPECT_EQ(native_.free_count, 2u);
 }
 
 TEST_F(AllocationQueueTest, HeldNativeAllocationDoesNotBlockSubmission) {

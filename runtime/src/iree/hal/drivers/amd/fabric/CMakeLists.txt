@@ -55,6 +55,8 @@ iree_cc_library(
     "memory.c"
   DEPS
     amdf::headers
+    iree::async
+    iree::async::types
     iree::base
     iree::base::internal
     iree::hal
@@ -203,6 +205,7 @@ iree_cc_test(
     ::memory
     ::slab_provider
     amdf::headers
+    iree::async::util::proactor_pool
     iree::base
     iree::hal
     iree::hal::memory::slab_provider

@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/fabric/memory.h"
 
+#include "iree/async/proactor.h"
 #include "iree/base/internal/math.h"
 #include "iree/hal/drivers/amd/status.h"
 
@@ -106,6 +107,7 @@ void iree_hal_amd_fabric_memory_deinitialize(
     iree_hal_amd_fabric_memory_t* memory) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, memory->info.byte_length);
+  iree_async_buffer_registration_state_deinitialize(&memory->registrations);
   if (memory->mapping) {
     amdf_status_t status = api->host_mapping_destroy(memory->mapping);
     if (!amdf_status_is_ok(status)) {
@@ -252,6 +254,15 @@ iree_status_t iree_hal_amd_fabric_memory_allocate(
               "memory_create"));
   iree_status_t status =
       iree_hal_amd_fabric_memory_prepare(api, options, &memory);
+  for (iree_host_size_t i = 0;
+       i < options->io.proactor_count && iree_status_is_ok(status); ++i) {
+    iree_async_buffer_registration_entry_t* entry = NULL;
+    status = iree_async_proactor_prepare_buffer(
+        options->io.proactors[i], &memory.registrations, memory.contents,
+        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+        &entry);
+  }
   if (iree_status_is_ok(status)) {
     *out_memory = memory;
   } else {

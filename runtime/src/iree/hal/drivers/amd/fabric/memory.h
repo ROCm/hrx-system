@@ -8,14 +8,13 @@
 #define IREE_HAL_DRIVERS_AMD_FABRIC_MEMORY_H_
 
 #include "amdf/amdf.h"
+#include "iree/async/types.h"
 #include "iree/hal/device_event.h"
 #include "iree/hal/slab_pool.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct iree_async_region_t iree_async_region_t;
 
 // One native backing with an optional persistent host view. Borrowed scopes,
 // native devices, and the API table outlive this owner and every device use.
@@ -39,6 +38,9 @@ typedef struct iree_hal_amd_fabric_memory_t {
   iree_hal_buffer_range_t maintenance_range;
   // Borrowed export policy, dominated by the owning slab provider.
   iree_hal_pool_export_classes_t exports;
+  // Owned I/O pins, released before the persistent host view. The consumer
+  // attaches prepared entries and joins detachment before native release.
+  iree_async_buffer_registration_state_t registrations;
 } iree_hal_amd_fabric_memory_t;
 
 // Private suffix after the generic entries of a fabric native binding table.
@@ -99,6 +101,14 @@ typedef struct iree_hal_amd_fabric_memory_options_t {
   amdf_memory_map_flags_t host_access;
   // Qualified exports; class storage outlives the native memory owner.
   iree_hal_pool_export_classes_t exports;
+  // Owned allocation prepares detached I/O pins against its persistent host
+  // view. Imports leave registration to their consumer.
+  struct {
+    // Number of distinct proactors requiring prepared pins on owned backing.
+    iree_host_size_t proactor_count;
+    // Borrowed proactors, live through native backing and pin release.
+    iree_async_proactor_t* const* proactors;
+  } io;
 } iree_hal_amd_fabric_memory_options_t;
 
 // Maps transport vocabulary only. NONE means libamdf has no representation;
@@ -122,8 +132,11 @@ bool iree_hal_amd_fabric_memory_constrain_profile(
     iree_hal_pool_export_classes_t exports, amdf_memory_profile_t* profile);
 
 // Allocates native backing, rounding the extent to the profile granularity.
-// A nonzero host_access creates the requested view before publication. Failure
-// leaves out_memory empty; native cleanup failures are reported to event_sink.
+// A nonzero host_access creates the requested view before publication.
+// Requested I/O pins are prepared against that view but remain detached. The
+// consumer attaches them before I/O. Failure leaves out_memory empty and
+// releases any prepared pins before the native view; cleanup failures report to
+// event_sink.
 iree_status_t iree_hal_amd_fabric_memory_allocate(
     const amdf_api_t* api, const iree_hal_amd_fabric_memory_options_t* options,
     uint64_t byte_length, uint64_t alignment,
@@ -152,8 +165,9 @@ iree_status_t iree_hal_amd_fabric_memory_import(
     iree_hal_device_event_sink_t event_sink,
     iree_hal_amd_fabric_memory_t* out_memory);
 
-// Releases native ownership after all uses retire, without waiting for them.
-// Native release failures are diagnosed; consumed handles are never retried.
+// Releases I/O pins and native ownership after all uses retire, without waiting
+// for them. Prepared registrations must be detached before entry. Native
+// release failures are diagnosed; consumed handles are never retried.
 void iree_hal_amd_fabric_memory_deinitialize(
     const amdf_api_t* api, iree_hal_device_event_sink_t event_sink,
     iree_hal_amd_fabric_memory_t* memory);

@@ -45,6 +45,8 @@ iree_runtime_cc_library(
     hdrs = ["memory.h"],
     deps = [
         "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
@@ -163,6 +165,7 @@ iree_runtime_cc_test(
         ":memory",
         ":slab_provider",
         "//libamdf:headers",
+        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:slab_provider",

@@ -98,8 +98,6 @@ typedef struct iree_hal_amd_fabric_slab_handle_t {
   iree_hal_amd_fabric_mapping_source_t* mapping_source;
   // Optional file binding table and presecured native transition storage.
   iree_hal_amd_fabric_slab_io_t* io;
-  // Owned registrations, released before their borrowed native host view.
-  iree_async_buffer_registration_state_t registrations;
   // Explicit external attachment whose teardown completes before release.
   bool imported;
 } iree_hal_amd_fabric_slab_handle_t;
@@ -160,6 +158,12 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
   iree_host_size_t access_devices_offset = 0;
   iree_host_size_t import_accesses_offset = 0;
   iree_host_size_t bindings_offset = 0;
+  iree_host_size_t io_proactors_offset = 0;
+  iree_host_size_t io_binding_count = 0;
+  for (uint32_t i = 0; i < options->binding_count; ++i) {
+    io_binding_count +=
+        options->bindings[i].type == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
+  }
   iree_host_size_t scope_access_ordinals_offset = 0;
   iree_host_size_t imports_offset = 0;
   iree_host_size_t exports_offset = 0;
@@ -187,6 +191,8 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
           options->binding_count, iree_hal_amd_fabric_binding_request_t,
           iree_alignof(iree_hal_amd_fabric_binding_request_t),
           &bindings_offset),
+      IREE_STRUCT_FIELD(io_binding_count, iree_async_proactor_t*,
+                        &io_proactors_offset),
       IREE_STRUCT_FIELD(options->scope_count, uint32_t,
                         &scope_access_ordinals_offset),
       IREE_STRUCT_FIELD(options->import_count,
@@ -241,6 +247,10 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
   memcpy(bindings, options->bindings,
          options->binding_count * sizeof(*bindings));
   provider->options.bindings = bindings;
+  iree_async_proactor_t** io_proactors =
+      (void*)((uint8_t*)provider + io_proactors_offset);
+  provider->options.memory.io.proactor_count = 0;
+  provider->options.memory.io.proactors = io_proactors;
   uint32_t* scope_access_ordinals =
       (void*)((uint8_t*)provider + scope_access_ordinals_offset);
   if (options->scope_count) {
@@ -253,6 +263,17 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
         bindings[i].type == IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
     provider->io_binding_count +=
         bindings[i].type == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
+    if (bindings[i].type == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO) {
+      iree_host_size_t j = 0;
+      while (j < provider->options.memory.io.proactor_count &&
+             io_proactors[j] != bindings[i].io_proactor) {
+        ++j;
+      }
+      if (j == provider->options.memory.io.proactor_count) {
+        io_proactors[provider->options.memory.io.proactor_count++] =
+            bindings[i].io_proactor;
+      }
+    }
   }
   iree_hal_external_storage_class_t* exports =
       (iree_hal_external_storage_class_t*)((uint8_t*)provider + exports_offset);
@@ -385,7 +406,6 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
     handle->io->bindings.regions =
         (void*)((uint8_t*)handle + io_regions_offset);
   }
-  iree_async_buffer_registration_state_initialize(&handle->registrations);
   *out_handle = handle;
   return iree_ok_status();
 }
@@ -410,7 +430,6 @@ static bool iree_hal_amd_fabric_slab_handle_free(
     }
   }
   const bool owns_memory = handle->memory.handle && !handle->imported;
-  iree_async_buffer_registration_state_deinitialize(&handle->registrations);
   iree_hal_amd_fabric_memory_deinitialize(provider->api, provider->event_sink,
                                           &handle->memory);
   if (owns_memory) {
@@ -467,6 +486,11 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
   if (handle->io) {
     handle->io->bindings.memory = handle->memory.handle;
     handle->io->bindings.mapping = handle->memory.mapping;
+    for (iree_async_buffer_registration_entry_t* entry =
+             handle->memory.registrations.head;
+         entry; entry = entry->next) {
+      handle->io->registrations[handle->io->registration_count++].entry = entry;
+    }
   }
   if (provider->has_mapping_source) {
     *handle->mapping_source = (iree_hal_amd_fabric_mapping_source_t){
@@ -500,27 +524,15 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
       }
       if (binding->type == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO) {
         iree_async_buffer_registration_entry_t* entry =
-            iree_async_buffer_registration_state_find(&handle->registrations,
-                                                      binding->io_proactor);
-        if (!entry) {
-          // Pins are part of physical acquisition. Reuse and file submission
-          // consume the prepared table without entering registration again.
-          const iree_async_buffer_access_flags_t access =
+            iree_async_buffer_registration_state_find(
+                &handle->memory.registrations, binding->io_proactor);
+        if (handle->imported && !entry) {
+          status = iree_async_proactor_register_buffer(
+              binding->io_proactor, &handle->memory.registrations,
+              handle->memory.contents,
               IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
-              IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE;
-          if (handle->imported) {
-            status = iree_async_proactor_register_buffer(
-                binding->io_proactor, &handle->registrations,
-                handle->memory.contents, access, &entry);
-          } else {
-            status = iree_async_proactor_prepare_buffer(
-                binding->io_proactor, &handle->registrations,
-                handle->memory.contents, access, &entry);
-            if (iree_status_is_ok(status)) {
-              handle->io->registrations[handle->io->registration_count++]
-                  .entry = entry;
-            }
-          }
+                  IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+              &entry);
         }
         if (iree_status_is_ok(status)) {
           handle->io->bindings.regions[binding->access_ordinal] = entry->region;
