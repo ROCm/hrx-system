@@ -860,9 +860,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @shared_spill_payloads(%offset: 
 
 // ====
 
-// Rematerialize private arithmetic, then spill the captured loads. Retaining
-// that arithmetic placement lets each reload start before the private producer
-// instead of losing all placement facts when spill traffic is inserted.
+// The explicit source fence holds all captured loads before their consumers,
+// forcing spills after private arithmetic is rematerialized. Retained placement
+// facts keep that arithmetic beside its consumers when spill traffic is added.
 // RUN: emit amdgpu-assembly @retained_arithmetic_after_spill strategy=resource-stall amdgpu.vgpr=3
 
 amdgpu.target<gfx1100> @target
@@ -875,7 +875,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @retained_arithmetic_after_spill
   %loaded0 = global_load_b32_saddr %offset, %source
   %loaded1 = global_load_b32_saddr %offset, %source {offset = 4}
   %loaded2 = global_load_b32_saddr %offset, %source {offset = 8}
-  s_barrier
+  low.schedule.fence
   %biased0 = v_add_u32 %loaded0, %bias0
   global_store_b32_saddr %offset, %biased0, %destination
   %biased1 = v_add_u32 %loaded1, %bias1
@@ -892,7 +892,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @retained_arithmetic_after_spill
   s_waitcnt vmcnt(0) lgkmcnt(63)
   scratch_store_b32 off, v1, off offset:4
   global_load_b32 v1, v0, s[0:1] offset:0
-  s_barrier
   v_add_u32 v2, 12345, v0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)

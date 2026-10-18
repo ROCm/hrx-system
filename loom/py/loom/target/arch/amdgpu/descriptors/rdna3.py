@@ -77,6 +77,9 @@ _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             # Result availability is distinct from the one-cycle issue rate.
             # LLVM SISchedule.td's GFX11SpeedModel includes the VGPR read cost.
             valu_latency_cycles=5,
+            # LLVM SISchedule.td models RDNA vector memory at 320 cycles.
+            # This is a variable-latency estimate, not a hardware wait bound.
+            vmem_latency_cycles=320,
             smem_load_hazards=_SMEM_WAIT_HAZARDS,
             smem_store_hazards=_SMEM_WAIT_HAZARDS,
             vmem_load_hazards=_VMEM_LOAD_WAIT_HAZARDS,

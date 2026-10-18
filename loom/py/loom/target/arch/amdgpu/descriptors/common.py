@@ -949,6 +949,7 @@ def _amdgpu_trans_schedule_classes(
 def _common_scalar_vector_memory_schedule_classes(
     *,
     valu_latency_cycles: int,
+    vmem_latency_cycles: int,
     smem_load_hazards: tuple[Hazard, ...],
     smem_store_hazards: tuple[Hazard, ...],
     vmem_load_hazards: tuple[Hazard, ...],
@@ -1019,8 +1020,8 @@ def _common_scalar_vector_memory_schedule_classes(
         ScheduleClass(
             _SCHEDULE_VMEM_LOAD,
             latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=16,
-            minimum_issue_separation_cycles=16,
+            latency_cycles=vmem_latency_cycles,
+            minimum_issue_separation_cycles=vmem_latency_cycles,
             issue_uses=(IssueUse(_RESOURCE_VMEM_LOAD, cycles=1, units=1),),
             hazards=vmem_load_hazards,
             flags=(ScheduleClassFlag.MAY_LOAD,),
@@ -1029,8 +1030,8 @@ def _common_scalar_vector_memory_schedule_classes(
         ScheduleClass(
             _SCHEDULE_VMEM_STORE,
             latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=16,
-            minimum_issue_separation_cycles=16,
+            latency_cycles=vmem_latency_cycles,
+            minimum_issue_separation_cycles=vmem_latency_cycles,
             issue_uses=(IssueUse(_RESOURCE_VMEM_STORE, cycles=1, units=1),),
             hazards=vmem_store_hazards,
             flags=(ScheduleClassFlag.MAY_STORE,),
@@ -1039,8 +1040,8 @@ def _common_scalar_vector_memory_schedule_classes(
         ScheduleClass(
             _SCHEDULE_VMEM_ATOMIC_RETURN,
             latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=16,
-            minimum_issue_separation_cycles=16,
+            latency_cycles=vmem_latency_cycles,
+            minimum_issue_separation_cycles=vmem_latency_cycles,
             issue_uses=(
                 IssueUse(_RESOURCE_VMEM_LOAD, cycles=1, units=1),
                 IssueUse(_RESOURCE_VMEM_STORE, cycles=1, units=1),
@@ -1052,8 +1053,8 @@ def _common_scalar_vector_memory_schedule_classes(
         ScheduleClass(
             _SCHEDULE_VMEM_ATOMIC_NO_RETURN,
             latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=16,
-            minimum_issue_separation_cycles=16,
+            latency_cycles=vmem_latency_cycles,
+            minimum_issue_separation_cycles=vmem_latency_cycles,
             issue_uses=(
                 IssueUse(_RESOURCE_VMEM_LOAD, cycles=1, units=1),
                 IssueUse(_RESOURCE_VMEM_STORE, cycles=1, units=1),
@@ -1065,8 +1066,8 @@ def _common_scalar_vector_memory_schedule_classes(
         ScheduleClass(
             _SCHEDULE_FLAT_LOAD,
             latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=16,
-            minimum_issue_separation_cycles=16,
+            latency_cycles=vmem_latency_cycles,
+            minimum_issue_separation_cycles=vmem_latency_cycles,
             issue_uses=(
                 IssueUse(_RESOURCE_VMEM_LOAD, cycles=1, units=1),
                 IssueUse(_RESOURCE_LDS_LOAD, cycles=1, units=1),
@@ -1078,8 +1079,8 @@ def _common_scalar_vector_memory_schedule_classes(
         ScheduleClass(
             _SCHEDULE_FLAT_STORE,
             latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=16,
-            minimum_issue_separation_cycles=16,
+            latency_cycles=vmem_latency_cycles,
+            minimum_issue_separation_cycles=vmem_latency_cycles,
             issue_uses=(
                 IssueUse(_RESOURCE_VMEM_STORE, cycles=1, units=1),
                 IssueUse(_RESOURCE_LDS_STORE, cycles=1, units=1),
@@ -1091,8 +1092,8 @@ def _common_scalar_vector_memory_schedule_classes(
         ScheduleClass(
             _SCHEDULE_FLAT_ATOMIC_RETURN,
             latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=16,
-            minimum_issue_separation_cycles=16,
+            latency_cycles=vmem_latency_cycles,
+            minimum_issue_separation_cycles=vmem_latency_cycles,
             issue_uses=(
                 IssueUse(_RESOURCE_VMEM_LOAD, cycles=1, units=1),
                 IssueUse(_RESOURCE_VMEM_STORE, cycles=1, units=1),
@@ -1109,8 +1110,8 @@ def _common_scalar_vector_memory_schedule_classes(
         ScheduleClass(
             _SCHEDULE_FLAT_ATOMIC_NO_RETURN,
             latency_kind=LatencyKind.VARIABLE,
-            latency_cycles=16,
-            minimum_issue_separation_cycles=16,
+            latency_cycles=vmem_latency_cycles,
+            minimum_issue_separation_cycles=vmem_latency_cycles,
             issue_uses=(
                 IssueUse(_RESOURCE_VMEM_LOAD, cycles=1, units=1),
                 IssueUse(_RESOURCE_VMEM_STORE, cycles=1, units=1),

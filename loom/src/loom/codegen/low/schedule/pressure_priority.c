@@ -95,7 +95,7 @@ uint64_t loom_low_schedule_pressure_ready_key(
 static uint64_t loom_low_schedule_ready_schedule_key(
     const loom_low_schedule_build_state_t* state, uint32_t node_index) {
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
-  // The strategy keys occupy at most the low 48 bits. Keeping potential
+  // The strategy keys occupy at most the low 62 bits. Keeping potential
   // materializations in the upper tiers lets bounded recovery find ordinary
   // work and actionable rematerialization even when the source window consists
   // entirely of deferred storage setup.
@@ -104,10 +104,15 @@ static uint64_t loom_low_schedule_ready_schedule_key(
   switch (state->options->strategy) {
     case LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL: {
       const uint32_t critical_path =
-          state->node_critical_path_cycles != NULL
-              ? state->node_critical_path_cycles[node_index]
-              : 0;
-      return materialization_key | (UINT32_MAX - critical_path);
+          state->node_critical_path_cycles[node_index];
+      // Dependency release fixes the ready cycle before frontier insertion.
+      // Nominate work that can issue before a stalled source window, then use
+      // critical path to break ties. Saturation affects only the nomination
+      // rank; candidate scoring retains the full critical-path value.
+      const uint32_t maximum_path = (UINT32_C(1) << 30) - 1;
+      return materialization_key |
+             ((uint64_t)state->node_ready_issue_cycles[node_index] << 30) |
+             (maximum_path - iree_min(critical_path, maximum_path));
     }
     case LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING: {
       const uint16_t dependency_latency =
