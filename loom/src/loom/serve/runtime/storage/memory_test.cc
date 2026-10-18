@@ -193,6 +193,11 @@ TEST_F(MemoryTest, PendingReleaseRetainsBudgetAndLeavesKeptSlabsUsable) {
                                          IREE_ASYNC_WAIT_FLAG_NONE));
   EXPECT_TRUE(loom_serve_memory_operation_is_complete(operation));
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  const auto retired = loom_serve_memory_pool_statistics(pool);
+  EXPECT_EQ(retired.pending_bytes, 0u);
+  EXPECT_EQ(retired.releasing_bytes, 0u);
+  EXPECT_EQ(retired.committed_bytes, kSlabSize);
+  EXPECT_EQ(retired.released_bytes, 2 * kSlabSize);
   EXPECT_GE(wakes.load(), 1u);
   EXPECT_EQ(statistics[0].releasing_bytes, 0u);
   EXPECT_EQ(statistics[0].committed_bytes, kSlabSize);

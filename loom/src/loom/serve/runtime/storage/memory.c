@@ -223,6 +223,8 @@ static uint64_t loom_serve_memory_pool_charged_bytes(
 
 // Arms a one-shot capacity wake only while native retirement can make progress.
 // Prepare precedes the final query so a concurrent free cannot lose its wake.
+// True preserves an observed wait even if its callback races this return: one
+// capacity change does not establish that every native release has retired.
 static bool loom_serve_memory_pool_observe_capacity(
     loom_serve_memory_pool_t* pool) {
   if (pool->capacity_failed) {
@@ -239,7 +241,7 @@ static bool loom_serve_memory_pool_observe_capacity(
       iree_slim_mutex_unlock(&pool->capacity_mutex);
       iree_hal_pool_wait_cancel(pool->capacity_wait);
     }
-    return !loom_serve_memory_capacity_is_idle(pool);
+    return true;
   }
   iree_hal_pool_wait_prepare(pool->capacity_wait);
   loom_serve_memory_pool_observe_retirement(pool);
@@ -382,8 +384,7 @@ bool loom_serve_memory_pool_is_pending(loom_serve_memory_pool_t* pool) {
   if (pool->operations) {
     return true;
   }
-  loom_serve_memory_pool_observe_capacity(pool);
-  return !loom_serve_memory_capacity_is_idle(pool);
+  return loom_serve_memory_pool_observe_capacity(pool);
 }
 
 iree_status_t loom_serve_memory_pool_await(loom_serve_memory_pool_t* pool) {
@@ -396,6 +397,9 @@ iree_status_t loom_serve_memory_pool_await(loom_serve_memory_pool_t* pool) {
                               iree_infinite_timeout());
     }
   }
+  // A callback can finish after the last collection but before observation
+  // finds no remaining retirement. Join its published status as well.
+  loom_serve_memory_pool_collect(pool);
   return iree_status_clone(pool->failure);
 }
 
