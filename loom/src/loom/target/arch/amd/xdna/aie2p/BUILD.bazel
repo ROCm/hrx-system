@@ -1425,6 +1425,18 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "program_object_test",
+    srcs = ["emit/program_object_test.cc"],
+    deps = [
+        ":program_object",
+        ":relocation",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "machine_test",
     srcs = ["machine/machine_test.cc"],
     deps = [

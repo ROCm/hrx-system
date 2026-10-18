@@ -1702,6 +1702,23 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
+    program_object_test
+  SRCS
+    "emit/program_object_test.cc"
+  DEPS
+    ::program_object
+    ::relocation
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_test(
+  NAME
     machine_test
   SRCS
     "machine/machine_test.cc"

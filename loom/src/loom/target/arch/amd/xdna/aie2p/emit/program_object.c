@@ -84,6 +84,43 @@ static iree_status_t loom_aie2p_program_object_resolve_calls(
   return iree_ok_status();
 }
 
+// Every emitted leaf entry has the same 16-byte alignment. Alignment before
+// the first helper is fixed by the entry, and every helper except the final one
+// pays the padding implied by its own byte length. Leaving the helper with the
+// largest such padding last therefore minimizes the complete program length
+// while preserving the relative order of every other helper.
+static iree_host_size_t loom_aie2p_program_object_select_tail(
+    const loom_aie2p_leaf_contribution_t* contributions,
+    iree_host_size_t contribution_count, uint64_t code_alignment) {
+  iree_host_size_t tail_index = contribution_count - 1;
+  uint64_t maximum_padding = 0;
+  for (iree_host_size_t i = 1; i < contribution_count; ++i) {
+    const loom_native_section_contribution_t* code =
+        &contributions[i].object.sections[0];
+    const uint64_t alignment =
+        iree_max((uint64_t)1, code->contribution_alignment);
+    IREE_ASSERT_EQ(alignment, code_alignment,
+                   "AIE2P leaf code contribution alignment");
+    const uint64_t remainder = code->contents.data_length % alignment;
+    const uint64_t padding = remainder == 0 ? 0 : alignment - remainder;
+    if (padding >= maximum_padding) {
+      maximum_padding = padding;
+      tail_index = i;
+    }
+  }
+  return tail_index;
+}
+
+static iree_host_size_t loom_aie2p_program_object_layout_index(
+    iree_host_size_t layout_index, iree_host_size_t contribution_count,
+    iree_host_size_t tail_index) {
+  if (layout_index == 0 || tail_index == contribution_count - 1 ||
+      layout_index < tail_index) {
+    return layout_index;
+  }
+  return layout_index == contribution_count - 1 ? tail_index : layout_index + 1;
+}
+
 iree_status_t loom_aie2p_program_object_merge(
     const loom_aie2p_leaf_contribution_t* contributions,
     iree_host_size_t contribution_count, iree_arena_allocator_t* arena,
@@ -113,6 +150,10 @@ iree_status_t loom_aie2p_program_object_merge(
   const iree_string_view_t code_section_name =
       entry->object.sections[entry_symbol->section_contribution_index]
           .section_name;
+  const uint64_t entry_code_alignment =
+      iree_max((uint64_t)1,
+               entry->object.sections[entry_symbol->section_contribution_index]
+                   .contribution_alignment);
 
   iree_host_size_t section_count = 0;
   iree_host_size_t symbol_count = 0;
@@ -143,6 +184,10 @@ iree_status_t loom_aie2p_program_object_merge(
     }
   }
 
+  const iree_host_size_t tail_contribution_index =
+      loom_aie2p_program_object_select_tail(contributions, contribution_count,
+                                            entry_code_alignment);
+
   loom_native_section_contribution_t* sections = NULL;
   loom_native_object_symbol_t* symbols = NULL;
   loom_native_object_fixup_t* fixups = NULL;
@@ -162,8 +207,13 @@ iree_status_t loom_aie2p_program_object_merge(
   uint64_t code_alignment = 1;
   loom_aie2p_register_unit_set_t register_writes = {0};
   loom_aie2p_leaf_capability_flags_t capability_flags = 0;
-  for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    const loom_aie2p_leaf_contribution_t* contribution = &contributions[i];
+  for (iree_host_size_t layout_index = 0; layout_index < contribution_count;
+       ++layout_index) {
+    const iree_host_size_t contribution_index =
+        loom_aie2p_program_object_layout_index(layout_index, contribution_count,
+                                               tail_contribution_index);
+    const loom_aie2p_leaf_contribution_t* contribution =
+        &contributions[contribution_index];
     for (iree_host_size_t j = 0; j < contribution->object.section_count; ++j) {
       sections[section_start + j] = contribution->object.sections[j];
       if (!loom_aie2p_program_object_is_code_section(

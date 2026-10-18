@@ -19,11 +19,13 @@ extern "C" {
 
 // Joins an entry contribution followed by its direct helper contributions.
 //
-// All executable fragments are normalized into the entry's code section, in
-// input order, so ordinary contribution assembly performs the final aligned
-// concatenation. Direct-call imports are resolved to exactly one helper entry.
-// Helpers must be code-only leaves; the entry continues to own all resources,
-// immutable data, and function storage for the tile program.
+// All executable fragments are normalized into the entry's code section. The
+// entry remains first, while helper placement minimizes alignment padding with
+// stable order for the helpers that remain. Ordinary contribution assembly
+// performs the final aligned concatenation. Direct-call imports are resolved
+// to exactly one helper entry. Helpers must be code-only leaves; the entry
+// continues to own all resources, immutable data, and function storage for the
+// tile program.
 iree_status_t loom_aie2p_program_object_merge(
     const loom_aie2p_leaf_contribution_t* contributions,
     iree_host_size_t contribution_count, iree_arena_allocator_t* arena,
