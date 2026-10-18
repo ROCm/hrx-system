@@ -151,13 +151,14 @@ Independent analytic cases check maximum, denominator and normalized output
 for empty, absent, repeated, short and ragged pages. Varied inputs distinguish
 K/V row identity and lane fragments across shared pages and different query
 lengths. Undersized inactive backing makes accidental tail reads observable
-under the access sanitizer. Timing cases launch one kernel each, with exact
-expectations and the full K/V cache footprint.
+under the access sanitizer. Benchmark samples launch one kernel each, with the
+same full K/V cache footprint.
 
-Matched benchmark names are
-`@cooperative_paged_attention_serial_n128_i256` and
-`@cooperative_paged_attention_pipelined_n128_i256`. The `n128`/`n1024` and
-`i1`/`i16`/`i256` suffixes select token and query counts. The
+The `@cooperative_paged_attention_serial_workloads` and
+`@cooperative_paged_attention_pipelined_workloads` benchmarks each generate six
+samples: 128-token prefixes at 1, 16, and 256 queries, followed by 1024-token
+prefixes at the same query counts. `--sample=2` selects 128 tokens and 256
+queries. Input generation stays outside the measured invocation. The
 [cooperative pipeline workflow](../../../../../docs/src/workflows/tune-loop-schedules.md#pipeline-cooperative-paged-attention)
 connects these workloads to native resource reports and controlled timings.
 

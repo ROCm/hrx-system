@@ -185,7 +185,7 @@ for policy in serial pipelined; do
   "${loom_report}" show "cooperative-${policy}.report.json" --format=json \
     >"cooperative-${policy}.view.json"
   "${loom_benchmark}" cooperative-paged-attention.loom \
-    --benchmark="@cooperative_paged_attention_${policy}_n128_i256" \
+    --benchmark="@cooperative_paged_attention_${policy}_workloads" --sample=2 \
     --dry-run --output="cooperative-${policy}.plan.json"
 done
 "${loom_report}" show cooperative-pipelined.report.json \
