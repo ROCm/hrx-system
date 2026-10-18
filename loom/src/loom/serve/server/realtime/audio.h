@@ -15,17 +15,12 @@ extern "C" {
 #endif
 
 // Worker-owned conversion into the standard mono 24 kHz PCM16 wire clock.
-// Coefficients survive response boundaries; each begin creates a fresh cursor.
+// Each response owns its cursor and borrows independently retained
+// coefficients.
 typedef struct loom_serve_realtime_audio_t {
-  // Allocator for filter coefficients and the bounded convolution window.
-  iree_allocator_t host_allocator;
   // Immutable source geometry of this registered speech deployment.
   loom_serve_speech_format_t format;
-  // Immutable source-rate to wire-rate coefficients, shared across responses.
-  loom_serve_audio_resampler_filter_t filter;
-  // Successful coefficient construction, independent of partial failure state.
-  bool filter_ready;
-  // One response's independent mono history, replaced only after CPU release.
+  // Independent mono history borrowing its immutable filter through retirement.
   loom_serve_audio_resampler_t resampler;
   // Frames already read from the currently borrowed native waveform block.
   iree_host_size_t source_offset;
@@ -33,11 +28,18 @@ typedef struct loom_serve_realtime_audio_t {
   uint64_t frames;
 } loom_serve_realtime_audio_t;
 
-// Worker-only start/reset. An initialized value retains coefficients; format
-// belongs to the bound registration and does not change between responses.
-iree_status_t loom_serve_realtime_audio_begin(
+// Constructs immutable coefficients on a worker. The owner publishes success
+// after that worker releases, and retains the filter through every cursor.
+iree_status_t loom_serve_realtime_audio_filter_initialize(
     loom_serve_speech_format_t format, iree_allocator_t host_allocator,
-    loom_serve_realtime_audio_t* audio);
+    loom_serve_audio_resampler_filter_t* filter);
+
+// Worker-only start/reset. The caller supplies coefficients for format's rate
+// and retains them through deinitialization, including accepted CPU borrowers.
+iree_status_t loom_serve_realtime_audio_begin(
+    loom_serve_speech_format_t format,
+    const loom_serve_audio_resampler_filter_t* filter,
+    iree_allocator_t host_allocator, loom_serve_realtime_audio_t* audio);
 
 // Converts at most 4096 source and output frames, appending base64 PCM to
 // output. The owner keeps block alive until out_consumed. A complete source
