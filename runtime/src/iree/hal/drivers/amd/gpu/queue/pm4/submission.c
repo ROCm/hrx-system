@@ -6,6 +6,23 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/pm4/submission.h"
 
+// Inline file-only state. Ordinary submissions pay no additional storage.
+typedef struct iree_hal_amd_gpu_pm4_submission_retirement_t {
+  // Borrowed file owner, released only by the last capture reference.
+  iree_hal_amd_gpu_retirement_callback_t callback;
+  // First failure shared by publication and retirement reporters.
+  iree_atomic_int32_t status_code;
+  // Written by terminal native retirement and read after the reference join.
+  iree_async_single_frontier_t frontier;
+} iree_hal_amd_gpu_pm4_submission_retirement_t;
+
+static iree_hal_amd_gpu_pm4_submission_retirement_t*
+iree_hal_amd_gpu_pm4_submission_retirement(
+    iree_hal_amd_gpu_pm4_submission_t* submission) {
+  return (void*)((uint8_t*)submission + submission->capture_size -
+                 sizeof(iree_hal_amd_gpu_pm4_submission_retirement_t));
+}
+
 // Captures common ownership and allocates the operation payload in one block.
 static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire(
     iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
@@ -165,6 +182,84 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
   return status;
 }
 
+iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_queue_family_t* family,
+    const iree_hal_transfer_operation_t* operation,
+    const iree_hal_amd_gpu_pm4_barrier_t* before,
+    const iree_hal_amd_gpu_pm4_barrier_t* after,
+    iree_hal_amd_gpu_retirement_callback_t callback,
+    iree_hal_amd_gpu_pm4_submission_t** out_submission) {
+  *out_submission = NULL;
+  // File copies borrow their captured host span instead of copying UPDATE
+  // bytes. One UPLOAD/DOWNLOAD descriptor has a fixed capture size.
+  const iree_hal_amd_gpu_pm4_transfer_layout_t layout = {
+      .count = operation ? 1 : 0,
+      .byte_length =
+          operation ? sizeof(iree_hal_amd_gpu_pm4_transfer_operation_t) : 0,
+  };
+  const iree_host_size_t payload_size =
+      iree_host_align(
+          layout.byte_length,
+          iree_alignof(iree_hal_amd_gpu_pm4_submission_retirement_t)) +
+      sizeof(iree_hal_amd_gpu_pm4_submission_retirement_t);
+  const iree_hal_amd_gpu_pm4_barrier_profile_t profile = {0};
+  const iree_hal_barrier_list_t empty = {0};
+  const iree_hal_queue_barriers_t barriers = {&empty, &empty};
+  iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
+  void* payload = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
+      pool, false, iree_hal_semaphore_list_empty(),
+      iree_hal_semaphore_list_empty(), payload_size, &profile, &barriers,
+      &submission, &payload));
+  if (before) {
+    submission->before = *before;
+  }
+  if (after) {
+    submission->after = *after;
+  }
+  iree_status_t status = iree_ok_status();
+  if (layout.count) {
+    submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
+    status = iree_hal_amd_gpu_pm4_transfer_initialize(
+        family, 1, operation, layout, payload, &submission->transfer);
+  }
+  if (iree_status_is_ok(status)) {
+    *iree_hal_amd_gpu_pm4_submission_retirement(submission) =
+        (iree_hal_amd_gpu_pm4_submission_retirement_t){.callback = callback};
+    submission->has_retirement_callback = true;
+    *out_submission = submission;
+  } else {
+    iree_hal_amd_gpu_pm4_submission_release(submission);
+  }
+  return status;
+}
+
+void iree_hal_amd_gpu_pm4_submission_fail(
+    iree_hal_amd_gpu_pm4_submission_t* submission, iree_status_t status) {
+  if (!submission->has_retirement_callback) {
+    return;
+  }
+  iree_hal_amd_gpu_pm4_submission_retirement_t* retirement =
+      iree_hal_amd_gpu_pm4_submission_retirement(submission);
+  int32_t expected = IREE_STATUS_OK;
+  if (iree_atomic_compare_exchange_strong(
+          &retirement->status_code, &expected, iree_status_code(status),
+          iree_memory_order_relaxed, iree_memory_order_relaxed)) {
+    retirement->callback.fn(retirement->callback.user_data,
+                            iree_status_clone(status), NULL, false);
+  }
+}
+
+void iree_hal_amd_gpu_pm4_submission_set_frontier(
+    iree_hal_amd_gpu_pm4_submission_t* submission,
+    const iree_async_single_frontier_t* frontier) {
+  if (submission->has_retirement_callback && frontier) {
+    iree_hal_amd_gpu_pm4_submission_retirement(submission)->frontier =
+        *frontier;
+  }
+}
+
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
     iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
@@ -309,10 +404,29 @@ static void iree_hal_amd_gpu_pm4_submission_destroy(
       pool, iree_make_byte_span(submission, submission->allocation_size));
 }
 
+static void iree_hal_amd_gpu_pm4_submission_retire_file(
+    iree_hal_amd_gpu_pm4_submission_t* submission) {
+  const iree_hal_amd_gpu_pm4_submission_retirement_t* retirement =
+      iree_hal_amd_gpu_pm4_submission_retirement(submission);
+  const iree_hal_amd_gpu_retirement_callback_t callback = retirement->callback;
+  const iree_status_code_t status_code = (iree_status_code_t)iree_atomic_load(
+      &retirement->status_code, iree_memory_order_relaxed);
+  const iree_async_single_frontier_t frontier = retirement->frontier;
+  iree_hal_amd_gpu_pm4_submission_destroy(submission);
+  // The file owner can release the device and its capture pool in this call.
+  // All submission and pool accesses have ended before transferring ownership.
+  callback.fn(callback.user_data, iree_status_from_code(status_code),
+              frontier.entry_count ? &frontier : NULL, true);
+}
+
 void iree_hal_amd_gpu_pm4_submission_release(
     iree_hal_amd_gpu_pm4_submission_t* submission) {
   if (submission && iree_atomic_ref_count_dec(&submission->ref_count) == 1) {
-    iree_hal_amd_gpu_pm4_submission_destroy(submission);
+    if (submission->has_retirement_callback) {
+      iree_hal_amd_gpu_pm4_submission_retire_file(submission);
+    } else {
+      iree_hal_amd_gpu_pm4_submission_destroy(submission);
+    }
   }
 }
 

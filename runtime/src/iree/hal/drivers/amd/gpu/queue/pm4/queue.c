@@ -187,7 +187,8 @@ static const iree_hal_queue_vtable_t iree_hal_amd_gpu_pm4_queue_vtable;
 
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
     iree_hal_queue_t* base, const iree_hal_transfer_operation_t* operation,
-    iree_hal_semaphore_list_t signals, const void* before, const void* after);
+    const void* before, const void* after,
+    iree_hal_amd_gpu_retirement_callback_t callback);
 
 static void iree_hal_amd_gpu_pm4_file_add_effects(
     iree_hal_queue_t* base, iree_hal_memory_effects_t effects, void* value) {
@@ -235,12 +236,13 @@ static void iree_hal_amd_gpu_pm4_complete(
 
 // Consumes an operation failure through its public signals and diagnostic sink.
 // This is also the terminal diagnostic boundary for a call without signals.
-static void iree_hal_amd_gpu_pm4_fail_signals(
-    iree_hal_amd_gpu_pm4_queue_t* queue, iree_hal_semaphore_list_t signals,
-    iree_status_t status) {
+static void iree_hal_amd_gpu_pm4_fail_submission(
+    iree_hal_amd_gpu_pm4_queue_t* queue,
+    iree_hal_amd_gpu_pm4_submission_t* submission, iree_status_t status) {
   iree_hal_amd_gpu_context_report_status(
       queue->context, queue->base.queue_family->device, status);
-  iree_hal_semaphore_list_fail(signals, status);
+  iree_hal_amd_gpu_pm4_submission_fail(submission, status);
+  iree_hal_semaphore_list_fail(submission->signals, status);
 }
 
 static void iree_hal_amd_gpu_pm4_abandon(
@@ -249,7 +251,7 @@ static void iree_hal_amd_gpu_pm4_abandon(
   iree_hal_amd_gpu_profile_operation_record(
       queue->profile, iree_hal_amd_gpu_pm4_submission_profile(submission),
       false, 0);
-  iree_hal_amd_gpu_pm4_fail_signals(queue, submission->signals, status);
+  iree_hal_amd_gpu_pm4_fail_submission(queue, submission, status);
   iree_hal_amd_gpu_pm4_complete(queue, submission);
 }
 
@@ -388,7 +390,7 @@ iree_hal_amd_gpu_pm4_publish_accepted(
     }
   }
   if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_pm4_fail_signals(queue, submission->signals, status);
+    iree_hal_amd_gpu_pm4_fail_submission(queue, submission, status);
   }
   if (terminal) {
     iree_hal_amd_gpu_pm4_submission_release(submission);
@@ -1431,8 +1433,8 @@ static bool iree_hal_amd_gpu_pm4_progress(void* user_data) {
       for (uint64_t i = begin; i != end; ++i) {
         iree_hal_amd_gpu_pm4_submission_t* submission =
             queue->issued[i & queue->retirement.capacity_mask].submission;
-        iree_hal_amd_gpu_pm4_fail_signals(queue, submission->signals,
-                                          iree_status_clone(failure));
+        iree_hal_amd_gpu_pm4_fail_submission(queue, submission,
+                                             iree_status_clone(failure));
       }
       // A published operation establishes that group assignment completed.
       // An idle observer must not race construction by reading frontier state.
@@ -1481,8 +1483,8 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
     for (uint64_t i = position; i != published; ++i) {
       iree_hal_amd_gpu_pm4_submission_t* submission =
           queue->issued[i & queue->retirement.capacity_mask].submission;
-      iree_hal_amd_gpu_pm4_fail_signals(
-          queue, submission->signals,
+      iree_hal_amd_gpu_pm4_fail_submission(
+          queue, submission,
           iree_make_status(feedback_failure, "GPU sanitizer failure"));
     }
     if (published && queue->frontier.tracker) {
@@ -1573,10 +1575,12 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
     }
     completion_code = iree_status_code(status);
     if (!iree_status_is_ok(status)) {
-      iree_hal_amd_gpu_pm4_fail_signals(queue, submission->signals, status);
+      iree_hal_amd_gpu_pm4_fail_submission(queue, submission, status);
     }
     if (action->terminal) {
       iree_hal_amd_gpu_pm4_signal_retire(submission->signal, completion_code);
+      iree_hal_amd_gpu_pm4_submission_set_frontier(
+          submission, frontier ? &completed_frontier : NULL);
     }
     iree_hal_amd_gpu_pm4_complete(queue, submission);
     iree_atomic_store(&queue->completed.words, consumed_words,
@@ -2222,22 +2226,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_transfer(
 // Reuse ordinary bounded transfer publication without another HAL replay layer.
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
     iree_hal_queue_t* base, const iree_hal_transfer_operation_t* operation,
-    iree_hal_semaphore_list_t signals, const void* before, const void* after) {
+    const void* before, const void* after,
+    iree_hal_amd_gpu_retirement_callback_t callback) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
-  const iree_hal_barrier_list_t empty = {0};
-  const iree_hal_queue_barriers_t barriers = {&empty, &empty};
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_transfer(
-      &queue->captures, false, base->queue_family,
-      iree_hal_semaphore_list_empty(), signals, operation ? 1 : 0, operation,
-      &queue->options.barriers, &barriers, &submission));
-  if (before) {
-    submission->before = *(const iree_hal_amd_gpu_pm4_barrier_t*)before;
-  }
-  if (after) {
-    submission->after = *(const iree_hal_amd_gpu_pm4_barrier_t*)after;
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_file(
+      &queue->captures, base->queue_family, operation, before, after, callback,
+      &submission));
   iree_hal_amd_gpu_pm4_submit(queue, submission);
   return iree_ok_status();
 }

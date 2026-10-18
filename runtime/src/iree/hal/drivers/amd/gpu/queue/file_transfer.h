@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_FILE_TRANSFER_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_FILE_TRANSFER_H_
 
+#include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
@@ -44,13 +45,15 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
                       iree_hal_memory_effects_t effects, void* barrier);
   // Captures one transfer or, for NULL operation, a barrier. The caller has
   // resolved dependencies and prepared immutable cache recipes. Success owns
-  // captured arguments through signals; failure retains no borrowed payload.
+  // captured arguments until callback reports retirement; failure retains no
+  // borrowed payload and invokes no callback. An early failure notification
+  // does not end borrowed payload lifetime.
   // NULL before/after omits that boundary. Other values point to barrier_size
   // prepared bytes that remain live through this call.
   iree_status_t (*submit)(iree_hal_queue_t* queue,
                           const iree_hal_transfer_operation_t* operation,
-                          iree_hal_semaphore_list_t signals, const void* before,
-                          const void* after);
+                          const void* before, const void* after,
+                          iree_hal_amd_gpu_retirement_callback_t callback);
 } iree_hal_amd_gpu_file_executor_t;
 
 // The executor is queue-owned and outlives accepted operations.

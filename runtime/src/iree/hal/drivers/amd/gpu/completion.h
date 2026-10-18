@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_COMPLETION_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_COMPLETION_H_
 
+#include "iree/async/frontier.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/thread.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
@@ -14,6 +15,22 @@
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
+
+// Reports the outcome and lifetime of one native queue operation. A failure
+// may be reported before retirement: retired=false fails dependents but leaves
+// every borrowed resource live. Exactly one retired=true callback ends those
+// borrows after publication and all accepted native users have joined. Rejected
+// work can retire immediately. A failed device may never prove retirement.
+// Callbacks consume status and borrow the completed queue frontier for the
+// call. The frontier may be NULL when no native work retired. Calls may run
+// before submit returns; the submitter separately joins its borrowed arguments.
+typedef struct iree_hal_amd_gpu_retirement_callback_t {
+  // Failure notification or final ownership handoff, without an executor hop.
+  void (*fn)(void* user_data, iree_status_t status,
+             const iree_async_single_frontier_t* frontier, bool retired);
+  // Borrowed owner, live until the final callback returns its ownership.
+  void* user_data;
+} iree_hal_amd_gpu_retirement_callback_t;
 
 // On success, consumes a bounded batch of authoritative completion records.
 // Returns true when another batch is immediately ready or this batch retired

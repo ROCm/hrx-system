@@ -694,6 +694,7 @@ iree_cc_library(
     iree::base
     iree::base::internal
     iree::hal
+    iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::kernarg
     iree::hal::drivers::amd::gpu::profile

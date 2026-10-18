@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_SUBMISSION_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_SUBMISSION_H_
 
+#include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
@@ -84,6 +85,8 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   // Optional profile operation occupies the bytes immediately after this
   // header.
   bool profiled;
+  // File owner callback occupies the end of the initialized capture extent.
+  bool has_retirement_callback;
   // Exact initialized extent, computed once by the capture constructor.
   iree_host_size_t capture_size;
   union {
@@ -151,6 +154,34 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_pm4_submission_t** out_submission);
+
+// Captures one nonempty file UPLOAD/DOWNLOAD, or a barrier when operation is
+// NULL. The file owner has resolved dependencies and supplies already-prepared
+// boundaries.
+// The callback replaces private signal semaphores and owns the file's borrowed
+// bytes until the capture's last publication/native reference retires. Failure
+// retains nothing and invokes no callback. Success may complete immediately.
+iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_queue_family_t* family,
+    const iree_hal_transfer_operation_t* operation,
+    const iree_hal_amd_gpu_pm4_barrier_t* before,
+    const iree_hal_amd_gpu_pm4_barrier_t* after,
+    iree_hal_amd_gpu_retirement_callback_t callback,
+    iree_hal_amd_gpu_pm4_submission_t** out_submission);
+
+// Reports a borrowed failure to the optional file owner without releasing any
+// captured resources. Concurrent reporters deliver only the first failure.
+// Each reporter owns a capture reference through the callback's final access.
+void iree_hal_amd_gpu_pm4_submission_fail(
+    iree_hal_amd_gpu_pm4_submission_t* submission, iree_status_t status);
+
+// Records the completed queue epoch for the final file callback. Only the
+// terminal native retirement owner writes this, before dropping its reference.
+// NULL records no frontier. Ordinary submissions have no callback storage.
+void iree_hal_amd_gpu_pm4_submission_set_frontier(
+    iree_hal_amd_gpu_pm4_submission_t* submission,
+    const iree_async_single_frontier_t* frontier);
 
 // Captures a recording and its invocation table in the same reusable block as
 // semaphore ownership. Recorded barriers own payload visibility; execution adds

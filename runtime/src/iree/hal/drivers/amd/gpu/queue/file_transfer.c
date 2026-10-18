@@ -7,7 +7,6 @@
 #include "iree/hal/drivers/amd/gpu/queue/file_transfer.h"
 
 #include "iree/async/file.h"
-#include "iree/async/semaphore.h"
 #include "iree/hal/drivers/amd/fabric/buffer.h"
 #include "iree/hal/drivers/amd/fabric/file_transfer.h"
 
@@ -40,17 +39,15 @@ typedef struct iree_hal_amd_gpu_file_transfer_t {
   iree_hal_amd_gpu_host_wait_fn_t resume;
   // Terminal result published before the completion borrow is returned.
   iree_status_t status;
-  // Host-completed native copy progress, private to this file operation.
+  // Last retired native epoch, preserved when publishing public completion.
+  iree_async_single_frontier_t frontier;
+  // Initial public waits, finished before the first native submission.
   struct {
-    // Owned timeline, reused monotonically across native chunks.
-    iree_hal_semaphore_t* semaphore;
-    // Current native copy completion value.
-    uint64_t value;
-    // One tracker registration, finalized before the next chunk starts.
+    // One tracker registration, finalized before file/native work starts.
     iree_hal_amd_gpu_host_wait_t wait;
-    // Reusable tracker allocation sized for initial waits and single copies.
+    // Inline tracker allocation sized for the initial public waits.
     iree_allocator_inline_storage_t storage;
-  } completion;
+  } dependency;
 } iree_hal_amd_gpu_file_transfer_t;
 
 static void iree_hal_amd_gpu_file_transfer_join(
@@ -71,36 +68,38 @@ static void iree_hal_amd_gpu_file_transfer_step_complete(void* user_data,
   iree_hal_amd_gpu_file_transfer_join(operation);
 }
 
-// The private point cannot complete before its native producer, but that
-// producer may finish before submit returns. Join both accesses before reusing
-// the wait, advancing mutable I/O state, or releasing captured buffers.
+static void iree_hal_amd_gpu_file_transfer_native_complete(
+    void* user_data, iree_status_t status,
+    const iree_async_single_frontier_t* frontier, bool retired) {
+  iree_hal_amd_gpu_file_transfer_t* operation = user_data;
+  if (!retired) {
+    // Report logical failure promptly while native work still borrows file
+    // bytes. Only the final callback may advance or release captured storage.
+    iree_hal_semaphore_list_fail(operation->signals, status);
+    return;
+  }
+  if (frontier) {
+    operation->frontier = *frontier;
+  }
+  iree_hal_amd_gpu_file_transfer_step_complete(operation, status);
+}
+
+// Native retirement may precede submit returning. Join both accesses before
+// advancing mutable I/O state or releasing the file's borrowed bytes.
 static void iree_hal_amd_gpu_file_transfer_submit_native(
     iree_hal_amd_gpu_file_transfer_t* operation,
     const iree_hal_transfer_operation_t* transfer, const void* before,
     const void* after, iree_hal_amd_gpu_host_wait_fn_t resume) {
-  ++operation->completion.value;
-  const iree_hal_semaphore_list_t completion = {
-      .count = 1,
-      .semaphores = &operation->completion.semaphore,
-      .payload_values = &operation->completion.value,
-  };
   operation->resume = resume;
   iree_atomic_store(&operation->pending, 2, iree_memory_order_relaxed);
-  iree_status_t status = iree_hal_amd_gpu_host_wait_begin(
-      operation->executor->waits, completion,
-      iree_hal_amd_gpu_file_transfer_step_complete, operation,
-      iree_allocator_inline_arena(&operation->completion.storage),
-      &operation->completion.wait);
+  iree_status_t status = operation->executor->submit(
+      operation->executor->queue, transfer, before, after,
+      (iree_hal_amd_gpu_retirement_callback_t){
+          .fn = iree_hal_amd_gpu_file_transfer_native_complete,
+          .user_data = operation});
   if (!iree_status_is_ok(status)) {
-    resume(operation, status);
-    return;
-  }
-  status = operation->executor->submit(operation->executor->queue, transfer,
-                                       completion, before, after);
-  if (!iree_status_is_ok(status)) {
-    // A rejected submission has no native users. Failure completes the
-    // already-enrolled wait; the submitting borrow still protects this call.
-    iree_hal_semaphore_fail(operation->completion.semaphore, status);
+    // Rejected work never acquired native ownership or its callback borrow.
+    iree_hal_amd_gpu_file_transfer_step_complete(operation, status);
   }
   iree_hal_amd_gpu_file_transfer_join(operation);
 }
@@ -108,7 +107,6 @@ static void iree_hal_amd_gpu_file_transfer_submit_native(
 static void iree_hal_amd_gpu_file_transfer_free(
     iree_hal_amd_gpu_file_transfer_t* operation) {
   iree_hal_device_t* device = operation->device;
-  iree_hal_semaphore_release(operation->completion.semaphore);
   iree_hal_semaphore_list_release(operation->waits);
   iree_hal_semaphore_list_release(operation->signals);
   iree_hal_amd_gpu_capture_pool_release(
@@ -128,16 +126,12 @@ static void iree_hal_amd_gpu_file_transfer_retire(void* user_data,
   // Keep backing live until dirty cache lines can no longer refer to it.
   iree_hal_amd_fabric_file_transfer_deinitialize(&operation->transfer);
   if (iree_status_is_ok(status)) {
-    // Every private point comes from the same queue. Preserve that completed
-    // epoch while publishing only after the buffer/pool uses have ended.
-    iree_async_single_frontier_t frontier;
-    const uint8_t count = iree_async_semaphore_query_frontier(
-        (iree_async_semaphore_t*)operation->completion.semaphore,
-        iree_async_single_frontier_as_frontier(&frontier), 1);
-    IREE_ASSERT_LE(count, 1);
+    // Preserve the completed queue epoch after all buffer/pool uses have ended.
     status = iree_hal_semaphore_list_signal(
         operation->signals,
-        iree_async_single_frontier_as_const_frontier(&frontier));
+        operation->frontier.entry_count
+            ? iree_async_single_frontier_as_const_frontier(&operation->frontier)
+            : NULL);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_context_report_status(operation->executor->context,
@@ -359,8 +353,8 @@ static void iree_hal_amd_gpu_file_transfer_begin(
   iree_status_t status = iree_hal_amd_gpu_host_wait_begin(
       operation->executor->waits, operation->waits,
       iree_hal_amd_gpu_file_transfer_start, operation,
-      iree_allocator_inline_arena(&operation->completion.storage),
-      &operation->completion.wait);
+      iree_allocator_inline_arena(&operation->dependency.storage),
+      &operation->dependency.wait);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
   }
@@ -374,8 +368,10 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit(
     iree_device_size_t buffer_offset, iree_device_size_t length,
     const void* before, const void* after) {
   iree_host_size_t tracker_size = 0;
-  IREE_RETURN_IF_ERROR(iree_async_semaphore_wait_tracker_storage_size(
-      iree_max(waits.count, 1), &tracker_size));
+  if (waits.count) {
+    IREE_RETURN_IF_ERROR(iree_async_semaphore_wait_tracker_storage_size(
+        waits.count, &tracker_size));
+  }
   iree_host_size_t total_size = 0;
   iree_host_size_t wait_values_offset = 0, wait_semaphores_offset = 0;
   iree_host_size_t signal_values_offset = 0, signal_semaphores_offset = 0;
@@ -422,7 +418,7 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit(
           },
       .before = storage.data + before_offset,
       .after = storage.data + after_offset,
-      .completion = {.storage = {.capacity = tracker_size,
+      .dependency = {.storage = {.capacity = tracker_size,
                                  .buffer = storage.data + tracker_offset}},
   };
   memcpy(storage.data + before_offset, before, executor->barrier_size);
@@ -441,11 +437,6 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit(
   iree_status_t status = iree_hal_amd_fabric_file_transfer_initialize(
       file, file_access, file_offset, buffer, buffer_offset, length,
       executor->captures->host_allocator, &operation->transfer);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_create(
-        operation->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-        IREE_HAL_SEMAPHORE_FLAG_NONE, &operation->completion.semaphore);
-  }
   if (iree_status_is_ok(status)) {
     if (executor->profile) {
       iree_hal_amd_gpu_profile_operation_t* profile_operation =

@@ -38,8 +38,8 @@ struct MappedQueue : iree_hal_queue_t {
 
   static iree_status_t Submit(iree_hal_queue_t* base,
                               const iree_hal_transfer_operation_t* operation,
-                              iree_hal_semaphore_list_t signals,
-                              const void* before, const void* after) {
+                              const void* before, const void* after,
+                              iree_hal_amd_gpu_retirement_callback_t callback) {
     auto* queue = static_cast<MappedQueue*>(base);
     queue->before_count += before != nullptr;
     queue->after_count += after != nullptr;
@@ -83,7 +83,8 @@ struct MappedQueue : iree_hal_queue_t {
       }
       IREE_RETURN_IF_ERROR(status);
     }
-    return iree_hal_semaphore_list_signal(signals, nullptr);
+    callback.fn(callback.user_data, iree_ok_status(), nullptr, true);
+    return iree_ok_status();
   }
 };
 

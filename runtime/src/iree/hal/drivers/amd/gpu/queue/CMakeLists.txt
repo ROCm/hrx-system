@@ -73,6 +73,7 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::amd::fabric::buffer
     iree::hal::drivers::amd::fabric::file_transfer
+    iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::profile
   PUBLIC
@@ -157,6 +158,7 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::drivers::amd::gpu::context
+    iree::hal::drivers::amd::gpu::queue::pm4::semaphore
     iree::hal::testing::mapped_transfer_buffer
     iree::hal::utils::files
     iree::hal::utils::host_semaphore
