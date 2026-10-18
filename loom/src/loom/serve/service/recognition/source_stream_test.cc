@@ -615,12 +615,15 @@ TEST_F(SourceRecognitionStreamTest,
   ASSERT_NO_FATAL_FAILURE(Open(&first, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
   ASSERT_NO_FATAL_FAILURE(
       Open(&second, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  EXPECT_EQ(loom_serve_recognition_stream_input_capacity(first), 7u);
   const float samples[] = {0.25f, 0.0f, 0.5f, 0.0f};
   for (size_t i = 0; i < IREE_ARRAYSIZE(samples); ++i) {
     const float first_sample = samples[i];
     const float second_sample = samples[IREE_ARRAYSIZE(samples) - 1 - i];
     ASSERT_NO_FATAL_FAILURE(
         Write(first, {first_sample, first_sample, first_sample}, 3));
+    EXPECT_EQ(loom_serve_recognition_stream_credit(first), 4u);
+    EXPECT_EQ(loom_serve_recognition_stream_input_capacity(first), 7u);
     ASSERT_NO_FATAL_FAILURE(
         Write(second, {second_sample, second_sample, second_sample}, 3));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
@@ -724,6 +727,7 @@ TEST_F(SourceRecognitionStreamTest,
   ASSERT_NO_FATAL_FAILURE(RetireModel());
 
   EXPECT_EQ(loom_serve_recognition_stream_peek(stream), activity);
+  EXPECT_EQ(loom_serve_recognition_stream_input_capacity(stream), 7u);
   EXPECT_EQ(activity->activity.end, 2u);
   loom_serve_recognition_stream_consume(stream);
   const auto* provisional = loom_serve_recognition_stream_peek(stream);

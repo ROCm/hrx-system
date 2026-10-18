@@ -394,8 +394,8 @@ class NativeActivityTest : public ::testing::Test {
       const std::vector<float>& samples,
       std::vector<loom_serve_activity_test_utterance_t>* utterances,
       size_t* maximum_retained) {
-    // Workload policy is explicit. Input credit does not describe source
-    // lookahead, so it cannot determine this caller-owned retention capacity.
+    // Retain caller pre-roll plus accepted input and one pending activity
+    // packet. Each packet covers at most one source input window.
     const uint64_t pre_roll = FLAG_pre_roll_frames;
     const uint64_t hangover = FLAG_hangover_frames;
     std::vector<float> ring(FLAG_retained_frames);
@@ -409,6 +409,14 @@ class NativeActivityTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(Open(&detector));
     if (!detector.stream) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
+    }
+    const iree_host_size_t input_capacity =
+        loom_serve_recognition_stream_input_capacity(detector.stream.get());
+    if (pre_roll > ring.size() ||
+        input_capacity > (ring.size() - pre_roll) / 2) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "activity retention requires pre-roll and two source input windows");
     }
     return Until(
         [&] { return detector.finished && Done(detector) && !stt.stream; },
