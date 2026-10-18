@@ -173,9 +173,16 @@ independently advancing span capacity are separate. All bucket variants share
 the prepared weights and the compilation cache.
 
 `draft_depth: 0` selects target-only execution; use `continuation_epochs: 1`.
-Depth 3 selects MTP. Depth 7 selects the DFlash2 source path and requires
-`definition.options.draft_weights` to name its matching GGUF draft checkpoint.
-Draft weights are additional model storage. Two-epoch continuation lets selected
+Depths 1 through 7 select that many MTP proposals using the NextN block in the
+base checkpoint. The packaged default remains 3. Source preparation specializes
+both proposal and verification commands to the requested depth; retained KV
+geometry and prepared weight storage are unchanged. More proposals trade extra
+draft work and verification workspace for potentially fewer target passes, so
+depth is a workload choice rather than an unconditional speed setting.
+
+Setting `definition.options.draft_weights` selects the DFlash2 source path,
+requires depth 7, and names its matching GGUF draft checkpoint. These draft
+weights are additional model storage. Two-epoch continuation lets selected
 device output feed the next prepared epoch before publishing results to the
 host. `continuation_epochs: 1` publishes after each completed epoch while
 preserving the selected drafting mode. Streaming speech consumers can therefore
