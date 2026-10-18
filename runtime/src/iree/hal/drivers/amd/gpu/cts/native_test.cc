@@ -514,6 +514,62 @@ TEST_P(GpuNativeTransferTest,
   }
 }
 
+TEST_P(GpuNativeTransferTest,
+       ConcurrentTransfersResumeAfterStagingCapacityReturns) {
+  using iree::hal::cts::Ref;
+  constexpr size_t kLaneCount = 8;
+  constexpr size_t kIterations = 16;
+  constexpr size_t kTransferLength = 3 * 1024 * 1024 + 37;
+  std::array<Ref<iree_hal_buffer_t>, kLaneCount> buffers;
+  std::array<Ref<iree_hal_semaphore_t>, kLaneCount> timelines;
+  for (size_t lane = 0; lane < kLaneCount; ++lane) {
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool_, iree_hal_make_pool_reservation_request(kTransferLength + 3, 4),
+        iree_infinite_timeout(), buffers[lane].out()));
+    CreateSemaphore(timelines[lane].out());
+  }
+  const auto* barriers = Barriers();
+  std::array<std::thread, kLaneCount> threads;
+  for (size_t lane = 0; lane < kLaneCount; ++lane) {
+    threads[lane] = std::thread([&, lane] {
+      std::vector<uint8_t> source(kTransferLength);
+      std::vector<uint8_t> target(kTransferLength + 2, 0xCC);
+      for (size_t i = 0; i < source.size(); ++i) {
+        source[i] = static_cast<uint8_t>((i * 29) ^ (i >> 9) ^ lane);
+      }
+      auto* timeline = timelines[lane].get();
+      for (size_t iteration = 0; iteration < kIterations; ++iteration) {
+        SCOPED_TRACE(::testing::Message()
+                     << "lane " << lane << ", iteration " << iteration);
+        uint64_t before = iteration * 2;
+        uint64_t uploaded = before + 1;
+        uint64_t downloaded = before + 2;
+        source.front() = static_cast<uint8_t>(iteration);
+        source.back() = static_cast<uint8_t>(lane ^ iteration);
+        // Independent lanes share one bounded native staging ring. Both the
+        // calling threads and deferred publisher must resume when retirement
+        // returns space; no later submission is needed to wake stalled work.
+        IREE_ASSERT_OK(iree_hal_queue_upload(
+            queues_[0], {iteration ? 1u : 0u, &timeline, &before},
+            {1, &timeline, &uploaded}, source.data(), buffers[lane], 3,
+            kTransferLength, barriers));
+        IREE_ASSERT_OK(iree_hal_queue_download(
+            queues_[0], {1, &timeline, &uploaded}, {1, &timeline, &downloaded},
+            buffers[lane], 3, target.data() + 1, kTransferLength, barriers));
+        IREE_ASSERT_OK(iree_hal_semaphore_wait(timeline, downloaded,
+                                               iree_infinite_timeout(), 0));
+        EXPECT_EQ(target.front(), 0xCC);
+        EXPECT_EQ(target.back(), 0xCC);
+        EXPECT_EQ(
+            std::memcmp(source.data(), target.data() + 1, kTransferLength), 0);
+      }
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+}
+
 TEST_P(GpuNativeTransferTest, ManyFillsAndUnalignedCopiesRetireInPieces) {
   const uint8_t zero = 0, guard = 0xCC;
   uint64_t initialized = 1, filled = 2, copied = 3, downloaded = 4;

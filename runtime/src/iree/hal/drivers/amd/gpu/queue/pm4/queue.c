@@ -1322,22 +1322,21 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
   return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
 }
 
-// Enrollment follows the final publication access. Either completion observes
-// the enrollment, or this recheck observes credit returned before enrollment.
+// Enrollment follows the final publication access. The exchanges order this
+// enrollment against retirement: either retirement observes the enrollment, or
+// enrollment acquires its returned credit before rechecking the predicate.
 static bool iree_hal_amd_gpu_pm4_handoff(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_publication_entry_t* remainder, bool capacity,
     uint64_t completed) {
   bool more = iree_hal_amd_gpu_publisher_handoff(&queue->publisher, remainder);
   if (more && capacity) {
-    iree_atomic_store(&queue->waiting_for_capacity, 1,
-                      iree_memory_order_release);
+    iree_atomic_exchange(&queue->waiting_for_capacity, 1,
+                         iree_memory_order_acq_rel);
     more = (uint64_t)iree_atomic_load(&queue->completed.count,
                                       iree_memory_order_acquire) != completed;
-    if (more) {
-      iree_atomic_exchange(&queue->waiting_for_capacity, 0,
-                           iree_memory_order_acq_rel);
-    }
+    // Only retirement consumes enrollment. Publication ownership has already
+    // transferred, so clearing here could erase the next publisher's wait.
   }
   return more;
 }
@@ -1588,9 +1587,9 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
                       iree_memory_order_release);
     IREE_TRACE_ZONE_END(z0);
   }
+  // Participate even when no publisher appears enrolled: a later enrollment
+  // must acquire the completion credit preceding this exchange.
   if (position != initial &&
-      iree_atomic_load(&queue->waiting_for_capacity,
-                       iree_memory_order_acquire) &&
       iree_atomic_exchange(&queue->waiting_for_capacity, 0,
                            iree_memory_order_acq_rel)) {
     iree_hal_amd_gpu_publication_notify(queue->options.publication,
