@@ -1118,20 +1118,23 @@ void iree_async_cancel_request_complete(iree_async_cancel_request_t* request);
 //
 // See iree/async/types.h for the entry and state type definitions.
 
-// Registers host memory for zero-copy I/O.
-//
-// Pre-registering buffers with the kernel enables DMA directly to/from
-// application memory, eliminating copy overhead. This is the critical path
-// for achieving line-rate network throughput and NVMe bandwidth.
+// Registers a nonempty host range for repeated I/O with the requested access.
 //
 // Availability:
 //   generic | io_uring | IOCP | kqueue
-//   emul    | 5.1+     | reg  | emul
+//   emul    | 5.1+     | emul | emul
 //
-// Registration limits:
-//   io_uring: Limited by IORING_MAX_FIXED_BUFFERS (typically 32768).
-//   IOCP: No hard limit; each registration pins pages.
-//   Others: Emulated; no kernel-side benefit but API is consistent.
+// io_uring pins the range into its fixed-buffer table for either READ or WRITE
+// access. Pinning or slot exhaustion fails registration; success never silently
+// substitutes an unpinned region. The kernel requires writable backing even for
+// READ-only I/O access. Ranges larger than 1 GiB occupy adjacent fixed slots;
+// operations contained within one slot use its retained page vector. Splitting
+// operations at region->buffer_size boundaries preserves that property. No
+// socket receive ring is created. Other backends retain metadata only.
+//
+// This is cold, synchronous setup and may block while pinning pages. Backends
+// with a bound registration owner execute the call on that owner. Registration
+// does not guarantee zero-copy I/O: buffered files still use the OS page cache.
 //
 // Buffer lifetime:
 //   The memory referenced by |buffer| must remain valid and at a stable
@@ -1147,8 +1150,9 @@ void iree_async_cancel_request_complete(iree_async_cancel_request_t* request);
 //
 // Returns:
 //   IREE_STATUS_OK: Buffer registered successfully.
-//   IREE_STATUS_RESOURCE_EXHAUSTED: Registration table full.
-//   IREE_STATUS_INVALID_ARGUMENT: Buffer address not suitably aligned.
+//   IREE_STATUS_RESOURCE_EXHAUSTED: Pinning or slot resources exhausted.
+//   IREE_STATUS_INVALID_ARGUMENT: Invalid range, access, or pinning source.
+//   IREE_STATUS_ALREADY_EXISTS: Legacy singleton buffer table already in use.
 //
 // See also: iree_async_proactor_unregister_buffer()
 static inline iree_status_t iree_async_proactor_register_buffer(

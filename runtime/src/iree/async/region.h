@@ -114,7 +114,8 @@ enum iree_async_region_type_e {
   // must register memory before RDMA read/write operations can target it.
   IREE_ASYNC_REGION_TYPE_RDMA,
 
-  // io_uring kernel registration. For WRITE-access slabs, creates a provided
+  // io_uring kernel registration. Host ranges have fixed slots for either I/O
+  // direction. For WRITE-access slabs, creates a provided
   // buffer ring (PBUF_RING) with a buffer_group_id for kernel-managed buffer
   // selection during recv. For READ-access slabs, registers into the kernel's
   // fixed buffer table with a base_buffer_index for file READ_FIXED/WRITE_FIXED
@@ -174,10 +175,9 @@ typedef struct iree_async_region_t {
   // Registered range length in bytes.
   iree_host_size_t length;
 
-  // Portable indexed buffer configuration (for buffer pools).
-  // Set by proactor during register_slab for indexed buffer regions.
-  // 0 if this region is not subdivided into indexed buffers.
-  // These are slab properties, independent of backend.
+  // Byte stride between indexed buffers, or zero for unpartitioned metadata.
+  // Slab registrations use their slab's buffer size. A fixed host range may
+  // have a shorter final slot, bounded by |length|.
   iree_host_size_t buffer_size;
   // Number of indexed buffers, or zero for an unpartitioned registration.
   uint32_t buffer_count;

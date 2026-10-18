@@ -8,7 +8,7 @@
 //
 // This module handles registration of memory regions with the kernel for
 // zero-copy I/O operations. It supports:
-//   - Simple buffer registration (wraps memory in a region)
+//   - Host buffer registration (retained fixed buffers for file and socket I/O)
 //   - DMA-buf registration (mmaps GPU memory for CPU access)
 //   - Slab registration (indexed buffers for zero-copy send/recv)
 
@@ -27,6 +27,23 @@
 // Buffer registration types
 //===----------------------------------------------------------------------===//
 
+// A contiguous range in the proactor's fixed-buffer table. Zero count means
+// no kernel registration; successful registration owns every slot in the range.
+typedef struct iree_async_io_uring_fixed_buffers_t {
+  // First owned slot; zero for the legacy singleton table.
+  uint16_t base;
+  // Number of owned slots, or zero without a registration.
+  uint16_t count;
+} iree_async_io_uring_fixed_buffers_t;
+
+static iree_status_t iree_async_io_uring_fixed_buffers_register(
+    iree_async_proactor_io_uring_t* proactor, iree_byte_span_t contents,
+    iree_host_size_t buffer_size, bool allow_unpinned,
+    iree_async_io_uring_fixed_buffers_t* out_buffers);
+static iree_status_t iree_async_io_uring_fixed_buffers_unregister(
+    iree_async_proactor_io_uring_t* proactor,
+    iree_async_io_uring_fixed_buffers_t buffers);
+
 // Combined allocation for registration entry + region.
 // This keeps them together in memory and simplifies cleanup.
 typedef struct iree_async_io_uring_buffer_registration_t {
@@ -35,6 +52,9 @@ typedef struct iree_async_io_uring_buffer_registration_t {
 
   // Region published through |entry| and embedded for one-allocation lifetime.
   iree_async_region_t region;
+
+  // Fixed slots retained until the last region reference is released.
+  iree_async_io_uring_fixed_buffers_t fixed_buffers;
 } iree_async_io_uring_buffer_registration_t;
 
 // Combined allocation for dmabuf registration entry + region.
@@ -72,6 +92,9 @@ static void iree_async_io_uring_buffer_registration_destroy(
                                                    offsetof(
                                                        iree_async_io_uring_buffer_registration_t,
                                                        region));
+  IREE_CHECK_OK(iree_async_io_uring_fixed_buffers_unregister(
+      iree_async_proactor_io_uring_cast(region->proactor),
+      registration->fixed_buffers));
   iree_allocator_free(region->proactor->allocator, registration);
 }
 
@@ -208,49 +231,81 @@ static void iree_async_io_uring_dmabuf_registration_cleanup(
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_async_proactor_io_uring_register_buffer(
-    iree_async_proactor_t* proactor,
+    iree_async_proactor_t* base_proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
     iree_async_buffer_access_flags_t access_flags,
     iree_async_buffer_registration_entry_t** out_entry) {
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_entry = NULL;
+  if (!buffer.data || !buffer.data_length) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "buffer registration requires a nonempty range");
+  }
+  if (buffer.data_length > UINTPTR_MAX - (uintptr_t)buffer.data) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "buffer registration range overflows address space");
+  }
+  if (!iree_any_bit_set(access_flags,
+                        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+                            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "buffer registration requires READ or WRITE access");
+  }
 
-  // Allocate combined entry + region.
+  // io_uring limits each fixed buffer to 1 GiB. Retain larger ranges as
+  // adjacent slots, with an exact final extent. Operations crossing a slot
+  // boundary use ordinary I/O; callers can split spans at buffer_size.
+  const iree_host_size_t buffer_size =
+      iree_min(buffer.data_length, (iree_host_size_t)(UINT32_C(1) << 30));
+  const iree_host_size_t buffer_count =
+      (buffer.data_length - 1) / buffer_size + 1;
+  if (buffer_count > UINT16_MAX) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "buffer range requires too many fixed slots");
+  }
+
   iree_async_io_uring_buffer_registration_t* registration = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(proactor->allocator, sizeof(*registration),
+      z0, iree_allocator_malloc(base_proactor->allocator, sizeof(*registration),
                                 (void**)&registration));
+  iree_async_proactor_io_uring_t* proactor =
+      iree_async_proactor_io_uring_cast(base_proactor);
+  iree_status_t status = iree_async_io_uring_fixed_buffers_register(
+      proactor, buffer, buffer_size, /*allow_unpinned=*/false,
+      &registration->fixed_buffers);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(base_proactor->allocator, registration);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
 
-  // Initialize the region.
   iree_async_region_t* region = &registration->region;
   iree_atomic_ref_count_init(&region->ref_count);
-  region->proactor = proactor;
-  region->slab = NULL;  // Not slab-backed.
+  region->proactor = base_proactor;
+  region->slab = NULL;
   region->destroy_fn = iree_async_io_uring_buffer_registration_destroy;
   region->type = IREE_ASYNC_REGION_TYPE_IOURING;
   region->access_flags = access_flags;
-  region->base_ptr = (void*)buffer.data;
+  region->base_ptr = buffer.data;
   region->length = buffer.data_length;
   region->recycle = iree_async_buffer_recycle_callback_null();
-  // For io_uring, we don't use IORING_REGISTER_BUFFERS for single buffers
-  // because that API requires registering all buffers at once. Instead, we
-  // just wrap the memory in a region for span-based access. The actual I/O
-  // uses the raw address in the span.
-  region->buffer_size = 0;
-  region->buffer_count = 0;                      // Not indexed (use address).
-  region->handles.iouring.buffer_group_id = -1;  // Not a provided buffer ring.
-  region->handles.iouring.base_buffer_index = -1;  // Not kernel-registered.
+  region->buffer_size = buffer_size;
+  region->buffer_count = (uint32_t)buffer_count;
+  region->handles.iouring.buffer_group_id = -1;
+  region->handles.iouring.base_buffer_index = registration->fixed_buffers.base;
 
-  // Initialize the entry.
   iree_async_buffer_registration_entry_t* entry = &registration->entry;
   entry->next = NULL;
-  entry->proactor = proactor;
+  entry->proactor = base_proactor;
   entry->cleanup_fn = iree_async_io_uring_buffer_registration_cleanup;
   entry->region = region;
-
-  // Link into the caller's state.
   iree_async_buffer_registration_state_add(state, entry);
-
   *out_entry = entry;
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -510,23 +565,14 @@ typedef struct iree_async_io_uring_slab_region_t {
   // Created when access_flags includes WRITE. NULL for send-only.
   iree_io_uring_buffer_ring_t* buffer_ring;
 
-  // True if this region registered with the kernel's fixed buffer table
-  // (either via sparse table or legacy IORING_REGISTER_BUFFERS).
-  bool registered_fixed_buffers;
-
-  // Starting slot index in the sparse buffer table (for release on cleanup).
-  // Only meaningful when registered_fixed_buffers is true and the proactor
-  // has a sparse buffer table (5.19+).
-  uint16_t fixed_buffer_base;
-
-  // Number of contiguous slots allocated in the sparse buffer table.
-  uint16_t fixed_buffer_count;
+  // Fixed slots retained until the last region reference is released.
+  iree_async_io_uring_fixed_buffers_t fixed_buffers;
 
   // Allocator used for freeing this struct.
   iree_allocator_t allocator;
 } iree_async_io_uring_slab_region_t;
 
-// Unregisters a slab region's fixed buffers from the kernel. Handles both the
+// Unregisters a region's fixed buffers from the kernel. Handles both the
 // sparse table path (5.19+, IORING_REGISTER_BUFFERS_UPDATE to clear individual
 // slots) and the legacy path (pre-5.19, IORING_UNREGISTER_BUFFERS to remove
 // the singleton buffer table).
@@ -534,15 +580,17 @@ typedef struct iree_async_io_uring_slab_region_t {
 // These kernel calls can only fail due to programming errors (releasing a
 // region while I/O is still in-flight causes EBUSY, and tracking bugs cause
 // EINVAL). They cannot fail for transient or resource-related reasons.
-static iree_status_t iree_async_io_uring_slab_region_unregister_fixed_buffers(
-    iree_async_io_uring_slab_region_t* slab_region,
-    iree_async_proactor_io_uring_t* proactor) {
+static iree_status_t iree_async_io_uring_fixed_buffers_unregister(
+    iree_async_proactor_io_uring_t* proactor,
+    iree_async_io_uring_fixed_buffers_t buffers) {
+  if (!buffers.count) {
+    return iree_ok_status();
+  }
   if (proactor->buffer_table != NULL) {
     // Sparse table path (5.19+): clear individual kernel slots and release
     // the corresponding bitmap entries.
-    return iree_async_io_uring_clear_buffer_slots(
-        proactor, slab_region->fixed_buffer_base,
-        slab_region->fixed_buffer_count);
+    return iree_async_io_uring_clear_buffer_slots(proactor, buffers.base,
+                                                  buffers.count);
   }
 
   // Legacy path (pre-5.19): unregister the entire singleton buffer table.
@@ -576,18 +624,18 @@ static iree_status_t iree_async_io_uring_slab_region_unregister_fixed_buffers(
   return iree_ok_status();
 }
 
-// Registers slab buffers in the kernel's fixed buffer table for zero-copy send.
-// On 5.19+ acquires contiguous slots from the sparse buffer table and populates
-// them via IORING_REGISTER_BUFFERS_UPDATE. On pre-5.19 uses the singleton
-// IORING_REGISTER_BUFFERS.
-//
-// On success, populates slab_region->fixed_buffer_base, fixed_buffer_count,
-// and sets registered_fixed_buffers to true.
-static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
-    iree_async_io_uring_slab_region_t* slab_region,
-    iree_async_proactor_io_uring_t* proactor, void* base_ptr,
-    iree_host_size_t buffer_size, iree_host_size_t buffer_count) {
-  // Build iovec array mapping each slab buffer to an iovec entry.
+// Registers fixed slots for the exact range, with a possibly short final slot.
+// Sparse tables permit independently retained registrations. Older kernels
+// have one singleton table. Optional socket zero-copy can admit an unpinned
+// region on ENOMEM; required registrations propagate the native failure.
+static iree_status_t iree_async_io_uring_fixed_buffers_register(
+    iree_async_proactor_io_uring_t* proactor, iree_byte_span_t contents,
+    iree_host_size_t buffer_size, bool allow_unpinned,
+    iree_async_io_uring_fixed_buffers_t* out_buffers) {
+  *out_buffers = (iree_async_io_uring_fixed_buffers_t){0};
+  const iree_host_size_t buffer_count =
+      (contents.data_length - 1) / buffer_size + 1;
+  // Build one iovec for each fixed slot.
   struct iovec* iovecs = NULL;
   struct iovec stack_iovecs[64];
   bool iovecs_heap_allocated = false;
@@ -595,14 +643,15 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
     iovecs = stack_iovecs;
   } else {
     IREE_RETURN_IF_ERROR(
-        iree_allocator_malloc_array(slab_region->allocator, buffer_count,
+        iree_allocator_malloc_array(proactor->base.allocator, buffer_count,
                                     sizeof(struct iovec), (void**)&iovecs));
     iovecs_heap_allocated = true;
   }
 
   for (iree_host_size_t i = 0; i < buffer_count; ++i) {
-    iovecs[i].iov_base = (uint8_t*)base_ptr + i * buffer_size;
-    iovecs[i].iov_len = buffer_size;
+    iovecs[i].iov_base = contents.data + i * buffer_size;
+    iovecs[i].iov_len =
+        iree_min(buffer_size, contents.data_length - i * buffer_size);
   }
 
   // Register with the kernel. The sparse table path (5.19+) acquires
@@ -658,7 +707,7 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
         IREE_CHECK_OK(iree_async_io_uring_rollback_buffer_slots(
             proactor, (uint16_t)base_slot, (uint16_t)buffer_count,
             registered_count));
-        if (error_number == ENOMEM) {
+        if (error_number == ENOMEM && allow_unpinned) {
           // Kernel couldn't pin pages — RLIMIT_MEMLOCK is likely too low.
           // Fall back to copy-based I/O instead of failing hard. The region
           // will have base_buffer_index = -1 so the send path uses regular
@@ -686,9 +735,8 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
           iree_status_abort(iree_status_join(status, rollback_status));
         }
       } else {
-        slab_region->fixed_buffer_base = (uint16_t)base_slot;
-        slab_region->fixed_buffer_count = (uint16_t)buffer_count;
-        slab_region->registered_fixed_buffers = true;
+        out_buffers->base = (uint16_t)base_slot;
+        out_buffers->count = (uint16_t)buffer_count;
       }
     }
   } else {
@@ -711,7 +759,7 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
         iree_atomic_store(&proactor->legacy_buffer_table_state,
                           IREE_ASYNC_IO_URING_LEGACY_BUFFER_TABLE_STATE_FREE,
                           iree_memory_order_release);
-        if (error_number == ENOMEM) {
+        if (error_number == ENOMEM && allow_unpinned) {
           IREE_TRACE_MESSAGE(
               WARNING,
               "io_uring: RLIMIT_MEMLOCK too low to pin pages for zero-copy "
@@ -726,15 +774,14 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
         iree_atomic_store(&proactor->legacy_buffer_table_state,
                           IREE_ASYNC_IO_URING_LEGACY_BUFFER_TABLE_STATE_ACTIVE,
                           iree_memory_order_release);
-        slab_region->fixed_buffer_base = 0;
-        slab_region->fixed_buffer_count = (uint16_t)buffer_count;
-        slab_region->registered_fixed_buffers = true;
+        out_buffers->base = 0;
+        out_buffers->count = (uint16_t)buffer_count;
       }
     }
   }
 
   if (iovecs_heap_allocated) {
-    iree_allocator_free(slab_region->allocator, iovecs);
+    iree_allocator_free(proactor->base.allocator, iovecs);
   }
 
   return status;
@@ -756,9 +803,9 @@ static void iree_async_io_uring_slab_region_destroy(
   // Unregister fixed buffers from the kernel. Failure aborts — the kernel
   // holds DMA references to the slab memory and continuing would cause
   // DMA-into-freed-pages corruption.
-  if (slab_region->registered_fixed_buffers) {
-    IREE_CHECK_OK(iree_async_io_uring_slab_region_unregister_fixed_buffers(
-        slab_region, proactor));
+  if (slab_region->fixed_buffers.count) {
+    IREE_CHECK_OK(iree_async_io_uring_fixed_buffers_unregister(
+        proactor, slab_region->fixed_buffers));
   }
 
   // Release the slab reference.
@@ -836,9 +883,10 @@ iree_status_t iree_async_proactor_io_uring_register_slab(
 
   // Register with kernel's fixed buffer table for send path (READ access).
   if (needs_fixed_buffers) {
-    iree_status_t status =
-        iree_async_io_uring_slab_region_register_fixed_buffers(
-            slab_region, proactor, base_ptr, buffer_size, buffer_count);
+    iree_status_t status = iree_async_io_uring_fixed_buffers_register(
+        proactor,
+        iree_make_byte_span(base_ptr, iree_async_slab_total_size(slab)),
+        buffer_size, /*allow_unpinned=*/true, &slab_region->fixed_buffers);
     if (!iree_status_is_ok(status)) {
       iree_allocator_free(base_proactor->allocator, slab_region);
       IREE_TRACE_ZONE_END(z0);
@@ -865,10 +913,10 @@ iree_status_t iree_async_proactor_io_uring_register_slab(
       // Unregister the buffer table on failure if we registered it.
       // This is a programming error if it fails (we just registered these
       // slots moments ago with no I/O in-flight), so hard-abort.
-      if (slab_region->registered_fixed_buffers) {
+      if (slab_region->fixed_buffers.count) {
         iree_status_t unregister_status =
-            iree_async_io_uring_slab_region_unregister_fixed_buffers(
-                slab_region, proactor);
+            iree_async_io_uring_fixed_buffers_unregister(
+                proactor, slab_region->fixed_buffers);
         if (!iree_status_is_ok(unregister_status)) {
           iree_status_abort(iree_status_join(status, unregister_status));
         }
@@ -908,8 +956,8 @@ iree_status_t iree_async_proactor_io_uring_register_slab(
   // -1 when fixed buffer registration was skipped (ENOMEM/RLIMIT_MEMLOCK):
   // send path sees this and falls back to copy-based I/O.
   region->handles.iouring.base_buffer_index =
-      slab_region->registered_fixed_buffers
-          ? (int32_t)slab_region->fixed_buffer_base
+      slab_region->fixed_buffers.count
+          ? (int32_t)slab_region->fixed_buffers.base
           : -1;
 
   *out_region = region;

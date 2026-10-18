@@ -127,6 +127,73 @@ TEST_P(SlabRegistrationFaultTest, ReportsFaultAndReleasesEveryReservedSlot) {
 INSTANTIATE_TEST_SUITE_P(FaultPosition, SlabRegistrationFaultTest,
                          ::testing::Values(0, 1, 3));
 
+TEST_P(SlabRegistrationFaultTest, HostBufferFailurePreservesRegistrationState) {
+  ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 4));
+  auto* fault_page = static_cast<uint8_t*>(mapping_) + GetParam() * page_size_;
+  ASSERT_EQ(mprotect(fault_page, page_size_, PROT_NONE), 0);
+  iree_async_buffer_registration_state_t state = {};
+  iree_async_buffer_registration_entry_t* entry = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_async_proactor_register_buffer(
+          proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+          IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry));
+  EXPECT_EQ(entry, nullptr);
+  iree_async_buffer_registration_state_deinitialize(&state);
+
+  ASSERT_EQ(mprotect(fault_page, page_size_, PROT_READ | PROT_WRITE), 0);
+  ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
+}
+
+TEST_F(SlabRegistrationTest, HostBufferAccessDoesNotSelectReceiveBuffers) {
+  ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 3));
+  const iree_async_buffer_access_flags_t accesses[] = {
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ | IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+  };
+  for (auto access : accesses) {
+    iree_async_buffer_registration_state_t state = {};
+    iree_async_buffer_registration_entry_t* entry = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_register_buffer(
+        proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+        access, &entry));
+    EXPECT_EQ(entry->region->access_flags, access);
+    EXPECT_EQ(entry->region->buffer_size, mapping_length_);
+    EXPECT_EQ(entry->region->buffer_count, 1u);
+    EXPECT_EQ(entry->region->handles.iouring.base_buffer_index, 0);
+    EXPECT_EQ(entry->region->handles.iouring.buffer_group_id, -1);
+    iree_async_buffer_registration_state_deinitialize(&state);
+  }
+}
+
+TEST_F(SlabRegistrationTest, HostBufferPinLimitRejectsUnpinnedAdmission) {
+  constexpr rlim_t kMaxPinLimit = 8 * 1024 * 1024;
+  struct rlimit limit = original_limit_;
+  if (limit.rlim_cur > kMaxPinLimit) {
+    limit.rlim_cur = kMaxPinLimit;
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      CreateSlab(page_size_, limit.rlim_cur / page_size_ + 1));
+  ASSERT_EQ(setrlimit(RLIMIT_MEMLOCK, &limit), 0);
+  limit_changed_ = true;
+
+  iree_async_buffer_registration_state_t state = {};
+  iree_async_buffer_registration_entry_t* entry = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_async_proactor_register_buffer(
+          proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+          IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry));
+  EXPECT_EQ(entry, nullptr);
+  iree_async_buffer_registration_state_deinitialize(&state);
+
+  ASSERT_EQ(setrlimit(RLIMIT_MEMLOCK, &original_limit_), 0);
+  limit_changed_ = false;
+  ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 4));
+  ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
+}
+
 TEST_F(SlabRegistrationTest, PinLimitReleasesPartialRegistration) {
   constexpr rlim_t kMaxPinLimit = 8 * 1024 * 1024;
   struct rlimit limit = original_limit_;
@@ -154,7 +221,8 @@ TEST_F(SlabRegistrationTest, PinLimitReleasesPartialRegistration) {
   ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
 }
 
-class FileSlabRegistrationTest : public SlabRegistrationTest {
+class FileRegistrationTest : public SlabRegistrationTest,
+                             public ::testing::WithParamInterface<bool> {
  protected:
   void SetUp() override {
     SlabRegistrationTest::SetUp();
@@ -172,13 +240,26 @@ class FileSlabRegistrationTest : public SlabRegistrationTest {
                     MAP_SHARED, backing_fd_, 0);
     ASSERT_NE(mapping_, MAP_FAILED);
     ASSERT_EQ(madvise(mapping_, mapping_length_, MADV_NOHUGEPAGE), 0);
-    IREE_ASSERT_OK(iree_async_slab_wrap(mapping_, 2 * page_size_, 2,
-                                        iree_allocator_system(), &slab_));
-    IREE_ASSERT_OK(iree_async_proactor_register_slab(
-        proactor_, slab_,
-        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
-            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-        &region_));
+    if (GetParam()) {
+      iree_async_buffer_registration_entry_t* entry = nullptr;
+      IREE_ASSERT_OK(iree_async_proactor_register_buffer(
+          proactor_, &registration_state_,
+          iree_make_byte_span(mapping_, mapping_length_),
+          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+              IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+          &entry));
+      region_ = entry->region;
+      iree_async_region_retain(region_);
+      EXPECT_EQ(region_->handles.iouring.buffer_group_id, -1);
+    } else {
+      IREE_ASSERT_OK(iree_async_slab_wrap(mapping_, 2 * page_size_, 2,
+                                          iree_allocator_system(), &slab_));
+      IREE_ASSERT_OK(iree_async_proactor_register_slab(
+          proactor_, slab_,
+          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+              IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+          &region_));
+    }
     ASSERT_GE(region_->handles.iouring.base_buffer_index, 0);
 
     raw_file_fd_ = memfd_create("iree_fixed_file_contents", MFD_CLOEXEC);
@@ -202,6 +283,7 @@ class FileSlabRegistrationTest : public SlabRegistrationTest {
     if (pagemap_fd_ >= 0) {
       EXPECT_EQ(close(pagemap_fd_), 0);
     }
+    iree_async_buffer_registration_state_deinitialize(&registration_state_);
     SlabRegistrationTest::TearDown();
     if (backing_fd_ >= 0) {
       EXPECT_EQ(close(backing_fd_), 0);
@@ -250,6 +332,8 @@ class FileSlabRegistrationTest : public SlabRegistrationTest {
     IREE_ASSERT_OK(completion.status.release());
   }
 
+  // Registration owner whose references may retire before accepted I/O.
+  iree_async_buffer_registration_state_t registration_state_ = {};
   // Shared physical backing retained until all registrations are released.
   int backing_fd_ = -1;
   // Own-process translation metadata, independent of payload access.
@@ -260,7 +344,7 @@ class FileSlabRegistrationTest : public SlabRegistrationTest {
   iree_async_file_t* file_ = nullptr;
 };
 
-TEST_F(FileSlabRegistrationTest, ReadWriteWithoutCpuTranslations) {
+TEST_P(FileRegistrationTest, ReadWriteWithoutCpuTranslations) {
   const iree_async_span_t spans[] = {
       iree_async_span_make(region_, 0, 2 * page_size_),
       iree_async_span_make(region_, 2 * page_size_, 2 * page_size_),
@@ -307,9 +391,10 @@ TEST_F(FileSlabRegistrationTest, ReadWriteWithoutCpuTranslations) {
   }
 }
 
-TEST_F(FileSlabRegistrationTest, RawAndCrossSlotSpansPreserveByteRanges) {
-  // These are legal spans that cannot name one fixed slot. They retain ordinary
-  // read/write behavior, including empty ranges at the end of the region.
+TEST_P(FileRegistrationTest, RawAndCrossSlotSpansPreserveByteRanges) {
+  // The first span crosses indexed slab slots but fits within a host buffer's
+  // fixed slot. Both representations preserve exact bytes, as do raw pointers
+  // and empty ranges at the end of the region.
   const iree_async_span_t spans[] = {
       iree_async_span_make(region_, page_size_ + 5, 2 * page_size_),
       iree_async_span_from_ptr(mapping_, mapping_length_),
@@ -338,6 +423,62 @@ TEST_F(FileSlabRegistrationTest, RawAndCrossSlotSpansPreserveByteRanges) {
     EXPECT_EQ(memcmp(mapping_, expected.data(), expected.size()), 0);
   }
 }
+
+TEST_P(FileRegistrationTest, AcceptedFileWriteRetainsRegistration) {
+  std::vector<uint8_t> expected(page_size_, 0xB7);
+  memcpy(mapping_, expected.data(), expected.size());
+  ASSERT_NO_FATAL_FAILURE(DiscardCpuTranslations());
+  struct Completion {
+    // Published by the terminal callback on this polling thread.
+    bool done = false;
+    // Terminal result consumed after polling completes.
+    iree::Status status;
+  } completion;
+  iree_async_file_write_operation_t write = {};
+  write.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
+  write.base.completion_fn =
+      +[](void* user_data, iree_async_operation_t*, iree_status_t status,
+          iree_async_completion_flags_t) {
+        auto& completion = *static_cast<Completion*>(user_data);
+        completion.status = std::move(status);
+        completion.done = true;
+      };
+  write.base.user_data = &completion;
+  write.file = file_;
+  write.buffer = iree_async_span_make(region_, 0, page_size_);
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &write.base));
+
+  // Only the accepted operation retains the registration from this point.
+  // The backing still belongs to this fixture, independently of its region.
+  iree_async_buffer_registration_state_deinitialize(&registration_state_);
+  iree_async_region_release(region_);
+  region_ = nullptr;
+  while (!completion.done) {
+    IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_infinite_timeout(),
+                                            /*out_completed_count=*/nullptr));
+  }
+  IREE_ASSERT_OK(completion.status.release());
+  EXPECT_EQ(write.bytes_written, expected.size());
+  ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
+  std::vector<uint8_t> actual(expected.size());
+  ASSERT_EQ(pread(file_->primitive.value.fd, actual.data(), actual.size(), 0),
+            actual.size());
+  EXPECT_EQ(actual, expected);
+
+  // Terminal retirement returns the exact fixed-table range for reuse.
+  iree_async_buffer_registration_entry_t* entry = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_register_buffer(
+      proactor_, &registration_state_,
+      iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry));
+  EXPECT_EQ(entry->region->handles.iouring.base_buffer_index, 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(RegistrationKind, FileRegistrationTest,
+                         ::testing::Bool(),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                           return info.param ? "HostBuffer" : "IndexedSlab";
+                         });
 
 class ReceiveSlabRegistrationTest : public SlabRegistrationTest {
  protected:
