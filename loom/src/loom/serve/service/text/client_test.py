@@ -275,7 +275,7 @@ class ClientTest(unittest.TestCase):
                         shutil.copyfile(PACKAGE / name, broken / name)
                     path = broken / "control.loom"
                     source = path.read_text()
-                    marker = "%empty = global.load @no_tools : buffer\n  func.return %empty : buffer"
+                    marker = "%empty = global.load @no_tools : buffer"
                     self.assertEqual(source.count(marker), 1)
                     path.write_text(
                         source.replace(marker, marker.replace("@no_tools", "@empty"))

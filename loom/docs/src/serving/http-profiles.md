@@ -464,7 +464,7 @@ mono PCM16LE carried in base64 JSON strings. Supported commands are:
 | `input_audio_buffer.clear` | Cancels the current uncommitted input item. |
 | `response.create` | Generates from canonical conversation history with an independent snapshot of output settings and optional response metadata. |
 | `response.cancel` | Cancels the active response, optionally checked against `response_id`. |
-| `conversation.item.create` | Inserts a completed text message with user, assistant, or system role. Optional `previous_item_id:"root"` prepends it. |
+| `conversation.item.create` | Inserts a text message, function call, or function result. Optional `previous_item_id:"root"` prepends it. |
 | `conversation.item.delete` | Removes an item after active response ownership retires. |
 | `conversation.item.truncate` | Acknowledges `audio_end_ms` at `content_index:0` and removes the assistant audio transcript. |
 
@@ -472,8 +472,9 @@ Session settings accept instructions, one output modality (`audio` or `text`),
 positive `max_output_tokens`, the configured transcription model plus language
 and prompt hints, the speech voice, and speed 1. Input noise reduction is null.
 Each `response.create.response` may override `instructions`, `output_modalities`,
-`max_output_tokens`, and `audio.output` without changing subsequent session
-defaults. Response audio has the same fixed format, voice, and speed contract.
+`max_output_tokens`, `tools`, `tool_choice`, and `audio.output` without changing
+subsequent session defaults. Response audio has the same fixed format, voice,
+and speed contract.
 Input audio settings and session type are not response overrides.
 
 Response `metadata` is null or an object containing at most 16 distinct keys.
@@ -485,8 +486,9 @@ affect text-prefix reuse. Session settings do not accept metadata.
 
 `response.created` establishes the response's input frontier. Later microphone
 commits follow that response in canonical history and cannot enter its input.
-Message-item events begin only when content becomes available; a response that
-ends before producing content has `output:[]`. Client-created items may omit
+Message-item events begin only when content becomes available. A tool-only
+response contains function items and never opens a speech request; a response
+with neither content nor calls has `output:[]`. Client-created items may omit
 `id` to receive a unique server ID. Explicit IDs are unique across committed
 items and uncommitted microphone reservations; clear releases an uncommitted
 reservation.
@@ -521,10 +523,44 @@ Automatic interruption removes unaligned assistant audio text from future prompt
 the client still reports actual playback through `conversation.item.truncate`.
 A repeated report for already removed text is harmless during a successor response.
 
-Tools must be empty; tool choice may be `none` or `auto`.
-Other policies, formats, function transactions, and out-of-band responses reject
-explicitly. Open WebUI's tool bridge additionally requires function transactions
-and out-of-band responses.
+Session and response settings accept up to 4096 flat function declarations:
+`{"type":"function","name":"lookup","parameters":{"type":"object","properties":{}}}`.
+Optional `description` and `strict:false` have the native chat semantics.
+Declaration order is preserved. `tool_choice:"auto"` exposes the catalogue to
+the text model; `"none"` suppresses it for that response. Required or forced tool
+selection and `strict:true` reject because the native sampler cannot enforce
+those constraints. Effective instructions and catalogue selection determine
+text-checkpoint compatibility. A rejected session update leaves prior defaults
+intact, including when the effective-settings echo exceeds the message limit.
+
+Generated calls publish `response.output_item.added`,
+`response.function_call_arguments.delta`,
+`response.function_call_arguments.done`, and `response.output_item.done`, with
+matching conversation item events. Arguments become available after native
+completion validates the full call set. Only a `function_call` item with
+`status:"completed"` in `response.output_item.done` is executable;
+arguments-done alone does not establish completion. Output indices include any
+preceding assistant message. The client executes tools; the server does not.
+
+Return a `function_call_output` item with the completed call's `call_id` and a
+string `output`, including an empty string. Results can append immediately,
+before `response.done`; creating the next response waits until the active
+response finishes or is cancelled. Call IDs resolve against preceding completed
+calls. Client-created `function_call` items require `name` and `arguments`; an
+omitted `call_id` receives a generated identity. Input status spellings are
+accepted but input items enter history as completed.
+
+Cancellation preserves completed calls, marks announced unfinished calls
+incomplete, and discards unannounced calls. Only completed calls enter later
+model input. All generated text and calls from a response share one native
+assistant message; an explicit idle insertion between members splits it at that
+position. Each result owns its call ID independently of later item deletion.
+Before publishing any executable call, the server reserves the entire call set
+and checks both individual events and the final response against output limits.
+Insufficient capacity fails that response without publishing a partial call set.
+
+Out-of-band responses and explicit response input selection reject explicitly.
+Open WebUI's auxiliary status responses require those additional capabilities.
 
 Text and speech output are incremental. Audio responses publish
 `response.output_audio_transcript.delta` and `response.output_audio.delta`;
