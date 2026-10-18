@@ -55,6 +55,13 @@ typedef enum loom_serve_realtime_response_finish_e {
   LOOM_SERVE_REALTIME_FINISH_RETIRED,
 } loom_serve_realtime_response_finish_t;
 
+typedef enum loom_serve_realtime_response_stop_e {
+  LOOM_SERVE_REALTIME_STOP_NONE,
+  LOOM_SERVE_REALTIME_STOP_CLIENT_CANCELLED,
+  LOOM_SERVE_REALTIME_STOP_TURN_DETECTED,
+  LOOM_SERVE_REALTIME_STOP_FAILED,
+} loom_serve_realtime_response_stop_t;
+
 typedef struct loom_serve_realtime_response_t {
   // Canonical assistant item; NULL denotes an available response slot.
   loom_serve_realtime_item_t* item;
@@ -66,8 +73,10 @@ typedef struct loom_serve_realtime_response_t {
   loom_serve_realtime_settings_t settings;
   // Native composition, including a separately retiring output CPU borrower.
   loom_serve_realtime_generation_t* generation;
-  // Logical cancellation is immediate and independent of physical retirement.
-  bool cancelled;
+  // First terminal cause withdrawing generation, independent of retirement.
+  loom_serve_realtime_response_stop_t stop;
+  // Owned native failure when stop is FAILED, retained through final delivery.
+  iree_status_t failure;
   // Completed text prefix capture has transferred to the history owner.
   bool captured;
   // Ordered final events, independent of native work and capture retirement.
@@ -230,7 +239,7 @@ static loom_serve_realtime_response_t* loom_serve_realtime_active_response(
     loom_serve_realtime_session_t* session) {
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
     loom_serve_realtime_response_t* response = &session->responses[i];
-    if (response->item && !response->cancelled &&
+    if (response->item && !response->stop &&
         response->finish != LOOM_SERVE_REALTIME_FINISH_RETIRED) {
       return response;
     }
@@ -238,10 +247,13 @@ static loom_serve_realtime_response_t* loom_serve_realtime_active_response(
   return NULL;
 }
 
-static void loom_serve_realtime_response_cancel(
+static void loom_serve_realtime_response_stop(
     loom_serve_realtime_session_t* session,
-    loom_serve_realtime_response_t* response) {
-  response->cancelled = true;
+    loom_serve_realtime_response_t* response,
+    loom_serve_realtime_response_stop_t stop) {
+  if (!response->stop) {
+    response->stop = stop;
+  }
   response->captured = true;
   response->finish =
       response->finish ? response->finish : LOOM_SERVE_REALTIME_FINISH_TEXT;
@@ -254,6 +266,26 @@ static void loom_serve_realtime_response_cancel(
   // released. Its predecessor remains valid until a conversation edit says so.
   loom_serve_realtime_history_invalidate(&session->history,
                                          response->item->sequence);
+}
+
+static void loom_serve_realtime_response_fail(
+    loom_serve_realtime_session_t* session,
+    loom_serve_realtime_response_t* response, iree_status_t failure) {
+  loom_serve_http_server_record_error(session->server, failure);
+  if (response->stop) {
+    // A late conversion failure is still diagnosed, but cannot replace the
+    // terminal cause already selected by cancellation or an earlier failure.
+    iree_status_ignore(failure);
+    return;
+  }
+  loom_serve_realtime_response_stop(session, response,
+                                    LOOM_SERVE_REALTIME_STOP_FAILED);
+  response->failure = failure;
+  if (response->item->audio) {
+    // Failed generation gives no alignment between partial text and playback.
+    loom_serve_realtime_conversation_truncate(&session->conversation,
+                                              response->item);
+  }
 }
 
 static void loom_serve_realtime_transcription_close(
@@ -286,7 +318,9 @@ static void loom_serve_realtime_session_stop(
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
     if (session->responses[i].item) {
-      loom_serve_realtime_response_cancel(session, &session->responses[i]);
+      loom_serve_realtime_response_stop(
+          session, &session->responses[i],
+          LOOM_SERVE_REALTIME_STOP_CLIENT_CANCELLED);
     }
   }
   loom_serve_realtime_history_invalidate(&session->history, 0);
@@ -346,20 +380,39 @@ static iree_status_t loom_serve_realtime_response_event(
       iree_string_builder_append_cstring(output, ",\"response\":{\"id\":"));
   IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
       output, iree_string_builder_view(&response->id)));
+  static const char* const stopped_status[] = {NULL, "cancelled", "cancelled",
+                                               "failed"};
+  const char* status = !done            ? "in_progress"
+                       : response->stop ? stopped_status[response->stop]
+                       : response->budget_exhausted ? "incomplete"
+                                                    : "completed";
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
       ",\"object\":\"realtime.response\",\"status\":\"%s\","
-      "\"status_details\":%s,\"output\":[",
-      done ? (response->cancelled          ? "cancelled"
-              : response->budget_exhausted ? "incomplete"
-                                           : "completed")
-           : "in_progress",
-      done ? (response->cancelled
-                  ? "{\"type\":\"cancelled\",\"reason\":\"client_cancelled\"}"
-              : response->budget_exhausted
-                  ? "{\"type\":\"incomplete\",\"reason\":\"max_output_tokens\"}"
-                  : "null")
-           : "null"));
+      "\"status_details\":",
+      status));
+  if (done && response->stop == LOOM_SERVE_REALTIME_STOP_FAILED) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output,
+        "{\"type\":\"failed\",\"error\":{\"type\":\"server_error\","
+        "\"code\":\"%s\",\"message\":",
+        iree_status_code_string(iree_status_code(response->failure))));
+    IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
+        output, iree_status_message(response->failure)));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}}"));
+  } else if (done && (response->stop || response->budget_exhausted)) {
+    const char* reason =
+        response->stop == LOOM_SERVE_REALTIME_STOP_TURN_DETECTED
+            ? "turn_detected"
+        : response->stop ? "client_cancelled"
+                         : "max_output_tokens";
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output, "{\"type\":\"%s\",\"reason\":\"%s\"}", status, reason));
+  } else {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, ",\"output\":["));
   if (done) {
     IREE_RETURN_IF_ERROR(
         loom_serve_realtime_item_write(response->item, output));
@@ -367,7 +420,7 @@ static iree_status_t loom_serve_realtime_response_event(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "],\"output_modalities\":[\"%s\"],\"metadata\":null,\"usage\":",
       response->settings.audio ? "audio" : "text"));
-  if (done && !response->cancelled) {
+  if (done && !response->stop) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output,
         "{\"total_tokens\":%" PRIhsz ",\"input_tokens\":%" PRIhsz
@@ -493,7 +546,7 @@ static bool loom_serve_realtime_response_ready(
     const loom_serve_realtime_response_t* other = &session->responses[i];
     if (other != response && other->generation &&
         (loom_serve_realtime_generation_pending(other->generation) ||
-         (!other->cancelled && !other->captured))) {
+         (!other->stop && !other->captured))) {
       return false;
     }
   }
@@ -547,20 +600,28 @@ static iree_status_t loom_serve_realtime_response_advance(
   if (!response->item) {
     return iree_ok_status();
   }
-  if (!response->generation && !response->cancelled &&
+  if (!response->generation && !response->stop &&
       loom_serve_realtime_response_ready(session, response)) {
-    IREE_RETURN_IF_ERROR(loom_serve_realtime_response_start(session, response));
+    iree_status_t status =
+        loom_serve_realtime_response_start(session, response);
+    if (!iree_status_is_ok(status)) {
+      loom_serve_realtime_response_fail(session, response, status);
+    }
     *out_progress = true;
   }
   if (response->generation) {
-    IREE_RETURN_IF_ERROR(loom_serve_realtime_generation_advance(
+    iree_status_t status = loom_serve_realtime_generation_advance(
         response->generation,
         !session->closing &&
             loom_serve_realtime_wire_can_publish(&session->wire),
-        out_progress));
+        out_progress);
+    if (!iree_status_is_ok(status)) {
+      loom_serve_realtime_response_fail(session, response, status);
+      *out_progress = true;
+    }
     response->item->generated_frames =
         loom_serve_realtime_generation_frames(response->generation);
-    if (!response->cancelled) {
+    if (!response->stop) {
       const iree_string_view_t audio =
           loom_serve_realtime_generation_audio(response->generation);
       if (audio.size && loom_serve_realtime_wire_can_publish(&session->wire)) {
@@ -647,6 +708,7 @@ static iree_status_t loom_serve_realtime_response_advance(
     iree_string_builder_deinitialize(&response->id);
     iree_string_builder_deinitialize(&response->checkpoint);
     loom_serve_realtime_settings_deinitialize(&response->settings);
+    iree_status_ignore(response->failure);
     *response = (loom_serve_realtime_response_t){0};
     *out_progress = true;
   }
@@ -912,7 +974,8 @@ static iree_status_t loom_serve_realtime_command_cancel(
            iree_string_builder_view(&response->id)))) {
     return iree_make_status(IREE_STATUS_NOT_FOUND, "response is not active");
   }
-  loom_serve_realtime_response_cancel(session, response);
+  loom_serve_realtime_response_stop(session, response,
+                                    LOOM_SERVE_REALTIME_STOP_CLIENT_CANCELLED);
   return iree_ok_status();
 }
 
@@ -1091,7 +1154,7 @@ static iree_status_t loom_serve_realtime_item_mutate(
           IREE_STATUS_FAILED_PRECONDITION,
           "response item remains owned until cancellation retires");
     }
-    if (changes_history && response->item && !response->cancelled &&
+    if (changes_history && response->item && !response->stop &&
         response->finish != LOOM_SERVE_REALTIME_FINISH_RETIRED) {
       if (response->item != item || !truncate) {
         return iree_make_status(
@@ -1101,10 +1164,11 @@ static iree_status_t loom_serve_realtime_item_mutate(
     }
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    if (session->responses[i].item == item &&
-        !session->responses[i].cancelled &&
+    if (session->responses[i].item == item && !session->responses[i].stop &&
         session->responses[i].finish != LOOM_SERVE_REALTIME_FINISH_RETIRED) {
-      loom_serve_realtime_response_cancel(session, &session->responses[i]);
+      loom_serve_realtime_response_stop(
+          session, &session->responses[i],
+          LOOM_SERVE_REALTIME_STOP_CLIENT_CANCELLED);
     }
   }
   if (truncate) {
@@ -1268,7 +1332,8 @@ static iree_status_t loom_serve_realtime_turns_advance(
       loom_serve_realtime_response_t* response =
           loom_serve_realtime_active_response(session);
       if (response) {
-        loom_serve_realtime_response_cancel(session, response);
+        loom_serve_realtime_response_stop(
+            session, response, LOOM_SERVE_REALTIME_STOP_TURN_DETECTED);
         if (response->item->audio) {
           // Cancellation says nothing about playback. Drop unaligned text
           // without inventing a client-owned played duration.
