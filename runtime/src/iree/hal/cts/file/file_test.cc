@@ -18,8 +18,6 @@
 
 namespace iree::hal::cts {
 
-using ::testing::ContainerEq;
-
 namespace {
 
 constexpr iree_device_size_t kFileAlignment = 128;
@@ -651,9 +649,8 @@ TEST_P(AsyncFileTest, DirectFileRoundTripUsesReportedRequirements) {
               source_contents.data() + buffer_offset, length);
   std::memcpy(expected.data() + file_offset,
               source_contents.data() + buffer_offset, length);
-  EXPECT_THAT(ReadBufferBytes(target.get(), 0, buffer_length),
-              ContainerEq(expected_buffer));
-  EXPECT_THAT(file.ReadContents(0, kFileLength), ContainerEq(expected));
+  EXPECT_EQ(ReadBufferBytes(target.get(), 0, buffer_length), expected_buffer);
+  EXPECT_EQ(file.ReadContents(0, kFileLength), expected);
 }
 
 TEST_P(FileTest, ReadEntireFile) {
@@ -667,11 +664,12 @@ TEST_P(FileTest, ReadEntireFile) {
     }
 
     Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(file_length);
-    QueueReadAndWait(file.get(), /*source_offset=*/0, target_buffer.get(),
-                     /*target_offset=*/0, file_length);
+    ASSERT_NO_FATAL_FAILURE(QueueReadAndWait(file.get(), /*source_offset=*/0,
+                                             target_buffer.get(),
+                                             /*target_offset=*/0, file_length));
 
-    EXPECT_THAT(ReadBufferBytes(target_buffer.get(), /*offset=*/0, file_length),
-                ContainerEq(file_contents));
+    EXPECT_EQ(ReadBufferBytes(target_buffer.get(), /*offset=*/0, file_length),
+              file_contents);
   });
 }
 
@@ -778,8 +776,7 @@ TEST_P(FileTest, MemoryFileUsesExplicitStoragePool) {
     ASSERT_TRUE(target);
     ASSERT_NO_FATAL_FAILURE(
         QueueReadAndWait(file.get(), 0, target.get(), 0, file_length));
-    EXPECT_THAT(ReadBufferBytes(target.get(), 0, file_length),
-                ContainerEq(expected));
+    EXPECT_EQ(ReadBufferBytes(target.get(), 0, file_length), expected);
   }
 }
 
@@ -1016,7 +1013,7 @@ TEST_P(FileTest, SynchronousHostSpans) {
         file.get(), 19, iree_make_byte_span(target.data() + 3, 67)));
     std::vector<uint8_t> expected_target(80, 0xA5);
     std::copy_n(file_contents.data() + 19, 67, expected_target.data() + 3);
-    EXPECT_THAT(target, ContainerEq(expected_target));
+    EXPECT_EQ(target, expected_target);
 
     const std::vector<uint8_t> source = target;
     IREE_ASSERT_OK(iree_hal_file_write(
@@ -1040,8 +1037,7 @@ TEST_P(FileTest, SynchronousHostSpans) {
         IREE_STATUS_OUT_OF_RANGE,
         iree_hal_file_write(file.get(), file_contents.size() - 1,
                             iree_make_const_byte_span(source.data(), 2)));
-    EXPECT_THAT(file.ReadContents(0, file_contents.size()),
-                ContainerEq(file_contents));
+    EXPECT_EQ(file.ReadContents(0, file_contents.size()), file_contents);
   });
 }
 
@@ -1078,17 +1074,18 @@ TEST_P(AsyncFileTest, SynchronousAndQueuedAccessShareFile) {
     std::vector<uint8_t> readback(contents.size(), 0);
     IREE_ASSERT_OK(iree_hal_file_read(
         file.get(), 11, iree_make_byte_span(readback.data(), readback.size())));
-    EXPECT_THAT(readback, ContainerEq(contents));
+    EXPECT_EQ(readback, contents);
 
-    QueueReadAndWait(file.get(), 11, buffer.get(), 7, contents.size());
-    EXPECT_THAT(ReadBufferBytes(buffer.get(), 7, contents.size()),
-                ContainerEq(contents));
-    QueueWriteAndWait(buffer.get(), 7, file.get(), 139, contents.size());
+    ASSERT_NO_FATAL_FAILURE(
+        QueueReadAndWait(file.get(), 11, buffer.get(), 7, contents.size()));
+    EXPECT_EQ(ReadBufferBytes(buffer.get(), 7, contents.size()), contents);
+    ASSERT_NO_FATAL_FAILURE(
+        QueueWriteAndWait(buffer.get(), 7, file.get(), 139, contents.size()));
     std::fill(readback.begin(), readback.end(), 0);
     IREE_ASSERT_OK(iree_hal_file_read(
         file.get(), 139,
         iree_make_byte_span(readback.data(), readback.size())));
-    EXPECT_THAT(readback, ContainerEq(contents));
+    EXPECT_EQ(readback, contents);
   });
 }
 
@@ -1239,7 +1236,7 @@ TEST_P(AsyncFileTest, MemoryFileChainRetainsDeferredResources) {
             expected.begin() + target_offset);
   const std::vector<uint8_t> actual(target_contents.get(),
                                     target_contents.get() + file_length);
-  EXPECT_THAT(actual, ContainerEq(expected));
+  EXPECT_EQ(actual, expected);
 }
 
 TEST_P(AsyncFileTest, NativeFileChainRetainsDeferredResources) {
@@ -1308,7 +1305,7 @@ TEST_P(AsyncFileTest, NativeFileChainRetainsDeferredResources) {
                                               IREE_ASYNC_WAIT_FLAG_NONE));
   std::vector<uint8_t> expected(file_length, 0xC7);
   std::copy(contents.begin(), contents.end(), expected.begin() + file_offset);
-  EXPECT_THAT(target_file.ReadContents(0, file_length), ContainerEq(expected));
+  EXPECT_EQ(target_file.ReadContents(0, file_length), expected);
 }
 
 TEST_P(AsyncFileTest, TruncatedFileFailsItsConsumer) {
@@ -1385,10 +1382,9 @@ TEST_P(AsyncFileTest, FailedDependencyPreventsReadAndWrite) {
         IREE_STATUS_ABORTED,
         iree_hal_semaphore_list_wait(write_done, iree_infinite_timeout(),
                                      IREE_ASYNC_WAIT_FLAG_NONE));
-    EXPECT_THAT(ReadBufferBytes(target_buffer.get(), 0, unchanged.size()),
-                ContainerEq(unchanged));
-    EXPECT_THAT(target_file.ReadContents(0, unchanged.size()),
-                ContainerEq(unchanged));
+    EXPECT_EQ(ReadBufferBytes(target_buffer.get(), 0, unchanged.size()),
+              unchanged);
+    EXPECT_EQ(target_file.ReadContents(0, unchanged.size()), unchanged);
   });
 }
 
@@ -1408,16 +1404,16 @@ TEST_P(FileTest, ReadSubrangeWithOffsets) {
     }
 
     Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(target_length);
-    QueueReadAndWait(file.get(), source_offset, target_buffer.get(),
-                     target_offset, read_length);
+    ASSERT_NO_FATAL_FAILURE(QueueReadAndWait(file.get(), source_offset,
+                                             target_buffer.get(), target_offset,
+                                             read_length));
 
     std::vector<uint8_t> expected(static_cast<size_t>(target_length), 0);
     std::copy(file_contents.begin() + source_offset,
               file_contents.begin() + source_offset + read_length,
               expected.begin() + target_offset);
-    EXPECT_THAT(
-        ReadBufferBytes(target_buffer.get(), /*offset=*/0, target_length),
-        ContainerEq(expected));
+    EXPECT_EQ(ReadBufferBytes(target_buffer.get(), /*offset=*/0, target_length),
+              expected);
   });
 }
 
@@ -1441,14 +1437,14 @@ TEST_P(FileTest, WriteSubrangeWithOffsets) {
 
     Ref<iree_hal_buffer_t> source_buffer =
         CreateBufferWithData(source_contents);
-    QueueWriteAndWait(source_buffer.get(), source_offset, file.get(),
-                      target_offset, write_length);
+    ASSERT_NO_FATAL_FAILURE(QueueWriteAndWait(source_buffer.get(),
+                                              source_offset, file.get(),
+                                              target_offset, write_length));
 
     std::copy(source_contents.begin() + source_offset,
               source_contents.begin() + source_offset + write_length,
               file_contents.begin() + target_offset);
-    EXPECT_THAT(file.ReadContents(/*offset=*/0, file_length),
-                ContainerEq(file_contents));
+    EXPECT_EQ(file.ReadContents(/*offset=*/0, file_length), file_contents);
   });
 }
 
@@ -1475,17 +1471,16 @@ TEST_P(FileTest, ChainedWriteThenReadWithSemaphores) {
     Ref<iree_hal_buffer_t> source_buffer =
         CreateBufferWithData(source_contents);
     Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(target_length);
-    QueueWriteThenRead(source_buffer.get(), source_offset, file.get(),
-                       file_offset, target_buffer.get(), target_offset,
-                       transfer_length);
+    ASSERT_NO_FATAL_FAILURE(QueueWriteThenRead(
+        source_buffer.get(), source_offset, file.get(), file_offset,
+        target_buffer.get(), target_offset, transfer_length));
 
     std::vector<uint8_t> expected(static_cast<size_t>(target_length), 0);
     std::copy(source_contents.begin() + source_offset,
               source_contents.begin() + source_offset + transfer_length,
               expected.begin() + target_offset);
-    EXPECT_THAT(
-        ReadBufferBytes(target_buffer.get(), /*offset=*/0, target_length),
-        ContainerEq(expected));
+    EXPECT_EQ(ReadBufferBytes(target_buffer.get(), /*offset=*/0, target_length),
+              expected);
   });
 }
 
@@ -1506,12 +1501,12 @@ TEST_P(FileTest, LargeRangeRoundTrip) {
     Ref<iree_hal_buffer_t> source_buffer =
         CreateBufferWithData(source_contents);
     Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(file_length);
-    QueueWriteThenRead(source_buffer.get(), /*source_offset=*/0, file.get(),
-                       /*file_offset=*/0, target_buffer.get(),
-                       /*target_offset=*/0, file_length);
+    ASSERT_NO_FATAL_FAILURE(QueueWriteThenRead(
+        source_buffer.get(), /*source_offset=*/0, file.get(), /*file_offset=*/0,
+        target_buffer.get(), /*target_offset=*/0, file_length));
 
-    EXPECT_THAT(ReadBufferBytes(target_buffer.get(), /*offset=*/0, file_length),
-                ContainerEq(source_contents));
+    EXPECT_EQ(ReadBufferBytes(target_buffer.get(), /*offset=*/0, file_length),
+              source_contents);
   });
 }
 
