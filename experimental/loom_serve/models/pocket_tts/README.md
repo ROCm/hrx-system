@@ -114,6 +114,12 @@ of partial responses inside Open WebUI. Its slim installation and preprocessing
 bypass do not support this raw PCM path. The server's native streaming and
 cancellation behavior remains available to clients that consume PCM directly.
 
+For a voice conversation, include Pocket in a
+[named realtime assistant](../../../../loom/docs/src/serving/workflows/realtime-conversation.md)
+with recognition, text, and optional voice-activity detection deployments.
+That WebSocket path streams the model's audio blocks as they become available.
+Each underlying deployment retains its own device, residency, and batching.
+
 ## Speech control and admission
 
 `prepare.loom` declares seven numerical phases and shared checkpoint domains.
@@ -139,7 +145,7 @@ one model can register 1–256 voices. The asset directory contains the original
 | `text_limit` | 65536 | Maximum cumulative raw UTF-8 bytes per request |
 | `request_capacity` | 4 | Independently resident request rows |
 | `batch_capacity` | 4 | Compatible next operations in one batch |
-| `threads` | 128 | Workitems per numerical workgroup |
+| `threads` | 128 | Workitems per scalar/pointwise workgroup; cooperative tiles own their geometry |
 
 Admission checks that a request context covers BOS, the longest voice prefix,
 one maximum-sized text chunk, and its complete generation allowance. Rotary
@@ -249,11 +255,13 @@ maximum period 10,000, with F32 rounding at the frequency and angle boundaries.
 Cosine and sine are
 evaluated at absolute positions; cache-slot wrapping never changes the angle.
 
-`pocket.threads` selects 1–256 workitems per workgroup. The complete numerical
-path is qualified on AMDGPU with 128. FlowLM and voice projections accumulate
-in F64, Mimi decoder projections and convolutions in F32, and normalization
-and attention reductions in F64. These choices establish recurrent numerical
-accuracy; they are not a throughput qualification.
+`pocket.threads` selects 1–256 workitems for scalar and pointwise dispatches.
+Cooperative projection, normalization, and prefix tiles use their own fixed
+128-workitem geometry. The complete numerical path is qualified on AMDGPU
+with the default thread setting. FlowLM and voice projections accumulate in
+F64, Mimi decoder projections and convolutions in F32, and normalization and
+attention reductions in F64. Numerical accuracy and performance require
+separate qualification on each target.
 
 ## Isolated request commands
 
@@ -312,7 +320,8 @@ bodies or adding intermediate host uploads.
 The arithmetic modules group projection, normalization, attention, convolution,
 pointwise maps, and recurrent state. Concrete model shapes wrap shared template
 bodies, keeping shape-dependent indexing constant in device code. `dispatch.loom`
-owns element assignment independently of any arithmetic family.
+provides linear element assignment for scalar and pointwise kernels; cooperative
+tiles own their workitem mapping.
 
 `batching.loom` separates packed numerical work from resident request identity.
 Its immutable membership packet contains an I32 active count followed by resident
@@ -333,9 +342,28 @@ The other `batch_*.loom` modules apply the same ownership to projections,
 normalization, pointwise maps, convolution, and FlowLM state. Convolution
 histories, overlap tails, previous latents, and position counters remain in
 resident rows. Intermediate activations, solver inputs, and output blocks use
-packed rows. Shared checkpoint tensors have zero row stride. Direct and batched
-commands invoke the same arithmetic bodies, including their precision choices;
-membership and byte origins determine where that arithmetic reads and writes.
+packed rows. Shared checkpoint tensors have zero row stride. Membership and byte
+origins determine where each operation reads and writes, independently of its
+execution tile.
+
+`batch_projection.loom` computes sixteen output channels across four packed/time
+positions per workgroup. Its 128-channel input panels are staged once and reused
+by the output channels. Zero-stride BF16 weights are acquired once for all four
+positions, whether those positions belong to one codec block or several ready
+requests. Distinct parameter strides preserve separate weights and biases.
+Eight channel lanes retain independent F32 or F64 accumulators for each output;
+one lane reduces their partials and writes it. The shared input bank retires
+before the next panel or final partials overwrite it.
+
+`batch_normalization.loom` assigns one or four time columns of one packed request
+to a workgroup. Each lane retains its input channels through both F64 moment
+reductions and the F32 output operation. A 1 KiB shared partial bank is reused
+only after every lane has copied the previous result. Affine and plain forms
+center population moments; variance scaling leaves the input uncentered and
+uses sample variance. These cooperative bodies retain the precision and rounding
+contracts of the isolated commands without global intermediates or changes to
+request storage. Other arithmetic families share their bodies with direct
+commands.
 
 `batch_prefill.loom`, `batch_voice.loom`, and `batch_decode.loom` compose complete
 phases through `pocket.batch.prefill.step`, `pocket.batch.voice.step`, and
@@ -408,8 +436,13 @@ normalization, and attention oracles. Attention checks retain positions beyond
 256, mask future slots, and reach the last configured absolute rotary row.
 Streaming checks observe consecutive outputs and retained history, including
 startup replication, overlap bias, latent recurrence, and
-fade behavior. Batched checks compare complete banks and outputs against isolated
-calls across staggered, reordered, removed, and resumed rows. Padded rows and
+fade behavior. Projection scenarios compare the shipping entries with serial
+dot products across multiple input panels, incomplete tiles, and independently
+shared or distinct weights and biases. Normalization scenarios compare serial
+moments with every production entry and all three arithmetic forms across
+channel/time tails. Both families cover empty through four-row cohorts.
+Other batched checks compare complete banks and outputs against isolated calls
+across staggered, reordered, removed, and resumed rows. Padded rows and
 nonzero origins expose accidental writes outside each tensor, and different
 packed and resident capacities expose identity/addressing confusion. An empty
 cohort leaves every cache and output unchanged. Sampling compares reordered and
@@ -422,7 +455,5 @@ and different voice blocks with inactive output guards. Run them with:
 
 ```sh
 iree-bazel-test --config=asan \
-  --//runtime/config/hal:drivers=task,amdgpu \
-  --//loom/config/emit:enable=amdgpu \
   //experimental/loom_serve/models/pocket_tts/...
 ```
