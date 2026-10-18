@@ -17,6 +17,21 @@ extern "C" {
 
 typedef struct loom_serve_realtime_capture_t loom_serve_realtime_capture_t;
 
+// Caller-owned position after all appends preceding capture_mark. The producer
+// resolves this exact original-rate position when those appends publish.
+typedef struct loom_serve_realtime_capture_mark_t {
+  // Owner-only ordered link among unresolved marks.
+  struct loom_serve_realtime_capture_mark_t* next;
+  // Capture retaining this record, or NULL after resolution/cancellation.
+  loom_serve_realtime_capture_t* capture;
+  // Private identity of the last append preceding this mark.
+  struct loom_serve_realtime_capture_packet_t* packet;
+  // Original 24 kHz endpoint, valid only after reached becomes true.
+  uint64_t position;
+  // The marked append frontier has fully published; cancellation leaves false.
+  bool reached;
+} loom_serve_realtime_capture_mark_t;
+
 // Caller-owned loan record, stable until release on the serialized owner.
 // A numerical worker may borrow samples but never inspects the record links.
 typedef struct loom_serve_realtime_capture_span_t {
@@ -45,9 +60,15 @@ iree_status_t loom_serve_realtime_capture_allocate(
 iree_status_t loom_serve_realtime_capture_append(
     loom_serve_realtime_capture_t* capture,
     loom_serve_websocket_message_t* message, iree_string_view_t audio);
-// Seals the ordered append frontier. An empty or already sealed capture fails.
-iree_status_t loom_serve_realtime_capture_finish(
-    loom_serve_realtime_capture_t* capture);
+// Marks the current ordered append frontier without sealing the capture.
+// Later appends cannot change this position. An already published frontier
+// resolves immediately. The caller keeps the record stable until resolution
+// or explicit cancellation; marking performs no allocation or worker wait.
+void loom_serve_realtime_capture_mark(loom_serve_realtime_capture_t* capture,
+                                      loom_serve_realtime_capture_mark_t* mark);
+// Removes an unresolved mark. Resolved, cancelled, and zero records are valid.
+void loom_serve_realtime_capture_mark_cancel(
+    loom_serve_realtime_capture_mark_t* mark);
 
 // Publishes released decode work and schedules at most one finite block.
 // Full retained storage is normal backpressure; no worker waits for a reader.
@@ -59,10 +80,6 @@ iree_status_t loom_serve_realtime_capture_status(
 // start.
 uint64_t loom_serve_realtime_capture_end(
     const loom_serve_realtime_capture_t* capture);
-// Every sealed append has published, independently of outstanding PCM loans.
-bool loom_serve_realtime_capture_is_complete(
-    const loom_serve_realtime_capture_t* capture);
-
 // Borrows up to maximum frames at a retained position before capture_end.
 // The caller supplies an unused span record. Ring wrap can shorten the loan.
 void loom_serve_realtime_capture_borrow(
@@ -76,11 +93,12 @@ void loom_serve_realtime_capture_release(void* span);
 void loom_serve_realtime_capture_discard_before(
     loom_serve_realtime_capture_t* capture, uint64_t position);
 
-// Ends publication interest. Accepted workers and loans still retain storage.
+// Ends publication interest and cancels pending marks. Accepted workers and
+// loans still retain storage.
 void loom_serve_realtime_capture_close(loom_serve_realtime_capture_t* capture);
 bool loom_serve_realtime_capture_pending(
     const loom_serve_realtime_capture_t* capture);
-// Requires no receipts, workers, or loans. NULL is accepted.
+// Requires no receipts, workers, marks, or loans. NULL is accepted.
 void loom_serve_realtime_capture_free(loom_serve_realtime_capture_t* capture);
 
 #ifdef __cplusplus

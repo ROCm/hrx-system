@@ -48,10 +48,10 @@ struct loom_serve_realtime_capture_t {
   uint64_t retain;
   // Owner-only list of borrowed contiguous spans into the ring.
   loom_serve_realtime_capture_span_t* spans;
-  // At least one nonempty append joined this capture's ordered frontier.
-  bool appended;
-  // Explicit semantic EOF; network packet exhaustion does not set this field.
-  bool finished;
+  // Ordered unresolved append frontiers, borrowing caller-owned records.
+  loom_serve_realtime_capture_mark_t* first_mark;
+  // Last unresolved mark, permitting marks during accepted decode work.
+  loom_serve_realtime_capture_mark_t* last_mark;
   // No further publication or CPU admission is permitted.
   bool closed;
   // Owned terminal failure, visible only after the failing task releases.
@@ -191,9 +191,9 @@ iree_status_t loom_serve_realtime_capture_allocate(
 iree_status_t loom_serve_realtime_capture_append(
     loom_serve_realtime_capture_t* capture,
     loom_serve_websocket_message_t* message, iree_string_view_t audio) {
-  if (capture->finished || !audio.size) {
+  if (!audio.size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "audio append requires a nonempty open capture");
+                            "audio append requires nonempty encoded PCM");
   }
   loom_serve_realtime_capture_packet_t* packet = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(capture->host_allocator,
@@ -206,18 +206,44 @@ iree_status_t loom_serve_realtime_capture_append(
     capture->first = packet;
   }
   capture->last = packet;
-  capture->appended = true;
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_realtime_capture_finish(
-    loom_serve_realtime_capture_t* capture) {
-  if (!capture->appended || capture->finished) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "commit requires nonempty uncommitted audio");
+void loom_serve_realtime_capture_mark(
+    loom_serve_realtime_capture_t* capture,
+    loom_serve_realtime_capture_mark_t* mark) {
+  *mark = (loom_serve_realtime_capture_mark_t){0};
+  if (!capture->last) {
+    mark->position = capture->end;
+    mark->reached = true;
+    return;
   }
-  capture->finished = true;
-  return iree_ok_status();
+  mark->capture = capture;
+  mark->packet = capture->last;
+  if (capture->last_mark) {
+    capture->last_mark->next = mark;
+  } else {
+    capture->first_mark = mark;
+  }
+  capture->last_mark = mark;
+}
+
+void loom_serve_realtime_capture_mark_cancel(
+    loom_serve_realtime_capture_mark_t* mark) {
+  if (mark->capture) {
+    loom_serve_realtime_capture_t* capture = mark->capture;
+    loom_serve_realtime_capture_mark_t** link = &capture->first_mark;
+    loom_serve_realtime_capture_mark_t* previous = NULL;
+    while (*link != mark) {
+      previous = *link;
+      link = &(*link)->next;
+    }
+    *link = mark->next;
+    if (capture->last_mark == mark) {
+      capture->last_mark = previous;
+    }
+  }
+  *mark = (loom_serve_realtime_capture_mark_t){0};
 }
 
 void loom_serve_realtime_capture_advance(loom_serve_realtime_capture_t* capture,
@@ -235,7 +261,17 @@ void loom_serve_realtime_capture_advance(loom_serve_realtime_capture_t* capture,
       capture->end += capture->produced;
     }
     loom_serve_realtime_capture_packet_t* packet = capture->first;
-    if (packet->offset == packet->samples.data_length) {
+    if (iree_status_is_ok(capture->status) &&
+        packet->offset == packet->samples.data_length) {
+      while (capture->first_mark && capture->first_mark->packet == packet) {
+        loom_serve_realtime_capture_mark_t* mark = capture->first_mark;
+        capture->first_mark = mark->next;
+        *mark = (loom_serve_realtime_capture_mark_t){.position = capture->end,
+                                                     .reached = true};
+      }
+      if (!capture->first_mark) {
+        capture->last_mark = NULL;
+      }
       capture->first = packet->next;
       if (!capture->first) {
         capture->last = NULL;
@@ -293,12 +329,6 @@ uint64_t loom_serve_realtime_capture_end(
   return capture->end;
 }
 
-bool loom_serve_realtime_capture_is_complete(
-    const loom_serve_realtime_capture_t* capture) {
-  return capture->finished && !capture->first && !capture->working &&
-         iree_status_is_ok(capture->status);
-}
-
 void loom_serve_realtime_capture_borrow(
     loom_serve_realtime_capture_t* capture, uint64_t position,
     iree_host_size_t maximum, loom_serve_realtime_capture_span_t* span) {
@@ -332,11 +362,15 @@ void loom_serve_realtime_capture_discard_before(
 
 void loom_serve_realtime_capture_close(loom_serve_realtime_capture_t* capture) {
   capture->closed = true;
+  while (capture->first_mark) {
+    loom_serve_realtime_capture_mark_cancel(capture->first_mark);
+  }
 }
 
 bool loom_serve_realtime_capture_pending(
     const loom_serve_realtime_capture_t* capture) {
-  return capture->first || capture->working || capture->spans;
+  return capture->first || capture->working || capture->spans ||
+         capture->first_mark;
 }
 
 void loom_serve_realtime_capture_free(loom_serve_realtime_capture_t* capture) {
