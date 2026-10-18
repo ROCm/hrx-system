@@ -15,7 +15,9 @@ loom-serve --agents_md
 The [serving walkthrough](workflows/serve-models.md) reaches a first response
 without weights. [Stream speech](workflows/stream-speech.md) receives incremental
 audio and explains how voices share numerical batches while advancing
-independently. [Audio transcription](http-profiles.md#audio-transcription) accepts
+independently. [Native voice conversations](workflows/realtime-conversation.md)
+connect recognition, text, and continuing speech through one WebSocket.
+[Audio transcription](http-profiles.md#audio-transcription) accepts
 recorded audio, and the
 [client guide](workflows/connect-model-clients.md#transcription-and-dictation) describes
 upload formats and Open WebUI dictation. [Model documents](model-documents.md)
@@ -31,6 +33,8 @@ controls, pressure, counters and telemetry cursors.
 | --- | --- | --- |
 | `--device=URI` | Required, repeatable | HAL device URI; encounter order defines device indices. |
 | `--model=path` | None, repeatable | One JSON deployment document per value; omission starts empty. |
+| `--realtime_assistant=path` | None, repeatable | Named recognition/text/speech composition for the Realtime endpoint. |
+| `--realtime_origin=origin` | None, repeatable | Exact allowed browser Origin for WebSocket upgrades. |
 | `--listen=address` | `127.0.0.1:8080`, repeatable | Numeric IPv4 `host:port`, IPv6 `[host]:port`, or `unix:path`. |
 | `--workers=N` | `8` | Shared CPU workers for JIT, model scheduling and media work. |
 | `--model_capacity=N` | `32` | Registered names, including drained, failed and removing entries. |

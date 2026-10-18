@@ -53,6 +53,7 @@ loom_cc_library(
         "//loom/src/loom/serve/server/http:response",
         "//loom/src/loom/serve/server/http:tokenization",
         "//loom/src/loom/serve/server/http:variants",
+        "//loom/src/loom/serve/server/realtime:server",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service:inspection",
         "//loom/src/loom/serve/service:kind",
