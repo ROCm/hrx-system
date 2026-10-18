@@ -483,6 +483,14 @@ codepoints. Escaped spellings are decoded before checking uniqueness and length.
 for cancelled or failed responses. Metadata does not enter model context or
 affect text-prefix reuse. Session settings do not accept metadata.
 
+`response.created` establishes the response's input frontier. Later microphone
+commits follow that response in canonical history and cannot enter its input.
+Message-item events begin only when content becomes available; a response that
+ends before producing content has `output:[]`. Client-created items may omit
+`id` to receive a unique server ID. Explicit IDs are unique across committed
+items and uncommitted microphone reservations; clear releases an uncommitted
+reservation.
+
 Turn detection defaults to null for explicit commits. An assistant with an
 `activity` deployment also accepts `audio.input.turn_detection` with:
 
