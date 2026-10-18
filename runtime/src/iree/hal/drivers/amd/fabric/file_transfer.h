@@ -25,8 +25,8 @@ typedef struct iree_hal_amd_fabric_file_transfer_callback_t {
   void* user_data;
 } iree_hal_amd_fabric_file_transfer_callback_t;
 
-// One contiguous physical source of a file operation. A registered source
-// borrows its persistent mapping; an ordinary view owns its temporary mapping.
+// One contiguous physical source of a file operation. Host views and optional
+// registrations are prepared by the backing owner and borrowed through I/O.
 typedef struct iree_hal_amd_fabric_file_host_range_t {
   // Native view borrowing the application's installed physical source.
   amdf_host_mapping_t* mapping;
@@ -38,8 +38,6 @@ typedef struct iree_hal_amd_fabric_file_host_range_t {
   uint64_t mapping_offset;
   // Transfer-relative first byte, independent of file and buffer offsets.
   uint64_t offset;
-  // Ordinary views are owned; registered views remain owned by their slab.
-  bool owns_mapping;
   // Exact pair requires host invalidation before accessing device-written data.
   bool invalidate;
   // Exact pair requires host publication after native file reads.
@@ -75,10 +73,8 @@ typedef struct iree_hal_amd_fabric_file_transfer_t {
   struct {
     // Borrowed native API, dominated by the engine's retained device.
     const amdf_api_t* api;
-    // Borrowed destination for native view cleanup diagnostics.
-    iree_hal_device_event_sink_t event_sink;
-    // File ranges in logical order, borrowing registered views or owning
-    // ordinary buffered views. No physical backing is retained.
+    // File ranges in logical order, borrowing prepared views and optional
+    // registrations. No physical backing is retained.
     iree_hal_amd_fabric_file_host_range_t* ranges;
     // Number of initialized ranges, including any partially prepared tail.
     iree_host_size_t count;
@@ -130,23 +126,22 @@ void iree_hal_amd_fabric_file_transfer_deinitialize(
     iree_hal_amd_fabric_file_transfer_t* transfer);
 
 // Qualifies the complete mapped range of an AMDF virtual buffer and prepares
-// platform I/O through its sources or registered physical backing, after
+// platform I/O through its sources or physical backing, after
 // dependencies complete and before barriers. Memory files still qualify every
 // mapped source before the engine copies their bytes.
 // Queue visibility is combined over the entire operation; CPU actions are
 // qualified against each physical source and performed only when required.
 // Unsupported backing returns OK with available=false and no acquired views.
-// Mapping failures, holes, native errors, and allocation failures propagate.
+// Holes, native errors, and metadata allocation failures propagate.
 // Registered sources support direct files and retain fixed-buffer identity.
 // Sources without registration may use ordinary buffered I/O. A registration
 // for a different file proactor is an admission error. Success with
-// available=true keeps host views until deinitialization,
+// available=true borrows prepared host views until deinitialization,
 // without adding source ownership or public host-mapping permissions to the
 // buffer.
 iree_status_t iree_hal_amd_fabric_file_transfer_prepare_ranges(
     iree_hal_amd_fabric_file_transfer_t* transfer, const amdf_api_t* api,
     const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
-    iree_hal_device_event_sink_t event_sink,
     iree_hal_memory_effects_t* out_before, iree_hal_memory_effects_t* out_after,
     bool* out_available);
 

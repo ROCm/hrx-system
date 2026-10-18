@@ -27,6 +27,8 @@ typedef struct iree_hal_amd_fabric_memory_t {
   amdf_host_mapping_t* mapping;
   // Borrowed host pointer and logical extent; empty without a host view.
   iree_byte_span_t contents;
+  // Actual permissions of the prepared host view, or zero when absent.
+  amdf_memory_map_flags_t host_access;
   // Cache class of the native or registered host view, when established.
   iree_hal_host_cacheability_t host_cacheability;
   // Achieved attachment geometry and physical identity, captured once.
@@ -36,6 +38,16 @@ typedef struct iree_hal_amd_fabric_memory_t {
   // Borrowed export policy, dominated by the owning slab provider.
   iree_hal_pool_export_classes_t exports;
 } iree_hal_amd_fabric_memory_t;
+
+// Private suffix after the generic entries of a fabric native binding table.
+// Copies borrow the same physical owner and preserve its lifetime contract.
+// Translated host bindings establish byte correspondence for nested views.
+typedef struct iree_hal_amd_fabric_memory_binding_facts_t {
+  // Borrowed physical storage, including its optional prepared host view.
+  const iree_hal_amd_fabric_memory_t* memory;
+  // Provider-owned native access ordinals indexed by the HAL memory scope ID.
+  const uint32_t* scope_access_ordinals;
+} iree_hal_amd_fabric_memory_binding_facts_t;
 
 // Prepared file registrations placed with one physical slab. Regions borrow
 // the persistent host view and expire before native storage is released.
@@ -52,8 +64,8 @@ typedef struct iree_hal_amd_fabric_io_binding_table_t {
 // Prepared source metadata owned by one physical slab. Native updates receive
 // logical offsets while HAL views preserve native coordinates for alignment.
 typedef struct iree_hal_amd_fabric_mapping_source_t {
-  // Borrowed prepared backing; no installed alias retains this handle.
-  amdf_memory_t* memory;
+  // Borrowed prepared backing; no installed alias retains this storage.
+  const iree_hal_amd_fabric_memory_t* storage;
   // Number of prepared native consumers in |accesses|.
   uint32_t access_count;
   // Borrowed provider-owned consumers in native memory access-ordinal order.

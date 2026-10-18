@@ -288,7 +288,7 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
     native_updates[i] = (amdf_memory_mapping_update_t){
         .target_byte_offset = updates[i].target_range.byte_offset,
         .byte_length = updates[i].target_range.byte_length,
-        .memory = source ? source->memory : NULL,
+        .memory = source ? source->storage->handle : NULL,
         .memory_access_ordinal = source_ordinal,
         .access = permissions,
         .source_byte_offset = source ? updates[i].source.mapping_source.offset -

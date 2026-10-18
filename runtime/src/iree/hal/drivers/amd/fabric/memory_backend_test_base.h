@@ -186,12 +186,15 @@ struct FakeNative {
         AMDF_MEMORY_PROFILE_ROLE_CREATE |
         (self->host_mappable ? AMDF_MEMORY_PROFILE_ROLE_HOST_MAP : 0);
     out_profile->guaranteed_flags =
-        (self->host_mappable ? AMDF_MEMORY_FLAG_HOST_VISIBLE : 0) |
+        (self->host_mappable && self->host_visibility_guaranteed
+             ? AMDF_MEMORY_FLAG_HOST_VISIBLE
+             : 0) |
         (storage->memory_class == AMDF_MEMORY_CLASS_LOCAL
              ? AMDF_MEMORY_FLAG_DEVICE_LOCAL
              : 0);
     out_profile->supported_flags =
         out_profile->guaranteed_flags | AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+        (self->host_mappable ? AMDF_MEMORY_FLAG_HOST_VISIBLE : 0) |
         (self->file_io_enabled ? AMDF_MEMORY_FLAG_HOST_FILE_IO : 0) |
         (self->host_source_enabled ? AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE : 0);
     out_profile->allocation.maximum_byte_length = UINT64_C(1) << 30;
@@ -213,6 +216,7 @@ struct FakeNative {
             ? AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE
             : AMDF_MEMORY_MAP_FLAG_READ;
     if (!placed && profile_ordinal == 1 && self->registration_enabled) {
+      out_profile->guaranteed_flags |= AMDF_MEMORY_FLAG_HOST_VISIBLE;
       out_profile->roles =
           AMDF_MEMORY_PROFILE_ROLE_REGISTER | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
       out_profile->allocation = {};
@@ -670,6 +674,8 @@ struct FakeNative {
   std::vector<amdf_memory_device_access_t> created_accesses;
   // Whether this profile has any host mapping route.
   bool host_mappable = true;
+  // Owned backing is host-visible without requesting a placement constraint.
+  bool host_visibility_guaranteed = true;
   // Native payload preceding usable byte zero for owned allocations.
   uint64_t native_prefix = 0;
   // Native permissions that cannot be narrowed by the caller.

@@ -267,63 +267,6 @@ static void iree_hal_amd_gpu_file_transfer_advance(
   }
 }
 
-// A prepared host pointer alone does not qualify the device cache handoff.
-// Query captured pair facts once per file operation, independently of the
-// caller's optional barriers. Uncached native I/O additionally needs a pinning
-// contract and does not use this buffered route.
-static bool iree_hal_amd_gpu_file_transfer_prepare_host(
-    iree_hal_amd_gpu_file_transfer_t* operation) {
-  const iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
-  if (!transfer->async.file ||
-      iree_any_bit_set(transfer->async.file->flags,
-                       IREE_ASYNC_FILE_FLAG_DIRECT) ||
-      transfer->buffer->host_binding_index ==
-          IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
-    return false;
-  }
-  const iree_hal_memory_contract_t* contract =
-      transfer->buffer->memory.contract;
-  const iree_hal_memory_access_t host_access =
-      transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
-          ? IREE_HAL_MEMORY_ACCESS_WRITE
-          : IREE_HAL_MEMORY_ACCESS_READ;
-  if (!contract || !iree_all_bits_set(contract->host.access, host_access)) {
-    return false;
-  }
-  const iree_hal_queue_family_t* family =
-      operation->executor->queue->queue_family;
-  const iree_hal_memory_scope_t host = {family->memory.domain, 1};
-  const iree_hal_memory_scope_t queue = {family->memory.domain,
-                                         family->memory.queue_scope_id};
-  const iree_hal_memory_access_t queue_access = iree_hal_buffer_usage_access(
-      iree_hal_buffer_family_usage(transfer->buffer, family));
-  iree_hal_memory_effects_t before = {0}, after = {0};
-  if (queue_access & IREE_HAL_MEMORY_ACCESS_WRITE) {
-    // Even a file read replacing bytes must retire dirty device lines before
-    // the host overwrite, so a later writeback cannot restore the old bytes.
-    before =
-        iree_hal_buffer_query_transition(transfer->buffer, queue, host).release;
-  }
-  if (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ &&
-      (queue_access & IREE_HAL_MEMORY_ACCESS_READ)) {
-    after =
-        iree_hal_buffer_query_transition(transfer->buffer, host, queue).acquire;
-  }
-  const uint32_t queue_effects =
-      IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
-      IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM |
-      IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
-      IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM;
-  if ((before.bits | after.bits) & ~queue_effects) {
-    return false;
-  }
-  operation->executor->add_effects(operation->executor->queue, before,
-                                   operation->before);
-  operation->executor->add_effects(operation->executor->queue, after,
-                                   operation->after);
-  return true;
-}
-
 static void iree_hal_amd_gpu_file_transfer_host_start(void* user_data,
                                                       iree_status_t status) {
   iree_hal_amd_gpu_file_transfer_t* operation = user_data;
@@ -350,8 +293,7 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
   status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
       transfer, operation->executor->context->api,
       operation->executor->queue->queue_family,
-      operation->executor->native_family_ordinal,
-      operation->executor->context->event_sink, &before, &after,
+      operation->executor->native_family_ordinal, &before, &after,
       &operation->host_transfer);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
@@ -362,12 +304,6 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
                                      operation->before);
     operation->executor->add_effects(operation->executor->queue, after,
                                      operation->after);
-  }
-  if (!operation->host_transfer) {
-    operation->host_transfer =
-        iree_hal_amd_gpu_file_transfer_prepare_host(operation);
-  }
-  if (operation->host_transfer) {
     iree_hal_amd_gpu_file_transfer_submit_native(
         operation, NULL, operation->before, NULL,
         iree_hal_amd_gpu_file_transfer_host_start);

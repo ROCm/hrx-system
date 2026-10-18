@@ -191,6 +191,7 @@ static iree_status_t iree_hal_amd_fabric_memory_prepare(
               "host_mapping_query_info"));
   memory->contents =
       iree_make_byte_span(mapping_info.pointer, memory->info.byte_length);
+  memory->host_access = map_info.flags;
   switch (mapping_info.cacheability) {
     case AMDF_HOST_CACHEABILITY_WRITE_BACK:
       memory->host_cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK;

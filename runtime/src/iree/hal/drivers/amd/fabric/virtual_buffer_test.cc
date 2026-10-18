@@ -254,7 +254,7 @@ TEST_F(MemoryBackendTest, FileTransfersQualifySourcesAfterDeviceOnlyPrefix) {
         IREE_EXPECT_STATUS_IS(
             expected, iree_hal_amd_fabric_file_transfer_prepare_ranges(
                           &transfer, &native_.api, families_[0],
-                          native_families_[0].queue_family_ordinal, {}, &before,
+                          native_families_[0].queue_family_ordinal, &before,
                           &after, &available));
         EXPECT_FALSE(available);
         EXPECT_EQ(transfer.host.count, 0u);

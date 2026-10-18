@@ -349,6 +349,7 @@ class SlabProviderTest : public ::testing::Test {
       import_route.profile.registration.minimum_alignment = 1;
       import_route.profile.registration.maximum_alignment = 4096;
       import_route.required_flags = options.memory.required_flags;
+      import_route.host_access = host_access;
       if (import_policy->storage_class.type !=
           IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER) {
         import_route.profile.roles = AMDF_MEMORY_PROFILE_ROLE_IMPORT |

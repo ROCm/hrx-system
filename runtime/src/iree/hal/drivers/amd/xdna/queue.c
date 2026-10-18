@@ -507,8 +507,7 @@ static void iree_hal_amd_xdna_host_worker_execute(
     bool available = false;
     operation->status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
         operation->file.transfer, queue->context->api, queue->base.queue_family,
-        queue->context->queue_family_ordinal, queue->context->event_sink,
-        &before, &after, &available);
+        queue->context->queue_family_ordinal, &before, &after, &available);
     // XDNA command boundaries supply global visibility, but this engine has
     // no command for a range-specific queue recipe.
     if (iree_status_is_ok(operation->status) &&

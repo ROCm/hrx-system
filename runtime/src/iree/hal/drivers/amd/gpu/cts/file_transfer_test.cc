@@ -18,6 +18,7 @@
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
+#include "iree/hal/memory/fixed_block_pool.h"
 #include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
@@ -34,6 +35,8 @@ enum class FileBacking {
   kVirtualPrivate,
   kPhysicalRegistered,
   kVirtualRegistered,
+  kPhysicalPrivate,
+  kNestedPrivate,
 };
 
 class GpuNativeFileTest : public GpuNativeTest,
@@ -41,7 +44,9 @@ class GpuNativeFileTest : public GpuNativeTest,
  protected:
   bool is_physical() const {
     return GetParam() == FileBacking::kPhysicalHost ||
-           GetParam() == FileBacking::kPhysicalRegistered;
+           GetParam() == FileBacking::kPhysicalRegistered ||
+           GetParam() == FileBacking::kPhysicalPrivate ||
+           GetParam() == FileBacking::kNestedPrivate;
   }
 
   bool is_registered() const {
@@ -83,7 +88,9 @@ class GpuNativeFileTest : public GpuNativeTest,
                 .modes = IREE_HAL_MAPPING_MODE_SCOPED,
             },
     };
-    if (GetParam() == FileBacking::kVirtualPrivate || is_registered()) {
+    if (GetParam() == FileBacking::kVirtualPrivate ||
+        GetParam() == FileBacking::kPhysicalPrivate ||
+        GetParam() == FileBacking::kNestedPrivate || is_registered()) {
       scope.host = {};
     }
     iree_hal_slab_pool_options_t options;
@@ -119,6 +126,7 @@ class GpuNativeFileTest : public GpuNativeTest,
     executable_.reset();
     timeline_.reset();
     sources_.clear();
+    nested_pool_.reset();
     pool_.reset();
     if (path_.Exists()) {
       EXPECT_TRUE(path_.Remove());
@@ -128,9 +136,43 @@ class GpuNativeFileTest : public GpuNativeTest,
 
   void Allocate(size_t length, iree_hal_buffer_t** out_buffer) {
     if (is_physical()) {
+      const bool nested = GetParam() == FileBacking::kNestedPrivate;
+      const uint64_t block_length = iree_device_align(length, 64);
+      Ref<iree_hal_buffer_t> backing;
       IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-          pool_, iree_hal_make_pool_reservation_request(length, 64),
-          iree_infinite_timeout(), out_buffer));
+          pool_,
+          iree_hal_make_pool_reservation_request(
+              block_length + (nested ? 512 : 0), 64),
+          iree_infinite_timeout(), backing.out()));
+      if (nested) {
+        const iree_hal_fixed_block_pool_options_t options = {
+            .block_size = block_length,
+        };
+        IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
+            backing, 256, block_length, &options, iree_allocator_system(),
+            nested_pool_.out()));
+        IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+            nested_pool_, iree_hal_make_pool_reservation_request(length, 64),
+            iree_infinite_timeout(), out_buffer));
+      } else {
+        *out_buffer = backing.release();
+      }
+      const auto memory = iree_hal_buffer_memory_view(*out_buffer);
+      const auto* facts =
+          reinterpret_cast<const iree_hal_amd_fabric_memory_binding_facts_t*>(
+              memory.bindings + memory.contract->binding_layout.binding_count);
+      host_transfer_ = facts->memory->mapping != nullptr;
+      RecordProperty("physical_sources_host_visible", host_transfer_);
+      if (GetParam() == FileBacking::kPhysicalPrivate || nested) {
+        EXPECT_EQ(memory.contract->host.access, 0u);
+      }
+      if (host_transfer_) {
+        const auto binding = iree_hal_buffer_memory_native_binding(
+            &memory, {memory.contract->binding_layout.host_binding_index,
+                      IREE_HAL_BUFFER_INTERFACE_HOST});
+        EXPECT_EQ(binding.host_pointer - facts->memory->contents.data,
+                  nested ? 256 : 0);
+      }
       return;
     }
     const iree_hal_pool_family_access_t family = {
@@ -179,14 +221,7 @@ class GpuNativeFileTest : public GpuNativeTest,
       const auto* native_source =
           static_cast<const iree_hal_amd_fabric_mapping_source_t*>(
               binding.mapping_source.descriptor);
-      amdf_memory_info_t native_info = {
-          .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
-          .structure_size = sizeof(native_info),
-      };
-      ASSERT_EQ(
-          fabric_->api->memory_query_info(native_source->memory, &native_info),
-          AMDF_STATUS_OK);
-      direct_ &= (native_info.flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) != 0;
+      host_transfer_ &= native_source->storage->mapping != nullptr;
       mappings_.push_back({
           .target = *out_buffer,
           .scope = program_scope,
@@ -205,13 +240,14 @@ class GpuNativeFileTest : public GpuNativeTest,
                                       mappings_.size(), mappings_.data(), 0));
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(mapped, value, iree_infinite_timeout(), 0));
-    RecordProperty("physical_sources_host_visible", direct_);
+    RecordProperty("physical_sources_host_visible", host_transfer_);
   }
 
   void ReleaseSources() {
     // The final captured virtual-buffer reference has already been released.
     // Physical sources remain application-owned until that native detach.
     sources_.clear();
+    nested_pool_.reset();
     iree_hal_pool_stats_t stats;
     iree_hal_pool_query_stats(pool_, &stats);
     EXPECT_EQ(stats.reservation_count, 0u);
@@ -289,12 +325,14 @@ class GpuNativeFileTest : public GpuNativeTest,
   iree::testing::TempFilePath path_{"iree_gpu_file_transfer"};
   // Explicit host/device backing contract, released after captured uses end.
   Ref<iree_hal_pool_t> pool_;
+  // Finite allocator retaining a nonzero range of an ordinary physical buffer.
+  Ref<iree_hal_pool_t> nested_pool_;
   // Explicit backing owners for the execution-only virtual-buffer variant.
   std::vector<Ref<iree_hal_buffer_t>> sources_;
   // Installed source coordinates, reused for explicit replacement and removal.
   std::vector<iree_hal_memory_mapping_t> mappings_;
-  // Native backing admits direct I/O even if the virtual view has no CPU grant.
-  bool direct_ = true;
+  // Prepared native sources admit file transfers without staged GPU copies.
+  bool host_transfer_ = true;
   // Public operation timeline, independent of private native handoff points.
   Ref<iree_hal_semaphore_t> timeline_;
   // Real shader that leaves dirty lines before file access.
@@ -329,7 +367,7 @@ TEST_P(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
                                      {1, &semaphore, &three}, file, 64, buffer,
                                      kBufferOffset, kLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(three));
-  if (direct_) {
+  if (host_transfer_) {
     EXPECT_EQ(Publications() - before_read, 2u);
   }
   ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, three, four, 19));
@@ -340,7 +378,7 @@ TEST_P(GpuNativeFileTest, BufferedReadWritePreservesInternalCacheHandoffs) {
       queues_[0], {1, &semaphore, &four}, {1, &semaphore, &five}, buffer,
       kBufferOffset, file, 64, kLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
-  if (direct_) {
+  if (host_transfer_) {
     EXPECT_EQ(Publications() - before_write, 2u);
   }
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
@@ -699,14 +737,18 @@ INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeFileTest,
                                            FileBacking::kVirtualHost,
                                            FileBacking::kVirtualPrivate,
                                            FileBacking::kPhysicalRegistered,
-                                           FileBacking::kVirtualRegistered));
+                                           FileBacking::kVirtualRegistered,
+                                           FileBacking::kPhysicalPrivate,
+                                           FileBacking::kNestedPrivate));
 
 INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeFileProgressTest,
                          ::testing::Values(FileBacking::kPhysicalHost,
                                            FileBacking::kVirtualHost,
                                            FileBacking::kVirtualPrivate,
                                            FileBacking::kPhysicalRegistered,
-                                           FileBacking::kVirtualRegistered));
+                                           FileBacking::kVirtualRegistered,
+                                           FileBacking::kPhysicalPrivate,
+                                           FileBacking::kNestedPrivate));
 
 INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeRegisteredFileTest,
                          ::testing::Values(FileBacking::kPhysicalRegistered,

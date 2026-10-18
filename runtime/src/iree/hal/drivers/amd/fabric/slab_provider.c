@@ -160,6 +160,7 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
   iree_host_size_t access_devices_offset = 0;
   iree_host_size_t import_accesses_offset = 0;
   iree_host_size_t bindings_offset = 0;
+  iree_host_size_t scope_access_ordinals_offset = 0;
   iree_host_size_t imports_offset = 0;
   iree_host_size_t exports_offset = 0;
   iree_host_size_t export_count = options->memory.exports.class_count;
@@ -186,6 +187,8 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
           options->binding_count, iree_hal_amd_fabric_binding_request_t,
           iree_alignof(iree_hal_amd_fabric_binding_request_t),
           &bindings_offset),
+      IREE_STRUCT_FIELD(options->scope_count, uint32_t,
+                        &scope_access_ordinals_offset),
       IREE_STRUCT_FIELD(options->import_count,
                         iree_hal_amd_fabric_import_route_t, &imports_offset),
       IREE_STRUCT_FIELD(export_count, iree_hal_external_storage_class_t,
@@ -238,6 +241,13 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
   memcpy(bindings, options->bindings,
          options->binding_count * sizeof(*bindings));
   provider->options.bindings = bindings;
+  uint32_t* scope_access_ordinals =
+      (void*)((uint8_t*)provider + scope_access_ordinals_offset);
+  if (options->scope_count) {
+    memcpy(scope_access_ordinals, options->scope_access_ordinals,
+           options->scope_count * sizeof(*scope_access_ordinals));
+  }
+  provider->options.scope_access_ordinals = scope_access_ordinals;
   for (uint32_t i = 0; i < options->binding_count; ++i) {
     provider->has_mapping_source |=
         bindings[i].type == IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
@@ -340,9 +350,11 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
           (provider->options.asan ? sizeof(iree_hal_amd_fabric_slab_asan_t)
                                   : 0),
       &total_size,
-      IREE_STRUCT_FIELD_ALIGNED(binding_count, iree_hal_buffer_native_binding_t,
-                                iree_alignof(iree_hal_buffer_native_binding_t),
-                                &bindings_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          binding_count * sizeof(iree_hal_buffer_native_binding_t) +
+              sizeof(iree_hal_amd_fabric_memory_binding_facts_t),
+          uint8_t, iree_alignof(iree_hal_buffer_native_binding_t),
+          &bindings_offset),
       IREE_STRUCT_FIELD(provider->has_mapping_source ? 1 : 0,
                         iree_hal_amd_fabric_mapping_source_t,
                         &mapping_source_offset),
@@ -446,13 +458,19 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
     iree_hal_amd_fabric_slab_provider_t* provider,
     iree_hal_amd_fabric_slab_handle_t* handle) {
   iree_status_t status = iree_ok_status();
+  iree_hal_amd_fabric_memory_binding_facts_t* facts =
+      (void*)(handle->bindings + provider->options.binding_count);
+  *facts = (iree_hal_amd_fabric_memory_binding_facts_t){
+      .memory = &handle->memory,
+      .scope_access_ordinals = provider->options.scope_access_ordinals,
+  };
   if (handle->io) {
     handle->io->bindings.memory = handle->memory.handle;
     handle->io->bindings.mapping = handle->memory.mapping;
   }
   if (provider->has_mapping_source) {
     *handle->mapping_source = (iree_hal_amd_fabric_mapping_source_t){
-        .memory = handle->memory.handle,
+        .storage = &handle->memory,
         .access_count = provider->options.memory.access_count,
         .accesses = provider->options.memory.accesses,
         .logical_byte_offset = handle->memory.info.source_byte_offset,
@@ -639,6 +657,7 @@ static iree_status_t iree_hal_amd_fabric_slab_provider_import_slab(
   }
   options.profile = route->profile;
   options.required_flags = route->required_flags;
+  options.host_access = route->host_access;
   options.exports = route->policy.exports;
   iree_status_t status =
       storage->storage_class.type == IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER
