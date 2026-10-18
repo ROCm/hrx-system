@@ -120,6 +120,65 @@ cancellation, or failure. Both `response.created` and `response.done` echo the
 metadata; it is not passed to the model. The next reply inherits session defaults
 again. Voice and metadata changes preserve compatible text checkpoints.
 
+## Call tools and speak the result
+
+With a text package that supports function calling, declare the client's tools
+in session settings. Realtime uses flat function objects:
+
+```json
+{
+  "type": "session.update",
+  "session": {
+    "tools": [{
+      "type": "function",
+      "name": "lookup_weather",
+      "description": "Look up the current weather for a city.",
+      "parameters": {
+        "type": "object",
+        "properties": {"city": {"type": "string"}},
+        "required": ["city"]
+      }
+    }],
+    "tool_choice": "auto"
+  }
+}
+```
+
+Commit the user's utterance and create a response as above. A response can
+contain spoken content, several function calls, or calls alone. Tool-only
+responses acquire no speech request. After receiving a
+`response.output_item.done` event whose item is a `function_call` with
+`status:"completed"`, execute that function in the client. Its `arguments`
+field contains the complete JSON argument string; `call_id` identifies the
+result's destination. Arguments-done events can also occur during cancellation,
+so completed output-item status is the execution boundary.
+
+Return each result immediately, using the call ID supplied by the server:
+
+```json
+{
+  "type": "conversation.item.create",
+  "item": {
+    "type": "function_call_output",
+    "call_id": "call_7_0",
+    "output": "Seattle: 16 degrees Celsius, light rain."
+  }
+}
+```
+
+Results may arrive before the original `response.done`. Once that response has
+finished and the required results are acknowledged, send another
+`response.create`. The text model receives its calls and the returned results
+in canonical history, and its answer streams through the selected speech model.
+Set `response.tool_choice:"none"` for a follow-up that should generate content
+without further calls; this leaves the session catalogue intact.
+
+Cancellation preserves calls already published as completed. Their results
+remain valid; unfinished calls never enter subsequent model input. The server
+reserves the full generated call set and checks its serialized size before any
+call becomes executable. A response that exceeds those bounds fails locally,
+leaving the connection available for a corrected request.
+
 ## Detect turns automatically
 
 Register an activity-capable model and add `"activity":"detector"` to the

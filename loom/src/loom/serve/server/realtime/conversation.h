@@ -27,15 +27,32 @@ typedef enum loom_serve_realtime_item_status_e {
 
 typedef struct loom_serve_realtime_group_t loom_serve_realtime_group_t;
 
+typedef enum loom_serve_realtime_item_kind_e {
+  LOOM_SERVE_REALTIME_ITEM_MESSAGE,
+  LOOM_SERVE_REALTIME_ITEM_FUNCTION_CALL,
+  LOOM_SERVE_REALTIME_ITEM_FUNCTION_OUTPUT,
+} loom_serve_realtime_item_kind_t;
+
 typedef struct loom_serve_realtime_item_t {
   // Canonical native-message position; NULL while the identity is reserved.
   loom_serve_realtime_group_t* group;
+  // Earlier member of the same native message, or NULL for its first item.
+  struct loom_serve_realtime_item_t* previous;
+  // Later member of the same native message, or NULL for its last item.
+  struct loom_serve_realtime_item_t* next;
   // Owned position in the bounded identity index, independent of history order.
   iree_host_size_t slot;
   // Owned wire identity, unique within this conversation.
   iree_string_builder_t id;
-  // Owned committed or currently generated transcript; no waveform is retained.
+  // Owned transcript, function arguments, or function result, according to
+  // kind.
   iree_string_builder_t text;
+  // Owned function transaction identity; results never borrow a call pointer.
+  iree_string_builder_t call_id;
+  // Owned function name for call items; empty for messages and results.
+  iree_string_builder_t name;
+  // Wire representation and native-message contribution of this member.
+  loom_serve_realtime_item_kind_t kind;
   // Semantic speaker role in native chat composition.
   loom_serve_realtime_role_t role;
   // This item represents input or output audio rather than a text-only message.
@@ -56,8 +73,14 @@ struct loom_serve_realtime_group_t {
   loom_serve_realtime_group_t* previous;
   // Later native-message position, independent of item publication order.
   loom_serve_realtime_group_t* next;
-  // Canonical message, or NULL before the response produces content.
-  loom_serve_realtime_item_t* item;
+  // First wire member, or NULL before the response produces any output.
+  loom_serve_realtime_item_t* first;
+  // Last wire member, allowing append without walking earlier output.
+  loom_serve_realtime_item_t* last;
+  // Optional message or function result; all other members are function calls.
+  loom_serve_realtime_item_t* message;
+  // Calls admitted as complete, maintained by the publication/input owner.
+  iree_host_size_t completed_calls;
   // Monotonic creation identity for input frontiers and checkpoint
   // invalidation.
   uint64_t sequence;
@@ -80,7 +103,7 @@ typedef struct loom_serve_realtime_conversation_t {
   loom_serve_realtime_item_t* items[128];
   // Allocated items plus retained empty groups, bounded by the identity index.
   iree_host_size_t count;
-  // Retained transcript and identity bytes across every item.
+  // Retained decoded text, function metadata, and identities across every item.
   iree_host_size_t bytes;
   // Last allocated creation identity; deleted identities are never reused.
   uint64_t sequence;
@@ -102,8 +125,8 @@ loom_serve_realtime_item_t* loom_serve_realtime_conversation_find(
 // find exposes only committed items. remove releases either kind of item.
 iree_status_t loom_serve_realtime_conversation_reserve(
     loom_serve_realtime_conversation_t* conversation, iree_string_view_t id,
-    loom_serve_realtime_role_t role, bool audio,
-    loom_serve_realtime_item_t** out_item);
+    loom_serve_realtime_item_kind_t kind, loom_serve_realtime_role_t role,
+    bool audio, loom_serve_realtime_item_t** out_item);
 
 // Adopts a reserved item in a new native-message position after the given
 // group, or at the beginning when after is NULL. Default append uses last,
@@ -111,6 +134,28 @@ iree_status_t loom_serve_realtime_conversation_reserve(
 iree_status_t loom_serve_realtime_conversation_insert(
     loom_serve_realtime_conversation_t* conversation,
     loom_serve_realtime_group_t* after, loom_serve_realtime_item_t* item);
+
+// Inserts after an explicit wire item, or at root for NULL. An insertion within
+// a retired native message splits its members without copying payloads. A live
+// response cannot be split. Allocation and call-result validation precede link
+// mutation, so a rejected command can remove its still-reserved item.
+iree_status_t loom_serve_realtime_conversation_insert_after(
+    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_item_t* after, loom_serve_realtime_item_t* item);
+
+// Initializes function metadata on a new item. Call IDs are unique among calls;
+// an omitted call ID is generated. Results require an explicit call ID,
+// resolved against a preceding completed call when inserted. All selected bytes
+// are owned and charged to conversation storage, including on partial
+// allocation failure.
+iree_status_t loom_serve_realtime_conversation_function(
+    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_item_t* item, iree_string_view_t call_id,
+    iree_string_view_t name, iree_string_view_t text);
+
+// Records the executable call frontier after its completed output control has
+// entered the wire queue. Input items use this before canonical insertion.
+void loom_serve_realtime_item_complete(loom_serve_realtime_item_t* item);
 
 // Reserves a response's append frontier and capacity for its first real item.
 // The caller releases the group after all native and CPU references retire.
@@ -121,11 +166,14 @@ void loom_serve_realtime_conversation_release(
     loom_serve_realtime_conversation_t* conversation,
     loom_serve_realtime_group_t* group);
 
-// Creates the response's first real message at its already reserved position.
+// Appends a real response member at its already reserved position. The first
+// member consumes reserved capacity; subsequent members consume ordinary
+// credit.
 iree_status_t loom_serve_realtime_conversation_add(
     loom_serve_realtime_conversation_t* conversation,
-    loom_serve_realtime_group_t* group, loom_serve_realtime_role_t role,
-    bool audio, loom_serve_realtime_item_t** out_item);
+    loom_serve_realtime_group_t* group, loom_serve_realtime_item_kind_t kind,
+    loom_serve_realtime_role_t role, bool audio,
+    loom_serve_realtime_item_t** out_item);
 
 // Finds the wire predecessor of a reserved position, skipping empty groups.
 loom_serve_realtime_item_t* loom_serve_realtime_conversation_previous(
@@ -148,19 +196,14 @@ void loom_serve_realtime_conversation_truncate(
     loom_serve_realtime_conversation_t* conversation,
     loom_serve_realtime_item_t* item);
 
-// Appends this item's standard Realtime representation. Audio is represented
-// by its transcript; full recordings/generated waveforms are never accumulated.
-iree_status_t loom_serve_realtime_item_write(
-    const loom_serve_realtime_item_t* item, iree_string_builder_t* output);
-
 // Composes one source-defined native text request from completed conversation
 // groups preceding exclude. Truncated assistant audio has no trustworthy text
 // and is omitted. Source rendering/tokenization retains its own ownership.
 iree_status_t loom_serve_realtime_conversation_request(
     const loom_serve_realtime_conversation_t* conversation,
     const loom_serve_realtime_group_t* exclude, iree_string_view_t model,
-    iree_string_view_t instructions, uint32_t max_tokens, uint64_t seed,
-    iree_string_builder_t* output);
+    iree_string_view_t instructions, iree_string_view_t tools,
+    uint32_t max_tokens, uint64_t seed, iree_string_builder_t* output);
 
 #ifdef __cplusplus
 }  // extern "C"
