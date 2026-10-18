@@ -6,6 +6,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core.h"
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core_lower_rules.h"
@@ -181,7 +182,20 @@ static iree_status_t loom_aie2p_map_argument(
     loom_low_lower_abi_argument_t* out_argument) {
   loom_type_t source_type = loom_module_value_type(
       loom_low_lower_context_module(context), source_argument_id);
-  if (loom_type_is_buffer(source_type)) {
+  const loom_func_like_t source_function =
+      loom_low_lower_context_source_function(context);
+  const bool is_direct_helper = loom_func_like_inline_policy(source_function) ==
+                                LOOM_INLINE_POLICY_NOINLINE;
+  if (loom_type_is_view(source_type) && is_direct_helper) {
+    *out_argument = (loom_low_lower_abi_argument_t){
+        .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
+        .abi_type = loom_type_none(),
+        .body_type = loom_type_none(),
+    };
+    return loom_low_lower_make_register_type(
+        context, AIE2P_CORE_REG_CLASS_ID_AIE2P_EP, 1, &out_argument->abi_type);
+  }
+  if (loom_type_is_buffer(source_type) && !is_direct_helper) {
     loom_type_t resource_type = loom_type_none();
     IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(
         context, AIE2P_CORE_REG_CLASS_ID_AIE2P_EP, 1, &resource_type));

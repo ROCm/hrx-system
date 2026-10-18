@@ -512,6 +512,7 @@ loom_cc_library(
     loom::ops::buffer
     loom::ops::global
     loom::ops::low
+    loom::ops::op_defs
     loom::ops::vector
     loom::target::arch::amd::xdna::aie2p::contracts::core
     loom::target::arch::amd::xdna::aie2p::contracts::core_lower_rules
@@ -526,12 +527,29 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
+    call_abi
+  HDRS
+    "call_abi.h"
+  SRCS
+    "call_abi.c"
+  DEPS
+    ::core_descriptors
+    loom::ir
+    loom::target::registers
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
     provider
   HDRS
     "provider.h"
   SRCS
     "provider.c"
   DEPS
+    ::call_abi
     ::legalization
     ::low_registry
     ::low_verify
@@ -1291,6 +1309,7 @@ loom_cc_library(
   SRCS
     "emit/program_compile.c"
   DEPS
+    ::call_abi
     ::core_descriptors
     ::leaf_compile
     ::program_object
@@ -1481,6 +1500,24 @@ loom_cc_test(
     loom::testing::module_ptr
   LABELS
     "iree-build-requirement=libamdf"
+    "iree-build-requirement=loom.target.arch.xdna"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_test(
+  NAME
+    call_abi_test
+  SRCS
+    "call_abi_test.cc"
+  DEPS
+    ::call_abi
+    ::core_descriptors
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::target::registers
+  LABELS
     "iree-build-requirement=loom.target.arch.xdna"
 )
 endif()

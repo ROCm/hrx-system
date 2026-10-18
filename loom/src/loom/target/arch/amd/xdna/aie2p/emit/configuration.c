@@ -16,7 +16,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/configuration_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration_report.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration_storage.h"
-#include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/reporting/low.h"
 
@@ -233,8 +233,8 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     };
     bool compiled = false;
     iree_status_t status =
-        loom_aie2p_leaf_compile(request->module, function, &options,
-                                request->scratch_arena, &compiled, worker);
+        loom_aie2p_program_compile(request->module, function, &options,
+                                   request->scratch_arena, &compiled, worker);
     if (report_ptr) {
       status = iree_status_join(status,
                                 loom_target_compile_report_record_entry_report(

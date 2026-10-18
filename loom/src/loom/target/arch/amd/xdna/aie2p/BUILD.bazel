@@ -432,6 +432,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
@@ -447,11 +448,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "call_abi",
+    srcs = ["call_abi.c"],
+    hdrs = ["call_abi.h"],
+    deps = [
+        ":core_descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+    ],
+)
+
+loom_cc_library(
     name = "provider",
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":call_abi",
         ":legalization",
         ":low_registry",
         ":low_verify",
@@ -1096,6 +1109,7 @@ loom_cc_library(
     srcs = ["emit/program_compile.c"],
     hdrs = ["emit/program_compile.h"],
     deps = [
+        ":call_abi",
         ":core_descriptors",
         ":leaf_compile",
         ":program_object",
@@ -1260,6 +1274,19 @@ loom_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/drivers/amd/xdna/image",
         "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:npu2",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "call_abi_test",
+    srcs = ["call_abi_test.cc"],
+    deps = [
+        ":call_abi",
+        ":core_descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

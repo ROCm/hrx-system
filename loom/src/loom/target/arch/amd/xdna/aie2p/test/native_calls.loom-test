@@ -52,3 +52,67 @@ entries: 1
 entry 0: 0 bindings, 0 dynamic relocations
   invocation 0: bytes=868 next=1
   invocation 1: bytes=16 next=1
+
+// ====
+// RUN: emit aie2p-xdna
+
+// Configuration programs load the same linked tile programs produced from an
+// array program. The worker and its helper therefore share one native image.
+aie2p.target<configuration> @configuration_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @configuration_core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration_target) abi(array_program) @configured_helper() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @initialize() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %column, %row, @configured_worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@configuration_core_target) abi(object_function) @configured_worker() asm {
+  %first_base = mov.local-address 458752
+  %second_base = mov.local-address 458880
+  %output = mov.local-address 459008
+  %scalar_output = mov.local-address 459072
+  %lhs = mov.i32 11
+  %rhs = mov.i32 13
+  %sum = low.func.call @configured_add_pair(%lhs, %rhs) : (reg<aie2p.er>, reg<aie2p.er>) -> (reg<aie2p.er>)
+  // Both load-FIFO tuples remain available in a program containing a call.
+  // The call's link shadow must not reserve either tuple's r24/r25 position.
+  %first_pointer = copy %first_base : reg<aie2p.ep> -> reg<aie2p.eps>
+  %first_low = vlda.load-fifo.low512 %first_base, 0
+  %first_fifo = vlda.load-fifo.high512 %first_base, %first_low, 64
+  %first_position = mova.fifo.position 0
+  %second_pointer = copy %second_base : reg<aie2p.ep> -> reg<aie2p.eps>
+  %second_low = vlda.load-fifo.low512 %second_base, 0
+  %second_fifo = vlda.load-fifo.high512 %second_base, %second_low, 64
+  %second_position = mova.fifo.position 0
+  %first, %first_pointer1, %first_fifo1, %first_position1 = vlda.pop.512.i32x16 %first_pointer, %first_fifo, %first_position
+  %second, %second_pointer1, %second_fifo1, %second_position1 = vldb.pop.512.i32x16 %second_pointer, %second_fifo, %second_position
+  %combined = vadd.32 %first, %second
+  vst.512.i32x16 %combined, %output, 0
+  st %sum, %scalar_output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@configuration_core_target) @configured_add_pair(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %sum = add.rr %lhs, %rhs
+  return %sum
+}
+
+// ----
+partition: 1 columns, 6 rows
+entries: 1
+entry 0: 0 bindings, 0 dynamic relocations
+  invocation 0: bytes=212 next=1
+  invocation 1: bytes=16 next=1

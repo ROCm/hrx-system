@@ -65,3 +65,41 @@ low.func.def target<amd.xdna.aie2p.core>(@core_target) @residual_call() asm {
   low.func.call @callee() : ()
   return
 }
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=module
+
+// An explicitly retained semantic helper passes typed view addresses in the
+// native pointer bank and remains a direct Low call after source lowering.
+aie2p.target<core> @core_target
+
+func.def noinline @copy_one(%input: view<1xi32>, %output: view<1xi32>) {
+  %c0 = index.constant 0 : index
+  %value = view.load %input[%c0] : view<1xi32> -> i32
+  view.store %value, %output[%c0] : i32, view<1xi32>
+  func.return
+}
+
+func.def public retain target(@core_target) @worker(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  func.call @copy_one(%input_view, %output_view) : (view<1xi32>, view<1xi32>)
+  func.return
+}
+
+// ----
+aie2p.target<core> @core_target
+
+low.func.def noinline target<amd.xdna.aie2p.core>(@core_target) @copy_one(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  %value = lda %input, 0
+  st %value, %output, 0
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @worker() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  low.func.call @copy_one(%input_view, %output_view) : (reg<aie2p.ep>, reg<aie2p.ep>)
+  return
+}

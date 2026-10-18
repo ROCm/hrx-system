@@ -11,7 +11,7 @@
 namespace loom {
 namespace {
 
-TEST(Aie2pProviderTest, RequiresLowCallsInline) {
+TEST(Aie2pProviderTest, RejectsMissingCallee) {
   ASSERT_NE(loom_aie2p_target_provider.select_call_policy, nullptr);
   const loom_resolved_target_t resolved_target = {};
   EXPECT_EQ(loom_aie2p_target_provider.select_call_policy(

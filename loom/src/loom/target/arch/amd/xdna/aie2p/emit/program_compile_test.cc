@@ -330,7 +330,7 @@ TEST_F(Aie2pProgramCompileTest,
   const loom_aie2p_physical_register_id_t link_register =
       loom_aie2p_machine_find_physical_register(IREE_SV("lr"));
   const loom_aie2p_physical_register_id_t shadow_register =
-      loom_aie2p_machine_find_physical_register(IREE_SV("r25"));
+      loom_aie2p_machine_find_physical_register(IREE_SV("r23"));
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();
   const loom_aie2p_encoded_slot_t save_link =

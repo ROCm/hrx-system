@@ -11,6 +11,7 @@
 
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_object.h"
 #include "loom/target/registers.h"
@@ -55,29 +56,25 @@ static iree_status_t loom_aie2p_program_select_abi_register(
     const loom_low_descriptor_set_t* descriptor_set, loom_type_t type,
     uint16_t* er_count, uint16_t* ep_count,
     loom_low_allocation_abi_location_t* out_location) {
-  if (!loom_low_type_is_register(type) ||
-      loom_low_register_type_descriptor_set_stable_id(type) !=
-          AIE2P_CORE_DESCRIPTOR_SET_ID ||
-      loom_low_register_type_unit_count(type) != 1) {
+  loom_aie2p_call_abi_requirements_t requirements = {0};
+  if (!loom_aie2p_call_abi_add_low_type(type, &requirements)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "AIE2P direct helper ABI requires one-unit register values");
   }
   const uint16_t register_class = loom_low_register_type_class_id(type);
   uint16_t* count = NULL;
-  if (register_class == AIE2P_CORE_REG_CLASS_ID_AIE2P_ER) {
+  if (requirements.scalar_count == 1) {
+    IREE_ASSERT_EQ(register_class, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER);
     count = er_count;
     if (*count >= 16) {
       return iree_make_status(
           IREE_STATUS_RESOURCE_EXHAUSTED,
           "AIE2P direct helper ABI supports at most 16 scalar values per side");
     }
-  } else if (register_class == AIE2P_CORE_REG_CLASS_ID_AIE2P_EP) {
-    count = ep_count;
   } else {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "AIE2P direct helper ABI supports only aie2p.er and aie2p.ep values");
+    IREE_ASSERT_EQ(register_class, AIE2P_CORE_REG_CLASS_ID_AIE2P_EP);
+    count = ep_count;
   }
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[register_class];
@@ -234,8 +231,11 @@ static iree_status_t loom_aie2p_program_compile_impl(
 
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();
+  // r24 and r25 are the position registers in the two load-FIFO tuples. Keep
+  // the link shadow out of both tuples so native calls do not reduce the
+  // worker from two simultaneous input streams to one.
   const loom_aie2p_physical_register_id_t link_shadow_register =
-      loom_aie2p_machine_find_physical_register(IREE_SV("r25"));
+      loom_aie2p_machine_find_physical_register(IREE_SV("r23"));
   IREE_ASSERT(link_shadow_register != LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID);
   const loom_low_allocation_reserved_range_t link_reservation = {
       .register_class = IREE_SV("aie2p.er"),
