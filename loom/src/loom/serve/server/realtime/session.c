@@ -101,7 +101,7 @@ static iree_status_t loom_serve_realtime_session_event(
 
 static iree_status_t loom_serve_realtime_session_error(
     loom_serve_realtime_session_t* session, iree_status_t failure,
-    iree_string_view_t event_id, bool server_failure) {
+    const char* code, iree_string_view_t event_id, bool server_failure) {
   loom_serve_http_server_record_error(session->server, failure);
   iree_status_t status =
       loom_serve_realtime_wire_begin(&session->wire, "error");
@@ -112,7 +112,7 @@ static iree_status_t loom_serve_realtime_session_error(
         ",\"error\":{\"type\":\"%s\",\"code\":\"%s\","
         "\"message\":",
         server_failure ? "server_error" : "invalid_request_error",
-        iree_status_code_string(iree_status_code(failure)));
+        code ? code : iree_status_code_string(iree_status_code(failure)));
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -181,7 +181,7 @@ static void loom_serve_realtime_session_fail(
     loom_serve_realtime_session_t* session, iree_status_t status) {
   if (!session->closing) {
     iree_status_t report = loom_serve_realtime_session_error(
-        session, status, iree_string_view_empty(), true);
+        session, status, NULL, iree_string_view_empty(), true);
     loom_serve_realtime_session_stop(session, !iree_status_is_ok(report));
     iree_status_ignore(report);
     if (!session->aborted) {
@@ -643,17 +643,25 @@ static iree_status_t loom_serve_realtime_session_receive(
             &event_id);
       }
       bool transactional = false;
+      const char* error_code = NULL;
       if (iree_status_is_ok(command)) {
         const loom_serve_realtime_command_t* operation =
             &loom_serve_realtime_commands[event.kind];
         transactional = operation->transactional;
         command = operation->execute(session, &event, &message);
+        // Completion or automatic interruption may win an explicit cancel.
+        // Clients distinguish this harmless race from other command failures.
+        if (event.kind == LOOM_SERVE_REALTIME_RESPONSE_CANCEL &&
+            iree_status_is_not_found(command)) {
+          error_code = "response_cancel_not_active";
+        }
       }
       if (!iree_status_is_ok(command)) {
         const bool terminal =
             !transactional && iree_status_is_resource_exhausted(command);
         status = loom_serve_realtime_session_error(
-            session, command, iree_string_builder_view(&event_id), false);
+            session, command, error_code, iree_string_builder_view(&event_id),
+            false);
         if (terminal) {
           loom_serve_realtime_session_stop(session, true);
         }
@@ -671,7 +679,7 @@ static iree_status_t loom_serve_realtime_session_receive(
           session,
           iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                            "realtime requires JSON text messages"),
-          iree_string_view_empty(), false);
+          NULL, iree_string_view_empty(), false);
     }
     if (message) {
       loom_serve_websocket_message_release(session->socket, message);
