@@ -103,7 +103,8 @@ is at least `minimum_workgroup_width<length>()`. The caller supplies
 rejects configurations exceeding the device's workgroup or local-memory capacity.
 Input and complex output use paired-scalar alignment; power output has natural
 scalar alignment. Input, output, window, and scratch are disjoint. Forward output
-is unnormalized, with positive-zero DC/Nyquist imaginary components.
+is unnormalized, with positive-zero DC/Nyquist imaginary components. Internal
+twiddle coefficients permit either zero sign.
 
 `workgroup_example.cxx` shows the full window → FFT → power call for 400- and
 1024-point frames. It derives the launch width from the stage geometry and

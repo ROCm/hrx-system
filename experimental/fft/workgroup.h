@@ -83,7 +83,9 @@ typedef float Float2 __attribute__((ext_vector_type(2)));
   store(buffer, local_position(position), value);
 }
 
-[[loom::force_inline]] static Complex<float> twiddle_turns(float turns) {
+// Cardinal twiddle zero signs do not affect the FFT's numerical contract.
+[[loom::force_inline, loom::fastmath("nsz")]] static Complex<float>
+twiddle_turns(float turns) {
   return {loom::scalar::approximate::costurnsf(turns),
           loom::scalar::approximate::sinturnsf(turns)};
 }
