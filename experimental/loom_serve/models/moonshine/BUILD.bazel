@@ -55,3 +55,17 @@ loom_test(
         AMDGPU_ACCESS_PROFILE,
     ],
 )
+
+loom_test(
+    name = "reductions_test",
+    srcs = [
+        "decoder_attention.loom",
+        "normalization.loom",
+        "tests/reductions.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)

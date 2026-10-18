@@ -132,6 +132,12 @@ to resident histories. The accepted mapping stays alive through actual device
 retirement, including after cancellation, so completion uses the original
 ordinal even when another request has left.
 
+Layer normalization assigns one workgroup to each packed row; decoder softmax
+assigns one to each attention head. Lanes retain their input values through the
+reductions, so intermediate moments and exponentials do not make extra trips
+through device memory. Encoder readiness still follows resident identities,
+while activations and decoder work follow the accepted packed mapping.
+
 `control.loom` runs request policy and tokenizer decoding on the shared CPU
 executor. `encoder.loom`, `decoder.loom`, and `reset.loom` compose the numerical
 phases from shared kernels with explicit layer offsets. The service owns async
@@ -141,8 +147,10 @@ does not reserve compute for voice or establish a latency guarantee.
 
 ## Check the package
 
-Checkpoint-free tests cover frame normalization, asymmetric shared-weight
-projection, and independent lookahead/EOF with reordered resident identities:
+Checkpoint-free tests cover frame and layer normalization, masked decoder
+softmax, asymmetric shared-weight projection, and independent lookahead/EOF
+with reordered resident identities. Reduction tests use closed-form numerical
+references and check that inactive rows and unready encoder rows stay untouched:
 
 ```sh
 iree-bazel-test --config=asan //experimental/loom_serve/models/moonshine/...
