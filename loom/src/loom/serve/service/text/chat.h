@@ -319,11 +319,12 @@ void loom_serve_text_chat_scratch_deinitialize(
 // Plain text responses produce an empty array. Source parser failures never
 // submit a partial executable call to the agent.
 // Replaces completion only on success, releasing its prior storage. Failure
-// leaves completion unchanged and tool_calls empty. The checkpoint validates subsequent client
-// history; it does not replace original generated tokens in device state.
-// scratch_allocator owns call-local argument wrappers only. Retained history
-// uses the request's host allocator, independent of temporary formatting work.
-// scratch is reset on entry and may be reused immediately after return.
+// leaves completion unchanged and tool_calls empty. The checkpoint validates
+// subsequent client history; it does not replace original generated tokens in
+// device state. scratch_allocator owns call-local argument wrappers only.
+// Retained history uses the request's host allocator, independent of temporary
+// formatting work. scratch is reset on entry and may be reused immediately
+// after return.
 iree_status_t loom_serve_text_chat_complete(
     loom_serve_text_chat_t* chat, iree_string_view_t response,
     uint64_t request_id, loom_serve_text_tool_calls_t* tool_calls,

@@ -119,14 +119,14 @@ iree_status_t loom_serve_text_input_count_complete(
     const bool unsupported = iree_status_is_unimplemented(status);
     const bool exhausted = iree_status_is_resource_exhausted(status);
     return loom_serve_text_http_reject(telemetry, request.connection,
-                                           request.receipt,
-                                           unsupported ? 501
-                                           : exhausted ? 503
-                                                       : 400,
-                                           unsupported ? "Not Implemented"
-                                           : exhausted ? "Service Unavailable"
-                                                       : "Bad Request",
-                                           status, queue->host_allocator);
+                                       request.receipt,
+                                       unsupported ? 501
+                                       : exhausted ? 503
+                                                   : 400,
+                                       unsupported ? "Not Implemented"
+                                       : exhausted ? "Service Unavailable"
+                                                   : "Bad Request",
+                                       status, queue->host_allocator);
   }
   iree_string_builder_reset(scratch);
   status = iree_string_builder_append_format(

@@ -22,7 +22,7 @@ namespace {
 
 TEST(RegistryTimeTest, BorrowedServicesShareRegistrationTimestamp) {
   const loom_serve_service_t services[] = {{.name = IREE_SV("first")},
-                                                {.name = IREE_SV("second")}};
+                                           {.name = IREE_SV("second")}};
   loom_serve_registry_t* registry = nullptr;
   IREE_ASSERT_OK(
       loom_serve_registry_allocate(IREE_ARRAYSIZE(services), services, 0, {},
