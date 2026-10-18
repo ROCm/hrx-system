@@ -138,6 +138,13 @@ reductions, so intermediate moments and exponentials do not make extra trips
 through device memory. Encoder readiness still follows resident identities,
 while activations and decoder work follow the accepted packed mapping.
 
+Decoder projections share one input panel across sixteen output channels and
+reuse each weight across all active packed rows. Eight lanes cooperate on each
+output, retaining separate F32 accumulators and the same balanced reduction
+order for every request. This covers attention projections, the feed-forward
+layers, and the vocabulary head without copying resident histories. Input and
+encoder projections retain their individual readiness gates.
+
 `control.loom` runs request policy and tokenizer decoding on the shared CPU
 executor. `encoder.loom`, `decoder.loom`, and `reset.loom` compose the numerical
 phases from shared kernels with explicit layer offsets. The service owns async
@@ -148,9 +155,10 @@ does not reserve compute for voice or establish a latency guarantee.
 ## Check the package
 
 Checkpoint-free tests cover frame and layer normalization, masked decoder
-softmax, asymmetric shared-weight projection, and independent lookahead/EOF
-with reordered resident identities. Reduction tests use closed-form numerical
-references and check that inactive rows and unready encoder rows stay untouched:
+softmax, every decoder projection shape, and independent lookahead/EOF with
+reordered resident identities. Closed-form numerical references check one
+through four projection rows, bias, inactive outputs, and unready encoder rows.
+Projection tests also instrument shared-memory access and synchronization:
 
 ```sh
 iree-bazel-test --config=asan //experimental/loom_serve/models/moonshine/...

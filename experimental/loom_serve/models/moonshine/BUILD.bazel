@@ -6,7 +6,7 @@
 
 load("//build_tools/bazel:python.bzl", "iree_py_binary")
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE", "AMDGPU_TSAN_PROFILE")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -46,13 +46,26 @@ loom_test(
     name = "numerics_test",
     srcs = [
         "frontend.loom",
-        "projection.loom",
         "tests/numerics.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "projections_test",
+    srcs = [
+        "projection.loom",
+        "tests/projections.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+        AMDGPU_TSAN_PROFILE,
     ],
 )
 

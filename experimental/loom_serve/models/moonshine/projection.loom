@@ -4,8 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// F32 projections share weights across active rows and reduce each row separately.
-// Eight-lane accumulators preserve the qualified arithmetic and reduction order.
+// Input and encoder projections follow independently gated resident state.
+// Decoder projections share input panels and weights across packed rows.
+// All paths use eight F32 partial sums and the same balanced reduction tree.
 target.decl @moonshine
 
 config.decl @moonshine.threads : index
@@ -418,378 +419,258 @@ kernel.def target(@moonshine) @moonshine.projection.encoder_down() {
   kernel.return
 }
 
-kernel.def target(@moonshine) @moonshine.projection.decoder() {
-  %items = index.constant 320 : index
-  %threads = config.get @moonshine.threads : index
-  %c1 = index.constant 1 : index
-  %tail = index.sub %threads, %c1 : index
-  %rounded = index.add %items, %tail : index
-  %groups = index.div %rounded, %threads : index
-  %capacity = index.constant 4 : index
-  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%x: view<4x320x1xf32>, %w: view<320x320xf32>, %y: view<4x320x1xf32>, %cohort: view<5xi32>) {
+// Sixteen outputs share a 128-channel input panel across all four packed
+// rows. Eight lanes cooperate on each output; each loaded weight feeds every
+// live row. The fifth shared-memory column pads the stride to avoid bank
+// conflicts. Panel storage is reused for the final eight-lane partial sums.
+template.decl @moonshine.projection.rows(%inputs: index, %outputs: index, %x: view<4x[%inputs]x1xf32>, %w: view<[%outputs]x[%inputs]xf32>, %count: index) -> (index, vector<4xf32>)
+
+template.def<@moonshine.projection.rows> device @moonshine_projection_rows(%inputs: index, %outputs: index, %x: view<4x[%inputs]x1xf32>, %w: view<[%outputs]x[%inputs]xf32>, %count: index) -> (index, vector<4xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %panel = index.constant 128 : index
+  %origin = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
   %group = kernel.workgroup.id<x> : index
-  %packed_value = kernel.workgroup.id<y> : index
-  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %channel_lane = index.rem %lane, %eight : index
+  %output_lane = index.div %lane, %eight : index
+  %output_value = index.madd %group, %sixteen, %output_lane : index
+  %output = index.assume %output_value [ge(%output_value, 0), lt(%output_value, %outputs)] : index
+  %stage_bytes = index.constant 2560 : offset
+  %storage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %stage = buffer.view %storage[%origin] : buffer -> view<128x5xf32>
+  %zero32 = scalar.constant 0.0 : f32
+  %empty = vector.constant 0.0 : vector<4xf32>
+  %total = scf.for %begin = [%zero to %inputs step %panel](%accumulators = %empty : vector<4xf32>) -> (vector<4xf32>) {
+    %load_channel = index.add %begin, %lane : index
+    %channel_live = index.cmp ult, %load_channel, %inputs : index
+    scf.for %row = [%zero to %rows step %one] unroll {
+      %row_live = index.cmp ult, %row, %count : index
+      %load_live = scalar.andi %row_live, %channel_live : i1
+      %loaded = scf.if %load_live -> (f32) {
+        %channel = index.assume %load_channel [ge(%load_channel, 0), lt(%load_channel, %inputs)] : index
+        %value = view.load %x[%row, %channel, 0] : view<4x[%inputs]x1xf32> -> f32
+        scf.yield %value : f32
+      } else {
+        scf.yield %zero32 : f32
+      }
+      view.store %loaded, %stage[%lane, %row] : f32, view<128x5xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %next = scf.for %round = [%zero to %sixteen step %one](%sums = %accumulators : vector<4xf32>) -> (vector<4xf32>) {
+      %local_channel = index.madd %round, %eight, %channel_lane : index
+      %channel = index.add %begin, %local_channel : index
+      %within = index.cmp ult, %channel, %inputs : index
+      %weight = scf.if %within -> (f32) {
+        %bounded = index.assume %channel [ge(%channel, 0), lt(%channel, %inputs)] : index
+        %stored = view.load %w[%output, %bounded] : view<[%outputs]x[%inputs]xf32> -> f32
+        scf.yield %stored : f32
+      } else {
+        scf.yield %zero32 : f32
+      }
+      %updated = scf.for %row = [%zero to %rows step %one](%values = %sums : vector<4xf32>) -> (vector<4xf32>) unroll {
+        %live = index.cmp ult, %row, %count : index
+        %sum = vector.extract %values[%row] : vector<4xf32> -> f32
+        %value = scf.if %live -> (f32) {
+          %input = view.load %stage[%local_channel, %row] : view<128x5xf32> -> f32
+          %product = scalar.fmaf %input, %weight, %sum : f32
+          scf.yield %product : f32
+        } else {
+          scf.yield %sum : f32
+        }
+        %next_values = vector.insert %value into %values[%row] : f32, vector<4xf32>
+        scf.yield %next_values : vector<4xf32>
+      }
+      scf.yield %updated : vector<4xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next : vector<4xf32>
+  }
+  scf.for %row = [%zero to %rows step %one] unroll {
+    %partial = vector.extract %total[%row] : vector<4xf32> -> f32
+    view.store %partial, %stage[%lane, %row] : f32, view<128x5xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %first = index.cmp eq, %channel_lane, %zero : index
+  %result = scf.if %first -> (vector<4xf32>) {
+    %partial_base = index.assume %lane [range(%lane, 0, 120)] : index
+    %reduced = scf.for %row = [%zero to %rows step %one](%values = %empty : vector<4xf32>) -> (vector<4xf32>) unroll {
+      %offset0 = index.constant 0 : index
+      %partial_lane0 = index.add %partial_base, %offset0 : index
+      %part0 = view.load %stage[%partial_lane0, %row] : view<128x5xf32> -> f32
+      %offset1 = index.constant 1 : index
+      %partial_lane1 = index.add %partial_base, %offset1 : index
+      %part1 = view.load %stage[%partial_lane1, %row] : view<128x5xf32> -> f32
+      %offset2 = index.constant 2 : index
+      %partial_lane2 = index.add %partial_base, %offset2 : index
+      %part2 = view.load %stage[%partial_lane2, %row] : view<128x5xf32> -> f32
+      %offset3 = index.constant 3 : index
+      %partial_lane3 = index.add %partial_base, %offset3 : index
+      %part3 = view.load %stage[%partial_lane3, %row] : view<128x5xf32> -> f32
+      %offset4 = index.constant 4 : index
+      %partial_lane4 = index.add %partial_base, %offset4 : index
+      %part4 = view.load %stage[%partial_lane4, %row] : view<128x5xf32> -> f32
+      %offset5 = index.constant 5 : index
+      %partial_lane5 = index.add %partial_base, %offset5 : index
+      %part5 = view.load %stage[%partial_lane5, %row] : view<128x5xf32> -> f32
+      %offset6 = index.constant 6 : index
+      %partial_lane6 = index.add %partial_base, %offset6 : index
+      %part6 = view.load %stage[%partial_lane6, %row] : view<128x5xf32> -> f32
+      %offset7 = index.constant 7 : index
+      %partial_lane7 = index.add %partial_base, %offset7 : index
+      %part7 = view.load %stage[%partial_lane7, %row] : view<128x5xf32> -> f32
+      %pair0 = scalar.addf %part0, %part1 : f32
+      %pair1 = scalar.addf %part2, %part3 : f32
+      %pair2 = scalar.addf %part4, %part5 : f32
+      %pair3 = scalar.addf %part6, %part7 : f32
+      %half0 = scalar.addf %pair0, %pair1 : f32
+      %half1 = scalar.addf %pair2, %pair3 : f32
+      %sum = scalar.addf %half0, %half1 : f32
+      %next_values = vector.insert %sum into %values[%row] : f32, vector<4xf32>
+      scf.yield %next_values : vector<4xf32>
+    }
+    scf.yield %reduced : vector<4xf32>
+  } else {
+    scf.yield %empty : vector<4xf32>
+  }
+  template.return %output, %result : index, vector<4xf32>
+}
+
+kernel.def target(@moonshine) @moonshine.projection.decoder() {
+  %groups = index.constant 20 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%x: view<4x320x1xf32>, %w: view<320x320xf32>, %y: view<4x320x1xf32>, %cohort: view<5xi32>) {
+  %inputs = index.constant 320 : index
+  %outputs = index.constant 320 : index
   %count32 = view.load %cohort[0] : view<5xi32> -> i32
   %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
   %count = index.cast %bounded_count : i32 to index
-  %active = index.cmp ult, %packed, %count : index
-  %threads = config.get @moonshine.threads : index
+  %input = view.refine %x : view<4x320x1xf32> -> view<4x[%inputs]x1xf32>
+  %weights = view.refine %w : view<320x320xf32> -> view<[%outputs]x[%inputs]xf32>
+  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<4x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<4xf32>)
   %lane = kernel.workitem.id<x> : index
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %element = index.madd %group, %threads, %lane : index
-  %limit = index.constant 320 : index
-  %live = index.cmp ult, %element, %limit : index
-  %participating = scalar.andi %active, %live : i1
-  %f0 = scalar.constant 0.0 : f32
-  scf.if %participating {
-    %member = index.add %packed, %c1 : index
-    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
-    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
-    %resident = index.cast %bounded_resident : i32 to index
-
-    %width = index.constant 1 : index
-    %row = index.div %element, %width : index
-    %column = index.rem %element, %width : index
-    %inputs = index.constant 320 : index
-    %stride = index.constant 8 : index
-    %result0, %result1, %result2, %result3, %result4, %result5, %result6, %result7 = scf.for %base = [%c0 to %inputs step %stride](%acc0 = %f0 : f32, %acc1 = %f0 : f32, %acc2 = %f0 : f32, %acc3 = %f0 : f32, %acc4 = %f0 : f32, %acc5 = %f0 : f32, %acc6 = %f0 : f32, %acc7 = %f0 : f32) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
-      %offset0 = index.constant 0 : index
-      %i0 = index.add %base, %offset0 : index
-      %input0 = view.load %x[%packed, %i0, %column] : view<4x320x1xf32> -> f32
-      %weight0 = view.load %w[%row, %i0] : view<320x320xf32> -> f32
-      %next0 = scalar.fmaf %input0, %weight0, %acc0 : f32
-      %offset1 = index.constant 1 : index
-      %i1 = index.add %base, %offset1 : index
-      %input1 = view.load %x[%packed, %i1, %column] : view<4x320x1xf32> -> f32
-      %weight1 = view.load %w[%row, %i1] : view<320x320xf32> -> f32
-      %next1 = scalar.fmaf %input1, %weight1, %acc1 : f32
-      %offset2 = index.constant 2 : index
-      %i2 = index.add %base, %offset2 : index
-      %input2 = view.load %x[%packed, %i2, %column] : view<4x320x1xf32> -> f32
-      %weight2 = view.load %w[%row, %i2] : view<320x320xf32> -> f32
-      %next2 = scalar.fmaf %input2, %weight2, %acc2 : f32
-      %offset3 = index.constant 3 : index
-      %i3 = index.add %base, %offset3 : index
-      %input3 = view.load %x[%packed, %i3, %column] : view<4x320x1xf32> -> f32
-      %weight3 = view.load %w[%row, %i3] : view<320x320xf32> -> f32
-      %next3 = scalar.fmaf %input3, %weight3, %acc3 : f32
-      %offset4 = index.constant 4 : index
-      %i4 = index.add %base, %offset4 : index
-      %input4 = view.load %x[%packed, %i4, %column] : view<4x320x1xf32> -> f32
-      %weight4 = view.load %w[%row, %i4] : view<320x320xf32> -> f32
-      %next4 = scalar.fmaf %input4, %weight4, %acc4 : f32
-      %offset5 = index.constant 5 : index
-      %i5 = index.add %base, %offset5 : index
-      %input5 = view.load %x[%packed, %i5, %column] : view<4x320x1xf32> -> f32
-      %weight5 = view.load %w[%row, %i5] : view<320x320xf32> -> f32
-      %next5 = scalar.fmaf %input5, %weight5, %acc5 : f32
-      %offset6 = index.constant 6 : index
-      %i6 = index.add %base, %offset6 : index
-      %input6 = view.load %x[%packed, %i6, %column] : view<4x320x1xf32> -> f32
-      %weight6 = view.load %w[%row, %i6] : view<320x320xf32> -> f32
-      %next6 = scalar.fmaf %input6, %weight6, %acc6 : f32
-      %offset7 = index.constant 7 : index
-      %i7 = index.add %base, %offset7 : index
-      %input7 = view.load %x[%packed, %i7, %column] : view<4x320x1xf32> -> f32
-      %weight7 = view.load %w[%row, %i7] : view<320x320xf32> -> f32
-      %next7 = scalar.fmaf %input7, %weight7, %acc7 : f32
-      scf.yield %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7 : f32, f32, f32, f32, f32, f32, f32, f32
+  %eight = index.constant 8 : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.constant 4 : index
+  %channel_lane = index.rem %lane, %eight : index
+  %writer = index.cmp eq, %channel_lane, %zero : index
+  scf.if %writer {
+    scf.for %row = [%zero to %rows step %one] unroll {
+      %live = index.cmp ult, %row, %count : index
+      scf.if %live {
+        %value = vector.extract %values[%row] : vector<4xf32> -> f32
+        view.store %value, %y[%row, %output, 0] : f32, view<4x320x1xf32>
+      }
     }
-    %sum0_0 = scalar.addf %result0, %result1 : f32
-    %sum0_2 = scalar.addf %result2, %result3 : f32
-    %sum0_4 = scalar.addf %result4, %result5 : f32
-    %sum0_6 = scalar.addf %result6, %result7 : f32
-    %sum1_0 = scalar.addf %sum0_0, %sum0_2 : f32
-    %sum1_2 = scalar.addf %sum0_4, %sum0_6 : f32
-    %sum = scalar.addf %sum1_0, %sum1_2 : f32
-
-    view.store %sum, %y[%packed, %row, %column] : f32, view<4x320x1xf32>
   }
   kernel.return
 }
 
 kernel.def target(@moonshine) @moonshine.projection.decoder_up() {
-  %items = index.constant 2560 : index
-  %threads = config.get @moonshine.threads : index
-  %c1 = index.constant 1 : index
-  %tail = index.sub %threads, %c1 : index
-  %rounded = index.add %items, %tail : index
-  %groups = index.div %rounded, %threads : index
-  %capacity = index.constant 4 : index
-  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+  %groups = index.constant 160 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%x: view<4x320x1xf32>, %w: view<2560x320xf32>, %y: view<4x2560x1xf32>, %b: view<2560xf32>, %cohort: view<5xi32>) {
-  %group = kernel.workgroup.id<x> : index
-  %packed_value = kernel.workgroup.id<y> : index
-  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %inputs = index.constant 320 : index
+  %outputs = index.constant 2560 : index
   %count32 = view.load %cohort[0] : view<5xi32> -> i32
   %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
   %count = index.cast %bounded_count : i32 to index
-  %active = index.cmp ult, %packed, %count : index
-  %threads = config.get @moonshine.threads : index
+  %input = view.refine %x : view<4x320x1xf32> -> view<4x[%inputs]x1xf32>
+  %weights = view.refine %w : view<2560x320xf32> -> view<[%outputs]x[%inputs]xf32>
+  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<4x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<4xf32>)
   %lane = kernel.workitem.id<x> : index
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %element = index.madd %group, %threads, %lane : index
-  %limit = index.constant 2560 : index
-  %live = index.cmp ult, %element, %limit : index
-  %participating = scalar.andi %active, %live : i1
-  %f0 = scalar.constant 0.0 : f32
-  scf.if %participating {
-    %member = index.add %packed, %c1 : index
-    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
-    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
-    %resident = index.cast %bounded_resident : i32 to index
-
-    %width = index.constant 1 : index
-    %row = index.div %element, %width : index
-    %column = index.rem %element, %width : index
-    %inputs = index.constant 320 : index
-    %stride = index.constant 8 : index
-    %result0, %result1, %result2, %result3, %result4, %result5, %result6, %result7 = scf.for %base = [%c0 to %inputs step %stride](%acc0 = %f0 : f32, %acc1 = %f0 : f32, %acc2 = %f0 : f32, %acc3 = %f0 : f32, %acc4 = %f0 : f32, %acc5 = %f0 : f32, %acc6 = %f0 : f32, %acc7 = %f0 : f32) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
-      %offset0 = index.constant 0 : index
-      %i0 = index.add %base, %offset0 : index
-      %input0 = view.load %x[%packed, %i0, %column] : view<4x320x1xf32> -> f32
-      %weight0 = view.load %w[%row, %i0] : view<2560x320xf32> -> f32
-      %next0 = scalar.fmaf %input0, %weight0, %acc0 : f32
-      %offset1 = index.constant 1 : index
-      %i1 = index.add %base, %offset1 : index
-      %input1 = view.load %x[%packed, %i1, %column] : view<4x320x1xf32> -> f32
-      %weight1 = view.load %w[%row, %i1] : view<2560x320xf32> -> f32
-      %next1 = scalar.fmaf %input1, %weight1, %acc1 : f32
-      %offset2 = index.constant 2 : index
-      %i2 = index.add %base, %offset2 : index
-      %input2 = view.load %x[%packed, %i2, %column] : view<4x320x1xf32> -> f32
-      %weight2 = view.load %w[%row, %i2] : view<2560x320xf32> -> f32
-      %next2 = scalar.fmaf %input2, %weight2, %acc2 : f32
-      %offset3 = index.constant 3 : index
-      %i3 = index.add %base, %offset3 : index
-      %input3 = view.load %x[%packed, %i3, %column] : view<4x320x1xf32> -> f32
-      %weight3 = view.load %w[%row, %i3] : view<2560x320xf32> -> f32
-      %next3 = scalar.fmaf %input3, %weight3, %acc3 : f32
-      %offset4 = index.constant 4 : index
-      %i4 = index.add %base, %offset4 : index
-      %input4 = view.load %x[%packed, %i4, %column] : view<4x320x1xf32> -> f32
-      %weight4 = view.load %w[%row, %i4] : view<2560x320xf32> -> f32
-      %next4 = scalar.fmaf %input4, %weight4, %acc4 : f32
-      %offset5 = index.constant 5 : index
-      %i5 = index.add %base, %offset5 : index
-      %input5 = view.load %x[%packed, %i5, %column] : view<4x320x1xf32> -> f32
-      %weight5 = view.load %w[%row, %i5] : view<2560x320xf32> -> f32
-      %next5 = scalar.fmaf %input5, %weight5, %acc5 : f32
-      %offset6 = index.constant 6 : index
-      %i6 = index.add %base, %offset6 : index
-      %input6 = view.load %x[%packed, %i6, %column] : view<4x320x1xf32> -> f32
-      %weight6 = view.load %w[%row, %i6] : view<2560x320xf32> -> f32
-      %next6 = scalar.fmaf %input6, %weight6, %acc6 : f32
-      %offset7 = index.constant 7 : index
-      %i7 = index.add %base, %offset7 : index
-      %input7 = view.load %x[%packed, %i7, %column] : view<4x320x1xf32> -> f32
-      %weight7 = view.load %w[%row, %i7] : view<2560x320xf32> -> f32
-      %next7 = scalar.fmaf %input7, %weight7, %acc7 : f32
-      scf.yield %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7 : f32, f32, f32, f32, f32, f32, f32, f32
+  %eight = index.constant 8 : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.constant 4 : index
+  %channel_lane = index.rem %lane, %eight : index
+  %writer = index.cmp eq, %channel_lane, %zero : index
+  scf.if %writer {
+    %bias = view.load %b[%output] : view<2560xf32> -> f32
+    scf.for %row = [%zero to %rows step %one] unroll {
+      %live = index.cmp ult, %row, %count : index
+      scf.if %live {
+        %value = vector.extract %values[%row] : vector<4xf32> -> f32
+        %result = scalar.addf %value, %bias : f32
+        view.store %result, %y[%row, %output, 0] : f32, view<4x2560x1xf32>
+      }
     }
-    %sum0_0 = scalar.addf %result0, %result1 : f32
-    %sum0_2 = scalar.addf %result2, %result3 : f32
-    %sum0_4 = scalar.addf %result4, %result5 : f32
-    %sum0_6 = scalar.addf %result6, %result7 : f32
-    %sum1_0 = scalar.addf %sum0_0, %sum0_2 : f32
-    %sum1_2 = scalar.addf %sum0_4, %sum0_6 : f32
-    %sum = scalar.addf %sum1_0, %sum1_2 : f32
-
-    %bias = view.load %b[%row] : view<2560xf32> -> f32
-    %result = scalar.addf %sum, %bias : f32
-    view.store %result, %y[%packed, %row, %column] : f32, view<4x2560x1xf32>
   }
   kernel.return
 }
 
 kernel.def target(@moonshine) @moonshine.projection.decoder_down() {
-  %items = index.constant 320 : index
-  %threads = config.get @moonshine.threads : index
-  %c1 = index.constant 1 : index
-  %tail = index.sub %threads, %c1 : index
-  %rounded = index.add %items, %tail : index
-  %groups = index.div %rounded, %threads : index
-  %capacity = index.constant 4 : index
-  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+  %groups = index.constant 20 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%x: view<4x1280x1xf32>, %w: view<320x1280xf32>, %y: view<4x320x1xf32>, %b: view<320xf32>, %cohort: view<5xi32>) {
-  %group = kernel.workgroup.id<x> : index
-  %packed_value = kernel.workgroup.id<y> : index
-  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %inputs = index.constant 1280 : index
+  %outputs = index.constant 320 : index
   %count32 = view.load %cohort[0] : view<5xi32> -> i32
   %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
   %count = index.cast %bounded_count : i32 to index
-  %active = index.cmp ult, %packed, %count : index
-  %threads = config.get @moonshine.threads : index
+  %input = view.refine %x : view<4x1280x1xf32> -> view<4x[%inputs]x1xf32>
+  %weights = view.refine %w : view<320x1280xf32> -> view<[%outputs]x[%inputs]xf32>
+  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<4x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<4xf32>)
   %lane = kernel.workitem.id<x> : index
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %element = index.madd %group, %threads, %lane : index
-  %limit = index.constant 320 : index
-  %live = index.cmp ult, %element, %limit : index
-  %participating = scalar.andi %active, %live : i1
-  %f0 = scalar.constant 0.0 : f32
-  scf.if %participating {
-    %member = index.add %packed, %c1 : index
-    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
-    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
-    %resident = index.cast %bounded_resident : i32 to index
-
-    %width = index.constant 1 : index
-    %row = index.div %element, %width : index
-    %column = index.rem %element, %width : index
-    %inputs = index.constant 1280 : index
-    %stride = index.constant 8 : index
-    %result0, %result1, %result2, %result3, %result4, %result5, %result6, %result7 = scf.for %base = [%c0 to %inputs step %stride](%acc0 = %f0 : f32, %acc1 = %f0 : f32, %acc2 = %f0 : f32, %acc3 = %f0 : f32, %acc4 = %f0 : f32, %acc5 = %f0 : f32, %acc6 = %f0 : f32, %acc7 = %f0 : f32) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
-      %offset0 = index.constant 0 : index
-      %i0 = index.add %base, %offset0 : index
-      %input0 = view.load %x[%packed, %i0, %column] : view<4x1280x1xf32> -> f32
-      %weight0 = view.load %w[%row, %i0] : view<320x1280xf32> -> f32
-      %next0 = scalar.fmaf %input0, %weight0, %acc0 : f32
-      %offset1 = index.constant 1 : index
-      %i1 = index.add %base, %offset1 : index
-      %input1 = view.load %x[%packed, %i1, %column] : view<4x1280x1xf32> -> f32
-      %weight1 = view.load %w[%row, %i1] : view<320x1280xf32> -> f32
-      %next1 = scalar.fmaf %input1, %weight1, %acc1 : f32
-      %offset2 = index.constant 2 : index
-      %i2 = index.add %base, %offset2 : index
-      %input2 = view.load %x[%packed, %i2, %column] : view<4x1280x1xf32> -> f32
-      %weight2 = view.load %w[%row, %i2] : view<320x1280xf32> -> f32
-      %next2 = scalar.fmaf %input2, %weight2, %acc2 : f32
-      %offset3 = index.constant 3 : index
-      %i3 = index.add %base, %offset3 : index
-      %input3 = view.load %x[%packed, %i3, %column] : view<4x1280x1xf32> -> f32
-      %weight3 = view.load %w[%row, %i3] : view<320x1280xf32> -> f32
-      %next3 = scalar.fmaf %input3, %weight3, %acc3 : f32
-      %offset4 = index.constant 4 : index
-      %i4 = index.add %base, %offset4 : index
-      %input4 = view.load %x[%packed, %i4, %column] : view<4x1280x1xf32> -> f32
-      %weight4 = view.load %w[%row, %i4] : view<320x1280xf32> -> f32
-      %next4 = scalar.fmaf %input4, %weight4, %acc4 : f32
-      %offset5 = index.constant 5 : index
-      %i5 = index.add %base, %offset5 : index
-      %input5 = view.load %x[%packed, %i5, %column] : view<4x1280x1xf32> -> f32
-      %weight5 = view.load %w[%row, %i5] : view<320x1280xf32> -> f32
-      %next5 = scalar.fmaf %input5, %weight5, %acc5 : f32
-      %offset6 = index.constant 6 : index
-      %i6 = index.add %base, %offset6 : index
-      %input6 = view.load %x[%packed, %i6, %column] : view<4x1280x1xf32> -> f32
-      %weight6 = view.load %w[%row, %i6] : view<320x1280xf32> -> f32
-      %next6 = scalar.fmaf %input6, %weight6, %acc6 : f32
-      %offset7 = index.constant 7 : index
-      %i7 = index.add %base, %offset7 : index
-      %input7 = view.load %x[%packed, %i7, %column] : view<4x1280x1xf32> -> f32
-      %weight7 = view.load %w[%row, %i7] : view<320x1280xf32> -> f32
-      %next7 = scalar.fmaf %input7, %weight7, %acc7 : f32
-      scf.yield %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7 : f32, f32, f32, f32, f32, f32, f32, f32
+  %eight = index.constant 8 : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.constant 4 : index
+  %channel_lane = index.rem %lane, %eight : index
+  %writer = index.cmp eq, %channel_lane, %zero : index
+  scf.if %writer {
+    %bias = view.load %b[%output] : view<320xf32> -> f32
+    scf.for %row = [%zero to %rows step %one] unroll {
+      %live = index.cmp ult, %row, %count : index
+      scf.if %live {
+        %value = vector.extract %values[%row] : vector<4xf32> -> f32
+        %result = scalar.addf %value, %bias : f32
+        view.store %result, %y[%row, %output, 0] : f32, view<4x320x1xf32>
+      }
     }
-    %sum0_0 = scalar.addf %result0, %result1 : f32
-    %sum0_2 = scalar.addf %result2, %result3 : f32
-    %sum0_4 = scalar.addf %result4, %result5 : f32
-    %sum0_6 = scalar.addf %result6, %result7 : f32
-    %sum1_0 = scalar.addf %sum0_0, %sum0_2 : f32
-    %sum1_2 = scalar.addf %sum0_4, %sum0_6 : f32
-    %sum = scalar.addf %sum1_0, %sum1_2 : f32
-
-    %bias = view.load %b[%row] : view<320xf32> -> f32
-    %result = scalar.addf %sum, %bias : f32
-    view.store %result, %y[%packed, %row, %column] : f32, view<4x320x1xf32>
   }
   kernel.return
 }
 
 kernel.def target(@moonshine) @moonshine.projection.logits() {
-  %items = index.constant 32768 : index
-  %threads = config.get @moonshine.threads : index
-  %c1 = index.constant 1 : index
-  %tail = index.sub %threads, %c1 : index
-  %rounded = index.add %items, %tail : index
-  %groups = index.div %rounded, %threads : index
-  %capacity = index.constant 4 : index
-  kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
+  %groups = index.constant 2048 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%x: view<4x320x1xf32>, %w: view<32768x320xf32>, %y: view<4x32768x1xf32>, %cohort: view<5xi32>) {
-  %group = kernel.workgroup.id<x> : index
-  %packed_value = kernel.workgroup.id<y> : index
-  %packed = index.assume %packed_value [range(%packed_value, 0, 3)] : index
+  %inputs = index.constant 320 : index
+  %outputs = index.constant 32768 : index
   %count32 = view.load %cohort[0] : view<5xi32> -> i32
   %bounded_count = scalar.assume %count32 [range(%count32, 0, 4)] : i32
   %count = index.cast %bounded_count : i32 to index
-  %active = index.cmp ult, %packed, %count : index
-  %threads = config.get @moonshine.threads : index
+  %input = view.refine %x : view<4x320x1xf32> -> view<4x[%inputs]x1xf32>
+  %weights = view.refine %w : view<32768x320xf32> -> view<[%outputs]x[%inputs]xf32>
+  %output, %values = template.apply<@moonshine.projection.rows>(%inputs, %outputs, %input, %weights, %count) : (index, index, view<4x[%inputs]x1xf32>, view<[%outputs]x[%inputs]xf32>, index) -> (index, vector<4xf32>)
   %lane = kernel.workitem.id<x> : index
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %element = index.madd %group, %threads, %lane : index
-  %limit = index.constant 32768 : index
-  %live = index.cmp ult, %element, %limit : index
-  %participating = scalar.andi %active, %live : i1
-  %f0 = scalar.constant 0.0 : f32
-  scf.if %participating {
-    %member = index.add %packed, %c1 : index
-    %resident32 = view.load %cohort[%member] : view<5xi32> -> i32
-    %bounded_resident = scalar.assume %resident32 [range(%resident32, 0, 3)] : i32
-    %resident = index.cast %bounded_resident : i32 to index
-
-    %width = index.constant 1 : index
-    %row = index.div %element, %width : index
-    %column = index.rem %element, %width : index
-    %inputs = index.constant 320 : index
-    %stride = index.constant 8 : index
-    %result0, %result1, %result2, %result3, %result4, %result5, %result6, %result7 = scf.for %base = [%c0 to %inputs step %stride](%acc0 = %f0 : f32, %acc1 = %f0 : f32, %acc2 = %f0 : f32, %acc3 = %f0 : f32, %acc4 = %f0 : f32, %acc5 = %f0 : f32, %acc6 = %f0 : f32, %acc7 = %f0 : f32) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
-      %offset0 = index.constant 0 : index
-      %i0 = index.add %base, %offset0 : index
-      %input0 = view.load %x[%packed, %i0, %column] : view<4x320x1xf32> -> f32
-      %weight0 = view.load %w[%row, %i0] : view<32768x320xf32> -> f32
-      %next0 = scalar.fmaf %input0, %weight0, %acc0 : f32
-      %offset1 = index.constant 1 : index
-      %i1 = index.add %base, %offset1 : index
-      %input1 = view.load %x[%packed, %i1, %column] : view<4x320x1xf32> -> f32
-      %weight1 = view.load %w[%row, %i1] : view<32768x320xf32> -> f32
-      %next1 = scalar.fmaf %input1, %weight1, %acc1 : f32
-      %offset2 = index.constant 2 : index
-      %i2 = index.add %base, %offset2 : index
-      %input2 = view.load %x[%packed, %i2, %column] : view<4x320x1xf32> -> f32
-      %weight2 = view.load %w[%row, %i2] : view<32768x320xf32> -> f32
-      %next2 = scalar.fmaf %input2, %weight2, %acc2 : f32
-      %offset3 = index.constant 3 : index
-      %i3 = index.add %base, %offset3 : index
-      %input3 = view.load %x[%packed, %i3, %column] : view<4x320x1xf32> -> f32
-      %weight3 = view.load %w[%row, %i3] : view<32768x320xf32> -> f32
-      %next3 = scalar.fmaf %input3, %weight3, %acc3 : f32
-      %offset4 = index.constant 4 : index
-      %i4 = index.add %base, %offset4 : index
-      %input4 = view.load %x[%packed, %i4, %column] : view<4x320x1xf32> -> f32
-      %weight4 = view.load %w[%row, %i4] : view<32768x320xf32> -> f32
-      %next4 = scalar.fmaf %input4, %weight4, %acc4 : f32
-      %offset5 = index.constant 5 : index
-      %i5 = index.add %base, %offset5 : index
-      %input5 = view.load %x[%packed, %i5, %column] : view<4x320x1xf32> -> f32
-      %weight5 = view.load %w[%row, %i5] : view<32768x320xf32> -> f32
-      %next5 = scalar.fmaf %input5, %weight5, %acc5 : f32
-      %offset6 = index.constant 6 : index
-      %i6 = index.add %base, %offset6 : index
-      %input6 = view.load %x[%packed, %i6, %column] : view<4x320x1xf32> -> f32
-      %weight6 = view.load %w[%row, %i6] : view<32768x320xf32> -> f32
-      %next6 = scalar.fmaf %input6, %weight6, %acc6 : f32
-      %offset7 = index.constant 7 : index
-      %i7 = index.add %base, %offset7 : index
-      %input7 = view.load %x[%packed, %i7, %column] : view<4x320x1xf32> -> f32
-      %weight7 = view.load %w[%row, %i7] : view<32768x320xf32> -> f32
-      %next7 = scalar.fmaf %input7, %weight7, %acc7 : f32
-      scf.yield %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7 : f32, f32, f32, f32, f32, f32, f32, f32
+  %eight = index.constant 8 : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %rows = index.constant 4 : index
+  %channel_lane = index.rem %lane, %eight : index
+  %writer = index.cmp eq, %channel_lane, %zero : index
+  scf.if %writer {
+    scf.for %row = [%zero to %rows step %one] unroll {
+      %live = index.cmp ult, %row, %count : index
+      scf.if %live {
+        %value = vector.extract %values[%row] : vector<4xf32> -> f32
+        view.store %value, %y[%row, %output, 0] : f32, view<4x32768x1xf32>
+      }
     }
-    %sum0_0 = scalar.addf %result0, %result1 : f32
-    %sum0_2 = scalar.addf %result2, %result3 : f32
-    %sum0_4 = scalar.addf %result4, %result5 : f32
-    %sum0_6 = scalar.addf %result6, %result7 : f32
-    %sum1_0 = scalar.addf %sum0_0, %sum0_2 : f32
-    %sum1_2 = scalar.addf %sum0_4, %sum0_6 : f32
-    %sum = scalar.addf %sum1_0, %sum1_2 : f32
-
-    view.store %sum, %y[%packed, %row, %column] : f32, view<4x32768x1xf32>
   }
   kernel.return
 }
