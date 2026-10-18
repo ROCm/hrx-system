@@ -519,8 +519,13 @@ Text and speech output are incremental. Audio responses publish
 `response.output_audio_transcript.delta` and `response.output_audio.delta`;
 text-only responses publish `response.output_text.delta`. Completion includes
 source token usage and compatible-prefix cached-token counts. A malformed command
-returns an `error` event; accepted asynchronous work failures end that session.
-A rejected checkpoint capture does not terminate other sessions or deployments.
+returns an `error` event. A text or speech request failure produces
+`response.done` with status `failed` and the original code and message in
+`status_details.error`; microphone input and subsequent requests remain usable.
+Failed audio has no model-visible transcript. Cancellation reports reason
+`client_cancelled` or `turn_detected`, according to its cause. Failures in input,
+transport, or checkpoint capture still end the affected session; other sessions
+and deployments remain independent.
 
 Each received message is at most 512 KiB. Receive storage retains at most 64
 records and 1 MiB of allocations, including worker-borrowed messages. Up to four
