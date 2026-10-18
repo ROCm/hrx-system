@@ -213,7 +213,7 @@ for policy in serial pipelined; do
   "${loom_report}" show "sparse-${policy}.report.json" --format=json \
     >"sparse-${policy}.view.json"
   "${loom_benchmark}" sparse-token-attention.loom \
-    --benchmark="@sparse_token_attention_${policy}_n128_i256" \
+    --benchmark="@sparse_token_attention_${policy}_workloads" --sample=2 \
     --dry-run --output="sparse-${policy}.plan.json"
 done
 "${loom_report}" suggest sparse-pipelined.report.json >sparse.suggest.txt
@@ -228,7 +228,7 @@ for policy in independent shared_serial shared; do
   "${loom_report}" show "grouped-${policy}.report.json" --format=json \
     >"grouped-${policy}.view.json"
   "${loom_benchmark}" grouped-paged-attention.loom \
-    --benchmark="@grouped_paged_attention_${policy}_n128_p1024" \
+    --benchmark="@grouped_paged_attention_${policy}_workloads" --sample=2 \
     --dry-run --output="grouped-${policy}.plan.json"
 done
 "${loom_report}" suggest grouped-shared.report.json >grouped.suggest.txt

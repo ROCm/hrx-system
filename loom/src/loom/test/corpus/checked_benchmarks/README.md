@@ -173,10 +173,11 @@ by two. Independent analytic cases check maximum, denominator and normalized
 output; varied queries cover shared lists and differing prefixes. Minimal
 backing and NaN-poisoned inactive payloads exercise both access boundaries.
 
-The `@sparse_token_attention_serial_n128_i256` and
-`@sparse_token_attention_pipelined_n128_i256` benchmarks launch one kernel
-each. The `n128`/`n1024` and `i1`/`i16`/`i256` suffixes select prefix and query
-counts with the same full-cache footprint. The
+The `@sparse_token_attention_serial_workloads` and
+`@sparse_token_attention_pipelined_workloads` benchmarks each generate six
+samples: 128-token prefixes at 1, 16, and 256 queries, followed by 1024-token
+prefixes at the same query counts. Each sample launches one kernel with the
+same full-cache footprint; `--sample=2` selects 128 tokens and 256 queries. The
 [sparse attention workflow](../../../../../docs/src/workflows/tune-loop-schedules.md#pipeline-sparse-token-attention)
 connects this source to access checking, reports and schedule comparisons.
 
@@ -194,10 +195,11 @@ whose vector width comes from the target's subgroup size. Analytic checks
 anchor both heads' states and outputs; varied pairs distinguish query and
 table ownership. Minimal backing covers ragged tails, holes and repeated pages.
 
-The `@grouped_paged_attention_independent_n128_p1024` and
-`@grouped_paged_attention_shared_n128_p1024` benchmarks compare 2048 query heads
-over the same 64 MiB K/V pool. The `n128`/`n1024` and `p1`/`p128`/`p1024`
-suffixes select token and pair counts. Sharing halves issued K/V loads for
+The `@grouped_paged_attention_independent_workloads` and
+`@grouped_paged_attention_shared_workloads` benchmarks each generate six
+samples: 128-token prefixes at 1, 128, and 1024 pairs, followed by 1024-token
+prefixes at the same pair counts. `--sample=2` compares 2048 query heads over
+the same 64 MiB K/V pool. Sharing halves issued K/V loads for
 equal-length heads but retains more state and launches fewer subgroups. The
 [shared-loading workflow](../../../../../docs/src/workflows/tune-loop-schedules.md#share-kv-loads-across-query-heads)
 compares that tradeoff separately from pipeline depth.
