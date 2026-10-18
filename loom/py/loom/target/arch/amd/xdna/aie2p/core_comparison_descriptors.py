@@ -63,6 +63,31 @@ PREDICATE_DESCRIPTOR_SPECS = (
         storage_continuation_part=_EL_LOW32_PART,
         rematerializable=True,
     ),
+    # Scalar mask construction uses the eR aliases of the two eL predicate
+    # words. OR with identical sources transfers a computed scalar word into
+    # the predicate carrier without materializing a vector solely to compare
+    # it back into a mask.
+    _DescriptorSpec(
+        "OR",
+        f"{_TARGET_KEY}.predicate.copy.scalar.to.low32",
+        "integer.predicate.copy.scalar.to.low32",
+        "II_OR",
+        storage_overrides=(("d0", "eLPredicate"),),
+        asm_mnemonic="predicate.copy.scalar.to.low32",
+        operand_register_parts=(("d0", _EL_LOW32_PART),),
+        encoding_adapter_overrides=(("d0", "LOOM_eL_low32"),),
+    ),
+    _DescriptorSpec(
+        "OR",
+        f"{_TARGET_KEY}.predicate.copy.scalar.to.high32",
+        "integer.predicate.copy.scalar.to.high32",
+        "II_OR",
+        storage_overrides=(("d0", "eLPredicate"),),
+        asm_mnemonic="predicate.copy.scalar.to.high32",
+        operand_register_parts=(("d0", _EL_HIGH32_PART),),
+        encoding_adapter_overrides=(("d0", "LOOM_eL_high32"),),
+        storage_continuation_part=_EL_LOW32_PART,
+    ),
     # Scalar AND reads either 32-bit word through its physical eR alias.
     *(
         _DescriptorSpec(

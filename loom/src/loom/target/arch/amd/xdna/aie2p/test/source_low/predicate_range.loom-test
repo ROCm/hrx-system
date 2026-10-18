@@ -1,0 +1,156 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @prefix16(%lower_input: index, %upper_input: index) -> (vector<16xi1>) {
+  %lower = index.assume %lower_input [range(%lower_input, 0, 2147483617)] : index
+  %upper = index.assume %upper_input [range(%upper_input, 0, 2147483647)] : index
+  %step = index.constant 1 : index
+  %result = vector.mask.range [%lower to %upper step %step] : index -> vector<16xi1>
+  func.return %result : vector<16xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @prefix16(%lower: reg<aie2p.er>, %upper: reg<aie2p.er>) -> (reg<aie2p.elpredicate>) asm {
+  %10 = sub %upper, %lower
+  %11 = mov.short 0
+  %12 = lt %11, %10
+  %13 = copy %12 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %14 = sel.nez %10, %11, %13
+  %15 = mov.i32 16
+  %16 = lt %14, %15
+  %17 = copy %16 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %18 = sel.nez %14, %15, %17
+  %19 = mov.short 1
+  %20 = lshl %19, %18
+  %21 = add %20, -1
+  %22 = predicate.copy.scalar.to.low32 %21, %21
+  %result = predicate.complete.zero.high32 %22, 0
+  return %result
+}
+
+// ====
+
+func.def @prefix32(%lower_input: index, %upper_input: index) -> (vector<32xi1>) {
+  %lower = index.assume %lower_input [range(%lower_input, 0, 2147483616)] : index
+  %upper = index.assume %upper_input [range(%upper_input, 0, 2147483647)] : index
+  %step = index.constant 1 : index
+  %result = vector.mask.range [%lower to %upper step %step] : index -> vector<32xi1>
+  func.return %result : vector<32xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @prefix32(%lower: reg<aie2p.er>, %upper: reg<aie2p.er>) -> (reg<aie2p.elpredicate>) asm {
+  %10 = sub %upper, %lower
+  %11 = mov.short 0
+  %12 = lt %11, %10
+  %13 = copy %12 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %14 = sel.nez %10, %11, %13
+  %15 = mov.i32 32
+  %16 = lt %14, %15
+  %17 = copy %16 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %18 = sel.nez %14, %15, %17
+  %19 = mov.short 32
+  %20 = lt %18, %19
+  %21 = mov.short 31
+  %22 = copy %20 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %23 = sel.nez %18, %21, %22
+  %24 = mov.short 1
+  %25 = lshl %24, %23
+  %26 = add %25, -1
+  %27 = mov.short -1
+  %28 = copy %20 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %29 = sel.nez %26, %27, %28
+  %30 = predicate.copy.scalar.to.low32 %29, %29
+  %result = predicate.complete.zero.high32 %30, 0
+  return %result
+}
+
+// ====
+
+func.def @prefix48(%lower_input: index, %upper_input: index) -> (vector<48xi1>) {
+  %lower = index.assume %lower_input [range(%lower_input, 0, 2147483585)] : index
+  %upper = index.assume %upper_input [range(%upper_input, 0, 2147483647)] : index
+  %step = index.constant 1 : index
+  %result = vector.mask.range [%lower to %upper step %step] : index -> vector<48xi1>
+  func.return %result : vector<48xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @prefix48(%lower: reg<aie2p.er>, %upper: reg<aie2p.er>) -> (reg<aie2p.elpredicate>) asm {
+  %10 = sub %upper, %lower
+  %11 = mov.short 0
+  %12 = lt %11, %10
+  %13 = copy %12 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %14 = sel.nez %10, %11, %13
+  %15 = mov.i32 48
+  %16 = lt %14, %15
+  %17 = copy %16 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %18 = sel.nez %14, %15, %17
+  %19 = mov.short 32
+  %20 = lt %18, %19
+  %21 = mov.short 31
+  %22 = copy %20 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %23 = sel.nez %18, %21, %22
+  %24 = mov.short 1
+  %25 = lshl %24, %23
+  %26 = add %25, -1
+  %27 = mov.short -1
+  %28 = copy %20 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %29 = sel.nez %26, %27, %28
+  %30 = predicate.copy.scalar.to.low32 %29, %29
+  %32 = sub %18, %19
+  %33 = lt %19, %18
+  %35 = copy %33 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %36 = sel.nez %32, %11, %35
+  %38 = lshl %24, %36
+  %39 = add %38, -1
+  %result = predicate.copy.scalar.to.high32 %39, %39, %30
+  return %result
+}
+
+// ====
+
+func.def @prefix64(%lower_input: index, %upper_input: index) -> (vector<64xi1>) {
+  %lower = index.assume %lower_input [range(%lower_input, 0, 2147483584)] : index
+  %upper = index.assume %upper_input [range(%upper_input, 0, 2147483647)] : index
+  %step = index.constant 1 : index
+  %result = vector.mask.range [%lower to %upper step %step] : index -> vector<64xi1>
+  func.return %result : vector<64xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @prefix64(%lower: reg<aie2p.er>, %upper: reg<aie2p.er>) -> (reg<aie2p.elpredicate>) asm {
+  %10 = sub %upper, %lower
+  %11 = mov.short 0
+  %12 = lt %11, %10
+  %13 = copy %12 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %14 = sel.nez %10, %11, %13
+  %15 = mov.i32 64
+  %16 = lt %14, %15
+  %17 = copy %16 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %18 = sel.nez %14, %15, %17
+  %19 = mov.short 32
+  %20 = lt %18, %19
+  %21 = mov.short 31
+  %22 = copy %20 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %23 = sel.nez %18, %21, %22
+  %24 = mov.short 1
+  %25 = lshl %24, %23
+  %26 = add %25, -1
+  %27 = mov.short -1
+  %28 = copy %20 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %29 = sel.nez %26, %27, %28
+  %30 = predicate.copy.scalar.to.low32 %29, %29
+  %32 = sub %18, %19
+  %33 = lt %19, %18
+  %35 = copy %33 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %36 = sel.nez %32, %11, %35
+  %38 = lt %36, %19
+  %40 = copy %38 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %41 = sel.nez %36, %21, %40
+  %43 = lshl %24, %41
+  %44 = add %43, -1
+  %46 = copy %38 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %47 = sel.nez %44, %27, %46
+  %result = predicate.copy.scalar.to.high32 %47, %47, %30
+  return %result
+}

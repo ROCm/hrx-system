@@ -1254,6 +1254,44 @@ def test_vector_predicates_use_one_partially_addressable_el_value() -> None:
     assert high_or.constraints == (Constraint(ConstraintKind.TIED, 0, 3),)
     assert high_or.asm_forms[0].operands == ("s0", "s1", "storage")
 
+    low_copy = descriptors["amd.xdna.aie2p.predicate.copy.scalar.to.low32"]
+    assert [operand.field_name for operand in low_copy.operands] == [
+        "d0",
+        "s0",
+        "s1",
+    ]
+    assert low_copy.operands[0].reg_alts[0].reg_class == "aie2p.elpredicate"
+    assert low_copy.operands[0].reg_alts[0].register_part == "aie2p.elpredicate.low32"
+    assert low_copy.operands[0].encoding_adapter_id != 0
+    assert all(
+        operand.reg_alts[0].reg_class == "aie2p.er" for operand in low_copy.operands[1:]
+    )
+    assert low_copy.constraints == ()
+    assert low_copy.asm_forms[0].operands == ("s0", "s1")
+
+    high_copy = descriptors["amd.xdna.aie2p.predicate.copy.scalar.to.high32"]
+    assert [operand.field_name for operand in high_copy.operands] == [
+        "d0",
+        "s0",
+        "s1",
+        "storage",
+    ]
+    assert high_copy.operands[0].reg_alts[0].reg_class == "aie2p.elpredicate"
+    assert high_copy.operands[0].reg_alts[0].register_part == "aie2p.elpredicate.high32"
+    assert high_copy.operands[0].encoding_adapter_id != 0
+    assert all(
+        operand.reg_alts[0].reg_class == "aie2p.er"
+        for operand in high_copy.operands[1:3]
+    )
+    high_copy_storage = high_copy.operands[3]
+    assert high_copy_storage.reg_alts[0].register_part == "aie2p.elpredicate.low32"
+    assert set(high_copy_storage.flags) == {
+        OperandFlag.IMPLICIT,
+        OperandFlag.STORAGE_CONTINUATION,
+    }
+    assert high_copy.constraints == (Constraint(ConstraintKind.TIED, 0, 3),)
+    assert high_copy.asm_forms[0].operands == ("s0", "s1", "storage")
+
     for width in (8, 16, 32):
         suffix = ".el.low32" if width != 8 else ""
         equality = descriptors[

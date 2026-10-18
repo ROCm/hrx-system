@@ -1118,6 +1118,7 @@ loom_check_test_suite(
     "test/source_low/predicate_concat.loom-test"
     "test/source_low/predicate_extension.loom-test"
     "test/source_low/predicate_extract.loom-test"
+    "test/source_low/predicate_range.loom-test"
     "test/source_low/predicate_slice.loom-test"
     "test/source_low/predicate_storage_reuse.loom-test"
     "test/source_low/rodata.loom-test"

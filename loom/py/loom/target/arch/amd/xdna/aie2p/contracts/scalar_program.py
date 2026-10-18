@@ -19,6 +19,7 @@ from loom.target.contracts import (
     EmitDescriptorOp,
     ValueProject,
     ValueRef,
+    ValueTypeProject,
     descriptor_by_key,
 )
 
@@ -39,7 +40,7 @@ class ScalarProgram:
     def constant(
         self,
         result_name: str | None,
-        value: int | ValueProject,
+        value: int | ValueProject | ValueTypeProject,
         *,
         descriptor_key: str | None = None,
     ) -> ValueRef:

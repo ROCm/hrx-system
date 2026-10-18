@@ -68,6 +68,9 @@ from loom.target.arch.amd.xdna.aie2p.contracts.packet_memory import (
 from loom.target.arch.amd.xdna.aie2p.contracts.power_of_two_scale import (
     AIE2P_POWER_OF_TWO_SCALE_RULES,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.predicate_range import (
+    AIE2P_PREDICATE_RANGE_RULES,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
     AIE2P_REDUCTION_RULES,
 )
@@ -132,6 +135,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         *AIE2P_INTEGER_DIVISION_RULES,
         *AIE2P_REDUCTION_RULES,
         *AIE2P_STRUCTURAL_RULES,
+        *AIE2P_PREDICATE_RANGE_RULES,
         *AIE2P_TABLE_RULES,
         *AIE2P_I64_RULES,
         *AIE2P_PACKET_MEMORY_RULES,
