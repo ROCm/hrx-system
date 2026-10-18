@@ -66,6 +66,9 @@ build:opt --features=thin_lto_link
 build:opt --features=optimize_for_speed
 build:opt --host_features=optimize_for_speed
 
+# Restore native CPython symbols without changing project optimization or ASAN.
+build:python-runtime-debug --//build_tools/bazel:python_runtime_debug=true
+
 # Use one pinned mimalloc instance for the build-selected IREE allocator.
 # Global C++ allocation follows the same provider through the process ABI.
 # Sanitizer configurations override this request and retain system allocation.

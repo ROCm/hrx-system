@@ -91,6 +91,21 @@ bool_flag(
     build_setting_default = False,
 )
 
+# Native interpreter symbols are independent of project code instrumentation.
+bool_flag(
+    name = "python_runtime_debug",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "python_runtime_stripped",
+    flag_values = {
+        ":python_runtime_debug": "false",
+        "@rules_python//python/config_settings:py_freethreaded": "no",
+        "@rules_python//python/config_settings:py_linux_libc": "glibc",
+    },
+)
+
 config_setting(
     name = "sanitizer_enabled",
     flag_values = {

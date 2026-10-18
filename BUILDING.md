@@ -151,6 +151,27 @@ exports the same configured bindings in either mode.
 Windows CMake builds place the shared tools and both DLLs together under the
 build tree's `bin/` directory so the tools also run directly from the build tree.
 
+### Python runtime symbols
+
+Bazel's Linux x86-64 glibc Python toolchain uses the pinned upstream stripped
+distribution. Python source, tracebacks, native-extension support, and executed
+code are unchanged; interpreter C debug information stays out of ordinary
+runfiles, remote transfers, and retained tool snapshots. This is independent
+of ASAN or debug information for project-built C/C++ code. Other Python
+platforms keep their upstream toolchains.
+
+Native debugging inside CPython can select the matching symbol-bearing runtime:
+
+```bash
+iree-bazel-build --config=python-runtime-debug //loom/py/loom/tools:loom-compile-report
+```
+
+The configuration composes with `--config=asan` and `--config=opt`; it does not
+change project optimization or sanitizer settings. Ordinary Python debugging
+and Python tracebacks need no extra configuration. Both runtime variants use
+the same pinned Python build; interpreter upgrades update the minor mapping
+and both archive pins together.
+
 ### Default allocator
 
 IREE uses libc for `iree_allocator_system()` by default. Native builds can
