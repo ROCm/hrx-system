@@ -13,6 +13,7 @@
 #include "iree/base/tooling/flags.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
+#include "loom/serve/server/realtime/configuration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/tooling/cli/help.h"
@@ -28,6 +29,13 @@ IREE_FLAG_LIST(
 IREE_FLAG(int32_t, model_capacity, 32,
           "Maximum registered models, including drained, failed and removing "
           "entries.");
+IREE_FLAG_LIST(string, realtime_assistant,
+               "Assistant JSON document naming text, recognition, speech, and "
+               "voice. Repeat to expose named /v1/realtime compositions.");
+IREE_FLAG_LIST(
+    string, realtime_origin,
+    "Allowed browser Origin for realtime WebSocket upgrades; repeat "
+    "for multiple origins. Native clients without Origin are allowed.");
 IREE_FLAG_LIST(string, listen,
                "HTTP binding: IPv4 host:port, [IPv6]:port, or unix:path. "
                "Repeat for multiple listeners; default 127.0.0.1:8080.");
@@ -138,6 +146,18 @@ static int loom_serve_main_agents_markdown(void) {
              "`stream=true` and unsupported containers reject. "
              "See https://rocm.github.io/hrx-system/loom/serving/http-profiles/"
              "#audio-transcription for accepted fields.\n\n"
+             "## Run a native voice conversation\n\n"
+             "`--realtime_assistant=path` loads a named JSON composition of "
+             "recognition, text and continuing speech deployments plus a "
+             "voice. Connect to `/v1/realtime?model=NAME` over WebSocket. "
+             "Append base64 mono 24 kHz PCM16LE, commit the utterance, then "
+             "send `response.create`. Text feeds speech inside the process. "
+             "Cancel stops generation; explicit item truncation reconciles "
+             "actual playback with conversation history. Browser Origins "
+             "require exact `--realtime_origin` entries. See "
+             "https://rocm.github.io/hrx-system/loom/serving/workflows/"
+             "realtime-conversation/ for configuration and supported "
+             "policy.\n\n"
              "## Develop live native code\n\n"
              "Text, image, embedding and decision services support live "
              "updates. Prepared models advertise `loom.variants` when "
@@ -227,6 +247,10 @@ int loom_serve_main(int argc, char** argv,
       bindings.count ? bindings.values : &default_binding;
   const iree_flag_string_list_t models = FLAG_model_list();
   loom_serve_model_configuration_t* configurations = NULL;
+  const iree_flag_string_list_t assistants = FLAG_realtime_assistant_list();
+  const iree_flag_string_list_t origins = FLAG_realtime_origin_list();
+  loom_serve_realtime_configuration_t* assistant_configurations = NULL;
+  loom_serve_realtime_profile_t* profiles = NULL;
   iree_status_t status = iree_ok_status();
   if (models.count > (iree_host_size_t)FLAG_model_capacity) {
     status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -241,6 +265,23 @@ int loom_serve_main(int argc, char** argv,
        ++i) {
     status = loom_serve_model_configuration_load(
         models.values[i], host_allocator, &configurations[i]);
+  }
+  if (iree_status_is_ok(status) && assistants.count) {
+    status = iree_allocator_malloc_array(host_allocator, assistants.count,
+                                         sizeof(*assistant_configurations),
+                                         (void**)&assistant_configurations);
+  }
+  if (iree_status_is_ok(status) && assistants.count) {
+    status = iree_allocator_malloc_array(host_allocator, assistants.count,
+                                         sizeof(*profiles), (void**)&profiles);
+  }
+  for (iree_host_size_t i = 0;
+       i < assistants.count && iree_status_is_ok(status); ++i) {
+    status = loom_serve_realtime_configuration_load(
+        assistants.values[i], host_allocator, &assistant_configurations[i]);
+    if (iree_status_is_ok(status)) {
+      profiles[i] = assistant_configurations[i].profile;
+    }
   }
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_block_default();
@@ -316,6 +357,9 @@ int loom_serve_main(int argc, char** argv,
         loom_serve_host_executor(host), server, registry,
         (loom_serve_router_options_t){
             .request_quota = (iree_host_size_t)FLAG_connections,
+            .realtime = {.profile_count = assistants.count,
+                         .profiles = profiles,
+                         .allowed_origins = {origins.count, origins.values}},
             .resources = {.device_group = group,
                           .listener_count = listener_count,
                           .listeners = listeners},
@@ -352,6 +396,13 @@ int loom_serve_main(int argc, char** argv,
     loom_serve_model_configuration_deinitialize(&configurations[i]);
   }
   iree_allocator_free(host_allocator, configurations);
+  for (iree_host_size_t i = 0; assistant_configurations && i < assistants.count;
+       ++i) {
+    loom_serve_realtime_configuration_deinitialize(
+        &assistant_configurations[i]);
+  }
+  iree_allocator_free(host_allocator, assistant_configurations);
+  iree_allocator_free(host_allocator, profiles);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

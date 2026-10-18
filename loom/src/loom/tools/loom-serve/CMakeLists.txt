@@ -111,6 +111,8 @@ loom_cc_library(
     loom::serve::runtime::device
     loom::serve::server::configuration
     loom::serve::server::model_registration
+    loom::serve::server::realtime::configuration
+    loom::serve::server::realtime::settings
     loom::serve::server::registry
     loom::serve::server::router
     loom::serve::transport::http::listener

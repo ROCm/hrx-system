@@ -9,6 +9,7 @@
 
 #include "iree/task/executor.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/server/realtime/server.h"
 #include "loom/serve/server/registry.h"
 #include "loom/serve/server/resources.h"
 
@@ -30,6 +31,9 @@ typedef struct loom_serve_router_options_t {
   // Optional idle reclamation without changing model admission or retained
   // sessions. Enabled policy requires resources.device_group.
   loom_serve_device_idle_policy_t idle;
+  // Optional named native text/recognition/speech conversations. Configuration
+  // and origin strings remain borrowed until this routing call retires.
+  loom_serve_realtime_options_t realtime;
 } loom_serve_router_options_t;
 
 // Routes JSON request bodies by their model field and checkpoint operations by
