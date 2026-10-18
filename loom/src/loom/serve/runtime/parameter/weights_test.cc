@@ -724,6 +724,12 @@ TEST_P(WeightsTest, PreparationPublishesOnlyRecordableRootAddresses) {
   auto status = Prepare(plans_[0], {path_.path()});
   if (!pool_) {
     IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    // Failed backing belongs to this plan; the shared compiler and execution
+    // queues remain usable by another parameter owner.
+    IREE_ASSERT_OK(Compile(1, "target"));
+    const auto peer = Root(1, 0);
+    IREE_ASSERT_OK(LoadRoots(0, 1, &peer, {path_.path()}));
+    Run(1, 70);
   } else {
     // Elastic roots already have stable virtual addresses. Recording needs
     // no physical allocation, file read, or parameter activation.
