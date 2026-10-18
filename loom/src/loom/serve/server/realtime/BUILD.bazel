@@ -183,6 +183,7 @@ loom_cc_library(
         ":turn",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
     ],
 )
 
