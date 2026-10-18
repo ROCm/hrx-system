@@ -9,6 +9,7 @@
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test", "loom_test_module")
 load("//loom/requirements:defs.bzl", "EXECUTE_IREE_HAL", "TARGET_ARCH_X86")
+load("//loom/src/loom/tooling/target/spirv:execution_profiles.bzl", "SPIRV_VULKAN_HARDWARE_PROFILE")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_HARDWARE_PROFILE")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
@@ -62,7 +63,7 @@ def workgroup_fft_test(name, length, frames = 3, input_type = "f32", output_type
             name = name + "_" + mode,
             module = ":" + name + "_module",
             case = "@" + mode,
-            execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+            execution_profiles = [AMDGPU_HARDWARE_PROFILE, SPIRV_VULKAN_HARDWARE_PROFILE],
             benchmark_smoke = False,
             tags = ["manual"],
             target_compatible_with = compatible,

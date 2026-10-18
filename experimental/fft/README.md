@@ -109,20 +109,22 @@ is unnormalized, with positive-zero DC/Nyquist imaginary components.
 1024-point frames. It derives the launch width from the stage geometry and
 `target.subgroup.size`, keeps the frame count dynamic, and uses full-width frame
 offsets. No complex spectrum or windowed frame crosses global memory between
-the producer, FFT, and consumer. This GPU provider currently implements forward
-transforms; inverse execution uses the separately implemented CPU provider.
+the producer, FFT, and consumer. The same source runs through the AMDGPU and
+SPIR-V/Vulkan providers using their discovered device facts. This GPU provider
+implements forward transforms; inverse execution uses the CPU provider.
 
 ```sh
 iree-bazel-build --config=loom-importer-cxx //experimental/fft:workgroup_example
 iree-bazel-test --config=asan --config=loom-importer-cxx \
-  --//runtime/config/hal:drivers=task,amdgpu //experimental/fft:workgroup_tests
+  --//runtime/config/hal:drivers=task,amdgpu,vulkan //experimental/fft:workgroup_tests
 ```
 
-The explicit hardware suite checks small independent direct-DFT fixtures, all
-nine storage pairs, empty and odd frame counts, distinct radix mechanisms,
-odd half-length reconstruction, a later-stage width requirement, guards, and
-immutable inputs. Each forward or power result is a separate check. Large
-performance spreads and machine comparisons remain outside ordinary tests.
+The explicit AMDGPU and Vulkan hardware suite shares small independent
+direct-DFT fixtures for all nine storage pairs, empty and odd frame counts,
+distinct radix mechanisms, odd half-length reconstruction, a later-stage width
+requirement, guards, and immutable inputs. Each forward or power result is a
+separate check. Large performance spreads and machine comparisons remain outside
+ordinary tests.
 
 ## Small checks
 
