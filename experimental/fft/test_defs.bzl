@@ -9,6 +9,7 @@
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test", "loom_test_module")
 load("//loom/requirements:defs.bzl", "EXECUTE_IREE_HAL", "TARGET_ARCH_X86")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_HARDWARE_PROFILE")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 _STORAGE = {"bf16": "std::bfloat16_t", "f16": "std::float16_t", "f32": "float"}
@@ -20,6 +21,52 @@ _NATIVE_PROFILE = loom_execution_profile(
     build_requirements = [EXECUTE_IREE_HAL, TARGET_ARCH_X86],
     runner_args = ["--device=task", "--target=x86:avx512", "--task_topology_max_group_count=2"],
 )
+
+def workgroup_fft_test(name, length, frames = 3, input_type = "f32", output_type = "f32"):
+    """Checks one cooperative schedule with independent DFT fixtures.
+
+    Args:
+        name: Fixture and test prefix.
+        length: Exact real transform length.
+        frames: Runtime frame count.
+        input_type: Input storage spelling.
+        output_type: Output storage spelling.
+    """
+    fixtures = [name + suffix for suffix in [
+        "-input.npy",
+        "-window.npy",
+        "-forward-expected.npy",
+        "-power-expected.npy",
+    ]]
+    native.genrule(
+        name = name + "_data",
+        testonly = True,
+        outs = fixtures + [name + ".loom"],
+        cmd = "$(execpath :workgroup_test_data) $(@D)/%s %s %s %s %s" % (name, length, frames, input_type, output_type),
+        tools = [":workgroup_test_data"],
+    )
+    compatible = loom_config_compatible_with(["//loom/config/import:cxx"])
+    loom_test_module(
+        name = name + "_module",
+        srcs = ["workgroup_test.cxx", name + ".loom"],
+        data = [":headers"] + fixtures,
+        inputopts = ["cxx:" + " ".join([
+            "D=FFT_LENGTH=%s" % length,
+            "D=FFT_INPUT=%s" % _STORAGE[input_type],
+            "D=FFT_OUTPUT=%s" % _STORAGE[output_type],
+        ])],
+        target_compatible_with = compatible,
+    )
+    for mode in ["forward", "power"]:
+        loom_test(
+            name = name + "_" + mode,
+            module = ":" + name + "_module",
+            case = "@" + mode,
+            execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+            benchmark_smoke = False,
+            tags = ["manual"],
+            target_compatible_with = compatible,
+        )
 
 def fft_test(name, length, width, frames, input_type = "f32", output_type = "f32", frequency_only = False):
     """Separates each direction so default checks retain a small JIT surface.

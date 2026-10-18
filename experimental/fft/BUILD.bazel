@@ -9,7 +9,7 @@
 load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library")
-load(":test_defs.bzl", "fft_composition_test", "fft_test")
+load(":test_defs.bzl", "fft_composition_test", "fft_test", "workgroup_fft_test")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -25,6 +25,9 @@ filegroup(
         "geometry.h",
         "real_packet.h",
         "real_radix.h",
+        "workgroup.h",
+        "workgroup_edges.h",
+        "workgroup_geometry.h",
     ],
 )
 
@@ -46,6 +49,13 @@ loom_library(
     deps = [":layout"],
 )
 
+loom_library(
+    name = "workgroup_example",
+    srcs = ["workgroup_example.cxx"],
+    data = [":headers"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
 iree_py_library(
     name = "tables_lib",
     srcs = ["tables.py"],
@@ -61,6 +71,20 @@ iree_py_binary(
     testonly = True,
     srcs = ["test_data.py"],
     deps = [":tables_lib"],
+)
+
+iree_py_library(
+    name = "test_data_lib",
+    testonly = True,
+    srcs = ["test_data.py"],
+    deps = [":tables_lib"],
+)
+
+iree_py_binary(
+    name = "workgroup_test_data",
+    testonly = True,
+    srcs = ["workgroup_test_data.py"],
+    deps = [":test_data_lib"],
 )
 
 [
@@ -130,3 +154,72 @@ fft_test(
 )
 
 fft_composition_test(name = "composition")
+
+_WORKGROUP_STORAGE_CASES = [
+    (
+        "workgroup_" + input_type + "_" + output_type,
+        input_type,
+        output_type,
+    )
+    for input_type in [
+        "f32",
+        "f16",
+        "bf16",
+    ]
+    for output_type in [
+        "f32",
+        "f16",
+        "bf16",
+    ]
+]
+
+[
+    workgroup_fft_test(
+        name = name,
+        input_type = input_type,
+        length = 10,
+        output_type = output_type,
+    )
+    for name, input_type, output_type in _WORKGROUP_STORAGE_CASES
+]
+
+# These lengths select distinct radix, reconstruction, and maximum-stage-width
+# mechanisms. The large performance workloads stay out of ordinary checks.
+_WORKGROUP_LENGTHS = [
+    2,
+    4,
+    8,
+    16,
+    20,
+    50,
+    64,
+    128,
+    500,
+]
+
+[
+    workgroup_fft_test(
+        name = "workgroup_length_%s" % length,
+        length = length,
+    )
+    for length in _WORKGROUP_LENGTHS
+]
+
+workgroup_fft_test(
+    name = "workgroup_empty",
+    frames = 0,
+    length = 10,
+)
+
+test_suite(
+    name = "workgroup_tests",
+    tags = ["manual"],
+    tests = [
+        ":" + name + "_" + mode
+        for name in [row[0] for row in _WORKGROUP_STORAGE_CASES] + ["workgroup_length_%s" % length for length in _WORKGROUP_LENGTHS] + ["workgroup_empty"]
+        for mode in [
+            "forward",
+            "power",
+        ]
+    ],
+)

@@ -75,6 +75,55 @@ normalization beyond the stated inverse scaling, scheduling, and buffer
 lifetimes. Integrating those operations with the stage helpers requires the
 pipeline's numerical and memory-traffic qualification.
 
+## Cooperative GPU forward transforms
+
+`workgroup.h` computes one real frame cooperatively in registers and one padded
+workgroup-memory bank. It shares the complex butterfly arithmetic with the CPU
+implementation, while owning its stage schedule and native approximate twiddles.
+The input and output operations are ordinary overloaded functions:
+
+```cpp
+using namespace fft_experiment::workgroup;
+forward<400>(
+    WindowedInput<float>{samples, window}, PowerOutput<float>{power}, workspace);
+```
+
+`workgroup_edges.h` supplies real and windowed producers, plus complex-spectrum
+and power consumers. Each storage boundary independently supports FP32, FP16,
+or BF16, with FP32 arithmetic between them. An application can define its own
+edge types and matching `load`/`store` overloads in their associated namespace.
+The helpers allocate nothing. Borrowed storage stays live until the collective
+finishes. A caller reusing the same scratch for another cooperative operation
+in the same kernel places a workgroup-memory barrier between the calls.
+
+Length has the same positive-even, factors-two-and-five contract as the CPU
+helpers. Every x workitem participates, y and z are one, and the workgroup width
+is at least `minimum_workgroup_width<length>()`. The caller supplies
+`workspace_elements<length>()` FP32 values in workgroup memory. Target validation
+rejects configurations exceeding the device's workgroup or local-memory capacity.
+Input and complex output use paired-scalar alignment; power output has natural
+scalar alignment. Input, output, window, and scratch are disjoint. Forward output
+is unnormalized, with positive-zero DC/Nyquist imaginary components.
+
+`workgroup_example.cxx` shows the full window → FFT → power call for 400- and
+1024-point frames. It derives the launch width from the stage geometry and
+`target.subgroup.size`, keeps the frame count dynamic, and uses full-width frame
+offsets. No complex spectrum or windowed frame crosses global memory between
+the producer, FFT, and consumer. This GPU provider currently implements forward
+transforms; inverse execution uses the separately implemented CPU provider.
+
+```sh
+iree-bazel-build --config=loom-importer-cxx //experimental/fft:workgroup_example
+iree-bazel-test --config=asan --config=loom-importer-cxx \
+  --//runtime/config/hal:drivers=task,amdgpu //experimental/fft:workgroup_tests
+```
+
+The explicit hardware suite checks small independent direct-DFT fixtures, all
+nine storage pairs, empty and odd frame counts, distinct radix mechanisms,
+odd half-length reconstruction, a later-stage width requirement, guards, and
+immutable inputs. Each forward or power result is a separate check. Large
+performance spreads and machine comparisons remain outside ordinary tests.
+
 ## Small checks
 
 ```sh
