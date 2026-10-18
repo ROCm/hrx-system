@@ -65,10 +65,6 @@ loom_cc_library(
         "//loom/src/loom/serve/service/recognition:request",
         "//loom/src/loom/serve/testing:service_application",
         "//loom/src/loom/serve/testing:worker_gate",
-        "//loom/src/loom/serve/transport/http:listener",
-        "//loom/src/loom/serve/transport/http:server",
-        "//loom/src/loom/serve/transport/websocket:connection",
-        "//loom/src/loom/serve/transport/websocket:handshake",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
@@ -159,14 +155,10 @@ loom_cc_library(
         "//loom/src/loom/serve/media:audio_resampler",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/server:registry",
-        "//loom/src/loom/serve/service/recognition:input",
         "//loom/src/loom/serve/service/recognition:request",
         "//loom/src/loom/serve/service/recognition:stream",
         "//loom/src/loom/serve/service/recognition:transcription",
-        "//loom/src/loom/serve/transport/websocket:connection",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:base64",
-        "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/task",
     ],
@@ -223,6 +215,7 @@ loom_cc_library(
     deps = [
         ":audio",
         ":binding",
+        ":capture",
         ":conversation",
         ":event",
         ":generation",
@@ -264,5 +257,44 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "capture",
+    srcs = ["capture.c"],
+    hdrs = ["capture.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/transport/websocket:connection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_test(
+    name = "capture_test",
+    srcs = ["capture_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":capture",
+        "//loom/src/loom/serve/testing:worker_gate",
+        "//loom/src/loom/serve/transport/http:listener",
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/serve/transport/websocket:connection",
+        "//loom/src/loom/serve/transport/websocket:handshake",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

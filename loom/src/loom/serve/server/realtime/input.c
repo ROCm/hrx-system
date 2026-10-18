@@ -8,8 +8,6 @@
 
 #include <string.h>
 
-#include "iree/base/internal/base64.h"
-#include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/media/audio_resampler.h"
 #include "loom/serve/service/recognition/stream.h"
@@ -24,16 +22,14 @@ enum {
 typedef struct loom_serve_realtime_input_packet_t {
   // Owner-only ordered append link; workers never inspect or mutate it.
   struct loom_serve_realtime_input_packet_t* next;
-  // Transport receipt retaining encoded audio through final CPU release.
-  loom_serve_websocket_message_t* message;
-  // Escaped JSON string borrowing message until the packet retires.
-  iree_string_view_t audio;
-  // Owned decoded PCM16LE, initialized by the first conversion task.
-  iree_byte_span_t pcm;
+  // Validated original-rate PCM, borrowed through the release callback.
+  iree_const_byte_span_t pcm;
+  // Owner-only callback after the final conversion borrower retires.
+  void (*release)(void*);
+  // Caller-owned callback data, stable through release.
+  void* user_data;
   // PCM bytes already committed to this item's independent converter.
   iree_host_size_t offset;
-  // PCM validation completed, including the whole-frame requirement.
-  bool decoded;
 } loom_serve_realtime_input_packet_t;
 
 struct loom_serve_realtime_input_item_t {
@@ -43,7 +39,7 @@ struct loom_serve_realtime_input_item_t {
   loom_serve_recognition_request_t request;
   // Native receipt; a final formatting task borrows its immutable document.
   loom_serve_recognition_stream_t* stream;
-  // Ordered pending append receipts; workers borrow only the captured head.
+  // Ordered pending PCM loans; workers borrow only the captured head.
   loom_serve_realtime_input_packet_t* first;
   // Last packet, allowing appends while an earlier packet is being converted.
   loom_serve_realtime_input_packet_t* last;
@@ -57,10 +53,8 @@ struct loom_serve_realtime_input_item_t {
   iree_host_size_t frame_count;
   // Prefix of the staged frames already accepted by recognition.
   iree_host_size_t frame_offset;
-  // Total decoded input frames in the 24 kHz wire clock.
+  // Total accepted PCM frames in the 24 kHz wire clock.
   uint64_t input_frames;
-  // At least one nonempty encoded append has joined the item frontier.
-  bool appended;
   // Explicit item EOF; later appends belong to another item.
   bool committed;
   // Conversion emitted every output frame through explicit EOF.
@@ -93,8 +87,6 @@ struct loom_serve_realtime_input_t {
   loom_serve_registry_t* registry;
   // Original recognition identity; later namesakes cannot receive old input.
   loom_serve_realtime_binding_t binding;
-  // Borrowed framed transport, kept alive by the session's HTTP claim.
-  loom_serve_websocket_t* socket;
   // Nonblocking wake target, retained until every accepted worker releases.
   loom_serve_wake_callback_t observer;
   // Bounded list of independently owned items, including retiring work.
@@ -129,8 +121,7 @@ struct loom_serve_realtime_input_t {
 static void loom_serve_realtime_input_packet_free(
     loom_serve_realtime_input_t* input,
     loom_serve_realtime_input_packet_t* packet) {
-  loom_serve_websocket_message_release(input->socket, packet->message);
-  iree_allocator_free(input->host_allocator, packet->pcm.data);
+  packet->release(packet->user_data);
   iree_allocator_free(input->host_allocator, packet);
 }
 
@@ -150,38 +141,6 @@ static void loom_serve_realtime_input_item_free(
   iree_string_builder_deinitialize(&item->transcript);
   iree_status_ignore(item->status);
   iree_allocator_free(input->host_allocator, item);
-}
-
-static iree_status_t loom_serve_realtime_input_decode(
-    loom_serve_realtime_input_t* input,
-    loom_serve_realtime_input_packet_t* packet) {
-  char* encoded = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      input->host_allocator, packet->audio.size, (void**)&encoded));
-  iree_host_size_t encoded_length = 0;
-  iree_status_t status = iree_json_unescape_string(
-      packet->audio, packet->audio.size, encoded, &encoded_length);
-  iree_string_view_t text = iree_make_string_view(encoded, encoded_length);
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(input->host_allocator,
-                                   iree_base64_decoded_size(text),
-                                   (void**)&packet->pcm.data);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_base64_decode(
-        text,
-        iree_make_byte_span(packet->pcm.data, iree_base64_decoded_size(text)),
-        &packet->pcm.data_length);
-  }
-  iree_allocator_free(input->host_allocator, encoded);
-  if (iree_status_is_ok(status) &&
-      (!packet->pcm.data_length || packet->pcm.data_length % sizeof(int16_t))) {
-    status =
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "audio append requires whole nonempty PCM16 frames");
-  }
-  packet->decoded = iree_status_is_ok(status);
-  return status;
 }
 
 static iree_status_t loom_serve_realtime_input_convert(
@@ -211,10 +170,6 @@ static iree_status_t loom_serve_realtime_input_convert(
     }
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
         input->host_allocator, staging_bytes, (void**)&item->samples));
-  }
-  if (packet && !packet->decoded) {
-    IREE_RETURN_IF_ERROR(loom_serve_realtime_input_decode(input, packet));
-    item->input_frames += packet->pcm.data_length / sizeof(int16_t);
   }
   item->frame_count = 0;
   item->frame_offset = 0;
@@ -298,9 +253,8 @@ static void loom_serve_realtime_input_released(iree_task_process_t* process) {
 
 iree_status_t loom_serve_realtime_input_allocate(
     iree_task_executor_t* executor, loom_serve_registry_t* registry,
-    loom_serve_realtime_binding_t binding, loom_serve_websocket_t* socket,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
-    loom_serve_realtime_input_t** out_input) {
+    loom_serve_realtime_binding_t binding, loom_serve_wake_callback_t observer,
+    iree_allocator_t host_allocator, loom_serve_realtime_input_t** out_input) {
   *out_input = NULL;
   loom_serve_realtime_input_t* input = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
@@ -310,7 +264,6 @@ iree_status_t loom_serve_realtime_input_allocate(
   input->executor = executor;
   input->registry = registry;
   input->binding = binding;
-  input->socket = socket;
   input->observer = observer;
   iree_slim_mutex_initialize(&input->mutex);
   *out_input = input;
@@ -356,35 +309,25 @@ iree_status_t loom_serve_realtime_input_begin(
 
 iree_status_t loom_serve_realtime_input_append(
     loom_serve_realtime_input_t* input, loom_serve_realtime_input_item_t* item,
-    loom_serve_websocket_message_t* message, iree_string_view_t audio) {
-  if (item->committed || !audio.size) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "audio append requires a nonempty open input item");
-  }
+    iree_const_byte_span_t samples, void (*release)(void*), void* user_data) {
   loom_serve_realtime_input_packet_t* packet = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(input->host_allocator,
                                              sizeof(*packet), (void**)&packet));
-  packet->message = message;
-  packet->audio = audio;
+  packet->pcm = samples;
+  packet->release = release;
+  packet->user_data = user_data;
   if (item->last) {
     item->last->next = packet;
   } else {
     item->first = packet;
   }
   item->last = packet;
-  item->appended = true;
+  item->input_frames += samples.data_length / sizeof(int16_t);
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_realtime_input_commit(
-    loom_serve_realtime_input_item_t* item) {
-  if (!item->appended || item->committed) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "commit requires a nonempty uncommitted audio item");
-  }
+void loom_serve_realtime_input_finish(loom_serve_realtime_input_item_t* item) {
   item->committed = true;
-  return iree_ok_status();
 }
 
 void loom_serve_realtime_input_close(loom_serve_realtime_input_item_t* item) {
@@ -405,7 +348,7 @@ static void loom_serve_realtime_input_collect(
   loom_serve_realtime_input_item_t* item = input->working;
   item->status = iree_status_join(item->status, input->status);
   input->status = iree_ok_status();
-  if (input->packet && input->packet->decoded &&
+  if (input->packet &&
       input->packet->offset == input->packet->pcm.data_length) {
     item->first = input->packet->next;
     if (!item->first) {
