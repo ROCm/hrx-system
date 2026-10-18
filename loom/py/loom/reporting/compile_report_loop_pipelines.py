@@ -113,13 +113,12 @@ def build_loop_pipeline_show(
                 previous = stages[-1]
                 if (
                     previous["op"] != name
-                    or previous.get("partition") != "guarded"
-                    or partition != "guarded"
+                    or previous.get("partition") != partition
                     or previous["stage"] != "producer"
                     or stage != "consumer"
                 ):
                     raise CompileReportError(
-                        f"{stage_path}: repeated position is not a guarded stage pair"
+                        f"{stage_path}: repeated position is not a matching stage pair"
                     )
             normalized_stage: dict[str, object] = {
                 "position": operation_position,
