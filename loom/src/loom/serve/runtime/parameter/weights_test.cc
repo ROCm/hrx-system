@@ -428,15 +428,20 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
                             iree_host_size_t root_count,
                             const loom_serve_weight_root_t* roots,
                             std::initializer_list<std::string> paths) {
-    const std::string policy = directory_ + "/policy.loom";
     auto** plan = &plans_[plan_count_++];
     IREE_RETURN_IF_ERROR(loom_serve_weights_allocate(
         device_, transfer_, dispatch_,
         loom_serve_device_storage_pool(device_owner_), pool_, shared_count,
         root_count, roots, host_allocator_, plan));
-    const auto before = loom_serve_weights_statistics(*plan);
+    return Prepare(*plan, paths);
+  }
+
+  iree_status_t Prepare(loom_serve_weights_t* plan,
+                        std::initializer_list<std::string> paths) {
+    const std::string policy = directory_ + "/policy.loom";
+    const auto before = loom_serve_weights_statistics(plan);
     loom_serve_test_weight_preparation_t preparation;
-    preparation.weights = *plan;
+    preparation.weights = plan;
     preparation.host = loom_serve_device_host(device_owner_);
     preparation.jit = jit_;
     std::vector<iree_string_view_t> checkpoints;
@@ -446,10 +451,10 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     preparation.checkpoints = {checkpoints.size(), checkpoints.data()};
     preparation.policy = iree_make_cstring_view(policy.c_str());
     auto status = preparation.Run();
-    const auto after = loom_serve_weights_statistics(*plan);
+    const auto after = loom_serve_weights_statistics(plan);
     EXPECT_EQ(after.reserved_bytes, before.reserved_bytes);
     EXPECT_EQ(after.committed_bytes, before.committed_bytes);
-    EXPECT_EQ(loom_serve_weights_activity(*plan).activations, 0u);
+    EXPECT_EQ(loom_serve_weights_activity(plan).activations, 0u);
     return status;
   }
 
@@ -692,6 +697,45 @@ TEST_P(WeightsTest, CanonicalWeightsNeedNoPreparationOrLeadingSharedGroup) {
   IREE_ASSERT_OK(Compile(0, "raw"));
   IREE_ASSERT_OK(Load(0, 1));
   Run(0, 90);
+}
+
+TEST_P(WeightsTest, PreparationPublishesOnlyRecordableRootAddresses) {
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  const auto root = Root(0, 0);
+  auto allocate = [&] {
+    return loom_serve_weights_allocate(
+        device_, transfer_, dispatch_,
+        loom_serve_device_storage_pool(device_owner_), pool_, 0, 1, &root,
+        host_allocator_, &plans_[plan_count_++]);
+  };
+  if (!pool_) {
+    // Allocation is accepted while its native dependency is held. Its later
+    // failure belongs to preparation completion, before consumer recording.
+    auto& allocator =
+        loom_serve::testing::NativeAllocator::ForDevice(device_owner_);
+    allocator.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC,
+                                 /*native_only=*/true);
+    loom_serve::testing::ScopedNativeHold hold(device_owner_);
+    IREE_ASSERT_OK(allocate());
+    hold.WaitEntered();
+  } else {
+    IREE_ASSERT_OK(allocate());
+  }
+  auto status = Prepare(plans_[0], {path_.path()});
+  if (!pool_) {
+    IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+  } else {
+    // Elastic roots already have stable virtual addresses. Recording needs
+    // no physical allocation, file read, or parameter activation.
+    IREE_ASSERT_OK(status);
+    IREE_ASSERT_OK(loom_serve_jit_stage_record(
+        compiled_[0], iree_hal_queue_family(dispatch_),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[0].data(),
+        &commands_[0]));
+    EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+    EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 0u);
+    EXPECT_EQ(loom_serve_weights_activity(plans_[0]).read_bytes, 0u);
+  }
 }
 
 TEST_P(WeightsTest, SeparateCheckpointDomainsRetainSharedBaseStorage) {

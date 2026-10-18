@@ -62,9 +62,10 @@ typedef struct loom_serve_weight_activity_t {
 // With pool, roots have stable virtual addresses and start without physical
 // backing. NULL selects explicitly fixed storage (including device ASAN use);
 // deactivation is unavailable in that mode. Fixed roots use one queued
-// allocation batch; activation imports its readiness before file reads.
-// Successful source preparation is
-// required before activation, and activation before any consumer executes.
+// allocation batch. Source preparation joins its readiness before consumer
+// commands can be recorded, and activation imports it before file reads.
+// Successful source preparation is required before activation, and activation
+// before any consumer executes.
 // storage_pool supplies fixed roots, is qualified for dispatch and transfer,
 // and outlives the plan and every resolved root.
 //
@@ -78,8 +79,10 @@ iree_status_t loom_serve_weights_allocate(
     iree_host_size_t root_count, const loom_serve_weight_root_t* roots,
     iree_allocator_t host_allocator, loom_serve_weights_t** out_weights);
 
-// Receives the terminal source preparation status on a shared task worker.
-// All preparation tasks/compiler accesses have retired before this callback.
+// Receives terminal source preparation and fixed-root allocation status.
+// All preparation tasks/compiler accesses have retired before this callback,
+// which runs on the completing task or allocation publication path.
+// Successful completion permits reusable command recording with the roots.
 // Pool mutation and activation return to the serialized model owner.
 typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
                                                    iree_status_t status);
