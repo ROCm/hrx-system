@@ -24,6 +24,7 @@ KERNEL_CORPUS = loom_corpus_manifest(
         "subgroup/transport_carrier.loom",
         "workgroup/loop_state.loom",
         "workgroup/predicate_insertion.loom",
+        "workgroup/publication.loom",
         "workgroup/reduce_partial.loom",
         "workgroup/reduce_tree.loom",
         "workgroup/scan.loom",

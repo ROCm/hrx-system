@@ -43,6 +43,7 @@ _KERNEL_SOURCES = [
     "kernel/subgroup/transport_carrier.loom",
     "kernel/workgroup/loop_state.loom",
     "kernel/workgroup/predicate_insertion.loom",
+    "kernel/workgroup/publication.loom",
     "kernel/workgroup/reduce_partial.loom",
     "kernel/workgroup/reduce_tree.loom",
     "kernel/workgroup/scan.loom",

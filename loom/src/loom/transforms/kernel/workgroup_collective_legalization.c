@@ -23,34 +23,55 @@
 #include "loom/target/launch.h"
 
 typedef struct loom_kernel_workgroup_topology_t {
+  // Physical invocations per subgroup.
   uint32_t subgroup_size;
+  // Subgroups covering the workgroup, including a partial final subgroup.
   uint32_t subgroup_count;
 } loom_kernel_workgroup_topology_t;
 
 typedef struct loom_kernel_workgroup_payload_t {
+  // Scalar or vector type carried by the source collective.
   loom_type_t logical_type;
+  // Scratch representation, with predicates widened to byte storage.
   loom_type_t storage_type;
+  // Element type of the flattened scratch view.
   loom_scalar_type_t storage_element_type;
+  // Components per payload slot; one for a scalar.
   int64_t lane_count;
+  // Scratch element width and minimum allocation alignment in bytes.
   int64_t element_byte_count;
+  // Elements in the partial and publication slots combined.
   int64_t scratch_element_count;
+  // Byte extent of the complete scratch allocation.
   int64_t scratch_byte_count;
+  // Subgroup reduction value published to its partial slot.
   loom_value_id_t local_total;
+  // Typed view of the compiler-owned workgroup scratch allocation.
   loom_value_id_t scratch_view;
 } loom_kernel_workgroup_payload_t;
 
 typedef struct loom_kernel_workgroup_collective_state_t {
+  // Borrowed owner of the current target-legalization transaction.
   loom_target_legalization_context_t* context;
+  // Borrowed insertion builder for replacement operations.
   loom_builder_t* builder;
+  // Source collective location inherited by generated operations.
   loom_location_id_t location;
+  // Shared combining operation for all payloads.
   loom_combining_kind_t kind;
+  // Source arithmetic permissions preserved by each component reduction.
   uint8_t math_flags;
+  // Qualified physical partitioning for this workgroup.
   loom_kernel_workgroup_topology_t topology;
+  // Index type used by scratch slot addressing.
   loom_type_t index_type;
-  loom_type_t i1_type;
+  // Reusable zero index in the replacement region.
   loom_value_id_t zero_index;
+  // Current subgroup ordinal, bounded by the selected topology.
   loom_value_id_t subgroup_id;
+  // Current physical lane within the subgroup.
   loom_value_id_t lane_id;
+  // Predicate selecting each subgroup's publication leader.
   loom_value_id_t lane_is_zero;
 } loom_kernel_workgroup_collective_state_t;
 
@@ -132,7 +153,7 @@ static bool loom_kernel_workgroup_collective_math_is_supported(
 
 static bool loom_kernel_workgroup_payload_initialize(
     const loom_module_t* module, loom_value_id_t source,
-    uint32_t subgroup_count, loom_kernel_workgroup_payload_t* out_payload) {
+    uint32_t scratch_slot_count, loom_kernel_workgroup_payload_t* out_payload) {
   *out_payload = (loom_kernel_workgroup_payload_t){0};
   const loom_type_t logical_type = loom_module_value_type(module, source);
   int64_t lane_count = 1;
@@ -167,7 +188,7 @@ static bool loom_kernel_workgroup_payload_initialize(
 
   int64_t scratch_element_count = 0;
   int64_t scratch_byte_count = 0;
-  if (!iree_checked_mul_i64(lane_count, subgroup_count,
+  if (!iree_checked_mul_i64(lane_count, scratch_slot_count,
                             &scratch_element_count) ||
       scratch_element_count > LOOM_DIM_MAX_STATIC_SIZE ||
       !iree_checked_mul_i64(scratch_element_count, element_byte_count,
@@ -219,7 +240,6 @@ static iree_status_t loom_kernel_workgroup_collective_state_initialize(
       .math_flags = math_flags,
       .topology = topology,
       .index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-      .i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1),
       .zero_index = LOOM_VALUE_ID_INVALID,
       .subgroup_id = LOOM_VALUE_ID_INVALID,
       .lane_id = LOOM_VALUE_ID_INVALID,
@@ -530,6 +550,12 @@ static iree_status_t loom_kernel_workgroup_hierarchical_reduce(
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_hierarchical_lane_state(
       state, &first_subgroup_condition, &lane_is_used, &safe_slot));
   (void)lane_is_used;
+  // Partial slots remain immutable until the result publication barrier. A
+  // separate result slot requires no implicit subgroup memory ordering between
+  // the partial loads and the leader's store.
+  loom_value_id_t result_slot = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_index_constant(
+      state, state->topology.subgroup_count, state->index_type, &result_slot));
   loom_op_t* fold_if = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_if_build(
       state->builder, /*build_flags=*/0, first_subgroup_condition,
@@ -567,8 +593,8 @@ static iree_status_t loom_kernel_workgroup_hierarchical_reduce(
         state->builder, leader_if, loom_scf_if_then_region(leader_if));
     for (iree_host_size_t i = 0; i < payload_count && iree_status_is_ok(status);
          ++i) {
-      status = loom_kernel_workgroup_build_store(
-          state, &payloads[i], reductions[i], state->zero_index);
+      status = loom_kernel_workgroup_build_store(state, &payloads[i],
+                                                 reductions[i], result_slot);
     }
     if (iree_status_is_ok(status)) {
       loom_op_t* leader_yield = NULL;
@@ -590,7 +616,7 @@ static iree_status_t loom_kernel_workgroup_hierarchical_reduce(
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_barrier(state));
   for (iree_host_size_t i = 0; i < payload_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_load(
-        state, &payloads[i], state->zero_index, &out_results[i]));
+        state, &payloads[i], result_slot, &out_results[i]));
   }
   return iree_ok_status();
 }
@@ -628,6 +654,11 @@ static iree_status_t loom_kernel_workgroup_hierarchical_scan(
   loom_value_id_t safe_slot = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_hierarchical_lane_state(
       state, &first_subgroup_condition, &lane_is_used, &safe_slot));
+  // Adjustments occupy the second half of scratch, leaving every subgroup's
+  // partial immutable while the first subgroup reads and scans them.
+  loom_value_id_t result_base = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_index_constant(
+      state, state->topology.subgroup_count, state->index_type, &result_base));
   loom_op_t* fold_if = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_if_build(
       state->builder, /*build_flags=*/0, first_subgroup_condition,
@@ -656,8 +687,14 @@ static iree_status_t loom_kernel_workgroup_hierarchical_scan(
   if (iree_status_is_ok(status)) {
     store_saved_ip = loom_builder_enter_region(
         state->builder, store_if, loom_scf_if_then_region(store_if));
-    status = loom_kernel_workgroup_build_store(state, payload, adjustment,
-                                               state->lane_id);
+    loom_op_t* result_slot_op = NULL;
+    status = loom_index_add_build(state->builder, result_base, state->lane_id,
+                                  state->index_type, state->location,
+                                  &result_slot_op);
+    if (iree_status_is_ok(status)) {
+      status = loom_kernel_workgroup_build_store(
+          state, payload, adjustment, loom_index_add_result(result_slot_op));
+    }
     if (iree_status_is_ok(status)) {
       loom_op_t* store_yield = NULL;
       status = loom_scf_yield_build(state->builder, /*values=*/NULL, 0,
@@ -674,8 +711,12 @@ static iree_status_t loom_kernel_workgroup_hierarchical_scan(
   IREE_RETURN_IF_ERROR(status);
 
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_barrier(state));
+  loom_op_t* result_slot_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_add_build(
+      state->builder, result_base, state->subgroup_id, state->index_type,
+      state->location, &result_slot_op));
   IREE_RETURN_IF_ERROR(loom_kernel_workgroup_build_load(
-      state, payload, state->subgroup_id, &adjustment));
+      state, payload, loom_index_add_result(result_slot_op), &adjustment));
   if (direction == LOOM_KERNEL_SUBGROUP_SCAN_DIRECTION_FORWARD) {
     return loom_kernel_workgroup_build_combine(state, payload, adjustment,
                                                local_prefix, out_result);
@@ -808,6 +849,9 @@ iree_status_t loom_kernel_target_legalize_workgroup_reduce(
   const loom_value_slice_t values = loom_kernel_workgroup_reduce_values(op);
   loom_kernel_workgroup_payload_t* payloads = NULL;
   loom_value_id_t* replacements = NULL;
+  const uint32_t scratch_slot_count =
+      topology.subgroup_count +
+      (topology.subgroup_count <= topology.subgroup_size ? 1u : 0u);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->arena, values.count, sizeof(*payloads), (void**)&payloads));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, values.count,
@@ -815,7 +859,7 @@ iree_status_t loom_kernel_target_legalize_workgroup_reduce(
                                                  (void**)&replacements));
   for (iree_host_size_t i = 0; i < values.count; ++i) {
     if (!loom_kernel_workgroup_payload_initialize(
-            context->module, values.values[i], topology.subgroup_count,
+            context->module, values.values[i], scratch_slot_count,
             &payloads[i])) {
       return iree_ok_status();
     }
@@ -880,8 +924,11 @@ iree_status_t loom_kernel_target_legalize_workgroup_scan(
   }
   const loom_value_id_t source = loom_kernel_workgroup_scan_value(op);
   loom_kernel_workgroup_payload_t payload;
-  if (!loom_kernel_workgroup_payload_initialize(
-          context->module, source, topology.subgroup_count, &payload)) {
+  const uint32_t scratch_slot_count =
+      topology.subgroup_count *
+      (topology.subgroup_count <= topology.subgroup_size ? 2u : 1u);
+  if (!loom_kernel_workgroup_payload_initialize(context->module, source,
+                                                scratch_slot_count, &payload)) {
     return iree_ok_status();
   }
 

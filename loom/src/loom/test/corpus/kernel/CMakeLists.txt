@@ -27,6 +27,7 @@ loom_corpus_sources(
     "subgroup/transport_carrier.loom"
     "workgroup/loop_state.loom"
     "workgroup/predicate_insertion.loom"
+    "workgroup/publication.loom"
     "workgroup/reduce_partial.loom"
     "workgroup/reduce_tree.loom"
     "workgroup/scan.loom"
