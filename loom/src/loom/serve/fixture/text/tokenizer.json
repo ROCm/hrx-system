@@ -1,4 +1,5 @@
 {
+  "normalizer": {"type": "Lowercase"},
   "added_tokens": [
     {"id": 3, "content": "#", "single_word": false, "lstrip": false,
      "rstrip": false, "normalized": false, "special": true}

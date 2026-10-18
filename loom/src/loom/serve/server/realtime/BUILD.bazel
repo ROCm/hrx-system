@@ -1,0 +1,268 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//loom/src/loom/serve:implementation"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+exports_files(["session_test.py"])
+
+loom_cc_test(
+    name = "audio_test",
+    srcs = ["audio_test.cc"],
+    deps = [
+        ":audio",
+        "//loom/src/loom/serve/service/speech:generator",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "generation_tests",
+    testonly = True,
+    srcs = ["generation_test.cc"],
+    deps = [
+        ":audio",
+        ":binding",
+        ":generation",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/server:configuration",
+        "//loom/src/loom/serve/server:model_registration",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service/text:stream",
+        "//loom/src/loom/serve/testing:service_application",
+        "//loom/src/loom/serve/testing:worker_gate",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "input_tests",
+    testonly = True,
+    srcs = ["input_test.cc"],
+    deps = [
+        ":binding",
+        ":input",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/server:configuration",
+        "//loom/src/loom/serve/server:model_registration",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service/recognition:request",
+        "//loom/src/loom/serve/testing:service_application",
+        "//loom/src/loom/serve/testing:worker_gate",
+        "//loom/src/loom/serve/transport/http:listener",
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/serve/transport/websocket:connection",
+        "//loom/src/loom/serve/transport/websocket:handshake",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "configuration",
+    srcs = ["configuration.c"],
+    hdrs = ["configuration.h"],
+    deps = [
+        ":event",
+        ":settings",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_library(
+    name = "event",
+    srcs = ["event.c"],
+    hdrs = ["event.h"],
+    deps = [
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_library(
+    name = "binding",
+    srcs = ["binding.c"],
+    hdrs = ["binding.h"],
+    deps = [
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service",
+        "//loom/src/loom/serve/service:kind",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "audio",
+    srcs = ["audio.c"],
+    hdrs = ["audio.h"],
+    deps = [
+        "//loom/src/loom/serve/media:audio_resampler",
+        "//loom/src/loom/serve/service/speech:generator",
+        "//loom/src/loom/serve/service/speech:output",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+    ],
+)
+
+loom_cc_library(
+    name = "generation",
+    srcs = ["generation.c"],
+    hdrs = ["generation.h"],
+    deps = [
+        ":audio",
+        ":binding",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service/speech:generator",
+        "//loom/src/loom/serve/service/speech:request",
+        "//loom/src/loom/serve/service/speech:stream",
+        "//loom/src/loom/serve/service/text:chat",
+        "//loom/src/loom/serve/service/text:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "input",
+    srcs = ["input.c"],
+    hdrs = ["input.h"],
+    deps = [
+        ":binding",
+        "//loom/src/loom/serve/media:audio_resampler",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service/recognition:input",
+        "//loom/src/loom/serve/service/recognition:request",
+        "//loom/src/loom/serve/service/recognition:stream",
+        "//loom/src/loom/serve/service/recognition:transcription",
+        "//loom/src/loom/serve/transport/websocket:connection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "conversation",
+    srcs = ["conversation.c"],
+    hdrs = ["conversation.h"],
+    deps = [
+        ":event",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "settings",
+    srcs = ["settings.c"],
+    hdrs = ["settings.h"],
+    deps = [
+        ":event",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+    ],
+)
+
+loom_cc_library(
+    name = "history",
+    srcs = ["history.c"],
+    hdrs = ["history.h"],
+    deps = [
+        ":binding",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service/text:checkpoint_control",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "wire",
+    srcs = ["wire.c"],
+    hdrs = ["wire.h"],
+    deps = [
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/serve/transport/websocket:connection",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "session",
+    srcs = ["session.c"],
+    hdrs = ["session.h"],
+    deps = [
+        ":audio",
+        ":binding",
+        ":conversation",
+        ":event",
+        ":generation",
+        ":history",
+        ":input",
+        ":settings",
+        ":wire",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/service/recognition:events",
+        "//loom/src/loom/serve/service/recognition:request",
+        "//loom/src/loom/serve/service/text:chat",
+        "//loom/src/loom/serve/service/text:stream",
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/serve/transport/websocket:connection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "server",
+    srcs = ["server.c"],
+    hdrs = ["server.h"],
+    deps = [
+        ":binding",
+        ":session",
+        ":settings",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/server/http:response",
+        "//loom/src/loom/serve/service:kind",
+        "//loom/src/loom/serve/transport/http:request",
+        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/serve/transport/websocket:connection",
+        "//loom/src/loom/serve/transport/websocket:handshake",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/task",
+    ],
+)
