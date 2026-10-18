@@ -948,6 +948,8 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .target = &device->target,
       .native_family_ordinal = device->memory.family.queue_family_ordinal,
       .memory = &memory,
+      .notification = device->memory.notification,
+      .frontier_tracker = device->topology.frontier.tracker,
       .feedback = device->feedback.context ? &device->feedback : NULL,
       .asan = device->memory.asan,
       .tsan_count = device->memory.tsan_count,

@@ -553,6 +553,70 @@ TEST_P(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
 
 class GpuNativeDirectFileTest : public GpuNativeFileTest {};
 
+class GpuNativeGlobalFileTest : public GpuNativeFileTest {};
+
+TEST_P(GpuNativeGlobalFileTest, NestedExecutableGlobalRoundTrip) {
+  constexpr size_t kGlobalWords = 2048;
+  constexpr size_t kRangeOffset = 4096;
+  constexpr size_t kRangeLength = 4096;
+  bool found = false;
+  iree_hal_executable_global_t token;
+  IREE_ASSERT_OK(iree_hal_executable_try_lookup_global_by_name(
+      executable_, IREE_SV("image_arena"), &found, &token));
+  ASSERT_TRUE(found);
+  iree_hal_buffer_t* global = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_executable_global_buffer(executable_, token, &global));
+  ASSERT_EQ(iree_hal_buffer_byte_length(global),
+            kGlobalWords * sizeof(uint32_t));
+  const iree_hal_fixed_block_pool_options_t options = {
+      .block_size = kRangeLength,
+  };
+  Ref<iree_hal_pool_t> nested;
+  IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
+      global, kRangeOffset, kRangeLength, &options, iree_allocator_system(),
+      nested.out()));
+  Ref<iree_hal_buffer_t> view;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      nested, iree_hal_make_pool_reservation_request(kRangeLength, 4),
+      iree_infinite_timeout(), view.out()));
+
+  std::vector<uint32_t> contents(16);
+  for (size_t i = 0; i < contents.size(); ++i) {
+    contents[i] = uint32_t(i * 23 + 7);
+  }
+  Ref<iree_hal_file_t> file;
+  IREE_ASSERT_OK(Open(contents, file.out()));
+  auto* semaphore = timeline_.get();
+  uint64_t one = 1, two = 2, three = 3, four = 4;
+  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &semaphore, &one},
+                                     file, 8, view, 8, 32, &barriers_, 0));
+  ASSERT_NO_FATAL_FAILURE(Accumulate(view, one, two, 19, 8));
+  IREE_ASSERT_OK(iree_hal_queue_write(queues_[0], {1, &semaphore, &two},
+                                      {1, &semaphore, &three}, view, 8, file, 4,
+                                      32, &barriers_, 0));
+  view.reset();
+  file.reset();
+  ASSERT_NO_FATAL_FAILURE(Wait(three));
+  nested.reset();
+
+  constexpr size_t kFirstWord = (kRangeOffset + 8) / sizeof(uint32_t);
+  std::vector<uint32_t> expected_global(kGlobalWords, 0);
+  std::copy_n(contents.begin() + 2, 8, expected_global.begin() + kFirstWord);
+  expected_global[kFirstWord] += 19;
+  std::vector<uint32_t> expected_file = contents;
+  std::copy_n(expected_global.begin() + kFirstWord, 8,
+              expected_file.begin() + 1);
+  ASSERT_NO_FATAL_FAILURE(ExpectFile(expected_file));
+  std::vector<uint32_t> observed_global(kGlobalWords);
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[0], {1, &semaphore, &three}, {1, &semaphore, &four}, global, 0,
+      observed_global.data(), observed_global.size() * sizeof(uint32_t),
+      nullptr));
+  ASSERT_NO_FATAL_FAILURE(Wait(four));
+  EXPECT_EQ(observed_global, expected_global);
+}
+
 TEST_P(GpuNativeDirectFileTest, DirectFileRoundTripThroughGpuBacking) {
   constexpr size_t kAlignment = 4096;
   constexpr size_t kBytes = 8 * 1024 * 1024 + kAlignment;
@@ -835,5 +899,8 @@ INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeDirectFileTest,
 
 INSTANTIATE_TEST_SUITE_P(RegisteredVirtual, GpuNativeRegisteredFileProgressTest,
                          ::testing::Values(FileBacking::kVirtualRegistered));
+
+INSTANTIATE_TEST_SUITE_P(Executable, GpuNativeGlobalFileTest,
+                         ::testing::Values(FileBacking::kPhysicalHost));
 
 }  // namespace

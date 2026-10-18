@@ -32,6 +32,10 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   const iree_hal_amd_fabric_memory_options_t* memory;
   // Group-local placement guarantee established with the native memory policy.
   iree_hal_pool_placement_t placement;
+  // Borrowed device capacity notification, live through global buffer uses.
+  iree_async_notification_t* notification;
+  // Borrowed sealed-group completion tracker for pools backed by globals.
+  iree_async_frontier_tracker_t* frontier_tracker;
   // Device-owned shared report channel, or NULL when feedback is disabled.
   iree_hal_amd_gpu_feedback_t* feedback;
   // Optional shadow namespace used by code-object globals and data ranges.

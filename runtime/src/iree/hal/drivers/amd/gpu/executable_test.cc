@@ -491,6 +491,18 @@ TEST_P(ExecutableTest, GlobalsPreserveRelocationsPermissionsAndBorrowIdentity) {
   IREE_ASSERT_OK(iree_hal_executable_global_buffer(executable_, global, &same));
   EXPECT_EQ(same, value);
   EXPECT_EQ(iree_hal_buffer_byte_length(value), 4u);
+  const auto memory = iree_hal_buffer_memory_view(value);
+  const auto& layout = memory.contract->binding_layout;
+  EXPECT_EQ(layout.byte_length,
+            layout.binding_count * sizeof(iree_hal_buffer_native_binding_t) +
+                sizeof(iree_hal_amd_fabric_memory_binding_facts_t));
+  const auto* facts =
+      reinterpret_cast<const iree_hal_amd_fabric_memory_binding_facts_t*>(
+          memory.bindings + layout.binding_count);
+  EXPECT_EQ(facts->memory->handle, reinterpret_cast<amdf_memory_t*>(&native_));
+  EXPECT_EQ(facts->scope_access_ordinals[family_.memory.queue_scope_id], 0u);
+  EXPECT_EQ(facts->memory->contents.data + memory.offset,
+            native_.bytes.data() + value->memory.binding_offset);
   iree_hal_buffer_mapping_t mapping;
   IREE_ASSERT_OK(iree_hal_buffer_map_range(value, IREE_HAL_MAPPING_MODE_SCOPED,
                                            IREE_HAL_MEMORY_ACCESS_READ, 0, 0, 4,

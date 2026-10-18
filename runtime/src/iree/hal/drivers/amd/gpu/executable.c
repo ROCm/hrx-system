@@ -29,6 +29,8 @@ typedef struct iree_hal_amd_gpu_executable_variant_t {
   iree_hal_amd_fabric_asan_t* asan;
   // Host and exact-device addresses of image-relative byte zero.
   iree_hal_buffer_native_binding_t bindings[2];
+  // Fabric binding suffix copied with global views and nested pool bindings.
+  iree_hal_amd_fabric_memory_binding_facts_t binding_facts;
   // Captured native geometry shared by every global view.
   iree_hal_buffer_backing_facts_t backing;
   // Achieved host visibility and coherence of the backing.
@@ -38,6 +40,12 @@ typedef struct iree_hal_amd_gpu_executable_variant_t {
   // Inline prepared conversion program, or NULL when no function needs packets.
   iree_hal_amd_gpu_pm4_launch_t* packet_program;
 } iree_hal_amd_gpu_executable_variant_t;
+
+static_assert(
+    offsetof(iree_hal_amd_gpu_executable_variant_t, binding_facts) ==
+        offsetof(iree_hal_amd_gpu_executable_variant_t, bindings) +
+            sizeof(((iree_hal_amd_gpu_executable_variant_t*)0)->bindings),
+    "fabric source facts must immediately follow the native bindings");
 
 typedef struct iree_hal_amd_gpu_executable_t {
   // Exact-family HAL resource retained by captured dispatches.
@@ -396,7 +404,8 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
       IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
   };
   const iree_hal_buffer_binding_layout_t layout = {
-      .byte_length = sizeof(executable->variants[0].bindings),
+      .byte_length = sizeof(executable->variants[0].bindings) +
+                     sizeof(executable->variants[0].binding_facts),
       .binding_count = IREE_ARRAYSIZE(types),
       .host_binding_index = 0,
       .types = types,
@@ -575,6 +584,8 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
            ? IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL
            : 0);
   variant->backing = (iree_hal_buffer_backing_facts_t){
+      .notification = options->notification,
+      .tracker = options->frontier_tracker,
       .maintenance_range = variant->memory->maintenance_range,
       .host_cacheability = variant->memory->host_cacheability,
       .physical_backing_id =
@@ -734,7 +745,7 @@ iree_status_t iree_hal_amd_gpu_executable_create(
                                 &image, IREE_SV("iree_tsan_config")) != NULL;
   const uint32_t variant_count = tsan_enabled ? options->tsan_count : 1;
   iree_host_size_t exports_offset = 0, variants_offset = 0, memories_offset = 0,
-                   addresses_offset = 0;
+                   addresses_offset = 0, scope_ordinals_offset = 0;
   iree_host_size_t function_count = 0, total_packet_count = 0;
   iree_host_size_t packet_count = 0, packets_offset = 0, program_offset = 0;
   for (iree_host_size_t i = 0; i < image.metadata.kernel_count; ++i) {
@@ -755,6 +766,8 @@ iree_status_t iree_hal_amd_gpu_executable_create(
                           &variants_offset),
         IREE_STRUCT_FIELD(variant_count, iree_hal_amd_fabric_memory_t,
                           &memories_offset),
+        IREE_STRUCT_FIELD(family->memory.queue_scope_id + 2, uint32_t,
+                          &scope_ordinals_offset),
         IREE_STRUCT_FIELD(tsan_enabled ? variant_count : 0, uint64_t,
                           &addresses_offset),
         IREE_STRUCT_FIELD_ALIGNED(function_count,
@@ -800,6 +813,14 @@ iree_status_t iree_hal_amd_gpu_executable_create(
     for (uint32_t v = 0; v < variant_count; ++v) {
       iree_hal_amd_gpu_executable_variant_t* variant = &executable->variants[v];
       variant->memory = &executable->memories[v];
+      // Every admitted scope uses this image's sole native access at ordinal
+      // zero. The executable allocation initializes the shared table to zero.
+      variant->binding_facts = (iree_hal_amd_fabric_memory_binding_facts_t){
+          .memory = variant->memory,
+          .scope_access_ordinals =
+              (const uint32_t*)((const uint8_t*)executable +
+                                scope_ordinals_offset),
+      };
       variant->functions =
           (iree_hal_amd_gpu_pm4_function_t*)((uint8_t*)executable +
                                              functions_offset) +

@@ -12,6 +12,9 @@ __attribute__((device, const)) __SIZE_TYPE__ __ockl_get_num_groups(unsigned);
 __attribute__((device, const)) unsigned __ockl_get_work_dim();
 __attribute__((device, used, visibility("default"))) unsigned image_value = 19;
 __attribute__((device, used, visibility("default"))) unsigned image_zero[17];
+// Page-aligned global storage can back pools with independent cache granules.
+__attribute__((device, used, visibility("default"),
+               aligned(4096))) unsigned image_arena[2048];
 __attribute__((device, used, visibility("default"))) unsigned* image_pointer =
     &image_value;
 // Ordinary user storage has no runtime service semantics. Admission tests
