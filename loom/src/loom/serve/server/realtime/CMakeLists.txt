@@ -230,6 +230,7 @@ loom_cc_library(
     ::turn
     iree::base
     iree::base::internal::json
+    iree::base::internal::unicode
   PUBLIC
 )
 endif()

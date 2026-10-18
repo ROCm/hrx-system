@@ -41,21 +41,27 @@ typedef struct loom_serve_realtime_profile_t {
   iree_host_size_t input_capacity;
 } loom_serve_realtime_profile_t;
 
-typedef struct loom_serve_realtime_settings_t {
-  // Allocator owning independently mutable session settings.
-  iree_allocator_t host_allocator;
+// Generation policy shared by session defaults and independent response copies.
+typedef struct loom_serve_realtime_output_settings_t {
   // Text instructions, copied before response composition.
   iree_string_builder_t instructions;
   // Source voice selected independently of speech deployment identity.
   iree_string_builder_t voice;
-  // Optional recognition language selector.
-  iree_string_builder_t language;
-  // Optional recognition prompt, copied into each independent audio item.
-  iree_string_builder_t prompt;
   // Text-only versus audio output; generated audio also carries its transcript.
   bool audio;
   // Explicit maximum native output token count.
   uint32_t max_output_tokens;
+} loom_serve_realtime_output_settings_t;
+
+typedef struct loom_serve_realtime_settings_t {
+  // Allocator owning independently mutable session settings.
+  iree_allocator_t host_allocator;
+  // Defaults copied before each response applies its own overrides.
+  loom_serve_realtime_output_settings_t output;
+  // Optional recognition language selector.
+  iree_string_builder_t language;
+  // Optional recognition prompt, copied into each independent audio item.
+  iree_string_builder_t prompt;
   // Server activity detection is enabled; false selects explicit manual turns.
   bool detect_turns;
   // Continuous detector threshold, pre-roll, and silence policy.
@@ -66,6 +72,13 @@ typedef struct loom_serve_realtime_settings_t {
   bool interrupt_response;
 } loom_serve_realtime_settings_t;
 
+typedef struct loom_serve_realtime_response_settings_t {
+  // Owned immutable policy, independent of later session defaults.
+  loom_serve_realtime_output_settings_t output;
+  // Owned canonical JSON object; empty storage denotes null metadata.
+  iree_string_builder_t metadata;
+} loom_serve_realtime_response_settings_t;
+
 iree_status_t loom_serve_realtime_settings_initialize(
     const loom_serve_realtime_profile_t* profile,
     iree_allocator_t host_allocator, loom_serve_realtime_settings_t* settings);
@@ -75,16 +88,27 @@ void loom_serve_realtime_settings_deinitialize(
 // Transactionally applies the supported GA session settings.
 // Unknown fields and unsupported formats/turn policies reject explicitly. A
 // requested transcription model must match the selected assistant composition.
-// response restricts the object to per-response overrides of text policy and
-// output modality; session type and input/output audio settings are not
-// overrides. Optional out_instructions_changed reports whether committed text
+// Optional out_instructions_changed reports whether committed text
 // policy changed. Audio/voice/output-budget changes preserve compatible text
 // prefixes. input_open prevents changes to input policy until explicit
 // commit/clear; such changes cannot reinterpret already classified samples.
 iree_status_t loom_serve_realtime_settings_update(
     loom_serve_realtime_settings_t* settings,
     const loom_serve_realtime_profile_t* profile, iree_string_view_t object,
-    bool response, bool input_open, bool* out_instructions_changed);
+    bool input_open, bool* out_instructions_changed);
+
+// Copies defaults, then applies one response's output policy and metadata.
+// overrides is empty or a complete JSON object. Input policy and session type
+// are not response settings. Metadata has at most 16 distinct keys, 64 Unicode
+// codepoints per key, and string values of at most 512 codepoints. The result
+// owns every selected byte before the command receipt is released, and remains
+// deinitializable after failure. No model work or session mutation occurs.
+iree_status_t loom_serve_realtime_response_settings_initialize(
+    const loom_serve_realtime_settings_t* defaults,
+    iree_string_view_t overrides,
+    loom_serve_realtime_response_settings_t* settings);
+void loom_serve_realtime_response_settings_deinitialize(
+    loom_serve_realtime_response_settings_t* settings);
 
 // Appends the actual effective session settings, including turn policy.
 iree_status_t loom_serve_realtime_settings_write(
