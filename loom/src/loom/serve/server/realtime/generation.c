@@ -185,24 +185,12 @@ static iree_status_t loom_serve_realtime_generation_admit(
         &generation->text_request, &generation->text));
     *out_progress |= generation->text != NULL;
   }
-  if (generation->speaks && !generation->speech) {
-    if (!loom_serve_realtime_binding_present(generation->registry,
-                                             &generation->speech_binding)) {
-      return iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "speech registration has retired");
-    }
-    IREE_RETURN_IF_ERROR(loom_serve_registry_try_open_speech(
-        generation->registry, generation->speech_binding.name,
-        &generation->speech_request, &generation->speech));
-    *out_progress |= generation->speech != NULL;
-  }
   return iree_ok_status();
 }
 
 static iree_status_t loom_serve_realtime_generation_forward(
     loom_serve_realtime_generation_t* generation, bool* out_progress) {
-  if (!generation->text || (generation->speaks && !generation->speech) ||
-      generation->text_length) {
+  if (!generation->text || generation->text_length) {
     return iree_ok_status();
   }
   const loom_serve_text_stream_block_t* block =
@@ -217,6 +205,22 @@ static iree_status_t loom_serve_realtime_generation_forward(
         count = iree_min(count, (iree_host_size_t)8192);
       }
       if (content && count && generation->speaks) {
+        // Hidden output and empty completions need no speech invocation. Hold
+        // this content span at its native frontier until speech admits it.
+        if (!generation->speech) {
+          if (!loom_serve_realtime_binding_present(
+                  generation->registry, &generation->speech_binding)) {
+            return iree_make_status(IREE_STATUS_NOT_FOUND,
+                                    "speech registration has retired");
+          }
+          IREE_RETURN_IF_ERROR(loom_serve_registry_try_open_speech(
+              generation->registry, generation->speech_binding.name,
+              &generation->speech_request, &generation->speech));
+          if (!generation->speech) {
+            return iree_ok_status();
+          }
+          *out_progress = true;
+        }
         IREE_RETURN_IF_ERROR(loom_serve_speech_stream_write(
             generation->speech,
             iree_make_const_byte_span(span.text.data + generation->byte_offset,
