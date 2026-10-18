@@ -143,16 +143,20 @@ typedef enum loom_serve_residency_admission_e {
 // capacity denial starts a FIFO; subsequent weighted admissions join it, even
 // for an already-active model. Accepted work uses acquire/try_acquire directly
 // so nested execution pins never wait behind the work they must unblock.
-// Parameter-free groups bypass weight pressure. Success removes the interest;
-// abandoning a denied/deferred request requires cancel_admission. All calls
-// share the cache's serialized owner. No callback or task waits are installed.
+// Parameter-free groups bypass weight pressure. Acquiring parameters preserves
+// an existing interest: model-owned state may still need capacity. The caller
+// withdraws it with cancel_admission only after the complete request/cohort is
+// admitted or abandoned. All calls share the cache's serialized owner. No
+// callback or task waits are installed.
 iree_status_t loom_serve_residency_try_admit(
     loom_serve_residency_t* residency,
     loom_serve_residency_admission_t* out_admission);
 
 // Withdraws this model's pending admission, without changing any owned pin or
 // queued device work. Idempotent; called on the owner when its prepared request
-// is cancelled/rejected. A later request joins behind surviving interests.
+// is fully admitted, cancelled, or rejected. A later request joins behind
+// surviving interests. Parameter readiness alone does not end a turn still
+// waiting for mutable-state capacity.
 void loom_serve_residency_cancel_admission(loom_serve_residency_t* residency);
 
 // Invocation admission: capacity denial is an execution error. Like
@@ -219,7 +223,8 @@ typedef struct loom_serve_residency_snapshot_t {
   bool elastic;
   // Accepted-consumer and explicit-retention pins, excluding persistent policy.
   iree_host_size_t pin_count;
-  // New-work FIFO waits, not request queue latency or activation I/O duration.
+  // New-work FIFO turns, including state retries after parameter acquisition;
+  // not total request queue latency or execution duration.
   struct {
     // One new-work interest is waiting for parameter admission.
     bool waiting;

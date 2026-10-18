@@ -1053,6 +1053,7 @@ iree_status_t loom_serve_finite_model_submit(
     loom_serve_execution_frontier_t* out_frontier) {
   *out_result = NULL;
   *out_frontier = (loom_serve_execution_frontier_t){0};
+  loom_serve_residency_cancel_admission(model->residency);
   iree_const_byte_span_t input;
   IREE_RETURN_IF_ERROR(iree_vm_buffer_map_read(
       model->invocation.payload, 0,

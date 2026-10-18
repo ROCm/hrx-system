@@ -55,9 +55,11 @@ Each prepared component in `loom.parameters` reports accepted-consumer `pins` an
 `admission` snapshot: `waiting`, `count`, `duration_seconds`, and `age_seconds`.
 The snapshot describes the component's single outstanding interest in shared
 parameter admission. A wait can reflect physical backing pressure, an older
-waiting model, or asynchronous reclamation that must retire first. It is not
-one observation per request, and it ends before admitted parameter I/O and
-execution complete.
+waiting model, or asynchronous reclamation that must retire first. A waiting
+model keeps its turn until its request or cohort is fully admitted or cancelled:
+parameter acquisition alone does not end a turn still waiting for mutable-state
+backing. The interval can therefore include activation I/O while a text or audio
+row waits for state. It is not one observation per request or execution latency.
 
 The corresponding Prometheus series have a `component` label (`primary` or
 `image`) in addition to the model identity:

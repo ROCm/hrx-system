@@ -1275,7 +1275,9 @@ static bool loom_serve_recognition_generator_complete_admit(
   loom_serve_recognition_model_t* model = self;
   loom_serve_recognition_invocation_t* invocation = opaque_invocation;
   loom_serve_rows_complete_backing(&model->state);
-  if (!invocation->reserved) {
+  if (invocation->reserved) {
+    loom_serve_residency_cancel_admission(model->residency);
+  } else {
     loom_serve_residency_release(model->residency);
   }
   return invocation->reserved;

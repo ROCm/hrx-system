@@ -1061,6 +1061,7 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
   loom_serve_activation_free(activation);
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_residency_cancel_admission(residencies_[0]);
   loom_serve_residency_release(residencies_[0]);
   loom_serve_residency_release(residencies_[0]);
   // A new operation can now reclaim the unpinned peer and finish normally.
@@ -1257,6 +1258,7 @@ TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   loom_serve_residency_release(residencies_[0]);
   ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(1));
+  loom_serve_residency_cancel_admission(residencies_[1]);
   const auto admitted = loom_serve_residency_snapshot(residencies_[1]);
   EXPECT_FALSE(admitted.admission.waiting);
   EXPECT_EQ(admitted.admission.count, 2u);
@@ -1269,12 +1271,88 @@ TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
   EXPECT_EQ(loom_serve_residency_snapshot(residencies_[0]).admission.count, 2u);
   loom_serve_residency_release(residencies_[1]);
   ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(0));
+  loom_serve_residency_cancel_admission(residencies_[0]);
   ASSERT_NO_FATAL_FAILURE(Run(0, 90));
   loom_serve_residency_release(residencies_[0]);
   EXPECT_EQ(loom_serve_residency_snapshot(residencies_[0]).pin_count, 0u);
   EXPECT_EQ(
       loom_serve_residency_snapshot(residencies_[1]).admission.duration_ns,
       admitted.admission.duration_ns);
+}
+
+TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
+  if (!GetParam()) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+  }
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool_, 2 * kSlabBytes, 256, &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+  loom_serve_residency_release(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(1));
+  IREE_ASSERT_OK(loom_serve_residency_await(residencies_[1]));
+
+  // Parameters fit, but a retired mutable-state slab still consumes physical
+  // capacity until its native return. The new row needs a different slab.
+  const loom_serve_memory_range_t next = {state_, kSlabBytes, kSlabBytes};
+  bool admitted = false;
+  {
+    loom_serve::testing::ScopedNativeHold gate(device_owner_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
+    loom_serve_virtual_buffer_begin_trim(state_);
+    loom_serve_memory_operation_t* operation = nullptr;
+    IREE_ASSERT_OK(loom_serve_memory_pool_trim_async(pool_, 1, &state_, nullptr,
+                                                     0, &operation));
+    gate.WaitEntered();
+    loom_serve_memory_operation_await(operation);
+    IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
+    loom_serve_memory_operation_free(operation);
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).releasing_bytes,
+              kSlabBytes);
+    IREE_ASSERT_OK(
+        loom_serve_memory_pool_try_commit(pool_, 1, &next, &admitted));
+    EXPECT_FALSE(admitted);
+    // No row was admitted, and activation has retired. Releasing that pin
+    // must not surrender this request's turn to the younger parameter waiter.
+    loom_serve_residency_release(residencies_[1]);
+    EXPECT_TRUE(
+        loom_serve_residency_snapshot(residencies_[1]).admission.waiting);
+    IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+    EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+    EXPECT_TRUE(loom_serve_residency_snapshot(residencies_[1]).active);
+    EXPECT_EQ(loom_serve_weights_activity(plans_[1]).deactivations, 0u);
+  }
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool_, 1, &next, &admitted));
+  ASSERT_TRUE(admitted);
+  loom_serve_residency_cancel_admission(residencies_[1]);
+  const auto completed = loom_serve_residency_snapshot(residencies_[1]);
+  EXPECT_FALSE(completed.admission.waiting);
+  EXPECT_EQ(completed.admission.count, 1u);
+  EXPECT_EQ(completed.pin_count, 1u);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[1]).activations, 1u);
+  ASSERT_NO_FATAL_FAILURE(Run(1, 70));
+  loom_serve_residency_release(residencies_[1]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(0));
+  loom_serve_residency_cancel_admission(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  loom_serve_residency_release(residencies_[0]);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).peak_bytes,
+            2 * kSlabBytes);
 }
 
 TEST_P(WeightsTest, NewAdmissionsCoexistWithoutPhysicalPressure) {

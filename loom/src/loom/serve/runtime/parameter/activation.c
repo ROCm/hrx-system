@@ -100,6 +100,7 @@ iree_status_t loom_serve_activation_advance(
     status = loom_serve_residency_try_admit(activation->residency, &admission);
     if (iree_status_is_ok(status) &&
         admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+      loom_serve_residency_cancel_admission(activation->residency);
       activation->frontier =
           loom_serve_residency_frontier(activation->residency);
       iree_async_semaphore_wait_operation_t* wait = &activation->wait;

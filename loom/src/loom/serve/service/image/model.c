@@ -1228,8 +1228,13 @@ iree_status_t loom_serve_image_model_generate(
 
 static iree_status_t loom_serve_image_generator_admit(
     void* self, loom_serve_residency_admission_t* out_admission) {
-  return loom_serve_residency_try_admit(loom_serve_image_model_residency(self),
-                                        out_admission);
+  loom_serve_residency_t* residency = loom_serve_image_model_residency(self);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_residency_try_admit(residency, out_admission));
+  if (*out_admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+    loom_serve_residency_cancel_admission(residency);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_image_generator_prepare(
