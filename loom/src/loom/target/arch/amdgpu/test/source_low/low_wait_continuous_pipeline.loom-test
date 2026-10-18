@@ -148,9 +148,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @continuous_lds_gfx1100(%address
   s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_2) | instid1(VALU_DEP_1)
   v_add_u32 v0, v0, v5
   ds_read_b32 v5, v1 offset:12
-  s_waitcnt vmcnt(63) lgkmcnt(3)
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   v_add_u32 v0, v0, v6
-  s_waitcnt vmcnt(63) lgkmcnt(2)
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v7
   s_cbranch_scc0 .Lbb3

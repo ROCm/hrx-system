@@ -24,6 +24,120 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @tuple_slice_waits(%address: r
 
 // ====
 
+// A second ordered dependency wait can complete the outstanding prefix that
+// survived the first wait while preserving the one younger load issued since.
+// The middle results then need no individual waits.
+// RUN: emit amdgpu-assembly @ordered_lds_prefix_gfx1151 strategy=source
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @ordered_lds_prefix_gfx1151(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %a = ds_read_b32 %address
+  %b = ds_read_b32 %address {offset = 4}
+  %c = ds_read_b32 %address {offset = 8}
+  %d = ds_read_b32 %address {offset = 12}
+  %e = ds_read_b32 %address {offset = 16}
+  %sum_a = v_add_u32 %input, %a
+  %f = ds_read_b32 %address {offset = 20}
+  %sum_b = v_add_u32 %sum_a, %b
+  %sum_c = v_add_u32 %sum_b, %c
+  %sum_d = v_add_u32 %sum_c, %d
+  %sum_e = v_add_u32 %sum_d, %e
+  %sum_f = v_add_u32 %sum_e, %f
+  return %sum_f
+}
+
+// ----
+  ds_read_b32 v2, v1 offset:0
+  ds_read_b32 v3, v1 offset:4
+  ds_read_b32 v4, v1 offset:8
+  ds_read_b32 v5, v1 offset:12
+  ds_read_b32 v6, v1 offset:16
+  s_waitcnt vmcnt(63) lgkmcnt(4)
+  v_add_u32 v0, v0, v2
+  ds_read_b32 v1, v1 offset:20
+  s_waitcnt vmcnt(63) lgkmcnt(1)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v0, v3
+  v_add_u32 v0, v0, v4
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v0, v5
+  v_add_u32 v0, v0, v6
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v1
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @ordered_lds_prefix_gfx1201 strategy=source
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @ordered_lds_prefix_gfx1201(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %a = ds_read_b32 %address
+  %b = ds_read_b32 %address {offset = 4}
+  %c = ds_read_b32 %address {offset = 8}
+  %d = ds_read_b32 %address {offset = 12}
+  %e = ds_read_b32 %address {offset = 16}
+  %sum_a = v_add_u32 %input, %a
+  %f = ds_read_b32 %address {offset = 20}
+  %sum_b = v_add_u32 %sum_a, %b
+  %sum_c = v_add_u32 %sum_b, %c
+  %sum_d = v_add_u32 %sum_c, %d
+  %sum_e = v_add_u32 %sum_d, %e
+  %sum_f = v_add_u32 %sum_e, %f
+  return %sum_f
+}
+
+// ----
+  ds_read_b32 v2, v1 offset:0
+  ds_read_b32 v3, v1 offset:4
+  ds_read_b32 v4, v1 offset:8
+  ds_read_b32 v5, v1 offset:12
+  ds_read_b32 v6, v1 offset:16
+  s_wait_dscnt dscnt(4)
+  v_add_u32 v0, v0, v2
+  ds_read_b32 v1, v1 offset:20
+  s_wait_dscnt dscnt(1)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v0, v3
+  v_add_u32 v0, v0, v4
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v0, v5
+  v_add_u32 v0, v0, v6
+  s_wait_dscnt dscnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v1
+  s_endpgm
+
+// ====
+
+// Without a younger LDS request, strengthening the second bound would only
+// stall the unused tail earlier. Keep both dependencies exact.
+// RUN: emit amdgpu-assembly @ordered_lds_without_younger_suffix strategy=source fixed=%unused:physical_register:10:1
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @ordered_lds_without_younger_suffix(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %a = ds_read_b32 %address
+  %b = ds_read_b32 %address {offset = 4}
+  %unused = ds_read_b32 %address {offset = 8}
+  %sum_a = v_add_u32 %input, %a
+  %sum_b = v_add_u32 %sum_a, %b
+  return %sum_b
+}
+
+// ----
+  ds_read_b32 v2, v0 offset:0
+  ds_read_b32 v3, v0 offset:4
+  ds_read_b32 v10, v0 offset:8
+  s_wait_dscnt dscnt(2)
+  v_add_u32 v0, v1, v2
+  s_wait_dscnt dscnt(1)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v3
+  s_endpgm
+
+// ====
+
 // An intervening ALU instruction separates completion boundaries, preserving
 // the partial wait before the first use and the full wait before the second.
 // RUN: emit amdgpu-assembly @alu_separates_slice_waits strategy=source
