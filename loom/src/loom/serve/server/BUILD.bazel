@@ -190,6 +190,7 @@ loom_cc_library(
     hdrs = ["registry.h"],
     deps = [
         ":configuration",
+        "//loom/src/loom/serve/runtime/host:clock",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/runtime/parameter:activation",
         "//loom/src/loom/serve/runtime/parameter:residency",

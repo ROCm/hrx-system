@@ -28,7 +28,7 @@ class ChatResponseTest : public ::testing::Test {
   loom_serve_text_chat_response_t response_ = {
       .model_name = IREE_SV("local-λ"),
       .request_id = 7,
-      .creation_time = 12000000034,
+      .created_unix_seconds = 12,
       .usage = {.input_tokens = 120, .cached_tokens = 100, .output_tokens = 4},
   };
   // Owned output from the production JSON/SSE encoder.
@@ -94,6 +94,24 @@ TEST_F(ChatResponseTest, StreamingWithoutUsageOmitsTheField) {
       "data: "
       R"({"id":"loom-7","object":"chat.completion.chunk","created":12,"model":"local-λ","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null,"logprobs":null}]})"
       "\n\n");
+}
+
+TEST_F(ChatResponseTest, UnixSecondsAreNotScaledOrNarrowed) {
+  for (int64_t timestamp :
+       {INT64_C(0), INT64_C(2147483648), INT64_C(4294967297)}) {
+    SCOPED_TRACE(timestamp);
+    response_.created_unix_seconds = timestamp;
+    iree_string_builder_reset(&output_);
+    IREE_ASSERT_OK(loom_serve_text_chat_event(&response_, IREE_SV("{}"),
+                                              IREE_SV("stop"), &output_));
+    EXPECT_EQ(
+        Output(),
+        "data: "
+        R"({"id":"loom-7","object":"chat.completion.chunk","created":)" +
+            std::to_string(timestamp) +
+            R"(,"model":"local-λ","choices":[{"index":0,"delta":{},"finish_reason":"stop","logprobs":null}]})"
+            "\n\n");
+  }
 }
 
 }  // namespace

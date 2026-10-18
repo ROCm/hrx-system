@@ -17,6 +17,22 @@
 
 namespace {
 
+TEST(RegistryTimeTest, BorrowedServicesShareRegistrationTimestamp) {
+  const loom_serve_http_service_t services[] = {{.name = IREE_SV("first")},
+                                                {.name = IREE_SV("second")}};
+  loom_serve_registry_t* registry = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_registry_allocate(IREE_ARRAYSIZE(services), services, 0, {},
+                                   iree_allocator_system(), &registry));
+  const int64_t registered =
+      loom_serve_registry_at(registry, 0)->registered_unix_seconds;
+  for (size_t i = 0; i < IREE_ARRAYSIZE(services); ++i) {
+    const auto* model = loom_serve_registry_at(registry, i);
+    EXPECT_EQ(model->registered_unix_seconds, registered);
+  }
+  IREE_EXPECT_OK(loom_serve_registry_free(registry));
+}
+
 class RegistryTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
@@ -91,6 +107,7 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
   EXPECT_EQ(configuration_.name.data, nullptr);
   EXPECT_EQ(configuration_.sources.values, nullptr);
   const auto* model = loom_serve_registry_at(registry_, index);
+  const int64_t registered = model->registered_unix_seconds;
   EXPECT_EQ(model->phase, LOOM_SERVE_REGISTRATION_DECLARED);
   EXPECT_TRUE(model->closed);
   EXPECT_EQ(String(model->service.name), "vectors");
@@ -109,6 +126,7 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
   bool progress = true;
   IREE_ASSERT_OK(loom_serve_registry_advance(registry_, index, {}, &progress));
   EXPECT_FALSE(progress);
+  EXPECT_EQ(model->registered_unix_seconds, registered);
   IREE_ASSERT_OK(loom_serve_registry_remove(
       loom_serve_registry_at(registry_, index), LOOM_SERVE_REMOVAL_DRAIN));
   IREE_ASSERT_OK(loom_serve_registry_advance(registry_, index, {}, &progress));

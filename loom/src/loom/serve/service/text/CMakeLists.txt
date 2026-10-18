@@ -581,6 +581,7 @@ loom_cc_library(
     ::model
     iree::base
     iree::tokenizer
+    loom::serve::runtime::host::clock
     loom::serve::service::inspection
     loom::serve::telemetry::record
     loom::serve::transport::http::server

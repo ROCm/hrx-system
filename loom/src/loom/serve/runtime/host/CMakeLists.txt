@@ -12,6 +12,20 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    clock
+  HDRS
+    "clock.h"
+  SRCS
+    "clock.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     host
   HDRS
     "host.h"

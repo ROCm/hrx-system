@@ -6,6 +6,7 @@
 
 #include "loom/serve/server/registry.h"
 
+#include "loom/serve/runtime/host/clock.h"
 #include "loom/serve/runtime/host/wake.h"
 
 struct loom_serve_registry_t {
@@ -85,10 +86,11 @@ iree_status_t loom_serve_registry_allocate(
                                          (void**)&registry->models);
   }
   if (iree_status_is_ok(status)) {
+    const int64_t registered_unix_seconds = loom_serve_clock_now_unix_seconds();
     for (iree_host_size_t i = 0; i < service_count; ++i) {
       registry->models[i].service = services[i];
       registry->models[i].phase = LOOM_SERVE_REGISTRATION_READY;
-      registry->models[i].registration_time = iree_time_now();
+      registry->models[i].registered_unix_seconds = registered_unix_seconds;
     }
     *out_registry = registry;
   } else {
@@ -180,7 +182,7 @@ iree_status_t loom_serve_registry_register(
   memset(configuration, 0, sizeof(*configuration));
   model->closed = model->configuration.start_drained;
   model->incarnation = registry->next_incarnation++;
-  model->registration_time = iree_time_now();
+  model->registered_unix_seconds = loom_serve_clock_now_unix_seconds();
   model->service.name = model->configuration.name;
   // Protocol metadata is known before source preparation, without model access.
   switch (model->configuration.kind) {

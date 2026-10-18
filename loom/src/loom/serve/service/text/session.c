@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/serve/runtime/host/clock.h"
 #include "loom/util/json.h"
 
 bool loom_serve_text_session_name_valid(iree_string_view_t name) {
@@ -124,7 +125,7 @@ static loom_serve_text_chat_response_t loom_serve_text_response_metadata(
   return (loom_serve_text_chat_response_t){
       .model_name = model_name,
       .request_id = session->lifetime.serial,
-      .creation_time = session->request.start_time,
+      .created_unix_seconds = session->request.created_unix_seconds,
       .flags = session->request.chat.flags,
       .usage = {.input_tokens = session->request.retained_count +
                                 session->request.input_count,
@@ -135,6 +136,7 @@ static loom_serve_text_chat_response_t loom_serve_text_response_metadata(
 iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
                                             const iree_tokenizer_t* tokenizer,
                                             iree_string_view_t model_name) {
+  session->request.created_unix_seconds = loom_serve_clock_now_unix_seconds();
   iree_string_builder_reset(&session->response);
   loom_serve_text_chat_completion_deinitialize(&session->completion);
   IREE_RETURN_IF_ERROR(iree_tokenizer_decode_state_initialize(

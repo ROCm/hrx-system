@@ -1806,7 +1806,7 @@ static iree_status_t loom_serve_text_chat_response_begin(
       output,
       "{\"id\":\"loom-%" PRIu64 "\",\"object\":\"%s\",\"created\":%" PRId64
       ",\"model\":",
-      response->request_id, object, response->creation_time / 1000000000));
+      response->request_id, object, response->created_unix_seconds));
   return loom_serve_text_chat_quote(output, response->model_name);
 }
 

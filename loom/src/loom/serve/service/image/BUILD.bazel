@@ -94,6 +94,7 @@ loom_cc_library(
         ":telemetry",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/host:clock",
         "//loom/src/loom/serve/runtime/host:timer",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/runtime/parameter:telemetry",

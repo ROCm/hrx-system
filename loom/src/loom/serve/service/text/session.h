@@ -97,8 +97,10 @@ typedef struct loom_serve_text_session_t {
     // Terminal wire literal: stop, length, tool_calls, or error. NULL until
     // translation establishes a terminal response.
     const char* finish_reason;
-    // Application admission time; network framing is not included.
+    // Monotonic application admission time; network framing is not included.
     iree_time_t start_time;
+    // Wall-clock Unix seconds at response creation, fixed across every chunk.
+    int64_t created_unix_seconds;
     // Time spent awaiting row and completion capacity before admission.
     iree_duration_t queue_duration;
     // Page-rounded maximum extent; admission charges only remaining growth.

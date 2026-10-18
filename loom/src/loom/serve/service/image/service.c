@@ -12,6 +12,7 @@
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/host/clock.h"
 #include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/parameter/telemetry.h"
@@ -291,7 +292,7 @@ static iree_status_t loom_serve_image_result_json(iree_string_builder_t* output,
   IREE_RETURN_IF_ERROR(loom_serve_image_response_begin(output, "200 OK"));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "{\"created\":%" PRId64 ",\"data\":[{\"b64_json\":\"",
-      iree_time_now() / INT64_C(1000000000)));
+      loom_serve_clock_now_unix_seconds()));
   const iree_host_size_t encoded_size =
       iree_base64_encoded_size(png.data_length);
   char* encoded = NULL;

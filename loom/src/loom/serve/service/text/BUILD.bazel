@@ -504,6 +504,7 @@ loom_cc_library(
         ":chat",
         ":media_projector",
         ":model",
+        "//loom/src/loom/serve/runtime/host:clock",
         "//loom/src/loom/serve/service:inspection",
         "//loom/src/loom/serve/telemetry:record",
         "//loom/src/loom/serve/transport/http:server",

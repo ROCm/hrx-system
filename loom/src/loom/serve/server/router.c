@@ -595,7 +595,7 @@ static iree_status_t loom_serve_router_describe_service(
   IREE_RETURN_IF_ERROR(loom_serve_router_quote(output, service->name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, ",\"created\":%" PRId64 ",\"owned_by\":\"local\"",
-      admission->registration_time / 1000000000));
+      admission->registered_unix_seconds));
   IREE_RETURN_IF_ERROR(loom_serve_router_describe_modalities(
       "input_modalities", service->capabilities.input_modalities, output));
   IREE_RETURN_IF_ERROR(loom_serve_router_describe_modalities(

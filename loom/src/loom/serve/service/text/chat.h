@@ -340,8 +340,8 @@ typedef struct loom_serve_text_chat_response_t {
   iree_string_view_t model_name;
   // Server-assigned request identity shared by every chunk and tool call.
   uint64_t request_id;
-  // Wall-clock admission time in nanoseconds; the wire uses whole seconds.
-  iree_time_t creation_time;
+  // Wall-clock Unix seconds at response creation, shared by all chunks.
+  int64_t created_unix_seconds;
   // Validated request output options.
   loom_serve_text_chat_flags_t flags;
   // Complete client transcript accounting, independent of output format.

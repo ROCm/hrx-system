@@ -127,6 +127,7 @@ loom_cc_library(
     iree::task
     loom::serve::runtime::execution
     loom::serve::runtime::host
+    loom::serve::runtime::host::clock
     loom::serve::runtime::host::timer
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::telemetry

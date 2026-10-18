@@ -211,6 +211,7 @@ loom_cc_library(
   DEPS
     ::configuration
     iree::base
+    loom::serve::runtime::host::clock
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::activation
     loom::serve::runtime::parameter::residency
