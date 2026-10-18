@@ -83,6 +83,12 @@ base64-decode each `response.output_audio.delta` into a continuous playback queu
 `response.done` describes generation completion, not how much the listener heard.
 An output-token cutoff reports `incomplete` with reason `max_output_tokens`.
 
+`response.created` reserves the reply's position in the conversation. A microphone
+utterance committed afterward belongs to the next turn, even while the reply
+waits for earlier transcription. Output-item events begin when the reply has
+content. Empty completions, failures before content, and cancellations before
+content report an empty `output` array without adding an assistant message.
+
 A text or speech request failure reports `response.done` with status `failed`
 and the original diagnostic in `status_details.error`. Microphone capture and
 the connection remain available. Correct the request settings or conversation
