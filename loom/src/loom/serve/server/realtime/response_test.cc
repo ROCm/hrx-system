@@ -10,8 +10,11 @@
 #include <unistd.h>
 
 #include <array>
+#include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
@@ -22,6 +25,7 @@
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/realtime/item.h"
 #include "loom/serve/testing/service_application.h"
+#include "loom/serve/testing/worker_gate.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/websocket/handshake.h"
 
@@ -191,6 +195,7 @@ class RealtimeResponseTest : public ::testing::TestWithParam<int> {
   void TearDown() override {
     if (responses_) {
       closing_ = true;
+      advance_responses_ = true;
       loom_serve_realtime_responses_stop(responses_);
       loom_serve_realtime_history_invalidate(&history_, 0);
       loom_serve_realtime_wire_clear(&wire_);
@@ -288,7 +293,7 @@ class RealtimeResponseTest : public ::testing::TestWithParam<int> {
     while (iree_status_is_ok(status) && !done()) {
       auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      if (responses_) {
+      if (responses_ && advance_responses_) {
         status = loom_serve_realtime_responses_advance(responses_, closing_,
                                                        UINT64_MAX, &progress);
         if (iree_status_is_ok(status)) {
@@ -356,6 +361,8 @@ class RealtimeResponseTest : public ::testing::TestWithParam<int> {
   loom_serve_realtime_responses_t* responses_ = nullptr;
   // Teardown withdraws accepted native and CPU work before freeing storage.
   bool closing_ = false;
+  // Pauses response turns while native services publish a retained waveform.
+  bool advance_responses_ = true;
 };
 
 TEST_P(RealtimeResponseTest, CancellationPreservesOnlyExecutableCalls) {
@@ -421,6 +428,64 @@ TEST_P(RealtimeResponseTest, CancellationPreservesOnlyExecutableCalls) {
   EXPECT_EQ(Field(Field(Field(response, "usage"), "input_token_details"),
                   "cached_tokens"),
             "0");
+}
+
+TEST_F(RealtimeResponseTest, ReplacementAdmitsWhileCancelledAudioRetires) {
+  loom_serve_realtime_conversation_remove(&conversation_,
+                                          conversation_.first->first);
+  IREE_ASSERT_OK(Insert(IREE_SV(
+      R"({"type":"message","role":"user","content":[{"type":"input_text","text":"abxa"}]})")));
+  IREE_ASSERT_OK(loom_serve_realtime_responses_create(
+      responses_, IREE_SV(R"({"tools":[],"tool_choice":"none"})")));
+  EXPECT_EQ(Field(NextEvent(), "type"), "response.created");
+  // A message is announced only after content reaches the speech input. Drain
+  // its opening events to restore transport credit, then leave response turns
+  // paused until the native speech service publishes the retained waveform.
+  EXPECT_EQ(Field(NextEvent(), "type"), "conversation.item.added");
+  advance_responses_ = false;
+  EXPECT_EQ(Field(NextEvent(), "type"), "response.output_item.added");
+  EXPECT_EQ(Field(NextEvent(), "type"), "response.content_part.added");
+  IREE_ASSERT_OK(Until([&] {
+    const auto& speech = loom_serve_registry_at(registry_, 1)->service;
+    return std::strcmp(speech.snapshot(speech.self).phase, "delivering") == 0 &&
+           loom_serve_realtime_wire_can_publish(&wire_);
+  }));
+  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  for (int32_t i = 0; i < FLAG_test_workers; ++i) {
+    gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
+        loom_serve_host_executor(host_)));
+  }
+  bool progress = false;
+  IREE_ASSERT_OK(loom_serve_realtime_responses_advance(responses_, false,
+                                                       UINT64_MAX, &progress));
+  IREE_ASSERT_OK(loom_serve_realtime_responses_cancel(
+      responses_, iree_string_view_empty()));
+  const auto& text = loom_serve_registry_at(registry_, 0)->service;
+  EXPECT_EQ(text.snapshot(text.self).queued_requests, 0u);
+  IREE_ASSERT_OK(loom_serve_realtime_responses_create(
+      responses_,
+      IREE_SV(R"({"output_modalities":["text"],"tool_choice":"none"})")));
+  IREE_ASSERT_OK(loom_serve_realtime_responses_advance(responses_, false,
+                                                       UINT64_MAX, &progress));
+  EXPECT_EQ(text.snapshot(text.self).queued_requests, 1u);
+  gates.clear();
+  advance_responses_ = true;
+  int completed = 0, cancelled = 0;
+  while (completed + cancelled < 2) {
+    const std::string event = NextEvent();
+    if (Field(event, "type") != "response.done") {
+      continue;
+    }
+    const auto status = Field(Field(event, "response"), "status");
+    if (status == "cancelled") {
+      ++cancelled;
+    } else {
+      EXPECT_TRUE(status == "completed" || status == "incomplete") << event;
+      ++completed;
+    }
+  }
+  EXPECT_EQ(completed, 1);
+  EXPECT_EQ(cancelled, 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(PublicationBoundary, RealtimeResponseTest,
