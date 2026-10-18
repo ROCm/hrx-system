@@ -609,6 +609,50 @@ TEST_F(SourceRecognitionStreamTest, ClosedCallerRetainsAcceptedInputBorrow) {
 }
 
 TEST_F(SourceRecognitionStreamTest,
+       ActivityTracksIndependentSpeechAndSilenceTransitions) {
+  loom_serve_recognition_stream_t* first = nullptr;
+  loom_serve_recognition_stream_t* second = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&first, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  ASSERT_NO_FATAL_FAILURE(
+      Open(&second, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  const float samples[] = {0.25f, 0.0f, 0.5f, 0.0f};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(samples); ++i) {
+    const float first_sample = samples[i];
+    const float second_sample = samples[IREE_ARRAYSIZE(samples) - 1 - i];
+    ASSERT_NO_FATAL_FAILURE(
+        Write(first, {first_sample, first_sample, first_sample}, 3));
+    ASSERT_NO_FATAL_FAILURE(
+        Write(second, {second_sample, second_sample, second_sample}, 3));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+      return loom_serve_recognition_stream_peek(first) &&
+             loom_serve_recognition_stream_peek(second);
+    }));
+    const loom_serve_recognition_stream_t* streams[] = {first, second};
+    const float expected[] = {first_sample ? 0.75f : 0.0f,
+                              second_sample ? 0.75f : 0.0f};
+    for (size_t row = 0; row < IREE_ARRAYSIZE(streams); ++row) {
+      const auto* event = loom_serve_recognition_stream_peek(streams[row]);
+      ASSERT_EQ(event->kind, LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY);
+      EXPECT_EQ(event->activity.begin, i * 3);
+      EXPECT_EQ(event->activity.end, (i + 1) * 3);
+      EXPECT_EQ(event->activity.speech_probability, expected[row]);
+    }
+    loom_serve_recognition_stream_consume(first);
+    loom_serve_recognition_stream_consume(second);
+  }
+  loom_serve_recognition_stream_finish(first);
+  loom_serve_recognition_stream_finish(second);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_recognition_stream_is_complete(first) &&
+           loom_serve_recognition_stream_is_complete(second);
+  }));
+  EXPECT_EQ(loom_serve_recognition_stream_peek(first), nullptr);
+  EXPECT_EQ(loom_serve_recognition_stream_peek(second), nullptr);
+  IREE_ASSERT_OK(loom_serve_recognition_stream_status(first));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_status(second));
+}
+
+TEST_F(SourceRecognitionStreamTest,
        HeldPacketRetainsEachRevisionWhilePeerRuns) {
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
