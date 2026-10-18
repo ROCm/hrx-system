@@ -10,7 +10,6 @@
 #include "iree/task/executor.h"
 #include "loom/serve/server/realtime/binding.h"
 #include "loom/serve/service/recognition/request.h"
-#include "loom/serve/transport/websocket/connection.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,12 +21,11 @@ typedef struct loom_serve_realtime_input_item_t
 
 // Owns independent microphone items and one finite conversion worker. The
 // registry owner serializes every call; worker publication owes observer a
-// wake. The HTTP claim keeps socket alive until input has no remaining items.
+// wake. PCM owners remain alive through their final release callback.
 iree_status_t loom_serve_realtime_input_allocate(
     iree_task_executor_t* executor, loom_serve_registry_t* registry,
-    loom_serve_realtime_binding_t binding, loom_serve_websocket_t* socket,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
-    loom_serve_realtime_input_t** out_input);
+    loom_serve_realtime_binding_t binding, loom_serve_wake_callback_t observer,
+    iree_allocator_t host_allocator, loom_serve_realtime_input_t** out_input);
 
 // Allocates one item's independent conversion history. At most four items may
 // remain live, including cancelled items with accepted CPU borrowers. Source
@@ -37,21 +35,20 @@ iree_status_t loom_serve_realtime_input_begin(
     const loom_serve_recognition_request_t* request,
     loom_serve_realtime_input_item_t** out_item);
 
-// Success transfers a WebSocket receipt and its escaped JSON audio view. The
-// finite worker validates/unescapes base64 and PCM16, then converts 24 kHz mono
-// into source geometry. Input storage remains charged to the transport until
-// its last borrower retires. Failure leaves the receipt with the caller.
+// Success borrows validated, nonempty PCM16LE mono at 24 kHz until release is
+// invoked exactly once on the serialized owner. The caller keeps samples and
+// release data alive through that callback, including after close. Failure
+// borrows nothing. Appends target an open item and preserve converter history.
 iree_status_t loom_serve_realtime_input_append(
     loom_serve_realtime_input_t* input, loom_serve_realtime_input_item_t* item,
-    loom_serve_websocket_message_t* message, iree_string_view_t audio);
+    iree_const_byte_span_t samples, void (*release)(void*), void* user_data);
 
-// Seals the current ordered append frontier. Completion flushes lookahead and
-// source EOF without requiring another append. Empty input is rejected.
-iree_status_t loom_serve_realtime_input_commit(
-    loom_serve_realtime_input_item_t* item);
+// Seals the ordered PCM frontier, flushing numerical lookahead and source EOF
+// without requiring another append. The caller has validated semantic commit.
+void loom_serve_realtime_input_finish(loom_serve_realtime_input_item_t* item);
 
 // Ends publication interest immediately. Accepted conversion retains the item
-// and its receipts until release. A completed item also retires through this
+// and its PCM loans until release. A completed item also retires through this
 // call; the caller must discard its pointer immediately.
 void loom_serve_realtime_input_close(loom_serve_realtime_input_item_t* item);
 
