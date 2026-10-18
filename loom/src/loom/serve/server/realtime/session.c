@@ -10,11 +10,12 @@
 
 #include "loom/serve/server/realtime/capture.h"
 #include "loom/serve/server/realtime/conversation.h"
-#include "loom/serve/server/realtime/generation.h"
 #include "loom/serve/server/realtime/history.h"
 #include "loom/serve/server/realtime/input.h"
+#include "loom/serve/server/realtime/item.h"
+#include "loom/serve/server/realtime/output.h"
+#include "loom/serve/server/realtime/response.h"
 #include "loom/serve/server/realtime/wire.h"
-#include "loom/serve/service/text/tool_calls.h"
 
 typedef enum loom_serve_realtime_transcription_phase_e {
   LOOM_SERVE_REALTIME_TRANSCRIPTION_FREE,
@@ -24,8 +25,6 @@ typedef enum loom_serve_realtime_transcription_phase_e {
 } loom_serve_realtime_transcription_phase_t;
 
 typedef struct loom_serve_realtime_transcription_t {
-  // Reserved wire identity, available before the item joins the conversation.
-  uint64_t identity;
   // Independent input lifetime, including accepted conversion after clear.
   loom_serve_realtime_input_item_t* input;
   // Start of this utterance after all earlier encoded appends publish.
@@ -40,64 +39,13 @@ typedef struct loom_serve_realtime_transcription_t {
   loom_serve_realtime_transcription_phase_t phase;
   // Uncommitted delivery follows classified activity rather than capture end.
   bool automatic;
-  // Committed conversation destination; NULL while the microphone item is open.
+  // Reserved item; its group is assigned only when microphone commit occurs.
   loom_serve_realtime_item_t* item;
 } loom_serve_realtime_transcription_t;
-
-typedef enum loom_serve_realtime_response_finish_e {
-  LOOM_SERVE_REALTIME_FINISH_GENERATING,
-  LOOM_SERVE_REALTIME_FINISH_TEXT,
-  LOOM_SERVE_REALTIME_FINISH_AUDIO,
-  LOOM_SERVE_REALTIME_FINISH_CONTENT,
-  LOOM_SERVE_REALTIME_FINISH_OUTPUT_ITEM,
-  LOOM_SERVE_REALTIME_FINISH_CONVERSATION_ITEM,
-  LOOM_SERVE_REALTIME_FINISH_RESPONSE,
-  LOOM_SERVE_REALTIME_FINISH_RETIRED,
-} loom_serve_realtime_response_finish_t;
-
-typedef enum loom_serve_realtime_response_stop_e {
-  LOOM_SERVE_REALTIME_STOP_NONE,
-  LOOM_SERVE_REALTIME_STOP_CLIENT_CANCELLED,
-  LOOM_SERVE_REALTIME_STOP_TURN_DETECTED,
-  LOOM_SERVE_REALTIME_STOP_FAILED,
-} loom_serve_realtime_response_stop_t;
-
-typedef struct loom_serve_realtime_response_t {
-  // Canonical assistant item; NULL denotes an available response slot.
-  loom_serve_realtime_item_t* item;
-  // Owned stable native session and wire response ID.
-  iree_string_builder_t id;
-  // Copied selected checkpoint, retained through deferred native admission.
-  iree_string_builder_t checkpoint;
-  // Immutable response settings, captured when response.create is accepted.
-  loom_serve_realtime_response_settings_t settings;
-  // Native composition, including a separately retiring output CPU borrower.
-  loom_serve_realtime_generation_t* generation;
-  // First terminal cause withdrawing generation, independent of retirement.
-  loom_serve_realtime_response_stop_t stop;
-  // Owned native failure when stop is FAILED, retained through final delivery.
-  iree_status_t failure;
-  // Completed text prefix capture has transferred to the history owner.
-  bool captured;
-  // Ordered final events, independent of native work and capture retirement.
-  loom_serve_realtime_response_finish_t finish;
-  // Native text ended at its token budget rather than the model's EOS.
-  bool budget_exhausted;
-  // Copied input token accounting after successful native text completion.
-  iree_host_size_t input_tokens;
-  // Copied compatible-prefix reuse, independent of output playback accounting.
-  iree_host_size_t cached_tokens;
-  // Copied generated output-token count, including source terminal tokens.
-  iree_host_size_t output_tokens;
-} loom_serve_realtime_response_t;
 
 struct loom_serve_realtime_session_t {
   // Allocator owning this session and each bounded child representation.
   iree_allocator_t host_allocator;
-  // Shared application workers, borrowed through all accepted CPU releases.
-  iree_task_executor_t* executor;
-  // Serialized registration owner, never borrowed by conversion workers.
-  loom_serve_registry_t* registry;
   // Shared transport diagnostics and connection lifetime owner.
   loom_serve_http_server_t* server;
   // Retained HTTP claim; released only after receipt borrowers retire.
@@ -106,16 +54,8 @@ struct loom_serve_realtime_session_t {
   loom_serve_websocket_t* socket;
   // Immutable application-owned assistant composition.
   const loom_serve_realtime_profile_t* profile;
-  // Nonblocking shared-owner wake target, stable until final CPU retirement.
-  loom_serve_wake_callback_t observer;
   // Unique server session identity, independent of native model request IDs.
   uint64_t id;
-  // Reserved server item identities, independent of conversation insertion.
-  uint64_t item_identity;
-  // Bound text registration; never rebound to a replacement namesake.
-  loom_serve_realtime_binding_t text;
-  // Bound speech registration, independent of the selected voice.
-  loom_serve_realtime_binding_t speech;
   // Effective settings for subsequent audio items and responses.
   loom_serve_realtime_settings_t settings;
   // Canonical committed conversation, without waveform or KV copies.
@@ -132,10 +72,8 @@ struct loom_serve_realtime_session_t {
   loom_serve_realtime_transcription_t* microphone;
   // Latest stopped turn requests a response after independent STT retirement.
   bool automatic_response;
-  // One logical response plus one cancelled response whose worker is retiring.
-  loom_serve_realtime_response_t responses[2];
-  // Reusable speech conversion coefficients; only one worker borrows at a time.
-  loom_serve_realtime_audio_t audio;
+  // Response execution, complete-call publication, and independent retirement.
+  loom_serve_realtime_responses_t* responses;
   // Completed prefixes and accepted capture/release effects.
   loom_serve_realtime_history_t history;
   // Bounded ordered output, separate from model and client-playback progress.
@@ -147,13 +85,13 @@ struct loom_serve_realtime_session_t {
 };
 
 static iree_status_t loom_serve_realtime_session_event(
-    loom_serve_realtime_session_t* session, const char* type) {
+    loom_serve_realtime_session_t* session, const char* type,
+    const loom_serve_realtime_settings_t* settings) {
   IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_begin(&session->wire, type));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
       &session->wire.scratch, ",\"session\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_realtime_settings_write(&session->settings, session->profile,
-                                         session->id, &session->wire.scratch));
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_settings_write(
+      settings, session->profile, session->id, &session->wire.scratch));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(&session->wire.scratch, "}"));
   return loom_serve_realtime_wire_commit(&session->wire, 0, false);
@@ -194,101 +132,8 @@ static iree_status_t loom_serve_realtime_session_error(
   return status;
 }
 
-static iree_status_t loom_serve_realtime_item_event(
-    loom_serve_realtime_session_t* session, const char* type,
-    const loom_serve_realtime_item_t* item,
-    const loom_serve_realtime_item_t* previous) {
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_begin(&session->wire, type));
-  iree_string_builder_t* output = &session->wire.scratch;
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"previous_item_id\":"));
-  if (previous) {
-    IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-        output, iree_string_builder_view(&previous->id)));
-  } else {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"item\":"));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_item_write(item, output));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
-  return loom_serve_realtime_wire_commit(&session->wire, 0, false);
-}
-
-static iree_status_t loom_serve_realtime_insert_item(
-    loom_serve_realtime_session_t* session, uint64_t identity,
-    loom_serve_realtime_role_t role, bool audio,
-    loom_serve_realtime_item_t** out_item) {
-  char id[96];
-  const int length = iree_snprintf(id, sizeof(id), "item_%" PRIu64 "_%" PRIu64,
-                                   session->id, identity);
-  return loom_serve_realtime_conversation_insert(
-      &session->conversation, session->conversation.last,
-      iree_make_string_view(id, (iree_host_size_t)length), role, audio,
-      out_item);
-}
-
-static iree_status_t loom_serve_realtime_new_item(
-    loom_serve_realtime_session_t* session, loom_serve_realtime_role_t role,
-    bool audio, loom_serve_realtime_item_t** out_item) {
-  return loom_serve_realtime_insert_item(session, ++session->item_identity,
-                                         role, audio, out_item);
-}
-
-static loom_serve_realtime_response_t* loom_serve_realtime_active_response(
-    loom_serve_realtime_session_t* session) {
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    loom_serve_realtime_response_t* response = &session->responses[i];
-    if (response->item && !response->stop &&
-        response->finish != LOOM_SERVE_REALTIME_FINISH_RETIRED) {
-      return response;
-    }
-  }
-  return NULL;
-}
-
-static void loom_serve_realtime_response_stop(
-    loom_serve_realtime_session_t* session,
-    loom_serve_realtime_response_t* response,
-    loom_serve_realtime_response_stop_t stop) {
-  if (!response->stop) {
-    response->stop = stop;
-  }
-  response->captured = true;
-  response->finish =
-      response->finish ? response->finish : LOOM_SERVE_REALTIME_FINISH_TEXT;
-  response->item->status = LOOM_SERVE_REALTIME_ITEM_INCOMPLETE;
-  loom_serve_realtime_wire_cancel(&session->wire, response->item->sequence);
-  if (response->generation) {
-    loom_serve_realtime_generation_cancel(response->generation);
-  }
-  // A capture already accepted for this response must still be observed and
-  // released. Its predecessor remains valid until a conversation edit says so.
-  loom_serve_realtime_history_invalidate(&session->history,
-                                         response->item->sequence);
-}
-
-static void loom_serve_realtime_response_fail(
-    loom_serve_realtime_session_t* session,
-    loom_serve_realtime_response_t* response, iree_status_t failure) {
-  loom_serve_http_server_record_error(session->server, failure);
-  if (response->stop) {
-    // A late conversion failure is still diagnosed, but cannot replace the
-    // terminal cause already selected by cancellation or an earlier failure.
-    iree_status_ignore(failure);
-    return;
-  }
-  loom_serve_realtime_response_stop(session, response,
-                                    LOOM_SERVE_REALTIME_STOP_FAILED);
-  response->failure = failure;
-  if (response->item->audio) {
-    // Failed generation gives no alignment between partial text and playback.
-    loom_serve_realtime_conversation_truncate(&session->conversation,
-                                              response->item);
-  }
-}
-
 static void loom_serve_realtime_transcription_close(
+    loom_serve_realtime_session_t* session,
     loom_serve_realtime_transcription_t* transcription) {
   if (transcription->input) {
     loom_serve_realtime_input_close(transcription->input);
@@ -296,6 +141,10 @@ static void loom_serve_realtime_transcription_close(
   }
   loom_serve_realtime_capture_mark_cancel(&transcription->begin);
   loom_serve_realtime_capture_mark_cancel(&transcription->end);
+  if (transcription->item && !transcription->item->group) {
+    loom_serve_realtime_conversation_remove(&session->conversation,
+                                            transcription->item);
+  }
   transcription->item = NULL;
   transcription->phase = LOOM_SERVE_REALTIME_TRANSCRIPTION_FREE;
 }
@@ -314,15 +163,9 @@ static void loom_serve_realtime_session_stop(
        ++i) {
     loom_serve_realtime_transcription_t* transcription =
         &session->transcriptions[i];
-    loom_serve_realtime_transcription_close(transcription);
+    loom_serve_realtime_transcription_close(session, transcription);
   }
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    if (session->responses[i].item) {
-      loom_serve_realtime_response_stop(
-          session, &session->responses[i],
-          LOOM_SERVE_REALTIME_STOP_CLIENT_CANCELLED);
-    }
-  }
+  loom_serve_realtime_responses_stop(session->responses);
   loom_serve_realtime_history_invalidate(&session->history, 0);
   if (session->aborted) {
     loom_serve_realtime_wire_clear(&session->wire);
@@ -353,398 +196,37 @@ static void loom_serve_realtime_session_fail(
   }
 }
 
-static iree_status_t loom_serve_realtime_response_fields(
-    loom_serve_realtime_session_t* session,
-    const loom_serve_realtime_response_t* response, const char* type) {
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_begin(&session->wire, type));
-  iree_string_builder_t* output = &session->wire.scratch;
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"response_id\":"));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-      output, iree_string_builder_view(&response->id)));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"item_id\":"));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-      output, iree_string_builder_view(&response->item->id)));
-  return iree_string_builder_append_cstring(
-      output, ",\"output_index\":0,\"content_index\":0");
-}
-
-static iree_status_t loom_serve_realtime_response_event(
-    loom_serve_realtime_session_t* session,
-    const loom_serve_realtime_response_t* response, bool done) {
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_begin(
-      &session->wire, done ? "response.done" : "response.created"));
-  iree_string_builder_t* output = &session->wire.scratch;
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"response\":{\"id\":"));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-      output, iree_string_builder_view(&response->id)));
-  static const char* const stopped_status[] = {NULL, "cancelled", "cancelled",
-                                               "failed"};
-  const char* status = !done            ? "in_progress"
-                       : response->stop ? stopped_status[response->stop]
-                       : response->budget_exhausted ? "incomplete"
-                                                    : "completed";
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output,
-      ",\"object\":\"realtime.response\",\"status\":\"%s\","
-      "\"status_details\":",
-      status));
-  if (done && response->stop == LOOM_SERVE_REALTIME_STOP_FAILED) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output,
-        "{\"type\":\"failed\",\"error\":{\"type\":\"server_error\","
-        "\"code\":\"%s\",\"message\":",
-        iree_status_code_string(iree_status_code(response->failure))));
-    IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-        output, iree_status_message(response->failure)));
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}}"));
-  } else if (done && (response->stop || response->budget_exhausted)) {
-    const char* reason =
-        response->stop == LOOM_SERVE_REALTIME_STOP_TURN_DETECTED
-            ? "turn_detected"
-        : response->stop ? "client_cancelled"
-                         : "max_output_tokens";
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output, "{\"type\":\"%s\",\"reason\":\"%s\"}", status, reason));
-  } else {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
-  }
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"output\":["));
-  if (done) {
-    IREE_RETURN_IF_ERROR(
-        loom_serve_realtime_item_write(response->item, output));
-  }
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, "],\"output_modalities\":[\"%s\"],\"metadata\":",
-      response->settings.output.audio ? "audio" : "text"));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
-      output, response->settings.metadata.size
-                  ? iree_string_builder_view(&response->settings.metadata)
-                  : IREE_SV("null")));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"usage\":"));
-  if (done && !response->stop) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output,
-        "{\"total_tokens\":%" PRIhsz ",\"input_tokens\":%" PRIhsz
-        ",\"output_tokens\":%" PRIhsz
-        ",\"input_token_details\":{"
-        "\"cached_tokens\":%" PRIhsz "}}",
-        response->input_tokens + response->output_tokens,
-        response->input_tokens, response->output_tokens,
-        response->cached_tokens));
-  } else {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
-  }
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}}"));
-  return loom_serve_realtime_wire_commit(&session->wire,
-                                         response->item->sequence, false);
-}
-
-static iree_status_t loom_serve_realtime_response_item_event(
-    loom_serve_realtime_session_t* session,
-    const loom_serve_realtime_response_t* response, bool done) {
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_response_fields(
-      session, response,
-      done ? "response.output_item.done" : "response.output_item.added"));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(&session->wire.scratch, ",\"item\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_realtime_item_write(response->item, &session->wire.scratch));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(&session->wire.scratch, "}"));
-  return loom_serve_realtime_wire_commit(&session->wire,
-                                         response->item->sequence, false);
-}
-
-static iree_status_t loom_serve_realtime_response_part_event(
-    loom_serve_realtime_session_t* session,
-    const loom_serve_realtime_response_t* response, bool done) {
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_response_fields(
-      session, response,
-      done ? "response.content_part.done" : "response.content_part.added"));
-  iree_string_builder_t* output = &session->wire.scratch;
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"part\":{\"type\":\"%s\",\"%s\":",
-      response->settings.output.audio ? "audio" : "text",
-      response->settings.output.audio ? "transcript" : "text"));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-      output, done ? iree_string_builder_view(&response->item->text)
-                   : iree_string_view_empty()));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}}"));
-  return loom_serve_realtime_wire_commit(&session->wire,
-                                         response->item->sequence, false);
-}
-
-static iree_status_t loom_serve_realtime_response_finish(
-    loom_serve_realtime_session_t* session,
-    loom_serve_realtime_response_t* response, bool* out_progress) {
-  if (!loom_serve_realtime_wire_can_publish(&session->wire)) {
-    return iree_ok_status();
-  }
-  iree_string_builder_t* output = &session->wire.scratch;
-  switch (response->finish) {
-    case LOOM_SERVE_REALTIME_FINISH_GENERATING:
-    case LOOM_SERVE_REALTIME_FINISH_RETIRED:
-      return iree_ok_status();
-    case LOOM_SERVE_REALTIME_FINISH_TEXT: {
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_response_fields(
-          session, response,
-          response->settings.output.audio
-              ? "response.output_audio_transcript.done"
-              : "response.output_text.done"));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          output,
-          ",\"%s\":", response->settings.output.audio ? "transcript" : "text"));
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-          output, iree_string_builder_view(&response->item->text)));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_commit(
-          &session->wire, response->item->sequence, false));
-      if (!response->settings.output.audio) {
-        ++response->finish;
-      }
-      break;
-    }
-    case LOOM_SERVE_REALTIME_FINISH_AUDIO: {
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_response_fields(
-          session, response, "response.output_audio.done"));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_commit(
-          &session->wire, response->item->sequence, false));
-      break;
-    }
-    case LOOM_SERVE_REALTIME_FINISH_CONTENT: {
-      IREE_RETURN_IF_ERROR(
-          loom_serve_realtime_response_part_event(session, response, true));
-      break;
-    }
-    case LOOM_SERVE_REALTIME_FINISH_OUTPUT_ITEM: {
-      IREE_RETURN_IF_ERROR(
-          loom_serve_realtime_response_item_event(session, response, true));
-      break;
-    }
-    case LOOM_SERVE_REALTIME_FINISH_CONVERSATION_ITEM: {
-      IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
-          session, "conversation.item.done", response->item, NULL));
-      break;
-    }
-    case LOOM_SERVE_REALTIME_FINISH_RESPONSE: {
-      IREE_RETURN_IF_ERROR(
-          loom_serve_realtime_response_event(session, response, true));
-      break;
-    }
-  }
-  ++response->finish;
-  *out_progress = true;
-  return iree_ok_status();
-}
-
-static bool loom_serve_realtime_response_ready(
-    const loom_serve_realtime_session_t* session,
-    const loom_serve_realtime_response_t* response) {
-  if (loom_serve_realtime_history_capturing(&session->history)) {
-    return false;
-  }
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    const loom_serve_realtime_response_t* other = &session->responses[i];
-    if (other != response && other->generation &&
-        (loom_serve_realtime_generation_pending(other->generation) ||
-         (!other->stop && !other->captured))) {
-      return false;
-    }
-  }
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->transcriptions);
-       ++i) {
-    if (session->transcriptions[i].item &&
-        session->transcriptions[i].item->sequence < response->item->sequence) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static iree_status_t loom_serve_realtime_response_start(
-    loom_serve_realtime_session_t* session,
-    loom_serve_realtime_response_t* response) {
-  loom_serve_text_request_t request = {0};
-  iree_string_builder_initialize(session->host_allocator, &request.body);
-  iree_status_t status = loom_serve_realtime_conversation_request(
-      &session->conversation, response->item, session->text.name,
-      iree_string_builder_view(&response->settings.output.instructions),
-      response->settings.output.max_output_tokens, session->profile->seed,
-      &request.body);
-  if (iree_status_is_ok(status) &&
-      iree_string_view_equal(
-          iree_string_builder_view(&response->settings.output.instructions),
-          iree_string_builder_view(&session->settings.output.instructions))) {
-    status = iree_string_builder_append_string(
-        &response->checkpoint,
-        loom_serve_realtime_history_checkpoint(&session->history));
-  }
-  if (iree_status_is_ok(status)) {
-    request.session = iree_string_builder_view(&response->id);
-    request.checkpoint = iree_string_builder_view(&response->checkpoint);
-    status = loom_serve_realtime_generation_allocate(
-        session->executor, session->registry, session->text, session->speech,
-        &request,
-        response->settings.output.audio
-            ? iree_string_builder_view(&response->settings.output.voice)
-            : iree_string_view_empty(),
-        session->profile->seed, &session->audio, session->observer,
-        session->host_allocator, &response->generation);
-  }
-  iree_string_builder_deinitialize(&request.body);
-  return status;
-}
-
-static iree_status_t loom_serve_realtime_response_advance(
-    loom_serve_realtime_session_t* session,
-    loom_serve_realtime_response_t* response, bool* out_progress) {
-  if (!response->item) {
-    return iree_ok_status();
-  }
-  if (!response->generation && !response->stop &&
-      loom_serve_realtime_response_ready(session, response)) {
-    iree_status_t status =
-        loom_serve_realtime_response_start(session, response);
-    if (!iree_status_is_ok(status)) {
-      loom_serve_realtime_response_fail(session, response, status);
-    }
-    *out_progress = true;
-  }
-  if (response->generation) {
-    iree_status_t status = loom_serve_realtime_generation_advance(
-        response->generation,
-        !session->closing &&
-            loom_serve_realtime_wire_can_publish(&session->wire),
-        out_progress);
-    if (!iree_status_is_ok(status)) {
-      loom_serve_realtime_response_fail(session, response, status);
-      *out_progress = true;
-    }
-    response->item->generated_frames =
-        loom_serve_realtime_generation_frames(response->generation);
-    if (!response->stop) {
-      const iree_string_view_t audio =
-          loom_serve_realtime_generation_audio(response->generation);
-      if (audio.size && loom_serve_realtime_wire_can_publish(&session->wire)) {
-        IREE_RETURN_IF_ERROR(loom_serve_realtime_response_fields(
-            session, response, "response.output_audio.delta"));
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-            &session->wire.scratch, ",\"delta\":\""));
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_string(&session->wire.scratch, audio));
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(&session->wire.scratch, "\"}"));
-        IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_commit(
-            &session->wire, response->item->sequence, true));
-        loom_serve_realtime_generation_consume_audio(response->generation);
-        *out_progress = true;
-      }
-      const iree_string_view_t text =
-          loom_serve_realtime_generation_text(response->generation);
-      if (text.size && loom_serve_realtime_wire_can_publish(&session->wire)) {
-        IREE_RETURN_IF_ERROR(loom_serve_realtime_conversation_append_text(
-            &session->conversation, response->item, text));
-        IREE_RETURN_IF_ERROR(loom_serve_realtime_response_fields(
-            session, response,
-            response->settings.output.audio
-                ? "response.output_audio_transcript.delta"
-                : "response.output_text.delta"));
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-            &session->wire.scratch, ",\"delta\":"));
-        IREE_RETURN_IF_ERROR(
-            loom_serve_realtime_string_write(&session->wire.scratch, text));
-        IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(&session->wire.scratch, "}"));
-        IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_commit(
-            &session->wire, response->item->sequence, true));
-        loom_serve_realtime_generation_consume_text(response->generation);
-        *out_progress = true;
-      }
-      const loom_serve_text_stream_result_t* result =
-          loom_serve_realtime_generation_result(response->generation);
-      if (result && !response->captured) {
-        if (result->calls->count) {
-          return iree_make_status(
-              IREE_STATUS_UNIMPLEMENTED,
-              "unexpected tool output in a tool-free session");
-        }
-        response->input_tokens = result->response.usage.input_tokens;
-        response->cached_tokens = result->response.usage.cached_tokens;
-        response->output_tokens = result->response.usage.output_tokens;
-        response->budget_exhausted =
-            iree_string_view_equal(result->finish_reason, IREE_SV("length"));
-        if (iree_string_view_equal(
-                iree_string_builder_view(
-                    &response->settings.output.instructions),
-                iree_string_builder_view(
-                    &session->settings.output.instructions))) {
-          IREE_RETURN_IF_ERROR(loom_serve_realtime_history_capture(
-              &session->history, iree_string_builder_view(&response->id),
-              response->item->sequence, &response->captured));
-        } else {
-          response->captured = true;
-        }
-        *out_progress |= response->captured;
-      }
-      if (!response->finish &&
-          loom_serve_realtime_generation_complete(response->generation)) {
-        response->item->status = response->budget_exhausted
-                                     ? LOOM_SERVE_REALTIME_ITEM_INCOMPLETE
-                                     : LOOM_SERVE_REALTIME_ITEM_COMPLETED;
-        response->finish = LOOM_SERVE_REALTIME_FINISH_TEXT;
-        *out_progress = true;
-      }
-    }
-  }
-  if (!session->closing) {
-    IREE_RETURN_IF_ERROR(
-        loom_serve_realtime_response_finish(session, response, out_progress));
-  }
-  if ((session->closing ||
-       response->finish == LOOM_SERVE_REALTIME_FINISH_RETIRED) &&
-      response->captured &&
-      (!response->generation ||
-       !loom_serve_realtime_generation_pending(response->generation))) {
-    if (response->generation) {
-      loom_serve_realtime_generation_cancel(response->generation);
-      loom_serve_realtime_generation_free(response->generation);
-    }
-    iree_string_builder_deinitialize(&response->id);
-    iree_string_builder_deinitialize(&response->checkpoint);
-    loom_serve_realtime_response_settings_deinitialize(&response->settings);
-    iree_status_ignore(response->failure);
-    *response = (loom_serve_realtime_response_t){0};
-    *out_progress = true;
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_serve_realtime_command_session(
     loom_serve_realtime_session_t* session,
     const loom_serve_realtime_event_t* event,
     loom_serve_websocket_message_t** message) {
-  if (loom_serve_realtime_active_response(session)) {
+  if (loom_serve_realtime_responses_active(session->responses)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "session settings require an idle response boundary");
   }
-  bool instructions_changed = false;
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_settings_update(
+  loom_serve_realtime_settings_t candidate;
+  iree_status_t status = loom_serve_realtime_settings_prepare(
       &session->settings, session->profile,
       event->fields[LOOM_SERVE_REALTIME_FIELD_SESSION].text,
       session->microphone ||
           (session->turn && loom_serve_realtime_turn_is_open(session->turn)),
-      &instructions_changed));
-  if (instructions_changed) {
-    loom_serve_realtime_history_invalidate(&session->history, 0);
+      &candidate);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_realtime_session_event(session, "session.updated",
+                                               &candidate);
   }
-  return loom_serve_realtime_session_event(session, "session.updated");
+  if (iree_status_is_ok(status)) {
+    if (!loom_serve_realtime_output_settings_text_equal(
+            &session->settings.output, &candidate.output)) {
+      loom_serve_realtime_history_invalidate(&session->history, 0);
+    }
+    loom_serve_realtime_settings_t previous = session->settings;
+    session->settings = candidate;
+    candidate = previous;
+  }
+  loom_serve_realtime_settings_deinitialize(&candidate);
+  return status;
 }
 
 static iree_status_t loom_serve_realtime_transcription_begin(
@@ -760,25 +242,30 @@ static iree_status_t loom_serve_realtime_transcription_begin(
 
 static iree_status_t loom_serve_realtime_microphone_reserve(
     loom_serve_realtime_session_t* session) {
+  loom_serve_realtime_transcription_t* transcription = NULL;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->transcriptions);
        ++i) {
     if (session->transcriptions[i].phase ==
             LOOM_SERVE_REALTIME_TRANSCRIPTION_FREE &&
         !session->transcriptions[i].span.capture) {
-      session->microphone = &session->transcriptions[i];
-      *session->microphone = (loom_serve_realtime_transcription_t){
-          .identity = ++session->item_identity,
-          .phase = LOOM_SERVE_REALTIME_TRANSCRIPTION_WAITING,
-          .automatic = session->settings.detect_turns};
+      transcription = &session->transcriptions[i];
       break;
     }
   }
-  if (!session->microphone) {
+  if (!transcription) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "realtime input item capacity is full");
   }
-  loom_serve_realtime_capture_mark(session->capture,
-                                   &session->microphone->begin);
+  loom_serve_realtime_item_t* item = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_conversation_reserve(
+      &session->conversation, iree_string_view_empty(),
+      LOOM_SERVE_REALTIME_ITEM_MESSAGE, LOOM_SERVE_REALTIME_USER, true, &item));
+  *transcription = (loom_serve_realtime_transcription_t){
+      .item = item,
+      .phase = LOOM_SERVE_REALTIME_TRANSCRIPTION_WAITING,
+      .automatic = session->settings.detect_turns};
+  session->microphone = transcription;
+  loom_serve_realtime_capture_mark(session->capture, &transcription->begin);
   return iree_ok_status();
 }
 
@@ -810,7 +297,7 @@ static iree_status_t loom_serve_realtime_command_append(
     *message = NULL;
   } else {
     if (created && session->microphone) {
-      loom_serve_realtime_transcription_close(session->microphone);
+      loom_serve_realtime_transcription_close(session, session->microphone);
       session->microphone = NULL;
     }
     if (begin_turn) {
@@ -822,11 +309,11 @@ static iree_status_t loom_serve_realtime_command_append(
 
 static iree_status_t loom_serve_realtime_microphone_commit(
     loom_serve_realtime_session_t* session, bool automatic, uint64_t end) {
-  loom_serve_realtime_item_t* previous = session->conversation.last;
-  loom_serve_realtime_item_t* item = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_realtime_insert_item(session, session->microphone->identity,
-                                      LOOM_SERVE_REALTIME_USER, true, &item));
+  loom_serve_realtime_item_t* previous =
+      loom_serve_realtime_conversation_last_item(&session->conversation);
+  loom_serve_realtime_item_t* item = session->microphone->item;
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_conversation_insert(
+      &session->conversation, session->conversation.last, item));
   if (automatic) {
     session->microphone->end =
         (loom_serve_realtime_capture_mark_t){.position = end, .reached = true};
@@ -834,7 +321,6 @@ static iree_status_t loom_serve_realtime_microphone_commit(
     loom_serve_realtime_capture_mark(session->capture,
                                      &session->microphone->end);
   }
-  session->microphone->item = item;
   session->microphone = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_begin(
       &session->wire, "input_audio_buffer.committed"));
@@ -854,8 +340,8 @@ static iree_status_t loom_serve_realtime_microphone_commit(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
   IREE_RETURN_IF_ERROR(
       loom_serve_realtime_wire_commit(&session->wire, 0, false));
-  return loom_serve_realtime_item_event(session, "conversation.item.added",
-                                        item, previous);
+  return loom_serve_realtime_item_event(
+      &session->wire, "conversation.item.added", item, previous);
 }
 
 static iree_status_t loom_serve_realtime_command_commit(
@@ -890,7 +376,7 @@ static iree_status_t loom_serve_realtime_command_clear(
     const loom_serve_realtime_event_t* event,
     loom_serve_websocket_message_t** message) {
   if (session->microphone) {
-    loom_serve_realtime_transcription_close(session->microphone);
+    loom_serve_realtime_transcription_close(session, session->microphone);
     session->microphone = NULL;
   }
   if (session->turn) {
@@ -903,161 +389,40 @@ static iree_status_t loom_serve_realtime_command_clear(
   return loom_serve_realtime_wire_commit(&session->wire, 0, false);
 }
 
-static iree_status_t loom_serve_realtime_response_create(
-    loom_serve_realtime_session_t* session, iree_string_view_t overrides) {
-  if (loom_serve_realtime_active_response(session)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "cancel the active response before creating another");
-  }
-  loom_serve_realtime_response_t* response = NULL;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    if (!session->responses[i].item) {
-      response = &session->responses[i];
-      break;
-    }
-  }
-  if (!response) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "cancelled response work is still retiring");
-  }
-  iree_string_builder_initialize(session->host_allocator, &response->id);
-  iree_string_builder_initialize(session->host_allocator,
-                                 &response->checkpoint);
-  iree_status_t status = loom_serve_realtime_response_settings_initialize(
-      &session->settings, overrides, &response->settings);
-  loom_serve_realtime_item_t* previous = session->conversation.last;
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_realtime_new_item(
-        session, LOOM_SERVE_REALTIME_ASSISTANT, response->settings.output.audio,
-        &response->item);
-  }
-  if (!iree_status_is_ok(status)) {
-    loom_serve_realtime_response_settings_deinitialize(&response->settings);
-    iree_string_builder_deinitialize(&response->id);
-    iree_string_builder_deinitialize(&response->checkpoint);
-    *response = (loom_serve_realtime_response_t){0};
-    return status;
-  }
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      &response->id, "resp_%" PRIu64 "_%" PRIu64, session->id,
-      response->item->sequence));
-  session->automatic_response = false;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_realtime_response_event(session, response, false));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
-      session, "conversation.item.added", response->item, previous));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_realtime_response_item_event(session, response, false));
-  return loom_serve_realtime_response_part_event(session, response, false);
-}
-
 static iree_status_t loom_serve_realtime_command_respond(
     loom_serve_realtime_session_t* session,
     const loom_serve_realtime_event_t* event,
     loom_serve_websocket_message_t** message) {
-  return loom_serve_realtime_response_create(
-      session, event->present & (1u << LOOM_SERVE_REALTIME_FIELD_RESPONSE)
-                   ? event->fields[LOOM_SERVE_REALTIME_FIELD_RESPONSE].text
-                   : iree_string_view_empty());
+  iree_status_t status = loom_serve_realtime_responses_create(
+      session->responses,
+      event->present & (1u << LOOM_SERVE_REALTIME_FIELD_RESPONSE)
+          ? event->fields[LOOM_SERVE_REALTIME_FIELD_RESPONSE].text
+          : iree_string_view_empty());
+  if (iree_status_is_ok(status)) {
+    session->automatic_response = false;
+  }
+  return status;
 }
 
 static iree_status_t loom_serve_realtime_command_cancel(
     loom_serve_realtime_session_t* session,
     const loom_serve_realtime_event_t* event,
     loom_serve_websocket_message_t** message) {
-  loom_serve_realtime_response_t* response =
-      loom_serve_realtime_active_response(session);
-  if (!response ||
-      ((event->present & (1u << LOOM_SERVE_REALTIME_FIELD_RESPONSE_ID)) &&
-       !loom_serve_realtime_string_is(
-           event->fields[LOOM_SERVE_REALTIME_FIELD_RESPONSE_ID].text,
-           iree_string_builder_view(&response->id)))) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND, "response is not active");
-  }
-  loom_serve_realtime_response_stop(session, response,
-                                    LOOM_SERVE_REALTIME_STOP_CLIENT_CANCELLED);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_serve_realtime_content_visit(
-    void* user_data, iree_host_size_t index, iree_json_value_type_t type,
-    iree_string_view_t value) {
-  if (type != IREE_JSON_VALUE_TYPE_OBJECT) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "conversation content requires text-part objects");
-  }
-  static const loom_serve_realtime_field_rule_t rules[] = {
-      {"type", 1u << IREE_JSON_VALUE_TYPE_STRING},
-      {"text", 1u << IREE_JSON_VALUE_TYPE_STRING}};
-  loom_serve_realtime_event_value_t values[IREE_ARRAYSIZE(rules)];
-  uint32_t present = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_object_parse(
-      value, IREE_ARRAYSIZE(rules), rules, values, &present));
-  if (present != 3 ||
-      (!loom_serve_realtime_string_is(values[0].text, IREE_SV("input_text")) &&
-       !loom_serve_realtime_string_is(values[0].text, IREE_SV("text")))) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "conversation creation currently accepts text parts");
-  }
-  iree_string_builder_t* output = user_data;
-  iree_string_builder_t decoded;
-  iree_string_builder_initialize(output->allocator, &decoded);
-  iree_status_t status = loom_serve_realtime_string_decode(
-      values[1].text, 1024 * 1024 - output->size, &decoded);
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(
-        output, iree_string_builder_view(&decoded));
-  }
-  iree_string_builder_deinitialize(&decoded);
-  return status;
+  return loom_serve_realtime_responses_cancel(
+      session->responses,
+      event->present & (1u << LOOM_SERVE_REALTIME_FIELD_RESPONSE_ID)
+          ? event->fields[LOOM_SERVE_REALTIME_FIELD_RESPONSE_ID].text
+          : iree_string_view_empty());
 }
 
 static iree_status_t loom_serve_realtime_item_create(
     loom_serve_realtime_session_t* session,
-    const loom_serve_realtime_event_t* event, iree_string_builder_t* id,
-    iree_string_builder_t* text) {
-  if (loom_serve_realtime_active_response(session)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "conversation edits require an idle response boundary");
-  }
-  static const loom_serve_realtime_field_rule_t rules[] = {
-      {"type", 1u << IREE_JSON_VALUE_TYPE_STRING},
-      {"id", 1u << IREE_JSON_VALUE_TYPE_STRING},
-      {"role", 1u << IREE_JSON_VALUE_TYPE_STRING},
-      {"content", 1u << IREE_JSON_VALUE_TYPE_ARRAY},
-      {"status", 1u << IREE_JSON_VALUE_TYPE_STRING}};
-  loom_serve_realtime_event_value_t values[IREE_ARRAYSIZE(rules)];
-  uint32_t present = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_object_parse(
-      event->fields[LOOM_SERVE_REALTIME_FIELD_ITEM].text, IREE_ARRAYSIZE(rules),
-      rules, values, &present));
-  if ((present & 13) != 13 ||
-      !loom_serve_realtime_string_is(values[0].text, IREE_SV("message")) ||
-      ((present & 16) &&
-       !loom_serve_realtime_string_is(values[4].text, IREE_SV("completed")))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "item requires a completed message with role and content");
-  }
-  loom_serve_realtime_role_t role;
-  if (loom_serve_realtime_string_is(values[2].text, IREE_SV("user"))) {
-    role = LOOM_SERVE_REALTIME_USER;
-  } else if (loom_serve_realtime_string_is(values[2].text,
-                                           IREE_SV("assistant"))) {
-    role = LOOM_SERVE_REALTIME_ASSISTANT;
-  } else if (loom_serve_realtime_string_is(values[2].text, IREE_SV("system"))) {
-    role = LOOM_SERVE_REALTIME_SYSTEM;
-  } else {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported message role");
-  }
-  IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
-      values[3].text, loom_serve_realtime_content_visit, text));
-  loom_serve_realtime_item_t* previous = session->conversation.last;
-  if (event->present & (1u << LOOM_SERVE_REALTIME_FIELD_PREVIOUS_ITEM_ID)) {
+    const loom_serve_realtime_event_t* event, iree_string_builder_t* id) {
+  const bool explicit_previous =
+      event->present & (1u << LOOM_SERVE_REALTIME_FIELD_PREVIOUS_ITEM_ID);
+  loom_serve_realtime_item_t* previous =
+      loom_serve_realtime_conversation_last_item(&session->conversation);
+  if (explicit_previous) {
     IREE_RETURN_IF_ERROR(loom_serve_realtime_string_decode(
         event->fields[LOOM_SERVE_REALTIME_FIELD_PREVIOUS_ITEM_ID].text, 128,
         id));
@@ -1072,33 +437,37 @@ static iree_status_t loom_serve_realtime_item_create(
       }
     }
   }
-  iree_string_builder_reset(id);
-  if (present & 2) {
-    IREE_RETURN_IF_ERROR(
-        loom_serve_realtime_string_decode(values[1].text, 128, id));
-  } else {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        id, "item_%" PRIu64 "_%" PRIu64, session->id,
-        session->conversation.sequence + 1));
-  }
-  const bool inserted = previous != session->conversation.last;
+  const bool inserted =
+      explicit_previous &&
+      (previous
+           ? previous->next || previous->group != session->conversation.last
+           : session->conversation.first != NULL);
   loom_serve_realtime_item_t* item = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_conversation_insert(
-      &session->conversation, previous, iree_string_builder_view(id), role,
-      false, &item));
-  iree_status_t status = loom_serve_realtime_conversation_append_text(
-      &session->conversation, item, iree_string_builder_view(text));
-  if (!iree_status_is_ok(status)) {
-    loom_serve_realtime_conversation_remove(&session->conversation, item);
-    return status;
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_item_parse(
+      &session->conversation,
+      event->fields[LOOM_SERVE_REALTIME_FIELD_ITEM].text, &item));
+  iree_status_t status = iree_ok_status();
+  if (loom_serve_realtime_responses_active(session->responses) &&
+      (item->kind != LOOM_SERVE_REALTIME_ITEM_FUNCTION_OUTPUT || inserted)) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "conversation edits require an idle response boundary");
   }
-  item->status = LOOM_SERVE_REALTIME_ITEM_COMPLETED;
   loom_serve_realtime_wire_message_t* tail = session->wire.last;
-  status = loom_serve_realtime_item_event(session, "conversation.item.added",
-                                          item, previous);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_realtime_item_event(session, "conversation.item.done",
-                                            item, previous);
+    status = loom_serve_realtime_item_event(
+        &session->wire, "conversation.item.added", item, previous);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_realtime_item_event(
+        &session->wire, "conversation.item.done", item, previous);
+  }
+  if (iree_status_is_ok(status)) {
+    status = explicit_previous ? loom_serve_realtime_conversation_insert_after(
+                                     &session->conversation, previous, item)
+                               : loom_serve_realtime_conversation_insert(
+                                     &session->conversation,
+                                     session->conversation.last, item);
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_realtime_wire_rewind(&session->wire, tail);
@@ -1115,13 +484,11 @@ static iree_status_t loom_serve_realtime_command_create(
     loom_serve_realtime_session_t* session,
     const loom_serve_realtime_event_t* event,
     loom_serve_websocket_message_t** message) {
-  iree_string_builder_t id, text;
+  iree_string_builder_t id;
   iree_string_builder_initialize(session->host_allocator, &id);
-  iree_string_builder_initialize(session->host_allocator, &text);
   const iree_status_t status =
-      loom_serve_realtime_item_create(session, event, &id, &text);
+      loom_serve_realtime_item_create(session, event, &id);
   iree_string_builder_deinitialize(&id);
-  iree_string_builder_deinitialize(&text);
   return status;
 }
 
@@ -1157,43 +524,23 @@ static iree_status_t loom_serve_realtime_item_mutate(
     }
   }
   const bool changes_history = !truncate || item->has_transcript;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    loom_serve_realtime_response_t* response = &session->responses[i];
-    if (response->item == item && !truncate) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "response item remains owned until cancellation retires");
-    }
-    if (changes_history && response->item && !response->stop &&
-        response->finish != LOOM_SERVE_REALTIME_FINISH_RETIRED) {
-      if (response->item != item || !truncate) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "conversation edits require an idle response boundary");
-      }
-    }
-  }
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    if (session->responses[i].item == item && !session->responses[i].stop &&
-        session->responses[i].finish != LOOM_SERVE_REALTIME_FINISH_RETIRED) {
-      loom_serve_realtime_response_stop(
-          session, &session->responses[i],
-          LOOM_SERVE_REALTIME_STOP_CLIENT_CANCELLED);
-    }
-  }
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_responses_edit(
+      session->responses, item, truncate, changes_history));
   if (truncate) {
     loom_serve_realtime_conversation_truncate(&session->conversation, item);
   } else {
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->transcriptions);
          ++i) {
       if (session->transcriptions[i].item == item) {
-        loom_serve_realtime_transcription_close(&session->transcriptions[i]);
+        loom_serve_realtime_transcription_close(session,
+                                                &session->transcriptions[i]);
       }
     }
   }
   if (changes_history) {
-    loom_serve_realtime_history_invalidate(&session->history, item->sequence);
-    loom_serve_realtime_wire_cancel(&session->wire, item->sequence);
+    loom_serve_realtime_history_invalidate(&session->history,
+                                           item->group->sequence);
+    loom_serve_realtime_wire_cancel(&session->wire, item->group->sequence);
   }
   IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_begin(
       &session->wire,
@@ -1307,12 +654,14 @@ static iree_status_t loom_serve_realtime_turn_event(
   IREE_RETURN_IF_ERROR(loom_serve_realtime_wire_begin(
       &session->wire, started ? "input_audio_buffer.speech_started"
                               : "input_audio_buffer.speech_stopped"));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      &session->wire.scratch, ",\"item_id\":"));
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
       &session->wire.scratch,
-      ",\"item_id\":\"item_%" PRIu64 "_%" PRIu64 "\",\"audio_%s_ms\":%" PRIu64
-      "}",
-      session->id, session->microphone->identity, started ? "start" : "end",
-      event.position / 24));
+      iree_string_builder_view(&session->microphone->item->id)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      &session->wire.scratch, ",\"audio_%s_ms\":%" PRIu64 "}",
+      started ? "start" : "end", event.position / 24));
   return loom_serve_realtime_wire_commit(&session->wire, 0, false);
 }
 
@@ -1339,18 +688,7 @@ static iree_status_t loom_serve_realtime_turns_advance(
         .position = event.position, .reached = true};
     session->automatic_response = false;
     if (session->settings.interrupt_response) {
-      loom_serve_realtime_response_t* response =
-          loom_serve_realtime_active_response(session);
-      if (response) {
-        loom_serve_realtime_response_stop(
-            session, response, LOOM_SERVE_REALTIME_STOP_TURN_DETECTED);
-        if (response->item->audio) {
-          // Cancellation says nothing about playback. Drop unaligned text
-          // without inventing a client-owned played duration.
-          loom_serve_realtime_conversation_truncate(&session->conversation,
-                                                    response->item);
-        }
-      }
+      loom_serve_realtime_responses_interrupt(session->responses);
     }
   }
   IREE_RETURN_IF_ERROR(loom_serve_realtime_turn_event(session, event));
@@ -1395,10 +733,10 @@ static iree_status_t loom_serve_realtime_transcriptions_advance(
       transcription->phase = LOOM_SERVE_REALTIME_TRANSCRIPTION_READING;
     }
     uint64_t end = loom_serve_realtime_capture_end(session->capture);
-    if (transcription->automatic && !transcription->item) {
+    if (transcription->automatic && !transcription->item->group) {
       end = iree_min(end, loom_serve_realtime_turn_covered(session->turn));
     }
-    if (transcription->item && transcription->end.reached) {
+    if (transcription->item->group && transcription->end.reached) {
       end = iree_min(end, transcription->end.position);
     }
     if (!transcription->span.capture && transcription->position < end) {
@@ -1422,7 +760,7 @@ static iree_status_t loom_serve_realtime_transcriptions_advance(
       continue;
     }
     if (transcription->phase == LOOM_SERVE_REALTIME_TRANSCRIPTION_READING &&
-        transcription->item && transcription->end.reached &&
+        transcription->item->group && transcription->end.reached &&
         transcription->position == transcription->end.position) {
       loom_serve_realtime_input_finish(transcription->input);
       transcription->phase = LOOM_SERVE_REALTIME_TRANSCRIPTION_FINISHED;
@@ -1430,7 +768,7 @@ static iree_status_t loom_serve_realtime_transcriptions_advance(
     }
     const iree_string_builder_t* text =
         loom_serve_realtime_input_transcript(transcription->input);
-    if (!text || !transcription->item) {
+    if (!text || !transcription->item->group) {
       continue;
     }
     loom_serve_realtime_item_t* item = transcription->item;
@@ -1470,11 +808,11 @@ static iree_status_t loom_serve_realtime_transcriptions_advance(
       status = loom_serve_realtime_wire_commit(&session->wire, 0, false);
     }
     if (iree_status_is_ok(status)) {
-      status = loom_serve_realtime_item_event(session, "conversation.item.done",
-                                              item, NULL);
+      status = loom_serve_realtime_item_event(
+          &session->wire, "conversation.item.done", item, NULL);
     }
     if (iree_status_is_ok(status)) {
-      loom_serve_realtime_transcription_close(transcription);
+      loom_serve_realtime_transcription_close(session, transcription);
       *out_progress = true;
     }
   }
@@ -1506,23 +844,21 @@ static iree_status_t loom_serve_realtime_automatic_response_advance(
     loom_serve_realtime_session_t* session, bool* out_progress) {
   if (!session->automatic_response || session->closing ||
       loom_serve_realtime_turn_is_speaking(session->turn) ||
-      loom_serve_realtime_active_response(session)) {
+      loom_serve_realtime_responses_active(session->responses)) {
     return iree_ok_status();
   }
   bool waiting = false;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->transcriptions);
        ++i) {
-    waiting |= session->transcriptions[i].item != NULL;
+    const loom_serve_realtime_item_t* item = session->transcriptions[i].item;
+    waiting |= item && item->group;
   }
-  bool available = false;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    available |= session->responses[i].item == NULL;
-  }
-  if (waiting || !available) {
+  if (waiting || !loom_serve_realtime_responses_available(session->responses)) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(
-      loom_serve_realtime_response_create(session, iree_string_view_empty()));
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_responses_create(
+      session->responses, iree_string_view_empty()));
+  session->automatic_response = false;
   *out_progress = true;
   return iree_ok_status();
 }
@@ -1542,17 +878,12 @@ iree_status_t loom_serve_realtime_session_allocate(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*session),
                                              (void**)&session));
   session->host_allocator = host_allocator;
-  session->executor = executor;
-  session->registry = registry;
   session->server = server;
   session->connection = connection;
   session->socket = socket;
   session->profile = profile;
-  session->observer = observer;
   session->id = id;
-  session->text = text;
-  session->speech = speech;
-  loom_serve_realtime_conversation_initialize(host_allocator,
+  loom_serve_realtime_conversation_initialize(id, host_allocator,
                                               &session->conversation);
   loom_serve_realtime_history_initialize(registry, text, host_allocator,
                                          &session->history);
@@ -1560,6 +891,12 @@ iree_status_t loom_serve_realtime_session_allocate(
                                       &session->wire);
   iree_status_t status = loom_serve_realtime_settings_initialize(
       profile, host_allocator, &session->settings);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_realtime_responses_allocate(
+        id, profile, text, speech, executor, registry, server, observer,
+        &session->settings, &session->conversation, &session->history,
+        &session->wire, host_allocator, &session->responses);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_serve_realtime_input_allocate(executor, registry, recognition,
                                                 observer, host_allocator,
@@ -1579,7 +916,8 @@ iree_status_t loom_serve_realtime_session_allocate(
         host_allocator, &session->turn);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_realtime_session_event(session, "session.created");
+    status = loom_serve_realtime_session_event(session, "session.created",
+                                               &session->settings);
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_realtime_session_free(session);
@@ -1606,11 +944,17 @@ iree_status_t loom_serve_realtime_session_advance(
     loom_serve_realtime_session_stop(session, true);
   }
   status = loom_serve_realtime_transcriptions_advance(session, out_progress);
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(session->responses) && iree_status_is_ok(status);
+  uint64_t earliest_input = UINT64_MAX;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->transcriptions);
        ++i) {
-    status = loom_serve_realtime_response_advance(
-        session, &session->responses[i], out_progress);
+    const loom_serve_realtime_item_t* item = session->transcriptions[i].item;
+    if (item && item->group) {
+      earliest_input = iree_min(earliest_input, item->group->sequence);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_realtime_responses_advance(
+        session->responses, session->closing, earliest_input, out_progress);
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -1638,11 +982,8 @@ iree_status_t loom_serve_realtime_session_advance(
       loom_serve_realtime_session_stop(session, true);
     }
   }
-  bool responses = false;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->responses); ++i) {
-    responses |= session->responses[i].item != NULL;
-  }
-  if (session->closing && !responses &&
+  if (session->closing &&
+      !loom_serve_realtime_responses_pending(session->responses) &&
       !loom_serve_realtime_capture_pending(session->capture) &&
       (!session->turn || !loom_serve_realtime_turn_pending(session->turn)) &&
       !loom_serve_realtime_input_pending(session->input) &&
@@ -1669,7 +1010,7 @@ void loom_serve_realtime_session_free(loom_serve_realtime_session_t* session) {
   loom_serve_realtime_input_free(session->input);
   loom_serve_realtime_turn_free(session->turn);
   loom_serve_realtime_capture_free(session->capture);
-  loom_serve_realtime_audio_deinitialize(&session->audio);
+  loom_serve_realtime_responses_free(session->responses);
   loom_serve_realtime_conversation_deinitialize(&session->conversation);
   loom_serve_realtime_settings_deinitialize(&session->settings);
   iree_allocator_free(session->host_allocator, session);

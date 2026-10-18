@@ -12,6 +12,22 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
+    conversation_test
+  SRCS
+    "conversation_test.cc"
+  DEPS
+    ::conversation
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
     wire_test
   SRCS
     "wire_test.cc"
@@ -243,6 +259,7 @@ loom_cc_library(
     "settings.c"
   DEPS
     ::event
+    ::tools
     ::turn
     iree::base
     iree::base::internal::json
@@ -280,6 +297,7 @@ loom_cc_library(
     iree::base
     loom::serve::transport::http::server
     loom::serve::transport::websocket::connection
+    loom::util::stream
   PUBLIC
 )
 endif()
@@ -293,14 +311,15 @@ loom_cc_library(
   SRCS
     "session.c"
   DEPS
-    ::audio
     ::binding
     ::capture
     ::conversation
     ::event
-    ::generation
     ::history
     ::input
+    ::item
+    ::output
+    ::response
     ::settings
     ::turn
     ::wire
@@ -311,8 +330,6 @@ loom_cc_library(
     loom::serve::server::registry
     loom::serve::service::recognition::events
     loom::serve::service::recognition::request
-    loom::serve::service::text::chat
-    loom::serve::service::text::stream
     loom::serve::transport::http::server
     loom::serve::transport::websocket::connection
   PUBLIC
@@ -411,6 +428,145 @@ loom_cc_test(
     loom::serve::transport::websocket::handshake
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    tools
+  HDRS
+    "tools.h"
+  SRCS
+    "tools.c"
+  DEPS
+    ::event
+    iree::base
+    iree::base::internal::json
+    loom::serve::service::text::chat
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    item
+  HDRS
+    "item.h"
+  SRCS
+    "item.c"
+  DEPS
+    ::conversation
+    ::event
+    ::settings
+    iree::base
+    iree::base::internal::json
+    loom::serve::service::text::chat
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    output
+  HDRS
+    "output.h"
+  SRCS
+    "output.c"
+  DEPS
+    ::conversation
+    ::wire
+    iree::base
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    response
+  HDRS
+    "response.h"
+  SRCS
+    "response.c"
+  DEPS
+    ::audio
+    ::binding
+    ::conversation
+    ::event
+    ::generation
+    ::history
+    ::output
+    ::settings
+    ::wire
+    iree::base
+    iree::task
+    loom::serve::runtime::host::wake
+    loom::serve::server::registry
+    loom::serve::service::text::chat
+    loom::serve::service::text::stream
+    loom::serve::transport::http::server
+    loom::util::stream
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    output_test
+  SRCS
+    "output_test.cc"
+  DEPS
+    ::conversation
+    ::output
+    ::wire
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::util::stream
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_library(
+  NAME
+    response_tests
+  SRCS
+    "response_test.cc"
+  DEPS
+    ::binding
+    ::conversation
+    ::history
+    ::item
+    ::response
+    ::settings
+    ::tools
+    ::wire
+    iree::base
+    iree::base::internal::json
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::testing::gtest
+    iree::testing::temp_file
+    loom::serve::runtime::host
+    loom::serve::server::configuration
+    loom::serve::server::model_registration
+    loom::serve::server::registry
+    loom::serve::testing::service_application
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
+    loom::serve::transport::websocket::connection
+    loom::serve::transport::websocket::handshake
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
 )
 endif()
 

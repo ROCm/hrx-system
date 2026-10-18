@@ -137,11 +137,14 @@ class Client:
         response = events[-1]["response"]
         status = "completed" if finish == "stop" else "incomplete"
         assert response["status"] == status, response
-        item = response["output"][0]
-        assert item["status"] == status, item
-        assert item["content"][0]["transcript" if audio_output else "text"] == text, (
-            response
-        )
+        if text:
+            item = response["output"][0]
+            assert item["status"] == status, item
+            assert (
+                item["content"][0]["transcript" if audio_output else "text"] == text
+            ), response
+        else:
+            assert response["output"] == [], response
         assert response["status_details"] == (
             None
             if finish == "stop"
@@ -416,7 +419,20 @@ def response_failure(address, trace, *, speech):
         assert not any(e["type"] == "response.output_audio.delta" for e in events), (
             events
         )
-        assert response["output"][0]["content"][0]["transcript"] is None, response
+        if speech:
+            # Text supplies the first content before the independently queued
+            # speech preparation rejects its voice. The real message survives
+            # as incomplete, with its unaligned transcript removed.
+            assert response["output"][0]["status"] == "incomplete", response
+            assert response["output"][0]["content"][0]["transcript"] is None, response
+            assert any(e["type"] == "response.output_item.added" for e in events), (
+                events
+            )
+        else:
+            assert response["output"] == [], response
+            assert not any(e["type"] == "response.output_item.added" for e in events), (
+                events
+            )
         client.send("conversation.item.delete", item_id="rejected-input")
         client.until("conversation.item.deleted")
         client.send(
@@ -447,7 +463,7 @@ def cancellation(address, trace):
         client.message("pending", "a")
         metadata = {"input_item_id": "pending"}
         client.send("response.create", response={"metadata": metadata})
-        events = client.until("response.content_part.added")
+        events = client.until("response.created")
         identity = next(
             e["response"]["id"] for e in events if e["type"] == "response.created"
         )
@@ -465,8 +481,10 @@ def cancellation(address, trace):
             "reason": "client_cancelled",
         }, response
         assert not any(e["type"].endswith(".delta") for e in events), events
-        client.send("conversation.item.delete", item_id=response["output"][0]["id"])
-        client.until("conversation.item.deleted")
+        assert response["output"] == [], response
+        assert not any(e["type"] == "response.output_item.added" for e in events), (
+            events
+        )
         admin.request("/v1/models/undrain", {"model": "fixture-text"})
         client.respond([{"role": "user", "content": "a"}])
         client.send("input_audio_buffer.append", audio="AAAAAA==")
@@ -743,19 +761,9 @@ def automatic_response_policy(address, trace, *, interrupt):
                 "type": "cancelled",
                 "reason": "turn_detected",
             }, cancelled
-            item = cancelled["output"][0]
-            assert item["content"][0]["transcript"] is None, item
+            assert cancelled["output"] == [], cancelled
             client.send("response.create")
             client.until("response.created")
-            # The old unaligned text is already absent. A late playback report
-            # cannot cancel or invalidate the correctly composed successor.
-            client.send(
-                "conversation.item.truncate",
-                item_id=item["id"],
-                content_index=0,
-                audio_end_ms=0,
-            )
-            client.until("conversation.item.truncated")
         else:
             assert not any(
                 e["type"] in ("response.done", "response.created") for e in events
@@ -848,6 +856,210 @@ def rejected_capture(address, trace):
         client.close()
 
 
+def anonymous_item(address, trace):
+    client = Client(address, trace)
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.send(
+            "conversation.item.create",
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "a"}],
+            },
+        )
+        item = client.until("conversation.item.done")[-1]["item"]
+        response = client.respond([{"role": "user", "content": "a"}])
+        assert item["id"] != response["output"][0]["id"], response
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def reserved_item_identity(address, trace):
+    client = Client(address, trace)
+    try:
+        session = client.receive()["session"]
+        namespace = session["id"].removeprefix("sess_")
+        claimed = f"item_{namespace}_1"
+        client.message(claimed, "a")
+        response = client.respond([{"role": "user", "content": "a"}])
+        assert response["output"][0]["id"] == f"item_{namespace}_2", response
+        client.send(
+            "session.update",
+            session={
+                "audio": {
+                    "input": {
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "silence_duration_ms": 100,
+                            "create_response": False,
+                            "interrupt_response": False,
+                        }
+                    }
+                }
+            },
+        )
+        client.until("session.updated")
+        raw = struct.pack("<288h", *([64] * 192 + [0] * 96))
+        for commit in (True, False):
+            client.send(
+                "input_audio_buffer.append", audio=base64.b64encode(raw).decode()
+            )
+            started = client.until("input_audio_buffer.speech_started")[-1]
+            identity = started["item_id"]
+            client.send(
+                "conversation.item.create",
+                event_id="reserved-collision",
+                item={
+                    "id": identity,
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "b"}],
+                },
+            )
+            error = client.receive(allow_error=True)
+            assert error["error"]["code"] == "INVALID_ARGUMENT", error
+            assert error["error"]["event_id"] == "reserved-collision", error
+            if commit:
+                client.send("input_audio_buffer.commit")
+                events = client.until("conversation.item.done")
+                transcript = next(
+                    e
+                    for e in events
+                    if e["type"]
+                    == "conversation.item.input_audio_transcription.completed"
+                )
+                assert transcript["item_id"] == identity, transcript
+                assert transcript["transcript"] == "A", transcript
+            else:
+                client.send("input_audio_buffer.clear")
+                client.until("input_audio_buffer.cleared")
+                # Clear releases the reserved identity without publishing a
+                # canonical item; the same explicit ID can now be accepted.
+                client.message(identity, "b")
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def deferred_response_frontier(address, trace):
+    client = Client(address, trace)
+    admin = HttpClient(address)
+    drained = False
+    try:
+        assert client.receive()["type"] == "session.created"
+        admin.request("/v1/models/drain", {"model": "recognition"})
+        drained = True
+        audio = base64.b64encode(bytes(480)).decode()
+        client.send("input_audio_buffer.append", audio=audio)
+        client.send("input_audio_buffer.commit")
+        first = client.until("conversation.item.added")[-1]["item"]["id"]
+        client.send("response.create")
+        created = client.until("response.created")[-1]["response"]
+        client.send("input_audio_buffer.append", audio=audio)
+        client.send("input_audio_buffer.commit")
+        appended = client.until("conversation.item.added")[-1]
+        second = appended["item"]["id"]
+        assert appended["previous_item_id"] == first, appended
+        admin.request("/v1/models/undrain", {"model": "recognition"})
+        drained = False
+        events, transcripts, inputs_done = [], set(), set()
+        response = None
+        while response is None or len(transcripts) != 2 or len(inputs_done) != 2:
+            event = client.receive()
+            events.append(event)
+            if event["type"] == "conversation.item.input_audio_transcription.completed":
+                transcripts.add(event["item_id"])
+                assert event["transcript"] == "A", event
+            elif (
+                event["type"] == "conversation.item.done"
+                and event["item"]["role"] == "user"
+            ):
+                inputs_done.add(event["item"]["id"])
+            elif event["type"] == "response.done":
+                response = event["response"]
+        assert transcripts == {first, second}, events
+        assert response["id"] == created["id"], response
+        messages = [{"role": "user", "content": "A"}]
+        expected = complete(messages, 2)[0]
+        assert response["output"][0]["content"][0]["transcript"] == expected, response
+        assert response["usage"]["input_tokens"] == 1, response
+        added = next(
+            e
+            for e in events
+            if e["type"] == "conversation.item.added"
+            and e["item"]["role"] == "assistant"
+        )
+        assert added["previous_item_id"] == first, added
+        pcm = b"".join(
+            base64.b64decode(e["delta"])
+            for e in events
+            if e["type"] == "response.output_audio.delta"
+        )
+        check_pcm(pcm, expected, 42)
+        messages.extend(
+            [
+                {"role": "assistant", "content": expected},
+                {"role": "user", "content": "A"},
+            ]
+        )
+        client.respond(messages)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        if drained:
+            admin.request("/v1/models/undrain", {"model": "recognition"})
+        client.close()
+
+
+def repeated_playback_report(address, trace):
+    client = Client(address, trace)
+    admin = HttpClient(address)
+    drained = False
+    try:
+        assert client.receive()["type"] == "session.created"
+        client.message("before-playback", "a")
+        messages = [{"role": "user", "content": "a"}]
+        response = client.respond(messages)
+        item = response["output"][0]
+        report = {"item_id": item["id"], "content_index": 0, "audio_end_ms": 0}
+        client.send("conversation.item.truncate", **report)
+        client.until("conversation.item.truncated")
+        admin.request("/v1/models/drain", {"model": "fixture-text"})
+        drained = True
+        client.send("response.create")
+        pending = client.until("response.created")[-1]["response"]
+        # The already removed transcript cannot invalidate or cancel the new
+        # response, even when it has not published an output item yet.
+        client.send("conversation.item.truncate", **report)
+        client.until("conversation.item.truncated")
+        admin.request("/v1/models/undrain", {"model": "fixture-text"})
+        drained = False
+        events = client.until("response.done")
+        response = events[-1]["response"]
+        expected, finish = complete(messages, 2)
+        assert response["id"] == pending["id"], response
+        assert response["status"] == (
+            "completed" if finish == "stop" else "incomplete"
+        ), response
+        assert response["output"][0]["content"][0]["transcript"] == expected, response
+        pcm = b"".join(
+            base64.b64decode(e["delta"])
+            for e in events
+            if e["type"] == "response.output_audio.delta"
+        )
+        check_pcm(pcm, expected, 42)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        if drained:
+            admin.request("/v1/models/undrain", {"model": "fixture-text"})
+        client.close()
+
+
 def empty_response(address, trace):
     client = Client(address, trace)
     admin = HttpClient(address)
@@ -863,9 +1075,22 @@ def empty_response(address, trace):
         assert response["status"] == "completed", events
         assert response["usage"]["input_tokens"] == 11, response
         assert response["usage"]["output_tokens"] == 1, response
-        assert not any(e["type"].endswith(".delta") for e in events), events
+        assert response["output"] == [], response
+        assert [e["type"] for e in events] == ["response.created", "response.done"], (
+            events
+        )
         admin.request("/v1/models/undrain", {"model": "speech"})
         drained = False
+        # No assistant separator from an invented empty message may enter the
+        # next native prompt or its compatible checkpoint.
+        client.message("after-empty", "b")
+        response = client.respond(
+            [
+                {"role": "user", "content": "a" * 11},
+                {"role": "user", "content": "b"},
+            ]
+        )
+        assert response["usage"]["input_tokens"] == 12, response
         client.send_frame(8, struct.pack(">H", 1000))
         assert client.read_frame() == (8, struct.pack(">H", 1000))
     finally:
@@ -909,6 +1134,458 @@ def oversized_item_admission(address, trace):
             client.message(label, "b")
             messages.append({"role": "user", "content": "b"})
         client.respond(messages)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+FUNCTION_TOOLS = [
+    {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+        },
+    }
+    for name, description in (
+        ("z_lookup", "First function 🌲"),
+        ("a_lookup", "Second function"),
+    )
+]
+
+
+def function_oracle(messages, tools, maximum):
+    # Independent dense recurrence, with the source's documented reversible
+    # rendering: catalogue markers, content, call letters, assistant separator.
+    prompt = "#" * len(tools)
+    for message in messages:
+        prompt += message.get("content") or ""
+        prompt += "".join(
+            json.loads(call["function"]["arguments"])["value"]
+            for call in message.get("tool_calls", [])
+        )
+        if message["role"] == "assistant":
+            prompt += "#"
+    raw, finish = complete([{"role": "user", "content": prompt}], maximum)
+    boundary = raw.find("x") if tools else -1
+    if boundary < 0:
+        return raw, [], finish
+    calls = [
+        {
+            "name": tools[0]["name"],
+            "arguments": json.dumps({"value": letter}, separators=(",", ":")),
+        }
+        for letter in raw[boundary:]
+    ]
+    return raw[:boundary], calls, "tool_calls"
+
+
+def function_response(
+    client, messages, tools, *, maximum=12, overrides=None, results=False
+):
+    expected, calls, finish = function_oracle(messages, tools, maximum)
+    client.send(
+        "response.create", response={"max_output_tokens": maximum, **(overrides or {})}
+    )
+    events = []
+    outputs = []
+    returned = []
+    acknowledgements = set()
+    response = None
+    while response is None or (results and len(acknowledgements) != len(calls)):
+        event = client.receive()
+        events.append(event)
+        if (
+            event["type"] == "response.output_item.done"
+            and event["item"]["type"] == "function_call"
+        ):
+            call = event["item"]
+            assert call["status"] == "completed", call
+            ordinal = len(outputs)
+            assert {key: call[key] for key in ("name", "arguments")} == calls[
+                ordinal
+            ], (call, calls)
+            outputs.append(call)
+            if results:
+                # Send before response.done, just as Open WebUI executes each
+                # completed call. Even empty result strings are canonical input.
+                output = "a" if ordinal % 2 == 0 else ""
+                identity = f"result_{ordinal}"
+                client.send(
+                    "conversation.item.create",
+                    item={
+                        "id": identity,
+                        "type": "function_call_output",
+                        "call_id": call["call_id"],
+                        "output": output,
+                        "object": "realtime.item",
+                        "status": "in_progress",
+                    },
+                )
+                returned.append(
+                    {"role": "tool", "tool_call_id": call["call_id"], "content": output}
+                )
+        elif (
+            event["type"] == "conversation.item.done"
+            and event["item"]["type"] == "function_call_output"
+        ):
+            acknowledgements.add(event["item"]["id"])
+            assert event["item"]["status"] == "completed", event
+        elif event["type"] == "response.done":
+            response = event["response"]
+    assert len(outputs) == len(calls), (outputs, calls)
+    text = "".join(
+        event["delta"]
+        for event in events
+        if event["type"]
+        in ("response.output_text.delta", "response.output_audio_transcript.delta")
+    )
+    assert text == expected, (text, expected, events)
+    audio = b"".join(
+        base64.b64decode(event["delta"], validate=True)
+        for event in events
+        if event["type"] == "response.output_audio.delta"
+    )
+    audio_output = (overrides or {}).get("output_modalities", ["audio"]) == ["audio"]
+    if audio_output and expected:
+        check_pcm(audio, expected, 42, "positive")
+    else:
+        assert not audio
+    if not expected:
+        assert not any(
+            "output_audio" in event["type"] or "content_part" in event["type"]
+            for event in events
+        ), events
+    status = "incomplete" if finish == "length" else "completed"
+    assert response["status"] == status, response
+    assert (
+        response["output"]
+        == (
+            [
+                next(
+                    event["item"]
+                    for event in events
+                    if event["type"] == "response.output_item.done"
+                    and event["item"]["type"] == "message"
+                )
+            ]
+            if expected
+            else []
+        )
+        + outputs
+    ), response
+    for index, call in enumerate(outputs, bool(expected)):
+        selected = [
+            event
+            for event in events
+            if event.get("item_id", event.get("item", {}).get("id")) == call["id"]
+        ]
+        kinds = [event["type"] for event in selected]
+        assert kinds == [
+            "conversation.item.added",
+            "response.output_item.added",
+            "response.function_call_arguments.delta",
+            "response.function_call_arguments.done",
+            "response.output_item.done",
+            "conversation.item.done",
+        ], selected
+        for event in selected:
+            if event["type"].startswith("response."):
+                assert event["output_index"] == index, event
+        assert (
+            selected[0]["item"]["arguments"] == selected[1]["item"]["arguments"] == ""
+        )
+        assert selected[2]["delta"] == selected[3]["arguments"] == call["arguments"]
+    message = {"role": "assistant", "content": expected}
+    if outputs:
+        message["tool_calls"] = [
+            {
+                "id": call["call_id"],
+                "type": "function",
+                "function": {key: call[key] for key in ("name", "arguments")},
+            }
+            for call in outputs
+        ]
+    return response, message, returned
+
+
+def function_transactions(address, trace, *, content):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        client.send(
+            "session.update", session={"tools": FUNCTION_TOOLS, "tool_choice": "auto"}
+        )
+        settings = client.until("session.updated")[-1]["session"]
+        assert (
+            settings["tools"] == FUNCTION_TOOLS and settings["tool_choice"] == "auto"
+        ), settings
+        client.message("prompt", content)
+        messages = [{"role": "user", "content": content}]
+        expected, calls, _ = function_oracle(messages, FUNCTION_TOOLS, 12)
+        model = next(
+            item["loom"]
+            for item in HttpClient(address).request("/v1/status")["data"]
+            if item["id"] == "fixture-text"
+        )
+        assert "error" not in model, model
+        try:
+            native = HttpClient(address).request(
+                "/v1/chat/completions",
+                {
+                    "model": "fixture-text",
+                    "messages": messages,
+                    "max_tokens": 12,
+                    "seed": 42,
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                key: value
+                                for key, value in tool.items()
+                                if key != "type"
+                            },
+                        }
+                        for tool in FUNCTION_TOOLS
+                    ],
+                },
+            )
+        except AssertionError as error:
+            error.add_note(json.dumps(HttpClient(address).request("/v1/status")))
+            raise
+        choice = native["choices"][0]
+        assert choice["finish_reason"] == "tool_calls", native
+        assert (choice["message"].get("content") or "") == expected, native
+        assert [
+            call["function"] for call in choice["message"]["tool_calls"]
+        ] == calls, native
+        metadata = {"input_item_id": "prompt", "operation": "lookup 🌲"}
+        overrides = {"metadata": metadata}
+        if not expected:
+            # A deliberately nonexistent voice proves tool-only output does not
+            # acquire a speech request, independently of emitted audio events.
+            overrides["audio"] = {"output": {"voice": "missing-tool-only-voice"}}
+        response, message, returned = function_response(
+            client, messages, FUNCTION_TOOLS, overrides=overrides, results=True
+        )
+        assert response["metadata"] == metadata
+        messages += [message, *returned]
+        spoken, _, _ = function_response(
+            client, messages, [], maximum=3, overrides={"tool_choice": "none"}
+        )
+        assert spoken["usage"]["input_token_details"]["cached_tokens"] == 0, spoken
+        # The override did not mutate the default catalogue or the preceding
+        # compatible checkpoint. Subsequent canonical history includes results.
+        messages.append(
+            {
+                "role": "assistant",
+                "content": spoken["output"][0]["content"][0]["transcript"],
+            }
+        )
+        resumed, _, _ = function_response(client, messages, FUNCTION_TOOLS, maximum=2)
+        assert resumed["usage"]["input_token_details"]["cached_tokens"] > 0, resumed
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def function_item_edits(address, trace):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        # Unknown calls reject without publishing or reserving the item ID.
+        result = {
+            "id": "result",
+            "type": "function_call_output",
+            "call_id": "unknown",
+            "output": "",
+        }
+        client.send("conversation.item.create", item=result, event_id="unknown")
+        error = client.receive(allow_error=True)
+        assert error["type"] == "error" and error["error"]["event_id"] == "unknown", (
+            error
+        )
+        client.send(
+            "conversation.item.create",
+            item={
+                "id": "call",
+                "type": "function_call",
+                "name": "z_lookup",
+                "arguments": '{"value":"x"}',
+                "status": "incomplete",
+                "object": "realtime.item",
+            },
+        )
+        call = client.until("conversation.item.done")[-1]["item"]
+        assert call["status"] == "completed" and call["call_id"], call
+        result["call_id"] = call["call_id"]
+        client.send(
+            "conversation.item.create",
+            item=result,
+            previous_item_id="root",
+            event_id="before-call",
+        )
+        error = client.receive(allow_error=True)
+        assert (
+            error["type"] == "error" and error["error"]["event_id"] == "before-call"
+        ), error
+        client.send("conversation.item.create", item=result)
+        assert client.until("conversation.item.done")[-1]["item"]["output"] == ""
+        duplicate = {**call, "id": "duplicate"}
+        client.send("conversation.item.create", item=duplicate, event_id="duplicate")
+        error = client.receive(allow_error=True)
+        assert error["type"] == "error" and error["error"]["event_id"] == "duplicate", (
+            error
+        )
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "id": call["call_id"],
+                        "function": {"name": "z_lookup", "arguments": '{"value":"x"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": call["call_id"], "content": ""},
+        ]
+        function_response(client, messages, [], maximum=2)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def function_policy_admission(address, trace):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        client.send("session.update", session={"tools": FUNCTION_TOOLS})
+        settings = client.until("session.updated")[-1]["session"]
+        rejected = [
+            {"tool_choice": "required"},
+            {"tool_choice": {"type": "function", "name": "z_lookup"}},
+            {"tools": [{**FUNCTION_TOOLS[0], "strict": True}]},
+            {"tools": [FUNCTION_TOOLS[0], FUNCTION_TOOLS[0]]},
+            {"tools": [{**FUNCTION_TOOLS[0], "parameters": {"type": "string"}}]},
+        ]
+        for index, policy in enumerate(rejected):
+            identity = f"rejected-policy-{index}"
+            client.send("session.update", session=policy, event_id=identity)
+            error = client.receive(allow_error=True)
+            assert (
+                error["type"] == "error" and error["error"]["event_id"] == identity
+            ), error
+            client.send("session.update", session={})
+            assert client.until("session.updated")[-1]["session"] == settings
+
+        # The inbound command fits, but its full effective-settings echo does
+        # not. Rejecting the echo must also discard the candidate catalogue.
+        tool = {**FUNCTION_TOOLS[0], "description": ""}
+        request = {
+            "type": "session.update",
+            "event_id": "large-policy",
+            "session": {"tools": [tool]},
+        }
+
+        def encode():
+            return json.dumps(
+                request, ensure_ascii=False, separators=(",", ":")
+            ).encode()
+
+        tool["description"] = "a" * (512 * 1024 - len(encode()))
+        payload = encode()
+        assert len(payload) == 512 * 1024
+        client.send_frame(1, payload)
+        error = client.receive(allow_error=True)
+        assert error["type"] == "error" and error["error"]["code"] == "OUT_OF_RANGE", (
+            error
+        )
+        assert error["error"]["event_id"] == "large-policy", error
+        client.send("session.update", session={})
+        assert client.until("session.updated")[-1]["session"] == settings
+        client.message("prompt", "a")
+        function_response(client, [{"role": "user", "content": "a"}], FUNCTION_TOOLS)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def function_capacity(address, trace):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        client.send("session.update", session={"tools": FUNCTION_TOOLS})
+        client.until("session.updated")
+        # Leave room for the first two of eight generated calls. The complete
+        # set must be admitted before any call becomes externally executable.
+        for index in range(125):
+            client.message(f"empty-{index}", "")
+        client.message("prompt", "a")
+        client.send("response.create", response={"max_output_tokens": 12})
+        events = client.until("response.done")
+        assert [event["type"] for event in events] == [
+            "response.created",
+            "response.done",
+        ], events
+        response = events[-1]["response"]
+        assert response["status"] == "failed" and response["output"] == [], response
+        assert response["status_details"]["error"]["code"] == "RESOURCE_EXHAUSTED", (
+            response
+        )
+        for index in range(125):
+            client.send("conversation.item.delete", item_id=f"empty-{index}")
+            client.until("conversation.item.deleted")
+        # No partial calls, assistant separators, or leaked capacity from the
+        # failed response may enter the next native prompt.
+        function_response(client, [{"role": "user", "content": "a"}], FUNCTION_TOOLS)
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        client.close()
+
+
+def function_group_edits(address, trace):
+    client = Client(address, trace)
+    try:
+        client.receive()
+        client.send("session.update", session={"tools": FUNCTION_TOOLS})
+        client.until("session.updated")
+        client.message("prompt", "a")
+        messages = [{"role": "user", "content": "a"}]
+        response, message, _ = function_response(client, messages, FUNCTION_TOOLS)
+        first, removed = response["output"][:2]
+        client.send(
+            "conversation.item.create",
+            previous_item_id=first["id"],
+            item={
+                "type": "function_call_output",
+                "call_id": first["call_id"],
+                "output": "a",
+            },
+        )
+        client.until("conversation.item.done")
+        client.send("conversation.item.delete", item_id=removed["id"])
+        client.until("conversation.item.deleted")
+        # A result inserted between generated members splits the native
+        # assistant message. Deletion removes only its selected call.
+        messages += [
+            {**message, "tool_calls": message["tool_calls"][:1]},
+            {"role": "tool", "tool_call_id": first["call_id"], "content": "a"},
+            {**message, "tool_calls": message["tool_calls"][2:]},
+        ]
+        response, _, _ = function_response(
+            client, messages, [], maximum=2, overrides={"tool_choice": "none"}
+        )
+        assert response["usage"]["input_token_details"]["cached_tokens"] == 0, response
         client.send_frame(8, struct.pack(">H", 1000))
         assert client.read_frame() == (8, struct.pack(">H", 1000))
     finally:
@@ -968,6 +1645,16 @@ def main():
         with running_server(command, artifacts / "server.log") as (process, address):
             assert address is not None, process.poll()
             with (artifacts / "wire.jsonl").open("w") as trace:
+                function_transactions(address, trace, content="a")
+                function_transactions(address, trace, content="b")
+                function_item_edits(address, trace)
+                function_policy_admission(address, trace)
+                function_capacity(address, trace)
+                function_group_edits(address, trace)
+                anonymous_item(address, trace)
+                reserved_item_identity(address, trace)
+                deferred_response_frontier(address, trace)
+                repeated_playback_report(address, trace)
                 empty_response(address, trace)
                 oversized_item_admission(address, trace)
                 response_policy(address, trace)

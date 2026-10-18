@@ -56,6 +56,7 @@ static iree_status_t loom_serve_realtime_output_settings_copy(
     iree_allocator_t host_allocator,
     loom_serve_realtime_output_settings_t* target) {
   *target = *source;
+  loom_serve_realtime_tools_retain(target->tools);
   iree_string_builder_initialize(host_allocator, &target->instructions);
   iree_string_builder_initialize(host_allocator, &target->voice);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
@@ -66,6 +67,7 @@ static iree_status_t loom_serve_realtime_output_settings_copy(
 
 static void loom_serve_realtime_output_settings_deinitialize(
     loom_serve_realtime_output_settings_t* settings) {
+  loom_serve_realtime_tools_release(settings->tools);
   iree_string_builder_deinitialize(&settings->instructions);
   iree_string_builder_deinitialize(&settings->voice);
 }
@@ -358,90 +360,94 @@ static iree_status_t loom_serve_realtime_output_settings_apply(
     settings->max_output_tokens = (uint32_t)limit;
   }
   if (present & (1u << LOOM_SERVE_REALTIME_SETTING_TOOLS)) {
-    iree_host_size_t count = 0;
-    IREE_RETURN_IF_ERROR(iree_json_array_length(
-        values[LOOM_SERVE_REALTIME_SETTING_TOOLS].text, &count));
-    if (count) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "function tools are not enabled for this session");
-    }
+    loom_serve_realtime_tools_t* tools = NULL;
+    IREE_RETURN_IF_ERROR(loom_serve_realtime_tools_parse(
+        values[LOOM_SERVE_REALTIME_SETTING_TOOLS].text,
+        settings->instructions.allocator, &tools));
+    loom_serve_realtime_tools_release(settings->tools);
+    settings->tools = tools;
   }
-  if ((present & (1u << LOOM_SERVE_REALTIME_SETTING_TOOL_CHOICE)) &&
-      !loom_serve_realtime_string_is(
-          values[LOOM_SERVE_REALTIME_SETTING_TOOL_CHOICE].text,
-          IREE_SV("none")) &&
-      !loom_serve_realtime_string_is(
-          values[LOOM_SERVE_REALTIME_SETTING_TOOL_CHOICE].text,
-          IREE_SV("auto"))) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "tool_choice requires none or auto with empty tools");
+  if (present & (1u << LOOM_SERVE_REALTIME_SETTING_TOOL_CHOICE)) {
+    const iree_string_view_t choice =
+        values[LOOM_SERVE_REALTIME_SETTING_TOOL_CHOICE].text;
+    if (!loom_serve_realtime_string_is(choice, IREE_SV("none")) &&
+        !loom_serve_realtime_string_is(choice, IREE_SV("auto"))) {
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "tool_choice supports auto or none");
+    }
+    settings->tool_choice_none =
+        loom_serve_realtime_string_is(choice, IREE_SV("none"));
   }
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_realtime_settings_update(
-    loom_serve_realtime_settings_t* settings,
+iree_status_t loom_serve_realtime_settings_prepare(
+    const loom_serve_realtime_settings_t* settings,
     const loom_serve_realtime_profile_t* profile, iree_string_view_t object,
-    bool input_open, bool* out_instructions_changed) {
-  if (out_instructions_changed) {
-    *out_instructions_changed = false;
+    bool input_open, loom_serve_realtime_settings_t* candidate) {
+  *candidate = *settings;
+  iree_string_builder_initialize(settings->host_allocator,
+                                 &candidate->language);
+  iree_string_builder_initialize(settings->host_allocator, &candidate->prompt);
+  iree_status_t status = loom_serve_realtime_output_settings_copy(
+      &settings->output, settings->host_allocator, &candidate->output);
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_string(
+        &candidate->language, iree_string_builder_view(&settings->language));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_string(
+        &candidate->prompt, iree_string_builder_view(&settings->prompt));
   }
   loom_serve_realtime_settings_fields_t fields;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_realtime_settings_parse(object, false, &fields));
-  loom_serve_realtime_settings_t candidate = *settings;
-  iree_string_builder_initialize(settings->host_allocator, &candidate.language);
-  iree_string_builder_initialize(settings->host_allocator, &candidate.prompt);
-  iree_status_t status = loom_serve_realtime_output_settings_copy(
-      &settings->output, settings->host_allocator, &candidate.output);
   if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(
-        &candidate.language, iree_string_builder_view(&settings->language));
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(
-        &candidate.prompt, iree_string_builder_view(&settings->prompt));
+    status = loom_serve_realtime_settings_parse(object, false, &fields);
   }
   if (iree_status_is_ok(status)) {
     status =
-        loom_serve_realtime_output_settings_apply(&candidate.output, &fields);
+        loom_serve_realtime_output_settings_apply(&candidate->output, &fields);
   }
   if (iree_status_is_ok(status) &&
       (fields.present & (1u << LOOM_SERVE_REALTIME_SETTING_AUDIO))) {
     status = loom_serve_realtime_audio_parse(
-        &candidate, profile,
+        candidate, profile,
         fields.values[LOOM_SERVE_REALTIME_SETTING_AUDIO].text);
   }
   if (iree_status_is_ok(status) && input_open &&
-      (candidate.detect_turns != settings->detect_turns ||
-       candidate.turn.threshold != settings->turn.threshold ||
-       candidate.turn.prefix_padding_ms != settings->turn.prefix_padding_ms ||
-       candidate.turn.silence_duration_ms !=
+      (candidate->detect_turns != settings->detect_turns ||
+       candidate->turn.threshold != settings->turn.threshold ||
+       candidate->turn.prefix_padding_ms != settings->turn.prefix_padding_ms ||
+       candidate->turn.silence_duration_ms !=
            settings->turn.silence_duration_ms ||
-       candidate.create_response != settings->create_response ||
-       candidate.interrupt_response != settings->interrupt_response ||
-       !iree_string_view_equal(iree_string_builder_view(&candidate.language),
+       candidate->create_response != settings->create_response ||
+       candidate->interrupt_response != settings->interrupt_response ||
+       !iree_string_view_equal(iree_string_builder_view(&candidate->language),
                                iree_string_builder_view(&settings->language)) ||
-       !iree_string_view_equal(iree_string_builder_view(&candidate.prompt),
+       !iree_string_view_equal(iree_string_builder_view(&candidate->prompt),
                                iree_string_builder_view(&settings->prompt)))) {
     status = iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "commit or clear microphone input before changing its policy");
   }
-  if (iree_status_is_ok(status)) {
-    if (out_instructions_changed) {
-      *out_instructions_changed = !iree_string_view_equal(
-          iree_string_builder_view(&settings->output.instructions),
-          iree_string_builder_view(&candidate.output.instructions));
-    }
-    loom_serve_realtime_settings_t previous = *settings;
-    *settings = candidate;
-    candidate = previous;
-  }
-  loom_serve_realtime_settings_deinitialize(&candidate);
   return status;
+}
+
+iree_string_view_t loom_serve_realtime_output_settings_tools(
+    const loom_serve_realtime_output_settings_t* settings) {
+  return settings->tool_choice_none
+             ? iree_string_view_empty()
+             : loom_serve_realtime_tools_native(settings->tools);
+}
+
+bool loom_serve_realtime_output_settings_text_equal(
+    const loom_serve_realtime_output_settings_t* left,
+    const loom_serve_realtime_output_settings_t* right) {
+  return iree_string_view_equal(
+             iree_string_builder_view(&left->instructions),
+             iree_string_builder_view(&right->instructions)) &&
+         iree_string_view_equal(
+             loom_serve_realtime_output_settings_tools(left),
+             loom_serve_realtime_output_settings_tools(right));
 }
 
 enum {
@@ -592,11 +598,17 @@ iree_status_t loom_serve_realtime_settings_write(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
       ",\"output_modalities\":[\"%s\"],\"max_output_tokens\":%" PRIu32
-      ",\"tools\":[],\"tool_choice\":\"none\",\"audio\":{\"input\":{"
-      "\"format\":{\"type\":\"audio/pcm\",\"rate\":24000},"
-      "\"turn_detection\":",
+      ",\"tools\":",
       settings->output.audio ? "audio" : "text",
       settings->output.max_output_tokens));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_realtime_tools_write(settings->output.tools, output));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output,
+      ",\"tool_choice\":\"%s\",\"audio\":{\"input\":{"
+      "\"format\":{\"type\":\"audio/pcm\",\"rate\":24000},"
+      "\"turn_detection\":",
+      settings->output.tool_choice_none ? "none" : "auto"));
   if (settings->detect_turns) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output,
