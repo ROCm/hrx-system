@@ -281,7 +281,8 @@ static iree_status_t loom_serve_text_submit_checkpoint(
     loom_serve_text_service_t* service) {
   const iree_string_view_t session_name = service->control.request.session;
   loom_serve_text_checkpoint_source_t source = {0};
-  if (service->control.request.action == LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN) {
+  if (service->control.request.action ==
+      LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN) {
     source.session = loom_serve_text_session_select(
         service->row_count, service->sessions, session_name, NULL);
     if (source.session &&
@@ -1100,9 +1101,8 @@ static iree_status_t loom_serve_text_select_request(
                               "checkpoint is not pinned");
     }
   }
-  const loom_serve_text_session_t* session =
-      loom_serve_text_session_select(service->row_count, service->sessions,
-                                     name, NULL);
+  const loom_serve_text_session_t* session = loom_serve_text_session_select(
+      service->row_count, service->sessions, name, NULL);
   bool busy = session && session->request.consumer.self;
   for (iree_host_size_t i = 0; name.size && i < service->pending.count; ++i) {
     busy |= iree_string_view_equal(name, service->pending.values[i]->name);

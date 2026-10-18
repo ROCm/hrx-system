@@ -265,8 +265,8 @@ iree_status_t loom_serve_text_session_append_tokens(
     loom_serve_text_chat_scratch_t* completion_scratch,
     iree_allocator_t scratch_allocator) {
   iree_status_t status = loom_serve_text_session_decode_tokens(
-      session, model_name, count, tokens, scratch, tool_calls, completion_scratch,
-      scratch_allocator);
+      session, model_name, count, tokens, scratch, tool_calls,
+      completion_scratch, scratch_allocator);
   if (!iree_status_is_ok(status)) {
     // Device work completed, but translation cannot establish client history.
     // The consumer discards the partial stage and preserves the terminal error.

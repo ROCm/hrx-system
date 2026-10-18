@@ -996,9 +996,9 @@ static iree_status_t loom_serve_text_chat_history_tool(
   iree_string_view_t name, arguments;
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_function_decode(
       fields[2].value, &history->arguments, &name, &arguments));
-  return loom_serve_text_chat_function_render(
-      history->chat->policy, name, arguments, index, &history->calls,
-      history->chat->host_allocator);
+  return loom_serve_text_chat_function_render(history->chat->policy, name,
+                                              arguments, index, &history->calls,
+                                              history->chat->host_allocator);
 }
 
 static iree_status_t loom_serve_text_chat_history_message(
@@ -1708,9 +1708,9 @@ static iree_status_t loom_serve_text_chat_completion_tool(
       tools->calls, tools->request_id, name, arguments));
   const loom_serve_text_tool_call_t decoded_call =
       loom_serve_text_tool_calls_at(tools->calls, index);
-  return loom_serve_text_chat_function_render(tools->policy, decoded_call.name,
-                                              decoded_call.arguments, index,
-                                              &tools->scratch->rendered, tools->scratch_allocator);
+  return loom_serve_text_chat_function_render(
+      tools->policy, decoded_call.name, decoded_call.arguments, index,
+      &tools->scratch->rendered, tools->scratch_allocator);
 }
 
 void loom_serve_text_chat_scratch_initialize(
