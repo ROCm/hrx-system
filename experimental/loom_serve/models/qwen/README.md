@@ -73,8 +73,11 @@ history, or end with a completed assistant message. The source adds the usual
 assistant generation prefix after closing any tool or initial system framing;
 it never inserts a user turn. This supports Realtime independent status replies
 and selected item histories. Thinking and tool declarations retain the same
-formatting as ordinary user-led conversations. This extends the upstream
-template's user-query admission rule; role, field, and media validation remain
+formatting as ordinary user-led conversations. Additional system messages retain
+their position in the conversation, supporting context updates alongside live
+turns. Each nonempty update has its own system frame; empty system content adds
+no text. This extends the upstream template's user-query and initial-system-only
+admission rules. Known roles and role-specific field and media validation remain
 in force.
 
 ## Image chat

@@ -608,7 +608,7 @@ global.rodata.def @chat_options_key = bytes("6d6f64656c5f6f7074696f6e73")
 
 global.rodata.def @chat_options_error = bytes("5177656e206d6f64656c5f6f7074696f6e732061636365707473206f6e6c79206d61785f696d6167655f746f6b656e732c20616e20696e74656765722066726f6d20313238207468726f756768203136333834")
 
-global.rodata.def @chat_invalid = bytes("756e737570706f7274656420726f6c652c20726f6c65206669656c64732c206f72206d657373616765206f72646572")
+global.rodata.def @chat_invalid = bytes("756e737570706f7274656420726f6c65206f7220726f6c65206669656c6473")
 
 global.rodata.def @chat_image_invalid = bytes("5177656e20696d6167657320726571756972652061207573657220726f6c6520616e6420646973706c61792061737065637420726174696f206174206d6f737420323030")
 
@@ -1271,7 +1271,6 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   %user = func.call @chat_equal(%role, %user_role) : (buffer, buffer) -> (i1)
   %assistant = func.call @chat_equal(%role, %assistant_role) : (buffer, buffer) -> (i1)
   %tool = func.call @chat_equal(%role, %tool_role) : (buffer, buffer) -> (i1)
-  %first = scalar.cmpi eq, %ordinal, %zero64 : i64
   %prior_role = scalar.andi %state, %three64 : i64
   %prior_tool = scalar.cmpi eq, %prior_role, %three64 : i64
   %system_bit = scalar.andi %state, %four64 : i64
@@ -1285,13 +1284,11 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   %valid_assistant_fields = scalar.ori %assistant, %not_assistant_fields : i1
   %valid_tool_fields = scalar.cmpi eq, %tool, %has_tool_id : i1
   %not_system = scalar.cmpi eq, %system, %false : i1
-  %valid_system = scalar.ori %not_system, %first : i1
   %role_a = scalar.ori %system, %user : i1
   %role_b = scalar.ori %assistant, %tool : i1
   %known_role = scalar.ori %role_a, %role_b : i1
   %valid_a = scalar.andi %valid_assistant_fields, %valid_tool_fields : i1
-  %valid_b = scalar.andi %valid_system, %known_role : i1
-  %valid = scalar.andi %valid_a, %valid_b : i1
+  %valid = scalar.andi %valid_a, %known_role : i1
   %valid32 = scalar.extui %valid : i1 to i32
   %error = global.load @chat_invalid : buffer
   func.call @require(%valid32, %error) : (i32, buffer)

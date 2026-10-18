@@ -260,13 +260,88 @@ class RequestCheckTest(unittest.TestCase):
                             ordinary["prompt"][: -len(suffix)] + generation,
                         )
 
+    def test_system_messages_preserve_context_order(self):
+        user = {"role": "user", "content": "Hello."}
+        call = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": '{"path":"a.txt"}'},
+                }
+            ],
+        }
+        histories = [
+            [{"role": "system", "content": "Initial instructions."}],
+            [user],
+            [user, {"role": "assistant", "content": "Earlier."}],
+            [
+                user,
+                call,
+                {"role": "tool", "tool_call_id": "call-1", "content": "Result."},
+            ],
+        ]
+        user_frame = "<|im_start|>user\nHello.<|im_end|>\n"
+        for history in histories:
+            for thinking in (False, True):
+                for tools in ([], TOOLS):
+                    options = {"enable_thinking": thinking, "tools": tools}
+                    generation = "<|im_start|>assistant\n<think>\n" + (
+                        "" if thinking else "\n</think>\n\n"
+                    )
+                    ordinary = self.success(
+                        self.execute(
+                            PACKAGE / "control.loom",
+                            self.request(messages=[*history, user], **options),
+                        )
+                    )
+                    suffix = user_frame + generation
+                    self.assertTrue(ordinary["prompt"].endswith(suffix))
+                    prefix = ordinary["prompt"][: -len(suffix)]
+                    for content in ("", "Updated context λ."):
+                        frame = (
+                            f"<|im_start|>system\n{content}<|im_end|>\n"
+                            if content
+                            else ""
+                        )
+                        system = {"role": "system", "content": f" {content} "}
+                        for following in ([], [user]):
+                            with self.subTest(
+                                history=history,
+                                thinking=thinking,
+                                tools=bool(tools),
+                                content=content,
+                                following=bool(following),
+                            ):
+                                value = self.success(
+                                    self.execute(
+                                        PACKAGE / "control.loom",
+                                        self.request(
+                                            messages=[*history, system, *following],
+                                            **options,
+                                        ),
+                                        None if thinking else "Ready.",
+                                    )
+                                )
+                                prompt = (
+                                    prefix
+                                    + frame
+                                    + (user_frame if following else "")
+                                    + generation
+                                )
+                                self.assertEqual(value["prompt"], prompt)
+                                if not thinking:
+                                    self.assertEqual(
+                                        value["checkpoint"],
+                                        prompt + "Ready.<|im_end|>\n",
+                                    )
+                                    self.assertTrue(value["reusable"])
+
     def test_independent_context_preserves_role_validation(self):
         for messages in (
             [{"role": "unknown", "content": "Hello."}],
-            [
-                {"role": "assistant", "content": "Earlier."},
-                {"role": "system", "content": "Late instruction."},
-            ],
             [{"role": "tool", "content": "Missing call identity."}],
         ):
             with self.subTest(messages=messages):
