@@ -2017,6 +2017,8 @@ const iree_async_proactor_vtable_t iree_async_proactor_io_uring_vtable = {
     .register_relay = iree_async_proactor_io_uring_register_relay,
     .unregister_relay = iree_async_proactor_io_uring_unregister_relay,
     .prepare_buffer = iree_async_proactor_io_uring_prepare_buffer,
+    .clone_buffer_registration =
+        iree_async_proactor_io_uring_clone_buffer_registration,
     .attach_buffer = iree_async_proactor_io_uring_attach_buffer,
     .detach_buffer = iree_async_proactor_io_uring_detach_buffer,
     .register_buffer = iree_async_proactor_io_uring_register_buffer,

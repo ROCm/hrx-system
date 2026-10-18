@@ -831,6 +831,8 @@ class SharedPreparedRegistrationTest : public FileRegistrationTest {
   iree_async_file_t* second_file_ = nullptr;
   // Tracks whether teardown must complete an explicit detach.
   bool second_attached_ = false;
+  // Allows a clone metadata-allocation failure without invalidating cleanup.
+  bool second_allocations_allowed_ = true;
 };
 
 TEST_P(SharedPreparedRegistrationTest, PinsOutliveFirstProactor) {
@@ -913,6 +915,75 @@ TEST_P(SharedPreparedRegistrationTest, DistinctAllocatorOwnsSeparatePins) {
   ASSERT_NO_FATAL_FAILURE(DestroyFirstProactor());
   ASSERT_NO_FATAL_FAILURE(AttachSecond());
   ASSERT_NO_FATAL_FAILURE(WriteSecond(0x6D));
+}
+
+TEST_P(SharedPreparedRegistrationTest, ExplicitCloneOutlivesSourceProactor) {
+  // Explicit sharing permits independent view allocators. The system allocator
+  // that owns the original pins remains valid after its proactor is destroyed.
+  const iree_allocator_t allocator = {
+      &second_allocations_allowed_,
+      +[](void* self, iree_allocator_command_t command, const void* params,
+          void** inout_ptr) {
+        if (!*static_cast<bool*>(self) &&
+            (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+             command == IREE_ALLOCATOR_COMMAND_CALLOC)) {
+          return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "clone metadata allocation rejected");
+        }
+        auto system_allocator = iree_allocator_system();
+        return system_allocator.ctl(system_allocator.self, command, params,
+                                    inout_ptr);
+      },
+  };
+  ASSERT_NO_FATAL_FAILURE(CreateSecondProactor(allocator));
+  second_allocations_allowed_ = false;
+  iree_status_t allocation_status =
+      iree_async_proactor_clone_buffer_registration(
+          second_proactor_, &registration_state_, prepared_entry_,
+          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_);
+  second_allocations_allowed_ = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, allocation_status);
+  EXPECT_EQ(second_entry_, nullptr);
+  EXPECT_EQ(registration_state_.head, prepared_entry_);
+  struct rlimit descriptor_limit = {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
+  struct rlimit exhausted_limit = descriptor_limit;
+  exhausted_limit.rlim_cur = 0;
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &exhausted_limit), 0);
+  iree_status_t status = iree_async_proactor_clone_buffer_registration(
+      second_proactor_, &registration_state_, prepared_entry_,
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_);
+  EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(second_entry_->region->access_flags,
+            IREE_ASYNC_BUFFER_ACCESS_FLAG_READ);
+  EXPECT_EQ(second_entry_->region->buffer_size, region_->buffer_size);
+  EXPECT_EQ(second_entry_->region->buffer_count, region_->buffer_count);
+  EXPECT_EQ(second_entry_->region->handles.iouring.base_buffer_index, 0);
+  ASSERT_NO_FATAL_FAILURE(AttachSecond());
+  ASSERT_NO_FATAL_FAILURE(WriteSecond(0x62));
+  ASSERT_NO_FATAL_FAILURE(DetachSecond());
+  ASSERT_NO_FATAL_FAILURE(DestroyFirstProactor());
+  ASSERT_NO_FATAL_FAILURE(AttachSecond());
+  ASSERT_NO_FATAL_FAILURE(WriteSecond(0xD5));
+}
+
+TEST_F(SlabRegistrationTest, CloneRejectsOrdinaryRegistration) {
+  ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 1));
+  iree_async_buffer_registration_state_t state = {};
+  iree_async_buffer_registration_entry_t* entry = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_register_buffer(
+      proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &entry));
+  iree_async_buffer_registration_entry_t* clone = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_async_proactor_clone_buffer_registration(
+                            proactor_, &state, entry,
+                            IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &clone));
+  EXPECT_EQ(clone, nullptr);
+  EXPECT_EQ(state.head, entry);
+  EXPECT_EQ(entry->next, nullptr);
+  iree_async_buffer_registration_state_deinitialize(&state);
 }
 
 INSTANTIATE_TEST_SUITE_P(

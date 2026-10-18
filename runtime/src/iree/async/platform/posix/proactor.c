@@ -4493,6 +4493,8 @@ static const iree_async_proactor_vtable_t iree_async_proactor_posix_vtable = {
     .register_relay = iree_async_proactor_posix_vtable_register_relay,
     .unregister_relay = iree_async_proactor_posix_vtable_unregister_relay,
     .prepare_buffer = iree_async_proactor_prepare_buffer_emulated,
+    .clone_buffer_registration =
+        iree_async_proactor_clone_buffer_registration_emulated,
     .attach_buffer = iree_async_proactor_transition_buffer_emulated,
     .detach_buffer = iree_async_proactor_transition_buffer_emulated,
     .register_buffer = iree_async_proactor_posix_register_buffer,

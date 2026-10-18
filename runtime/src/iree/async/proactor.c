@@ -36,6 +36,30 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
                                           out_entry);
 }
 
+IREE_API_EXPORT iree_status_t iree_async_proactor_clone_buffer_registration(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state,
+    const iree_async_buffer_registration_entry_t* source_entry,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry) {
+  *out_entry = NULL;
+  if (!source_entry ||
+      !iree_any_bit_set(access_flags,
+                        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+                            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE) ||
+      (access_flags & ~source_entry->region->access_flags)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "registration cloning requires nonempty access "
+                            "contained in the source registration");
+  }
+  if (!proactor->vtable->clone_buffer_registration) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "proactor cannot clone prepared registrations");
+  }
+  return proactor->vtable->clone_buffer_registration(
+      proactor, state, source_entry, access_flags, out_entry);
+}
+
 IREE_API_EXPORT void iree_async_proactor_attach_buffer(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_entry_t* entry,
@@ -69,6 +93,24 @@ iree_status_t iree_async_proactor_prepare_buffer_emulated(
     iree_async_buffer_registration_entry_t** out_entry) {
   return proactor->vtable->register_buffer(proactor, state, buffer,
                                            access_flags, out_entry);
+}
+
+iree_status_t iree_async_proactor_clone_buffer_registration_emulated(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state,
+    const iree_async_buffer_registration_entry_t* source_entry,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry) {
+  if (source_entry->proactor->vtable->clone_buffer_registration !=
+      iree_async_proactor_clone_buffer_registration_emulated) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "source preparation is incompatible with proactor");
+  }
+  return proactor->vtable->register_buffer(
+      proactor, state,
+      iree_make_byte_span(source_entry->region->base_ptr,
+                          source_entry->region->length),
+      access_flags, out_entry);
 }
 
 void iree_async_proactor_transition_buffer_emulated(

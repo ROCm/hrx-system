@@ -714,6 +714,13 @@ typedef struct iree_async_proactor_vtable_t {
       iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
       iree_async_buffer_access_flags_t access_flags,
       iree_async_buffer_registration_entry_t** out_entry);
+  // Creates an independent attachment view without acquiring new native pins.
+  iree_status_t (*clone_buffer_registration)(
+      iree_async_proactor_t* proactor,
+      iree_async_buffer_registration_state_t* state,
+      const iree_async_buffer_registration_entry_t* source_entry,
+      iree_async_buffer_access_flags_t access_flags,
+      iree_async_buffer_registration_entry_t** out_entry);
   // Attaches prepared pins without waiting for another owner.
   void (*attach_buffer)(iree_async_proactor_t* proactor,
                         iree_async_buffer_registration_entry_t* entry,
@@ -1163,6 +1170,28 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
     iree_async_buffer_access_flags_t access_flags,
     iree_async_buffer_registration_entry_t** out_entry);
 
+// Creates a detached registration for the exact host range of |source_entry|.
+// Shares compatible prepared native pins and reserves independent metadata and
+// attachment slots on |proactor|. This never pins pages, copies payload bytes,
+// or waits for polling progress. Incompatible preparation returns UNAVAILABLE;
+// allocation or slot exhaustion returns RESOURCE_EXHAUSTED. Failure publishes
+// no entry. Success links an owned entry into |state|, ready for attach_buffer.
+// |access_flags| must include READ or WRITE and be a subset of source access.
+//
+// The caller serializes |state| mutation and keeps |source_entry| alive through
+// this call. The source entry and its proactor may then be cleaned up normally.
+// The allocator used for the source preparation must outlive every clone, as
+// the final clone releases that preparation. The borrowed host range and each
+// entry's own proactor retain the same lifetime requirements as prepare_buffer.
+// Cloning allocates only registration metadata and can run independently of
+// cold backing preparation; final cleanup may still release native pins.
+IREE_API_EXPORT iree_status_t iree_async_proactor_clone_buffer_registration(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state,
+    const iree_async_buffer_registration_entry_t* source_entry,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry);
+
 // Attaches a prepared entry without pinning or waiting for polling progress.
 // Exactly one required callback receives the result, possibly inline. The
 // caller serializes transitions on each entry and retains it through callback
@@ -1193,6 +1222,12 @@ IREE_API_EXPORT void iree_async_proactor_detach_buffer(
 iree_status_t iree_async_proactor_prepare_buffer_emulated(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry);
+iree_status_t iree_async_proactor_clone_buffer_registration_emulated(
+    iree_async_proactor_t* proactor,
+    iree_async_buffer_registration_state_t* state,
+    const iree_async_buffer_registration_entry_t* source_entry,
     iree_async_buffer_access_flags_t access_flags,
     iree_async_buffer_registration_entry_t** out_entry);
 void iree_async_proactor_transition_buffer_emulated(

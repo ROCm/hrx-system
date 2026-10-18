@@ -365,11 +365,13 @@ static iree_status_t iree_async_io_uring_prepared_pins_acquire(
   return status;
 }
 
-iree_status_t iree_async_proactor_io_uring_prepare_buffer(
-    iree_async_proactor_t* base_proactor,
-    iree_async_buffer_registration_state_t* state, iree_byte_span_t contents,
+// Reserves detached metadata and slots without acquiring native pins. Geometry
+// comes from host-range preparation or an already prepared source registration.
+static iree_status_t iree_async_io_uring_prepared_buffer_allocate(
+    iree_async_proactor_t* base_proactor, iree_byte_span_t contents,
+    iree_host_size_t buffer_size, iree_host_size_t buffer_count,
     iree_async_buffer_access_flags_t access_flags,
-    iree_async_buffer_registration_entry_t** out_entry) {
+    iree_async_io_uring_prepared_buffer_t** out_buffer) {
   iree_async_proactor_io_uring_t* proactor =
       iree_async_proactor_io_uring_cast(base_proactor);
   if (!iree_any_bit_set(
@@ -378,10 +380,6 @@ iree_status_t iree_async_proactor_io_uring_prepare_buffer(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "kernel cannot attach prepared buffer pins");
   }
-  const iree_host_size_t buffer_size =
-      iree_min(contents.data_length, (iree_host_size_t)(UINT32_C(1) << 30));
-  const iree_host_size_t buffer_count =
-      (contents.data_length - 1) / buffer_size + 1;
   if (buffer_count >
       iree_io_uring_sparse_table_capacity(proactor->buffer_table)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -398,26 +396,12 @@ iree_status_t iree_async_proactor_io_uring_prepare_buffer(
       base_proactor->allocator,
       sizeof(*buffer) + buffer_count * sizeof(buffer->buffers[0]),
       (void**)&buffer);
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < buffer_count; ++i) {
-      buffer->buffers[i] = (struct iovec){
-          .iov_base = contents.data + i * buffer_size,
-          .iov_len =
-              iree_min(buffer_size, contents.data_length - i * buffer_size),
-      };
-    }
-    status = iree_async_io_uring_prepared_pins_acquire(
-        state, contents, buffer->buffers, (uint32_t)buffer_count,
-        base_proactor->allocator, &buffer->pins);
-  }
   if (!iree_status_is_ok(status)) {
     iree_io_uring_sparse_table_release(proactor->buffer_table, (uint16_t)base,
                                        (uint16_t)buffer_count);
-    iree_allocator_free(base_proactor->allocator, buffer);
     return status;
   }
 
-  memset(buffer->buffers, 0, buffer_count * sizeof(buffer->buffers[0]));
   buffer->fixed_buffers = (iree_async_io_uring_fixed_buffers_t){
       .base = (uint16_t)base,
       .count = (uint16_t)buffer_count,
@@ -440,6 +424,64 @@ iree_status_t iree_async_proactor_io_uring_prepare_buffer(
       .cleanup_fn = iree_async_io_uring_prepared_buffer_cleanup,
       .region = region,
   };
+  *out_buffer = buffer;
+  return iree_ok_status();
+}
+
+iree_status_t iree_async_proactor_io_uring_prepare_buffer(
+    iree_async_proactor_t* base_proactor,
+    iree_async_buffer_registration_state_t* state, iree_byte_span_t contents,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry) {
+  const iree_host_size_t buffer_size =
+      iree_min(contents.data_length, (iree_host_size_t)(UINT32_C(1) << 30));
+  const iree_host_size_t buffer_count =
+      (contents.data_length - 1) / buffer_size + 1;
+  iree_async_io_uring_prepared_buffer_t* buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_async_io_uring_prepared_buffer_allocate(
+      base_proactor, contents, buffer_size, buffer_count, access_flags,
+      &buffer));
+  for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+    buffer->buffers[i] = (struct iovec){
+        .iov_base = contents.data + i * buffer_size,
+        .iov_len =
+            iree_min(buffer_size, contents.data_length - i * buffer_size),
+    };
+  }
+  iree_status_t status = iree_async_io_uring_prepared_pins_acquire(
+      state, contents, buffer->buffers, (uint32_t)buffer_count,
+      base_proactor->allocator, &buffer->pins);
+  if (iree_status_is_ok(status)) {
+    memset(buffer->buffers, 0, buffer_count * sizeof(buffer->buffers[0]));
+    iree_async_buffer_registration_state_add(state, &buffer->entry);
+    *out_entry = &buffer->entry;
+  } else {
+    iree_async_io_uring_prepared_buffer_cleanup(buffer, base_proactor);
+  }
+  return status;
+}
+
+iree_status_t iree_async_proactor_io_uring_clone_buffer_registration(
+    iree_async_proactor_t* base_proactor,
+    iree_async_buffer_registration_state_t* state,
+    const iree_async_buffer_registration_entry_t* source_entry,
+    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_entry_t** out_entry) {
+  if (source_entry->cleanup_fn != iree_async_io_uring_prepared_buffer_cleanup) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "source registration has no prepared io_uring pins");
+  }
+  const iree_async_io_uring_prepared_buffer_t* source =
+      (const void*)source_entry;
+  iree_async_io_uring_prepared_buffer_t* buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_async_io_uring_prepared_buffer_allocate(
+      base_proactor,
+      iree_make_byte_span(source->region.base_ptr, source->region.length),
+      source->region.buffer_size, source->region.buffer_count, access_flags,
+      &buffer));
+  buffer->pins = source->pins;
+  iree_atomic_ref_count_inc(&buffer->pins->ref_count);
   iree_async_buffer_registration_state_add(state, &buffer->entry);
   *out_entry = &buffer->entry;
   return iree_ok_status();
