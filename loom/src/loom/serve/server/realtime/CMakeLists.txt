@@ -12,6 +12,22 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
+    conversation_test
+  SRCS
+    "conversation_test.cc"
+  DEPS
+    ::conversation
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
     wire_test
   SRCS
     "wire_test.cc"

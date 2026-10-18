@@ -15,6 +15,17 @@ package(
 exports_files(["session_test.py"])
 
 loom_cc_test(
+    name = "conversation_test",
+    srcs = ["conversation_test.cc"],
+    deps = [
+        ":conversation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "wire_test",
     srcs = ["wire_test.cc"],
     deps = [

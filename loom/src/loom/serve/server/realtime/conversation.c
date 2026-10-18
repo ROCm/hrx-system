@@ -12,44 +12,82 @@ static const char* const loom_serve_realtime_roles[] = {"user", "assistant",
                                                         "system"};
 
 void loom_serve_realtime_conversation_initialize(
-    iree_allocator_t host_allocator,
+    uint64_t session_id, iree_allocator_t host_allocator,
     loom_serve_realtime_conversation_t* conversation) {
-  *conversation =
-      (loom_serve_realtime_conversation_t){.host_allocator = host_allocator};
+  *conversation = (loom_serve_realtime_conversation_t){
+      .host_allocator = host_allocator, .session_id = session_id};
+}
+
+static void loom_serve_realtime_group_free(
+    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_group_t* group) {
+  if (group->previous) {
+    group->previous->next = group->next;
+  } else {
+    conversation->first = group->next;
+  }
+  if (group->next) {
+    group->next->previous = group->previous;
+  } else {
+    conversation->last = group->previous;
+  }
+  iree_allocator_free(conversation->host_allocator, group);
 }
 
 void loom_serve_realtime_conversation_deinitialize(
     loom_serve_realtime_conversation_t* conversation) {
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(conversation->items); ++i) {
+    if (conversation->items[i]) {
+      loom_serve_realtime_conversation_remove(conversation,
+                                              conversation->items[i]);
+    }
+  }
   while (conversation->first) {
-    loom_serve_realtime_conversation_remove(conversation, conversation->first);
+    loom_serve_realtime_conversation_release(conversation, conversation->first);
   }
 }
 
-loom_serve_realtime_item_t* loom_serve_realtime_conversation_find(
+static loom_serve_realtime_item_t* loom_serve_realtime_item_find(
     const loom_serve_realtime_conversation_t* conversation,
     iree_string_view_t id) {
-  for (loom_serve_realtime_item_t* item = conversation->first; item;
-       item = item->next) {
-    if (iree_string_view_equal(iree_string_builder_view(&item->id), id)) {
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(conversation->items); ++i) {
+    loom_serve_realtime_item_t* item = conversation->items[i];
+    if (item &&
+        iree_string_view_equal(iree_string_builder_view(&item->id), id)) {
       return item;
     }
   }
   return NULL;
 }
 
-iree_status_t loom_serve_realtime_conversation_insert(
-    loom_serve_realtime_conversation_t* conversation,
-    loom_serve_realtime_item_t* after, iree_string_view_t id,
-    loom_serve_realtime_role_t role, bool audio,
+loom_serve_realtime_item_t* loom_serve_realtime_conversation_find(
+    const loom_serve_realtime_conversation_t* conversation,
+    iree_string_view_t id) {
+  loom_serve_realtime_item_t* item =
+      loom_serve_realtime_item_find(conversation, id);
+  return item && item->group ? item : NULL;
+}
+
+static iree_status_t loom_serve_realtime_item_allocate(
+    loom_serve_realtime_conversation_t* conversation, iree_string_view_t id,
+    loom_serve_realtime_role_t role, bool audio, bool reserved_capacity,
     loom_serve_realtime_item_t** out_item) {
   *out_item = NULL;
-  if (!id.size || id.size > 128 ||
-      loom_serve_realtime_conversation_find(conversation, id)) {
+  char generated_id[64];
+  if (!id.size) {
+    do {
+      const int length = iree_snprintf(
+          generated_id, sizeof(generated_id), "item_%" PRIu64 "_%" PRIu64,
+          conversation->session_id, ++conversation->identity);
+      id = iree_make_string_view(generated_id, (iree_host_size_t)length);
+    } while (loom_serve_realtime_item_find(conversation, id));
+  } else if (id.size > 128 || loom_serve_realtime_item_find(conversation, id)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "conversation item requires a unique ID of 1-128 bytes");
   }
-  if (conversation->count == 128 ||
+  if ((!reserved_capacity &&
+       conversation->count == IREE_ARRAYSIZE(conversation->items)) ||
       id.size > 1024 * 1024 - conversation->bytes) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -69,20 +107,111 @@ iree_status_t loom_serve_realtime_conversation_insert(
   item->role = role;
   item->audio = audio;
   item->has_transcript = true;
-  item->sequence = ++conversation->sequence;
-  item->next = after ? after->next : conversation->first;
-  if (after) {
-    after->next = item;
-  } else {
-    conversation->first = item;
+  while (conversation->items[item->slot]) {
+    ++item->slot;
   }
-  if (!item->next) {
-    conversation->last = item;
-  }
-  ++conversation->count;
+  conversation->items[item->slot] = item;
+  conversation->count += !reserved_capacity;
   conversation->bytes += id.size;
   *out_item = item;
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_realtime_conversation_reserve(
+    loom_serve_realtime_conversation_t* conversation, iree_string_view_t id,
+    loom_serve_realtime_role_t role, bool audio,
+    loom_serve_realtime_item_t** out_item) {
+  return loom_serve_realtime_item_allocate(conversation, id, role, audio, false,
+                                           out_item);
+}
+
+static iree_status_t loom_serve_realtime_group_allocate(
+    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_group_t* after,
+    loom_serve_realtime_group_t** out_group) {
+  *out_group = NULL;
+  loom_serve_realtime_group_t* group = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(conversation->host_allocator,
+                                             sizeof(*group), (void**)&group));
+  group->sequence = ++conversation->sequence;
+  group->previous = after;
+  group->next = after ? after->next : conversation->first;
+  if (after) {
+    after->next = group;
+  } else {
+    conversation->first = group;
+  }
+  if (group->next) {
+    group->next->previous = group;
+  } else {
+    conversation->last = group;
+  }
+  *out_group = group;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_realtime_conversation_insert(
+    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_group_t* after, loom_serve_realtime_item_t* item) {
+  IREE_RETURN_IF_ERROR(
+      loom_serve_realtime_group_allocate(conversation, after, &item->group));
+  item->group->item = item;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_realtime_conversation_begin(
+    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_group_t** out_group) {
+  *out_group = NULL;
+  if (conversation->count == IREE_ARRAYSIZE(conversation->items)) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "conversation storage is full; delete earlier items");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_group_allocate(
+      conversation, conversation->last, out_group));
+  (*out_group)->retained = true;
+  ++conversation->count;
+  return iree_ok_status();
+}
+
+void loom_serve_realtime_conversation_release(
+    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_group_t* group) {
+  group->retained = false;
+  if (!group->item) {
+    --conversation->count;
+    loom_serve_realtime_group_free(conversation, group);
+  }
+}
+
+iree_status_t loom_serve_realtime_conversation_add(
+    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_group_t* group, loom_serve_realtime_role_t role,
+    bool audio, loom_serve_realtime_item_t** out_item) {
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_item_allocate(
+      conversation, iree_string_view_empty(), role, audio, true, out_item));
+  group->item = *out_item;
+  (*out_item)->group = group;
+  return iree_ok_status();
+}
+
+loom_serve_realtime_item_t* loom_serve_realtime_conversation_previous(
+    const loom_serve_realtime_group_t* group) {
+  for (group = group->previous; group; group = group->previous) {
+    if (group->item) {
+      return group->item;
+    }
+  }
+  return NULL;
+}
+
+loom_serve_realtime_item_t* loom_serve_realtime_conversation_last_item(
+    const loom_serve_realtime_conversation_t* conversation) {
+  const loom_serve_realtime_group_t* group = conversation->last;
+  return !group        ? NULL
+         : group->item ? group->item
+                       : loom_serve_realtime_conversation_previous(group);
 }
 
 iree_status_t loom_serve_realtime_conversation_append_text(
@@ -100,17 +229,17 @@ iree_status_t loom_serve_realtime_conversation_append_text(
 void loom_serve_realtime_conversation_remove(
     loom_serve_realtime_conversation_t* conversation,
     loom_serve_realtime_item_t* item) {
-  loom_serve_realtime_item_t* previous = NULL;
-  loom_serve_realtime_item_t** link = &conversation->first;
-  while (*link != item) {
-    previous = *link;
-    link = &previous->next;
+  loom_serve_realtime_group_t* group = item->group;
+  if (group) {
+    group->item = NULL;
+    if (!group->retained) {
+      loom_serve_realtime_group_free(conversation, group);
+      --conversation->count;
+    }
+  } else {
+    --conversation->count;
   }
-  *link = item->next;
-  if (conversation->last == item) {
-    conversation->last = previous;
-  }
-  --conversation->count;
+  conversation->items[item->slot] = NULL;
   conversation->bytes -= item->text.size + item->id.size;
   iree_string_builder_deinitialize(&item->text);
   iree_string_builder_deinitialize(&item->id);
@@ -161,7 +290,7 @@ static iree_status_t loom_serve_realtime_message_write(
 
 iree_status_t loom_serve_realtime_conversation_request(
     const loom_serve_realtime_conversation_t* conversation,
-    const loom_serve_realtime_item_t* exclude, iree_string_view_t model,
+    const loom_serve_realtime_group_t* exclude, iree_string_view_t model,
     iree_string_view_t instructions, uint32_t max_tokens, uint64_t seed,
     iree_string_builder_t* output) {
   IREE_RETURN_IF_ERROR(
@@ -179,10 +308,11 @@ iree_status_t loom_serve_realtime_conversation_request(
     comma = true;
   }
   iree_status_t status = iree_ok_status();
-  for (const loom_serve_realtime_item_t* item = conversation->first;
-       item && item != exclude && iree_status_is_ok(status);
-       item = item->next) {
-    if (!item->has_transcript) {
+  for (const loom_serve_realtime_group_t* group = conversation->first;
+       group && group != exclude && iree_status_is_ok(status);
+       group = group->next) {
+    const loom_serve_realtime_item_t* item = group->item;
+    if (!item || !item->has_transcript) {
       continue;
     }
     status = loom_serve_realtime_message_write(
