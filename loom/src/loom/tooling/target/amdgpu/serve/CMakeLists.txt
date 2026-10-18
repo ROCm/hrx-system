@@ -130,6 +130,7 @@ iree_py_test(
     "loom::tooling::target::amdgpu::serve::loom-serve-test-tool"
   DEPS
     loom::serve::server::catalog_test_util
+    loom::serve::server::realtime::session_test_support
     loom::serve::testing::http
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"

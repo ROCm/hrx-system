@@ -29,7 +29,7 @@ typedef struct loom_serve_realtime_transcription_t {
   loom_serve_realtime_input_item_t* input;
   // Start of this utterance after all earlier encoded appends publish.
   loom_serve_realtime_capture_mark_t begin;
-  // Explicit commit frontier, valid after a conversation item is assigned.
+  // Sealed commit frontier, retained independently of canonical item deletion.
   loom_serve_realtime_capture_mark_t end;
   // One captured PCM loan, stable until conversion releases it on this owner.
   loom_serve_realtime_capture_span_t span;
@@ -39,7 +39,9 @@ typedef struct loom_serve_realtime_transcription_t {
   loom_serve_realtime_transcription_phase_t phase;
   // Uncommitted delivery follows classified activity rather than capture end.
   bool automatic;
-  // Reserved item; its group is assigned only when microphone commit occurs.
+  // Commit seals the PCM end independently of canonical item deletion.
+  bool committed;
+  // Reserved or committed canonical consumer; NULL after explicit deletion.
   loom_serve_realtime_item_t* item;
 } loom_serve_realtime_transcription_t;
 
@@ -135,13 +137,16 @@ static iree_status_t loom_serve_realtime_session_error(
 static void loom_serve_realtime_transcription_close(
     loom_serve_realtime_session_t* session,
     loom_serve_realtime_transcription_t* transcription) {
+  if (transcription->item) {
+    transcription->item->input = NULL;
+  }
   if (transcription->input) {
     loom_serve_realtime_input_close(transcription->input);
     transcription->input = NULL;
   }
   loom_serve_realtime_capture_mark_cancel(&transcription->begin);
   loom_serve_realtime_capture_mark_cancel(&transcription->end);
-  if (transcription->item && !transcription->item->group) {
+  if (transcription->item && !transcription->committed) {
     loom_serve_realtime_conversation_remove(&session->conversation,
                                             transcription->item);
   }
@@ -236,8 +241,10 @@ static iree_status_t loom_serve_realtime_transcription_begin(
       .language = iree_string_builder_view(&session->settings.language),
       .prompt = iree_string_builder_view(&session->settings.prompt),
       .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT};
-  return loom_serve_realtime_input_begin(session->input, &request,
-                                         &transcription->input);
+  IREE_RETURN_IF_ERROR(loom_serve_realtime_input_begin(session->input, &request,
+                                                       &transcription->input));
+  transcription->item->input = transcription->input;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_realtime_microphone_reserve(
@@ -313,7 +320,8 @@ static iree_status_t loom_serve_realtime_microphone_commit(
       loom_serve_realtime_conversation_last_item(&session->conversation);
   loom_serve_realtime_item_t* item = session->microphone->item;
   IREE_RETURN_IF_ERROR(loom_serve_realtime_conversation_insert(
-      &session->conversation, session->conversation.last, item));
+      &session->conversation, session->conversation.history.last, item));
+  session->microphone->committed = true;
   if (automatic) {
     session->microphone->end =
         (loom_serve_realtime_capture_mark_t){.position = end, .reached = true};
@@ -393,12 +401,14 @@ static iree_status_t loom_serve_realtime_command_respond(
     loom_serve_realtime_session_t* session,
     const loom_serve_realtime_event_t* event,
     loom_serve_websocket_message_t** message) {
+  bool default_response = false;
   iree_status_t status = loom_serve_realtime_responses_create(
       session->responses,
       event->present & (1u << LOOM_SERVE_REALTIME_FIELD_RESPONSE)
           ? event->fields[LOOM_SERVE_REALTIME_FIELD_RESPONSE].text
-          : iree_string_view_empty());
-  if (iree_status_is_ok(status)) {
+          : iree_string_view_empty(),
+      &default_response);
+  if (iree_status_is_ok(status) && default_response) {
     session->automatic_response = false;
   }
   return status;
@@ -431,7 +441,8 @@ static iree_status_t loom_serve_realtime_item_create(
     } else {
       previous = loom_serve_realtime_conversation_find(
           &session->conversation, iree_string_builder_view(id));
-      if (!previous) {
+      if (!previous ||
+          previous->group->owner != &session->conversation.history) {
         return iree_make_status(IREE_STATUS_NOT_FOUND,
                                 "previous item was not found");
       }
@@ -439,9 +450,9 @@ static iree_status_t loom_serve_realtime_item_create(
   }
   const bool inserted =
       explicit_previous &&
-      (previous
-           ? previous->next || previous->group != session->conversation.last
-           : session->conversation.first != NULL);
+      (previous ? previous->next ||
+                      previous->group != session->conversation.history.last
+                : session->conversation.history.first != NULL);
   loom_serve_realtime_item_t* item = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_realtime_item_parse(
       &session->conversation,
@@ -467,7 +478,7 @@ static iree_status_t loom_serve_realtime_item_create(
                                      &session->conversation, previous, item)
                                : loom_serve_realtime_conversation_insert(
                                      &session->conversation,
-                                     session->conversation.last, item);
+                                     session->conversation.history.last, item);
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_realtime_wire_rewind(&session->wire, tail);
@@ -523,7 +534,9 @@ static iree_status_t loom_serve_realtime_item_mutate(
                               "truncate exceeds assistant audio duration");
     }
   }
-  const bool changes_history = !truncate || item->has_transcript;
+  const bool changes_history =
+      item->group->owner == &session->conversation.history &&
+      (!truncate || item->has_transcript);
   IREE_RETURN_IF_ERROR(loom_serve_realtime_responses_edit(
       session->responses, item, truncate, changes_history));
   if (truncate) {
@@ -531,9 +544,14 @@ static iree_status_t loom_serve_realtime_item_mutate(
   } else {
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->transcriptions);
          ++i) {
-      if (session->transcriptions[i].item == item) {
-        loom_serve_realtime_transcription_close(session,
-                                                &session->transcriptions[i]);
+      loom_serve_realtime_transcription_t* transcription =
+          &session->transcriptions[i];
+      if (transcription->item == item) {
+        transcription->item = NULL;
+        item->input = NULL;
+        if (!loom_serve_realtime_input_has_readers(transcription->input)) {
+          loom_serve_realtime_transcription_close(session, transcription);
+        }
       }
     }
   }
@@ -577,12 +595,24 @@ typedef iree_status_t (*loom_serve_realtime_command_fn_t)(
     const loom_serve_realtime_event_t* event,
     loom_serve_websocket_message_t** message);
 
-static const loom_serve_realtime_command_fn_t loom_serve_realtime_commands[] = {
-    loom_serve_realtime_command_session, loom_serve_realtime_command_append,
-    loom_serve_realtime_command_commit,  loom_serve_realtime_command_clear,
-    loom_serve_realtime_command_respond, loom_serve_realtime_command_cancel,
-    loom_serve_realtime_command_create,  loom_serve_realtime_command_mutate,
-    loom_serve_realtime_command_mutate,
+typedef struct loom_serve_realtime_command_t {
+  // Applies one validated command on the serialized session owner.
+  loom_serve_realtime_command_fn_t execute;
+  // Failure unwinds every mutation and queued acknowledgement, allowing an
+  // admission error to preserve already accepted work even at capacity.
+  bool transactional;
+} loom_serve_realtime_command_t;
+
+static const loom_serve_realtime_command_t loom_serve_realtime_commands[] = {
+    {loom_serve_realtime_command_session, true},
+    {loom_serve_realtime_command_append, false},
+    {loom_serve_realtime_command_commit, false},
+    {loom_serve_realtime_command_clear, false},
+    {loom_serve_realtime_command_respond, true},
+    {loom_serve_realtime_command_cancel, false},
+    {loom_serve_realtime_command_create, true},
+    {loom_serve_realtime_command_mutate, false},
+    {loom_serve_realtime_command_mutate, false},
 };
 
 static iree_status_t loom_serve_realtime_session_receive(
@@ -612,12 +642,16 @@ static iree_status_t loom_serve_realtime_session_receive(
             event.fields[LOOM_SERVE_REALTIME_FIELD_EVENT_ID].text, 128,
             &event_id);
       }
+      bool transactional = false;
       if (iree_status_is_ok(command)) {
-        command =
-            loom_serve_realtime_commands[event.kind](session, &event, &message);
+        const loom_serve_realtime_command_t* operation =
+            &loom_serve_realtime_commands[event.kind];
+        transactional = operation->transactional;
+        command = operation->execute(session, &event, &message);
       }
       if (!iree_status_is_ok(command)) {
-        const bool terminal = iree_status_is_resource_exhausted(command);
+        const bool terminal =
+            !transactional && iree_status_is_resource_exhausted(command);
         status = loom_serve_realtime_session_error(
             session, command, iree_string_builder_view(&event_id), false);
         if (terminal) {
@@ -721,6 +755,12 @@ static iree_status_t loom_serve_realtime_transcriptions_advance(
     if (!transcription->input) {
       continue;
     }
+    if (!transcription->item &&
+        !loom_serve_realtime_input_has_readers(transcription->input)) {
+      loom_serve_realtime_transcription_close(session, transcription);
+      *out_progress = true;
+      continue;
+    }
     status = loom_serve_realtime_input_status(transcription->input);
     if (!iree_status_is_ok(status)) {
       continue;
@@ -733,10 +773,10 @@ static iree_status_t loom_serve_realtime_transcriptions_advance(
       transcription->phase = LOOM_SERVE_REALTIME_TRANSCRIPTION_READING;
     }
     uint64_t end = loom_serve_realtime_capture_end(session->capture);
-    if (transcription->automatic && !transcription->item->group) {
+    if (transcription->automatic && !transcription->committed) {
       end = iree_min(end, loom_serve_realtime_turn_covered(session->turn));
     }
-    if (transcription->item->group && transcription->end.reached) {
+    if (transcription->committed && transcription->end.reached) {
       end = iree_min(end, transcription->end.position);
     }
     if (!transcription->span.capture && transcription->position < end) {
@@ -760,7 +800,7 @@ static iree_status_t loom_serve_realtime_transcriptions_advance(
       continue;
     }
     if (transcription->phase == LOOM_SERVE_REALTIME_TRANSCRIPTION_READING &&
-        transcription->item->group && transcription->end.reached &&
+        transcription->committed && transcription->end.reached &&
         transcription->position == transcription->end.position) {
       loom_serve_realtime_input_finish(transcription->input);
       transcription->phase = LOOM_SERVE_REALTIME_TRANSCRIPTION_FINISHED;
@@ -768,7 +808,12 @@ static iree_status_t loom_serve_realtime_transcriptions_advance(
     }
     const iree_string_builder_t* text =
         loom_serve_realtime_input_transcript(transcription->input);
-    if (!text || !transcription->item->group) {
+    if (!text || !transcription->committed) {
+      continue;
+    }
+    if (!transcription->item) {
+      loom_serve_realtime_transcription_close(session, transcription);
+      *out_progress = true;
       continue;
     }
     loom_serve_realtime_item_t* item = transcription->item;
@@ -857,7 +902,7 @@ static iree_status_t loom_serve_realtime_automatic_response_advance(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_serve_realtime_responses_create(
-      session->responses, iree_string_view_empty()));
+      session->responses, iree_string_view_empty(), NULL));
   session->automatic_response = false;
   *out_progress = true;
   return iree_ok_status();
@@ -944,17 +989,9 @@ iree_status_t loom_serve_realtime_session_advance(
     loom_serve_realtime_session_stop(session, true);
   }
   status = loom_serve_realtime_transcriptions_advance(session, out_progress);
-  uint64_t earliest_input = UINT64_MAX;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(session->transcriptions);
-       ++i) {
-    const loom_serve_realtime_item_t* item = session->transcriptions[i].item;
-    if (item && item->group) {
-      earliest_input = iree_min(earliest_input, item->group->sequence);
-    }
-  }
   if (iree_status_is_ok(status)) {
     status = loom_serve_realtime_responses_advance(
-        session->responses, session->closing, earliest_input, out_progress);
+        session->responses, session->closing, out_progress);
   }
   if (iree_status_is_ok(status)) {
     status =

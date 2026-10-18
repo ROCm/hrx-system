@@ -280,6 +280,8 @@ enum {
   LOOM_SERVE_REALTIME_SETTING_TOOLS,
   LOOM_SERVE_REALTIME_SETTING_TOOL_CHOICE,
   LOOM_SERVE_REALTIME_SETTING_METADATA,
+  LOOM_SERVE_REALTIME_SETTING_CONVERSATION,
+  LOOM_SERVE_REALTIME_SETTING_INPUT,
   LOOM_SERVE_REALTIME_SETTING_COUNT,
 };
 
@@ -301,12 +303,16 @@ static iree_status_t loom_serve_realtime_settings_parse(
       {"max_output_tokens", REALTIME_TYPE(NUMBER)},
       {"tools", REALTIME_TYPE(ARRAY)},
       {"tool_choice", REALTIME_TYPE(STRING)},
-      {"metadata", REALTIME_TYPE(OBJECT) | REALTIME_TYPE(NULL)}};
+      {"metadata", REALTIME_TYPE(OBJECT) | REALTIME_TYPE(NULL)},
+      {"conversation", REALTIME_TYPE(STRING)},
+      {"input", REALTIME_TYPE(ARRAY)}};
   IREE_RETURN_IF_ERROR(loom_serve_realtime_object_parse(
       object, IREE_ARRAYSIZE(rules), rules, fields->values, &fields->present));
   const uint32_t inapplicable =
       response ? (1u << LOOM_SERVE_REALTIME_SETTING_TYPE)
-               : (1u << LOOM_SERVE_REALTIME_SETTING_METADATA);
+               : ((1u << LOOM_SERVE_REALTIME_SETTING_METADATA) |
+                  (1u << LOOM_SERVE_REALTIME_SETTING_CONVERSATION) |
+                  (1u << LOOM_SERVE_REALTIME_SETTING_INPUT));
   if (fields->present & inapplicable) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "inapplicable session or response settings");
@@ -533,7 +539,10 @@ static iree_status_t loom_serve_realtime_metadata_visit(
 iree_status_t loom_serve_realtime_response_settings_initialize(
     const loom_serve_realtime_settings_t* defaults,
     iree_string_view_t overrides,
-    loom_serve_realtime_response_settings_t* settings) {
+    loom_serve_realtime_response_settings_t* settings,
+    iree_string_view_t* out_input) {
+  *out_input = iree_string_view_empty();
+  settings->independent = false;
   iree_string_builder_initialize(defaults->host_allocator, &settings->metadata);
   IREE_RETURN_IF_ERROR(loom_serve_realtime_output_settings_copy(
       &defaults->output, defaults->host_allocator, &settings->output));
@@ -543,6 +552,20 @@ iree_status_t loom_serve_realtime_response_settings_initialize(
   loom_serve_realtime_settings_fields_t fields;
   IREE_RETURN_IF_ERROR(
       loom_serve_realtime_settings_parse(overrides, true, &fields));
+  if (fields.present & (1u << LOOM_SERVE_REALTIME_SETTING_CONVERSATION)) {
+    const iree_string_view_t value =
+        fields.values[LOOM_SERVE_REALTIME_SETTING_CONVERSATION].text;
+    settings->independent =
+        loom_serve_realtime_string_is(value, IREE_SV("none"));
+    if (!settings->independent &&
+        !loom_serve_realtime_string_is(value, IREE_SV("auto"))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "response conversation requires auto or none");
+    }
+  }
+  if (fields.present & (1u << LOOM_SERVE_REALTIME_SETTING_INPUT)) {
+    *out_input = fields.values[LOOM_SERVE_REALTIME_SETTING_INPUT].text;
+  }
   IREE_RETURN_IF_ERROR(
       loom_serve_realtime_output_settings_apply(&settings->output, &fields));
   if (fields.present & (1u << LOOM_SERVE_REALTIME_SETTING_AUDIO)) {
