@@ -32,8 +32,7 @@ class InputCountTest : public SourceTextServiceTest {
   void TearDown() override {
     if (service_) {
       AdvanceUntil(
-          interface_, [&] { return Idle(); },
-          LOOM_SERVE_SERVICE_FLAG_STOPPING);
+          interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
       interface_.set_observer(interface_.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
     }
@@ -175,8 +174,7 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
     EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
   });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return Idle(); },
-      LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING));
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);
   EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
   EXPECT_TRUE(Read(first, true).empty());

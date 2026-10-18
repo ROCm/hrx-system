@@ -64,16 +64,15 @@ iree_status_t loom_serve_text_pending_queue_select_request(
         "checkpoint must be at most 64 ASCII identifier characters");
   }
   if (checkpoint_name.size) {
-    *out_checkpoint = loom_serve_text_checkpoint_registry_find(
-        checkpoints, checkpoint_name);
+    *out_checkpoint =
+        loom_serve_text_checkpoint_registry_find(checkpoints, checkpoint_name);
     if (!*out_checkpoint) {
       return iree_make_status(IREE_STATUS_NOT_FOUND,
                               "checkpoint is not pinned");
     }
   }
   const loom_serve_text_session_t* session =
-      loom_serve_text_session_select(row_count, sessions,
-                                     name, NULL);
+      loom_serve_text_session_select(row_count, sessions, name, NULL);
   bool busy = session && session->request.consumer.self;
   for (iree_host_size_t i = 0; name.size && i < queue->count; ++i) {
     busy |= iree_string_view_equal(name, queue->values[i]->name);
@@ -93,14 +92,13 @@ void loom_serve_text_pending_queue_push(
   if (checkpoint) {
     ++checkpoint->pending;
   }
-  *queue->values[queue->count++] =
-      (loom_serve_text_pending_request_t){
-          .consumer = consumer,
-          .body = body,
-          .name = name,
-          .checkpoint = checkpoint,
-          .receipt = receipt,
-      };
+  *queue->values[queue->count++] = (loom_serve_text_pending_request_t){
+      .consumer = consumer,
+      .body = body,
+      .name = name,
+      .checkpoint = checkpoint,
+      .receipt = receipt,
+  };
 }
 
 // Resolves the exact completed frontier without acquiring native ownership.
