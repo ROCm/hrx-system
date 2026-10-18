@@ -285,10 +285,10 @@ typedef struct iree_hal_pool_capabilities_t {
   // round internally and report 0 or 1 when they have no practical lower bound.
   iree_device_size_t min_allocation_size;
 
-  // Strategy-specific maximum single user-visible reservation in bytes.
+  // Maximum single user-visible reservation in bytes.
   // Finite pools report their managed geometry; growable pools inherit their
-  // backing limit. A zero value means no strategy limit. Budgets are reported
-  // separately and enforced by reservation acquisition.
+  // backing limit. A zero value means no known native or strategy limit.
+  // Budgets are reported separately and enforced by reservation acquisition.
   iree_device_size_t max_allocation_size;
 
   // Largest power-of-two alignment accepted by reservation requests.

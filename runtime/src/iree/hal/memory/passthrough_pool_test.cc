@@ -68,6 +68,9 @@ typedef struct iree_hal_test_opaque_slab_provider_t {
   // Optional external witness that the last provider reference was released.
   uint32_t* destruction_count;
 
+  // Largest native allocation accepted, or zero for an unbounded provider.
+  iree_device_size_t max_allocation_size;
+
   // Number of trim calls received by the provider.
   uint32_t trim_count;
 
@@ -138,6 +141,9 @@ static iree_status_t iree_hal_test_opaque_slab_provider_acquire_slab(
   iree_hal_test_opaque_slab_provider_t* provider =
       (iree_hal_test_opaque_slab_provider_t*)base_provider;
   memset(out_slab, 0, sizeof(*out_slab));
+  if (provider->max_allocation_size) {
+    EXPECT_LE(min_length, provider->max_allocation_size);
+  }
   void* backing = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
       provider->base.host_allocator, min_length, IREE_HAL_HEAP_BUFFER_ALIGNMENT,
@@ -246,6 +252,10 @@ static void iree_hal_test_opaque_slab_provider_query_stats(
 static void iree_hal_test_opaque_slab_provider_query_properties(
     const iree_hal_slab_provider_t* base_provider,
     iree_hal_slab_provider_properties_t* out_properties) {
+  const auto* provider =
+      reinterpret_cast<const iree_hal_test_opaque_slab_provider_t*>(
+          base_provider);
+  out_properties->max_allocation_size = provider->max_allocation_size;
   out_properties->allocation_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT;
   out_properties->max_allocation_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT;
   out_properties->memory_type =
@@ -530,6 +540,83 @@ class NativePassthroughPoolTest : public ::testing::Test {
   // Owned public source pool reference.
   iree_hal_pool_t* pool_ = nullptr;
 };
+
+TEST_F(NativePassthroughPoolTest, NativeExtentLimitBoundsCompleteBacking) {
+  for (const bool guarded : {false, true}) {
+    SCOPED_TRACE(guarded);
+    iree_hal_pool_release(pool_);
+    pool_ = nullptr;
+    native_->max_allocation_size = 4100;
+    iree_hal_passthrough_pool_options_t options = {};
+    if (guarded) {
+      options.asan = ShadowOptions();
+    }
+    IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+        options, provider_, notification_, tracker_, allocations_.allocator(),
+        &pool_));
+    const iree_device_size_t user_limit = guarded ? 4016 : 4100;
+    iree_hal_pool_capabilities_t capabilities;
+    iree_hal_pool_query_capabilities(pool_, &capabilities);
+    EXPECT_EQ(capabilities.max_allocation_size, user_limit);
+
+    const iree_hal_pool_reservation_request_t requests[] = {
+        MakeReservationRequest(16, 1),
+        MakeReservationRequest(user_limit + 1, 1),
+    };
+    iree_hal_pool_reservation_t reservations[2];
+    iree_hal_pool_acquire_info_t infos[2];
+    iree_hal_pool_acquire_result_t result;
+    const size_t allocation_count = allocations_.allocation_count;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_hal_pool_acquire_reservations_sync(
+            pool_, IREE_ARRAYSIZE(requests), requests, nullptr, reservations,
+            infos, &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+    EXPECT_EQ(allocations_.allocation_count, allocation_count);
+
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool_, MakeReservationRequest(user_limit, 1), iree_infinite_timeout(),
+        &buffer));
+    EXPECT_EQ(iree_hal_buffer_byte_length(buffer), user_limit);
+    iree_hal_pool_stats_t stats;
+    iree_hal_pool_query_stats(pool_, &stats);
+    EXPECT_EQ(stats.bytes_reserved, guarded ? 4096u : 4100u);
+    uint8_t value = 0xA5;
+    IREE_ASSERT_OK(
+        iree_hal_buffer_map_write(buffer, user_limit - 1, &value, 1));
+    value = 0;
+    IREE_ASSERT_OK(iree_hal_buffer_map_read(buffer, user_limit - 1, &value, 1));
+    EXPECT_EQ(value, 0xA5);
+    iree_hal_buffer_release(buffer);
+  }
+}
+
+TEST_F(NativePassthroughPoolTest, NativeLimitMustFitProtectedAllocation) {
+  iree_hal_pool_release(pool_);
+  pool_ = nullptr;
+  native_->max_allocation_size = 127;
+  iree_hal_passthrough_pool_options_t options = {.asan = ShadowOptions()};
+  const size_t allocation_count = allocations_.allocation_count;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_passthrough_pool_create(
+                            options, provider_, notification_, tracker_,
+                            allocations_.allocator(), &pool_));
+  EXPECT_EQ(pool_, nullptr);
+  EXPECT_EQ(allocations_.allocation_count, allocation_count);
+
+  native_->max_allocation_size = 128;
+  IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+      options, provider_, notification_, tracker_, allocations_.allocator(),
+      &pool_));
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(pool_, &capabilities);
+  EXPECT_EQ(capabilities.max_allocation_size, 48u);
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, MakeReservationRequest(48, 1), iree_infinite_timeout(), &buffer));
+  iree_hal_buffer_release(buffer);
+}
 
 TEST_F(NativePassthroughPoolTest,
        DeferredBatchPublishesTogetherAndReleaseSurvivesPoolDestruction) {

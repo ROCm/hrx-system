@@ -182,6 +182,7 @@ TEST_F(MemoryBackendTest, PublishesCanonicalPerDeviceBindings) {
 
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(pool, &capabilities);
+  EXPECT_EQ(capabilities.max_allocation_size, UINT64_C(1) << 30);
   EXPECT_EQ(capabilities.maintenance_alignment, 128u);
   EXPECT_TRUE(iree_all_bits_set(capabilities.memory_type,
                                 IREE_HAL_MEMORY_TYPE_HOST_LOCAL |

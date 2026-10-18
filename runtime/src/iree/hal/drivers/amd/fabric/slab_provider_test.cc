@@ -296,7 +296,8 @@ class SlabProviderTest : public ::testing::Test {
 
   void CreateProvider(
       amdf_memory_map_flags_t host_access,
-      const iree_hal_pool_import_class_t* import_policy = nullptr) {
+      const iree_hal_pool_import_class_t* import_policy = nullptr,
+      uint64_t maximum_byte_length = 4096) {
     iree_hal_slab_provider_release(provider_);
     provider_ = nullptr;
     accesses_[0].device = reinterpret_cast<amdf_device_t*>(uintptr_t{1});
@@ -315,7 +316,7 @@ class SlabProviderTest : public ::testing::Test {
     options.memory.profile.roles =
         AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
     options.memory.profile.supported_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-    options.memory.profile.allocation.maximum_byte_length = 4096;
+    options.memory.profile.allocation.maximum_byte_length = maximum_byte_length;
     options.memory.profile.allocation.byte_length_granularity = 64;
     options.memory.profile.allocation.minimum_alignment = 64;
     options.memory.profile.allocation.maximum_alignment = 4096;
@@ -461,6 +462,7 @@ TEST_F(SlabProviderTest, MixedReleaseDetachesImportsAndQueuesOwnedFrees) {
 TEST_F(SlabProviderTest, PublishesRangedBindingsAndCacheControl) {
   iree_hal_slab_provider_properties_t properties = {};
   iree_hal_slab_provider_query_properties(provider_, &properties);
+  EXPECT_EQ(properties.max_allocation_size, 4096u);
   EXPECT_EQ(properties.allocation_alignment, 64u);
   EXPECT_EQ(properties.max_allocation_alignment, 4096u);
   EXPECT_EQ(properties.maintenance_alignment, 64u);
@@ -535,6 +537,24 @@ TEST_F(SlabProviderTest, PublishesRangedBindingsAndCacheControl) {
   iree_hal_slab_provider_query_stats(provider_, &visited, &stats);
   EXPECT_EQ(stats.total_acquired, 1u);
   EXPECT_EQ(stats.total_released, 1u);
+}
+
+TEST_F(SlabProviderTest, NativeExtentLimitAccountsForAllocationGranularity) {
+  CreateProvider(AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+                 nullptr, 4097);
+  iree_hal_slab_provider_properties_t properties = {};
+  iree_hal_slab_provider_query_properties(provider_, &properties);
+  EXPECT_EQ(properties.max_allocation_size, 4096u);
+  iree_hal_slab_t slab = {};
+  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab_sync(
+      provider_, properties.max_allocation_size, 64, &slab));
+  EXPECT_EQ(slab.length, 4096u);
+  iree_hal_slab_provider_release_slab_sync(provider_, &slab);
+  const int create_count = native_.create_count;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_slab_provider_acquire_slab_sync(provider_, 4097, 64, &slab));
+  EXPECT_EQ(native_.create_count, create_count);
 }
 
 TEST_F(SlabProviderTest, NativeDestroyFailureLeaksWithoutAborting) {

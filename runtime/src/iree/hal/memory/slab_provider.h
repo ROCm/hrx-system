@@ -38,6 +38,10 @@ typedef struct iree_hal_slab_provider_properties_t {
   // containing logical device.
   iree_hal_queue_family_affinity_t queue_family_affinity;
 
+  // Largest individual owned slab extent, or zero when no limit is known.
+  // Imported storage is governed by its separately admitted external class.
+  iree_device_size_t max_allocation_size;
+
   // Guaranteed power-of-two alignment of acquired slab byte zero.
   iree_device_size_t allocation_alignment;
 

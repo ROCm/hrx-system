@@ -509,6 +509,21 @@ iree_status_t iree_hal_passthrough_pool_create(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_slab_provider_validate_asan_options(slab_provider,
                                                        &options.asan));
+  iree_hal_slab_provider_properties_t slab_properties;
+  iree_hal_slab_provider_query_properties(slab_provider, &slab_properties);
+  if (slab_properties.max_allocation_size &&
+      iree_hal_asan_pool_options_is_enabled(&options.asan)) {
+    iree_hal_asan_allocation_layout_t minimum_layout;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_asan_calculate_allocation_layout(&options.asan, 1, 1,
+                                                      &minimum_layout));
+    if (minimum_layout.backing_length > slab_properties.max_allocation_size) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "native slab limit cannot hold an ASAN-protected allocation");
+    }
+  }
 
   iree_host_size_t pool_size = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -560,8 +575,7 @@ iree_status_t iree_hal_passthrough_pool_create(
   iree_slim_mutex_initialize(&pool->retirement_mutex);
   pool->slab_provider = slab_provider;
   iree_hal_slab_provider_retain(slab_provider);
-  iree_hal_slab_provider_query_properties(slab_provider,
-                                          &pool->slab_properties);
+  pool->slab_properties = slab_properties;
   pool->allowed_usage = options.memory_contract
                             ? options.memory_contract->allowed_usage
                             : pool->slab_properties.supported_usage;
@@ -817,10 +831,20 @@ static iree_status_t iree_hal_passthrough_pool_validate_reservation_request(
                             alignment,
                             pool->slab_properties.max_allocation_alignment);
   }
+  iree_device_size_t backing_size = size;
   if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
     iree_hal_asan_allocation_layout_t asan_layout;
     IREE_RETURN_IF_ERROR(iree_hal_asan_calculate_allocation_layout(
         &pool->asan_options, size, alignment, &asan_layout));
+    backing_size = asan_layout.backing_length;
+  }
+  if (pool->slab_properties.max_allocation_size &&
+      backing_size > pool->slab_properties.max_allocation_size) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "reservation backing size %" PRIdsz
+                            " exceeds native slab limit %" PRIdsz,
+                            backing_size,
+                            pool->slab_properties.max_allocation_size);
   }
   return iree_ok_status();
 }
@@ -1258,7 +1282,22 @@ static void iree_hal_passthrough_pool_query_capabilities(
       pool->slab_properties.queue_family_affinity;
   out_capabilities->atomic_operations = pool->slab_properties.atomic_operations;
   out_capabilities->min_allocation_size = 0;
-  out_capabilities->max_allocation_size = 0;
+  out_capabilities->max_allocation_size =
+      pool->slab_properties.max_allocation_size;
+  if (out_capabilities->max_allocation_size &&
+      iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
+    // Construction proves the smallest protected allocation fits. Report the
+    // exact user capacity for minimum alignment; stronger alignment may require
+    // a larger left redzone and is checked with each reservation request.
+    const iree_device_size_t alignment =
+        iree_max(pool->asan_options.shadow_granule_size,
+                 pool->asan_options.backing_alignment);
+    const iree_device_size_t prefix =
+        iree_device_align(pool->asan_options.redzone_size, alignment);
+    out_capabilities->max_allocation_size =
+        (out_capabilities->max_allocation_size & ~(alignment - 1)) - prefix -
+        pool->asan_options.redzone_size;
+  }
   out_capabilities->max_allocation_alignment =
       pool->slab_properties.max_allocation_alignment;
   out_capabilities->maintenance_alignment =
