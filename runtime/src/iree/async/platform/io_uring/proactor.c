@@ -569,6 +569,17 @@ static iree_status_t iree_async_proactor_io_uring_arm_wake(
   iree_io_uring_ring_sq_lock(&proactor->ring);
   iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
   if (!sqe) {
+    // Producers can refill capacity freed by the preceding progress turn.
+    // Keep ownership of the next freed slot until the wake poll is prepared.
+    iree_status_t status =
+        iree_io_uring_ring_submit_pending_locked(&proactor->ring);
+    if (!iree_status_is_ok(status)) {
+      iree_io_uring_ring_sq_unlock(&proactor->ring);
+      return status;
+    }
+    sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
+  }
+  if (!sqe) {
     iree_io_uring_ring_sq_unlock(&proactor->ring);
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "SQ full when arming wake");
@@ -1216,13 +1227,11 @@ iree_status_t iree_async_proactor_io_uring_submit_pending_event_monitors(
         iree_async_io_uring_retry_pending_relays(proactor);
     has_pending = has_pending_event_sources || has_pending_relays;
 
-    // This also flushes SQEs queued by ordinary operations before the first
-    // poll. Submitting each full batch advances the SQ head so registration is
-    // not limited by the ring's instantaneous capacity.
-    IREE_RETURN_IF_ERROR(
-        iree_io_uring_ring_submit(&proactor->ring,
-                                  /*min_complete=*/0,
-                                  /*flags=*/IREE_IORING_ENTER_GETEVENTS));
+    // This also admits SQEs queued before the first poll. Each progress turn
+    // frees submission capacity for pending registrations while respecting
+    // producer-marked completion boundaries.
+    IREE_RETURN_IF_ERROR(iree_io_uring_ring_progress(
+        &proactor->ring, /*flags=*/IREE_IORING_ENTER_GETEVENTS));
   } while (has_pending);
   return iree_ok_status();
 }
@@ -1255,9 +1264,8 @@ static iree_status_t iree_async_proactor_io_uring_poll(
   // Any staged SQEs are flushed with the registrations below.
   iree_async_io_uring_notification_drain_pending(proactor);
 
-  // Submit registrations and any SQEs queued before the first poll. This must
-  // happen before arming the wake source: a full pre-poll SQ must not prevent
-  // the poll owner from establishing its own wake path.
+  // Progress registrations and SQEs queued before the first poll so wake
+  // arming normally has capacity without a locked admission call.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_async_proactor_io_uring_submit_pending_event_monitors(proactor));
 
@@ -1265,14 +1273,14 @@ static iree_status_t iree_async_proactor_io_uring_poll(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_async_proactor_io_uring_arm_wake(proactor));
 
-  // Flush the wake SQE and deferred completions. With DEFER_TASKRUN, the kernel
-  // defers CQE generation for async notifications until we explicitly request
-  // processing via GETEVENTS. This flush must happen even when CQEs are already
-  // available because those completions may have triggered deferred task work.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_uring_ring_submit(&proactor->ring,
-                                    /*min_complete=*/0,
-                                    /*flags=*/IREE_IORING_ENTER_GETEVENTS));
+  // The preceding progress turn ran deferred kernel work with GETEVENTS.
+  // Deliver its ready completions before admitting another buffered copy.
+  // Without ready completions, admit the wake monitor before blocking.
+  if (!iree_io_uring_ring_cq_ready(&proactor->ring)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_io_uring_ring_progress(&proactor->ring,
+                                        /*flags=*/IREE_IORING_ENTER_GETEVENTS));
+  }
 
   // Run poll-owner work before waiting for native completions.
   iree_host_size_t progress_count = 0;
@@ -1295,9 +1303,12 @@ static iree_status_t iree_async_proactor_io_uring_poll(
   if (!iree_io_uring_ring_cq_ready(&proactor->ring) && !is_immediate &&
       !base_proactor->cancellations.list.head) {
     iree_duration_t timeout_ns = iree_timeout_as_duration_ns(timeout);
+    // Progress admits the frozen extent, including the wake monitor, unless
+    // it leaves ready completions. New submissions use that monitor's wake;
+    // admitting another batch here could delay an early buffered completion.
     iree_status_t wait_status =
         iree_io_uring_ring_wait_cqe(&proactor->ring, /*min_complete=*/1,
-                                    /*flush_pending=*/true, timeout_ns);
+                                    /*flush_pending=*/false, timeout_ns);
     if (iree_status_is_deadline_exceeded(wait_status)) {
       iree_status_free(wait_status);
       return iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
@@ -1360,10 +1371,10 @@ static iree_status_t iree_async_proactor_io_uring_poll(
       iree_async_proactor_io_uring_drain_pending_software_operations(proactor);
 
   // Drain loop: process CQEs generated by Phase 4 flushes and run DEFER_TASKRUN
-  // task_work. Each pass calls ring_submit with GETEVENTS to flush any
-  // remaining SQEs and run deferred task_work (e.g., multishot recv triggered
-  // by a send on the same ring). The resulting CQEs are processed with a fresh
-  // snapshot to prevent cascading loops.
+  // task_work. Each pass admits pending complete chains with GETEVENTS until
+  // completions are ready, and runs deferred task_work (e.g., multishot recv
+  // triggered by a send on the same ring). The resulting CQEs are processed
+  // with a fresh snapshot to prevent cascading loops.
   //
   // GETEVENTS is required because DEFER_TASKRUN defers async completions as
   // task_work. Without GETEVENTS, io_uring_enter only processes inline
@@ -1384,8 +1395,8 @@ static iree_status_t iree_async_proactor_io_uring_poll(
         proactor);
     status = iree_async_proactor_io_uring_submit_cancel_requests(proactor);
     if (iree_status_is_ok(status)) {
-      status = iree_io_uring_ring_submit(&proactor->ring, /*min_complete=*/0,
-                                         IREE_IORING_ENTER_GETEVENTS);
+      status = iree_io_uring_ring_progress(&proactor->ring,
+                                           IREE_IORING_ENTER_GETEVENTS);
     }
     if (iree_status_is_ok(status)) {
       uint32_t drain_tail_snapshot =
@@ -1414,11 +1425,12 @@ static iree_status_t iree_async_proactor_io_uring_poll(
 
   if (iree_status_is_ok(status)) {
     // Acquire notification intents from submitters that suppressed their wake
-    // before dispatch_tid became idle. A monitor staged here must be submitted
-    // before returning; future submitters use the normal wake path.
+    // before dispatch_tid became idle. Progress either submits each staged
+    // monitor or leaves ready CQEs for the next poll turn. Future submitters
+    // use the normal wake path.
     if (iree_async_io_uring_notification_drain_pending(proactor)) {
-      status = iree_io_uring_ring_submit(&proactor->ring, /*min_complete=*/0,
-                                         IREE_IORING_ENTER_GETEVENTS);
+      status = iree_io_uring_ring_progress(&proactor->ring,
+                                           IREE_IORING_ENTER_GETEVENTS);
     }
 
     // Drain pending messages from the fallback MPSC queue.

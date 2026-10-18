@@ -6,6 +6,10 @@
 
 #include "iree/async/platform/io_uring/uring.h"
 
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstring>
 #include <vector>
@@ -281,6 +285,193 @@ TEST_F(RingTest, SubmitClearsPending) {
                                            /*min_complete=*/0, /*flags=*/0));
 
   EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), 0u);
+}
+
+TEST_F(RingTest, ProgressKeepsUnmarkedBatchesTogether) {
+  for (uint32_t i = 0; i < 8; ++i) {
+    auto* sqe = iree_io_uring_ring_get_sqe(&ring_);
+    ASSERT_NE(sqe, nullptr);
+    sqe->opcode = IREE_IORING_OP_NOP;
+    sqe->user_data = i;
+  }
+  IREE_ASSERT_OK(
+      iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+  EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), 0u);
+  ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), 8u);
+  for (uint32_t i = 0; i < 8; ++i) {
+    const auto* cqe = iree_io_uring_ring_peek_cqe(&ring_);
+    EXPECT_EQ(cqe->res, 0);
+    iree_io_uring_ring_cq_advance(&ring_, 1);
+  }
+}
+
+TEST_F(RingTest, ProgressYieldsAfterCompleteMarkedChains) {
+  for (uint32_t i = 0; i < 8; ++i) {
+    auto* sqe = iree_io_uring_ring_get_sqe(&ring_);
+    ASSERT_NE(sqe, nullptr);
+    sqe->opcode = IREE_IORING_OP_NOP;
+    sqe->user_data = i;
+    if (i < 2) {
+      sqe->flags = IREE_IOSQE_IO_LINK;
+    }
+    if (i == 2 || i == 5) {
+      iree_io_uring_ring_mark_progress_boundary(&ring_);
+    }
+  }
+  for (uint32_t count : {3u, 3u, 2u}) {
+    uint32_t pending = iree_io_uring_ring_sq_pending(&ring_);
+    IREE_ASSERT_OK(
+        iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+    EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), pending - count);
+    ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), count);
+    for (uint32_t i = 0; i < count; ++i) {
+      const auto* cqe = iree_io_uring_ring_peek_cqe(&ring_);
+      EXPECT_EQ(cqe->res, 0);
+      iree_io_uring_ring_cq_advance(&ring_, 1);
+    }
+  }
+}
+
+TEST_F(RingTest, ProgressDoesNotWaitForAnIncompleteMarkedChain) {
+  const int event_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(event_fd, 0);
+  auto* poll = iree_io_uring_ring_get_sqe(&ring_);
+  ASSERT_NE(poll, nullptr);
+  poll->opcode = IREE_IORING_OP_POLL_ADD;
+  poll->fd = event_fd;
+  poll->poll32_events = POLLIN;
+  poll->flags = IREE_IOSQE_IO_LINK;
+  poll->user_data = 1;
+  auto* terminal = iree_io_uring_ring_get_sqe(&ring_);
+  ASSERT_NE(terminal, nullptr);
+  terminal->opcode = IREE_IORING_OP_NOP;
+  terminal->user_data = 2;
+  iree_io_uring_ring_mark_progress_boundary(&ring_);
+  auto* independent = iree_io_uring_ring_get_sqe(&ring_);
+  ASSERT_NE(independent, nullptr);
+  independent->opcode = IREE_IORING_OP_NOP;
+  independent->user_data = 3;
+
+  IREE_ASSERT_OK(
+      iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+  EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), 0u);
+  ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), 1u);
+  EXPECT_EQ(iree_io_uring_ring_peek_cqe(&ring_)->user_data, 3u);
+  EXPECT_EQ(iree_io_uring_ring_peek_cqe(&ring_)->res, 0);
+  iree_io_uring_ring_cq_advance(&ring_, 1);
+
+  const uint64_t value = 1;
+  ASSERT_EQ(write(event_fd, &value, sizeof(value)), sizeof(value));
+  IREE_ASSERT_OK(iree_io_uring_ring_wait_cqe(&ring_, 2, /*flush_pending=*/false,
+                                             IREE_DURATION_INFINITE));
+  uint64_t completed = 0;
+  while (const auto* cqe = iree_io_uring_ring_peek_cqe(&ring_)) {
+    EXPECT_GE(cqe->res, 0);
+    completed |= UINT64_C(1) << cqe->user_data;
+    iree_io_uring_ring_cq_advance(&ring_, 1);
+  }
+  EXPECT_EQ(completed, (UINT64_C(1) << 1) | (UINT64_C(1) << 2));
+  EXPECT_EQ(close(event_fd), 0);
+}
+
+TEST_F(RingTest, ProgressMarkersRetireOnSlotReuseAndRollback) {
+  // Reusing marked slots without markers must recover full-batch admission.
+  for (uint32_t iteration = 0; iteration < 3; ++iteration) {
+    for (uint32_t i = 0; i < ring_.sq_entries; ++i) {
+      auto* sqe = iree_io_uring_ring_get_sqe(&ring_);
+      ASSERT_NE(sqe, nullptr);
+      sqe->opcode = IREE_IORING_OP_NOP;
+      if (iteration == 0) {
+        iree_io_uring_ring_mark_progress_boundary(&ring_);
+      }
+    }
+    if (iteration == 0) {
+      IREE_ASSERT_OK(iree_io_uring_ring_submit(&ring_, ring_.sq_entries,
+                                               IREE_IORING_ENTER_GETEVENTS));
+    } else {
+      IREE_ASSERT_OK(
+          iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+      EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), 0u);
+      ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), ring_.sq_entries);
+    }
+    iree_io_uring_ring_cq_advance(&ring_, ring_.sq_entries);
+  }
+  auto* rolled_back = iree_io_uring_ring_get_sqe(&ring_);
+  ASSERT_NE(rolled_back, nullptr);
+  iree_io_uring_ring_mark_progress_boundary(&ring_);
+  iree_io_uring_ring_sq_rollback(&ring_, 1);
+  for (uint32_t i = 0; i < 8; ++i) {
+    auto* sqe = iree_io_uring_ring_get_sqe(&ring_);
+    ASSERT_NE(sqe, nullptr);
+    sqe->opcode = IREE_IORING_OP_NOP;
+  }
+  IREE_ASSERT_OK(
+      iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+  EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), 0u);
+  ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), 8u);
+  iree_io_uring_ring_cq_advance(&ring_, 8);
+}
+
+TEST_F(RingTest, ProgressBoundaryCrossesBitmapAndRingWrap) {
+  for (uint32_t i = 0; i < ring_.sq_entries - 2; ++i) {
+    auto* sqe = iree_io_uring_ring_get_sqe(&ring_);
+    ASSERT_NE(sqe, nullptr);
+    sqe->opcode = IREE_IORING_OP_NOP;
+  }
+  IREE_ASSERT_OK(iree_io_uring_ring_submit(&ring_, ring_.sq_entries - 2,
+                                           IREE_IORING_ENTER_GETEVENTS));
+  iree_io_uring_ring_cq_advance(&ring_, ring_.sq_entries - 2);
+  for (uint32_t i = 0; i < 4; ++i) {
+    auto* sqe = iree_io_uring_ring_get_sqe(&ring_);
+    ASSERT_NE(sqe, nullptr);
+    sqe->opcode = IREE_IORING_OP_NOP;
+    if (i == 2) {
+      iree_io_uring_ring_mark_progress_boundary(&ring_);
+    }
+  }
+  IREE_ASSERT_OK(
+      iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+  EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), 1u);
+  ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), 3u);
+  iree_io_uring_ring_cq_advance(&ring_, 3);
+  IREE_ASSERT_OK(
+      iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+  EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), 0u);
+  ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), 1u);
+  iree_io_uring_ring_cq_advance(&ring_, 1);
+}
+
+TEST_F(RingTest, ProgressPreservesPartiallyConsumedExtent) {
+  // A preparation error produces a CQE and stops this native submission.
+  // The marked final entry remains published for the next progress turn.
+  for (uint32_t i = 0; i < 3; ++i) {
+    auto* sqe = iree_io_uring_ring_get_sqe(&ring_);
+    ASSERT_NE(sqe, nullptr);
+    sqe->opcode = i == 1 ? UINT8_MAX : IREE_IORING_OP_NOP;
+    sqe->user_data = i;
+  }
+  iree_io_uring_ring_mark_progress_boundary(&ring_);
+  IREE_ASSERT_OK(
+      iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+  ASSERT_EQ(*ring_.sq_head, 2u);
+  ASSERT_EQ(*ring_.sq_tail, 3u);
+  ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), 2u);
+  uint32_t completed = 0;
+  while (const auto* cqe = iree_io_uring_ring_peek_cqe(&ring_)) {
+    ASSERT_LT(cqe->user_data, 2u);
+    EXPECT_EQ(cqe->res, cqe->user_data == 1 ? -EINVAL : 0);
+    completed |= 1u << cqe->user_data;
+    iree_io_uring_ring_cq_advance(&ring_, 1);
+  }
+  EXPECT_EQ(completed, 3u);
+
+  IREE_ASSERT_OK(
+      iree_io_uring_ring_progress(&ring_, IREE_IORING_ENTER_GETEVENTS));
+  EXPECT_EQ(iree_io_uring_ring_sq_pending(&ring_), 0u);
+  ASSERT_EQ(iree_io_uring_ring_cq_count(&ring_), 1u);
+  EXPECT_EQ(iree_io_uring_ring_peek_cqe(&ring_)->user_data, 2u);
+  EXPECT_EQ(iree_io_uring_ring_peek_cqe(&ring_)->res, 0);
+  iree_io_uring_ring_cq_advance(&ring_, 1);
 }
 
 TEST_F(RingTest, WaitCqeWithFlushSubmitsPendingSqe) {

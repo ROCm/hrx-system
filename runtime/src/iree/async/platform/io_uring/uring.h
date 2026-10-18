@@ -19,7 +19,7 @@
 //   partially-filled SQEs from being flushed.
 //
 //   io_uring_enter is called ONLY from the poll thread, normally outside the
-//   SQ lock. Cold-path cancellation may submit pending entries with the lock
+//   SQ lock. Cold control admission may submit pending entries with the lock
 //   held to reserve a freed slot; that submission never waits for completions.
 //   This satisfies IORING_SETUP_SINGLE_ISSUER (only one thread may call
 //   io_uring_enter). Cross-thread submitters fill SQEs under the lock and wake
@@ -92,6 +92,11 @@ typedef struct iree_io_uring_ring_t {
   // not the published tail, determines which entries still need submission.
   // Protected by sq_lock.
   uint32_t sq_local_tail;
+
+  // One bit per SQ slot marking a complete native chain after which ready
+  // completions can take priority over further admission. Protected by sq_lock;
+  // a reused SQ slot clears its previous marker. Owned by the ring.
+  uint64_t* sq_progress_boundaries;
 
   // Test-and-test-and-set lock protecting SQ mutations.
   // Zero is unlocked and one is locked; waiters poll without modifying it.
@@ -245,6 +250,24 @@ static inline void iree_io_uring_ring_sq_rollback(iree_io_uring_ring_t* ring,
 // After filling, call iree_io_uring_ring_submit() to submit pending SQEs.
 iree_io_uring_sqe_t* iree_io_uring_ring_get_sqe(iree_io_uring_ring_t* ring);
 
+// Marks the last prepared SQE as a progress boundary. The producer must hold
+// the SQ lock and finish the entire native linked chain before marking it.
+// Buffered file operations use this to deliver inline completions before
+// admitting another potentially expensive copy into the kernel.
+static inline void iree_io_uring_ring_mark_progress_boundary(
+    iree_io_uring_ring_t* ring) {
+  uint32_t index = (ring->sq_local_tail - 1) & ring->sq_mask;
+  ring->sq_progress_boundaries[index / 64] |= UINT64_C(1) << (index % 64);
+}
+
+// Admits the prepared extent through complete producer-marked chains until
+// completions are ready or the extent has been submitted. Unmarked spans stay
+// batched. Never waits for an incomplete operation before admitting independent
+// work, and never dispatches callbacks. The poll owner calls this without the
+// SQ lock; flags can request GETEVENTS to run deferred kernel work.
+iree_status_t iree_io_uring_ring_progress(iree_io_uring_ring_t* ring,
+                                          uint32_t flags);
+
 // Submits all pending SQEs that were acquired via get_sqe().
 // Automatically calculates the number of SQEs to submit from ring state.
 // |min_complete| is the minimum number of CQEs to wait for (0 for non-blocking)
@@ -258,8 +281,8 @@ iree_status_t iree_io_uring_ring_submit(iree_io_uring_ring_t* ring,
 // Submits pending entries without waiting for completions or dispatching
 // callbacks. The poll owner must hold the SQ lock across this call and the
 // following get_sqe to prevent concurrent producers taking the freed slots.
-// Used by cold cancellation admission when the SQ is full. Platform failures
-// are returned without discarding published work.
+// Used by cold control admission when the SQ is full. Platform failures are
+// returned without discarding published work.
 iree_status_t iree_io_uring_ring_submit_pending_locked(
     iree_io_uring_ring_t* ring);
 

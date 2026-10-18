@@ -20,7 +20,9 @@
 #include "iree/async/cts/file/native_file.h"
 #include "iree/async/cts/util/registry.h"
 #include "iree/async/cts/util/test_base.h"
+#include "iree/async/event.h"
 #include "iree/async/operations/file.h"
+#include "iree/async/operations/scheduling.h"
 #include "iree/async/region.h"
 #include "iree/async/slab.h"
 #include "iree/async/span.h"
@@ -680,6 +682,77 @@ TEST_P(FileTest, ConcurrentReadsAtDifferentOffsets) {
   EXPECT_EQ(read_b.bytes_read, 5u);
   EXPECT_EQ(memcmp(buffer_b, "abcde", 5), 0);
 
+  iree_async_file_release(file);
+}
+
+TEST_P(FileTest, BufferedFileEventChainPreservesIndependentProgress) {
+  const char initial[] = "abcdefghijkl";
+  std::string path = CreateTempFileWithContents(initial, sizeof(initial) - 1);
+  iree_async_file_t* file = ImportTempFileForReadWrite(path);
+  ASSERT_NE(file, nullptr);
+  iree_async_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_async_event_create(proactor_, &event));
+
+  char payload[] = "WXYZ";
+  char dependent_result[4] = {};
+  char independent_result[4] = {};
+  CompletionTracker write_completion;
+  CompletionTracker wait_completion;
+  CompletionTracker dependent_completion;
+  CompletionTracker independent_completion;
+  iree_async_file_write_operation_t write = {};
+  iree_async_operation_initialize(
+      &write.base, IREE_ASYNC_OPERATION_TYPE_FILE_WRITE,
+      IREE_ASYNC_OPERATION_FLAG_LINKED, CompletionTracker::Callback,
+      &write_completion);
+  write.file = file;
+  write.buffer = iree_async_span_from_ptr(payload, sizeof(dependent_result));
+  iree_async_event_wait_operation_t wait = {};
+  iree_async_operation_initialize(
+      &wait.base, IREE_ASYNC_OPERATION_TYPE_EVENT_WAIT,
+      IREE_ASYNC_OPERATION_FLAG_LINKED, CompletionTracker::Callback,
+      &wait_completion);
+  wait.event = event;
+  iree_async_file_read_operation_t dependent = {};
+  iree_async_operation_initialize(
+      &dependent.base, IREE_ASYNC_OPERATION_TYPE_FILE_READ,
+      IREE_ASYNC_OPERATION_FLAG_NONE, CompletionTracker::Callback,
+      &dependent_completion);
+  dependent.file = file;
+  dependent.buffer =
+      iree_async_span_from_ptr(dependent_result, sizeof(dependent_result));
+  iree_async_file_read_operation_t independent = {};
+  iree_async_operation_initialize(
+      &independent.base, IREE_ASYNC_OPERATION_TYPE_FILE_READ,
+      IREE_ASYNC_OPERATION_FLAG_NONE, CompletionTracker::Callback,
+      &independent_completion);
+  independent.file = file;
+  independent.offset = 8;
+  independent.buffer =
+      iree_async_span_from_ptr(independent_result, sizeof(independent_result));
+  iree_async_operation_t* operations[] = {&write.base, &wait.base,
+                                          &dependent.base, &independent.base};
+  IREE_ASSERT_OK(iree_async_proactor_submit(
+      proactor_,
+      iree_async_operation_list_make(operations, IREE_ARRAYSIZE(operations))));
+
+  PollUntilCondition([&] { return independent_completion.call_count == 1; });
+  EXPECT_EQ(wait_completion.call_count, 0);
+  EXPECT_EQ(dependent_completion.call_count, 0);
+  EXPECT_EQ(memcmp(independent_result, "ijkl", 4), 0);
+
+  iree_async_event_set(event);
+  PollUntilCondition([&] {
+    return write_completion.call_count == 1 &&
+           wait_completion.call_count == 1 &&
+           dependent_completion.call_count == 1;
+  });
+  IREE_EXPECT_OK(write_completion.ConsumeStatus());
+  IREE_EXPECT_OK(wait_completion.ConsumeStatus());
+  IREE_EXPECT_OK(dependent_completion.ConsumeStatus());
+  IREE_EXPECT_OK(independent_completion.ConsumeStatus());
+  EXPECT_EQ(memcmp(dependent_result, payload, 4), 0);
+  iree_async_event_release(event);
   iree_async_file_release(file);
 }
 

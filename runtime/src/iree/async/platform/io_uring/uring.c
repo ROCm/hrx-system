@@ -312,10 +312,14 @@ iree_status_t iree_io_uring_ring_initialize(
                                         &out_ring->registration);
 
   iree_status_t status = iree_io_uring_ring_map_buffers(out_ring, &params);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(
+        iree_allocator_system(),
+        ((out_ring->sq_entries + 63) / 64) * sizeof(uint64_t),
+        (void**)&out_ring->sq_progress_boundaries);
+  }
   if (!iree_status_is_ok(status)) {
-    iree_io_uring_registration_deinitialize(&out_ring->registration);
-    close(out_ring->ring_fd);
-    out_ring->ring_fd = -1;
+    iree_io_uring_ring_deinitialize(out_ring);
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -364,6 +368,8 @@ void iree_io_uring_ring_deinitialize(iree_io_uring_ring_t* ring) {
   if (ring->ring_fd >= 0) {
     iree_io_uring_registration_deinitialize(&ring->registration);
   }
+  iree_allocator_free(iree_allocator_system(), ring->sq_progress_boundaries);
+  ring->sq_progress_boundaries = NULL;
   if (ring->cq_ring_ptr) {
     munmap(ring->cq_ring_ptr, ring->cq_ring_size);
     ring->cq_ring_ptr = NULL;
@@ -399,6 +405,7 @@ iree_io_uring_sqe_t* iree_io_uring_ring_get_sqe(iree_io_uring_ring_t* ring) {
 
   uint32_t index = tail & ring->sq_mask;
   iree_io_uring_sqe_t* sqe = &ring->sqes[index];
+  ring->sq_progress_boundaries[index / 64] &= ~(UINT64_C(1) << (index % 64));
 
   // Zero the SQE for the caller.
   memset(sqe, 0, sizeof(*sqe));
@@ -486,6 +493,50 @@ static iree_status_t iree_io_uring_ring_submit_extent(
   }
 
   return iree_ok_status();
+}
+
+// Selects the next complete chain within the frozen extent. The caller holds
+// the SQ lock so producers cannot replace a marker while it is being read.
+static uint32_t iree_io_uring_ring_progress_tail(
+    const iree_io_uring_ring_t* ring, uint32_t submission_tail) {
+  uint32_t position = iree_atomic_load((iree_atomic_int32_t*)ring->sq_head,
+                                       iree_memory_order_acquire);
+  while (position != submission_tail) {
+    uint32_t index = position & ring->sq_mask;
+    uint32_t shift = index % 64;
+    uint32_t count = iree_min(submission_tail - position,
+                              iree_min(ring->sq_entries - index, 64 - shift));
+    uint64_t boundaries = (ring->sq_progress_boundaries[index / 64] >> shift) &
+                          (UINT64_MAX >> (64 - count));
+    if (boundaries) {
+      return position + iree_math_count_trailing_zeros_u64(boundaries) + 1;
+    }
+    position += count;
+  }
+  return submission_tail;
+}
+
+iree_status_t iree_io_uring_ring_progress(iree_io_uring_ring_t* ring,
+                                          uint32_t flags) {
+  iree_io_uring_ring_sq_lock(ring);
+  uint32_t submission_tail = iree_io_uring_ring_flush(ring);
+  uint32_t progress_tail =
+      iree_io_uring_ring_progress_tail(ring, submission_tail);
+  iree_io_uring_ring_sq_unlock(ring);
+  for (;;) {
+    IREE_RETURN_IF_ERROR(iree_io_uring_ring_submit_extent(
+        ring, progress_tail, /*min_complete=*/0, flags));
+    // A successful enter may consume only part of the requested extent.
+    // Without ready completions, finish admitting it before callers can wait.
+    if (iree_io_uring_ring_cq_ready(ring) ||
+        iree_atomic_load((iree_atomic_int32_t*)ring->sq_head,
+                         iree_memory_order_acquire) == submission_tail) {
+      return iree_ok_status();
+    }
+    iree_io_uring_ring_sq_lock(ring);
+    progress_tail = iree_io_uring_ring_progress_tail(ring, submission_tail);
+    iree_io_uring_ring_sq_unlock(ring);
+  }
 }
 
 iree_status_t iree_io_uring_ring_submit(iree_io_uring_ring_t* ring,
