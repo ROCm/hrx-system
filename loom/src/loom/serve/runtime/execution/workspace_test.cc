@@ -375,8 +375,14 @@ TEST_P(WorkspaceTest, PersistentStateDoesNotKeepTransientWorkspaceActive) {
 
 TEST_P(WorkspaceTest,
        SharedEscapeRetiresAfterLastReaderWithoutBlockingOtherWork) {
-  IREE_ASSERT_OK(Allocate(producer_));
-  IREE_ASSERT_OK(Allocate(consumer_));
+  // Establish both reservations in one slab before holding the last reader.
+  // Submission alone can leave native backing acquisition pending.
+  for (auto* domain : {&producer_, &consumer_}) {
+    IREE_ASSERT_OK(Allocate(*domain));
+    const auto frontier = loom_serve_execution_frontier(domain->execution);
+    IREE_ASSERT_OK(
+        loom_serve_execution_wait(domain->execution, frontier.values[0]));
+  }
   for (size_t i = 0; i < input_.size(); ++i) {
     input_[i] = 17 + i * i;
   }
