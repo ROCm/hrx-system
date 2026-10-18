@@ -424,19 +424,12 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     return {program, root, &buffers_[stage_index][root.fixed_buffer_index]};
   }
 
-  iree_status_t CreateRoots(iree_host_size_t shared_count,
-                            iree_host_size_t root_count,
-                            const loom_serve_weight_root_t* roots,
-                            std::initializer_list<std::string> paths) {
+  iree_status_t Prepare(loom_serve_weights_t* plan,
+                        std::initializer_list<std::string> paths) {
     const std::string policy = directory_ + "/policy.loom";
-    auto** plan = &plans_[plan_count_++];
-    IREE_RETURN_IF_ERROR(loom_serve_weights_allocate(
-        device_, transfer_, dispatch_,
-        loom_serve_device_storage_pool(device_owner_), pool_, shared_count,
-        root_count, roots, host_allocator_, plan));
-    const auto before = loom_serve_weights_statistics(*plan);
+    const auto before = loom_serve_weights_statistics(plan);
     loom_serve_test_weight_preparation_t preparation;
-    preparation.weights = *plan;
+    preparation.weights = plan;
     preparation.host = loom_serve_device_host(device_owner_);
     preparation.jit = jit_;
     std::vector<iree_string_view_t> checkpoints;
@@ -446,11 +439,23 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     preparation.checkpoints = {checkpoints.size(), checkpoints.data()};
     preparation.policy = iree_make_cstring_view(policy.c_str());
     auto status = preparation.Run();
-    const auto after = loom_serve_weights_statistics(*plan);
+    const auto after = loom_serve_weights_statistics(plan);
     EXPECT_EQ(after.reserved_bytes, before.reserved_bytes);
     EXPECT_EQ(after.committed_bytes, before.committed_bytes);
-    EXPECT_EQ(loom_serve_weights_activity(*plan).activations, 0u);
+    EXPECT_EQ(loom_serve_weights_activity(plan).activations, 0u);
     return status;
+  }
+
+  iree_status_t CreateRoots(iree_host_size_t shared_count,
+                            iree_host_size_t root_count,
+                            const loom_serve_weight_root_t* roots,
+                            std::initializer_list<std::string> paths) {
+    auto** plan = &plans_[plan_count_++];
+    IREE_RETURN_IF_ERROR(loom_serve_weights_allocate(
+        device_, transfer_, dispatch_,
+        loom_serve_device_storage_pool(device_owner_), pool_, shared_count,
+        root_count, roots, host_allocator_, plan));
+    return Prepare(*plan, paths);
   }
 
   iree_status_t LoadRoots(iree_host_size_t shared_count,
@@ -765,6 +770,45 @@ TEST_P(WeightsTest, InitialBackingRetirementMatchesAcceptedWork) {
   }
   loom_serve_weights_await_retirement(plans_[0]);
   EXPECT_TRUE(loom_serve_weights_is_retired(plans_[0]));
+}
+
+TEST_P(WeightsTest, PreparedRootsRecordConsumersBeforeActivation) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(loom_serve_jit_stage_record(
+      compiled_[0], iree_hal_queue_family(dispatch_),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[0].data(),
+      &commands_[0]));
+  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+  IREE_ASSERT_OK(loom_serve_weights_await(plans_[0]));
+  Run(0, 70);
+}
+
+TEST_P(WeightsTest, FailedInitialBackingFailsPreparationAndPreservesPeer) {
+  if (pool_) {
+    GTEST_SKIP() << "Elastic roots allocate physical backing during activation";
+  }
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  {
+    loom_serve::testing::ScopedNativeHold hold(device_owner_);
+    loom_serve::testing::NativeAllocator::ForDevice(device_owner_)
+        .FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC, true);
+    // Hold the actual native dependency until allocation has accepted its
+    // handles. The later failure belongs to readiness, not submission.
+    IREE_ASSERT_OK(loom_serve_weights_allocate(
+        device_, transfer_, dispatch_,
+        loom_serve_device_storage_pool(device_owner_), pool_, 0, 1, &root,
+        host_allocator_, &plans_[plan_count_++]));
+    hold.WaitEntered();
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        Prepare(plans_[0], {path_.path()}));
+  IREE_ASSERT_OK(Compile(1, "target"));
+  const auto peer = Root(1, 0);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &peer, {path_.path()}));
+  Run(1, 70);
 }
 
 TEST_P(WeightsTest, MissingFileParameterFailsTheLoad) {

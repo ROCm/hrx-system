@@ -62,9 +62,10 @@ typedef struct loom_serve_weight_activity_t {
 // With pool, roots have stable virtual addresses and start without physical
 // backing. NULL selects explicitly fixed storage (including device ASAN use);
 // deactivation is unavailable in that mode. Fixed roots use one queued
-// allocation batch; activation imports its readiness before file reads.
-// Successful source preparation is
-// required before activation, and activation before any consumer executes.
+// allocation batch. Successful source preparation joins that allocation before
+// reusable commands may record these roots; activation imports its readiness
+// before file reads. Preparation is required before activation, and activation
+// before any consumer executes.
 // storage_pool supplies fixed roots, is qualified for dispatch and transfer,
 // and outlives the plan and every resolved root.
 //
@@ -78,9 +79,11 @@ iree_status_t loom_serve_weights_allocate(
     iree_host_size_t root_count, const loom_serve_weight_root_t* roots,
     iree_allocator_t host_allocator, loom_serve_weights_t** out_weights);
 
-// Receives the terminal source preparation status on a shared task worker.
+// Receives terminal source preparation and initial fixed-allocation status.
 // All preparation tasks/compiler accesses have retired before this callback.
-// Pool mutation and activation return to the serialized model owner.
+// It may run on a shared task worker or allocation completion thread; it only
+// publishes status and schedules the owner. Pool mutation and activation return
+// to the serialized model owner.
 typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
                                                    iree_status_t status);
 
@@ -88,6 +91,10 @@ typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
 // submitting device work. CPU source policy/indexing and native compilation
 // run on the shared host. Payload reads wait for activation; open checkpoint
 // handles and recorded preparers remain cached, not a second weight copy.
+// Successful completion also establishes initial fixed-root allocation
+// readiness, permitting reusable command recording without a host wait.
+// Elastic roots retain their stable unbacked virtual addresses until
+// activation.
 //
 // The ordered weights_paths populate one parameter index; files may use any
 // supported format. Relative checkpoint paths use the source environment's
