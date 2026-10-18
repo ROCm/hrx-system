@@ -9,16 +9,31 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "iree/base/threading/notification.h"
+#include "iree/task/executor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/testing/worker_gate.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/websocket/handshake.h"
 
 namespace {
+
+struct loom_serve_websocket_message_deleter_t {
+  // Borrowed protocol owner retained by the test's HTTP claim.
+  loom_serve_websocket_t* socket;
+  void operator()(loom_serve_websocket_message_t* message) const {
+    loom_serve_websocket_message_release(socket, message);
+  }
+};
+using Message = std::unique_ptr<loom_serve_websocket_message_t,
+                                loom_serve_websocket_message_deleter_t>;
 
 std::string ClientFrame(uint8_t type, const std::string& payload,
                         bool final = true) {
@@ -149,15 +164,15 @@ class WebSocketConnectionTest : public ::testing::Test {
     return bytes;
   }
 
-  bool AwaitMessage(loom_serve_websocket_message_type_t* type,
-                    iree_const_byte_span_t* payload) {
+  Message AwaitMessage(loom_serve_websocket_message_type_t* type,
+                       iree_const_byte_span_t* payload) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (true) {
       const auto token = iree_notification_prepare_wait(notification);
-      const bool found = loom_serve_websocket_peek(socket_, type, payload);
-      if (found || loom_serve_http_connection_failed(connection_)) {
+      auto* message = loom_serve_websocket_take(socket_, type, payload);
+      if (message || loom_serve_http_connection_failed(connection_)) {
         iree_notification_cancel_wait(notification);
-        return found;
+        return Message(message, {socket_});
       }
       iree_notification_commit_wait(notification, token, IREE_DURATION_ZERO,
                                     IREE_TIME_INFINITE_FUTURE);
@@ -168,10 +183,10 @@ class WebSocketConnectionTest : public ::testing::Test {
                      const std::string& expected_payload) {
     loom_serve_websocket_message_type_t type;
     iree_const_byte_span_t payload;
-    ASSERT_TRUE(AwaitMessage(&type, &payload));
+    auto message = AwaitMessage(&type, &payload);
+    ASSERT_NE(message, nullptr);
     EXPECT_EQ(type, expected_type);
     EXPECT_EQ(Copy(payload), expected_payload);
-    loom_serve_websocket_consume(socket_);
   }
 
   void AwaitFailure() {
@@ -241,7 +256,8 @@ TEST_F(WebSocketConnectionTest,
   ASSERT_TRUE(Write(ClientFrame(1, "borrowed")));
   loom_serve_websocket_message_type_t type;
   iree_const_byte_span_t held;
-  ASSERT_TRUE(AwaitMessage(&type, &held));
+  auto message = AwaitMessage(&type, &held);
+  ASSERT_NE(message, nullptr);
   ASSERT_TRUE(Write(ClientFrame(2, std::string(65536, 'x'))));
   ASSERT_EQ(shutdown(client_, SHUT_WR), 0);
   AwaitFailure();
@@ -250,8 +266,8 @@ TEST_F(WebSocketConnectionTest,
   const loom_serve_http_request_t* request = nullptr;
   EXPECT_EQ(loom_serve_http_server_take_request(server_, &request), nullptr);
   EXPECT_EQ(Copy(held), "borrowed");
-  loom_serve_websocket_consume(socket_);
   ExpectMessage(LOOM_SERVE_WEBSOCKET_BINARY, std::string(65536, 'x'));
+  EXPECT_EQ(Copy(held), "borrowed");
 }
 
 TEST_F(WebSocketConnectionTest,
@@ -305,11 +321,12 @@ TEST_F(WebSocketConnectionTest,
                     ClientFrame(8, close_payload)));
   loom_serve_websocket_message_type_t type;
   iree_const_byte_span_t payload;
-  ASSERT_TRUE(AwaitMessage(&type, &payload));
+  auto message = AwaitMessage(&type, &payload);
+  ASSERT_NE(message, nullptr);
   ASSERT_EQ(type, LOOM_SERVE_WEBSOCKET_CLOSE);
   EXPECT_TRUE(loom_serve_websocket_peer_closed(socket_));
   IREE_ASSERT_OK(loom_serve_websocket_send(socket_, type, payload));
-  loom_serve_websocket_consume(socket_);
+  message.reset();
   ASSERT_EQ(shutdown(client_, SHUT_WR), 0);
   loom_serve_http_connection_finish(connection_);
   connection_ = nullptr;
@@ -347,6 +364,135 @@ TEST_F(WebSocketConnectionTest, FragmentedMessageCannotExceedItsOwnBudget) {
   ASSERT_TRUE(Write(ClientFrame(1, std::string(80, 'a'), false) +
                     ClientFrame(0, std::string(46, 'b'))));
   AwaitFailure();
+}
+
+TEST_F(WebSocketConnectionTest, TakenMessagesKeepRecordCreditUntilRelease) {
+  auto limits = loom_serve_websocket_limits_default();
+  limits.message_capacity = 2;
+  Open(limits);
+  ASSERT_TRUE(Write(ClientFrame(1, "held")));
+  loom_serve_websocket_message_type_t type;
+  iree_const_byte_span_t payload;
+  auto held = AwaitMessage(&type, &payload);
+  ASSERT_NE(held, nullptr);
+  ASSERT_TRUE(Write(ClientFrame(9, "control")));
+  ExpectMessage(LOOM_SERVE_WEBSOCKET_PING, "control");
+  EXPECT_EQ(Copy(payload), "held");
+  ASSERT_TRUE(Write(ClientFrame(9, "one") + ClientFrame(9, "two")));
+  AwaitFailure();
+  ExpectMessage(LOOM_SERVE_WEBSOCKET_PING, "one");
+  EXPECT_EQ(Copy(payload), "held");
+}
+
+TEST_F(WebSocketConnectionTest, TakenMessagesKeepPayloadCreditUntilRelease) {
+  auto limits = loom_serve_websocket_limits_default();
+  limits.message_byte_capacity = limits.retained_byte_capacity = 256;
+  Open(limits);
+  ASSERT_TRUE(Write(ClientFrame(2, std::string(256, 'a'))));
+  loom_serve_websocket_message_type_t type;
+  iree_const_byte_span_t payload;
+  auto held = AwaitMessage(&type, &payload);
+  ASSERT_NE(held, nullptr);
+  ASSERT_TRUE(Write(ClientFrame(2, "b")));
+  AwaitFailure();
+  EXPECT_EQ(Copy(payload), std::string(256, 'a'));
+}
+
+// A real shared-worker borrower, joined after its release callback. The gate
+// controlling worker admission is separate from the job and protocol owner.
+class WebSocketReadJob {
+ public:
+  ~WebSocketReadJob() {
+    if (scheduled_) {
+      Wait();
+    }
+  }
+
+  void Schedule(iree_task_executor_t* executor,
+                iree_const_byte_span_t payload) {
+    payload_ = payload;
+    iree_task_process_initialize(
+        [](iree_task_process_t* process, const iree_task_worker_context_t*,
+           iree_task_process_drain_result_t* result) {
+          auto* job = static_cast<WebSocketReadJob*>(process->user_data);
+          job->copy_ = Copy(job->payload_);
+          result->did_work = true;
+          result->completed = true;
+          return iree_ok_status();
+        },
+        0, 1, &process_);
+    process_.user_data = this;
+    process_.completion_fn = [](iree_task_process_t*, iree_status_t status) {
+      IREE_EXPECT_OK(status);
+    };
+    process_.release_fn = [](iree_task_process_t* process) {
+      auto* job = static_cast<WebSocketReadJob*>(process->user_data);
+      std::lock_guard<std::mutex> lock(job->mutex_);
+      job->released_ = true;
+      job->condition_.notify_all();
+    };
+    scheduled_ = true;
+    iree_task_executor_schedule_process(executor, &process_);
+  }
+
+  const std::string& Wait() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return released_; });
+    return copy_;
+  }
+
+ private:
+  // Intrusive process storage retained until the final release callback.
+  iree_task_process_t process_ = {};
+  // Borrowed immutable network payload held by the application's receipt.
+  iree_const_byte_span_t payload_ = iree_const_byte_span_empty();
+  // Worker result visible to the caller only after release publication.
+  std::string copy_;
+  // Joins the release callback's last access with the outer test caller.
+  std::mutex mutex_;
+  // Explicit final release notification without wall-clock polling.
+  std::condition_variable condition_;
+  // Owner-only fact distinguishing an unused job from accepted work.
+  bool scheduled_ = false;
+  // Publication under mutex after the executor relinquishes job storage.
+  bool released_ = false;
+};
+
+TEST_F(WebSocketConnectionTest, LaterControlsPassAnAcceptedCpuBorrower) {
+  Open();
+  const std::string audio(4096, 'a');
+  ASSERT_TRUE(Write(ClientFrame(2, audio)));
+  loom_serve_websocket_message_type_t type;
+  iree_const_byte_span_t payload;
+  auto held = AwaitMessage(&type, &payload);
+  ASSERT_NE(held, nullptr);
+
+  iree_task_topology_t topology;
+  iree_task_topology_initialize_from_group_count(1, &topology);
+  iree_task_executor_options_t options;
+  iree_task_executor_options_initialize(&options);
+  iree_task_executor_t* raw_executor = nullptr;
+  auto status = iree_task_executor_create(
+      options, &topology, iree_allocator_system(), &raw_executor);
+  iree_task_topology_deinitialize(&topology);
+  IREE_ASSERT_OK(status);
+  std::unique_ptr<iree_task_executor_t, decltype(&iree_task_executor_release)>
+      executor(raw_executor, iree_task_executor_release);
+  WebSocketReadJob job;
+  loom_serve::testing::WorkerGate gate(executor.get());
+  job.Schedule(executor.get(), payload);
+
+  const std::string cancel = R"({"type":"response.cancel"})";
+  ASSERT_TRUE(Write(ClientFrame(1, cancel)));
+  ExpectMessage(LOOM_SERVE_WEBSOCKET_TEXT, cancel);
+  ASSERT_EQ(shutdown(client_, SHUT_WR), 0);
+  AwaitFailure();
+  const loom_serve_http_request_t* request = nullptr;
+  EXPECT_EQ(loom_serve_http_server_take_request(server_, &request), nullptr);
+
+  gate.Open();
+  EXPECT_EQ(job.Wait(), audio);
+  held.reset();
 }
 
 class WebSocketMalformedTest

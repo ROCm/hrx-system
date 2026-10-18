@@ -11,7 +11,7 @@
 #include "iree/base/internal/unicode.h"
 #include "iree/base/threading/mutex.h"
 
-typedef struct loom_serve_websocket_message_t {
+struct loom_serve_websocket_message_t {
   // Next completed message in publication order, or NULL for the tail.
   struct loom_serve_websocket_message_t* next;
   // Initial data opcode, retained across continuation frames, or control type.
@@ -22,7 +22,7 @@ typedef struct loom_serve_websocket_message_t {
   iree_host_size_t capacity;
   // Owned payload; published records never resize or change.
   uint8_t data[];
-} loom_serve_websocket_message_t;
+};
 
 struct loom_serve_websocket_t {
   // Allocator owning all receiver storage through HTTP reclamation.
@@ -31,7 +31,7 @@ struct loom_serve_websocket_t {
   loom_serve_http_connection_t* connection;
   // Immutable payload and record bounds.
   loom_serve_websocket_limits_t limits;
-  // Serializes receive publication with application peek/consume.
+  // Serializes receive publication with application take/release.
   iree_slim_mutex_t mutex;
   // Oldest complete immutable message, including interleaved control frames.
   loom_serve_websocket_message_t* head;
@@ -41,7 +41,7 @@ struct loom_serve_websocket_t {
   loom_serve_websocket_message_t* fragment;
   // Record receiving the current frame; may alias fragment for data frames.
   loom_serve_websocket_message_t* current;
-  // Total allocated records, including both incomplete and queued messages.
+  // Allocated records, including incomplete, queued, and taken messages.
   iree_host_size_t message_count;
   // Total allocated payload capacity across those records.
   iree_host_size_t retained_bytes;
@@ -338,26 +338,30 @@ iree_status_t loom_serve_websocket_upgrade(
   return iree_ok_status();
 }
 
-bool loom_serve_websocket_peek(loom_serve_websocket_t* socket,
-                               loom_serve_websocket_message_type_t* out_type,
-                               iree_const_byte_span_t* out_payload) {
+loom_serve_websocket_message_t* loom_serve_websocket_take(
+    loom_serve_websocket_t* socket,
+    loom_serve_websocket_message_type_t* out_type,
+    iree_const_byte_span_t* out_payload) {
   iree_slim_mutex_lock(&socket->mutex);
-  const loom_serve_websocket_message_t* message = socket->head;
+  loom_serve_websocket_message_t* message = socket->head;
+  if (message) {
+    socket->head = message->next;
+    if (!socket->head) {
+      socket->tail = NULL;
+    }
+    message->next = NULL;
+  }
   *out_type = message ? message->type : 0;
   *out_payload = message
                      ? iree_make_const_byte_span(message->data, message->length)
                      : iree_const_byte_span_empty();
   iree_slim_mutex_unlock(&socket->mutex);
-  return message != NULL;
+  return message;
 }
 
-void loom_serve_websocket_consume(loom_serve_websocket_t* socket) {
+void loom_serve_websocket_message_release(
+    loom_serve_websocket_t* socket, loom_serve_websocket_message_t* message) {
   iree_slim_mutex_lock(&socket->mutex);
-  loom_serve_websocket_message_t* message = socket->head;
-  socket->head = message->next;
-  if (!socket->head) {
-    socket->tail = NULL;
-  }
   const iree_host_size_t capacity = message->capacity;
   iree_allocator_free(socket->host_allocator, message);
   --socket->message_count;
