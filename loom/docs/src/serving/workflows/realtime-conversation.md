@@ -295,6 +295,8 @@ an automatic response. Setting `turn_detection:null` selects manual turns again.
 Send `response.cancel` to stop future generation of the default reply, or supply
 `response_id` to select any live response. Already admitted CPU or device work retains its
 storage until retirement; other requests can continue independently.
+If the response has already stopped, the server reports
+`response_cancel_not_active`; the call can continue on the same connection.
 
 The client knows the actual playback cursor. After stopping playback, send
 `conversation.item.truncate` with the assistant item's ID, `content_index:0`, and
