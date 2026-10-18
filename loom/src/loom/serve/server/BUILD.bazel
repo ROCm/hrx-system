@@ -199,6 +199,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/program:compilation",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service:kind",
+        "//loom/src/loom/serve/service/text:checkpoint_control",
         "//loom/src/loom/serve/telemetry:latency",
         "//loom/src/loom/serve/telemetry:record",
         "//loom/src/loom/serve/telemetry:stream",

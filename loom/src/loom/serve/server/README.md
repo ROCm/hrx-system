@@ -64,6 +64,12 @@ execution rows. Holding and live observation share a bound below connection
 capacity so they cannot occupy every control connection. Each service applies
 its own admission and output-credit policy after routing.
 
+Releasing a text checkpoint bypasses drained admission and held inference,
+using the existing bounded control slot. This lets a departing client release
+its history while inference remains closed. Pinning and suspension still obey
+admission. An unprepared model has no retained checkpoint and returns not-found
+without preparing its source or weights.
+
 Raw tokenization runs as independent finite CPU tasks. A tokenizer borrower
 keeps its deployment alive through task release, including after disconnect.
 Log readers retain copied identity and cursor state, not model resources or

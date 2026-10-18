@@ -319,6 +319,11 @@ Absent sessions or checkpoint names return 404; busy sessions, duplicate names
 or queued borrowers preventing deletion return 409. Exhausted pin capacity
 returns 503. Fixed backing rejects suspension with 400.
 
+Deletion remains available while inference admission is drained, including
+when inference requests are waiting. It uses the normal bounded checkpoint
+control slot. An unprepared registration returns 404 without preparing the
+model. Pinning and suspension wait for inference admission to reopen.
+
 Pin completion publishes an immutable consumed frontier and the exact pending
 token. The next completion still sends full history extending the endpoint's
 canonical transcript. Another destination session forks that endpoint; the
