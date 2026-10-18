@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/gpu/completion.h"
 
+#include "iree/base/threading/processor.h"
 #include "iree/hal/drivers/amd/status.h"
 
 enum {
@@ -14,20 +15,58 @@ enum {
   IREE_HAL_AMD_GPU_COMPLETION_STOPPED = 2,
 };
 
+// The source drain establishes these addresses once. Unchanged native work
+// performs only coherent loads here, never callbacks, locks, or native queries.
+static bool iree_hal_amd_gpu_completion_observe(
+    iree_hal_amd_gpu_completion_t* completion, iree_time_t deadline) {
+  while (iree_atomic_load(&completion->state, iree_memory_order_relaxed) ==
+             IREE_HAL_AMD_GPU_COMPLETION_RUNNING &&
+         iree_time_now() < deadline) {
+    bool has_address = false;
+    for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
+      const iree_hal_amd_gpu_completion_wait_t* wait =
+          &completion->sources[i].wait;
+      if (wait->address) {
+        has_address = true;
+        if (iree_atomic_load(wait->address, iree_memory_order_acquire) !=
+            wait->value) {
+          return true;
+        }
+      }
+    }
+    if (!has_address) {
+      break;
+    }
+    iree_processor_yield();
+  }
+  return false;
+}
+
 static int iree_hal_amd_gpu_completion_main(void* user_data) {
   iree_hal_amd_gpu_completion_t* completion = user_data;
   const iree_hal_amd_gpu_context_t* context = completion->context;
   const iree_hal_amd_gpu_completion_exit_callback_t exit_callback =
       completion->exit_callback;
+  iree_time_t spin_deadline = IREE_TIME_INFINITE_PAST;
   while (iree_atomic_load(&completion->state, iree_memory_order_acquire) ==
          IREE_HAL_AMD_GPU_COMPLETION_RUNNING) {
     bool ready = false;
     for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
-      const iree_hal_amd_gpu_completion_source_t* source =
-          &completion->sources[i];
-      ready |= source->fn(source->user_data, AMDF_STATUS_OK);
+      iree_hal_amd_gpu_completion_source_t* source = &completion->sources[i];
+      source->wait = (iree_hal_amd_gpu_completion_wait_t){0};
+      ready |= source->fn(source->user_data, AMDF_STATUS_OK, &source->wait);
     }
     if (ready) {
+      if (completion->spin_ns) {
+        const iree_time_t now = iree_time_now();
+        spin_deadline = completion->spin_ns < IREE_TIME_INFINITE_FUTURE - now
+                            ? now + completion->spin_ns
+                            : IREE_TIME_INFINITE_FUTURE;
+      }
+      continue;
+    }
+    if (completion->spin_ns &&
+        iree_hal_amd_gpu_completion_observe(completion, spin_deadline)) {
       continue;
     }
     if (iree_atomic_load(&completion->state, iree_memory_order_acquire) !=
@@ -56,9 +95,9 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
         iree_hal_amd_gpu_context_report(context, status, "gpu.event_wait");
       }
       for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
-        const iree_hal_amd_gpu_completion_source_t* source =
-            &completion->sources[i];
-        source->fn(source->user_data, status);
+        iree_hal_amd_gpu_completion_source_t* source = &completion->sources[i];
+        source->wait = (iree_hal_amd_gpu_completion_wait_t){0};
+        source->fn(source->user_data, status, &source->wait);
       }
       break;
     }
@@ -74,7 +113,7 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
 
 iree_status_t iree_hal_amd_gpu_completion_initialize(
     const iree_hal_amd_gpu_context_t* context, iree_host_size_t source_count,
-    const iree_hal_amd_gpu_completion_source_t* sources,
+    iree_hal_amd_gpu_completion_source_t* sources, iree_duration_t spin_ns,
     iree_hal_amd_gpu_completion_exit_callback_t exit_callback,
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_completion_t* out_completion) {
@@ -83,6 +122,7 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
   out_completion->context = context;
   out_completion->source_count = source_count;
   out_completion->sources = sources;
+  out_completion->spin_ns = spin_ns;
   out_completion->exit_callback = exit_callback;
   const iree_thread_create_params_t params = {
       .name = IREE_SV("hal-gpu-retire"),

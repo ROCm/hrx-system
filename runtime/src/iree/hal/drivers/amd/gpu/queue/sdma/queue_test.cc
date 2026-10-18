@@ -207,8 +207,10 @@ class QueueTest : public ::testing::Test {
 
   void Poll(amdf_status_t status = AMDF_STATUS_OK) {
     const auto source = iree_hal_amd_gpu_sdma_queue_completion_source(queue_);
-    while (source.fn(source.user_data, status)) {
+    iree_hal_amd_gpu_completion_wait_t wait = {};
+    while (source.fn(source.user_data, status, &wait)) {
     }
+    EXPECT_EQ(wait.address, nullptr);  // KERNEL retirement needs native status.
   }
 
   // Native API dependencies, immutable after construction.

@@ -1462,8 +1462,9 @@ static void iree_hal_amd_gpu_pm4_fail_native(
                                       queue->options.queue_ordinal);
 }
 
-static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
-                                        amdf_status_t wait_status) {
+static bool iree_hal_amd_gpu_pm4_retire(
+    void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_wait_t* out_wait) {
   iree_hal_amd_gpu_pm4_queue_t* queue = user_data;
   if (!amdf_status_is_ok((amdf_status_t)iree_atomic_load(
           &queue->native_failure, iree_memory_order_relaxed))) {
@@ -1509,6 +1510,7 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
   }
   const uint64_t limit = iree_min(published, position + 64);
   const uint64_t initial = position;
+  bool waiting_for_producer = false;
   for (; position != limit; ++position) {
     if (queue->kernel &&
         queue->kernel->points[position & queue->retirement.capacity_mask] >
@@ -1531,6 +1533,7 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
     iree_status_code_t completion_code = IREE_STATUS_OK;
     if (action->terminal && !iree_hal_amd_gpu_pm4_submission_retirement_ready(
                                 submission, &completion_code)) {
+      waiting_for_producer = true;
       break;
     }
     IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_pm4_retire");
@@ -1613,6 +1616,15 @@ static bool iree_hal_amd_gpu_pm4_retire(void* user_data,
                            iree_memory_order_acq_rel);
       return true;
     }
+  }
+  if (!queue->kernel && !waiting_for_producer) {
+    // The next generation also observes a future publication without touching
+    // the publisher's count on every active-wait iteration. Capacity credit
+    // prevents record reuse until this consumer advances it.
+    out_wait->address =
+        &queue->retirement.records[position & queue->retirement.capacity_mask]
+             .generation;
+    out_wait->value = (int32_t)(position >> queue->retirement.capacity_shift);
   }
   // A later source can retire this source's native producer. One more round
   // after actual progress joins those causal payload lifetimes without a

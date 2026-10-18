@@ -32,26 +32,44 @@ typedef struct iree_hal_amd_gpu_retirement_callback_t {
   void* user_data;
 } iree_hal_amd_gpu_retirement_callback_t;
 
+// A coherent host word whose change may make a source ready. This is only a
+// wake hint: the source still establishes native retirement before releasing
+// resources. No driver call or MMIO read is permitted to observe this word.
+typedef struct iree_hal_amd_gpu_completion_wait_t {
+  // Borrowed CPU-cacheable atomic word, or NULL for event-only observation.
+  // Storage remains live until the next source callback or worker join.
+  const iree_atomic_int32_t* address;
+  // Last consumed value. A change requests another authoritative source drain.
+  int32_t value;
+} iree_hal_amd_gpu_completion_wait_t;
+
 // On success, consumes a bounded batch of authoritative completion records.
 // Returns true when another batch is immediately ready or this batch retired
 // resources that may unblock another source. Outstanding GPU work alone does
 // not request another round. Native events are hints, never completion facts.
 // The callback runs only on the completion worker, without a worker-owned lock.
+// out_wait starts empty; the source may provide its next coherent wake hint.
+// An already-ready record blocked on another source's retirement supplies no
+// hint until that dependency progresses. KERNEL status queries remain
+// event-only.
 //
 // A native wait failure is delivered once to every source before worker exit.
 // Queue sources record terminal failure; the return value is then ignored.
 // Failure does not establish native quiescence or permit releasing GPU storage.
-typedef bool (*iree_hal_amd_gpu_completion_fn_t)(void* user_data,
-                                                 amdf_status_t wait_status);
+typedef bool (*iree_hal_amd_gpu_completion_fn_t)(
+    void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_wait_t* out_wait);
 
 // One provisioned completion source, such as queue retirement or shader
-// reports. Sources are immutable and borrowed until completion deinitialization
-// joins.
+// reports. Callback bindings are immutable and borrowed until completion
+// deinitialization joins. Only the completion worker accesses the wait hint.
 typedef struct iree_hal_amd_gpu_completion_source_t {
   // Bounded observation or terminal native-failure delivery.
   iree_hal_amd_gpu_completion_fn_t fn;
   // Borrowed source state, live through the callback's final access.
   void* user_data;
+  // Consumer-owned next wake hint, replaced after each authoritative drain.
+  iree_hal_amd_gpu_completion_wait_t wait;
 } iree_hal_amd_gpu_completion_source_t;
 
 // Final worker action after its last source, context, and completion-state
@@ -67,16 +85,19 @@ typedef struct iree_hal_amd_gpu_completion_exit_callback_t {
 
 // One high-priority completion worker per device. Its fixed source array has
 // no submission-time activation or registration traffic. The worker waits
-// directly on the context's native event; GPU producers and host stop signals
-// share that event. No timer, polling thread, or per-queue worker is created.
+// on coherent completion words for a bounded interval after actual progress,
+// then on the context's native event. GPU producers and host stop signals share
+// that event. No timer, polling thread, or per-queue worker is created.
 // The embedding owner joins accepted work before stopping this worker.
 typedef struct iree_hal_amd_gpu_completion_t {
   // Borrowed context whose event and API table outlive the worker join.
   const iree_hal_amd_gpu_context_t* context;
-  // Number of immutable provisioned sources.
+  // Number of provisioned sources.
   iree_host_size_t source_count;
   // Borrowed contiguous source array, live through the worker join.
-  const iree_hal_amd_gpu_completion_source_t* sources;
+  iree_hal_amd_gpu_completion_source_t* sources;
+  // Maximum active observation after progress, in ns; zero parks immediately.
+  iree_duration_t spin_ns;
   // Owned thread, or NULL after failed initialization or a successful join.
   iree_thread_t* thread;
   // Final owner action, copied before source callbacks can request shutdown.
@@ -94,7 +115,7 @@ typedef struct iree_hal_amd_gpu_completion_t {
 // freeing the completion.
 iree_status_t iree_hal_amd_gpu_completion_initialize(
     const iree_hal_amd_gpu_context_t* context, iree_host_size_t source_count,
-    const iree_hal_amd_gpu_completion_source_t* sources,
+    iree_hal_amd_gpu_completion_source_t* sources, iree_duration_t spin_ns,
     iree_hal_amd_gpu_completion_exit_callback_t exit_callback,
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_completion_t* out_completion);

@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <semaphore>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -432,7 +434,7 @@ bool Check(benchmark::State& state, iree_status_t raw_status) {
   return false;
 }
 
-void Read(benchmark::State& state, bool stream) {
+void Read(benchmark::State& state, bool stream, int64_t idle_ns = 0) {
   if (!reads) {
     reads = std::make_unique<FileReads>();
   }
@@ -446,8 +448,16 @@ void Read(benchmark::State& state, bool stream) {
   }
   const uint64_t allocations_before = reads->allocation_calls();
   for (auto _ : state) {
+    const iree_time_t start = idle_ns ? iree_time_now() : 0;
     if (!Check(state, ((*reads).*operation)())) {
       break;
+    }
+    if (idle_ns) {
+      // Elapsed latency includes submit and completion, not the application
+      // gap. Process CPU includes the entire cycle, including any runtime
+      // activity after the public semaphore was signaled.
+      state.SetIterationTime((iree_time_now() - start) * 1e-9);
+      std::this_thread::sleep_for(std::chrono::nanoseconds(idle_ns));
     }
   }
   const uint64_t allocations = reads->allocation_calls() - allocations_before;
@@ -469,10 +479,16 @@ void Read(benchmark::State& state, bool stream) {
   state.counters["retained_bytes"] = reads->retained_bytes();
   state.counters["direct"] = FLAG_direct;
   state.counters["registered_io"] = FLAG_registered_io;
+  state.counters["idle_ns"] = idle_ns;
 }
 
 void BM_ReadBurst(benchmark::State& state) { Read(state, false); }
 BENCHMARK(BM_ReadBurst)->MeasureProcessCPUTime()->UseRealTime();
+
+void BM_ReadIntermittent(benchmark::State& state) {
+  Read(state, false, 1000000);
+}
+BENCHMARK(BM_ReadIntermittent)->MeasureProcessCPUTime()->UseManualTime();
 
 void BM_ReadStream(benchmark::State& state) { Read(state, true); }
 BENCHMARK(BM_ReadStream)->MeasureProcessCPUTime()->UseRealTime();

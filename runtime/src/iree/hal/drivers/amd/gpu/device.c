@@ -47,7 +47,8 @@ typedef struct iree_hal_amd_gpu_device_t {
   uint32_t queue_count;
   // Owned queue references. Every queue joins before any signal backing frees.
   iree_hal_queue_t** queues;
-  // Immutable queue sources, optional feedback, and a final shutdown observer.
+  // Provisioned queue sources, optional feedback, and a final shutdown
+  // observer.
   iree_hal_amd_gpu_completion_source_t* sources;
   // Fixed queue, allocation, and mapping result sources, live through
   // publication join.
@@ -126,6 +127,7 @@ void iree_hal_amd_gpu_device_options_initialize(
       .queue_family_ordinal = UINT32_MAX,
       .queue_count = 1,
       .host_numa_node = UINT32_MAX,
+      .completion_spin_ns = 100000,
       .pm4 = {.ring_byte_length = 65536,
               .retirement_capacity = 256,
               .argument_capacity = 65536,
@@ -489,8 +491,9 @@ static void iree_hal_amd_gpu_device_completion_exit(void* user_data) {
   iree_allocator_free(device->host_allocator, device);
 }
 
-static bool iree_hal_amd_gpu_device_poll_shutdown(void* user_data,
-                                                  amdf_status_t wait_status) {
+static bool iree_hal_amd_gpu_device_poll_shutdown(
+    void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_wait_t* out_wait) {
   iree_hal_amd_gpu_device_t* device = user_data;
   if (amdf_status_is_ok(wait_status) &&
       iree_hal_amd_gpu_device_is_closing(device) &&
@@ -886,7 +889,7 @@ iree_status_t iree_hal_amd_gpu_device_create(
     // Startup is the final fallible step. Its exit callback cannot consume the
     // device until the caller's eventual last release completes the handoff.
     status = iree_hal_amd_gpu_completion_initialize(
-        context, source_count, device->sources,
+        context, source_count, device->sources, options->completion_spin_ns,
         (iree_hal_amd_gpu_completion_exit_callback_t){
             iree_hal_amd_gpu_device_completion_exit, device},
         affinity, host_allocator, &device->completion);

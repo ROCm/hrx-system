@@ -250,6 +250,9 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
     } else if (iree_string_view_equal(params[i].key,
                                       IREE_SV("host_numa_node"))) {
       value = &options.host_numa_node;
+    } else if (iree_string_view_equal(params[i].key,
+                                      IREE_SV("completion_spin_ns"))) {
+      value = &options.completion_spin_ns;
     }
     if (!value || !iree_string_view_atoi_uint32(params[i].value, value)) {
       return iree_make_status(

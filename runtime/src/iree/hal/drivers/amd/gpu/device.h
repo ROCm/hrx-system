@@ -36,6 +36,10 @@ typedef struct iree_hal_amd_gpu_device_options_t {
   // Host NUMA node for both device workers and the shared proactor. UINT32_MAX
   // leaves placement unspecified; GPU memory nodes are not CPU NUMA nodes.
   uint32_t host_numa_node;
+  // Active observation budget after real completion progress, in nanoseconds.
+  // Zero uses native events immediately. Applies only to coherent USER queue
+  // records; KERNEL queues retain native event/status observation.
+  uint32_t completion_spin_ns;
   // Initial per-queue storage. Native growth uses the fabric allocation owner.
   struct {
     // Native command storage capacity in bytes.

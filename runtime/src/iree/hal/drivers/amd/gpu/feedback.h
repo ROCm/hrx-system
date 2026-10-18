@@ -160,7 +160,9 @@ void iree_hal_amd_gpu_feedback_fail(void* user_data,
 
 // Drains a bounded ready prefix without waiting for unpublished reservations.
 // Shader/native publication errors are reported once through the device sink.
-bool iree_hal_amd_gpu_feedback_poll(void* user_data, amdf_status_t wait_status);
+bool iree_hal_amd_gpu_feedback_poll(
+    void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_wait_t* out_wait);
 
 // Drains the ready prefix observed at entry before publishing host completion.
 // Called only by the sole completion worker; never waits for a reserved hole.

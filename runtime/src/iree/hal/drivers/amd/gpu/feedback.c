@@ -484,8 +484,9 @@ static bool iree_hal_amd_gpu_feedback_drain_packets(
   return count == limit;
 }
 
-bool iree_hal_amd_gpu_feedback_poll(void* user_data,
-                                    amdf_status_t wait_status) {
+bool iree_hal_amd_gpu_feedback_poll(
+    void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_wait_t* out_wait) {
   return amdf_status_is_ok(wait_status) &&
          iree_hal_amd_gpu_feedback_drain_packets(user_data, 64);
 }

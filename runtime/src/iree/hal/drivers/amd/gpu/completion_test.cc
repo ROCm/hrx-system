@@ -125,8 +125,22 @@ class CompletionTest : public ::testing::Test {
   iree_hal_amd_gpu_completion_source_t Source(Callback& callback) {
     return {
         .fn =
-            [](void* user_data, amdf_status_t status) {
+            [](void* user_data, amdf_status_t status,
+               iree_hal_amd_gpu_completion_wait_t* out_wait) {
               return (*static_cast<Callback*>(user_data))(status);
+            },
+        .user_data = &callback,
+    };
+  }
+
+  using WaitCallback =
+      std::function<bool(amdf_status_t, iree_hal_amd_gpu_completion_wait_t*)>;
+  iree_hal_amd_gpu_completion_source_t Source(WaitCallback& callback) {
+    return {
+        .fn =
+            [](void* user_data, amdf_status_t status,
+               iree_hal_amd_gpu_completion_wait_t* out_wait) {
+              return (*static_cast<WaitCallback*>(user_data))(status, out_wait);
             },
         .user_data = &callback,
     };
@@ -146,11 +160,106 @@ class CompletionTest : public ::testing::Test {
 
 TEST_F(CompletionTest, EmptyDeviceParksAndJoinsWithHostWake) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 0, nullptr, {}, {}, iree_allocator_system(), &completion_));
+      &context_, 0, nullptr, 0, {}, {}, iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
   EXPECT_EQ(event_.signal_count(), 1u);
   EXPECT_EQ(completion_.thread, nullptr);
+}
+
+TEST_F(CompletionTest, CoherentChangeProgressesWithoutNativeWake) {
+  iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
+  std::binary_semaphore armed{0};
+  uint32_t calls = 0;
+  uint32_t other_calls = 0;
+  WaitCallback callback = [&](amdf_status_t status,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    ++calls;
+    if (iree_atomic_load(&word, iree_memory_order_acquire)) {
+      EXPECT_TRUE(amdf_status_is_ok(
+          iree_hal_amd_gpu_completion_request_stop(&completion_)));
+      return false;
+    }
+    *out_wait = {.address = &word, .value = 0};
+    if (calls == 2) {
+      armed.release();
+    }
+    return calls == 1;
+  };
+  Callback other = [&](amdf_status_t status) {
+    ++other_calls;
+    return false;
+  };
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(callback),
+                                                    Source(other)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, IREE_DURATION_INFINITE, {},
+      {}, iree_allocator_system(), &completion_));
+  armed.acquire();
+  iree_atomic_store(&word, 1, iree_memory_order_release);
+  // Joining directly avoids a controller stop racing the changed-word drain.
+  iree_thread_release(completion_.thread);
+  completion_.thread = nullptr;
+  EXPECT_EQ(calls, 3u);
+  EXPECT_EQ(other_calls, 3u);
+  EXPECT_EQ(event_.signal_count(), 1u);  // Only the callback's final stop.
+}
+
+TEST_F(CompletionTest, EventOnlySourcesParkAfterProgress) {
+  uint32_t calls = 0;
+  Callback callback = [&](amdf_status_t status) { return ++calls == 1; };
+  auto source = Source(callback);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, IREE_DURATION_INFINITE, {}, {},
+      iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(calls, 2u);
+}
+
+TEST_F(CompletionTest, StopInterruptsActiveObservation) {
+  iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
+  std::binary_semaphore armed{0};
+  uint32_t calls = 0;
+  WaitCallback callback = [&](amdf_status_t status,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    *out_wait = {.address = &word, .value = 0};
+    if (++calls == 2) {
+      armed.release();
+    }
+    return calls == 1;
+  };
+  auto source = Source(callback);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, IREE_DURATION_INFINITE, {}, {},
+      iree_allocator_system(), &completion_));
+  armed.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(calls, 2u);
+}
+
+TEST_F(CompletionTest, IdleAndStaleEventsDoNotRenewObservationBudget) {
+  iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
+  uint32_t calls = 0;
+  WaitCallback callback = [&](amdf_status_t status,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    *out_wait = {.address = &word, .value = 0};
+    return ++calls == 1;
+  };
+  auto source = Source(callback);
+  // This explicitly tests budget expiry, not a deadline for valid GPU work.
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, 1, {}, {}, iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  // Even an unsatisfied source's changed hint cannot restart an expired budget.
+  iree_atomic_store(&word, 1, iree_memory_order_release);
+  for (uint32_t i = 0; i < 4; ++i) {
+    EXPECT_TRUE(amdf_status_is_ok(NativeEvent::Signal(event_.handle())));
+    event_.AwaitWaitCount(i + 2);
+  }
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(calls, 6u);
 }
 
 TEST_F(CompletionTest, BoundedSourcesTakeTurnsBeforeParking) {
@@ -172,10 +281,10 @@ TEST_F(CompletionTest, BoundedSourcesTakeTurnsBeforeParking) {
     }
     return remaining[1] != 0;
   };
-  const iree_hal_amd_gpu_completion_source_t sources[] = {Source(first),
-                                                          Source(second)};
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(first),
+                                                    Source(second)};
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, IREE_ARRAYSIZE(sources), sources, {}, {},
+      &context_, IREE_ARRAYSIZE(sources), sources, 0, {}, {},
       iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
@@ -200,9 +309,9 @@ TEST_F(CompletionTest, CoalescedWakeBeforeWaitPreservesTheFinalWork) {
     completed += ready;
     return false;
   };
-  const auto source = Source(callback);
+  auto source = Source(callback);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 1, &source, {}, {}, iree_allocator_system(), &completion_));
+      &context_, 1, &source, 0, {}, {}, iree_allocator_system(), &completion_));
   observed_empty.acquire();
   pending.store(1000, std::memory_order_release);
   for (uint32_t i = 0; i < 1000; ++i) {
@@ -238,10 +347,10 @@ TEST_F(CompletionTest, LaterSourceRetirementUnblocksEarlierSourceBeforeWait) {
     // No work remains here, but the earlier source can now retire its payload.
     return true;
   };
-  const iree_hal_amd_gpu_completion_source_t sources[] = {Source(consumer),
-                                                          Source(producer)};
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(consumer),
+                                                    Source(producer)};
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, IREE_ARRAYSIZE(sources), sources, {}, {},
+      &context_, IREE_ARRAYSIZE(sources), sources, 0, {}, {},
       iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
@@ -256,9 +365,9 @@ TEST_F(CompletionTest, StaleWakeRechecksWithoutInventingCompletion) {
     ++calls;
     return false;
   };
-  const auto source = Source(callback);
+  auto source = Source(callback);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 1, &source, {}, {}, iree_allocator_system(), &completion_));
+      &context_, 1, &source, 0, {}, {}, iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
   EXPECT_TRUE(amdf_status_is_ok(NativeEvent::Signal(event_.handle())));
   event_.AwaitWaitCount(2);
@@ -277,9 +386,9 @@ TEST_F(CompletionTest, DeinitializationJoinsTheLastSourceAccess) {
     ++final_access;
     return false;
   };
-  const auto source = Source(callback);
+  auto source = Source(callback);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 1, &source, {}, {}, iree_allocator_system(), &completion_));
+      &context_, 1, &source, 0, {}, {}, iree_allocator_system(), &completion_));
   entered.acquire();
   std::atomic<bool> joined = false;
   std::thread owner([&] {
@@ -316,10 +425,10 @@ TEST_F(CompletionTest, NativeWaitFailureReachesEverySourceAndStops) {
     delivered.release();
     return true;
   };
-  const iree_hal_amd_gpu_completion_source_t sources[] = {Source(first),
-                                                          Source(second)};
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(first),
+                                                    Source(second)};
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, IREE_ARRAYSIZE(sources), sources, {}, {},
+      &context_, IREE_ARRAYSIZE(sources), sources, 0, {}, {},
       iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
   event_.SetWaitStatus(failure);
@@ -331,7 +440,7 @@ TEST_F(CompletionTest, NativeWaitFailureReachesEverySourceAndStops) {
 
 TEST_F(CompletionTest, FailedStopWakePreservesTheOwnerForRetry) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 0, nullptr, {}, {}, iree_allocator_system(), &completion_));
+      &context_, 0, nullptr, 0, {}, {}, iree_allocator_system(), &completion_));
   event_.AwaitWaitCount(1);
   iree_thread_t* thread = completion_.thread;
   event_.SetSignalStatus(
@@ -352,11 +461,11 @@ TEST_F(CompletionTest, FailedThreadAllocationRunsNoSource) {
     ++calls;
     return false;
   };
-  const auto source = Source(callback);
+  auto source = Source(callback);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_amd_gpu_completion_initialize(
-          &context_, 1, &source,
+          &context_, 1, &source, 0,
           {[](void* data) { ++*static_cast<uint32_t*>(data); }, &exits}, {},
           iree_allocator_null(), &completion_));
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
@@ -383,7 +492,7 @@ TEST_F(CompletionTest, ExternalDeinitializationJoinsTheExitCallback) {
       .user_data = &state,
   };
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 0, nullptr, exit_callback, {}, iree_allocator_system(),
+      &context_, 0, nullptr, 0, exit_callback, {}, iree_allocator_system(),
       &completion_));
   event_.AwaitWaitCount(1);
   std::atomic<bool> joined = false;
@@ -412,7 +521,8 @@ TEST_F(CompletionTest, ExitCallbackCanReleaseTheWorkerAndItsAllocation) {
   auto* owner = new Owner;
   owner->source = {
       .fn =
-          [](void* data, amdf_status_t status) {
+          [](void* data, amdf_status_t status,
+             iree_hal_amd_gpu_completion_wait_t* out_wait) {
             auto* owner = static_cast<Owner*>(data);
             EXPECT_TRUE(amdf_status_is_ok(status));
             owner->constructed.acquire();
@@ -434,8 +544,8 @@ TEST_F(CompletionTest, ExitCallbackCanReleaseTheWorkerAndItsAllocation) {
       .user_data = owner,
   };
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 1, &owner->source, exit_callback, {}, iree_allocator_system(),
-      &owner->completion));
+      &context_, 1, &owner->source, 0, exit_callback, {},
+      iree_allocator_system(), &owner->completion));
   owner->constructed.release();
   finalized.acquire();
 }
@@ -451,9 +561,10 @@ TEST(CompletionNativeEventTest, KernelWakeSharesOneWorkerAndJoinsShutdown) {
     // Joins each source observation before the next publication.
     std::binary_semaphore observed{0};
   } state;
-  const iree_hal_amd_gpu_completion_source_t source = {
+  iree_hal_amd_gpu_completion_source_t source = {
       .fn =
-          [](void* user_data, amdf_status_t status) {
+          [](void* user_data, amdf_status_t status,
+             iree_hal_amd_gpu_completion_wait_t* out_wait) {
             auto* state = static_cast<State*>(user_data);
             EXPECT_TRUE(amdf_status_is_ok(status));
             if (state->ready.exchange(false)) {
@@ -465,7 +576,7 @@ TEST(CompletionNativeEventTest, KernelWakeSharesOneWorkerAndJoinsShutdown) {
   };
   iree_hal_amd_gpu_completion_t completion = {};
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context, 1, &source, {}, {}, iree_allocator_system(), &completion));
+      &context, 1, &source, 0, {}, {}, iree_allocator_system(), &completion));
   for (int i = 0; i < 128; ++i) {
     state.ready.store(true);
     EXPECT_TRUE(amdf_status_is_ok(iree_hal_amd_gpu_context_signal(&context)));

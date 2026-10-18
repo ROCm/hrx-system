@@ -433,9 +433,16 @@ static bool iree_hal_amd_gpu_sdma_queue_scan(
   return progress;
 }
 
-static bool iree_hal_amd_gpu_sdma_queue_poll(void* user_data,
-                                             amdf_status_t wait_status) {
+static bool iree_hal_amd_gpu_sdma_queue_poll(
+    void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_wait_t* out_wait) {
   iree_hal_amd_gpu_sdma_queue_t* queue = user_data;
+  if (!queue->kernel.queue && amdf_status_is_ok(wait_status) &&
+      !iree_atomic_load(&queue->failure, iree_memory_order_acquire)) {
+    out_wait->address = queue->completion;
+    out_wait->value =
+        (int32_t)iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
+  }
   // Other engines share the observer. An idle copy source performs no RMW and
   // does not contend with its publisher merely because a PM4 queue woke up.
   if (amdf_status_is_ok(wait_status) &&
@@ -454,9 +461,12 @@ static bool iree_hal_amd_gpu_sdma_queue_poll(void* user_data,
       &queue->observer, ~IREE_HAL_AMD_GPU_SDMA_OBSERVER_ACTIVE,
       iree_memory_order_acq_rel);
   if (previous & IREE_HAL_AMD_GPU_SDMA_OBSERVER_STOPPED) {
+    out_wait->address = NULL;
     iree_hal_amd_gpu_publication_notify(queue->publication,
                                         queue->publication_ordinal);
   }
+  out_wait->value =
+      (int32_t)iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
   return progress;
 }
 

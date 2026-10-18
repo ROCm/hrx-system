@@ -56,6 +56,15 @@ workers. `queue_family` selects an exact native family ordinal instead of the
 first supported family. `host_numa_node` selects CPU placement for the workers
 and shared proactor; GPU-local memory node IDs are not CPU NUMA node IDs.
 
+`completion_spin_ns` bounds active completion observation after actual progress
+(default 100,000 ns). While actively waiting, the existing retirement worker
+reads coherent USER queue completion words; a change resumes authoritative
+source drains. At expiry it parks on the native event, with no periodic wakeups.
+Setting zero parks immediately. KERNEL queues continue to use native events and
+status queries. This trades a bounded CPU tail after the last completion for
+lower latency between dependent operations; it does not alter process power
+policy, add a thread, or change submission and retirement ordering.
+
 Each materialized device retains the fabric independently. Releasing the
 registry and driver leaves those devices operational. The fabric owns the native
 instance and its discovery snapshot; engine contexts own their native children.
