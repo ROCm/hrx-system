@@ -17,11 +17,31 @@ _PIPELINE_VISIBILITY = [
 ]
 
 loom_cc_library(
+    name = "source_invocation_facts",
+    srcs = ["source_invocation_facts.c"],
+    hdrs = ["source_invocation_facts.h"],
+    deps = [
+        "//loom/src/loom/codegen/low/lower:source_selection",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/util:call_graph",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "source_to_low",
     srcs = ["source_to_low.c"],
     hdrs = ["source_to_low.h"],
     visibility = _PIPELINE_VISIBILITY,
     deps = [
+        ":source_invocation_facts",
         "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:launch_config_program",
@@ -40,6 +60,7 @@ loom_cc_library(
         "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target/reporting:low",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -55,6 +76,7 @@ loom_cc_library(
     hdrs = ["target_legalize.h"],
     visibility = _PIPELINE_VISIBILITY,
     deps = [
+        ":source_invocation_facts",
         "//loom/src/loom/analysis:contract",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/codegen/low/lower:source_selection",

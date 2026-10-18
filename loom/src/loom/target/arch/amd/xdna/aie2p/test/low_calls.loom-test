@@ -103,3 +103,101 @@ low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_
   low.func.call @copy_one(%input_view, %output_view) : (reg<aie2p.ep>, reg<aie2p.ep>)
   return
 }
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=module
+
+// A retained helper consumes the storage placement established by its only
+// caller. The vector memory choice therefore remains native across the source
+// call boundary instead of scalarizing the sixteen-byte row.
+aie2p.target<core> @core_target
+
+func.def noinline @copy_aligned_row(%input: view<8xbf16>, %output: view<8xbf16>) {
+  %value = vector.load %input[0] : view<8xbf16> -> vector<8xbf16>
+  vector.store %value, %output[0] : vector<8xbf16>, view<8xbf16>
+  func.return
+}
+
+func.def public retain target(@core_target) @aligned_worker(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 16} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%origin] : buffer -> view<8xbf16>
+  %output_view = buffer.view %output_aligned[%origin] : buffer -> view<8xbf16>
+  func.call @copy_aligned_row(%input_view, %output_view) : (view<8xbf16>, view<8xbf16>)
+  func.return
+}
+
+// ----
+aie2p.target<core> @core_target
+
+low.func.def noinline target<amd.xdna.aie2p.core>(@core_target) @copy_aligned_row(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  %2 = vlda.128.bf16x8 %input, 0
+  vst.128.bf16x8 %2, %output, 0
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @aligned_worker() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  low.func.call @copy_aligned_row(%input_view, %output_view) : (reg<aie2p.ep>, reg<aie2p.ep>)
+  return
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=module
+
+// A private helper's argument facts describe every semantic caller. One caller
+// without the required alignment therefore prevents the shared helper from
+// selecting a vector memory instruction that would be invalid on that edge.
+aie2p.target<core> @core_target
+
+func.def noinline @copy_shared_row(%input: view<8xbf16>, %output: view<8xbf16>) {
+  %value = vector.load %input[0] : view<8xbf16> -> vector<8xbf16>
+  vector.store %value, %output[0] : vector<8xbf16>, view<8xbf16>
+  func.return
+}
+
+func.def public retain target(@core_target) @mixed_caller(%aligned_input: buffer, %aligned_output: buffer, %unaligned_input: buffer, %unaligned_output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %aligned_input, %aligned_output {minimum_alignment = 16} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%origin] : buffer -> view<8xbf16>
+  %output_view = buffer.view %output_aligned[%origin] : buffer -> view<8xbf16>
+  func.call @copy_shared_row(%input_view, %output_view) : (view<8xbf16>, view<8xbf16>)
+  %unaligned_input_view = buffer.view %unaligned_input[%origin] : buffer -> view<8xbf16>
+  %unaligned_output_view = buffer.view %unaligned_output[%origin] : buffer -> view<8xbf16>
+  func.call @copy_shared_row(%unaligned_input_view, %unaligned_output_view) : (view<8xbf16>, view<8xbf16>)
+  func.return
+}
+
+// ----
+aie2p.target<core> @core_target
+
+low.func.def noinline target<amd.xdna.aie2p.core>(@core_target) @copy_shared_row(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  %2 = lda.u16 %input, 0
+  %3 = lda.u16 %input, 2
+  %4 = lda.u16 %input, 4
+  %5 = lda.u16 %input, 6
+  %6 = lda.u16 %input, 8
+  %7 = lda.u16 %input, 10
+  %8 = lda.u16 %input, 12
+  %9 = lda.u16 %input, 14
+  st.s16 %2, %output, 0
+  st.s16 %3, %output, 2
+  st.s16 %4, %output, 4
+  st.s16 %5, %output, 6
+  st.s16 %6, %output, 8
+  st.s16 %7, %output, 10
+  st.s16 %8, %output, 12
+  st.s16 %9, %output, 14
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @mixed_caller() asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %unaligned_input_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %unaligned_output_view = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
+  low.func.call @copy_shared_row(%input_view, %output_view) : (reg<aie2p.ep>, reg<aie2p.ep>)
+  low.func.call @copy_shared_row(%unaligned_input_view, %unaligned_output_view) : (reg<aie2p.ep>, reg<aie2p.ep>)
+  return
+}

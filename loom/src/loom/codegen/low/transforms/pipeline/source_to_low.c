@@ -14,6 +14,7 @@
 #include "loom/codegen/low/lower/representation_projection.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/codegen/low/transforms/pipeline/source_invocation_facts.h"
 #include "loom/ops/low/ops.h"
 #include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
@@ -414,6 +415,11 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     status =
         loom_low_lower_module_state_allocate(&selection_arena, &module_state);
   }
+  loom_low_source_invocation_facts_t invocation_facts = {0};
+  if (iree_status_is_ok(status) && !emitted_error_diagnostics) {
+    status = loom_low_source_invocation_facts_compute(
+        pass, module, &selection_list, &selection_arena, &invocation_facts);
+  }
   if (iree_status_is_ok(status) && !emitted_error_diagnostics &&
       selected_declaration_count != 0) {
     status = iree_arena_allocate_array(
@@ -483,11 +489,13 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     const loom_target_low_legality_provider_list_t* legality_provider_list =
         loom_low_pass_capability_legality_provider_list(low_capability);
     loom_value_fact_table_t* fact_table = NULL;
-    status = loom_pass_value_facts_acquire(
-        pass, module,
+    loom_pass_value_fact_scope_t fact_scope =
         loom_pass_value_fact_scope_conditioned_function_for_target(
-            selection->func, selection->target_facts),
-        &fact_table);
+            selection->func, selection->target_facts);
+    fact_scope.seed_facts = loom_low_source_invocation_facts_for_function(
+        &invocation_facts, selection->func);
+    status =
+        loom_pass_value_facts_acquire(pass, module, fact_scope, &fact_table);
     if (!iree_status_is_ok(status)) {
       break;
     }

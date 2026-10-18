@@ -12,6 +12,7 @@
 #include "loom/codegen/low/lower/source_query.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/codegen/low/transforms/pipeline/source_invocation_facts.h"
 #include "loom/codegen/low/transforms/pipeline/target_legalize_options.h"
 #include "loom/codegen/low/transforms/pipeline/target_legalize_preflight.h"
 #include "loom/error/error_catalog.h"
@@ -1652,6 +1653,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
     loom_pass_t* pass, loom_module_t* module,
     const loom_low_target_legalize_pass_state_t* pass_state,
     const loom_low_source_selection_t* selection,
+    const loom_low_source_invocation_facts_t* invocation_facts,
     const loom_target_legalizer_registry_t* legalizer_registry,
     loom_target_low_legality_provider_list_t legality_provider_list,
     iree_arena_allocator_t* arena, bool* out_emitted_error_diagnostics) {
@@ -1682,9 +1684,11 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
       loom_low_source_selection_target_bundle(selection),
       pass->diagnostic_emitter, pass_state->max_errors, &state.preflight);
 
-  const loom_pass_value_fact_scope_t fact_scope =
+  loom_pass_value_fact_scope_t fact_scope =
       loom_pass_value_fact_scope_function_for_target(selection->func,
                                                      selection->target_facts);
+  fact_scope.seed_facts = loom_low_source_invocation_facts_for_function(
+      invocation_facts, selection->func);
   loom_value_fact_table_t* fact_table = NULL;
   IREE_RETURN_IF_ERROR(
       loom_pass_value_facts_acquire(pass, module, fact_scope, &fact_table));
@@ -1782,11 +1786,13 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
   uint32_t final_error_count = 0;
   if (iree_status_is_ok(status) && state.preflight.error_count == 0 &&
       pass_state->verify_source_legality && is_source_function) {
-    status = loom_pass_value_facts_acquire(
-        pass, module,
+    loom_pass_value_fact_scope_t final_fact_scope =
         loom_pass_value_fact_scope_conditioned_function_for_target(
-            selection->func, selection->target_facts),
-        &fact_table);
+            selection->func, selection->target_facts);
+    final_fact_scope.seed_facts = loom_low_source_invocation_facts_for_function(
+        invocation_facts, selection->func);
+    status = loom_pass_value_facts_acquire(pass, module, final_fact_scope,
+                                           &fact_table);
     if (iree_status_is_ok(status)) {
       status = loom_low_target_legalize_verify_final(
           module, &state, pass_state, fact_table, &final_error_count);
@@ -1829,6 +1835,11 @@ iree_status_t loom_low_target_legalize_run(loom_pass_t* pass,
   };
   iree_status_t status = loom_low_select_target_bound_funcs(
       module, &selection_options, &run_arena, &selection_list);
+  loom_low_source_invocation_facts_t invocation_facts = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_low_source_invocation_facts_compute(
+        pass, module, &selection_list, &run_arena, &invocation_facts);
+  }
 
   bool emitted_error_diagnostics = false;
   uint32_t function_count = 0;
@@ -1857,8 +1868,9 @@ iree_status_t loom_low_target_legalize_run(loom_pass_t* pass,
       continue;
     }
     status = loom_low_target_legalize_function(
-        pass, module, state, &selection_list.values[i], legalizer_registry,
-        legality_list, &run_arena, &emitted_error_diagnostics);
+        pass, module, state, &selection_list.values[i], &invocation_facts,
+        legalizer_registry, legality_list, &run_arena,
+        &emitted_error_diagnostics);
     if (iree_status_is_ok(status)) {
       ++function_count;
     }

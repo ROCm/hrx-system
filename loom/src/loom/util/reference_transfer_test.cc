@@ -237,5 +237,81 @@ TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
   EXPECT_EQ(rebound.extension_id, cloned.extension_id);
 }
 
+TEST_F(ReferenceTransferTest, CallArgumentRebasesPassedViewAddress) {
+  const auto caller_buffer = Argument(loom_type_buffer());
+  const auto callee_argument = Argument(loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I8, 32, /*encoding_id=*/0));
+  loom_value_fact_view_reference_t source_reference = {
+      .base_byte_offset = loom_value_facts_exact_i64(16),
+      .footprint_byte_length = loom_value_facts_exact_i64(32),
+      .minimum_alignment = 16,
+      .root_minimum_alignment = 64,
+      .static_element_byte_count = 1,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .root_value_id = caller_buffer,
+      .buffer_value_id = caller_buffer,
+      .alias_scope_id = caller_buffer,
+      .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
+      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, caller_buffer},
+  };
+  loom_value_facts_t facts;
+  IREE_ASSERT_OK(loom_value_facts_make_view_reference(
+      &facts_.context, source_reference, &facts));
+  const loom_value_fact_reference_origin_t callee_origin = {
+      2, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, callee_argument};
+  IREE_ASSERT_OK(loom_value_facts_rebase_call_argument(
+      &facts_.context, callee_argument, callee_origin, &facts));
+
+  loom_value_fact_view_reference_t reference;
+  ASSERT_TRUE(loom_value_facts_query_view_reference(&facts_.context, facts,
+                                                    &reference));
+  EXPECT_TRUE(loom_value_facts_is_exact(reference.base_byte_offset));
+  EXPECT_EQ(reference.base_byte_offset.range_lo, 0);
+  EXPECT_EQ(reference.footprint_byte_length.range_hi, 32);
+  EXPECT_EQ(reference.minimum_alignment, 1);
+  EXPECT_EQ(reference.root_minimum_alignment, 16);
+  EXPECT_EQ(reference.root_value_id, callee_argument);
+  EXPECT_EQ(reference.buffer_value_id, LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(reference.alias_scope_id, LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE);
+  EXPECT_EQ(reference.nullability,
+            LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL);
+  EXPECT_TRUE(
+      loom_value_fact_reference_origin_equal(reference.origin, callee_origin));
+}
+
+TEST_F(ReferenceTransferTest, CallArgumentRebasesBufferIdentity) {
+  const auto caller_buffer = Argument(loom_type_buffer());
+  const auto callee_argument = Argument(loom_type_buffer());
+  loom_value_fact_buffer_reference_t source_reference = {
+      .maximum_byte_extent = loom_value_facts_exact_i64(256),
+      .minimum_alignment = 64,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .root_value_id = caller_buffer,
+      .alias_scope_id = caller_buffer,
+      .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
+      .origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, caller_buffer},
+  };
+  loom_value_facts_t facts;
+  IREE_ASSERT_OK(loom_value_facts_make_buffer_reference(
+      &facts_.context, source_reference, &facts));
+  const loom_value_fact_reference_origin_t callee_origin = {
+      2, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY, callee_argument};
+  IREE_ASSERT_OK(loom_value_facts_rebase_call_argument(
+      &facts_.context, callee_argument, callee_origin, &facts));
+
+  loom_value_fact_buffer_reference_t reference;
+  ASSERT_TRUE(loom_value_facts_query_buffer_reference(&facts_.context, facts,
+                                                      &reference));
+  EXPECT_EQ(reference.maximum_byte_extent.range_hi, 256);
+  EXPECT_EQ(reference.minimum_alignment, 64);
+  EXPECT_EQ(reference.memory_space, LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL);
+  EXPECT_EQ(reference.root_value_id, callee_argument);
+  EXPECT_EQ(reference.alias_scope_id, LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE);
+  EXPECT_EQ(reference.nullability,
+            LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL);
+  EXPECT_TRUE(
+      loom_value_fact_reference_origin_equal(reference.origin, callee_origin));
+}
+
 }  // namespace
 }  // namespace loom
