@@ -25,6 +25,13 @@
 
 namespace {
 
+class CaptureMark {
+ public:
+  ~CaptureMark() { loom_serve_realtime_capture_mark_cancel(&value); }
+  // Stable position record, retained until capture resolves or cancels it.
+  loom_serve_realtime_capture_mark_t value = {};
+};
+
 class CaptureSpan {
  public:
   ~CaptureSpan() {
@@ -204,7 +211,8 @@ class RealtimeCaptureTest : public ::testing::TestWithParam<int> {
         &length));
     encoded.resize(length);
     ASSERT_NO_FATAL_FAILURE(Append(encoded));
-    IREE_ASSERT_OK(loom_serve_realtime_capture_finish(capture_));
+    CaptureMark end;
+    loom_serve_realtime_capture_mark(capture_, &end.value);
     Await(
         [&] { return loom_serve_realtime_capture_end(capture_) == capacity; });
     CaptureSpan first, second;
@@ -235,7 +243,8 @@ class RealtimeCaptureTest : public ::testing::TestWithParam<int> {
       position += span.value.samples.data_length / 2;
       loom_serve_realtime_capture_discard_before(capture_, position);
     }
-    Await([&] { return loom_serve_realtime_capture_is_complete(capture_); });
+    Await([&] { return end.value.reached; });
+    EXPECT_EQ(end.value.position, frames);
     EXPECT_EQ(loom_serve_realtime_capture_end(capture_), frames);
     IREE_ASSERT_OK(loom_serve_realtime_capture_status(capture_));
   }
@@ -269,8 +278,10 @@ TEST_P(RealtimeCaptureTest, LargeMessageUsesFiniteBlocksAndBoundedStorage) {
 TEST_P(RealtimeCaptureTest, CloseRetainsLoanAfterDecodeCompletes) {
   ASSERT_NO_FATAL_FAILURE(Open(7));
   ASSERT_NO_FATAL_FAILURE(Append("AQAC\\u0041AMA"));
-  IREE_ASSERT_OK(loom_serve_realtime_capture_finish(capture_));
-  Await([&] { return loom_serve_realtime_capture_is_complete(capture_); });
+  CaptureMark end;
+  loom_serve_realtime_capture_mark(capture_, &end.value);
+  Await([&] { return end.value.reached; });
+  EXPECT_EQ(end.value.position, 3u);
   CaptureSpan span;
   loom_serve_realtime_capture_borrow(capture_, 0, 7, &span.value);
   loom_serve_realtime_capture_close(capture_);
@@ -290,10 +301,14 @@ TEST_P(RealtimeCaptureTest, ClearRetainsDecodeThroughControlAndDisconnect) {
     gates.push_back(
         std::make_unique<loom_serve::testing::WorkerGate>(executor_));
   }
+  CaptureMark end;
+  loom_serve_realtime_capture_mark(capture_, &end.value);
   bool progress = false;
   loom_serve_realtime_capture_advance(capture_, &progress);
   ASSERT_TRUE(progress);
   loom_serve_realtime_capture_close(capture_);
+  EXPECT_FALSE(end.value.reached);
+  EXPECT_EQ(end.value.capture, nullptr);
   loom_serve_realtime_capture_advance(capture_, &progress);
   EXPECT_TRUE(loom_serve_realtime_capture_pending(capture_));
   iree_const_byte_span_t payload;
@@ -310,11 +325,62 @@ TEST_P(RealtimeCaptureTest, ClearRetainsDecodeThroughControlAndDisconnect) {
   EXPECT_EQ(loom_serve_realtime_capture_end(capture_), 0u);
 }
 
+TEST_P(RealtimeCaptureTest, MarksResolveExactOrderedAppendFrontiers) {
+  ASSERT_NO_FATAL_FAILURE(Open(7));
+  ASSERT_NO_FATAL_FAILURE(Append("AQACAAMABAA="));
+  CaptureMark first, cancelled, duplicate, last, tail;
+  loom_serve_realtime_capture_mark(capture_, &first.value);
+  loom_serve_realtime_capture_mark(capture_, &cancelled.value);
+  loom_serve_realtime_capture_mark(capture_, &duplicate.value);
+  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  for (int i = 0; i < GetParam(); ++i) {
+    gates.push_back(
+        std::make_unique<loom_serve::testing::WorkerGate>(executor_));
+  }
+  bool progress = false;
+  loom_serve_realtime_capture_advance(capture_, &progress);
+  ASSERT_TRUE(progress);
+  ASSERT_NO_FATAL_FAILURE(Append("BQAGAAcACAAJAA=="));
+  loom_serve_realtime_capture_mark(capture_, &last.value);
+  loom_serve_realtime_capture_mark(capture_, &tail.value);
+  loom_serve_realtime_capture_mark_cancel(&cancelled.value);
+  loom_serve_realtime_capture_mark_cancel(&tail.value);
+  EXPECT_FALSE(first.value.reached);
+  EXPECT_FALSE(last.value.reached);
+  gates.clear();
+  Await([&] { return loom_serve_realtime_capture_end(capture_) == 7; });
+  ASSERT_TRUE(first.value.reached);
+  ASSERT_TRUE(duplicate.value.reached);
+  EXPECT_EQ(first.value.position, 4u);
+  EXPECT_EQ(duplicate.value.position, 4u);
+  EXPECT_FALSE(last.value.reached);
+  EXPECT_FALSE(cancelled.value.reached);
+  EXPECT_FALSE(tail.value.reached);
+  {
+    CaptureSpan span;
+    loom_serve_realtime_capture_borrow(capture_, 0, 7, &span.value);
+    ASSERT_EQ(span.value.samples.data_length, 14u);
+    for (size_t i = 0; i < 7; ++i) {
+      EXPECT_EQ(iree_unaligned_load_le_u16(span.value.samples.data + i * 2),
+                i + 1);
+    }
+    loom_serve_realtime_capture_discard_before(capture_, 7);
+  }
+  Await([&] { return last.value.reached; });
+  EXPECT_EQ(last.value.position, 9u);
+  CaptureMark immediate;
+  loom_serve_realtime_capture_mark(capture_, &immediate.value);
+  EXPECT_TRUE(immediate.value.reached);
+  EXPECT_EQ(immediate.value.position, 9u);
+}
+
 TEST_P(RealtimeCaptureTest, MalformedEncodedInputFailsBeforePublication) {
   for (const char* encoded : {"AA==", "!!!!!!==", "AAAAA"}) {
     SCOPED_TRACE(encoded);
     ASSERT_NO_FATAL_FAILURE(Open(7));
     ASSERT_NO_FATAL_FAILURE(Append(encoded));
+    CaptureMark end;
+    loom_serve_realtime_capture_mark(capture_, &end.value);
     Await([&] {
       auto status = loom_serve_realtime_capture_status(capture_);
       const bool failed = !iree_status_is_ok(status);
@@ -324,7 +390,9 @@ TEST_P(RealtimeCaptureTest, MalformedEncodedInputFailsBeforePublication) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           loom_serve_realtime_capture_status(capture_));
     EXPECT_EQ(loom_serve_realtime_capture_end(capture_), 0u);
+    EXPECT_FALSE(end.value.reached);
     loom_serve_realtime_capture_close(capture_);
+    EXPECT_EQ(end.value.capture, nullptr);
     Await([&] { return !loom_serve_realtime_capture_pending(capture_); });
     loom_serve_realtime_capture_free(capture_);
     capture_ = nullptr;
