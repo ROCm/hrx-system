@@ -10,6 +10,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/server/realtime/context.h"
 
 namespace {
 
@@ -32,17 +33,25 @@ class ConversationTest : public ::testing::Test {
         &conversation_, *out_item, text));
     (*out_item)->status = LOOM_SERVE_REALTIME_ITEM_COMPLETED;
     return loom_serve_realtime_conversation_insert(
-        &conversation_, conversation_.last, *out_item);
+        &conversation_, conversation_.history.last, *out_item);
   }
 
-  std::string Request(loom_serve_realtime_group_t* exclude = nullptr) {
-    iree_string_builder_t output;
-    iree_string_builder_initialize(iree_allocator_system(), &output);
-    IREE_EXPECT_OK(loom_serve_realtime_conversation_request(
-        &conversation_, exclude, IREE_SV("model"), iree_string_view_empty(),
-        iree_string_view_empty(), 32, 42, &output));
+  loom_serve_realtime_context_t Context() {
+    loom_serve_realtime_context_t context = {};
+    IREE_EXPECT_OK(loom_serve_realtime_context_initialize(
+        &conversation_, iree_string_view_empty(), IREE_SV("model"),
+        iree_string_view_empty(), iree_string_view_empty(), 32, 42, &context));
+    return context;
+  }
+
+  std::string Request(loom_serve_realtime_context_t* captured = nullptr) {
+    auto local = captured ? loom_serve_realtime_context_t{} : Context();
+    auto* context = captured ? captured : &local;
+    iree_string_builder_t output = {};
+    IREE_EXPECT_OK(loom_serve_realtime_context_take(context, &output));
     std::string value(output.buffer, output.size);
     iree_string_builder_deinitialize(&output);
+    loom_serve_realtime_context_deinitialize(context);
     return value;
   }
 
@@ -68,7 +77,7 @@ TEST_F(ConversationTest, ReservationOwnsIdentityBeforeCommit) {
                             LOOM_SERVE_REALTIME_USER, false, &collision));
   EXPECT_EQ(collision, nullptr);
   IREE_ASSERT_OK(loom_serve_realtime_conversation_insert(
-      &conversation_, conversation_.last, microphone));
+      &conversation_, conversation_.history.last, microphone));
   EXPECT_EQ(loom_serve_realtime_conversation_find(
                 &conversation_, iree_make_cstring_view(id.c_str())),
             microphone);
@@ -93,11 +102,12 @@ TEST_F(ConversationTest, PendingResponseKeepsItsCanonicalInputFrontier) {
   IREE_ASSERT_OK(Message(IREE_SV("before"), IREE_SV("a"), &before));
   loom_serve_realtime_group_t* response = nullptr;
   IREE_ASSERT_OK(
-      loom_serve_realtime_conversation_begin(&conversation_, &response));
+      loom_serve_realtime_conversation_begin(&conversation_, false, &response));
+  auto context = Context();
   loom_serve_realtime_item_t* after = nullptr;
   IREE_ASSERT_OK(Message(IREE_SV("after"), IREE_SV("x"), &after));
   EXPECT_EQ(
-      Request(response),
+      Request(&context),
       R"({"model":"model","stream":true,"max_tokens":32,"seed":42,"messages":[{"role":"user","content":"a"}]})");
   loom_serve_realtime_item_t* output = nullptr;
   IREE_ASSERT_OK(loom_serve_realtime_conversation_add(
@@ -117,7 +127,7 @@ TEST_F(ConversationTest, PendingResponseKeepsItsCanonicalInputFrontier) {
 TEST_F(ConversationTest, EmptyResponseRetainsCapacityUntilRelease) {
   loom_serve_realtime_group_t* response = nullptr;
   IREE_ASSERT_OK(
-      loom_serve_realtime_conversation_begin(&conversation_, &response));
+      loom_serve_realtime_conversation_begin(&conversation_, false, &response));
   for (iree_host_size_t i = 0; i < 127; ++i) {
     loom_serve_realtime_item_t* item = nullptr;
     IREE_ASSERT_OK(loom_serve_realtime_conversation_reserve(
@@ -150,15 +160,16 @@ TEST_F(ConversationTest, CancelledEmptyFrontiersLeaveNoHistoryItems) {
   loom_serve_realtime_group_t* first = nullptr;
   loom_serve_realtime_group_t* second = nullptr;
   IREE_ASSERT_OK(
-      loom_serve_realtime_conversation_begin(&conversation_, &first));
+      loom_serve_realtime_conversation_begin(&conversation_, false, &first));
   IREE_ASSERT_OK(
-      loom_serve_realtime_conversation_begin(&conversation_, &second));
+      loom_serve_realtime_conversation_begin(&conversation_, false, &second));
+  auto context = Context();
   loom_serve_realtime_item_t* after = nullptr;
   IREE_ASSERT_OK(Message(IREE_SV("after"), IREE_SV("a"), &after));
   loom_serve_realtime_conversation_release(&conversation_, first);
   EXPECT_EQ(loom_serve_realtime_conversation_previous(after->group), nullptr);
   EXPECT_EQ(
-      Request(second),
+      Request(&context),
       R"({"model":"model","stream":true,"max_tokens":32,"seed":42,"messages":[]})");
   loom_serve_realtime_conversation_release(&conversation_, second);
   EXPECT_EQ(
@@ -170,7 +181,7 @@ TEST_F(ConversationTest,
        CompletedCallsShareOneMessageAndResultsOwnTheirIdentity) {
   loom_serve_realtime_group_t* group = nullptr;
   IREE_ASSERT_OK(
-      loom_serve_realtime_conversation_begin(&conversation_, &group));
+      loom_serve_realtime_conversation_begin(&conversation_, false, &group));
   loom_serve_realtime_item_t* message = nullptr;
   IREE_ASSERT_OK(loom_serve_realtime_conversation_add(
       &conversation_, group, LOOM_SERVE_REALTIME_ITEM_MESSAGE,
@@ -212,7 +223,7 @@ TEST_F(ConversationTest,
 TEST_F(ConversationTest, IdleInsertionSplitsMembershipWithoutCopyingPayloads) {
   loom_serve_realtime_group_t* group = nullptr;
   IREE_ASSERT_OK(
-      loom_serve_realtime_conversation_begin(&conversation_, &group));
+      loom_serve_realtime_conversation_begin(&conversation_, false, &group));
   loom_serve_realtime_item_t* calls[3];
   for (auto& call : calls) {
     IREE_ASSERT_OK(loom_serve_realtime_conversation_add(

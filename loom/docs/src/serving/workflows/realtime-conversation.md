@@ -96,7 +96,8 @@ input before requesting another response. Failed audio contributes no unaligned
 assistant transcript to subsequent model context.
 
 `session.update` changes subsequent instructions, voice, transcription hints,
-output modality, or token budget at an idle response boundary. Selecting
+output modality, or token budget when the default reply is idle. Already accepted
+independent responses keep their captured settings. Selecting
 `output_modalities:["text"]` produces `response.output_text.delta` without speech.
 The [Realtime profile](../http-profiles.md#realtime-conversations) defines the
 supported event and settings surface.
@@ -119,6 +120,66 @@ values. The response owns its settings and metadata through completion,
 cancellation, or failure. Both `response.created` and `response.done` echo the
 metadata; it is not passed to the model. The next reply inherits session defaults
 again. Voice and metadata changes preserve compatible text checkpoints.
+
+## Generate an independent reply
+
+An auxiliary response can speak a status update or answer a separate question
+while the main conversation continues. Set `conversation:"none"` to keep its
+output out of default history. For a short status announcement with no prior
+conversation input:
+
+```json
+{
+  "type": "response.create",
+  "response": {
+    "conversation": "none",
+    "input": [],
+    "instructions": "Briefly tell the listener that the image is being generated.",
+    "tools": [],
+    "tool_choice": "none",
+    "metadata": {"purpose": "status"}
+  }
+}
+```
+
+This inherits the session's voice and output modality. Match subsequent output
+by `response_id`; events from several responses may interleave. The client
+chooses whether to queue, replace, or mix their audio. To cancel this reply,
+send `response.cancel` with the ID from its `response.created`. Cancellation
+without an ID targets only the default reply.
+
+Omitting `input` uses a snapshot of current default history. An explicit array
+instead selects exactly the listed items, combining new text and references:
+
+```json
+{
+  "type": "response.create",
+  "response": {
+    "conversation": "none",
+    "input": [
+      {"type": "item_reference", "id": "utterance-7"},
+      {
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "Summarize that in one sentence."}]
+      }
+    ],
+    "metadata": {"purpose": "summary"}
+  }
+}
+```
+
+Replace `utterance-7` with an actual committed item ID. A microphone reference
+waits for that utterance's final transcription. Deleting the original item
+after response acceptance leaves the selected input intact. Completed independent
+output is also referenceable by ID, but does not become default history by itself.
+
+One default response and multiple independent responses can be live together,
+up to four records including retiring work. Each keeps its own voice, native
+request, conversion cursor, and cancellation. Native services continue selecting
+compatible work for batching across requests and sessions. A slow socket still
+shares one output-credit budget across its responses. Independent responses
+neither consume a pending automatic voice reply nor change its history.
 
 ## Call tools and speak the result
 
@@ -231,8 +292,8 @@ an automatic response. Setting `turn_detection:null` selects manual turns again.
 
 ## Interrupt and reconcile playback
 
-Send `response.cancel` to stop future generation. Its optional `response_id`
-identifies the active response. Already admitted CPU or device work retains its
+Send `response.cancel` to stop future generation of the default reply, or supply
+`response_id` to select any live response. Already admitted CPU or device work retains its
 storage until retirement; other requests can continue independently.
 
 The client knows the actual playback cursor. After stopping playback, send

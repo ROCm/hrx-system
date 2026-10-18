@@ -10,12 +10,25 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_VM)
+iree_py_library(
+  NAME
+    session_test_support
+  SRCS
+    "client_test_util.py"
+    "independent_test.py"
+  DEPS
+    loom::serve::server::catalog_test_util
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
     conversation_test
   SRCS
     "conversation_test.cc"
   DEPS
+    ::context
     ::conversation
     iree::base
     iree::testing::gtest
@@ -491,6 +504,26 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    context
+  HDRS
+    "context.h"
+  SRCS
+    "context.c"
+  DEPS
+    ::conversation
+    ::event
+    ::input
+    ::item
+    ::settings
+    iree::base
+    iree::base::internal::json
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     response
   HDRS
     "response.h"
@@ -498,6 +531,7 @@ loom_cc_library(
     "response.c"
   DEPS
     ::binding
+    ::context
     ::conversation
     ::event
     ::generation
