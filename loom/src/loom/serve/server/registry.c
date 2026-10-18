@@ -8,6 +8,7 @@
 
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/kind.h"
+#include "loom/serve/service/text/checkpoint_control.h"
 
 struct loom_serve_registry_t {
   // Allocator owning the table and registration operations.
@@ -148,7 +149,7 @@ loom_serve_service_snapshot_t loom_serve_registry_snapshot(
 
 static iree_status_t loom_serve_registry_find_admission(
     loom_serve_registry_t* registry, iree_string_view_t name, uint32_t kinds,
-    const char* operation, loom_serve_service_t** out_service) {
+    const char* operation, bool releasing, loom_serve_service_t** out_service) {
   *out_service = NULL;
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
     loom_serve_registered_model_t* model = &registry->models[i];
@@ -167,8 +168,13 @@ static iree_status_t loom_serve_registry_find_admission(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "selected model does not provide %s", operation);
     }
-    if (model->closed || model->held_count ||
-        model->phase != LOOM_SERVE_REGISTRATION_READY) {
+    if (model->phase != LOOM_SERVE_REGISTRATION_READY) {
+      return releasing
+                 ? iree_make_status(IREE_STATUS_NOT_FOUND,
+                                    "unprepared model has no retained state")
+                 : iree_ok_status();
+    }
+    if (!releasing && (model->closed || model->held_count)) {
       return iree_ok_status();
     }
     *out_service = &model->service;
@@ -184,7 +190,8 @@ iree_status_t loom_serve_registry_try_open_speech(
   *out_stream = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "speech", &service));
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "speech", false,
+      &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -205,7 +212,7 @@ iree_status_t loom_serve_registry_try_open_recognition(
       registry, name,
       (1u << LOOM_SERVE_MODEL_KIND_RECOGNITION) |
           (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY),
-      "recognition", &service));
+      "recognition", false, &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -222,7 +229,8 @@ iree_status_t loom_serve_registry_try_open_text(
   *out_stream = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text", &service));
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text", false,
+      &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -240,7 +248,8 @@ iree_status_t loom_serve_registry_try_open_text_checkpoint(
   *out_control = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text", &service));
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text",
+      request->action == LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE, &service));
   if (!service) {
     return iree_ok_status();
   }

@@ -672,6 +672,56 @@ TEST_F(NativeTextRegistryTest, NativeCheckpointPressureAndRejectionStayLocal) {
   ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(released));
 }
 
+TEST_F(NativeTextRegistryTest, NativeCheckpointReleasePassesDrainedAdmission) {
+  ASSERT_NO_FATAL_FAILURE(Prepare());
+  NativeStream first(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "conversation", &first));
+  ASSERT_NO_FATAL_FAILURE(ReadFinal(first));
+  NativeControl pinned(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "retained", "conversation", &pinned));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(pinned));
+
+  Model()->closed = true;
+  NativeStream waiting(nullptr, loom_serve_text_stream_close);
+  IREE_ASSERT_OK(Open(body_, "waiting", &waiting));
+  EXPECT_EQ(waiting, nullptr);
+  NativeControl blocked(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+                                "another", "conversation", &blocked));
+  EXPECT_EQ(blocked, nullptr);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_SUSPEND,
+                                "retained", "", &blocked));
+  EXPECT_EQ(blocked, nullptr);
+
+  NativeControl released(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "retained", "", &released));
+  ASSERT_NO_FATAL_FAILURE(CompleteCheckpoint(released));
+  EXPECT_TRUE(Model()->closed);
+  IREE_ASSERT_OK(OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE,
+                                "retained", "", &released));
+  ASSERT_NE(released, nullptr);
+  ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+    return loom_serve_text_checkpoint_control_is_complete(released.get());
+  }));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      loom_serve_text_checkpoint_control_status(released.get()));
+  EXPECT_TRUE(Model()->closed);
+}
+
+TEST_F(NativeTextRegistryTest, NativeCheckpointReleaseDoesNotPrepareModel) {
+  NativeControl released(nullptr, loom_serve_text_checkpoint_control_close);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE, "absent", "",
+                     &released));
+  EXPECT_EQ(released, nullptr);
+  EXPECT_EQ(Model()->phase, LOOM_SERVE_REGISTRATION_DECLARED);
+  EXPECT_TRUE(Model()->closed);
+}
+
 TEST_F(NativeTextRegistryTest,
        NativeCheckpointRetirementDoesNotRebindAfterReplacement) {
   ASSERT_NO_FATAL_FAILURE(Prepare());

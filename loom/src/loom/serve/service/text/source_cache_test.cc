@@ -88,6 +88,71 @@ TEST_F(SourceTextServiceTest,
 }
 
 TEST_F(RegisteredSourceTextServiceTest,
+       CheckpointDeletionRetiresWhileInferenceAndCaptureAreHeld) {
+  StartManaged();
+  const std::string headers = "X-Loom-Model: fixture-text\r\n";
+  const std::string selector = R"({"model":"fixture-text"})";
+  EXPECT_EQ(Read(Send(Declaration("fixture-text", directory_, "drained"), "",
+                      "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  EXPECT_EQ(Read(Send("", headers, "/v1/checkpoints/absent", "DELETE"))
+                .find("HTTP/1.1 404"),
+            0u);
+  EXPECT_NE(WaitModel("fixture-text", R"("registration":"registered")")
+                .find(R"("admission":"drained")"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send(selector, "", "/v1/models/undrain")).find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Read(Send(Request(Message("user", "abxa"), 2),
+                      "X-Loom-Session: base\r\n"))
+                .find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Read(Send("", headers + "X-Loom-Session: base\r\n",
+                      "/v1/checkpoints/retained"))
+                .find("HTTP/1.1 201"),
+            0u);
+  EXPECT_EQ(Read(Send(selector, "", "/v1/models/drain")).find("HTTP/1.1 200"),
+            0u);
+
+  const int inference =
+      Send(Request(Message("user", "b"), 2), "X-Loom-Session: waiting\r\n");
+  const int capture =
+      Send("", headers + "X-Loom-Session: base\r\n", "/v1/checkpoints/another");
+  WaitModel("fixture-text", R"("held_requests":2)");
+  EXPECT_EQ(Read(Send("", headers, "/v1/checkpoints/retained", "DELETE"))
+                .find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Read(Send("", headers, "/v1/checkpoints/retained", "DELETE"))
+                .find("HTTP/1.1 404"),
+            0u);
+  EXPECT_EQ(Read(Send("", headers, "/v1/checkpoints/another/suspend", "DELETE"))
+                .find("HTTP/1.1 400"),
+            0u);
+  EXPECT_NE(WaitModel("fixture-text", R"("held_requests":2)")
+                .find(R"("admission":"drained")"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send(selector, "", "/v1/models/undrain")).find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Read(inference).find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(Read(capture).find("HTTP/1.1 201"), 0u);
+
+  EXPECT_EQ(Read(Send(selector, "", "/v1/models/drain")).find("HTTP/1.1 200"),
+            0u);
+  const int suspension = Send("", headers, "/v1/checkpoints/another/suspend");
+  WaitModel("fixture-text", R"("held_requests":1)");
+  EXPECT_EQ(Read(Send("", headers, "/v1/checkpoints/another", "DELETE"))
+                .find("HTTP/1.1 200"),
+            0u);
+  EXPECT_NE(WaitModel("fixture-text", R"("held_requests":1)")
+                .find(R"("admission":"drained")"),
+            std::string::npos);
+  EXPECT_EQ(Read(Send(selector, "", "/v1/models/undrain")).find("HTTP/1.1 200"),
+            0u);
+  EXPECT_EQ(Read(suspension).find("HTTP/1.1 404"), 0u);
+}
+
+TEST_F(RegisteredSourceTextServiceTest,
        DynamicTextAdmissionCheckpointRetirementAndReuse) {
   StartManaged();
   EXPECT_NE(Read(Send("", "", "/v1/models", "GET")).find(R"("data":[])"),
