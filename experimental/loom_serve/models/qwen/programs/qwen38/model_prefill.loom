@@ -80,10 +80,7 @@ command.program.def public @qwen38_text_prefill_body_impl(%token_count: index, %
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
 
-  // Full-attention layers reuse one maximum-capacity output. Nested layer
-  // allocations remain semantic and are packed with it during preparation.
   %attention_bytes = index.constant 12582912 : offset
-  %attention_output = buffer.alloca<global> align(256) %attention_bytes : buffer
 
   scf.for %group = [%group_begin to %group_end step %group_step] unroll {
     %layer0 = index.mul %group, %layers_per_group : index
@@ -101,6 +98,9 @@ command.program.def public @qwen38_text_prefill_body_impl(%token_count: index, %
     command.program.launch @qwen38_capture_layer[%token_count, %capture_features, %layer1](%control, %residual) : [index, index, index](buffer, buffer)
     command.program.launch @qwen38_gdn_layer_prefill[%token_count, %schedule_token_count, %layer2, %gdn_ordinal2, %verification_depth, %span_capacity](%parameters, %residual, %gdn_state, %control, %transition_capture, %rows) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer)
     command.program.launch @qwen38_capture_layer[%token_count, %capture_features, %layer2](%control, %residual) : [index, index, index](buffer, buffer)
+    // Each attention layer owns its scratch lifetime; preparation packs reuse
+    // across layers without keeping this range live through the GDN layers.
+    %attention_output = buffer.alloca<global> align(256) %attention_bytes : buffer
     command.program.launch @qwen38_attention_layer_prefill[%token_count, %schedule_token_count, %attention_layer, %group, %verification_depth, %span_capacity, %mixed_inputs](%parameters, %residual, %attention_cache, %control, %attention_output, %rows, %input_tokens) : [index, index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     command.program.launch @qwen38_capture_layer[%token_count, %capture_features, %attention_layer](%control, %residual) : [index, index, index](buffer, buffer)
   }
