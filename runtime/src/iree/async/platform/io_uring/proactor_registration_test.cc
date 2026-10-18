@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <condition_variable>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -196,6 +197,52 @@ TEST_F(SlabRegistrationTest, HostBufferAccessDoesNotSelectReceiveBuffers) {
     EXPECT_EQ(entry->region->handles.iouring.buffer_group_id, -1);
     iree_async_buffer_registration_state_deinitialize(&state);
   }
+}
+
+TEST_F(SlabRegistrationTest,
+       PreparedBufferDescriptorLimitPreservesEarlierPins) {
+  if (!iree_any_bit_set(
+          iree_async_proactor_query_capabilities(proactor_),
+          IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+    GTEST_SKIP() << "kernel cannot attach prepared registrations";
+  }
+  ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 1));
+  struct rlimit descriptor_limit = {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
+  iree_async_buffer_registration_state_t state = {};
+  std::unique_ptr<iree_async_buffer_registration_state_t,
+                  decltype(&iree_async_buffer_registration_state_deinitialize)>
+      cleanup(&state, iree_async_buffer_registration_state_deinitialize);
+  iree_async_buffer_registration_entry_t* first_entry = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
+      proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &first_entry));
+  EXPECT_EQ(first_entry->region->handles.iouring.base_buffer_index, 0);
+
+  // Existing descriptors remain valid at a zero soft limit. The next pin
+  // owner's creation must fail without changing the accepted registration.
+  struct rlimit exhausted_limit = descriptor_limit;
+  exhausted_limit.rlim_cur = 0;
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &exhausted_limit), 0);
+  iree_async_buffer_registration_entry_t* entry = first_entry;
+  iree_status_t status = iree_async_proactor_prepare_buffer(
+      proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry);
+  // Restore the process limit before assertion/reporting infrastructure runs.
+  EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+  EXPECT_EQ(entry, nullptr);
+  EXPECT_EQ(state.head, first_entry);
+  EXPECT_EQ(first_entry->next, nullptr);
+
+  IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
+      proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry));
+  EXPECT_EQ(entry->region->handles.iouring.base_buffer_index, 1);
+  EXPECT_EQ(entry->next, first_entry);
+  cleanup.reset();
+  EXPECT_TRUE(iree_async_buffer_registration_state_is_empty(&state));
+  ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
 }
 
 TEST_F(SlabRegistrationTest, HostBufferPinLimitRejectsUnpinnedAdmission) {
