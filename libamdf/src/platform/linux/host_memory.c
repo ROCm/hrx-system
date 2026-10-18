@@ -194,10 +194,12 @@ amdf_status_t amdf_platform_host_backing_prepare(
       status = amdf_linux_error(errno);
     }
   }
-  if (amdf_status_is_ok(status) && folio_length != 0 &&
-      madvise(backing->pointer, (size_t)folio_length,
-              AMDF_LINUX_MADV_COLLAPSE) != 0) {
-    status = amdf_linux_error(errno);
+  if (amdf_status_is_ok(status) && folio_length != 0) {
+    // Promotion is an optimization, not an allocation requirement. A native
+    // refusal may leave any subset promoted; the mandatory population below
+    // establishes every writable translation regardless of page size.
+    (void)madvise(backing->pointer, (size_t)folio_length,
+                  AMDF_LINUX_MADV_COLLAPSE);
   }
   // Install writable CPU translations for the entire extent, including any
   // sub-folio tail, before export pins pages and cache publication reads them.

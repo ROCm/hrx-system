@@ -1080,7 +1080,7 @@ program-side protocol.
 
 | Platform | Native requirements | Resource admission |
 | --- | --- | --- |
-| Linux KFD | Linux 6.1 or newer with synchronous huge-page preparation (`MADV_COLLAPSE`), kernel udmabuf support (`CONFIG_UDMABUF`), a loaded service, read/write access to `/dev/udmabuf`, readable `/sys/module/udmabuf/parameters/size_limit_mb`, and the ordinary KFD/render-node access. The AMDGPU driver must accept these exports and the selected exact GPU alias contract. | The profile intersects the export size limit with all consumer limits. Backing pages remain pinned for the allocation lifetime; each attachment also consumes native import and page-table resources. File-buffer registration has its own admission, including the process's locked-memory limit for registered io_uring buffers. |
+| Linux KFD | Writable page population (`MADV_POPULATE_WRITE`, Linux 5.14 or newer), kernel udmabuf support (`CONFIG_UDMABUF`), a loaded service, read/write access to `/dev/udmabuf`, readable `/sys/module/udmabuf/parameters/size_limit_mb`, and the ordinary KFD/render-node access. The AMDGPU driver must accept these exports and the selected exact GPU alias contract. | The profile intersects the export size limit with all consumer limits. Backing pages remain pinned for the allocation lifetime; each attachment also consumes native import and page-table resources. File-buffer registration has its own admission, including the process's locked-memory limit for registered io_uring buffers. |
 | Windows WDDM | The native GPU provider's owned system-page allocation and mapping services. No udmabuf service is involved. | Native allocation and page-lock admission can fail independently of file creation. Buffered/unbuffered file alignment and transfer constraints come from the file API. |
 
 Optional Linux exporter discovery runs once at instance creation. A profile
@@ -1094,12 +1094,14 @@ permissions, or raise resource limits.
 
 The exported host backing is prepared before its first device attachment.
 Explicit NUMA placement is applied before physical allocation. Full 2 MiB
-extents use large folios; a smaller final extent uses base pages. The ordinary
-host view is populated for the entire allocation before export pins it and
-publishes CPU initialization. Allocation reports native preparation failures,
-including unavailable huge-page support or insufficient memory, without
-silently switching page policy. CPU-only allocations and caller-owned imports
-retain their separate construction contracts.
+extents attempt synchronous large-folio promotion where supported. Promotion
+may be unavailable or partial when contiguous physical memory is scarce;
+allocation does not require huge pages. The ordinary host view is populated
+for the entire allocation before export pins it and publishes CPU
+initialization, including every base page that could not be promoted.
+Required placement or population failures remain allocation errors. CPU-only
+allocations and caller-owned imports retain their separate construction
+contracts.
 
 Preparation runs once per physical allocation. Retaining a slab preserves its
 pages across buffer reuse, and a retained native file-buffer registration lets

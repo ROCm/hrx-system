@@ -28,9 +28,10 @@ amdf_status_t amdf_platform_host_backing_create(
 
 // Materializes fresh backing and its writable host translations before the
 // first native export. Applies explicit NUMA placement before allocating any
-// pages. Large Linux extents use synchronous huge-folio preparation; native
-// admission failures propagate without changing page policy. Failure leaves
-// the backing owned by its unpublished constructor for rollback.
+// pages. Linux attempts synchronous huge-folio promotion, then populates the
+// complete range regardless of page size. Huge-page availability is not an
+// allocation requirement. Required placement/population failures leave the
+// backing owned by its unpublished constructor for rollback.
 amdf_status_t amdf_platform_host_backing_prepare(
     const amdf_platform_host_backing_t* backing, uint64_t byte_length,
     amdf_memory_placement_t placement, amdf_allocator_t host_allocator);
