@@ -1,0 +1,130 @@
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+// The integer-to-offset conversion retains the complete biased base. Its
+// static contribution is already included and must not be charged twice.
+func.def @complete_field_base(%raw_base: i32, %storage: buffer) -> (i32, offset) {
+  %base = scalar.assume %raw_base [range(%raw_base, 0, 4096), multiple_of(%raw_base, 8)] : i32
+  %bias = scalar.constant 20 : i32
+  %biased = scalar.addi %base, %bias : i32
+  %field_base = index.cast %biased : i32 to offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %field = buffer.view %global[%field_base] : buffer -> view<1xi32>
+  %increment = scalar.constant 1 : i32
+  %old = view.atomic.rmw<addi> %increment, %field[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  func.return %old, %field_base : i32, offset
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @complete_field_base(%base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) asm {
+  %field = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %bias = s_mov_b32 20
+  %field_base = s_add_u32 %base, %bias
+  %19 = v_mov_b32 0
+  %20 = s_mov_b32 4
+  %21 = s_add_u32 %field_base, %20
+  %25 = slice %field[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %field[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = s_mov_b32 65535
+  %28 = s_and_b32 %26, %27
+  %29 = concat(%25, %28) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %30 = s_mov_b32 822173696
+  %31 = concat(%29, %21, %30) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %23 = v_mov_b32 1
+  %old = buffer_atomic_add_u32_rtn %23, %31, %19, %base {offset = 20}
+  return %old, %field_base
+}
+
+// ====
+
+// View projection composes the dynamic root base with a constant field index.
+// The descriptor still ends after the field, not after the dynamic prefix.
+func.def @projected_field(%raw_base: i32, %storage: buffer) -> (i32) {
+  %base0 = index.cast %raw_base : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4096), multiple_of(%base0, 8)] : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %record = buffer.view %global[%base] : buffer -> view<8xi32>
+  %field = view.subview %record[5] : view<8xi32> -> view<1xi32>
+  %initial = scalar.constant 0 : i32
+  %replacement = scalar.constant 1 : i32
+  %old = view.atomic.cmpxchg %initial, %replacement, %field[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<1xi32> -> i32
+  func.return %old : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @projected_field(%base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %record = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %17 = s_mov_b32 4
+  %18 = s_add_u32 %base, %17
+  %19 = s_add_u32_rhs_inline %18, 20
+  %26 = slice %record[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = slice %record[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = s_mov_b32 65535
+  %29 = s_and_b32 %27, %28
+  %30 = concat(%26, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %31 = s_mov_b32 822173696
+  %32 = concat(%30, %19, %31) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %22 = v_mov_b32 1
+  %23 = concat(%22, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %24 = buffer_atomic_cmpswap_b32_rtn %23, %32, %16, %base {offset = 20}
+  %old = slice %24[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %old
+}
+
+// ====
+
+// The base record remains live separately from its statically biased fields.
+// Descriptor ends must include those field offsets as well as payload widths.
+func.def @record_fields(%raw_base: i32, %storage: buffer) -> (i32, i64) {
+  %base0 = index.cast %raw_base : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4096), multiple_of(%base0, 8)] : offset
+  %count_bias = index.constant 20 : offset
+  %state_bias = index.constant 24 : offset
+  %count_base = index.add %base, %count_bias : offset
+  %state_base = index.add %base, %state_bias : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %header = buffer.view %global[%base] : buffer -> view<1xi32>
+  %count = buffer.view %global[%count_base] : buffer -> view<1xi32>
+  %state = buffer.view %global[%state_base] : buffer -> view<1xi64>
+  %marker = scalar.constant 42 : i32
+  %increment = scalar.constant 1 : i32
+  %initial = scalar.constant 0 : i64
+  %replacement = scalar.constant 4294967297 : i64
+  view.store %marker, %header[0] : i32, view<1xi32>
+  %old_count = view.atomic.rmw<addi> %increment, %count[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %old_state = view.atomic.cmpxchg %initial, %replacement, %state[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i64, view<1xi64> -> i64
+  func.return %old_count, %old_state : i32, i64
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @record_fields(%base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %state = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %32 = v_mov_b32 42
+  %33 = v_mov_b32 0
+  %34 = slice %state[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = slice %state[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = s_mov_b32 0
+  %37, %38 = s_add_co_u32 %34, %base
+  %39, %40 = s_addc_u32 %35, %36, %38
+  %41 = concat(%37, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr %33, %32, %41
+  %43 = s_mov_b32 4
+  %44 = s_add_u32 %base, %43
+  %45 = s_add_u32_rhs_inline %44, 20
+  %68 = s_mov_b32 65535
+  %69 = s_and_b32 %35, %68
+  %70 = concat(%34, %69) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %71 = s_mov_b32 822173696
+  %72 = concat(%70, %45, %71) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %47 = v_mov_b32 1
+  %old_count = buffer_atomic_add_u32_rtn %47, %72, %33, %base {offset = 20}
+  %53, %54 = s_add_co_u32 %34, %base
+  %55, %56 = s_addc_u32 %35, %36, %54
+  %57 = concat(%53, %55) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %60 = concat(%33, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %61 = v_mov_b32 1
+  %63 = concat(%61, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %64 = concat(%63, %60) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %old_state = global_atomic_cmpswap_b64_rtn_saddr %33, %64, %57 {offset = 24}
+  return %old_count, %old_state
+}

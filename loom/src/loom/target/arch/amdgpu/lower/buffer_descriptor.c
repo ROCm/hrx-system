@@ -187,9 +187,7 @@ static iree_status_t loom_amdgpu_plan_buffer_extent_with_flags(
     }
     selected.byte_scale = (uint32_t)scale;
     if (source->dynamic_view_base_term_count != 0) {
-      static_base = source->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID
-                        ? 0
-                        : source->static_view_base_byte_offset;
+      static_base = source->static_view_base_byte_offset;
       bool dynamic_base_supported = false;
       if (source->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_buffer_extent_prepare_sgpr_u32(
@@ -198,6 +196,9 @@ static iree_status_t loom_amdgpu_plan_buffer_extent_with_flags(
       }
       if (dynamic_base_supported) {
         selected.base = LOOM_AMDGPU_BUFFER_EXTENT_BASE_VALUE;
+        // A retained SSA base may be the complete authored expression or its
+        // constant-free prefix. Charge only the static bytes it does not carry.
+        static_base -= source->dynamic_view_base_value_static_byte_offset;
       } else {
         for (uint8_t i = 0; i < source->dynamic_view_base_term_count; ++i) {
           if (!loom_amdgpu_buffer_extent_term_fits(context,

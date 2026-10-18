@@ -1,0 +1,64 @@
+// Native buffer descriptors must cover each narrow field when a shared dynamic
+// record base is materialized independently of the field's static byte offset.
+func.def inline @atomic_record_base(%bits: i64) -> (offset) {
+  %word = scalar.trunci %bits : i64 to i32
+  %mask = scalar.constant 15 : i32
+  %shift = scalar.constant 3 : i32
+  %record = scalar.andi %word, %mask : i32
+  %bytes = scalar.shli %record, %shift : i32
+  %base = index.cast %bytes : i32 to offset
+  func.return %base : offset
+}
+
+kernel.def @atomic_record_fields() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%bits: i64, %storage: buffer) {
+  %base = func.call @atomic_record_base(%bits) : (i64) -> (offset)
+  %count_bias = index.constant 20 : offset
+  %flag_bias = index.constant 16 : offset
+  %state_bias = index.constant 24 : offset
+  %count_base = index.add %base, %count_bias : offset
+  %flag_base = index.add %base, %flag_bias : offset
+  %state_base = index.add %base, %state_bias : offset
+  %header = buffer.view %storage[%base] : buffer -> view<1xi32>
+  %count = buffer.view %storage[%count_base] : buffer -> view<1xi32>
+  %flag = buffer.view %storage[%flag_base] : buffer -> view<1xi32>
+  %state = buffer.view %storage[%state_base] : buffer -> view<1xi64>
+  %marker = scalar.constant 42 : i32
+  %increment = scalar.constant 1 : i32
+  %initial_flag = scalar.constant 0 : i32
+  %initial_state = scalar.constant 0 : i64
+  %replacement = scalar.constant 4294967297 : i64
+  view.store %marker, %header[0] : i32, view<1xi32>
+  view.atomic.reduce<addi> %increment, %count[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  %old_count = view.atomic.rmw<addi> %increment, %count[0] {ordering = acq_rel, scope = device} : i32, view<1xi32> -> i32
+  %old_flag = view.atomic.cmpxchg %initial_flag, %marker, %flag[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  %old_state = view.atomic.cmpxchg %initial_state, %replacement, %state[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  kernel.return
+}
+
+func.def @atomic_record_fields_oracle(%bits: i64, %storage: buffer) {
+  %base = func.call @atomic_record_base(%bits) : (i64) -> (offset)
+  %view = buffer.view %storage[%base] : buffer -> view<8xi32>
+  %marker = scalar.constant 42 : i32
+  %state_word = scalar.constant 1 : i32
+  %final_count = scalar.constant 2 : i32
+  view.store %marker, %view[0] : i32, view<8xi32>
+  view.store %marker, %view[4] : i32, view<8xi32>
+  view.store %final_count, %view[5] : i32, view<8xi32>
+  view.store %state_word, %view[6] : i32, view<8xi32>
+  view.store %state_word, %view[7] : i32, view<8xi32>
+  func.return
+}
+
+check.scenario @atomic_record_field_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.fill value(0) : tensor<40xi32>
+    check.compare<@atomic_record_fields, @atomic_record_fields_oracle>(%bits, %storage) : (i64, tensor<40xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi32>
+    }
+  }
+  check.return
+}

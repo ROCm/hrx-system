@@ -1,5 +1,54 @@
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
+// A narrow header and a dynamically sized tail share a materialized record
+// base. The tail's field bias belongs in its descriptor end even though the
+// retained common prefix contains only the dynamic record address.
+func.def @biased_tail_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %input: buffer) -> (i32, vector<4xi32>) {
+  %row = index.assume %row0 [range(%row0, 0, 1023)] : index
+  %rows = index.assume %rows0 [range(%rows0, 1, 1024)] : index
+  %base0 = index.cast %base_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4096), multiple_of(%base0, 16)] : offset
+  %bias = index.constant 16 : offset
+  %tail = index.add %base, %bias : offset
+  %descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %header = buffer.view %descriptor[%base] : buffer -> view<1xi32>
+  %source = buffer.view %descriptor[%tail] : buffer -> view<[%rows]x4xi32>
+  %header_value = view.load %header[0] : view<1xi32> -> i32
+  %inside = index.cmp slt, %row, %rows : index
+  %mask = vector.splat %inside : vector<4xi1>
+  %passthrough = vector.constant 0 : vector<4xi32>
+  %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
+  func.return %header_value, %value : i32, vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @biased_tail_zero_fill(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %26 = v_mov_b32 0
+  %27 = s_mov_b32 4
+  %28 = s_add_u32 %base, %27
+  %39 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = s_mov_b32 65535
+  %42 = s_and_b32 %40, %41
+  %43 = concat(%39, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %44 = s_mov_b32 822173696
+  %45 = concat(%43, %28, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %header_value = buffer_load_dword %45, %26, %base
+  %32 = s_lshl_b32_rhs_inline %row, 4
+  %33 = s_add_u32 %base, %32
+  %34 = s_lshl_b32_rhs_inline %rows, 4
+  %35 = s_add_u32 %base, %34
+  %36 = s_add_u32_rhs_inline %35, 16
+  %49 = s_and_b32 %40, %41
+  %50 = concat(%39, %49) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %52 = concat(%50, %36, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %value = buffer_load_b128 %52, %26, %33 {offset = 16}
+  return %header_value, %value
+}
+
+// ====
+
 // A vector wider than one native load retains separate ownership for both
 // packets. Each fallback copy precedes its EXEC envelope, and each load owns
 // that copy explicitly. The caller also observes the original fallback.

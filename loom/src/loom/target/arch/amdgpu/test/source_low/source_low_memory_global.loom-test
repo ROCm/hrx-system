@@ -438,14 +438,15 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @descriptor_dynam
   %13 = v_mov_b32 0
   %14 = s_mov_b32 16
   %15 = s_add_u32 %base, %14
-  %18 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %19 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20 = s_mov_b32 65535
-  %21 = s_and_b32 %19, %20
-  %22 = concat(%18, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %23 = s_mov_b32 822173696
-  %24 = concat(%22, %15, %23) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %loaded = buffer_load_dword %24, %13, %base {offset = 12}
+  %16 = s_add_u32_rhs_inline %15, 4
+  %19 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = s_mov_b32 65535
+  %22 = s_and_b32 %20, %21
+  %23 = concat(%19, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %24 = s_mov_b32 822173696
+  %25 = concat(%23, %16, %24) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %loaded = buffer_load_dword %25, %13, %base {offset = 12}
   return %loaded
 }
 
