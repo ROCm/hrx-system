@@ -292,8 +292,8 @@ static iree_status_t loom_serve_text_request_check_run(
   }
   if (iree_status_is_ok(status) && response) {
     status = loom_serve_text_chat_complete(
-        &chat, loom_serve_text_request_check_file_text(response), 1,
-        &calls, &scratch, iree_arena_allocator(&arena), &completion);
+        &chat, loom_serve_text_request_check_file_text(response), 1, &calls,
+        &scratch, iree_arena_allocator(&arena), &completion);
   }
   if (iree_status_is_ok(status) && response) {
     status = loom_serve_text_tool_calls_write_json(
