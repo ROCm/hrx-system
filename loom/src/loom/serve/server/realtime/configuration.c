@@ -38,7 +38,9 @@ iree_status_t loom_serve_realtime_configuration_initialize(
       {"voice", 1u << IREE_JSON_VALUE_TYPE_STRING},
       {"instructions", 1u << IREE_JSON_VALUE_TYPE_STRING},
       {"max_output_tokens", 1u << IREE_JSON_VALUE_TYPE_NUMBER},
-      {"seed", 1u << IREE_JSON_VALUE_TYPE_NUMBER}};
+      {"seed", 1u << IREE_JSON_VALUE_TYPE_NUMBER},
+      {"activity", 1u << IREE_JSON_VALUE_TYPE_STRING},
+      {"input_capacity", 1u << IREE_JSON_VALUE_TYPE_NUMBER}};
   loom_serve_realtime_event_value_t values[IREE_ARRAYSIZE(rules)];
   uint32_t present = 0;
   IREE_RETURN_IF_ERROR(loom_serve_realtime_object_parse(
@@ -48,25 +50,27 @@ iree_status_t loom_serve_realtime_configuration_initialize(
         IREE_STATUS_INVALID_ARGUMENT,
         "assistant requires name, text, recognition, speech, and voice");
   }
-  iree_string_view_t* fields[] = {&configuration->profile.name,
-                                  &configuration->profile.text,
-                                  &configuration->profile.recognition,
-                                  &configuration->profile.speech,
-                                  &configuration->profile.voice,
-                                  &configuration->profile.instructions};
+  iree_string_view_t* fields[] = {
+      &configuration->profile.name,        &configuration->profile.text,
+      &configuration->profile.recognition, &configuration->profile.speech,
+      &configuration->profile.voice,       &configuration->profile.instructions,
+      &configuration->profile.activity};
+  static const uint32_t field_indices[] = {0, 1, 2, 3, 4, 5, 8};
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(fields) && iree_status_is_ok(status); ++i) {
-    if (!(present & (1u << i))) {
+    const uint32_t index = field_indices[i];
+    if (!(present & (1u << index))) {
       continue;
     }
-    status = loom_serve_realtime_string_decode(
-        values[i].text, i == 5 ? 65536 : 128, &configuration->strings[i]);
+    status = loom_serve_realtime_string_decode(values[index].text,
+                                               index == 5 ? 65536 : 128,
+                                               &configuration->strings[i]);
     *fields[i] = iree_string_builder_view(&configuration->strings[i]);
-    if (iree_status_is_ok(status) && i < 5 && !fields[i]->size) {
-      status =
-          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                           "assistant selector '%s' is empty", rules[i].name);
+    if (iree_status_is_ok(status) && index != 5 && !fields[i]->size) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "assistant selector '%s' is empty",
+                                rules[index].name);
     }
   }
   uint64_t maximum = 256;
@@ -82,6 +86,16 @@ iree_status_t loom_serve_realtime_configuration_initialize(
     status =
         iree_json_parse_uint64(values[7].text, &configuration->profile.seed);
   }
+  uint64_t capacity = LOOM_SERVE_REALTIME_INPUT_CAPACITY_DEFAULT;
+  if (iree_status_is_ok(status) && (present & 512)) {
+    status = iree_json_parse_uint64(values[9].text, &capacity);
+    if (iree_status_is_ok(status) &&
+        (!capacity || capacity > IREE_HOST_SIZE_MAX)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "input_capacity requires a positive host size");
+    }
+  }
+  configuration->profile.input_capacity = (iree_host_size_t)capacity;
   return status;
 }
 
