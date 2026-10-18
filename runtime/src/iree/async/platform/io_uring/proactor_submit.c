@@ -301,70 +301,28 @@ static void iree_async_proactor_io_uring_fill_socket_recv_pool(
   }
 }
 
-// Result of checking if a span can use fixed-buffer zero-copy send.
-typedef enum {
-  // Span is not eligible for fixed-buffer path. Use standard zero-copy.
-  // This is NOT an error - just means we fall back to page-pinning per send.
-  IREE_ASYNC_FIXED_BUFFER_INELIGIBLE = 0,
-  // Span is eligible. out_buffer_index contains the kernel buffer table index.
-  IREE_ASYNC_FIXED_BUFFER_ELIGIBLE = 1,
-} iree_async_fixed_buffer_eligibility_t;
-
-// Queries whether a validated span can use fixed-buffer zero-copy send.
-static iree_async_fixed_buffer_eligibility_t
-iree_async_span_query_fixed_buffer_send(
-    iree_async_proactor_io_uring_t* proactor, iree_async_span_t span,
-    uint16_t* out_buffer_index) {
+// Resolves a validated, nonempty span wholly within one kernel fixed buffer.
+// Registration establishes slot geometry; submission validation establishes
+// region ownership, access, and bounds. A span crossing slots uses ordinary
+// I/O.
+static bool iree_async_span_query_fixed_buffer(iree_async_span_t span,
+                                               uint16_t* out_buffer_index) {
   *out_buffer_index = 0;
-
-  if (!span.region) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
-  }
   iree_async_region_t* region = span.region;
-  IREE_ASSERT(region->proactor == &proactor->base);
-
-  if (region->type != IREE_ASYNC_REGION_TYPE_IOURING) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
-  }
-
-  uint32_t buffer_count = region->buffer_count;
-  if (buffer_count == 0) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
+  if (!region || region->type != IREE_ASYNC_REGION_TYPE_IOURING ||
+      region->handles.iouring.base_buffer_index < 0 || span.length == 0) {
+    return false;
   }
 
   iree_host_size_t buffer_size = region->buffer_size;
-  IREE_ASSERT_GT(buffer_size, 0);
-  if (IREE_UNLIKELY(buffer_size == 0)) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
-  }
-
-  if (!(region->access_flags & IREE_ASYNC_BUFFER_ACCESS_FLAG_READ)) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
-  }
-
-  uint64_t buffer_index_offset = span.offset / buffer_size;
-  if (buffer_index_offset >= buffer_count) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
-  }
-
   iree_host_size_t offset_in_buffer = span.offset % buffer_size;
-  if (offset_in_buffer + span.length > buffer_size) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
+  if (span.length > buffer_size - offset_in_buffer) {
+    return false;
   }
 
-  int32_t base_buffer_index = region->handles.iouring.base_buffer_index;
-  if (base_buffer_index < 0) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
-  }
-
-  uint64_t final_index = (uint64_t)base_buffer_index + buffer_index_offset;
-  IREE_ASSERT_LE(final_index, UINT16_MAX);
-  if (IREE_UNLIKELY(final_index > UINT16_MAX)) {
-    return IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
-  }
-
-  *out_buffer_index = (uint16_t)final_index;
-  return IREE_ASYNC_FIXED_BUFFER_ELIGIBLE;
+  *out_buffer_index = (uint16_t)(region->handles.iouring.base_buffer_index +
+                                 span.offset / buffer_size);
+  return true;
 }
 
 // Fills an SQE for a SOCKET_SEND operation.
@@ -387,15 +345,14 @@ static void iree_async_proactor_io_uring_fill_socket_send(
       proactor->capabilities, IREE_ASYNC_PROACTOR_CAPABILITY_ZERO_COPY_SEND);
   bool use_zero_copy = zero_copy_requested && zero_copy_available;
 
-  iree_async_fixed_buffer_eligibility_t eligibility =
-      IREE_ASYNC_FIXED_BUFFER_INELIGIBLE;
+  bool use_fixed_buffer = false;
   uint16_t fixed_buffer_index = 0;
   const uint8_t span_count = base_operation->acquired_span_count;
   if (use_zero_copy && span_count == 1) {
     iree_async_span_t first_buffer = iree_async_socket_prepared_span_resolve(
         send->platform.prepared.spans[0], send->retained_buffer_regions[0]);
-    eligibility = iree_async_span_query_fixed_buffer_send(
-        proactor, first_buffer, &fixed_buffer_index);
+    use_fixed_buffer =
+        iree_async_span_query_fixed_buffer(first_buffer, &fixed_buffer_index);
   }
 
   // Clear output fields.
@@ -423,7 +380,7 @@ static void iree_async_proactor_io_uring_fill_socket_send(
     if (use_zero_copy) {
       // Always request usage reporting so we can tell callers if ZC succeeded.
       sqe->ioprio |= IREE_IORING_SEND_ZC_REPORT_USAGE;
-      if (eligibility == IREE_ASYNC_FIXED_BUFFER_ELIGIBLE) {
+      if (use_fixed_buffer) {
         sqe->ioprio |= IREE_IORING_RECVSEND_FIXED_BUF;
         sqe->buf_index = fixed_buffer_index;
       }
@@ -615,20 +572,25 @@ static void iree_async_proactor_io_uring_fill_file_open(
 }
 
 // Fills an SQE for a FILE_READ operation.
-// Uses IORING_OP_READ for positioned file I/O (pread semantics).
+// Uses READ_FIXED when a registered span fits within one fixed buffer and READ
+// otherwise. Fixed I/O consumes the pinned pages without importing CPU PTEs.
 //
-// SQE layout (io_uring READ):
+// SQE layout (io_uring READ[_FIXED]):
 //   fd   = file descriptor
 //   off  = file offset
 //   addr = buffer address
 //   len  = buffer length
+//   buf_index = kernel fixed-buffer slot (READ_FIXED only)
 static void iree_async_proactor_io_uring_fill_file_read(
     iree_io_uring_sqe_t* sqe, iree_async_operation_t* base_operation) {
   iree_async_file_read_operation_t* read_op =
       (iree_async_file_read_operation_t*)base_operation;
 
   memset(sqe, 0, sizeof(*sqe));
-  sqe->opcode = IREE_IORING_OP_READ;
+  sqe->opcode =
+      iree_async_span_query_fixed_buffer(read_op->buffer, &sqe->buf_index)
+          ? IREE_IORING_OP_READ_FIXED
+          : IREE_IORING_OP_READ;
   sqe->fd = read_op->file->primitive.value.fd;
   sqe->off = read_op->offset;
   sqe->addr = (uint64_t)(uintptr_t)iree_async_span_ptr(read_op->buffer);
@@ -637,20 +599,25 @@ static void iree_async_proactor_io_uring_fill_file_read(
 }
 
 // Fills an SQE for a FILE_WRITE operation.
-// Uses IORING_OP_WRITE for positioned file I/O (pwrite semantics).
+// Uses WRITE_FIXED when a registered span fits within one fixed buffer and
+// WRITE otherwise, preserving positioned file I/O (pwrite semantics).
 //
-// SQE layout (io_uring WRITE):
+// SQE layout (io_uring WRITE[_FIXED]):
 //   fd   = file descriptor
 //   off  = file offset
 //   addr = buffer address
 //   len  = buffer length
+//   buf_index = kernel fixed-buffer slot (WRITE_FIXED only)
 static void iree_async_proactor_io_uring_fill_file_write(
     iree_io_uring_sqe_t* sqe, iree_async_operation_t* base_operation) {
   iree_async_file_write_operation_t* write_op =
       (iree_async_file_write_operation_t*)base_operation;
 
   memset(sqe, 0, sizeof(*sqe));
-  sqe->opcode = IREE_IORING_OP_WRITE;
+  sqe->opcode =
+      iree_async_span_query_fixed_buffer(write_op->buffer, &sqe->buf_index)
+          ? IREE_IORING_OP_WRITE_FIXED
+          : IREE_IORING_OP_WRITE;
   sqe->fd = write_op->file->primitive.value.fd;
   sqe->off = write_op->offset;
   sqe->addr = (uint64_t)(uintptr_t)iree_async_span_ptr(write_op->buffer);

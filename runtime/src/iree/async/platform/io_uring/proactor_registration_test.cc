@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -11,8 +12,11 @@
 
 #include <cerrno>
 #include <cstring>
+#include <vector>
 
 #include "iree/async/buffer_pool.h"
+#include "iree/async/file.h"
+#include "iree/async/operations/file.h"
 #include "iree/async/operations/net.h"
 #include "iree/async/platform/io_uring/api.h"
 #include "iree/async/slab.h"
@@ -148,6 +152,191 @@ TEST_F(SlabRegistrationTest, PinLimitReleasesPartialRegistration) {
   limit_changed_ = false;
   ASSERT_NO_FATAL_FAILURE(CreateSlab(page_size_, 4));
   ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
+}
+
+class FileSlabRegistrationTest : public SlabRegistrationTest {
+ protected:
+  void SetUp() override {
+    SlabRegistrationTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+
+    // Shared backing preserves the registered pages when CPU translations are
+    // discarded. Anonymous MADV_DONTNEED would replace the visible contents.
+    backing_fd_ = memfd_create("iree_fixed_file_buffer", MFD_CLOEXEC);
+    ASSERT_GE(backing_fd_, 0);
+    mapping_length_ = 4 * page_size_;
+    ASSERT_EQ(ftruncate(backing_fd_, mapping_length_), 0);
+    mapping_ = mmap(nullptr, mapping_length_, PROT_READ | PROT_WRITE,
+                    MAP_SHARED, backing_fd_, 0);
+    ASSERT_NE(mapping_, MAP_FAILED);
+    ASSERT_EQ(madvise(mapping_, mapping_length_, MADV_NOHUGEPAGE), 0);
+    IREE_ASSERT_OK(iree_async_slab_wrap(mapping_, 2 * page_size_, 2,
+                                        iree_allocator_system(), &slab_));
+    IREE_ASSERT_OK(iree_async_proactor_register_slab(
+        proactor_, slab_,
+        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+        &region_));
+    ASSERT_GE(region_->handles.iouring.base_buffer_index, 0);
+
+    raw_file_fd_ = memfd_create("iree_fixed_file_contents", MFD_CLOEXEC);
+    ASSERT_GE(raw_file_fd_, 0);
+    IREE_ASSERT_OK(iree_async_file_import(
+        proactor_, iree_async_primitive_from_fd(raw_file_fd_),
+        IREE_ASYNC_FILE_FLAG_NONE, &file_));
+    raw_file_fd_ = -1;
+
+    // Pagemap exposes presence without reading the buffer and faulting it in.
+    // PFN disclosure is privileged; the presence bit for our own VMA is not.
+    pagemap_fd_ = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(pagemap_fd_, 0);
+  }
+
+  void TearDown() override {
+    iree_async_file_release(file_);
+    if (raw_file_fd_ >= 0) {
+      EXPECT_EQ(close(raw_file_fd_), 0);
+    }
+    if (pagemap_fd_ >= 0) {
+      EXPECT_EQ(close(pagemap_fd_), 0);
+    }
+    SlabRegistrationTest::TearDown();
+    if (backing_fd_ >= 0) {
+      EXPECT_EQ(close(backing_fd_), 0);
+    }
+  }
+
+  void DiscardCpuTranslations() {
+    ASSERT_EQ(madvise(mapping_, mapping_length_, MADV_DONTNEED), 0);
+    ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
+  }
+
+  void ExpectNoCpuTranslations() {
+    for (iree_host_size_t offset = 0; offset < mapping_length_;
+         offset += page_size_) {
+      uint64_t entry = 0;
+      uint64_t page_index =
+          (reinterpret_cast<uintptr_t>(mapping_) + offset) / page_size_;
+      ASSERT_EQ(
+          pread(pagemap_fd_, &entry, sizeof(entry), page_index * sizeof(entry)),
+          sizeof(entry));
+      EXPECT_EQ(entry & (uint64_t{1} << 63), 0u) << "byte offset " << offset;
+    }
+  }
+
+  void Run(iree_async_operation_t* operation) {
+    struct Completion {
+      // Published by the terminal callback on this polling thread.
+      bool done = false;
+      // Terminal result consumed after polling completes.
+      iree::Status status;
+    } completion;
+    operation->completion_fn =
+        +[](void* user_data, iree_async_operation_t*, iree_status_t status,
+            iree_async_completion_flags_t flags) {
+          auto& completion = *static_cast<Completion*>(user_data);
+          EXPECT_EQ(flags & IREE_ASYNC_COMPLETION_FLAG_MORE, 0u);
+          completion.status = std::move(status);
+          completion.done = true;
+        };
+    operation->user_data = &completion;
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, operation));
+    while (!completion.done) {
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          proactor_, iree_infinite_timeout(), /*out_completed_count=*/nullptr));
+    }
+    IREE_ASSERT_OK(completion.status.release());
+  }
+
+  // Shared physical backing retained until all registrations are released.
+  int backing_fd_ = -1;
+  // Own-process translation metadata, independent of payload access.
+  int pagemap_fd_ = -1;
+  // Owned file descriptor until import transfers it to |file_|.
+  int raw_file_fd_ = -1;
+  // Source and destination file owned until all operations complete.
+  iree_async_file_t* file_ = nullptr;
+};
+
+TEST_F(FileSlabRegistrationTest, ReadWriteWithoutCpuTranslations) {
+  const iree_async_span_t spans[] = {
+      iree_async_span_make(region_, 0, 2 * page_size_),
+      iree_async_span_make(region_, 2 * page_size_, 2 * page_size_),
+      iree_async_span_make(region_, 2 * page_size_ + 17, page_size_ - 33),
+  };
+  std::vector<uint8_t> expected(mapping_length_);
+  std::vector<uint8_t> actual(mapping_length_);
+  for (iree_async_span_t span : spans) {
+    SCOPED_TRACE(span.offset);
+    for (iree_host_size_t i = 0; i < expected.size(); ++i) {
+      expected[i] = static_cast<uint8_t>(i * 13 + 7);
+    }
+    memcpy(mapping_, expected.data(), expected.size());
+    ASSERT_NO_FATAL_FAILURE(DiscardCpuTranslations());
+
+    iree_async_file_write_operation_t write = {};
+    write.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
+    write.file = file_;
+    write.offset = 29;
+    write.buffer = span;
+    ASSERT_NO_FATAL_FAILURE(Run(&write.base));
+    ASSERT_EQ(write.bytes_written, span.length);
+    ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
+    ASSERT_EQ(pread(file_->primitive.value.fd, actual.data(), span.length, 29),
+              span.length);
+    EXPECT_EQ(memcmp(actual.data(), expected.data() + span.offset, span.length),
+              0);
+
+    // Overwrite only the requested subrange. Prefix/suffix sentinels check that
+    // a fixed slot is not confused with the complete registered region.
+    memset(actual.data(), 0xA5, span.length);
+    ASSERT_EQ(pwrite(file_->primitive.value.fd, actual.data(), span.length, 29),
+              span.length);
+    memset(expected.data() + span.offset, 0xA5, span.length);
+    iree_async_file_read_operation_t read = {};
+    read.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_READ;
+    read.file = file_;
+    read.offset = 29;
+    read.buffer = span;
+    ASSERT_NO_FATAL_FAILURE(Run(&read.base));
+    ASSERT_EQ(read.bytes_read, span.length);
+    ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
+    EXPECT_EQ(memcmp(mapping_, expected.data(), expected.size()), 0);
+  }
+}
+
+TEST_F(FileSlabRegistrationTest, RawAndCrossSlotSpansPreserveByteRanges) {
+  // These are legal spans that cannot name one fixed slot. They retain ordinary
+  // read/write behavior, including empty ranges at the end of the region.
+  const iree_async_span_t spans[] = {
+      iree_async_span_make(region_, page_size_ + 5, 2 * page_size_),
+      iree_async_span_from_ptr(mapping_, mapping_length_),
+      iree_async_span_make(region_, mapping_length_, 0),
+  };
+  std::vector<uint8_t> expected(mapping_length_);
+  for (iree_host_size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = static_cast<uint8_t>(i * 17 + 11);
+  }
+  for (iree_async_span_t span : spans) {
+    memcpy(mapping_, expected.data(), expected.size());
+    iree_async_file_write_operation_t write = {};
+    write.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
+    write.file = file_;
+    write.buffer = span;
+    ASSERT_NO_FATAL_FAILURE(Run(&write.base));
+    ASSERT_EQ(write.bytes_written, span.length);
+
+    memset(iree_async_span_ptr(span), 0, span.length);
+    iree_async_file_read_operation_t read = {};
+    read.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_READ;
+    read.file = file_;
+    read.buffer = span;
+    ASSERT_NO_FATAL_FAILURE(Run(&read.base));
+    ASSERT_EQ(read.bytes_read, span.length);
+    EXPECT_EQ(memcmp(mapping_, expected.data(), expected.size()), 0);
+  }
 }
 
 class ReceiveSlabRegistrationTest : public SlabRegistrationTest {

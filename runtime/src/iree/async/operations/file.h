@@ -14,7 +14,8 @@
 //   yes     | yes      | yes  | yes
 //
 // Performance characteristics:
-//   io_uring: Native async I/O via IORING_OP_READ/WRITE.
+//   io_uring: Native async I/O, using fixed buffers for spans contained in one
+//     registered kernel buffer and ordinary READ/WRITE for other spans.
 //   IOCP: Native async I/O via ReadFile/WriteFile overlapped.
 //   kqueue: Emulated via thread pool (kqueue doesn't support file I/O).
 //   generic: Emulated via thread pool.
