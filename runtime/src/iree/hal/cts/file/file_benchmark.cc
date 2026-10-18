@@ -21,6 +21,7 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/init.h"
+#include "iree/hal/utils/fd_file.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/benchmark.h"
 #include "iree/tooling/device_util.h"
@@ -33,11 +34,67 @@ IREE_FLAG(int64_t, read_depth, 8,
           "Maximum number of independent reads in flight.");
 IREE_FLAG(int64_t, buffer_bytes, 0,
           "Bytes retained per lane; zero uses read_bytes.");
+IREE_FLAG(int64_t, initial_read_bytes, 0,
+          "Untimed initial read per lane before the normal warmup; zero skips "
+          "this step. Exercises growth from smaller prepared transfers.");
+IREE_FLAG(int64_t, file_proactors, 0,
+          "Independent caller-owned I/O proactors shared round-robin across "
+          "lanes; zero imports the file through the device.");
 IREE_FLAG(bool, direct, false, "Open the source for native uncached I/O.");
 IREE_FLAG(bool, registered_io, false,
           "Require retained REGISTERED_IO bindings from the buffer pool.");
 
 namespace {
+
+// Counts host allocations and joins their actual retirement. The owner's
+// initial reference makes final reclamation a single notification, including
+// partial initialization and asynchronous resource teardown.
+class TrackedAllocator {
+ public:
+  iree_allocator_t allocator() { return {this, Allocate}; }
+  uint64_t allocation_calls() const { return allocation_calls_.load(); }
+  void Join() {
+    Release();
+    reclaimed_.acquire();
+  }
+
+ private:
+  void Release() {
+    if (live_count_.fetch_sub(1) == 1) {
+      reclaimed_.release();
+    }
+  }
+
+  static iree_status_t Allocate(void* user_data,
+                                iree_allocator_command_t command,
+                                const void* params, void** inout_pointer) {
+    auto* self = static_cast<TrackedAllocator*>(user_data);
+    const bool had_pointer = (command == IREE_ALLOCATOR_COMMAND_FREE ||
+                              command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
+                             *inout_pointer != nullptr;
+    auto system = iree_allocator_system();
+    IREE_RETURN_IF_ERROR(
+        system.ctl(system.self, command, params, inout_pointer));
+    if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+      if (had_pointer) {
+        self->Release();
+      }
+    } else {
+      self->allocation_calls_.fetch_add(1);
+      if (!had_pointer) {
+        self->live_count_.fetch_add(1);
+      }
+    }
+    return iree_ok_status();
+  }
+
+  // Successful allocate/reallocate calls through this host allocator.
+  std::atomic<uint64_t> allocation_calls_{0};
+  // Live allocations plus the owner's reference, relinquished by Join.
+  std::atomic<uint64_t> live_count_{1};
+  // Final release's last access publishes retirement without polling.
+  std::binary_semaphore reclaimed_{0};
+};
 
 // The device, file, and physical buffers survive benchmark repetitions. Each
 // lane has its own timeline because queue completion is not implicitly FIFO.
@@ -46,17 +103,14 @@ class FileReads {
   FileReads() { status_ = Initialize(); }
 
   ~FileReads() {
-    // The registry remains a live tracked allocation while retirement is
-    // armed. Its final release, or a later native callback, joins all owners
-    // before their allocator and borrowed download storage leave scope.
-    const bool join = registry_ != nullptr;
-    retiring_.store(true);
     for (auto& lane : lanes_) {
       iree_hal_buffer_release(lane.buffer);
       iree_hal_semaphore_release(lane.timeline);
     }
     iree_hal_pool_release(pool_);
-    iree_hal_file_release(file_);
+    for (auto* file : files_) {
+      iree_hal_file_release(file);
+    }
     iree_io_file_mapping_release(oracle_);
     iree_io_file_handle_release(handle_);
     iree_hal_device_group_release(group_);
@@ -64,9 +118,11 @@ class FileReads {
     iree_async_frontier_tracker_release(tracker_);
     iree_async_proactor_pool_release(proactors_);
     iree_hal_driver_registry_free(registry_);
-    if (join) {
-      reclaimed_.acquire();
-    }
+    // Keep foreign file polling available through device cache teardown. The
+    // two allocators count all warm runtime allocations but join separately.
+    device_allocator_.Join();
+    iree_async_proactor_pool_release(file_proactors_);
+    file_allocator_.Join();
     iree_status_free(status_);
   }
 
@@ -75,7 +131,10 @@ class FileReads {
   uint64_t extent() const { return extent_; }
   size_t depth() const { return lanes_.size(); }
   uint64_t retained_bytes() const { return retained_bytes_; }
-  uint64_t allocation_calls() const { return allocation_calls_.load(); }
+  uint64_t allocation_calls() const {
+    return device_allocator_.allocation_calls() +
+           file_allocator_.allocation_calls();
+  }
 
   iree_status_t Burst() {
     iree_status_t status = iree_ok_status();
@@ -142,6 +201,8 @@ class FileReads {
 
  private:
   struct Lane {
+    // Borrowed file owned by files_, with this lane's exact I/O proactor.
+    iree_hal_file_t* file = nullptr;
     // Owned physical destination, reused only after its timeline completes.
     iree_hal_buffer_t* buffer = nullptr;
     // Owned completion timeline for this lane alone.
@@ -157,14 +218,18 @@ class FileReads {
   iree_status_t Initialize() {
     if (!FLAG_file[0] || FLAG_file_length < 0 || FLAG_read_bytes <= 0 ||
         FLAG_read_depth <= 0 || FLAG_buffer_bytes < 0 ||
+        FLAG_initial_read_bytes < 0 ||
+        FLAG_initial_read_bytes > FLAG_read_bytes || FLAG_file_proactors < 0 ||
+        FLAG_file_proactors > FLAG_read_depth ||
         (FLAG_buffer_bytes && FLAG_buffer_bytes < FLAG_read_bytes)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "file is required; read_bytes/read_depth must be positive, "
-          "file_length/buffer_bytes nonnegative, and buffer_bytes >= "
-          "read_bytes");
+          "file_length/buffer_bytes nonnegative, buffer_bytes >= read_bytes, "
+          "0 <= initial_read_bytes <= read_bytes, and "
+          "0 <= file_proactors <= read_depth");
     }
-    const iree_allocator_t allocator = {this, Allocate};
+    const iree_allocator_t allocator = device_allocator_.allocator();
     IREE_RETURN_IF_ERROR(
         iree_hal_driver_registry_allocate(allocator, &registry_));
     IREE_RETURN_IF_ERROR(iree_hal_register_all_available_drivers(registry_));
@@ -200,24 +265,47 @@ class FileReads {
                       (FLAG_direct ? IREE_IO_FILE_MODE_DIRECT : 0);
     IREE_RETURN_IF_ERROR(iree_io_file_handle_open(
         mode, iree_make_cstring_view(FLAG_file), allocator, &handle_));
-    IREE_RETURN_IF_ERROR(iree_hal_file_import(device_, nullptr, affinity,
-                                              IREE_HAL_MEMORY_ACCESS_READ,
-                                              handle_, 0, &file_));
+    if (FLAG_file_proactors) {
+      IREE_RETURN_IF_ERROR(iree_async_proactor_pool_create(
+          FLAG_file_proactors, nullptr,
+          iree_async_proactor_pool_options_default(),
+          file_allocator_.allocator(), &file_proactors_));
+    }
+    files_.resize(FLAG_file_proactors ? FLAG_file_proactors : 1);
+    iree_status_t status = iree_ok_status();
+    for (size_t i = 0; i < files_.size() && iree_status_is_ok(status); ++i) {
+      if (file_proactors_) {
+        iree_async_proactor_t* proactor = nullptr;
+        status = iree_async_proactor_pool_get(file_proactors_, i, &proactor);
+        if (iree_status_is_ok(status)) {
+          status =
+              iree_hal_fd_file_from_handle(IREE_HAL_MEMORY_ACCESS_READ, handle_,
+                                           proactor, allocator, &files_[i]);
+        }
+      } else {
+        status = iree_hal_file_import(device_, nullptr, affinity,
+                                      IREE_HAL_MEMORY_ACCESS_READ, handle_, 0,
+                                      &files_[i]);
+      }
+    }
+    IREE_RETURN_IF_ERROR(status);
     extent_ = FLAG_read_bytes;
-    length_ = FLAG_file_length ? FLAG_file_length : iree_hal_file_length(file_);
-    if (length_ > iree_hal_file_length(file_) || length_ < extent_ ||
+    length_ =
+        FLAG_file_length ? FLAG_file_length : iree_hal_file_length(files_[0]);
+    if (length_ > iree_hal_file_length(files_[0]) || length_ < extent_ ||
         length_ > IREE_HOST_SIZE_MAX || extent_ > IREE_HOST_SIZE_MAX) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "read extent must fit the requested source range");
     }
-    const auto& requirements = iree_hal_file_requirements(file_)->read;
+    const auto& requirements = iree_hal_file_requirements(files_[0])->read;
     if (extent_ % requirements.offset_alignment ||
         extent_ % requirements.length_alignment ||
-        length_ % requirements.length_alignment) {
+        length_ % requirements.length_alignment ||
+        FLAG_initial_read_bytes % requirements.length_alignment) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "read_bytes/file_length violate native alignment");
+          "read_bytes/file_length/initial_read_bytes violate native alignment");
     }
     IREE_RETURN_IF_ERROR(iree_io_file_map_view(
         handle_, IREE_IO_FILE_ACCESS_READ, 0, length_,
@@ -241,8 +329,8 @@ class FileReads {
         std::max(iree_host_size_t{64}, requirements.buffer_alignment));
     lanes_.resize(FLAG_read_depth);
     verification_.resize(extent_);
-    iree_status_t status = iree_ok_status();
     for (size_t i = 0; i < lanes_.size() && iree_status_is_ok(status); ++i) {
+      lanes_[i].file = files_[i % files_.size()];
       status = iree_hal_pool_allocate_buffer(
           pool_, request, iree_infinite_timeout(), &lanes_[i].buffer);
       if (iree_status_is_ok(status)) {
@@ -252,6 +340,17 @@ class FileReads {
                                            &lanes_[i].timeline);
       }
     }
+    if (iree_status_is_ok(status) && FLAG_initial_read_bytes) {
+      for (auto& lane : lanes_) {
+        if (iree_status_is_ok(status)) {
+          status = Issue(lane, 0, FLAG_initial_read_bytes);
+        }
+      }
+      status = iree_status_join(status, Join());
+      if (iree_status_is_ok(status)) {
+        status = Verify();
+      }
+    }
     return status;
   }
 
@@ -259,7 +358,7 @@ class FileReads {
     uint64_t next = lane.value + 1;
     IREE_RETURN_IF_ERROR(iree_hal_queue_read(
         queue_, {lane.value ? 1u : 0u, &lane.timeline, &lane.value},
-        {1, &lane.timeline, &next}, file_, offset, lane.buffer, 0, length,
+        {1, &lane.timeline, &next}, lane.file, offset, lane.buffer, 0, length,
         nullptr, IREE_HAL_READ_FLAG_NONE));
     lane.value = next;
     lane.offset = offset;
@@ -282,36 +381,14 @@ class FileReads {
     return status;
   }
 
-  static iree_status_t Allocate(void* user_data,
-                                iree_allocator_command_t command,
-                                const void* params, void** inout_pointer) {
-    auto* self = static_cast<FileReads*>(user_data);
-    const bool had_pointer = (command == IREE_ALLOCATOR_COMMAND_FREE ||
-                              command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
-                             *inout_pointer != nullptr;
-    auto system = iree_allocator_system();
-    IREE_RETURN_IF_ERROR(
-        system.ctl(system.self, command, params, inout_pointer));
-    if (command == IREE_ALLOCATOR_COMMAND_FREE) {
-      if (had_pointer && self->live_allocations_.fetch_sub(1) == 1 &&
-          self->retiring_.load()) {
-        self->reclaimed_.release();
-      }
-    } else {
-      self->allocation_calls_.fetch_add(1);
-      if (!had_pointer) {
-        self->live_allocations_.fetch_add(1);
-      }
-    }
-    return iree_ok_status();
-  }
-
   // Retained initialization failure; subsequent benchmark rows report it too.
   iree_status_t status_ = iree_ok_status();
   // Owned driver cache, retained until all benchmark submissions are finished.
   iree_hal_driver_registry_t* registry_ = nullptr;
   // Caller-supplied I/O progress owners shared with the selected device.
   iree_async_proactor_pool_t* proactors_ = nullptr;
+  // Optional independent file poll owners, live through file retirement.
+  iree_async_proactor_pool_t* file_proactors_ = nullptr;
   // Owned group completion tracker.
   iree_async_frontier_tracker_t* tracker_ = nullptr;
   // Owned selected device, also retained by its group and pools.
@@ -322,8 +399,8 @@ class FileReads {
   iree_hal_queue_t* queue_ = nullptr;
   // Owned source handle, shared with the HAL import and byte oracle.
   iree_io_file_handle_t* handle_ = nullptr;
-  // Owned asynchronous HAL file using the selected queue family's proactor.
-  iree_hal_file_t* file_ = nullptr;
+  // Owned asynchronous imports, shared by lanes using the same poll owner.
+  std::vector<iree_hal_file_t*> files_;
   // Owned read-only source mapping, accessed only outside timing.
   iree_io_file_mapping_t* oracle_ = nullptr;
   // Owned physical pool, without a public host-mapping requirement.
@@ -338,14 +415,10 @@ class FileReads {
   uint64_t extent_ = 0;
   // Sum of the actual buffer allocation sizes reported by the HAL.
   uint64_t retained_bytes_ = 0;
-  // Successful allocate/reallocate calls through the runtime's host allocator.
-  std::atomic<uint64_t> allocation_calls_{0};
-  // Live runtime allocations, including the registry until final teardown.
-  std::atomic<uint64_t> live_allocations_{0};
-  // Allows the last resource to publish terminal allocator ownership.
-  std::atomic<bool> retiring_{false};
-  // Joins asynchronous final resource destruction without a polling timer.
-  std::binary_semaphore reclaimed_{0};
+  // Device/file/resource ownership, joined before independent runners stop.
+  TrackedAllocator device_allocator_;
+  // Independent file runners, joined after all device registrations retire.
+  TrackedAllocator file_allocator_;
 };
 
 std::unique_ptr<FileReads> reads;
@@ -391,6 +464,8 @@ void Read(benchmark::State& state, bool stream) {
       static_cast<double>(allocations) / (state.iterations() * operations);
   state.counters["read_bytes"] = reads->extent();
   state.counters["read_depth"] = reads->depth();
+  state.counters["initial_read_bytes"] = FLAG_initial_read_bytes;
+  state.counters["file_proactors"] = FLAG_file_proactors;
   state.counters["retained_bytes"] = reads->retained_bytes();
   state.counters["direct"] = FLAG_direct;
   state.counters["registered_io"] = FLAG_registered_io;

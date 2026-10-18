@@ -56,6 +56,7 @@ iree_runtime_cc_binary(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:benchmark",
         "//runtime/src/iree/tooling:device_util",
@@ -73,6 +74,26 @@ iree_executable_test(
         "--file_length=4096",
         "--read_bytes=4096",
         "--read_depth=1",
+        "--benchmark_dry_run",
+    ],
+    data = ["file_benchmark.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_task": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+iree_executable_test(
+    name = "file_benchmark_shared_test",
+    src = ":file_benchmark",
+    args = [
+        "--device=task",
+        "--file=$(rootpath file_benchmark.cc)",
+        "--file_length=4096",
+        "--read_bytes=4096",
+        "--read_depth=2",
+        "--initial_read_bytes=512",
+        "--file_proactors=2",
         "--benchmark_dry_run",
     ],
     data = ["file_benchmark.cc"],

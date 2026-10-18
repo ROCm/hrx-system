@@ -47,6 +47,7 @@ iree_cc_binary(
     iree::base::tooling::flags
     iree::hal
     iree::hal::drivers
+    iree::hal::utils::files
     iree::io::file_handle
     iree::testing::benchmark
     iree::third_party::google_benchmark
@@ -64,6 +65,26 @@ iree_native_test(
     "--file_length=4096"
     "--read_bytes=4096"
     "--read_depth=1"
+    "--benchmark_dry_run"
+  SRC
+    ::file_benchmark
+  DATA
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/file/file_benchmark.cc"
+)
+endif()
+
+if(IREE_HAL_DRIVER_TASK)
+iree_native_test(
+  NAME
+    "file_benchmark_shared_test"
+  ARGS
+    "--device=task"
+    "--file={{${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/file/file_benchmark.cc}}"
+    "--file_length=4096"
+    "--read_bytes=4096"
+    "--read_depth=2"
+    "--initial_read_bytes=512"
+    "--file_proactors=2"
     "--benchmark_dry_run"
   SRC
     ::file_benchmark
