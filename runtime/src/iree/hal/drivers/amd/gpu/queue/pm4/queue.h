@@ -28,8 +28,6 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   uint32_t family_ordinal;
   // Stable ordinal in the parent's provisioned queue array.
   uint32_t queue_ordinal;
-  // Dispatches reuse one queue-local race-detection shadow arena.
-  bool tsan_enabled;
   // One admitted USER or KERNEL publication mode.
   amdf_queue_publication_modes_t publication_mode;
   // Power-of-two command storage capacity in bytes.

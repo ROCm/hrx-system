@@ -655,6 +655,40 @@ TEST_P(ExecutableTest, RuntimeConfigurationRequiresProvisionedServices) {
   }
 }
 
+TEST_P(ExecutableTest, TsanProvisioningDoesNotSerializeOrdinaryFunctions) {
+  iree_hal_amd_gpu_tsan_t shadows[2] = {};
+  options_.tsan_count = IREE_ARRAYSIZE(shadows);
+  options_.tsan = shadows;
+  IREE_ASSERT_OK(Load());
+  EXPECT_EQ(native_.allocations, 1u);
+  EXPECT_EQ(iree_hal_amd_gpu_executable_queue_image_addresses(executable_),
+            nullptr);
+  iree_hal_executable_function_t token;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable_, IREE_SV("image_transform"), &token));
+  const iree_hal_amd_gpu_pm4_function_t* function = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_executable_lookup_pm4_for_queue(
+      executable_, token, 1, &function));
+  EXPECT_EQ(function->launch.requirements &
+                IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN,
+            0u);
+}
+
+TEST_P(ExecutableTest,
+       RejectsOversizedTsanConfigurationBeforeNativeAllocation) {
+  const auto* symbol = iree_hal_amd_gpu_image_find_symbol(
+      &image_, IREE_SV("image_runtime_config"));
+  ASSERT_NE(symbol, nullptr);
+  ASSERT_GT(symbol->length, sizeof(iree_hal_amd_gpu_tsan_config_t));
+  RenameConfiguration("iree_tsan_config");
+  iree_hal_amd_gpu_tsan_t shadow = {};
+  options_.tsan_count = 1;
+  options_.tsan = &shadow;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Load());
+  EXPECT_EQ(executable_, nullptr);
+  EXPECT_EQ(native_.calls, 0u);
+}
+
 TEST_P(ExecutableTest, PublishesSharedFeedbackWithRetainedSourceIdentity) {
   RenameConfiguration("iree_feedback_config");
   feedback_.config.record_length = sizeof(feedback_.config);

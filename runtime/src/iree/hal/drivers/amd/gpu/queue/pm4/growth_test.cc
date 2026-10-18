@@ -467,8 +467,8 @@ class ProgramGrowthTest : public GrowthTest {
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_pm4_barrier_profile_initialize({11, 0, 0}, &profile));
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_buffer_create(
-        &family_, &programs_, 0, IREE_HAL_COMMAND_CATEGORY_ANY, 0, 0, 0,
-        &profile, iree_allocator_system(), &command_buffer_));
+        &family_, &programs_, 0, IREE_HAL_COMMAND_CATEGORY_ANY, 0, 0, &profile,
+        iree_allocator_system(), &command_buffer_));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer_));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer_));
     iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;

@@ -39,8 +39,7 @@ class GpuTsanTest : public GpuNativeTest,
       }
     }
     ASSERT_NE(artifact_.data, nullptr);
-    options_.tsan.memory.workgroup_local_memory_size = 256;
-    options_.tsan.memory.workgroup_capacity = GetParam();
+    options_.tsan.memory.shadow_size = GetParam();
   }
 
   void TearDown() override {
@@ -86,7 +85,7 @@ class GpuTsanTest : public GpuNativeTest,
       const auto* failure =
           reinterpret_cast<const iree_hal_device_driver_failure_event_t*>(
               event->payload.data);
-      EXPECT_EQ(failure->status_code, IREE_STATUS_DATA_LOSS);
+      EXPECT_EQ(failure->status_code, self.expected_failure_);
       self.queue_failures_.fetch_add(1);
       return;
     }
@@ -98,6 +97,19 @@ class GpuTsanTest : public GpuNativeTest,
     }
     const auto* report = reinterpret_cast<const iree_hal_device_tsan_report_t*>(
         event->payload.data);
+    if (report->check_kind == IREE_HAL_DEVICE_TSAN_CHECK_KIND_SHADOW_CAPACITY) {
+      const auto& capacity = report->detail.shadow_capacity;
+      EXPECT_EQ(capacity.shadow_size, self.options_.tsan.memory.shadow_size);
+      EXPECT_EQ(capacity.workgroup_local_memory_size, 8u);
+      EXPECT_EQ(capacity.shadow_cell_size, 16u);
+      EXPECT_EQ(capacity.shadow_history_count, 2u);
+      EXPECT_EQ(capacity.workgroup_shadow_stride, 136u);
+      EXPECT_EQ(capacity.workgroup_ordinal, capacity.shadow_size / 136u);
+      EXPECT_EQ(capacity.required_shadow_end,
+                (capacity.workgroup_ordinal + 1) * 136u);
+      self.capacity_reports_.fetch_add(1);
+      return;
+    }
     ASSERT_EQ(report->check_kind, IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE);
     const auto& data_race = report->detail.data_race;
     EXPECT_EQ(data_race.memory_space,
@@ -167,10 +179,14 @@ class GpuTsanTest : public GpuNativeTest,
   std::array<iree_hal_semaphore_t*, 2> done_ = {};
   // Reports delivered by the sole completion consumer.
   std::atomic<uint64_t> reports_ = 0;
+  // Capacity failures reported before the excess workgroup executes.
+  std::atomic<uint64_t> capacity_reports_ = 0;
   // Unexpected channel or device failures.
   std::atomic<uint64_t> errors_ = 0;
   // Failed-operation diagnostics accompanying the requested fail-device policy.
   std::atomic<uint64_t> queue_failures_ = 0;
+  // Expected terminal status for the current fail-device policy witness.
+  iree_status_code_t expected_failure_ = IREE_STATUS_DATA_LOSS;
   // Shared executable identity retained after the public handle is released.
   std::atomic<uint64_t> executable_id_ = 0;
   // Most recent native shadow address, inspected only after completion.
@@ -233,6 +249,30 @@ TEST_P(GpuTsanTest, ReportFailurePropagatesWithoutAbandoningNativeRetirement) {
   EXPECT_GE(queue_failures_.load(), 1u);
   // Fixture teardown waits for actual device and worker reclamation even when
   // the public signal failed before native completion.
+}
+
+TEST_P(GpuTsanTest, CapacityFailurePreservesStatusAndNativeRetirement) {
+  expected_failure_ = IREE_STATUS_RESOURCE_EXHAUSTED;
+  Load(IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE);
+  ASSERT_FALSE(HasFatalFailure());
+  // safe_write requires 8 + 8 * 16 bytes per workgroup. Only the first excess
+  // workgroup reports capacity; valid preceding workgroups have disjoint data.
+  const uint32_t workgroups = GetParam() / 136u + 1;
+  uint64_t value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queues_[0], iree_hal_semaphore_list_empty(), {1, &done_[0], &value},
+      executable_, safe_, Config(workgroups), iree_const_byte_span_empty(),
+      iree_hal_buffer_ref_list_empty(), nullptr, 0));
+  iree_hal_executable_release(executable_);
+  executable_ = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_semaphore_wait(done_[0], value, iree_infinite_timeout(),
+                              IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_EQ(capacity_reports_.load(), 1u);
+  EXPECT_EQ(reports_.load(), 0u);
+  EXPECT_EQ(errors_.load(), 0u);
+  EXPECT_GE(queue_failures_.load(), 1u);
 }
 
 TEST_P(GpuTsanTest, IndirectDispatchRelocatesPacketAndPreparationProgram) {
@@ -323,8 +363,10 @@ TEST_P(GpuTsanTest, IndirectDispatchRelocatesPacketAndPreparationProgram) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(ShadowCapacity, GpuTsanTest,
-                         ::testing::Values(4u, 8u, 64u));
+// The largest kernel uses eight LDS bytes and therefore 8 + 8 * 16 shadow
+// bytes per workgroup. Each arena admits the three-workgroup replay cases.
+INSTANTIATE_TEST_SUITE_P(ShadowBytes, GpuTsanTest,
+                         ::testing::Values(544u, 1088u, 8704u));
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu::cts

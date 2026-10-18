@@ -114,7 +114,8 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
       iree_hal_dispatch_uses_indirect_parameters(flags);
   const uint16_t launch_requirements =
       function->launch.requirements &
-      ~IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_DISPATCH_POINTER;
+      ~(IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_DISPATCH_POINTER |
+        IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN);
   if (launch_requirements || function->kernarg->requirements) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,

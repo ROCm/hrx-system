@@ -87,7 +87,7 @@ loom_test_module(
     "test/channel_multicast.loom"
 )
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
     multicast_execution_test_execute_xdna_eight_columns_test
@@ -103,7 +103,7 @@ loom_execution_test(
     "iree-build-requirement=loom.target.arch.xdna"
     "iree-build-requirement=loom.emit.xdna"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.xdna"
+    "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.xdna"
     "runtime-resource=amd-xdna"
     "loom-execution-profile=xdna_eight_columns"
@@ -122,7 +122,7 @@ loom_test_module(
     "test/dma_wrap.loom"
 )
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
     dma_wrap_execution_test_execute_xdna_hardware_test
@@ -137,7 +137,7 @@ loom_execution_test(
     "iree-build-requirement=loom.target.arch.xdna"
     "iree-build-requirement=loom.emit.xdna"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.xdna"
+    "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.xdna"
     "runtime-resource=amd-xdna"
     "loom-execution-profile=xdna_hardware"
@@ -156,7 +156,7 @@ loom_test_module(
     "test/staging_stress.loom"
 )
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
     staging_stress_execute_xdna_hardware_test
@@ -173,7 +173,7 @@ loom_execution_test(
     "iree-build-requirement=loom.target.arch.xdna"
     "iree-build-requirement=loom.emit.xdna"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.xdna"
+    "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.xdna"
     "runtime-resource=amd-xdna"
     "loom-execution-profile=xdna_hardware"
@@ -223,7 +223,7 @@ loom_generated_file(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_cc_binary(
   NAME
     temporal_fold_test_bin
@@ -242,7 +242,7 @@ loom_cc_binary(
 )
 endif()
 
-if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 iree_native_test(
   NAME
     "temporal_fold_execution_test"
@@ -319,7 +319,7 @@ loom_test_module(
 endif()
 
 if(LOOM_IMPORT_CXX)
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
     assembly_pack_execution_test_execute_xdna_hardware_test
@@ -334,7 +334,7 @@ loom_execution_test(
     "iree-build-requirement=loom.target.arch.xdna"
     "iree-build-requirement=loom.emit.xdna"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.xdna"
+    "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.xdna"
     "runtime-resource=amd-xdna"
     "loom-execution-profile=xdna_hardware"
@@ -359,7 +359,7 @@ loom_test_module(
 endif()
 
 if(LOOM_IMPORT_CXX)
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
     bitcast_execution_test_execute_xdna_hardware_test
@@ -374,7 +374,7 @@ loom_execution_test(
     "iree-build-requirement=loom.target.arch.xdna"
     "iree-build-requirement=loom.emit.xdna"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.xdna"
+    "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.xdna"
     "runtime-resource=amd-xdna"
     "loom-execution-profile=xdna_hardware"
@@ -399,7 +399,7 @@ loom_test_module(
 endif()
 
 if(LOOM_IMPORT_CXX)
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
     buffer_selection_execution_test_execute_xdna_hardware_test
@@ -414,7 +414,7 @@ loom_execution_test(
     "iree-build-requirement=loom.target.arch.xdna"
     "iree-build-requirement=loom.emit.xdna"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.xdna"
+    "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.xdna"
     "runtime-resource=amd-xdna"
     "loom-execution-profile=xdna_hardware"
@@ -439,7 +439,7 @@ loom_test_module(
 endif()
 
 if(LOOM_IMPORT_CXX)
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
     vector_copy_execution_test_execute_xdna_hardware_test
@@ -454,7 +454,7 @@ loom_execution_test(
     "iree-build-requirement=loom.target.arch.xdna"
     "iree-build-requirement=loom.emit.xdna"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.xdna"
+    "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.xdna"
     "runtime-resource=amd-xdna"
     "loom-execution-profile=xdna_hardware"
@@ -478,7 +478,7 @@ loom_test_module(
 endif()
 
 if(LOOM_IMPORT_CXX)
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
 loom_execution_test(
   NAME
     packed_memory_execution_test_execute_xdna_hardware_test
@@ -493,7 +493,7 @@ loom_execution_test(
     "iree-build-requirement=loom.target.arch.xdna"
     "iree-build-requirement=loom.emit.xdna"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.xdna"
+    "iree-build-requirement=runtime.hal.amd"
     "iree-run-requirement=libamdf.resource.xdna"
     "runtime-resource=amd-xdna"
     "loom-execution-profile=xdna_hardware"

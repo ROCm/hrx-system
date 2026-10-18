@@ -233,6 +233,15 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
       }
       continue;
     }
+    if (iree_string_view_equal(params[i].key, IREE_SV("tsan_shadow_size"))) {
+      if (!iree_string_view_atoi_uint64(params[i].value,
+                                        &options.tsan.memory.shadow_size)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "GPU TSAN shadow size must be an unsigned "
+                                "byte count");
+      }
+      continue;
+    }
     uint32_t* value = NULL;
     if (iree_string_view_equal(params[i].key, IREE_SV("queue_count"))) {
       value = &options.queue_count;
@@ -241,16 +250,6 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
     } else if (iree_string_view_equal(params[i].key,
                                       IREE_SV("host_numa_node"))) {
       value = &options.host_numa_node;
-    } else if (iree_string_view_equal(params[i].key,
-                                      IREE_SV("tsan_memory_granule_shift"))) {
-      value = &options.tsan.memory.memory_granule_shift;
-    } else if (iree_string_view_equal(
-                   params[i].key,
-                   IREE_SV("tsan_workgroup_local_memory_size"))) {
-      value = &options.tsan.memory.workgroup_local_memory_size;
-    } else if (iree_string_view_equal(params[i].key,
-                                      IREE_SV("tsan_workgroup_capacity"))) {
-      value = &options.tsan.memory.workgroup_capacity;
     }
     if (!value || !iree_string_view_atoi_uint32(params[i].value, value)) {
       return iree_make_status(

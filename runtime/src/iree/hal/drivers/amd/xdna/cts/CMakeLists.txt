@@ -76,7 +76,7 @@ iree_cc_test(
 )
 endif()
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND IREE_HAL_DRIVER_XDNA)
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND IREE_HAL_DRIVER_AMD)
 iree_cc_test(
   NAME
     native_replay_stress

@@ -92,9 +92,9 @@ RDNA_TSAN_PROFILE = rdna_execution_profile(
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 
-RDNA_TSAN_BYTE_GRANULE_PROFILE = rdna_execution_profile(
-    name = "rdna_tsan_byte_granule",
-    device = "rdna://?tsan_report_policy=report-only&tsan_memory_granule_shift=0",
+RDNA_TSAN_CAPACITY_PROFILE = rdna_execution_profile(
+    name = "rdna_tsan_capacity",
+    device = "rdna://?tsan_report_policy=report-only&tsan_shadow_size=2176",
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 

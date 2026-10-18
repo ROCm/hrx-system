@@ -346,8 +346,8 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
           .workgroup_ordinal = iree_unaligned_load_le_u64(payload + 40),
           .workgroup_local_memory_size =
               iree_unaligned_load_le_u32(payload + 48),
-          .memory_granule_shift = iree_unaligned_load_le_u32(payload + 52),
-          .shadow_entry_size = iree_unaligned_load_le_u32(payload + 56),
+          .shadow_cell_size = iree_unaligned_load_le_u32(payload + 52),
+          .shadow_history_count = iree_unaligned_load_le_u32(payload + 56),
       };
       for (uint32_t i = 0; i < 3; ++i) {
         capacity->current_workgroup_id[i] =

@@ -204,8 +204,8 @@ TEST_F(FeedbackTest, TsanShadowCapacityPreservesGeometryAndCoordinates) {
   iree_unaligned_store_le_u64(payload + 32, 4096);
   iree_unaligned_store_le_u64(payload + 40, UINT64_C(1) << 21);
   iree_unaligned_store_le_u32(payload + 48, 2048);
-  iree_unaligned_store_le_u32(payload + 52, 2);
-  iree_unaligned_store_le_u32(payload + 56, 8);
+  iree_unaligned_store_le_u32(payload + 52, 16);
+  iree_unaligned_store_le_u32(payload + 56, 2);
   for (uint32_t i = 0; i < 6; ++i) {
     iree_unaligned_store_le_u32(payload + 64 + i * 4, 31 + i);
   }
@@ -224,8 +224,8 @@ TEST_F(FeedbackTest, TsanShadowCapacityPreservesGeometryAndCoordinates) {
   EXPECT_EQ(capacity.workgroup_shadow_stride, 4096u);
   EXPECT_EQ(capacity.workgroup_ordinal, UINT64_C(1) << 21);
   EXPECT_EQ(capacity.workgroup_local_memory_size, 2048u);
-  EXPECT_EQ(capacity.memory_granule_shift, 2u);
-  EXPECT_EQ(capacity.shadow_entry_size, 8u);
+  EXPECT_EQ(capacity.shadow_cell_size, 16u);
+  EXPECT_EQ(capacity.shadow_history_count, 2u);
   EXPECT_EQ(capacity.reserved0, 0u);
   for (uint32_t i = 0; i < 3; ++i) {
     EXPECT_EQ(capacity.current_workgroup_id[i], 31 + i);

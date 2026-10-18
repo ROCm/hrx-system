@@ -86,8 +86,6 @@ typedef struct iree_hal_amd_gpu_pm4_command_buffer_t {
   iree_hal_amd_gpu_pm4_binding_requirement_t* requirements;
   // Device-local LDS capacity for public dispatch admission.
   uint32_t maximum_group_segment_byte_length;
-  // Each dispatch joins prior use of the queue-local TSAN shadow arena.
-  bool tsan_enabled;
   // Captured physical cache behavior; no topology is retained.
   iree_hal_amd_gpu_pm4_barrier_profile_t profile;
   // First failed native recording mutation; prevents sealing partial packets.
@@ -128,7 +126,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     iree_hal_amd_gpu_pm4_program_pool_t* pool,
     iree_hal_command_buffer_mode_t mode, iree_hal_command_category_t categories,
     iree_host_size_t binding_capacity,
-    uint32_t maximum_group_segment_byte_length, bool tsan_enabled,
+    uint32_t maximum_group_segment_byte_length,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     iree_allocator_t host_allocator, iree_hal_command_buffer_t** out_buffer) {
   *out_buffer = NULL;
@@ -157,7 +155,6 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
   buffer->pool = pool;
   buffer->maximum_group_segment_byte_length = maximum_group_segment_byte_length;
   buffer->profile = *profile;
-  buffer->tsan_enabled = tsan_enabled;
   buffer->requirements = (void*)((uint8_t*)buffer + requirements_offset);
   for (uint32_t i = 0; i <= binding_capacity; ++i) {
     buffer->requirements[i].parent = i;
@@ -771,7 +768,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
         buffer->profile.command_processor_bypasses_l2 ? buffer->profile.acquire
                                                       : buffer->profile.shader;
   }
-  if (buffer->tsan_enabled) {
+  if (function->launch.requirements &
+      IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN) {
     // Instrumented dispatches reuse one queue-local shadow arena. The next
     // generation must not touch that arena until prior shaders have finished.
     buffer->pending_barrier.execution |=

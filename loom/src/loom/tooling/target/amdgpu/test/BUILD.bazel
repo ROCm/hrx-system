@@ -32,7 +32,7 @@ load(
     "AMDGPU_TSAN_PROFILE",
     "RDNA_ASAN_PROFILE",
     "RDNA_HARDWARE_PROFILE",
-    "RDNA_TSAN_BYTE_GRANULE_PROFILE",
+    "RDNA_TSAN_CAPACITY_PROFILE",
     "RDNA_TSAN_PROFILE",
 )
 
@@ -367,7 +367,6 @@ loom_test(
     srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom"],
     execution_profiles = [
         AMDGPU_TSAN_PROFILE,
-        RDNA_TSAN_BYTE_GRANULE_PROFILE,
         RDNA_TSAN_PROFILE,
     ],
 )
@@ -375,14 +374,20 @@ loom_test(
 loom_test(
     name = "tsan_fragment_test",
     srcs = ["//loom/src/loom/tooling/target/amdgpu/test/corpus:gfx11/fragment_repack_bf16.loom"],
-    execution_profiles = [AMDGPU_TSAN_PROFILE],
+    execution_profiles = [
+        AMDGPU_TSAN_PROFILE,
+        RDNA_TSAN_PROFILE,
+    ],
     target_compatible_with = _GFX11_EXECUTION_COMPATIBLE_WITH,
 )
 
 loom_test(
     name = "tsan_capacity_test",
     srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_capacity.loom"],
-    execution_profiles = [AMDGPU_TSAN_CAPACITY_PROFILE],
+    execution_profiles = [
+        AMDGPU_TSAN_CAPACITY_PROFILE,
+        RDNA_TSAN_CAPACITY_PROFILE,
+    ],
 )
 
 iree_execution_test_suite(

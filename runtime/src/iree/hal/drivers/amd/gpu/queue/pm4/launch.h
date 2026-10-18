@@ -28,6 +28,8 @@ enum iree_hal_amd_gpu_pm4_launch_requirement_bits_e {
   IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_DISPATCH_POINTER = 1u << 2,
   // An initialized AMD queue ABI object in GPU-readable storage.
   IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_QUEUE_POINTER = 1u << 3,
+  // Executable-owned TSAN configuration names the queue's serialized arena.
+  IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN = 1u << 4,
 };
 typedef uint16_t iree_hal_amd_gpu_pm4_launch_requirements_t;
 
@@ -51,7 +53,7 @@ typedef struct iree_hal_amd_gpu_pm4_launch_t {
   uint32_t resource3_register;
   // Enabled zero-origin dispatch in group units with the compiled wave mode.
   uint32_t dispatch_initiator;
-  // Runtime service requirements derived from the descriptor.
+  // Runtime services derived from the descriptor and executable configuration.
   iree_hal_amd_gpu_pm4_launch_requirements_t requirements;
   // Complete user-register interval, including zero-filled compiler padding.
   uint8_t user_data_count;

@@ -184,7 +184,8 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
       if (symbol->kind != IREE_HAL_AMD_GPU_IMAGE_SYMBOL_DATA ||
           symbol->address.kind != IREE_HAL_AMD_GPU_IMAGE_ADDRESS_IMAGE ||
           !(symbol->access & IREE_HAL_AMD_GPU_IMAGE_ACCESS_WRITE) ||
-          symbol->length < required_length) {
+          (i == 1 ? symbol->length != required_length
+                  : symbol->length < required_length)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "GPU service global `%.*s` has an invalid layout",
@@ -503,7 +504,7 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
 static iree_status_t iree_hal_amd_gpu_executable_load_image(
     iree_hal_amd_gpu_executable_t* executable,
     const iree_hal_amd_gpu_executable_options_t* options,
-    uint32_t variant_ordinal) {
+    uint32_t variant_ordinal, bool tsan_enabled) {
   iree_hal_amd_gpu_executable_variant_t* variant =
       &executable->variants[variant_ordinal];
   const iree_hal_amd_gpu_image_t* image = &executable->image;
@@ -653,6 +654,10 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
       status = iree_hal_amd_gpu_pm4_launch_initialize(
           options->target->version, format_features, &image->kernels[i],
           variant->bindings[1].device_address, &function->launch);
+      if (tsan_enabled) {
+        function->launch.requirements |=
+            IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN;
+      }
       if (function->packet) {
         iree_hal_amd_gpu_pm4_dispatch_packet_info_t* packet =
             (iree_hal_amd_gpu_pm4_dispatch_packet_info_t*)function->packet;
@@ -670,7 +675,7 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
     status = iree_hal_amd_gpu_executable_publish_feedback(executable, variant,
                                                           options->feedback);
   }
-  if (iree_status_is_ok(status) && executable->queue_image_addresses) {
+  if (iree_status_is_ok(status) && tsan_enabled) {
     const iree_hal_amd_gpu_image_symbol_t* config =
         iree_hal_amd_gpu_image_find_symbol(image, IREE_SV("iree_tsan_config"));
     memcpy(variant->memory->contents.data + config->address.offset,
@@ -692,11 +697,12 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
 static iree_status_t iree_hal_amd_gpu_executable_prepare(
     iree_hal_amd_gpu_executable_t* executable,
     const iree_hal_amd_gpu_executable_options_t* options,
-    const iree_hal_external_storage_class_t* classes) {
+    const iree_hal_external_storage_class_t* classes, bool tsan_enabled) {
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0;
        i < executable->variant_count && iree_status_is_ok(status); ++i) {
-    status = iree_hal_amd_gpu_executable_load_image(executable, options, i);
+    status = iree_hal_amd_gpu_executable_load_image(executable, options, i,
+                                                    tsan_enabled);
   }
   if (iree_status_is_ok(status)) {
     executable->memories[0].exports.classes = classes;
@@ -724,9 +730,9 @@ iree_status_t iree_hal_amd_gpu_executable_create(
       params->executable_data, host_allocator, &image));
   iree_status_t status = iree_hal_amd_gpu_executable_admit(&image, options);
   iree_host_size_t byte_length = 0, functions_offset = 0, globals_offset = 0;
-  const bool queue_scoped = iree_hal_amd_gpu_image_find_symbol(
+  const bool tsan_enabled = iree_hal_amd_gpu_image_find_symbol(
                                 &image, IREE_SV("iree_tsan_config")) != NULL;
-  const uint32_t variant_count = queue_scoped ? options->tsan_count : 1;
+  const uint32_t variant_count = tsan_enabled ? options->tsan_count : 1;
   iree_host_size_t exports_offset = 0, variants_offset = 0, memories_offset = 0,
                    addresses_offset = 0;
   iree_host_size_t function_count = 0, total_packet_count = 0;
@@ -749,7 +755,7 @@ iree_status_t iree_hal_amd_gpu_executable_create(
                           &variants_offset),
         IREE_STRUCT_FIELD(variant_count, iree_hal_amd_fabric_memory_t,
                           &memories_offset),
-        IREE_STRUCT_FIELD(queue_scoped ? variant_count : 0, uint64_t,
+        IREE_STRUCT_FIELD(tsan_enabled ? variant_count : 0, uint64_t,
                           &addresses_offset),
         IREE_STRUCT_FIELD_ALIGNED(function_count,
                                   iree_hal_amd_gpu_pm4_function_t, 64,
@@ -783,11 +789,11 @@ iree_status_t iree_hal_amd_gpu_executable_create(
     memset(&image, 0, sizeof(image));
     executable->variant_count = variant_count;
     executable->function_variant_stride =
-        queue_scoped ? (uint32_t)executable->image.metadata.kernel_count : 0;
+        tsan_enabled ? (uint32_t)executable->image.metadata.kernel_count : 0;
     executable->functions = (void*)((uint8_t*)executable + functions_offset);
     executable->variants = (void*)((uint8_t*)executable + variants_offset);
     executable->memories = (void*)((uint8_t*)executable + memories_offset);
-    if (queue_scoped) {
+    if (tsan_enabled) {
       executable->queue_image_addresses =
           (void*)((uint8_t*)executable + addresses_offset);
     }
@@ -826,7 +832,8 @@ iree_status_t iree_hal_amd_gpu_executable_create(
       memcpy(classes, options->memory->exports.classes,
              options->memory->exports.class_count * sizeof(*classes));
     }
-    status = iree_hal_amd_gpu_executable_prepare(executable, options, classes);
+    status = iree_hal_amd_gpu_executable_prepare(executable, options, classes,
+                                                 tsan_enabled);
   }
   iree_hal_amd_gpu_image_deinitialize(&image);
   if (iree_status_is_ok(status)) {

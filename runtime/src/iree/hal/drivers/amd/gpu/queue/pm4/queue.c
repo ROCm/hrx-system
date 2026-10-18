@@ -851,7 +851,8 @@ static iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish(
     // Instruction upload and host argument publication remain mandatory even
     // when the caller supplies an empty optional payload boundary.
     before.cache_control |= 1u | queue->options.barriers.acquire;
-    if (queue->options.tsan_enabled) {
+    if (function->launch.requirements &
+        IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_TSAN) {
       before.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
       before.cache_control |= queue->options.barriers.shader;
     }
