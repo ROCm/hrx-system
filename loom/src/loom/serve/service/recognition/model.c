@@ -1615,7 +1615,8 @@ static iree_status_t loom_serve_recognition_generator_collect(
       // Another ordinal may reuse the source buffer. The caller's bounded
       // storage freezes this packet before that source call can overwrite it.
       status = loom_serve_recognition_events_parse(
-          events, packet, invocation->frame_position + result.consumed_frames,
+          events, packet, invocation->frame_position,
+          invocation->frame_position + result.consumed_frames,
           invocation->outputs);
     }
   }

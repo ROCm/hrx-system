@@ -57,10 +57,11 @@ class RecognitionEventsTest : public ::testing::Test {
 
   iree_status_t Parse(const std::vector<uint8_t>& bytes,
                       loom_serve_recognition_output_flags_t outputs =
-                          LOOM_SERVE_RECOGNITION_OUTPUT_ALL) {
+                          LOOM_SERVE_RECOGNITION_OUTPUT_ALL,
+                      uint64_t input_begin = 160, uint64_t input_end = 480) {
     return loom_serve_recognition_events_parse(
         events_.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
-        480, outputs);
+        input_begin, input_end, outputs);
   }
 
   // Native caller owns one reusable packet independently of source storage.
@@ -91,7 +92,50 @@ TEST_F(RecognitionEventsTest, OwnsOrderedActivityAndIndependentRevisions) {
     EXPECT_EQ(event->transcript.flags,
               i ? LOOM_SERVE_RECOGNITION_TRANSCRIPT_FINAL : 0u);
   }
-  IREE_ASSERT_OK(Parse({}));
+  IREE_ASSERT_OK(Parse({}, LOOM_SERVE_RECOGNITION_OUTPUT_ALL, 480, 480));
+  EXPECT_EQ(loom_serve_recognition_events_count(events_.get()), 0u);
+}
+
+TEST_F(RecognitionEventsTest, ActivityPartitionsExactlyTheAcknowledgedPrefix) {
+  auto bytes = Packet();
+  bytes.resize(60);
+  iree_unaligned_store_le_u32(bytes.data(), 2);
+  std::copy_n(bytes.data() + 4, 28, bytes.data() + 32);
+  iree_unaligned_store_le_u64(bytes.data() + 20, 320);
+  iree_unaligned_store_le_u64(bytes.data() + 40, 320);
+  IREE_ASSERT_OK(Parse(bytes));
+  ASSERT_EQ(loom_serve_recognition_events_count(events_.get()), 2u);
+  EXPECT_EQ(loom_serve_recognition_events_at(events_.get(), 0)->activity.end,
+            320u);
+  EXPECT_EQ(loom_serve_recognition_events_at(events_.get(), 1)->activity.begin,
+            320u);
+
+  const std::pair<size_t, uint64_t> discontinuities[] = {
+      {12, 159}, {12, 161}, {40, 319}, {40, 321}, {48, 479}};
+  for (auto [offset, position] : discontinuities) {
+    SCOPED_TRACE(offset);
+    SCOPED_TRACE(position);
+    auto invalid = bytes;
+    iree_unaligned_store_le_u64(invalid.data() + offset, position);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(invalid));
+    EXPECT_EQ(loom_serve_recognition_events_count(events_.get()), 0u);
+  }
+  std::swap_ranges(bytes.begin() + 4, bytes.begin() + 32, bytes.begin() + 32);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(bytes));
+  EXPECT_EQ(loom_serve_recognition_events_count(events_.get()), 0u);
+}
+
+TEST_F(RecognitionEventsTest, OnlyRequestedActivityRequiresCoverage) {
+  auto bytes = Packet();
+  bytes.erase(bytes.begin() + 4, bytes.begin() + 32);
+  iree_unaligned_store_le_u32(bytes.data(), 2);
+  IREE_ASSERT_OK(Parse(bytes, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT));
+  EXPECT_EQ(loom_serve_recognition_events_count(events_.get()), 2u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(bytes));
+  EXPECT_EQ(loom_serve_recognition_events_count(events_.get()), 0u);
+
+  IREE_ASSERT_OK(Parse({}, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse({}));
   EXPECT_EQ(loom_serve_recognition_events_count(events_.get()), 0u);
 }
 

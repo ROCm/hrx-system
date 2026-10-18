@@ -74,6 +74,11 @@ iree_status_t loom_serve_recognition_stream_service_try_open(
 loom_serve_recognition_format_t loom_serve_recognition_stream_format(
     const loom_serve_recognition_stream_t* stream);
 
+// Immutable source input-window capacity, including lookahead. This is not
+// current write credit and remains available after execution/model retirement.
+iree_host_size_t loom_serve_recognition_stream_input_capacity(
+    const loom_serve_recognition_stream_t* stream);
+
 // Appends whole finite F32LE frames in the generator's declared geometry.
 // Copies only the available credit; zero accepted frames is normal pressure.
 // Malformed PCM, exceeding the request frame limit, and writing after EOF fail
