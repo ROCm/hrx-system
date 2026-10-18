@@ -48,6 +48,15 @@ expose several compositions sharing any of the same deployments. Repeat
 `--realtime_origin` for each browser application's exact Origin. Native clients
 that send no Origin header do not require an allowlist entry.
 
+Size the text deployment's
+[`context_capacity`](../model-documents.md#text-definitions) for instructions,
+tool definitions, conversation history, and generated output. A client may send
+a large tool catalogue or chat snapshot even for a short spoken question.
+Clients that delegate to a separate chat completion need to budget that
+request's complete context too. The assistant's `max_output_tokens` controls
+generated output; the underlying text deployment owns the total context limit
+and shared cache capacity.
+
 ## Send an utterance and receive speech
 
 Connect to `ws://127.0.0.1:8080/v1/realtime?model=assistant` using a WebSocket
@@ -316,3 +325,8 @@ already completed response; the client's reported cursor remains authoritative.
 has retired. Disconnect cancels delivery and joins accepted conversion work and
 checkpoint cleanup, including when model inference has been drained. Removing
 and replacing a deployment never redirects an old conversation to the replacement.
+Reconnect to use the replacement. A response using a removed text or speech
+deployment reports `failed`. Microphone input using a removed recognition or
+activity deployment reports an `error` event and closes the connection. Fresh
+conversations retain their own history while old conversations release their
+resources.
