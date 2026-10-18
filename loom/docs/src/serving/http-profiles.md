@@ -458,12 +458,12 @@ mono PCM16LE carried in base64 JSON strings. Supported commands are:
 
 | Event | Effect |
 | --- | --- |
-| `session.update` | Transactionally updates effective settings at an idle response boundary. |
+| `session.update` | Transactionally updates effective settings when the default conversation has no active response. |
 | `input_audio_buffer.append` | Appends complete PCM16 samples from the `audio` string. |
 | `input_audio_buffer.commit` | Creates an input item and finalizes recognition; does not create a response. |
 | `input_audio_buffer.clear` | Cancels the current uncommitted input item. |
-| `response.create` | Generates from canonical conversation history with an independent snapshot of output settings and optional response metadata. |
-| `response.cancel` | Cancels the active response, optionally checked against `response_id`. |
+| `response.create` | Captures selected input and output settings, then generates a default or independent response. |
+| `response.cancel` | Cancels the response named by `response_id`, or the active default response when omitted. |
 | `conversation.item.create` | Inserts a text message, function call, or function result. Optional `previous_item_id:"root"` prepends it. |
 | `conversation.item.delete` | Removes an item after active response ownership retires. |
 | `conversation.item.truncate` | Acknowledges `audio_end_ms` at `content_index:0` and removes the assistant audio transcript. |
@@ -485,7 +485,38 @@ for cancelled or failed responses. Metadata does not enter model context or
 affect text-prefix reuse. Session settings do not accept metadata.
 
 `response.created` establishes the response's input frontier. Later microphone
-commits follow that response in canonical history and cannot enter its input.
+commits cannot enter its input. The optional `conversation` field selects output
+membership: `"auto"` (the default) appends the reply to the default conversation;
+`"none"` keeps its output independent. One default response and several
+independent responses can progress together, within four live response slots.
+Cancelled requests retain their slots until accepted work retires.
+
+Omitting `input` captures the current default conversation, even with
+`conversation:"none"`. An explicit `input` array replaces that context; `[]`
+selects no conversation items. Effective instructions and tools still apply.
+Array members may be raw text messages, function calls, function results, or
+`{"type":"item_reference","id":"item-id"}` references to committed session
+items. Raw items are input only; they are not inserted into session history.
+Function results require a preceding complete call in the selected input, with
+unique call IDs. Raw audio and images are unsupported; microphone audio enters
+through `input_audio_buffer` and may then be referenced by its committed item ID.
+
+Selected content is fixed when the request is accepted. Later deletion or
+truncation cannot rewrite it. A selected microphone item that is still being
+transcribed retains its result and ordered audio delivery even if the original
+item is deleted. Unselected pending transcripts do not hold an independent
+response. Each selected input is bounded to 128 items and 1 MiB of decoded
+content, separate from the settings limits.
+
+Independent responses report `conversation_id:null`, publish response events,
+and emit no conversation-item additions or completions. Their completed output
+items remain referenceable by ID in subsequent explicit inputs and may be
+deleted. They share the session's item storage limit, but never enter default
+history implicitly. Default responses report the session's conversation ID.
+Omitted-ID cancellation, automatic interruption, and pending automatic reply
+intent apply to the default response. Clients cancel independent responses by
+their explicit IDs and route interleaved output using `response_id`.
+
 Message-item events begin only when content becomes available. A tool-only
 response contains function items and never opens a speech request; a response
 with neither content nor calls has `output:[]`. Client-created items may omit
@@ -536,7 +567,7 @@ intact, including when the effective-settings echo exceeds the message limit.
 Generated calls publish `response.output_item.added`,
 `response.function_call_arguments.delta`,
 `response.function_call_arguments.done`, and `response.output_item.done`, with
-matching conversation item events. Arguments become available after native
+matching conversation item events for default responses. Arguments become available after native
 completion validates the full call set. Only a `function_call` item with
 `status:"completed"` in `response.output_item.done` is executable;
 arguments-done alone does not establish completion. Output indices include any
@@ -559,9 +590,6 @@ Before publishing any executable call, the server reserves the entire call set
 and checks both individual events and the final response against output limits.
 Insufficient capacity fails that response without publishing a partial call set.
 
-Out-of-band responses and explicit response input selection reject explicitly.
-Open WebUI's auxiliary status responses require those additional capabilities.
-
 Text and speech output are incremental. Audio responses publish
 `response.output_audio_transcript.delta` and `response.output_audio.delta`;
 text-only responses publish `response.output_text.delta`. Completion includes
@@ -583,9 +611,13 @@ history, pending output, and pre-roll must fit this bound; an incompatible
 activity deployment fails before its detector receives samples. Increasing
 `input_capacity` supports larger source windows. Independent consumers apply
 bounded backpressure without copying an entire utterance or blocking a worker.
-Conversation storage permits 128 items and 1 MiB of text and identifiers;
-delete earlier items to reclaim it. Capacity exhaustion ends the connection
-instead of silently dropping audio or controls. WebSocket connections share the
+Conversation and independent output storage together permit 128 items and 1 MiB
+of text and identifiers; delete earlier items to reclaim it. Response admission,
+item creation, and session updates reject capacity exhaustion transactionally,
+leaving accepted work and prior settings intact. Exhaustion while accepting
+audio or publishing nontransactional controls ends the connection instead of
+silently dropping them. All responses share the connection's output credit;
+a stalled socket applies backpressure to that session. WebSocket connections share the
 server's long-lived connection credit, preserving a connection for administration.
 
 ## Embeddings

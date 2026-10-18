@@ -104,9 +104,21 @@ activity probabilities never encode playback or conversation policy.
 continuing speech interface under bounded output credit. Its finite output task
 borrows the native waveform block until actual task release. Generated samples,
 transport-admitted samples, and client-reported playback remain distinct.
-[Conversation history](realtime/conversation.h) owns canonical text, while
-[checkpoint ownership](realtime/history.h) retains the current completed prefix
-and its predecessor for interruption. No component copies entire KV histories.
+[Conversation storage](realtime/conversation.h) owns default history and a
+separate list of independent output groups under one session identity index.
+[Accepted context](realtime/context.h) serializes ready input once at admission
+and retains existing input receipts for pending transcripts. Canonical deletion
+does not cancel an accepted reader's PCM delivery or EOF. Independent responses
+never acquire the default writer's history gate; each native request and audio
+cursor survives changes in peer progress. Immutable conversion coefficients are
+shared. A rotating first publisher shares bounded wire credit across four live
+response records, including cancelled work awaiting retirement. Native services
+continue to own compatible execution batches and residency.
+
+[Checkpoint ownership](realtime/history.h) retains the current completed prefix
+and its predecessor for default-conversation interruption. Explicit input and
+independent responses do not capture or invalidate those checkpoints.
+No component copies entire KV histories.
 
 The real CLI socket witness lives in [session_test.py](realtime/session_test.py),
 with physical execution registered by CPU, AMDGPU, and SPIR-V providers. It checks
@@ -120,6 +132,11 @@ cancellation and peer disconnect. [Input lifetime tests](realtime/input_test.cc)
 retain borrowed PCM through conversion release, prime without audio, preserve
 activity coverage with a stalled consumer, and independently flush finite
 utterances. The
+[independent socket cases](realtime/independent_test.py) compare exact text and
+PCM across mixed raw/reference input, pending-transcript deletion, explicit
+cancellation, default overlap, detached output references, and a pending
+automatic turn with separately held recognition. Function-publication tests
+cancel at every default and independent event boundary. The
 [generation lifetime test](realtime/generation_test.cc) cancels an accepted
 conversion job while it borrows a real native waveform block. Numerical audio
 tests cover rate conversion, downmixing, packet boundaries, EOF, and saturation.

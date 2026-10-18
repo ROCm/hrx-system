@@ -10,8 +10,12 @@
 #include <unistd.h>
 
 #include <array>
+#include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
@@ -22,6 +26,7 @@
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/realtime/item.h"
 #include "loom/serve/testing/service_application.h"
+#include "loom/serve/testing/worker_gate.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/websocket/handshake.h"
 
@@ -42,7 +47,8 @@ std::string Field(const std::string& object, const char* key) {
   return std::string(value.data, value.size);
 }
 
-class RealtimeResponseTest : public ::testing::TestWithParam<int> {
+class RealtimeResponseTest
+    : public ::testing::TestWithParam<std::tuple<int, bool>> {
  protected:
   void SetUp() override {
     iree_notification_initialize(&notification_);
@@ -191,6 +197,7 @@ class RealtimeResponseTest : public ::testing::TestWithParam<int> {
   void TearDown() override {
     if (responses_) {
       closing_ = true;
+      advance_responses_ = true;
       loom_serve_realtime_responses_stop(responses_);
       loom_serve_realtime_history_invalidate(&history_, 0);
       loom_serve_realtime_wire_clear(&wire_);
@@ -233,7 +240,7 @@ class RealtimeResponseTest : public ::testing::TestWithParam<int> {
     IREE_RETURN_IF_ERROR(
         loom_serve_realtime_item_parse(&conversation_, object, &item));
     auto status = loom_serve_realtime_conversation_insert(
-        &conversation_, conversation_.last, item);
+        &conversation_, conversation_.history.last, item);
     if (!iree_status_is_ok(status)) {
       loom_serve_realtime_conversation_remove(&conversation_, item);
     }
@@ -288,9 +295,9 @@ class RealtimeResponseTest : public ::testing::TestWithParam<int> {
     while (iree_status_is_ok(status) && !done()) {
       auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      if (responses_) {
+      if (responses_ && advance_responses_) {
         status = loom_serve_realtime_responses_advance(responses_, closing_,
-                                                       UINT64_MAX, &progress);
+                                                       &progress);
         if (iree_status_is_ok(status)) {
           bool cleanup_failed = false;
           status = loom_serve_realtime_history_advance(
@@ -356,20 +363,33 @@ class RealtimeResponseTest : public ::testing::TestWithParam<int> {
   loom_serve_realtime_responses_t* responses_ = nullptr;
   // Teardown withdraws accepted native and CPU work before freeing storage.
   bool closing_ = false;
+  // Pauses response turns while native services publish a retained waveform.
+  bool advance_responses_ = true;
 };
 
 TEST_P(RealtimeResponseTest, CancellationPreservesOnlyExecutableCalls) {
+  const auto [cut, independent] = GetParam();
   IREE_ASSERT_OK(loom_serve_realtime_responses_create(
-      responses_, iree_string_view_empty()));
-  EXPECT_EQ(Field(NextEvent(), "type"), "response.created");
-  // Six events per call. Parameterization cuts before and after each of the
-  // first two calls' publication boundaries, with no timing or thread race.
-  for (int i = 0; i < GetParam(); ++i) {
+      responses_,
+      independent ? IREE_SV(R"({"conversation":"none"})")
+                  : iree_string_view_empty(),
+      nullptr));
+  const std::string created = NextEvent();
+  EXPECT_EQ(Field(created, "type"), "response.created");
+  const std::string identity = Field(Field(created, "response"), "id");
+  // Default output has six events per call; independent output has four. Cut
+  // before and after both calls' publication boundaries without a thread race.
+  for (int i = 0; i < cut; ++i) {
     const std::string event = NextEvent();
     ASSERT_NE(Field(event, "type"), "response.done") << event;
   }
+  if (independent) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                          loom_serve_realtime_responses_cancel(
+                              responses_, iree_string_view_empty()));
+  }
   IREE_ASSERT_OK(loom_serve_realtime_responses_cancel(
-      responses_, iree_string_view_empty()));
+      responses_, independent ? View(identity) : iree_string_view_empty()));
   std::string response;
   do {
     const std::string event = NextEvent();
@@ -378,12 +398,18 @@ TEST_P(RealtimeResponseTest, CancellationPreservesOnlyExecutableCalls) {
     }
   } while (response.empty());
   EXPECT_EQ(Field(response, "status"), "cancelled");
-  const int announced = (GetParam() + 5) / 6;
-  const int completed = (GetParam() + 1) / 6;
+  const int announced = independent ? (cut + 3) / 4 : (cut + 5) / 6;
+  const int completed = independent ? cut / 4 : (cut + 1) / 6;
   const auto output = Field(response, "output");
   iree_host_size_t count = 0;
   IREE_ASSERT_OK(iree_json_array_length(View(output), &count));
   ASSERT_EQ(count, announced) << response;
+  std::string inputs =
+      "[{\"type\":\"item_reference\",\"id\":\"" +
+      std::string(conversation_.history.first->first->id.buffer,
+                  conversation_.history.first->first->id.size) +
+      "\"}";
+  std::string results;
   for (int i = 0; i < announced; ++i) {
     iree_string_view_t value;
     IREE_ASSERT_OK(iree_json_array_get(View(output), i, &value));
@@ -393,16 +419,34 @@ TEST_P(RealtimeResponseTest, CancellationPreservesOnlyExecutableCalls) {
     const std::string result =
         "{\"type\":\"function_call_output\",\"call_id\":\"" +
         Field(item, "call_id") + "\",\"output\":\"a\"}";
-    if (i < completed) {
+    if (independent) {
+      const std::string reference =
+          "{\"type\":\"item_reference\",\"id\":\"" + Field(item, "id") + "\"}";
+      if (i < completed) {
+        inputs += "," + reference;
+        results += "," + result;
+      } else {
+        const std::string invalid =
+            "{\"conversation\":\"none\",\"input\":[" + reference + "]}";
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                              loom_serve_realtime_responses_create(
+                                  responses_, View(invalid), nullptr));
+      }
+    } else if (i < completed) {
       IREE_ASSERT_OK(Insert(View(result)));
     } else {
       IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Insert(View(result)));
     }
   }
+  std::string overrides =
+      R"({"tool_choice":"none","output_modalities":["text"],"max_output_tokens":2)";
+  if (independent) {
+    overrides +=
+        ",\"conversation\":\"none\",\"input\":" + inputs + results + "]";
+  }
+  overrides += "}";
   IREE_ASSERT_OK(loom_serve_realtime_responses_create(
-      responses_,
-      IREE_SV(
-          R"({"tool_choice":"none","output_modalities":["text"],"max_output_tokens":2})")));
+      responses_, View(overrides), nullptr));
   std::string text;
   response.clear();
   do {
@@ -423,7 +467,77 @@ TEST_P(RealtimeResponseTest, CancellationPreservesOnlyExecutableCalls) {
             "0");
 }
 
+TEST_F(RealtimeResponseTest, ReplacementAdmitsWhileCancelledAudioRetires) {
+  loom_serve_realtime_conversation_remove(&conversation_,
+                                          conversation_.history.first->first);
+  IREE_ASSERT_OK(Insert(IREE_SV(
+      R"({"type":"message","role":"user","content":[{"type":"input_text","text":"abxa"}]})")));
+  IREE_ASSERT_OK(loom_serve_realtime_responses_create(
+      responses_, IREE_SV(R"({"tools":[],"tool_choice":"none"})"), nullptr));
+  EXPECT_EQ(Field(NextEvent(), "type"), "response.created");
+  // A message is announced only after content reaches the speech input. Drain
+  // its opening events to restore transport credit, then leave response turns
+  // paused until the native speech service publishes the retained waveform.
+  EXPECT_EQ(Field(NextEvent(), "type"), "conversation.item.added");
+  advance_responses_ = false;
+  EXPECT_EQ(Field(NextEvent(), "type"), "response.output_item.added");
+  EXPECT_EQ(Field(NextEvent(), "type"), "response.content_part.added");
+  IREE_ASSERT_OK(Until([&] {
+    const auto& speech = loom_serve_registry_at(registry_, 1)->service;
+    return std::strcmp(speech.snapshot(speech.self).phase, "delivering") == 0 &&
+           loom_serve_realtime_wire_can_publish(&wire_);
+  }));
+  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  for (int32_t i = 0; i < FLAG_test_workers; ++i) {
+    gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
+        loom_serve_host_executor(host_)));
+  }
+  bool progress = false;
+  IREE_ASSERT_OK(
+      loom_serve_realtime_responses_advance(responses_, false, &progress));
+  IREE_ASSERT_OK(loom_serve_realtime_responses_cancel(
+      responses_, iree_string_view_empty()));
+  const auto& text = loom_serve_registry_at(registry_, 0)->service;
+  EXPECT_EQ(text.snapshot(text.self).queued_requests, 0u);
+  IREE_ASSERT_OK(loom_serve_realtime_responses_create(
+      responses_,
+      IREE_SV(R"({"output_modalities":["text"],"tool_choice":"none"})"),
+      nullptr));
+  IREE_ASSERT_OK(
+      loom_serve_realtime_responses_advance(responses_, false, &progress));
+  EXPECT_EQ(text.snapshot(text.self).queued_requests, 1u);
+  gates.clear();
+  advance_responses_ = true;
+  int completed = 0, cancelled = 0;
+  while (completed + cancelled < 2) {
+    const std::string event = NextEvent();
+    if (Field(event, "type") != "response.done") {
+      continue;
+    }
+    const auto status = Field(Field(event, "response"), "status");
+    if (status == "cancelled") {
+      ++cancelled;
+    } else {
+      EXPECT_TRUE(status == "completed" || status == "incomplete") << event;
+      ++completed;
+    }
+  }
+  EXPECT_EQ(completed, 1);
+  EXPECT_EQ(cancelled, 1);
+}
+
+std::vector<std::tuple<int, bool>> PublicationCuts() {
+  std::vector<std::tuple<int, bool>> cuts;
+  for (bool independent : {false, true}) {
+    const int event_count = independent ? 8 : 12;
+    for (int cut = 0; cut <= event_count; ++cut) {
+      cuts.emplace_back(cut, independent);
+    }
+  }
+  return cuts;
+}
+
 INSTANTIATE_TEST_SUITE_P(PublicationBoundary, RealtimeResponseTest,
-                         ::testing::Range(0, 13));
+                         ::testing::ValuesIn(PublicationCuts()));
 
 }  // namespace

@@ -18,13 +18,13 @@
 extern "C" {
 #endif
 
-// One default-conversation writer and independently retiring cancelled work.
+// One default writer and independent responses, including retiring work.
 // All calls belong to the serialized session owner. CPU work borrows only
-// generation-owned state and the stable conversion workspace.
+// generation-owned state and stable immutable conversion coefficients.
 typedef struct loom_serve_realtime_responses_t loom_serve_realtime_responses_t;
 
 // Borrows every dependency through retirement. Only the response records and
-// speech conversion workspace belong to this owner; no model work starts here.
+// shared speech coefficients belong to this owner; no model work starts here.
 iree_status_t loom_serve_realtime_responses_allocate(
     uint64_t session_id, const loom_serve_realtime_profile_t* profile,
     loom_serve_realtime_binding_t text, loom_serve_realtime_binding_t speech,
@@ -45,8 +45,11 @@ bool loom_serve_realtime_responses_available(
     const loom_serve_realtime_responses_t* owner);
 bool loom_serve_realtime_responses_pending(
     const loom_serve_realtime_responses_t* owner);
+// Admission captures context and queues response.created atomically. Optional
+// out_default reports whether this request consumes default automatic intent.
 iree_status_t loom_serve_realtime_responses_create(
-    loom_serve_realtime_responses_t* owner, iree_string_view_t overrides);
+    loom_serve_realtime_responses_t* owner, iree_string_view_t overrides,
+    bool* out_default);
 // encoded_id borrows the command's JSON string; empty means the active writer.
 iree_status_t loom_serve_realtime_responses_cancel(
     loom_serve_realtime_responses_t* owner, iree_string_view_t encoded_id);
@@ -63,12 +66,10 @@ iree_status_t loom_serve_realtime_responses_edit(
     loom_serve_realtime_responses_t* owner, loom_serve_realtime_item_t* item,
     bool truncate, bool changes_history);
 
-// earliest_input is the earliest unfinished committed transcription sequence,
-// or UINT64_MAX when none exists. Deferred responses consume only earlier
-// input.
+// Advances accepted immutable inputs, native generations, and bounded wire
+// publication. Pending transcription readiness is owned by each input snapshot.
 iree_status_t loom_serve_realtime_responses_advance(
-    loom_serve_realtime_responses_t* owner, bool closing,
-    uint64_t earliest_input, bool* out_progress);
+    loom_serve_realtime_responses_t* owner, bool closing, bool* out_progress);
 
 #ifdef __cplusplus
 }  // extern "C"

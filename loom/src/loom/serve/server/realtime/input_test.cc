@@ -167,7 +167,7 @@ TEST_F(RealtimeInputTest, CancelRetainsPcmUntilAcceptedConversionReleases) {
   EXPECT_EQ(releases, 1u);
 }
 
-TEST_F(RealtimeInputTest, IndependentPcmItemsFlushFiniteConversion) {
+TEST_F(RealtimeInputTest, IndependentPcmItemsFlushAndRetainFinalResults) {
   const loom_serve_recognition_request_t request = {
       .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
   };
@@ -191,13 +191,31 @@ TEST_F(RealtimeInputTest, IndependentPcmItemsFlushFiniteConversion) {
            loom_serve_realtime_input_transcript(items[1]);
   }));
   EXPECT_EQ(releases, 8u);
+  using Reader = std::unique_ptr<loom_serve_realtime_input_item_t,
+                                 decltype(&loom_serve_realtime_input_release)>;
+  std::vector<Reader> readers;
   for (auto* item : items) {
     IREE_ASSERT_OK(loom_serve_realtime_input_status(item));
     const auto* text = loom_serve_realtime_input_transcript(item);
     EXPECT_EQ(std::string(text->buffer, text->size), "A");
     EXPECT_EQ(loom_serve_realtime_input_frames(item), 240u);
+    loom_serve_realtime_input_retain(item);
+    readers.emplace_back(item, loom_serve_realtime_input_release);
     loom_serve_realtime_input_close(item);
   }
+  bool progress = false;
+  loom_serve_realtime_input_advance(input_, false, &progress);
+  ASSERT_TRUE(loom_serve_realtime_input_pending(input_));
+  for (const auto& reader : readers) {
+    IREE_ASSERT_OK(loom_serve_realtime_input_status(reader.get()));
+    const auto* text = loom_serve_realtime_input_transcript(reader.get());
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(std::string(text->buffer, text->size), "A");
+  }
+  readers.pop_back();
+  loom_serve_realtime_input_advance(input_, false, &progress);
+  EXPECT_TRUE(loom_serve_realtime_input_pending(input_));
+  readers.clear();
   IREE_ASSERT_OK(
       Until([&] { return !loom_serve_realtime_input_pending(input_); }));
 }
