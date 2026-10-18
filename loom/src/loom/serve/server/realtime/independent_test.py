@@ -425,11 +425,39 @@ def independent_cancel_scope(address, trace):
         client.send("response.cancel")
         responses = collect(client, events, {default})
         assert responses[default]["status"] == "cancelled", responses
-        client.send("response.cancel", event_id="no-default")
+        for event_id, kind, fields, code in (
+            ("no-default", "response.cancel", {}, "response_cancel_not_active"),
+            (
+                "cancelled-response",
+                "response.cancel",
+                {"response_id": default},
+                "response_cancel_not_active",
+            ),
+            (
+                "unknown-response",
+                "response.cancel",
+                {"response_id": "missing"},
+                "response_cancel_not_active",
+            ),
+            (
+                "unknown-item",
+                "conversation.item.delete",
+                {"item_id": "missing"},
+                "NOT_FOUND",
+            ),
+        ):
+            client.send(kind, event_id=event_id, **fields)
+            error = client.receive(allow_error=True)
+            assert error["type"] == "error", error
+            assert error["error"]["type"] == "invalid_request_error", error
+            assert error["error"]["event_id"] == event_id, error
+            assert error["error"]["code"] == code, error
+            assert error["error"]["message"], error
+        client.send("response.cancel", response_id=7)
         error = client.receive(allow_error=True)
-        assert (
-            error["type"] == "error" and error["error"]["event_id"] == "no-default"
-        ), error
+        assert error["type"] == "error", error
+        assert error["error"]["type"] == "invalid_request_error", error
+        assert error["error"]["code"] == "INVALID_ARGUMENT", error
         admin.request("/v1/models/undrain", {"model": "fixture-text"})
         drained = False
         responses = collect(client, events, {independent})
@@ -438,6 +466,13 @@ def independent_cancel_scope(address, trace):
             responses[independent],
             complete([{"role": "user", "content": "b"}], 2)[0],
         )
+        client.send(
+            "response.cancel", response_id=independent, event_id="completed-response"
+        )
+        error = client.receive(allow_error=True)
+        assert error["type"] == "error", error
+        assert error["error"]["event_id"] == "completed-response", error
+        assert error["error"]["code"] == "response_cancel_not_active", error
         client.respond([{"role": "user", "content": "a"}])
         # Socket close drops the final snapshot reader while its original
         # canonical item has already been deleted and STT admission is held.
