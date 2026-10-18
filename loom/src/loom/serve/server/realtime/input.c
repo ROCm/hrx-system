@@ -69,6 +69,8 @@ struct loom_serve_realtime_input_item_t {
   bool finished;
   // Caller interest ended; no new CPU or native work may be admitted.
   bool closed;
+  // Serialized-owner result readers, independent of the PCM producer.
+  iree_host_size_t readers;
   // Final text formatting completed successfully after native completion.
   bool complete;
   // Owned terminal outcome, published only after the last CPU access retires.
@@ -355,6 +357,22 @@ void loom_serve_realtime_input_finish(loom_serve_realtime_input_item_t* item) {
 
 void loom_serve_realtime_input_close(loom_serve_realtime_input_item_t* item) {
   item->closed = true;
+  if (!item->complete && iree_status_is_ok(item->status)) {
+    item->status = iree_status_from_code(IREE_STATUS_CANCELLED);
+  }
+}
+
+void loom_serve_realtime_input_retain(loom_serve_realtime_input_item_t* item) {
+  ++item->readers;
+}
+
+void loom_serve_realtime_input_release(loom_serve_realtime_input_item_t* item) {
+  --item->readers;
+}
+
+bool loom_serve_realtime_input_has_readers(
+    const loom_serve_realtime_input_item_t* item) {
+  return item->readers != 0;
 }
 
 static void loom_serve_realtime_input_collect(
@@ -455,12 +473,18 @@ void loom_serve_realtime_input_advance(loom_serve_realtime_input_t* input,
   loom_serve_realtime_input_item_t** link = &input->items;
   while (*link) {
     loom_serve_realtime_input_item_t* item = *link;
-    item->closed |= stopping;
+    if (stopping) {
+      loom_serve_realtime_input_close(item);
+    }
     if (item == input->working) {
       link = &item->next;
       continue;
     }
     if (item->closed) {
+      if (item->readers) {
+        link = &item->next;
+        continue;
+      }
       *link = item->next;
       loom_serve_realtime_input_item_free(input, item);
       --input->count;

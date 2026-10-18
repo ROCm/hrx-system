@@ -79,6 +79,14 @@ iree_status_t loom_serve_realtime_output_write(
   IREE_RETURN_IF_ERROR(
       loom_output_stream_write_cstring(output, ",\"response\":{\"id\":"));
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(output, view->id));
+  IREE_RETURN_IF_ERROR(
+      loom_output_stream_write_cstring(output, ",\"conversation_id\":"));
+  if (view->conversation_id) {
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+        output, "\"conv_%" PRIu64 "\"", view->conversation_id));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(output, "null"));
+  }
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       output,
       ",\"object\":\"realtime.response\",\"status\":\"%s\","
@@ -256,7 +264,7 @@ iree_status_t loom_serve_realtime_output_admit(
         "response.output_item.done",
         "response.function_call_arguments.delta",
         "response.function_call_arguments.done"};
-    for (iree_host_size_t i = 0;
+    for (iree_host_size_t i = view->conversation_id ? 0 : 2;
          i < IREE_ARRAYSIZE(types) && iree_status_is_ok(status); ++i) {
       status = loom_serve_realtime_output_measure_begin(session_id, types[i],
                                                         &output);

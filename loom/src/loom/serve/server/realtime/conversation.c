@@ -8,9 +8,6 @@
 
 #include <inttypes.h>
 
-static const char* const loom_serve_realtime_roles[] = {"user", "assistant",
-                                                        "system"};
-
 void loom_serve_realtime_conversation_initialize(
     uint64_t session_id, iree_allocator_t host_allocator,
     loom_serve_realtime_conversation_t* conversation) {
@@ -24,12 +21,12 @@ static void loom_serve_realtime_group_free(
   if (group->previous) {
     group->previous->next = group->next;
   } else {
-    conversation->first = group->next;
+    group->owner->first = group->next;
   }
   if (group->next) {
     group->next->previous = group->previous;
   } else {
-    conversation->last = group->previous;
+    group->owner->last = group->previous;
   }
   iree_allocator_free(conversation->host_allocator, group);
 }
@@ -42,8 +39,13 @@ void loom_serve_realtime_conversation_deinitialize(
                                               conversation->items[i]);
     }
   }
-  while (conversation->first) {
-    loom_serve_realtime_conversation_release(conversation, conversation->first);
+  while (conversation->history.first) {
+    loom_serve_realtime_conversation_release(conversation,
+                                             conversation->history.first);
+  }
+  while (conversation->detached.first) {
+    loom_serve_realtime_conversation_release(conversation,
+                                             conversation->detached.first);
   }
 }
 
@@ -138,19 +140,20 @@ static iree_status_t loom_serve_realtime_group_allocate(
 }
 
 static void loom_serve_realtime_group_insert(
-    loom_serve_realtime_conversation_t* conversation,
-    loom_serve_realtime_group_t* after, loom_serve_realtime_group_t* group) {
+    loom_serve_realtime_groups_t* owner, loom_serve_realtime_group_t* after,
+    loom_serve_realtime_group_t* group) {
+  group->owner = owner;
   group->previous = after;
-  group->next = after ? after->next : conversation->first;
+  group->next = after ? after->next : owner->first;
   if (after) {
     after->next = group;
   } else {
-    conversation->first = group;
+    owner->first = group;
   }
   if (group->next) {
     group->next->previous = group;
   } else {
-    conversation->last = group;
+    owner->last = group;
   }
 }
 
@@ -210,7 +213,7 @@ iree_status_t loom_serve_realtime_conversation_insert(
   loom_serve_realtime_group_t* group = NULL;
   IREE_RETURN_IF_ERROR(
       loom_serve_realtime_group_allocate(conversation, &group));
-  loom_serve_realtime_group_insert(conversation, after, group);
+  loom_serve_realtime_group_insert(&conversation->history, after, group);
   loom_serve_realtime_group_append(group, item);
   return iree_ok_status();
 }
@@ -252,14 +255,14 @@ iree_status_t loom_serve_realtime_conversation_insert_after(
     loom_serve_realtime_group_append(suffix, member);
     member = next;
   }
-  loom_serve_realtime_group_insert(conversation, prefix, inserted);
+  loom_serve_realtime_group_insert(&conversation->history, prefix, inserted);
   loom_serve_realtime_group_append(inserted, item);
-  loom_serve_realtime_group_insert(conversation, inserted, suffix);
+  loom_serve_realtime_group_insert(&conversation->history, inserted, suffix);
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_realtime_conversation_begin(
-    loom_serve_realtime_conversation_t* conversation,
+    loom_serve_realtime_conversation_t* conversation, bool independent,
     loom_serve_realtime_group_t** out_group) {
   *out_group = NULL;
   if (conversation->count == IREE_ARRAYSIZE(conversation->items)) {
@@ -269,8 +272,9 @@ iree_status_t loom_serve_realtime_conversation_begin(
   }
   IREE_RETURN_IF_ERROR(
       loom_serve_realtime_group_allocate(conversation, out_group));
-  loom_serve_realtime_group_insert(conversation, conversation->last,
-                                   *out_group);
+  loom_serve_realtime_groups_t* owner =
+      independent ? &conversation->detached : &conversation->history;
+  loom_serve_realtime_group_insert(owner, owner->last, *out_group);
   (*out_group)->retained = true;
   ++conversation->count;
   return iree_ok_status();
@@ -310,7 +314,7 @@ loom_serve_realtime_item_t* loom_serve_realtime_conversation_previous(
 
 loom_serve_realtime_item_t* loom_serve_realtime_conversation_last_item(
     const loom_serve_realtime_conversation_t* conversation) {
-  const loom_serve_realtime_group_t* group = conversation->last;
+  const loom_serve_realtime_group_t* group = conversation->history.last;
   return !group        ? NULL
          : group->last ? group->last
                        : loom_serve_realtime_conversation_previous(group);
@@ -430,118 +434,4 @@ void loom_serve_realtime_conversation_truncate(
   conversation->bytes -= item->text.size;
   iree_string_builder_reset(&item->text);
   item->has_transcript = false;
-}
-
-static iree_status_t loom_serve_realtime_message_write(
-    iree_string_builder_t* output, const char* role, iree_string_view_t text,
-    bool comma) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, "%s{\"role\":\"%s\",\"content\":", comma ? "," : "", role));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(output, text));
-  return iree_string_builder_append_cstring(output, "}");
-}
-
-static iree_status_t loom_serve_realtime_group_write(
-    const loom_serve_realtime_group_t* group, bool comma,
-    iree_string_builder_t* output) {
-  const loom_serve_realtime_item_t* message = group->message;
-  const bool result =
-      message && message->kind == LOOM_SERVE_REALTIME_ITEM_FUNCTION_OUTPUT;
-  const char* role = result    ? "tool"
-                     : message ? loom_serve_realtime_roles[message->role]
-                               : "assistant";
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, "%s{\"role\":\"%s\",\"content\":", comma ? "," : "", role));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-      output, message && message->has_transcript
-                  ? iree_string_builder_view(&message->text)
-                  : iree_string_view_empty()));
-  if (result) {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(output, ",\"tool_call_id\":"));
-    IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(
-        output, iree_string_builder_view(&message->call_id)));
-  }
-  if (group->completed_calls) {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(output, ",\"tool_calls\":["));
-    bool call_comma = false;
-    iree_status_t status = iree_ok_status();
-    for (const loom_serve_realtime_item_t* item = group->first;
-         item && iree_status_is_ok(status); item = item->next) {
-      if (item->kind != LOOM_SERVE_REALTIME_ITEM_FUNCTION_CALL ||
-          item->status != LOOM_SERVE_REALTIME_ITEM_COMPLETED) {
-        continue;
-      }
-      status = iree_string_builder_append_cstring(
-          output, call_comma ? ",{\"id\":" : "{\"id\":");
-      if (iree_status_is_ok(status)) {
-        status = loom_serve_realtime_string_write(
-            output, iree_string_builder_view(&item->call_id));
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_string_builder_append_cstring(
-            output, ",\"type\":\"function\",\"function\":{\"name\":");
-      }
-      if (iree_status_is_ok(status)) {
-        status = loom_serve_realtime_string_write(
-            output, iree_string_builder_view(&item->name));
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_string_builder_append_cstring(output, ",\"arguments\":");
-      }
-      if (iree_status_is_ok(status)) {
-        status = loom_serve_realtime_string_write(
-            output, iree_string_builder_view(&item->text));
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_string_builder_append_cstring(output, "}}");
-      }
-      call_comma = true;
-    }
-    IREE_RETURN_IF_ERROR(status);
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "]"));
-  }
-  return iree_string_builder_append_cstring(output, "}");
-}
-
-iree_status_t loom_serve_realtime_conversation_request(
-    const loom_serve_realtime_conversation_t* conversation,
-    const loom_serve_realtime_group_t* exclude, iree_string_view_t model,
-    iree_string_view_t instructions, iree_string_view_t tools,
-    uint32_t max_tokens, uint64_t seed, iree_string_builder_t* output) {
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, "{\"model\":"));
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_string_write(output, model));
-  if (tools.size) {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(output, ",\"tools\":"));
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_string(output, tools));
-  }
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output,
-      ",\"stream\":true,\"max_tokens\":%" PRIu32 ",\"seed\":%" PRIu64
-      ",\"messages\":[",
-      max_tokens, seed));
-  bool comma = false;
-  if (instructions.size) {
-    IREE_RETURN_IF_ERROR(loom_serve_realtime_message_write(
-        output, "system", instructions, false));
-    comma = true;
-  }
-  iree_status_t status = iree_ok_status();
-  for (const loom_serve_realtime_group_t* group = conversation->first;
-       group && group != exclude && iree_status_is_ok(status);
-       group = group->next) {
-    if ((!group->message || !group->message->has_transcript) &&
-        !group->completed_calls) {
-      continue;
-    }
-    status = loom_serve_realtime_group_write(group, comma, output);
-    comma = true;
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(output, "]}");
-  }
-  return status;
 }
