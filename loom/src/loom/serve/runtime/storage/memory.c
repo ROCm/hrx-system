@@ -258,28 +258,24 @@ static bool loom_serve_memory_pool_observe_capacity(
   return true;
 }
 
-iree_status_t loom_serve_memory_pool_allocate(
-    iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
-    iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
-    iree_device_size_t slab_size, uint64_t limit_bytes,
-    iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool) {
-  *out_pool = NULL;
-  iree_hal_virtual_buffer_capabilities_t capabilities;
-  IREE_RETURN_IF_ERROR(iree_hal_virtual_buffer_query_capabilities(
-      group, scope, host_allocator, &capabilities));
+iree_status_t loom_serve_memory_pool_query_slab_request(
+    const iree_hal_virtual_buffer_capabilities_t* capabilities,
+    iree_hal_pool_t* storage_pool, iree_device_size_t slab_size,
+    iree_hal_pool_reservation_request_t* out_request) {
+  *out_request = (iree_hal_pool_reservation_request_t){0};
   const iree_hal_memory_mapping_operations_t required =
       (1u << IREE_HAL_MEMORY_MAPPING_OPERATION_BIND) |
       (1u << IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND);
-  if (!capabilities.max_byte_length ||
-      !iree_all_bits_set(capabilities.operations, required)) {
+  if (!capabilities->max_byte_length ||
+      !iree_all_bits_set(capabilities->operations, required)) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "elastic backing requires bind and unbind support");
   }
   const iree_hal_pool_mapping_requirements_t requirements =
       iree_hal_pool_query_mapping_requirements(storage_pool);
   const iree_device_size_t minimum =
-      iree_max(capabilities.reservation_granularity,
-               iree_max(capabilities.mapping_granularity,
+      iree_max(capabilities->reservation_granularity,
+               iree_max(capabilities->mapping_granularity,
                         requirements.minimum_granularity));
   if (!slab_size) {
     slab_size = iree_max(minimum, requirements.recommended_granularity);
@@ -289,6 +285,29 @@ iree_status_t loom_serve_memory_pool_allocate(
                             "slab size must be a multiple of %" PRIdsz,
                             minimum);
   }
+  iree_hal_pool_capabilities_t source_capabilities;
+  iree_hal_pool_query_capabilities(storage_pool, &source_capabilities);
+  if (source_capabilities.max_allocation_size &&
+      slab_size > source_capabilities.max_allocation_size) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "slab size %" PRIdsz
+                            " exceeds backing source limit %" PRIdsz,
+                            slab_size, source_capabilities.max_allocation_size);
+  }
+  if (minimum > source_capabilities.max_allocation_alignment) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "backing source cannot satisfy slab alignment");
+  }
+  *out_request = iree_hal_make_pool_reservation_request(slab_size, minimum);
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_memory_pool_allocate(
+    iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
+    iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
+    iree_hal_pool_reservation_request_t slab_request, uint64_t limit_bytes,
+    iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool) {
+  *out_pool = NULL;
   loom_serve_memory_pool_t* pool = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
       host_allocator, sizeof(*pool), scope.family_count,
@@ -304,8 +323,8 @@ iree_status_t loom_serve_memory_pool_allocate(
          scope.family_count * sizeof(*scope.families));
   pool->mapping_scope = (iree_hal_memory_scope_t){
       iree_hal_device_group_memory_domain(group), IREE_HAL_MEMORY_SCOPE_ANY};
-  pool->slab_size = slab_size;
-  pool->minimum_alignment = minimum;
+  pool->slab_size = slab_request.allocation_size;
+  pool->minimum_alignment = slab_request.min_alignment;
   pool->limit_bytes = limit_bytes ? limit_bytes : UINT64_MAX;
   iree_slim_mutex_initialize(&pool->capacity_mutex);
   iree_notification_initialize(&pool->capacity_notification);
@@ -716,8 +735,8 @@ static void loom_serve_memory_operation_enqueue(
                                             &value};
   for (iree_host_size_t i = 0; i < operation->count; ++i) {
     loom_serve_memory_edit_t* edit = &operation->edits[i];
-    operation->requests[i] =
-        iree_hal_make_pool_reservation_request(pool->slab_size, 0);
+    operation->requests[i] = iree_hal_make_pool_reservation_request(
+        pool->slab_size, pool->minimum_alignment);
     if (operation->releasing) {
       operation->sources[i] = edit->result.physical;
     }

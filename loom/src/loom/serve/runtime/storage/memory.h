@@ -39,16 +39,27 @@ typedef struct loom_serve_memory_statistics_t {
   uint64_t released_bytes;
 } loom_serve_memory_statistics_t;
 
+// Resolves physical slab geometry against captured virtual-target capabilities
+// and one mapping source. Zero slab_size selects the source recommendation;
+// explicit sizes must satisfy source and target geometry and the native limit.
+// Returns UNAVAILABLE for missing mapping support, INVALID_ARGUMENT for invalid
+// geometry, or OUT_OF_RANGE when the requested extent exceeds the source limit.
+// This is a cold admission query and acquires no physical backing.
+iree_status_t loom_serve_memory_pool_query_slab_request(
+    const iree_hal_virtual_buffer_capabilities_t* capabilities,
+    iree_hal_pool_t* storage_pool, iree_device_size_t slab_size,
+    iree_hal_pool_reservation_request_t* out_request);
+
 // Retains the mapping-source pool and copies the exact virtual-target scope.
-// The sealed group and selected transfer queue outlive this pool. Zero
-// slab_size selects the common recommended granularity; explicit sizes satisfy
-// both source and target geometry. limit_bytes bounds physical commitment,
+// The sealed group and selected transfer queue outlive this pool. slab_request
+// is the query result for this exact source and target scope; it is consumed
+// without repeating native queries. limit_bytes bounds physical commitment,
 // including native releases not yet completed. Zero imposes no serving budget.
 // Each reservation borrows this pool and is destroyed before the pool.
 iree_status_t loom_serve_memory_pool_allocate(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
-    iree_device_size_t slab_size, uint64_t limit_bytes,
+    iree_hal_pool_reservation_request_t slab_request, uint64_t limit_bytes,
     iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool);
 
 void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool);

@@ -10,6 +10,7 @@
 #include <atomic>
 #include <vector>
 
+#include "iree/hal/memory/fixed_block_pool.h"
 #include "iree/hal/testing/deferred_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -104,8 +105,14 @@ class MemoryTest : public ::testing::Test {
     for (auto& family : families) {
       family.interfaces = 0;
     }
+    iree_hal_virtual_buffer_capabilities_t capabilities;
+    IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+        hal_group, scope, host_allocator, &capabilities));
+    iree_hal_pool_reservation_request_t request;
+    IREE_ASSERT_OK(loom_serve_memory_pool_query_slab_request(
+        &capabilities, deferred_backing, kSlabSize, &request));
     IREE_ASSERT_OK(loom_serve_memory_pool_allocate(
-        hal_group, scope, deferred_backing, queue, kSlabSize, limit_bytes,
+        hal_group, scope, deferred_backing, queue, request, limit_bytes,
         host_allocator, &owned_pool));
     pool = owned_pool;
   }
@@ -212,6 +219,58 @@ class MemoryTest : public ::testing::Test {
   // Private command allocation retained until its queue release is submitted.
   iree_hal_buffer_t* workspace = nullptr;
 };
+
+TEST_F(MemoryTest, SlabRequestRespectsFiniteBackingCapacity) {
+  iree_hal_pool_family_access_t family = {
+      .family = iree_hal_queue_family(loom_serve_device_transfer_queue(device)),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+  };
+  const iree_hal_pool_scope_t scope = {.family_count = 1, .families = &family};
+  iree_hal_pool_t* source = nullptr;
+  iree_hal_slab_pool_options_t source_options;
+  iree_hal_slab_pool_options_initialize(&source_options);
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(loom_serve_device_group(device),
+                                           scope, &source_options,
+                                           iree_allocator_system(), &source));
+  family.interfaces = 0;
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      loom_serve_device_group(device), scope, iree_allocator_system(),
+      &capabilities));
+  iree_hal_pool_reservation_request_t request;
+  IREE_ASSERT_OK(loom_serve_memory_pool_query_slab_request(
+      &capabilities, source, kSlabSize, &request));
+  const iree_hal_fixed_block_pool_options_t options = {
+      .block_size = request.allocation_size,
+      .blocks_per_slab = 1,
+      .alignment = request.min_alignment,
+  };
+  iree_hal_pool_t* bounded_source = nullptr;
+  IREE_ASSERT_OK(iree_hal_fixed_block_pool_create(
+      source, &options, iree_allocator_system(), &bounded_source));
+  iree_hal_pool_release(source);
+  IREE_ASSERT_OK(loom_serve_memory_pool_query_slab_request(
+      &capabilities, bounded_source, kSlabSize, &request));
+  EXPECT_EQ(request.allocation_size, kSlabSize);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_serve_memory_pool_query_slab_request(&capabilities, bounded_source,
+                                                2 * kSlabSize, &request));
+  EXPECT_EQ(request.allocation_size, 0u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_memory_pool_query_slab_request(&capabilities, bounded_source,
+                                                kSlabSize - 1, &request));
+  IREE_ASSERT_OK(loom_serve_memory_pool_query_slab_request(
+      &capabilities, bounded_source, 0, &request));
+  EXPECT_GT(request.allocation_size, 0u);
+  EXPECT_LE(request.allocation_size, kSlabSize);
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(bounded_source, &stats);
+  EXPECT_EQ(stats.bytes_committed, 0u);
+  iree_hal_pool_release(bounded_source);
+}
 
 TEST_F(MemoryTest, PendingReleaseRetainsBudgetAndLeavesKeptSlabsUsable) {
   ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());

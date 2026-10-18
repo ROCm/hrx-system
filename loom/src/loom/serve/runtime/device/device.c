@@ -91,6 +91,61 @@ static iree_status_t loom_serve_device_group_initialize(
   return status;
 }
 
+// Optional file registration is selected before physical acquisition. An
+// accelerated source must preserve the ordinary source's placement/locality
+// and the application's slab geometry. Once selected, pin or I/O failures
+// remain failures of that source.
+static iree_status_t loom_serve_device_select_io_backing(
+    loom_serve_device_t* device, iree_hal_pool_scope_t registered_scope,
+    const iree_hal_virtual_buffer_capabilities_t* virtual_capabilities,
+    iree_device_size_t slab_size, iree_hal_pool_t** inout_source_pool,
+    iree_hal_pool_reservation_request_t* inout_slab_request) {
+  iree_hal_pool_capabilities_t ordinary_capabilities;
+  iree_hal_pool_query_capabilities(*inout_source_pool, &ordinary_capabilities);
+  const iree_hal_slab_pool_options_t options = {
+      .placement = ordinary_capabilities.placement,
+      .trace_name = IREE_SVL("loom-serve-elastic-backing"),
+  };
+  iree_hal_pool_t* registered_pool = NULL;
+  iree_status_t status = iree_hal_slab_pool_create(
+      device->owner->handle, registered_scope, &options,
+      device->owner->host_allocator, &registered_pool);
+  if (iree_status_is_unavailable(status)) {
+    iree_status_free(status);
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(status);
+  iree_hal_pool_capabilities_t registered_capabilities;
+  iree_hal_pool_query_capabilities(registered_pool, &registered_capabilities);
+  const iree_hal_memory_type_t locality =
+      ordinary_capabilities.memory_type &
+      (IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+  if (!iree_all_bits_set(registered_capabilities.memory_type, locality)) {
+    iree_hal_pool_release(registered_pool);
+    return iree_ok_status();
+  }
+  iree_hal_pool_reservation_request_t request;
+  status = loom_serve_memory_pool_query_slab_request(
+      virtual_capabilities, registered_pool, slab_size, &request);
+  if (iree_status_is_invalid_argument(status) ||
+      iree_status_is_out_of_range(status) ||
+      iree_status_is_unavailable(status)) {
+    // The request already fits the ordinary source. Optional registration can
+    // impose a different granularity, alignment, or native allocation limit.
+    iree_status_free(status);
+    iree_hal_pool_release(registered_pool);
+    return iree_ok_status();
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_pool_release(*inout_source_pool);
+    *inout_source_pool = registered_pool;
+    *inout_slab_request = request;
+  } else {
+    iree_hal_pool_release(registered_pool);
+  }
+  return status;
+}
+
 static iree_status_t loom_serve_device_initialize(
     loom_serve_device_t* device, const loom_serve_device_options_t* options) {
   loom_serve_device_group_t* group = device->owner;
@@ -144,6 +199,9 @@ static iree_status_t loom_serve_device_initialize(
       group->handle, device->storage_pool, &asan_options, group->host_allocator,
       &device->workspace));
   if (options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
+    iree_hal_virtual_buffer_capabilities_t virtual_capabilities;
+    IREE_RETURN_IF_ERROR(iree_hal_virtual_buffer_query_capabilities(
+        group->handle, scope, group->host_allocator, &virtual_capabilities));
     iree_hal_pool_family_access_t source_families[IREE_ARRAYSIZE(families)];
     memcpy(source_families, families, sizeof(families));
     for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
@@ -159,9 +217,25 @@ static iree_status_t loom_serve_device_initialize(
     IREE_RETURN_IF_ERROR(
         iree_hal_slab_pool_create(group->handle, source_scope, &source_options,
                                   group->host_allocator, &source_pool));
-    iree_status_t status = loom_serve_memory_pool_allocate(
-        group->handle, scope, source_pool, device->transfer, options->slab_size,
-        options->memory_limit, group->host_allocator, &device->memory_pool);
+    iree_hal_pool_reservation_request_t slab_request;
+    iree_status_t status = loom_serve_memory_pool_query_slab_request(
+        &virtual_capabilities, source_pool, options->slab_size, &slab_request);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < source_scope.family_count; ++i) {
+        if (source_families[i].family == transfer_family) {
+          source_families[i].interfaces |=
+              UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
+        }
+      }
+      status = loom_serve_device_select_io_backing(
+          device, source_scope, &virtual_capabilities, options->slab_size,
+          &source_pool, &slab_request);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_memory_pool_allocate(
+          group->handle, scope, source_pool, device->transfer, slab_request,
+          options->memory_limit, group->host_allocator, &device->memory_pool);
+    }
     iree_hal_pool_release(source_pool);
     IREE_RETURN_IF_ERROR(status);
   }

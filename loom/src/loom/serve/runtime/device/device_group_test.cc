@@ -100,6 +100,24 @@ TEST_F(DeviceGroupTest, LaterPoolFailureReleasesSealedGroupAndEarlierPool) {
   EXPECT_EQ(group_, nullptr);
 }
 
+TEST_F(DeviceGroupTest, OptionalIoBackingPreservesExplicitSlabSize) {
+  constexpr uint64_t slab_size = 128 * 1024 * 1024;
+  const loom_serve_device_options_t options = {
+      .driver = driver_,
+      .uri = loom_serve_test_device()->device_uri,
+      .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
+      .slab_size = slab_size,
+  };
+  IREE_ASSERT_OK(loom_serve_device_group_allocate(
+      host_, 1, &options, iree_allocator_system(), &group_));
+  auto* device = loom_serve_device_group_at(group_, 0);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      loom_serve_device_memory_pool(device), 1, 256, &statistics_[0],
+      &reservations_[0]));
+  EXPECT_EQ(statistics_[0].reserved_bytes, slab_size);
+  EXPECT_EQ(statistics_[0].committed_bytes, 0u);
+}
+
 TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
   const loom_serve_device_options_t options[] = {
       {

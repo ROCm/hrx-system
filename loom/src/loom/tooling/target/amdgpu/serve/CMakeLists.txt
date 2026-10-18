@@ -1156,6 +1156,7 @@ loom_cc_test(
     ::test_device
     iree::base
     iree::hal
+    iree::hal::memory::fixed_block_pool
     iree::hal::testing::deferred_pool
     iree::testing::gtest
     iree::testing::gtest_main
@@ -1185,6 +1186,7 @@ loom_cc_test(
     ::test_device_rdna
     iree::base
     iree::hal
+    iree::hal::memory::fixed_block_pool
     iree::hal::testing::deferred_pool
     iree::testing::gtest
     iree::testing::gtest_main
