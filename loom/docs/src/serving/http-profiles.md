@@ -431,6 +431,51 @@ preserves revisions and optional alignment/diarization evidence for typed
 consumers. A chunked HTTP upload still completes before recognition begins;
 it is not an appendable microphone session.
 
+## Realtime conversations
+
+`GET /v1/realtime?model=assistant` upgrades an HTTP/1.1 connection to WebSocket.
+The model query selects a named composition supplied by `--realtime_assistant`.
+The [conversation workflow](workflows/realtime-conversation.md) covers its model
+requirements, startup document, and playback ownership.
+
+The manual-turn profile uses GA event names and nested `audio.input` /
+`audio.output` settings. Both formats are `{"type":"audio/pcm","rate":24000}`:
+mono PCM16LE carried in base64 JSON strings. Supported commands are:
+
+| Event | Effect |
+| --- | --- |
+| `session.update` | Transactionally updates effective settings at an idle response boundary. |
+| `input_audio_buffer.append` | Appends complete PCM16 samples from the `audio` string. |
+| `input_audio_buffer.commit` | Creates an input item and finalizes recognition; does not create a response. |
+| `input_audio_buffer.clear` | Cancels the current uncommitted input item. |
+| `response.create` | Generates from canonical conversation history; optional overrides are instructions, output modality, and maximum tokens. |
+| `response.cancel` | Cancels the active response, optionally checked against `response_id`. |
+| `conversation.item.create` | Inserts a completed text message with user, assistant, or system role. Optional `previous_item_id:"root"` prepends it. |
+| `conversation.item.delete` | Removes an item after active response ownership retires. |
+| `conversation.item.truncate` | Acknowledges `audio_end_ms` at `content_index:0` and removes the assistant audio transcript. |
+
+Session settings accept instructions, one output modality (`audio` or `text`),
+positive `max_output_tokens`, the configured transcription model plus language
+and prompt hints, the speech voice, and speed 1. Turn detection and input noise
+reduction are null. Tools must be empty; tool choice may be `none` or `auto`.
+Other policies, formats, function transactions, and out-of-band responses reject
+explicitly. This profile does not satisfy Open WebUI's automatic-turn/tool bridge.
+
+Text and speech output are incremental. Audio responses publish
+`response.output_audio_transcript.delta` and `response.output_audio.delta`;
+text-only responses publish `response.output_text.delta`. Completion includes
+source token usage and compatible-prefix cached-token counts. A malformed command
+returns an `error` event; accepted asynchronous work failures end that session.
+A rejected checkpoint capture does not terminate other sessions or deployments.
+
+Each received message is at most 512 KiB. Receive storage retains at most 64
+records and 1 MiB of allocations, including worker-borrowed messages. Up to four
+input items can remain live, including cancelled work awaiting retirement.
+Conversation storage permits 128 items and 1 MiB of text and identifiers;
+delete earlier items to reclaim it. Capacity exhaustion ends the connection
+instead of silently dropping audio or controls. WebSocket connections share the
+server's long-lived connection credit, preserving a connection for administration.
+
 ## Embeddings
 
 `POST /v1/embeddings` accepts:

@@ -27,7 +27,7 @@ from loom_serve_testing.logs import LogClient
 def complete(messages, maximum):
     """Dense recurrence with no knowledge of pages, row IDs or epoch shapes."""
     prompt = "".join(
-        message["content"] + ("#" if message["role"] == "assistant" else "")
+        message["content"].lower() + ("#" if message["role"] == "assistant" else "")
         for message in messages
     )
     hidden = history = total = position = 0

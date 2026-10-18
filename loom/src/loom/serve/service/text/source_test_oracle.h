@@ -38,6 +38,7 @@ class Oracle {
   }
 
   static int32_t Id(char character) {
+    character = static_cast<char>(character | 0x20);
     return character == 'a'   ? 0
            : character == 'b' ? 1
            : character == 'x' ? 2
