@@ -272,16 +272,61 @@ def cancellation(address, trace):
         assert (
             error["type"] == "error" and error["error"]["event_id"] == "empty-commit"
         ), error
-        client.send("input_audio_buffer.append", audio="AAAAAA==")
+        client.send(
+            "input_audio_buffer.append",
+            audio=base64.b64encode(bytes(480)).decode(),
+        )
         client.send("input_audio_buffer.commit")
         transcript = client.until(
             "conversation.item.input_audio_transcription.completed"
         )[-1]
         assert transcript["transcript"] == "A", transcript
+        assert transcript["usage"] == {"type": "duration", "seconds": 0.01}, transcript
         client.until("conversation.item.done")
         client.send_frame(8, struct.pack(">H", 1000))
         assert client.read_frame() == (8, struct.pack(">H", 1000))
     finally:
+        client.close()
+
+
+def pipelined_microphone_items(address, trace):
+    client = Client(address, trace)
+    admin = HttpClient(address)
+    drained = False
+    try:
+        assert client.receive()["type"] == "session.created"
+        admin.request("/v1/models/drain", {"model": "recognition"})
+        drained = True
+        identities = []
+        for frames in (240, 480):
+            client.send(
+                "input_audio_buffer.append",
+                audio=base64.b64encode(bytes(frames * 2)).decode(),
+            )
+            client.send("input_audio_buffer.commit")
+            committed = client.until("input_audio_buffer.committed")[-1]
+            identities.append(committed["item_id"])
+        admin.request("/v1/models/undrain", {"model": "recognition"})
+        drained = False
+        transcripts = {}
+        done = set()
+        while len(transcripts) != 2 or len(done) != 2:
+            event = client.receive()
+            if event["type"] == "conversation.item.input_audio_transcription.completed":
+                transcripts[event["item_id"]] = event
+            elif event["type"] == "conversation.item.done":
+                done.add(event["item"]["id"])
+        for identity, seconds in zip(identities, (0.01, 0.02), strict=True):
+            assert transcripts[identity]["transcript"] == "A", transcripts
+            assert transcripts[identity]["usage"] == {
+                "type": "duration",
+                "seconds": seconds,
+            }, transcripts
+        client.send_frame(8, struct.pack(">H", 1000))
+        assert client.read_frame() == (8, struct.pack(">H", 1000))
+    finally:
+        if drained:
+            admin.request("/v1/models/undrain", {"model": "recognition"})
         client.close()
 
 
@@ -355,6 +400,7 @@ def main():
             with (artifacts / "wire.jsonl").open("w") as trace:
                 conversation(address, trace)
                 cancellation(address, trace)
+                pipelined_microphone_items(address, trace)
         text["definition"].update(session_cache_capacity=0, checkpoint_capacity=0)
         write_startup(flags, catalog)
         with running_server(command, artifacts / "rejection-server.log") as (
