@@ -20,17 +20,50 @@ namespace {
 
 class Audio {
  public:
-  ~Audio() { loom_serve_realtime_audio_deinitialize(&value); }
-  // Production converter, reused across responses with immutable geometry.
+  ~Audio() {
+    loom_serve_realtime_audio_deinitialize(&value);
+    loom_serve_audio_resampler_filter_deinitialize(&filter);
+  }
+  // Immutable coefficients retained through every borrowing cursor.
+  loom_serve_audio_resampler_filter_t filter = {};
+  // Production cursor, reset independently of coefficient ownership.
   loom_serve_realtime_audio_t value = {};
 };
+
+void ConvertBlock(loom_serve_realtime_audio_t* audio,
+                  const loom_serve_speech_block_t& block, std::string* pcm) {
+  bool consumed = false;
+  while (!consumed) {
+    iree_string_builder_t packet;
+    iree_string_builder_initialize(iree_allocator_system(), &packet);
+    auto status =
+        loom_serve_realtime_audio_convert(audio, &block, &packet, &consumed);
+    std::string decoded(
+        iree_base64_decoded_size(iree_string_builder_view(&packet)), '\0');
+    iree_host_size_t length = 0;
+    if (iree_status_is_ok(status)) {
+      status = iree_base64_decode(
+          iree_string_builder_view(&packet),
+          iree_make_byte_span(decoded.data(), decoded.size()), &length);
+    }
+    iree_string_builder_deinitialize(&packet);
+    IREE_ASSERT_OK(status);
+    decoded.resize(length);
+    pcm->append(decoded);
+  }
+}
 
 void Convert(Audio* audio, uint32_t rate, uint32_t channels,
              const std::vector<float>& samples,
              const std::vector<size_t>& partitions, bool separate_eof,
              std::string* pcm) {
-  IREE_ASSERT_OK(loom_serve_realtime_audio_begin(
-      {rate, channels}, iree_allocator_system(), &audio->value));
+  if (!audio->filter.denominator) {
+    IREE_ASSERT_OK(loom_serve_realtime_audio_filter_initialize(
+        {rate, channels}, iree_allocator_system(), &audio->filter));
+  }
+  IREE_ASSERT_OK(
+      loom_serve_realtime_audio_begin({rate, channels}, &audio->filter,
+                                      iree_allocator_system(), &audio->value));
   pcm->clear();
   std::vector<uint8_t> encoded_samples(samples.size() * sizeof(float));
   for (size_t i = 0; i < samples.size(); ++i) {
@@ -51,25 +84,7 @@ void Convert(Audio* audio, uint32_t rate, uint32_t channels,
             encoded_samples.data() + position * channels * sizeof(float),
             count * channels * sizeof(float)),
         complete};
-    bool consumed = false;
-    while (!consumed) {
-      iree_string_builder_t packet;
-      iree_string_builder_initialize(iree_allocator_system(), &packet);
-      auto status = loom_serve_realtime_audio_convert(&audio->value, &block,
-                                                      &packet, &consumed);
-      std::string decoded(
-          iree_base64_decoded_size(iree_string_builder_view(&packet)), '\0');
-      iree_host_size_t length = 0;
-      if (iree_status_is_ok(status)) {
-        status = iree_base64_decode(
-            iree_string_builder_view(&packet),
-            iree_make_byte_span(decoded.data(), decoded.size()), &length);
-      }
-      iree_string_builder_deinitialize(&packet);
-      IREE_ASSERT_OK(status);
-      decoded.resize(length);
-      pcm->append(decoded);
-    }
+    ASSERT_NO_FATAL_FAILURE(ConvertBlock(&audio->value, block, pcm));
     position += count;
   }
   EXPECT_EQ(pcm->size() / 2, (frames * 24000 + rate - 1) / rate);
@@ -117,6 +132,67 @@ TEST(RealtimeAudioTest, DownmixClockAndQuantizationPreserveIndependentSignal) {
   }
 }
 
+TEST(RealtimeAudioTest, SharedCoefficientsPreserveInterleavedCursorLifetimes) {
+  for (uint32_t rate : {16000u, 24000u, 44100u, 16001u}) {
+    SCOPED_TRACE(rate);
+    std::vector<float> first(997), second(4807);
+    for (size_t i = 0; i < first.size(); ++i) {
+      first[i] = static_cast<float>(0.3 * std::sin(i * 0.17));
+    }
+    for (size_t i = 0; i < second.size(); ++i) {
+      second[i] = static_cast<float>(-0.2 + 0.4 * std::cos(i * 0.13));
+    }
+    Audio owner, peer;
+    std::string expected_first, expected_second;
+    ASSERT_NO_FATAL_FAILURE(Convert(&owner, rate, 1, first, {first.size()},
+                                    false, &expected_first));
+    ASSERT_NO_FATAL_FAILURE(Convert(&owner, rate, 1, second, {second.size()},
+                                    false, &expected_second));
+    const auto* coefficients = owner.filter.coefficients;
+    IREE_ASSERT_OK(loom_serve_realtime_audio_begin(
+        {rate, 1}, &owner.filter, iree_allocator_system(), &owner.value));
+    IREE_ASSERT_OK(loom_serve_realtime_audio_begin(
+        {rate, 1}, &owner.filter, iree_allocator_system(), &peer.value));
+    for (size_t i = 0; i < first.size(); ++i) {
+      iree_unaligned_store_le_f32(first.data() + i, first[i]);
+    }
+    for (size_t i = 0; i < second.size(); ++i) {
+      iree_unaligned_store_le_f32(second.data() + i, second[i]);
+    }
+    std::string actual_first, actual_second;
+    size_t first_position = 0, second_position = 0;
+    while (second_position < second.size()) {
+      if (first_position < first.size()) {
+        const size_t count =
+            std::min<size_t>(137, first.size() - first_position);
+        const loom_serve_speech_block_t block = {
+            first_position, count,
+            iree_make_const_byte_span(first.data() + first_position,
+                                      count * sizeof(float)),
+            first_position + count == first.size()};
+        ASSERT_NO_FATAL_FAILURE(
+            ConvertBlock(&owner.value, block, &actual_first));
+        first_position += count;
+        if (first_position == first.size()) {
+          loom_serve_realtime_audio_deinitialize(&owner.value);
+        }
+      }
+      const size_t count =
+          std::min<size_t>(113, second.size() - second_position);
+      const loom_serve_speech_block_t block = {
+          second_position, count,
+          iree_make_const_byte_span(second.data() + second_position,
+                                    count * sizeof(float)),
+          second_position + count == second.size()};
+      ASSERT_NO_FATAL_FAILURE(ConvertBlock(&peer.value, block, &actual_second));
+      second_position += count;
+    }
+    EXPECT_EQ(owner.filter.coefficients, coefficients);
+    EXPECT_EQ(actual_first, expected_first);
+    EXPECT_EQ(actual_second, expected_second);
+  }
+}
+
 TEST(RealtimeAudioTest, SameRateSaturationAndNonfiniteFailureAreExplicit) {
   Audio audio;
   std::string pcm;
@@ -133,7 +209,7 @@ TEST(RealtimeAudioTest, SameRateSaturationAndNonfiniteFailureAreExplicit) {
                       -std::numeric_limits<float>::infinity(),
                       std::numeric_limits<float>::quiet_NaN()}) {
     IREE_ASSERT_OK(loom_serve_realtime_audio_begin(
-        {24000, 1}, iree_allocator_system(), &audio.value));
+        {24000, 1}, &audio.filter, iree_allocator_system(), &audio.value));
     uint8_t sample[4];
     iree_unaligned_store_le_f32(sample, value);
     const loom_serve_speech_block_t block = {

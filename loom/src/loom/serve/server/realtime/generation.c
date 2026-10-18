@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/unicode.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/server/realtime/audio.h"
 #include "loom/serve/service/speech/stream.h"
 
 struct loom_serve_realtime_generation_t {
@@ -31,8 +32,13 @@ struct loom_serve_realtime_generation_t {
   loom_serve_text_stream_t* text;
   // Native waveform handle, closed after any accepted conversion borrower.
   loom_serve_speech_stream_t* speech;
-  // Session-owned coefficients and per-response conversion cursor.
-  loom_serve_realtime_audio_t* audio;
+  // Session-owned immutable coefficients and serialized preparation state.
+  loom_serve_realtime_generation_filter_t* filter;
+  // Response-owned conversion cursor, retained through final CPU release.
+  loom_serve_realtime_audio_t audio;
+  // This generation's accepted worker exclusively constructs shared
+  // coefficients.
+  bool preparing_filter;
   // This response requests audio in addition to source text semantics.
   bool speaks;
   // No new publication, native admission, or worker submission is permitted.
@@ -77,14 +83,22 @@ static iree_status_t loom_serve_realtime_generation_run(
   result->did_work = true;
   IREE_TRACE_ZONE_BEGIN(z0);
   if (!generation->audio_started) {
+    const loom_serve_speech_format_t format =
+        loom_serve_speech_stream_format(generation->speech);
+    if (generation->preparing_filter) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0,
+          loom_serve_realtime_audio_filter_initialize(
+              format, generation->host_allocator, &generation->filter->value));
+    }
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, loom_serve_realtime_audio_begin(
-                loom_serve_speech_stream_format(generation->speech),
-                generation->host_allocator, generation->audio));
+        z0, loom_serve_realtime_audio_begin(format, &generation->filter->value,
+                                            generation->host_allocator,
+                                            &generation->audio));
     generation->audio_started = true;
   }
   const iree_status_t status = loom_serve_realtime_audio_convert(
-      generation->audio, generation->block, &generation->packet,
+      &generation->audio, generation->block, &generation->packet,
       &generation->consumed);
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -111,7 +125,7 @@ iree_status_t loom_serve_realtime_generation_allocate(
     iree_task_executor_t* executor, loom_serve_registry_t* registry,
     loom_serve_realtime_binding_t text, loom_serve_realtime_binding_t speech,
     loom_serve_text_request_t* text_request, iree_string_view_t voice,
-    uint64_t seed, loom_serve_realtime_audio_t* audio,
+    uint64_t seed, loom_serve_realtime_generation_filter_t* filter,
     loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_realtime_generation_t** out_generation) {
   *out_generation = NULL;
@@ -124,7 +138,7 @@ iree_status_t loom_serve_realtime_generation_allocate(
   generation->registry = registry;
   generation->text_binding = text;
   generation->speech_binding = speech;
-  generation->audio = audio;
+  generation->filter = filter;
   generation->observer = observer;
   generation->speaks = voice.size != 0;
   iree_status_t status = iree_ok_status();
@@ -157,8 +171,18 @@ static iree_status_t loom_serve_realtime_generation_collect(
   if (!released) {
     return iree_ok_status();
   }
+  if (generation->preparing_filter) {
+    // A cursor borrows the filter only after coefficient construction succeeds,
+    // including when later cursor allocation or waveform conversion fails.
+    if (generation->audio.resampler.filter) {
+      generation->filter->phase = LOOM_SERVE_REALTIME_FILTER_READY;
+    } else {
+      loom_serve_realtime_generation_filter_deinitialize(generation->filter);
+    }
+    generation->preparing_filter = false;
+  }
   generation->block = NULL;
-  generation->frames = generation->audio->frames;
+  generation->frames = generation->audio.frames;
   if (generation->cancelled) {
     loom_serve_speech_stream_close(generation->speech);
     generation->speech = NULL;
@@ -293,9 +317,17 @@ iree_status_t loom_serve_realtime_generation_advance(
   }
   IREE_RETURN_IF_ERROR(
       loom_serve_realtime_generation_forward(generation, out_progress));
+  if (!generation->block && !generation->audio_started &&
+      generation->filter->phase == LOOM_SERVE_REALTIME_FILTER_PREPARING) {
+    return iree_ok_status();
+  }
   if (generation->speech && !generation->block && !generation->packet.size) {
     generation->block = loom_serve_speech_stream_peek(generation->speech);
     if (generation->block) {
+      if (generation->filter->phase == LOOM_SERVE_REALTIME_FILTER_EMPTY) {
+        generation->filter->phase = LOOM_SERVE_REALTIME_FILTER_PREPARING;
+        generation->preparing_filter = true;
+      }
       generation->released = false;
       generation->consumed = false;
       iree_task_process_initialize(loom_serve_realtime_generation_run, 0, 1,
@@ -395,7 +427,14 @@ void loom_serve_realtime_generation_free(
   iree_string_builder_deinitialize(&generation->text_request.body);
   iree_string_builder_deinitialize(&generation->packet);
   iree_string_builder_deinitialize(&generation->pending_text);
+  loom_serve_realtime_audio_deinitialize(&generation->audio);
   iree_status_ignore(generation->status);
   iree_slim_mutex_deinitialize(&generation->mutex);
   iree_allocator_free_aligned(generation->host_allocator, generation);
+}
+
+void loom_serve_realtime_generation_filter_deinitialize(
+    loom_serve_realtime_generation_filter_t* filter) {
+  loom_serve_audio_resampler_filter_deinitialize(&filter->value);
+  filter->phase = LOOM_SERVE_REALTIME_FILTER_EMPTY;
 }
