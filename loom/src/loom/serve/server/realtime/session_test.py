@@ -37,6 +37,9 @@ from loom.src.loom.serve.server.realtime.independent_test import (
     independent_function_input,
     independent_pending_input,
 )
+from loom.src.loom.serve.server.realtime.registration_test import (
+    registration_replacement,
+)
 
 
 def response_policy(address, trace):
@@ -1564,6 +1567,7 @@ def main():
             assert address is not None, process.poll()
             with (artifacts / "independent-activity-wire.jsonl").open("w") as trace:
                 independent_automatic_intent(address, trace)
+                registration_replacement(address, trace, catalog["models"])
 
 
 if __name__ == "__main__":
