@@ -188,6 +188,7 @@ iree_runtime_cc_test(
         ":test_device",
         "//libamdf:headers",
         "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",

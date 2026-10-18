@@ -318,6 +318,7 @@ iree_cc_test(
     ::test_device
     amdf::headers
     iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::hal
     iree::hal::cts::util::test_base

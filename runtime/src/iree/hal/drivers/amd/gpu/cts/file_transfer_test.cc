@@ -5,10 +5,14 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
+#include "iree/async/operations/scheduling.h"
 #include "iree/async/semaphore.h"
+#include "iree/async/util/proactor_pool.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
@@ -504,6 +508,129 @@ class GpuNativeFileProgressTest : public GpuNativeFileTest {
   iree::hal::amd::gpu::cts::NativeMemoryGate memory_gate_;
 };
 
+// Holds a real polling callback and joins its final access on scope exit.
+class HeldFileOwner {
+ public:
+  ~HeldFileOwner() {
+    if (!submitted_) {
+      return;
+    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    released_ = true;
+    condition_.notify_one();
+    condition_.wait(lock, [&] { return exited_; });
+  }
+
+  iree_status_t Hold(iree_async_proactor_t* proactor) {
+    operation_.base.type = IREE_ASYNC_OPERATION_TYPE_NOP;
+    operation_.base.user_data = this;
+    operation_.base.completion_fn =
+        +[](void* user_data, iree_async_operation_t*, iree_status_t status,
+            iree_async_completion_flags_t) {
+          IREE_EXPECT_OK(status);
+          auto* self = static_cast<HeldFileOwner*>(user_data);
+          std::unique_lock<std::mutex> lock(self->mutex_);
+          self->entered_ = true;
+          self->condition_.notify_one();
+          self->condition_.wait(lock, [&] { return self->released_; });
+          self->exited_ = true;
+          self->condition_.notify_one();
+        };
+    IREE_RETURN_IF_ERROR(
+        iree_async_proactor_submit_one(proactor, &operation_.base));
+    submitted_ = true;
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return entered_; });
+    return iree_ok_status();
+  }
+
+ private:
+  // Accepted operation and callback storage, joined before destruction.
+  iree_async_nop_operation_t operation_ = {};
+  // Serializes gate publication and the callback's final access.
+  std::mutex mutex_;
+  // Publishes entry, release permission, and terminal gate exit.
+  std::condition_variable condition_;
+  // True after the proactor accepts the operation.
+  bool submitted_ = false;
+  // The actual polling owner has entered its callback.
+  bool entered_ = false;
+  // Permission from scope exit to return from the callback.
+  bool released_ = false;
+  // Callback made its final gate access while holding mutex_.
+  bool exited_ = false;
+};
+
+class GpuNativeRegisteredFileProgressTest : public GpuNativeFileProgressTest {};
+
+TEST_P(GpuNativeRegisteredFileProgressTest,
+       ReusedBackingMapsWhileColdRegistrationWaitsForFileOwner) {
+  Ref<iree_hal_buffer_t> buffer;
+  ASSERT_NO_FATAL_FAILURE(Allocate(kLength + 256, buffer.out()));
+  auto* timeline = timeline_.get();
+  uint64_t one = 1, two = 2, three = 3, four = 4;
+  auto unmaps = mappings_;
+  for (auto& mapping : unmaps) {
+    mapping.source = nullptr;
+    mapping.source_offset = 0;
+    mapping.access = 0;
+    mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+  }
+  IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {}, {1, &timeline, &one},
+                                    unmaps.size(), unmaps.data(), 0));
+  ASSERT_NO_FATAL_FAILURE(Wait(one));
+
+  iree_async_proactor_t* file_proactor = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_pool_get(proactors_, 0, &file_proactor));
+  Ref<iree_hal_buffer_t> cold;
+  Ref<iree_hal_semaphore_t> acquired;
+  CreateSemaphore(acquired.out());
+  auto* acquired_handle = acquired.get();
+  constexpr uint32_t kPattern = 0x73C04B19;
+  {
+    HeldFileOwner file_owner;
+    IREE_ASSERT_OK(file_owner.Hold(file_proactor));
+    {
+      iree::hal::amd::gpu::cts::NativeMemoryGate::Hold native(&memory_gate_);
+      const auto request = iree_hal_make_pool_reservation_request(4096, 64);
+      IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[1], {},
+                                           {1, &acquired_handle, &one}, pool_,
+                                           1, &request, cold.out()));
+      native.WaitEntered();
+      // Mapping reaches the native queue only after the cold allocation has
+      // entered its driver call. It cannot pass by winning an admission race.
+      IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {1, &timeline, &one},
+                                        {1, &timeline, &two}, mappings_.size(),
+                                        mappings_.data(), 0));
+    }
+    // Cold preparation must return without its attachment receipt, allowing
+    // these already-owned pages to map and execute while file polling is held.
+    ASSERT_NO_FATAL_FAILURE(Wait(two));
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        queues_[0], {1, &timeline, &two}, {1, &timeline, &three}, buffer,
+        kBufferOffset, kLength, &kPattern, sizeof(kPattern), nullptr, 0));
+    ASSERT_NO_FATAL_FAILURE(Wait(three));
+  }
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(acquired, one, iree_infinite_timeout(), 0));
+
+  std::vector<uint32_t> expected(kLength / 4, 0);
+  Ref<iree_hal_file_t> file;
+  ASSERT_NO_FATAL_FAILURE(Open(expected, file.out()));
+  IREE_ASSERT_OK(iree_hal_queue_write(
+      queues_[0], {1, &timeline, &three}, {1, &timeline, &four}, buffer,
+      kBufferOffset, file, 0, kLength, &barriers_, 0));
+  ASSERT_NO_FATAL_FAILURE(Wait(four));
+  std::fill(expected.begin(), expected.end(), kPattern);
+  ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
+  auto* cold_handle = cold.get();
+  IREE_ASSERT_OK(
+      iree_hal_queue_dealloca(queues_[1], {1, &acquired_handle, &one},
+                              {1, &acquired_handle, &two}, 1, &cold_handle));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(acquired, two, iree_infinite_timeout(), 0));
+}
+
 TEST_P(GpuNativeFileProgressTest,
        ReadShaderAndWriteCompleteWhileUnrelatedAllocationIsHeld) {
   Ref<iree_hal_buffer_t> buffer;
@@ -584,5 +711,8 @@ INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeFileProgressTest,
 INSTANTIATE_TEST_SUITE_P(PhysicalAndVirtual, GpuNativeRegisteredFileTest,
                          ::testing::Values(FileBacking::kPhysicalRegistered,
                                            FileBacking::kVirtualRegistered));
+
+INSTANTIATE_TEST_SUITE_P(RegisteredVirtual, GpuNativeRegisteredFileProgressTest,
+                         ::testing::Values(FileBacking::kVirtualRegistered));
 
 }  // namespace

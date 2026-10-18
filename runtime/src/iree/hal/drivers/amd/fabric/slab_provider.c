@@ -37,8 +37,8 @@ typedef struct iree_hal_amd_fabric_slab_provider_t {
   iree_hal_memory_trace_t trace;
   // Whether slabs need one shared prepared source descriptor.
   bool has_mapping_source;
-  // Whether slabs retain registrations for the participating file proactors.
-  bool has_registered_io;
+  // Upper bound on distinct registrations, one per requested I/O binding.
+  uint16_t io_binding_count;
   // Native access ordinal of the optional ASAN namespace's device.
   uint32_t asan_access_ordinal;
   // Cumulative successful slab acquisitions.
@@ -47,6 +47,48 @@ typedef struct iree_hal_amd_fabric_slab_provider_t {
   iree_atomic_int64_t total_released;
 } iree_hal_amd_fabric_slab_provider_t;
 
+// Joins native table transitions without waiting on an I/O owner. The launch
+// count keeps inline callbacks from consuming an unfinished enumeration.
+typedef struct iree_hal_amd_fabric_slab_io_batch_t {
+  // Launch count plus one per outstanding native transition.
+  iree_atomic_int32_t pending_count;
+  // First failed transition, owned until terminal delivery.
+  iree_atomic_intptr_t failure_status;
+  // Terminal consumer; may immediately reclaim or reuse this batch.
+  iree_hal_slab_acquire_callback_t completion;
+  // True for attachment; false for detachment before rollback or release.
+  bool attaching;
+} iree_hal_amd_fabric_slab_io_batch_t;
+
+typedef struct iree_hal_amd_fabric_slab_io_registration_t {
+  // Prepared entry owned by the slab's registration-state list.
+  iree_async_buffer_registration_entry_t* entry;
+  // Borrowed aggregate through this entry's terminal callback.
+  iree_hal_amd_fabric_slab_io_batch_t* batch;
+  // A successful attachment remains live until successful detachment.
+  bool attached;
+} iree_hal_amd_fabric_slab_io_registration_t;
+
+typedef struct iree_hal_amd_fabric_slab_io_release_t {
+  // Detachment state secured with each physical slab during construction.
+  iree_hal_amd_fabric_slab_io_batch_t batch;
+  // Provider retained until the native release queue takes ownership.
+  iree_hal_amd_fabric_slab_provider_t* provider;
+  // Caller-owned release descriptor, stable through native completion.
+  iree_hal_slab_release_request_t* request;
+} iree_hal_amd_fabric_slab_io_release_t;
+
+typedef struct iree_hal_amd_fabric_slab_io_t {
+  // Immutable file-I/O views published only after all attachments succeed.
+  iree_hal_amd_fabric_io_binding_table_t bindings;
+  // Presecured release aggregate; a release batch borrows its first slab's.
+  iree_hal_amd_fabric_slab_io_release_t release;
+  // Number of distinct prepared registrations in the placed array.
+  uint16_t registration_count;
+  // Placed array with provider->io_binding_count capacity.
+  iree_hal_amd_fabric_slab_io_registration_t* registrations;
+} iree_hal_amd_fabric_slab_io_t;
+
 typedef struct iree_hal_amd_fabric_slab_handle_t {
   // Native allocation and optional persistent host mapping.
   iree_hal_amd_fabric_memory_t memory;
@@ -54,8 +96,8 @@ typedef struct iree_hal_amd_fabric_slab_handle_t {
   iree_hal_buffer_native_binding_t* bindings;
   // Prepared backing identity; absent for ordinary address-only slabs.
   iree_hal_amd_fabric_mapping_source_t* mapping_source;
-  // Optional placed table indexing file registrations by native consumer.
-  iree_hal_amd_fabric_io_binding_table_t* io_bindings;
+  // Optional file binding table and presecured native transition storage.
+  iree_hal_amd_fabric_slab_io_t* io;
   // Owned registrations, released before their borrowed native host view.
   iree_async_buffer_registration_state_t registrations;
   // Explicit external attachment whose teardown completes before release.
@@ -199,7 +241,7 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
   for (uint32_t i = 0; i < options->binding_count; ++i) {
     provider->has_mapping_source |=
         bindings[i].type == IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
-    provider->has_registered_io |=
+    provider->io_binding_count +=
         bindings[i].type == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
   }
   iree_hal_external_storage_class_t* exports =
@@ -292,6 +334,7 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
   iree_host_size_t mapping_source_offset = 0;
   iree_host_size_t io_bindings_offset = 0;
   iree_host_size_t io_regions_offset = 0;
+  iree_host_size_t io_registrations_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_fabric_slab_handle_t) +
           (provider->options.asan ? sizeof(iree_hal_amd_fabric_slab_asan_t)
@@ -303,10 +346,12 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
       IREE_STRUCT_FIELD(provider->has_mapping_source ? 1 : 0,
                         iree_hal_amd_fabric_mapping_source_t,
                         &mapping_source_offset),
-      IREE_STRUCT_FIELD(provider->has_registered_io ? 1 : 0,
-                        iree_hal_amd_fabric_io_binding_table_t,
-                        &io_bindings_offset),
-      IREE_STRUCT_FIELD(provider->has_registered_io
+      IREE_STRUCT_FIELD(provider->io_binding_count ? 1 : 0,
+                        iree_hal_amd_fabric_slab_io_t, &io_bindings_offset),
+      IREE_STRUCT_FIELD(provider->io_binding_count,
+                        iree_hal_amd_fabric_slab_io_registration_t,
+                        &io_registrations_offset),
+      IREE_STRUCT_FIELD(provider->io_binding_count
                             ? provider->options.memory.access_count
                             : 0,
                         iree_async_region_t*, &io_regions_offset)));
@@ -321,9 +366,11 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
         (iree_hal_amd_fabric_mapping_source_t*)((uint8_t*)handle +
                                                 mapping_source_offset);
   }
-  if (provider->has_registered_io) {
-    handle->io_bindings = (void*)((uint8_t*)handle + io_bindings_offset);
-    handle->io_bindings->regions =
+  if (provider->io_binding_count) {
+    handle->io = (void*)((uint8_t*)handle + io_bindings_offset);
+    handle->io->registrations =
+        (void*)((uint8_t*)handle + io_registrations_offset);
+    handle->io->bindings.regions =
         (void*)((uint8_t*)handle + io_regions_offset);
   }
   iree_async_buffer_registration_state_initialize(&handle->registrations);
@@ -334,6 +381,15 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_allocate(
 static bool iree_hal_amd_fabric_slab_handle_free(
     iree_hal_amd_fabric_slab_provider_t* provider,
     iree_hal_amd_fabric_slab_handle_t* handle) {
+  if (handle->io) {
+    for (uint16_t i = 0; i < handle->io->registration_count; ++i) {
+      if (handle->io->registrations[i].attached) {
+        // A failed detachment leaves native table references live. Its
+        // terminal callback already diagnosed the failure; retain backing.
+        return false;
+      }
+    }
+  }
   if (provider->options.asan) {
     iree_hal_amd_fabric_slab_asan_t* asan = (void*)(handle + 1);
     if (!iree_hal_amd_fabric_asan_unmap_application(provider->options.asan,
@@ -390,9 +446,9 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
     iree_hal_amd_fabric_slab_provider_t* provider,
     iree_hal_amd_fabric_slab_handle_t* handle) {
   iree_status_t status = iree_ok_status();
-  if (handle->io_bindings) {
-    handle->io_bindings->memory = handle->memory.handle;
-    handle->io_bindings->mapping = handle->memory.mapping;
+  if (handle->io) {
+    handle->io->bindings.memory = handle->memory.handle;
+    handle->io->bindings.mapping = handle->memory.mapping;
   }
   if (provider->has_mapping_source) {
     *handle->mapping_source = (iree_hal_amd_fabric_mapping_source_t){
@@ -400,7 +456,7 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
         .access_count = provider->options.memory.access_count,
         .accesses = provider->options.memory.accesses,
         .logical_byte_offset = handle->memory.info.source_byte_offset,
-        .io_bindings = handle->io_bindings,
+        .io_bindings = handle->io ? &handle->io->bindings : NULL,
     };
     if (provider->options.import_accesses) {
       const iree_hal_amd_fabric_slab_asan_t* asan = (const void*)(handle + 1);
@@ -431,16 +487,26 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
         if (!entry) {
           // Pins are part of physical acquisition. Reuse and file submission
           // consume the prepared table without entering registration again.
-          status = iree_async_proactor_register_buffer(
-              binding->io_proactor, &handle->registrations,
-              handle->memory.contents,
+          const iree_async_buffer_access_flags_t access =
               IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
-                  IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-              &entry);
+              IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE;
+          if (handle->imported) {
+            status = iree_async_proactor_register_buffer(
+                binding->io_proactor, &handle->registrations,
+                handle->memory.contents, access, &entry);
+          } else {
+            status = iree_async_proactor_prepare_buffer(
+                binding->io_proactor, &handle->registrations,
+                handle->memory.contents, access, &entry);
+            if (iree_status_is_ok(status)) {
+              handle->io->registrations[handle->io->registration_count++]
+                  .entry = entry;
+            }
+          }
         }
         if (iree_status_is_ok(status)) {
-          handle->io_bindings->regions[binding->access_ordinal] = entry->region;
-          handle->bindings[i].registered_io.table = handle->io_bindings;
+          handle->io->bindings.regions[binding->access_ordinal] = entry->region;
+          handle->bindings[i].registered_io.table = &handle->io->bindings;
           handle->bindings[i].registered_io.index = binding->access_ordinal;
         }
         continue;
@@ -787,10 +853,197 @@ static void iree_hal_amd_fabric_slab_provider_query_properties(
   *out_properties = provider->properties;
 }
 
+//===----------------------------------------------------------------------===//
+// Registered slab publication and retirement
+//===----------------------------------------------------------------------===//
+
+static void iree_hal_amd_fabric_slab_io_batch_complete_one(
+    iree_hal_amd_fabric_slab_io_batch_t* batch) {
+  if (iree_atomic_fetch_sub(&batch->pending_count, 1,
+                            iree_memory_order_acq_rel) != 1) {
+    return;
+  }
+  const iree_hal_slab_acquire_callback_t completion = batch->completion;
+  iree_status_t status = (iree_status_t)iree_atomic_load(
+      &batch->failure_status, iree_memory_order_acquire);
+  completion.fn(completion.user_data, status);
+}
+
+static void iree_hal_amd_fabric_slab_io_transition_completed(
+    void* user_data, iree_status_t status) {
+  iree_hal_amd_fabric_slab_io_registration_t* registration = user_data;
+  iree_hal_amd_fabric_slab_io_batch_t* batch = registration->batch;
+  if (iree_status_is_ok(status)) {
+    registration->attached = batch->attaching;
+  } else {
+    intptr_t expected = 0;
+    if (!iree_atomic_compare_exchange_strong(
+            &batch->failure_status, &expected, (intptr_t)status,
+            iree_memory_order_release, iree_memory_order_relaxed)) {
+      iree_status_free(status);
+    }
+  }
+  iree_hal_amd_fabric_slab_io_batch_complete_one(batch);
+}
+
+static void iree_hal_amd_fabric_slab_io_transition(
+    iree_hal_amd_fabric_slab_io_batch_t* batch, bool attaching,
+    iree_host_size_t count, const iree_hal_slab_t* slabs,
+    iree_hal_slab_acquire_callback_t completion) {
+  iree_atomic_store(&batch->pending_count, 1, iree_memory_order_relaxed);
+  iree_atomic_store(&batch->failure_status, 0, iree_memory_order_relaxed);
+  batch->completion = completion;
+  batch->attaching = attaching;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    iree_hal_amd_fabric_slab_handle_t* handle =
+        (void*)(uintptr_t)slabs[i].provider_handle;
+    for (uint16_t j = 0; j < handle->io->registration_count; ++j) {
+      iree_hal_amd_fabric_slab_io_registration_t* registration =
+          &handle->io->registrations[j];
+      if (!attaching && !registration->attached) {
+        continue;
+      }
+      registration->batch = batch;
+      iree_atomic_fetch_add(&batch->pending_count, 1,
+                            iree_memory_order_relaxed);
+      iree_async_buffer_registration_entry_t* entry = registration->entry;
+      const iree_async_buffer_registration_callback_t callback = {
+          iree_hal_amd_fabric_slab_io_transition_completed, registration};
+      if (attaching) {
+        iree_async_proactor_attach_buffer(entry->proactor, entry, callback);
+      } else {
+        iree_async_proactor_detach_buffer(entry->proactor, entry, callback);
+      }
+    }
+  }
+  // The terminal callback may free every slab and this aggregate immediately.
+  iree_hal_amd_fabric_slab_io_batch_complete_one(batch);
+}
+
+typedef struct iree_hal_amd_fabric_slab_io_acquire_t {
+  // Attachment or rollback-detachment join, reused only after completion.
+  iree_hal_amd_fabric_slab_io_batch_t batch;
+  // Retained across native preparation, attachment, and any rollback.
+  iree_hal_amd_fabric_slab_provider_t* provider;
+  // Original caller-owned request, published only after full attachment.
+  iree_hal_slab_acquire_request_t* request;
+  // Typed native preparation batch with a private completion boundary.
+  iree_hal_slab_acquire_request_t prepare;
+  // Presecured native release batch used after failed attachment.
+  iree_hal_slab_release_request_t rollback;
+  // Attachment failure retained while native rollback finishes.
+  iree_status_t failure;
+} iree_hal_amd_fabric_slab_io_acquire_t;
+
+static void iree_hal_amd_fabric_slab_io_acquire_finish(
+    iree_hal_amd_fabric_slab_io_acquire_t* acquire, iree_status_t status) {
+  iree_hal_amd_fabric_slab_provider_t* provider = acquire->provider;
+  const iree_hal_slab_acquire_callback_t completion =
+      acquire->request->completion;
+  iree_allocator_free(provider->base.host_allocator, acquire);
+  completion.fn(completion.user_data, status);
+  iree_hal_slab_provider_release(&provider->base);
+}
+
+static void iree_hal_amd_fabric_slab_io_rollback_released(void* user_data) {
+  iree_hal_amd_fabric_slab_io_acquire_t* acquire = user_data;
+  iree_hal_amd_fabric_slab_io_acquire_finish(acquire, acquire->failure);
+}
+
+static void iree_hal_amd_fabric_slab_io_rollback_detached(
+    void* user_data, iree_status_t status) {
+  iree_hal_amd_fabric_slab_io_acquire_t* acquire = user_data;
+  acquire->failure = iree_status_join(acquire->failure, status);
+  acquire->rollback = (iree_hal_slab_release_request_t){
+      .operation = {.provider = &acquire->provider->base,
+                    .type = IREE_HAL_SLAB_OPERATION_RELEASE},
+      .count = acquire->request->count,
+      .slabs = acquire->request->slabs,
+      .completion = {iree_hal_amd_fabric_slab_io_rollback_released, acquire},
+  };
+  iree_hal_amd_fabric_allocation_queue_enqueue(
+      acquire->provider->allocation_queue, &acquire->rollback.operation);
+}
+
+static void iree_hal_amd_fabric_slab_io_acquire_attached(void* user_data,
+                                                         iree_status_t status) {
+  iree_hal_amd_fabric_slab_io_acquire_t* acquire = user_data;
+  if (iree_status_is_ok(status)) {
+    iree_hal_amd_fabric_slab_io_acquire_finish(acquire, status);
+    return;
+  }
+  acquire->failure = status;
+  iree_hal_amd_fabric_slab_io_transition(
+      &acquire->batch, false, acquire->request->count, acquire->request->slabs,
+      (iree_hal_slab_acquire_callback_t){
+          iree_hal_amd_fabric_slab_io_rollback_detached, acquire});
+}
+
+static void iree_hal_amd_fabric_slab_io_acquire_prepared(void* user_data,
+                                                         iree_status_t status) {
+  iree_hal_amd_fabric_slab_io_acquire_t* acquire = user_data;
+  if (!iree_status_is_ok(status)) {
+    // The native queue already rolled back every prepared slab.
+    iree_hal_amd_fabric_slab_io_acquire_finish(acquire, status);
+    return;
+  }
+  iree_hal_amd_fabric_slab_io_transition(
+      &acquire->batch, true, acquire->request->count, acquire->request->slabs,
+      (iree_hal_slab_acquire_callback_t){
+          iree_hal_amd_fabric_slab_io_acquire_attached, acquire});
+}
+
+static void iree_hal_amd_fabric_slab_io_release_detached(void* user_data,
+                                                         iree_status_t status) {
+  iree_hal_amd_fabric_slab_io_release_t* release = user_data;
+  iree_hal_amd_fabric_slab_provider_t* provider = release->provider;
+  iree_hal_slab_release_request_t* request = release->request;
+  if (!iree_status_is_ok(status)) {
+    const iree_hal_device_driver_failure_event_t payload = {
+        .record_length = sizeof(payload),
+        .abi_version = IREE_HAL_DEVICE_DRIVER_FAILURE_EVENT_ABI_VERSION_0,
+        .status_code = iree_status_code(status),
+        .message =
+            IREE_SV("registered I/O detachment failed; retaining backing"),
+    };
+    iree_hal_device_event_t event = iree_hal_device_event_default();
+    event.type = IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE;
+    event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
+    event.source.driver_id = IREE_SV("amd");
+    event.payload = iree_make_const_byte_span(&payload, sizeof(payload));
+    iree_hal_device_event_sink_publish(provider->event_sink, &event);
+    iree_status_free(status);
+  }
+  // No further access to release: it lives inside a slab the worker may free
+  // before enqueue returns. The explicit provider claim spans this handoff.
+  iree_hal_amd_fabric_allocation_queue_enqueue(provider->allocation_queue,
+                                               &request->operation);
+  iree_hal_slab_provider_release(&provider->base);
+}
+
 static void iree_hal_amd_fabric_slab_provider_acquire_slabs(
     iree_hal_slab_provider_t* base, iree_hal_slab_acquire_request_t* request) {
   iree_hal_amd_fabric_slab_provider_t* provider =
       iree_hal_amd_fabric_slab_provider_cast(base);
+  if (provider->io_binding_count && request->count) {
+    iree_hal_amd_fabric_slab_io_acquire_t* acquire = NULL;
+    iree_status_t status = iree_allocator_malloc(
+        base->host_allocator, sizeof(*acquire), (void**)&acquire);
+    if (!iree_status_is_ok(status)) {
+      memset(request->slabs, 0, request->count * sizeof(*request->slabs));
+      request->completion.fn(request->completion.user_data, status);
+      return;
+    }
+    acquire->provider = provider;
+    iree_hal_slab_provider_retain(base);
+    acquire->request = request;
+    acquire->prepare = *request;
+    acquire->prepare.completion = (iree_hal_slab_acquire_callback_t){
+        iree_hal_amd_fabric_slab_io_acquire_prepared, acquire};
+    iree_hal_amd_fabric_allocation_queue_enqueue(provider->allocation_queue,
+                                                 &acquire->prepare.operation);
+    return;
+  }
   iree_hal_amd_fabric_allocation_queue_enqueue(provider->allocation_queue,
                                                &request->operation);
 }
@@ -805,7 +1058,10 @@ static void iree_hal_amd_fabric_slab_provider_release_slabs(
     const iree_hal_amd_fabric_slab_handle_t* handle =
         (const iree_hal_amd_fabric_slab_handle_t*)(uintptr_t)request->slabs[i]
             .provider_handle;
-    if (handle && handle->imported) {
+    if (!handle) {
+      continue;
+    }
+    if (handle->imported) {
       iree_hal_amd_fabric_slab_provider_release_slab(base, &request->slabs[i]);
     } else {
       if (owned_count != i) {
@@ -821,6 +1077,19 @@ static void iree_hal_amd_fabric_slab_provider_release_slabs(
   }
   iree_hal_amd_fabric_slab_provider_t* provider =
       iree_hal_amd_fabric_slab_provider_cast(base);
+  if (provider->io_binding_count) {
+    iree_hal_amd_fabric_slab_handle_t* first =
+        (void*)(uintptr_t)request->slabs[0].provider_handle;
+    iree_hal_amd_fabric_slab_io_release_t* release = &first->io->release;
+    release->provider = provider;
+    iree_hal_slab_provider_retain(base);
+    release->request = request;
+    iree_hal_amd_fabric_slab_io_transition(
+        &release->batch, false, request->count, request->slabs,
+        (iree_hal_slab_acquire_callback_t){
+            iree_hal_amd_fabric_slab_io_release_detached, release});
+    return;
+  }
   iree_hal_amd_fabric_allocation_queue_enqueue(provider->allocation_queue,
                                                &request->operation);
 }

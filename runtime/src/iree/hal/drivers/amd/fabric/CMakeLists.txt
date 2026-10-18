@@ -223,6 +223,7 @@ iree_cc_test(
   DEPS
     ::slab_provider
     amdf::headers
+    iree::async::util::proactor_pool
     iree::base
     iree::hal
     iree::hal::memory::slab_provider

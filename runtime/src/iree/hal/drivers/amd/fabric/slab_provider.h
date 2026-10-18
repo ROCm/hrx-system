@@ -96,7 +96,10 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
 
 // Native steps used by the fabric allocation worker. The worker keeps batch
 // progress privately and reconsiders priority between slabs. No completion is
-// invoked here; a failed acquisition leaves its output empty.
+// invoked here; a failed acquisition leaves its output empty. Acquisition
+// prepares I/O pins without attaching them. The provider's batch completion
+// attaches those pins before publishing usable slabs. Release consumes only
+// prepared or detached pins; table transitions run outside the native worker.
 iree_status_t iree_hal_amd_fabric_slab_provider_acquire_slab(
     iree_hal_slab_provider_t* provider, iree_device_size_t min_length,
     iree_device_size_t min_alignment, iree_hal_slab_t* out_slab);
