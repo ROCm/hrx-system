@@ -58,6 +58,7 @@ loom_cc_test(
     deps = [
         ":rewriter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",

@@ -11,7 +11,10 @@
 #include <cstdint>
 #include <random>
 
+#include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
+#include "loom/util/fact_table.h"
 
 namespace {
 
@@ -160,20 +163,21 @@ TEST(DecisionProgramTest, PreservesSsaIdentityAcrossSignaturePositions) {
       .choice_count = 1,
       .priority_group_count = 1,
   };
-  loom_value_facts_t entries[4];
-  for (auto& entry : entries) {
-    entry = loom_value_facts_unknown();
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+  loom_value_fact_table_t fact_table;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&fact_table, &arena, 4));
+  for (loom_value_id_t value = 0; value < 4; ++value) {
+    IREE_ASSERT_OK(loom_value_fact_table_define(&fact_table, value,
+                                                loom_value_facts_unknown()));
   }
   // Values 1 and 2 are aliases of value 0; value 3 is independent.
-  loom_value_id_t identities[] = {LOOM_VALUE_ID_INVALID, 0, 0,
-                                  LOOM_VALUE_ID_INVALID};
-  loom_value_fact_table_t fact_table = {
-      .entries = entries,
-      .count = IREE_ARRAYSIZE(entries),
-      .capacity = IREE_ARRAYSIZE(entries),
-  };
-  fact_table.identities.entries = identities;
-  fact_table.identities.capacity = IREE_ARRAYSIZE(identities);
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define_identity(&fact_table, 1, 0, nullptr));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define_identity(&fact_table, 2, 0, nullptr));
   const loom_value_id_t arguments[][2] = {{0, 0}, {0, 1}, {1, 2}, {0, 3}};
   for (const auto& pair : arguments) {
     SCOPED_TRACE(::testing::Message() << pair[0] << ", " << pair[1]);
@@ -196,6 +200,8 @@ TEST(DecisionProgramTest, PreservesSsaIdentityAcrossSignaturePositions) {
       EXPECT_EQ(result.action_ordinal, 0u);
     }
   }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
 }
 
 TEST(DecisionProgramTest, ResolutionPolicyControlsHigherUnknownChoice) {

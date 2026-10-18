@@ -59,6 +59,8 @@ loom_cc_test(
     srcs = ["program_test.cc"],
     deps = [
         ":program",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

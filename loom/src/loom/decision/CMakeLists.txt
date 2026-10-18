@@ -68,8 +68,10 @@ loom_cc_test(
     "program_test.cc"
   DEPS
     ::program
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::util::fact_table
 )
 
 loom_cc_benchmark(

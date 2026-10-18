@@ -429,3 +429,87 @@ func.def @nested_loop_feedback(%limit: index, %again: i1, %good: i32, %bad: i32)
 ^exit:
   func.return %good : i32
 }
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// Fusion retires the argument retained by the bound's identity before the next
+// induction refresh. The assumption's operand and retained representative must
+// both follow the replacement, even while numeric inference is pending.
+func.def @fused_loop_bound(%bound: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.br ^bound_bridge(%bound: index)
+^bound_bridge(%forwarded: index):
+  %extent = index.assume %forwarded [range(%forwarded, 1, 256)] : index
+  cfg.br ^header(%c0: index)
+^header(%position: index):
+  %active = index.cmp ult, %position, %extent : index
+  cfg.cond_br %active, ^body, ^exit
+^body:
+  test.use %position : index
+  %next = index.add %position, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}
+
+// ----
+func.def @fused_loop_bound(%bound: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %extent = index.assume %bound [range(%bound, 1, 256)] : index
+  cfg.br ^header(%c0: index)
+^header(%position: index):
+  %active = index.cmp ult, %position, %extent : index
+  cfg.cond_br %active, ^body, ^exit
+^body:
+  test.use %position : index
+  %next = index.add %position, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// Removing an invariant carried argument has the same lifetime contract as
+// block fusion. A transitive alias keeps its predicate while the canonical
+// identity moves outside the loop.
+func.def @redundant_loop_bound(%bound: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.br ^header(%c0: index, %bound: index)
+^header(%position: index, %carried_bound: index):
+  %positive = index.assume %carried_bound [range(%carried_bound, 1, 256)] : index
+  %extent = index.assume %positive [multiple_of(%positive, 2)] : index
+  %active = index.cmp ult, %position, %extent : index
+  cfg.cond_br %active, ^body, ^exit
+^body:
+  test.use %position : index
+  %next = index.add %position, %c1 : index
+  cfg.br ^header(%next: index, %carried_bound: index)
+^exit:
+  func.return
+}
+
+// ----
+func.def @redundant_loop_bound(%bound: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.br ^header(%c0: index)
+^header(%position: index):
+  %positive = index.assume %bound [range(%bound, 1, 256)] : index
+  %extent = index.assume %positive [multiple_of(%positive, 2)] : index
+  %active = index.cmp ult, %position, %extent : index
+  cfg.cond_br %active, ^body, ^exit
+^body:
+  test.use %position : index
+  %next = index.add %position, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}

@@ -41,6 +41,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ir/type_dependencies.h"
 #include "loom/util/fact_extensions.h"
+#include "loom/util/fact_identity.h"
 #include "loom/util/fact_layout.h"
 
 #ifdef __cplusplus
@@ -244,10 +245,12 @@ struct loom_value_fact_table_t {
   // Canonical SSA identities retained while computing value facts. Only
   // declared identity operations populate this map; numeric equality does not.
   struct {
-    // Canonical value IDs, or LOOM_VALUE_ID_INVALID for a value's own identity.
-    loom_value_id_t* entries;
+    // Shared publication tokens. NULL leaves the value its own identity.
+    loom_value_fact_identity_t** entries;
     // Allocated entry count. Storage grows lazily on the first alias.
     iree_host_size_t capacity;
+    // Scope-owned tokens, released with the transient arena after clearing.
+    loom_value_fact_identity_t* nodes;
   } identities;
 
   // Signed relations carried by scoped SSA aliases, including sparse interior
@@ -734,15 +737,21 @@ static inline bool loom_value_fact_table_has_result_type_kind(
 
 // Returns the canonical SSA identity retained for |value_id|, or |value_id|
 // itself when the table is NULL or no identity has been established. This is
-// an O(1) lookup, not an IR traversal. Identities have the same populated-scope
-// lifetime and mutation/recomputation contract as numeric facts.
+// read-only indexed lookup through O(log publications) representative links,
+// not an IR traversal. Unmerged publications have no links to follow.
+// Replacement preserves live representatives before deferred numeric inference.
 static inline loom_value_id_t loom_value_fact_table_query_identity(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
   if (!table || value_id >= table->identities.capacity) {
     return value_id;
   }
-  const loom_value_id_t identity = table->identities.entries[value_id];
-  return identity != LOOM_VALUE_ID_INVALID ? identity : value_id;
+  loom_value_fact_identity_t* identity = table->identities.entries[value_id];
+  if (!identity) {
+    return value_id;
+  }
+  const loom_value_id_t representative =
+      loom_value_fact_identity_root(identity)->representative;
+  return representative != LOOM_VALUE_ID_INVALID ? representative : value_id;
 }
 
 // Returns true when exact predicate-bearing identities await consumption.

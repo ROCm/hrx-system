@@ -9,6 +9,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/scalar/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
@@ -30,6 +31,9 @@ class ErasureTest : public ::testing::Test {
     vtables = loom_vector_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_VECTOR,
                                                  vtables, (uint16_t)count));
+    vtables = loom_scalar_dialect_vtables(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_SCALAR,
+                                                 vtables, (uint16_t)count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("erasure"), &pool_,
                                         nullptr, iree_allocator_system(),
@@ -44,6 +48,15 @@ class ErasureTest : public ::testing::Test {
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&arena_);
     iree_arena_block_pool_deinitialize(&pool_);
+  }
+
+  loom_op_t* BuildIdentity(loom_value_id_t source) {
+    const loom_type_t type = loom_module_value_type(module_, source);
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_scalar_assume_build(&rewriter_.builder, &source, 1,
+                                           nullptr, 0, &type, 1,
+                                           LOOM_LOCATION_UNKNOWN, &op));
+    return op;
   }
 
   // Shared backing for source and rewrite allocations.
@@ -211,6 +224,89 @@ TEST_F(ErasureTest, TypeChangesWithdrawMaterializations) {
   EXPECT_EQ(
       loom_value_fact_table_query_vector_partition(&facts, vector_value).count,
       2u);
+  loom_rewriter_attach_value_facts(&rewriter_, nullptr);
+}
+
+TEST_F(ErasureTest, RetainedIdentitiesFollowReplacementBeforeInference) {
+  loom_value_fact_table_t facts;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &arena_, 0));
+  loom_rewriter_attach_value_facts(&rewriter_, &facts);
+  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* original = nullptr;
+  loom_op_t* replacement = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&rewriter_.builder, loom_attr_i64(7),
+                                          type, LOOM_LOCATION_UNKNOWN,
+                                          &original));
+  IREE_ASSERT_OK(loom_test_constant_build(&rewriter_.builder, loom_attr_i64(7),
+                                          type, LOOM_LOCATION_UNKNOWN,
+                                          &replacement));
+  const loom_value_id_t original_value = loom_test_constant_result(original);
+  const loom_value_id_t replacement_value =
+      loom_test_constant_result(replacement);
+  loom_op_t* direct = BuildIdentity(original_value);
+  loom_op_t* indirect = BuildIdentity(loom_op_const_results(direct)[0]);
+  const loom_value_id_t indirect_value = loom_op_const_results(indirect)[0];
+  ASSERT_EQ(loom_rewriter_value_identity(&rewriter_, indirect_value),
+            original_value);
+
+  IREE_ASSERT_OK(loom_rewriter_replace_all_uses_with(&rewriter_, original_value,
+                                                     replacement_value));
+  EXPECT_EQ(loom_rewriter_value_identity(&rewriter_, indirect_value),
+            replacement_value);
+  // Replacing uses does not erase or redefine the original SSA value. An
+  // identity subsequently created from it belongs to a separate publication.
+  loom_op_t* subsequent = BuildIdentity(original_value);
+  const loom_value_id_t subsequent_value = loom_op_const_results(subsequent)[0];
+  EXPECT_EQ(loom_rewriter_value_identity(&rewriter_, subsequent_value),
+            original_value);
+  IREE_ASSERT_OK(loom_rewriter_erase(&rewriter_, subsequent));
+  IREE_ASSERT_OK(loom_rewriter_erase(&rewriter_, original));
+  EXPECT_EQ(loom_rewriter_value_identity(&rewriter_, indirect_value),
+            replacement_value);
+  bool changed = false;
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(&facts, module_,
+                                                             direct, &changed));
+  EXPECT_TRUE(changed);
+  changed = false;
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(
+      &facts, module_, indirect, &changed));
+  EXPECT_TRUE(changed);
+  loom_rewriter_attach_value_facts(&rewriter_, nullptr);
+}
+
+TEST_F(ErasureTest, PartialMutationWithdrawsErasedIdentityBeforeInference) {
+  loom_value_fact_table_t facts;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &arena_, 0));
+  loom_rewriter_attach_value_facts(&rewriter_, &facts);
+  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* original = nullptr;
+  loom_op_t* replacement = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&rewriter_.builder, loom_attr_i64(7),
+                                          type, LOOM_LOCATION_UNKNOWN,
+                                          &original));
+  IREE_ASSERT_OK(loom_test_constant_build(&rewriter_.builder, loom_attr_i64(7),
+                                          type, LOOM_LOCATION_UNKNOWN,
+                                          &replacement));
+  const loom_value_id_t original_value = loom_test_constant_result(original);
+  const loom_value_id_t replacement_value =
+      loom_test_constant_result(replacement);
+  loom_op_t* direct = BuildIdentity(original_value);
+  loom_op_t* indirect = BuildIdentity(loom_op_const_results(direct)[0]);
+  const loom_value_id_t indirect_value = loom_op_const_results(indirect)[0];
+  IREE_ASSERT_OK(
+      loom_rewriter_set_operand(&rewriter_, direct, 0, replacement_value));
+  // The downstream equation is pending when DCE removes its former source.
+  // Withdrawing that source makes the downstream value its own identity until
+  // normal inference publishes the replacement, without scanning its users.
+  IREE_ASSERT_OK(loom_rewriter_erase(&rewriter_, original));
+  EXPECT_EQ(loom_rewriter_value_identity(&rewriter_, indirect_value),
+            indirect_value);
+  bool changed = false;
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op_and_report(
+      &facts, module_, indirect, &changed));
+  EXPECT_TRUE(changed);
+  EXPECT_EQ(loom_rewriter_value_identity(&rewriter_, indirect_value),
+            replacement_value);
   loom_rewriter_attach_value_facts(&rewriter_, nullptr);
 }
 
