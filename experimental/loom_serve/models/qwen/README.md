@@ -68,6 +68,15 @@ that suffix requires replay; byte-identical history remains reusable.
 Tool definitions and tool-result turns use the chat endpoint;
 the source policy formats and parses the model's XML tool-call protocol.
 
+Explicit contexts may be empty, contain only system instructions or assistant
+history, or end with a completed assistant message. The source adds the usual
+assistant generation prefix after closing any tool or initial system framing;
+it never inserts a user turn. This supports Realtime independent status replies
+and selected item histories. Thinking and tool declarations retain the same
+formatting as ordinary user-led conversations. This extends the upstream
+template's user-query admission rule; role, field, and media validation remain
+in force.
+
 ## Image chat
 
 Send images at their original size. The projector applies orientation, composites

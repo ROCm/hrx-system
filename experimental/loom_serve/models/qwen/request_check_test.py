@@ -173,6 +173,109 @@ class RequestCheckTest(unittest.TestCase):
                     self.assertFalse(value["reusable"])
                     self.assertTrue(value["checkpoint"].endswith("<|im_end|>\n"))
 
+    def test_independent_context_prompt_bytes(self):
+        generation = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        cases = [
+            ([], ""),
+            (
+                [{"role": "system", "content": "Speak briefly."}],
+                "<|im_start|>system\nSpeak briefly.<|im_end|>\n",
+            ),
+            (
+                [{"role": "assistant", "content": "Earlier."}],
+                generation + "Earlier.<|im_end|>\n",
+            ),
+            (
+                [
+                    {"role": "user", "content": "Hello."},
+                    {"role": "assistant", "content": "Earlier."},
+                ],
+                "<|im_start|>user\nHello.<|im_end|>\n"
+                + generation
+                + "Earlier.<|im_end|>\n",
+            ),
+        ]
+        for messages, prefix in cases:
+            with self.subTest(messages=messages):
+                value = self.success(
+                    self.execute(
+                        PACKAGE / "control.loom",
+                        self.request(messages=messages),
+                        "Ready.",
+                    )
+                )
+                self.assertEqual(value["prompt"], prefix + generation)
+                self.assertEqual(
+                    value["checkpoint"], prefix + generation + "Ready.<|im_end|>\n"
+                )
+                self.assertTrue(value["reusable"])
+
+    def test_independent_context_closes_source_prefixes(self):
+        call = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": '{"path":"a.txt"}'},
+                }
+            ],
+        }
+        histories = [
+            [],
+            [{"role": "system", "content": ""}],
+            [{"role": "system", "content": "Speak briefly."}],
+            [{"role": "assistant", "content": "Earlier."}],
+            [call, {"role": "tool", "tool_call_id": "call-1", "content": "Found it."}],
+        ]
+        user = {"role": "user", "content": "Hello λ."}
+        user_frame = "<|im_start|>user\nHello λ.<|im_end|>\n"
+        for thinking in (False, True):
+            generation = "<|im_start|>assistant\n<think>\n" + (
+                "" if thinking else "\n</think>\n\n"
+            )
+            for tools in ([], TOOLS):
+                for history in histories:
+                    with self.subTest(
+                        thinking=thinking, tools=bool(tools), history=history
+                    ):
+                        options = {"enable_thinking": thinking, "tools": tools}
+                        ordinary = self.success(
+                            self.execute(
+                                PACKAGE / "control.loom",
+                                self.request(messages=[*history, user], **options),
+                            )
+                        )
+                        suffix = user_frame + generation
+                        self.assertTrue(ordinary["prompt"].endswith(suffix))
+                        selected = self.success(
+                            self.execute(
+                                PACKAGE / "control.loom",
+                                self.request(messages=history, **options),
+                            )
+                        )
+                        self.assertEqual(
+                            selected["prompt"],
+                            ordinary["prompt"][: -len(suffix)] + generation,
+                        )
+
+    def test_independent_context_preserves_role_validation(self):
+        for messages in (
+            [{"role": "unknown", "content": "Hello."}],
+            [
+                {"role": "assistant", "content": "Earlier."},
+                {"role": "system", "content": "Late instruction."},
+            ],
+            [{"role": "tool", "content": "Missing call identity."}],
+        ):
+            with self.subTest(messages=messages):
+                result = self.execute(
+                    PACKAGE / "control.loom", self.request(messages=messages)
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("INVALID_ARGUMENT", result.stderr)
+
     def test_thinking_defaults_off_and_remains_request_selectable(self):
         for tools in ([], TOOLS):
             with self.subTest(tools=bool(tools)):

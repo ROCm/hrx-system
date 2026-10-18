@@ -612,8 +612,6 @@ global.rodata.def @chat_invalid = bytes("756e737570706f7274656420726f6c652c20726
 
 global.rodata.def @chat_image_invalid = bytes("5177656e20696d6167657320726571756972652061207573657220726f6c6520616e6420646973706c61792061737065637420726174696f206174206d6f737420323030")
 
-global.rodata.def @chat_end_invalid = bytes("63686174206d75737420636f6e7461696e2061207573657220717565727920616e6420656e6420776974682075736572206f7220746f6f6c20696e707574")
-
 global.rodata.def @chat_vision_start = bytes("3c7c766973696f6e5f73746172747c3e")
 
 global.rodata.def @chat_image_pad = bytes("3c7c696d6167655f7061647c3e")
@@ -1251,8 +1249,8 @@ func.def @chat_shift_markers(%plan: buffer, %image_count64: i64, %base: offset) 
   func.return
 }
 
-// Low two bits hold the preceding role; bits 2/3 retain system/user presence,
-// bit 4 selects thinking, and the upper bits hold the per-image token budget.
+// Low two bits hold the preceding role; bit 2 marks an unclosed initial system
+// prefix, bit 4 selects thinking, and upper bits hold the per-image token budget.
 // This is source-private state. Native code carries it without interpreting it.
 func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %parts: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64, %part_count: i64) -> (buffer, i64, buffer) {
   %zero64 = scalar.constant 0 : i64
@@ -1260,8 +1258,7 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   %two64 = scalar.constant 2 : i64
   %three64 = scalar.constant 3 : i64
   %four64 = scalar.constant 4 : i64
-  %eight64 = scalar.constant 8 : i64
-  %retained_mask = scalar.constant -4 : i64
+  %retained_mask = scalar.constant -8 : i64
   %c0 = index.constant 0 : offset
   %empty = global.load @input_empty_boundary : buffer
   %close = global.load @input_open_boundary : buffer
@@ -1314,8 +1311,7 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   %nonempty = index.cmp ne, %text_length, %c0 : offset
   %calls_length = buffer.length %calls
   %has_calls = index.cmp ne, %calls_length, %c0 : offset
-  %first_system = scalar.andi %first, %has_system_prefix : i1
-  %close_system = scalar.andi %first_system, %not_system : i1
+  %close_system = scalar.andi %has_system_prefix, %not_system : i1
   %not_tool = scalar.cmpi eq, %tool, %false : i1
   %close_tools = scalar.andi %prior_tool, %not_tool : i1
   %closes = scalar.ori %close_system, %close_tools : i1
@@ -1371,29 +1367,22 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   %role_d = scf.select %assistant, %two64, %role_c : i64
   %new_role = scf.select %user, %one64, %role_d : i64
   %retained_bits = scalar.andi %state, %retained_mask : i64
-  %user_bit = scf.select %user, %eight64, %zero64 : i64
-  %new_bits = scalar.ori %retained_bits, %user_bit : i64
-  %next = scalar.ori %new_bits, %new_role : i64
+  %next = scalar.ori %retained_bits, %new_role : i64
   func.return %result, %next, %plan : buffer, i64, buffer
 }
 
 func.def public @chat_end(%state: i64) -> (buffer, i64) {
   %c0 = scalar.constant 0 : i64
-  %c2 = scalar.constant 2 : i64
   %c3 = scalar.constant 3 : i64
-  %c8 = scalar.constant 8 : i64
-  %user = scalar.andi %state, %c8 : i64
-  %has_user = scalar.cmpi ne, %user, %c0 : i64
+  %c4 = scalar.constant 4 : i64
   %role = scalar.andi %state, %c3 : i64
-  %not_assistant = scalar.cmpi ne, %role, %c2 : i64
-  %valid = scalar.andi %has_user, %not_assistant : i1
-  %valid32 = scalar.extui %valid : i1 to i32
-  %error = global.load @chat_end_invalid : buffer
-  func.call @require(%valid32, %error) : (i32, buffer)
   %tool = scalar.cmpi eq, %role, %c3 : i64
+  %system_bit = scalar.andi %state, %c4 : i64
+  %open_system = scalar.cmpi ne, %system_bit, %c0 : i64
+  %needs_close = scalar.ori %tool, %open_system : i1
   %close = global.load @input_open_boundary : buffer
   %empty = global.load @input_empty_boundary : buffer
-  %prefix = scf.select %tool, %close, %empty : buffer
+  %prefix = scf.select %needs_close, %close, %empty : buffer
   %c16 = scalar.constant 16 : i64
   %thinking_bit = scalar.andi %state, %c16 : i64
   %thinking = scalar.cmpi ne, %thinking_bit, %c0 : i64
