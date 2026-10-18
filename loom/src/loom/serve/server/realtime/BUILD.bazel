@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:python.bzl", "loom_py_library")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
@@ -14,10 +15,21 @@ package(
 
 exports_files(["session_test.py"])
 
+loom_py_library(
+    name = "session_test_support",
+    testonly = True,
+    srcs = [
+        "client_test_util.py",
+        "independent_test.py",
+    ],
+    deps = ["//loom/src/loom/serve/server:catalog_test_util"],
+)
+
 loom_cc_test(
     name = "conversation_test",
     srcs = ["conversation_test.cc"],
     deps = [
+        ":context",
         ":conversation",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
@@ -385,11 +397,27 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "context",
+    srcs = ["context.c"],
+    hdrs = ["context.h"],
+    deps = [
+        ":conversation",
+        ":event",
+        ":input",
+        ":item",
+        ":settings",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+    ],
+)
+
+loom_cc_library(
     name = "response",
     srcs = ["response.c"],
     hdrs = ["response.h"],
     deps = [
         ":binding",
+        ":context",
         ":conversation",
         ":event",
         ":generation",

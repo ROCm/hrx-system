@@ -83,10 +83,16 @@ static const loom_serve_realtime_item_rule_t loom_serve_realtime_item_rules[] =
          0},
 };
 
-static iree_status_t loom_serve_realtime_item_decode(
-    loom_serve_realtime_conversation_t* conversation, iree_string_view_t object,
-    iree_string_builder_t* id, iree_string_builder_t* call_id,
-    iree_string_builder_t* text, loom_serve_realtime_item_t** out_item) {
+iree_status_t loom_serve_realtime_item_input_initialize(
+    iree_string_view_t object, iree_allocator_t host_allocator,
+    loom_serve_realtime_item_input_t* input) {
+  *input = (loom_serve_realtime_item_input_t){0};
+  iree_string_builder_initialize(host_allocator, &input->id);
+  iree_string_builder_initialize(host_allocator, &input->call_id);
+  iree_string_builder_initialize(host_allocator, &input->text);
+  iree_string_builder_t* id = &input->id;
+  iree_string_builder_t* call_id = &input->call_id;
+  iree_string_builder_t* text = &input->text;
   static const loom_serve_realtime_field_rule_t rules[] = {
       {"type", 1u << IREE_JSON_VALUE_TYPE_STRING},
       {"id", 1u << IREE_JSON_VALUE_TYPE_STRING},
@@ -192,39 +198,48 @@ static iree_status_t loom_serve_realtime_item_decode(
             .text,
         1024 * 1024, text));
   }
-  loom_serve_realtime_item_t* item = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_conversation_reserve(
-      conversation, iree_string_builder_view(id), rule->kind, role, false,
-      &item));
-  iree_status_t status =
-      rule->kind == LOOM_SERVE_REALTIME_ITEM_MESSAGE
-          ? loom_serve_realtime_conversation_append_text(
-                conversation, item, iree_string_builder_view(text))
-          : loom_serve_realtime_conversation_function(
-                conversation, item, iree_string_builder_view(call_id), name,
-                iree_string_builder_view(text));
-  if (!iree_status_is_ok(status)) {
-    loom_serve_realtime_conversation_remove(conversation, item);
-    return status;
-  }
-  loom_serve_realtime_item_complete(item);
-  *out_item = item;
+  input->kind = rule->kind;
+  input->role = role;
+  input->name = name;
   return iree_ok_status();
+}
+
+void loom_serve_realtime_item_input_deinitialize(
+    loom_serve_realtime_item_input_t* input) {
+  iree_string_builder_deinitialize(&input->id);
+  iree_string_builder_deinitialize(&input->call_id);
+  iree_string_builder_deinitialize(&input->text);
 }
 
 iree_status_t loom_serve_realtime_item_parse(
     loom_serve_realtime_conversation_t* conversation, iree_string_view_t object,
     loom_serve_realtime_item_t** out_item) {
   *out_item = NULL;
-  iree_string_builder_t id, call_id, text;
-  iree_string_builder_initialize(conversation->host_allocator, &id);
-  iree_string_builder_initialize(conversation->host_allocator, &call_id);
-  iree_string_builder_initialize(conversation->host_allocator, &text);
-  const iree_status_t status = loom_serve_realtime_item_decode(
-      conversation, object, &id, &call_id, &text, out_item);
-  iree_string_builder_deinitialize(&id);
-  iree_string_builder_deinitialize(&call_id);
-  iree_string_builder_deinitialize(&text);
+  loom_serve_realtime_item_input_t input;
+  iree_status_t status = loom_serve_realtime_item_input_initialize(
+      object, conversation->host_allocator, &input);
+  loom_serve_realtime_item_t* item = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_realtime_conversation_reserve(
+        conversation, iree_string_builder_view(&input.id), input.kind,
+        input.role, false, &item);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        input.kind == LOOM_SERVE_REALTIME_ITEM_MESSAGE
+            ? loom_serve_realtime_conversation_append_text(
+                  conversation, item, iree_string_builder_view(&input.text))
+            : loom_serve_realtime_conversation_function(
+                  conversation, item, iree_string_builder_view(&input.call_id),
+                  input.name, iree_string_builder_view(&input.text));
+  }
+  loom_serve_realtime_item_input_deinitialize(&input);
+  if (iree_status_is_ok(status)) {
+    loom_serve_realtime_item_complete(item);
+    *out_item = item;
+  } else if (item) {
+    loom_serve_realtime_conversation_remove(conversation, item);
+  }
   return status;
 }
 
