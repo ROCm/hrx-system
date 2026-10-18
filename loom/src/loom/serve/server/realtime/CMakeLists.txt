@@ -75,10 +75,6 @@ loom_cc_library(
     loom::serve::service::recognition::request
     loom::serve::testing::service_application
     loom::serve::testing::worker_gate
-    loom::serve::transport::http::listener
-    loom::serve::transport::http::server
-    loom::serve::transport::websocket::connection
-    loom::serve::transport::websocket::handshake
   TESTONLY
   ALWAYSLINK
   PUBLIC
@@ -194,18 +190,14 @@ loom_cc_library(
   DEPS
     ::binding
     iree::base
-    iree::base::internal::base64
-    iree::base::internal::json
     iree::base::threading
     iree::task
     loom::serve::media::audio_resampler
     loom::serve::runtime::host::wake
     loom::serve::server::registry
-    loom::serve::service::recognition::input
     loom::serve::service::recognition::request
     loom::serve::service::recognition::stream
     loom::serve::service::recognition::transcription
-    loom::serve::transport::websocket::connection
   PUBLIC
 )
 endif()
@@ -285,6 +277,7 @@ loom_cc_library(
   DEPS
     ::audio
     ::binding
+    ::capture
     ::conversation
     ::event
     ::generation
@@ -332,6 +325,51 @@ loom_cc_library(
     loom::serve::transport::websocket::connection
     loom::serve::transport::websocket::handshake
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    capture
+  HDRS
+    "capture.h"
+  SRCS
+    "capture.c"
+  DEPS
+    iree::base
+    iree::base::internal::base64
+    iree::base::internal::json
+    iree::base::threading
+    iree::task
+    loom::serve::runtime::host::wake
+    loom::serve::transport::websocket::connection
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    capture_test
+  SRCS
+    "capture_test.cc"
+  DEPS
+    ::capture
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::internal::base64
+    iree::base::threading
+    iree::task
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::testing::worker_gate
+    loom::serve::transport::http::listener
+    loom::serve::transport::http::server
+    loom::serve::transport::websocket::connection
+    loom::serve::transport::websocket::handshake
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
 )
 endif()
 
