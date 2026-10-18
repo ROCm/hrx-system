@@ -1,0 +1,110 @@
+// All lanes consume variadic scalar/vector reductions, then independent scan
+// directions. This exercises publication between subgroup partials and final
+// results, including a partial last subgroup, without source-authored barriers.
+kernel.def @workgroup_publication_reduce() {
+  %unit = index.constant 1 : index
+  %items = index.constant 128 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: view<128xf32>, %output: view<128x3xf32>) {
+  %item = kernel.workitem.id<x> : index
+  %value = view.load %input[%item] : view<128xf32> -> f32
+  %negative = scalar.negf %value : f32
+  %pair = vector.from_elements %value, %negative : vector<2xf32>
+  %maximum, %extrema = kernel.workgroup.reduce<maximumf> %value, %pair : f32, vector<2xf32>
+  %high = vector.extract %extrema[0] : vector<2xf32> -> f32
+  %low = vector.extract %extrema[1] : vector<2xf32> -> f32
+  view.store %maximum, %output[%item, 0] : f32, view<128x3xf32>
+  view.store %high, %output[%item, 1] : f32, view<128x3xf32>
+  view.store %low, %output[%item, 2] : f32, view<128x3xf32>
+  kernel.return
+}
+
+func.def @workgroup_publication_reduce_expected(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %result = buffer.view %output[%origin] : buffer -> view<128x3xf32>
+  %begin = index.constant 0 : index
+  %increment = index.constant 1 : index
+  %items = index.constant 128 : index
+  %high = scalar.constant 128.0 : f32
+  %low = scalar.constant -1.0 : f32
+  scf.for %item = [%begin to %items step %increment] {
+    view.store %high, %result[%item, 0] : f32, view<128x3xf32>
+    view.store %high, %result[%item, 1] : f32, view<128x3xf32>
+    view.store %low, %result[%item, 2] : f32, view<128x3xf32>
+  }
+  func.return
+}
+
+check.scenario @workgroup_publication_reduce_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1.0) step(1.0) : view<128xf32>
+    %output = check.generate.fill value(-123.0) : view<128x3xf32>
+    check.compare<@workgroup_publication_reduce, @workgroup_publication_reduce_expected>(%input, %output) : (view<128xf32>, view<128x3xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : view<128x3xf32>
+    }
+  }
+  check.return
+}
+
+kernel.def @workgroup_publication_scan() {
+  %unit = index.constant 1 : index
+  %items = index.constant 83 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%input: view<83x2xf32>, %output: view<83x4x2xf32>) {
+  %item = kernel.workitem.id<x> : index
+  %value = vector.load %input[%item, 0] : view<83x2xf32> -> vector<2xf32>
+  %forward_inclusive = kernel.workgroup.scan<maximumf> %value {direction = forward, mode = inclusive} : vector<2xf32>
+  %forward_exclusive = kernel.workgroup.scan<maximumf> %value {direction = forward, mode = exclusive} : vector<2xf32>
+  %reverse_inclusive = kernel.workgroup.scan<maximumf> %value {direction = reverse, mode = inclusive} : vector<2xf32>
+  %reverse_exclusive = kernel.workgroup.scan<maximumf> %value {direction = reverse, mode = exclusive} : vector<2xf32>
+  vector.store %forward_inclusive, %output[%item, 0, 0] : vector<2xf32>, view<83x4x2xf32>
+  vector.store %forward_exclusive, %output[%item, 1, 0] : vector<2xf32>, view<83x4x2xf32>
+  vector.store %reverse_inclusive, %output[%item, 2, 0] : vector<2xf32>, view<83x4x2xf32>
+  vector.store %reverse_exclusive, %output[%item, 3, 0] : vector<2xf32>, view<83x4x2xf32>
+  kernel.return
+}
+
+// Increasing binary-integral inputs give exact prefix/suffix maxima. Empty
+// exclusive ranges have the extremum identity, independently per component.
+func.def @workgroup_publication_scan_expected(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %result = buffer.view %output[%origin] : buffer -> view<83x4x2xf32>
+  %begin = index.constant 0 : index
+  %increment = index.constant 1 : index
+  %components = index.constant 2 : index
+  %items = index.constant 83 : index
+  %last = index.constant 82 : index
+  %identity = scalar.constant -inf : f32
+  %step = scalar.constant 2.0 : f32
+  scf.for %item = [%begin to %items step %increment] {
+    %first_item = index.cmp eq, %item, %begin : index
+    %last_item = index.cmp eq, %item, %last : index
+    scf.for %component = [%begin to %components step %increment] {
+      %linear = index.madd %item, %components, %component : index
+      %last_linear = index.madd %last, %components, %component : index
+      %word = index.cast %linear : index to i32
+      %last_word = index.cast %last_linear : index to i32
+      %current = scalar.uitofp %word : i32 to f32
+      %maximum = scalar.uitofp %last_word : i32 to f32
+      %previous = scalar.subf %current, %step : f32
+      %forward_exclusive = scf.select %first_item, %identity, %previous : f32
+      %reverse_exclusive = scf.select %last_item, %identity, %maximum : f32
+      view.store %current, %result[%item, 0, %component] : f32, view<83x4x2xf32>
+      view.store %forward_exclusive, %result[%item, 1, %component] : f32, view<83x4x2xf32>
+      view.store %maximum, %result[%item, 2, %component] : f32, view<83x4x2xf32>
+      view.store %reverse_exclusive, %result[%item, 3, %component] : f32, view<83x4x2xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario @workgroup_publication_scan_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0.0) step(1.0) : view<83x2xf32>
+    %output = check.generate.fill value(-123.0) : view<83x4x2xf32>
+    check.compare<@workgroup_publication_scan, @workgroup_publication_scan_expected>(%input, %output) : (view<83x2xf32>, view<83x4x2xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : view<83x4x2xf32>
+    }
+  }
+  check.return
+}
