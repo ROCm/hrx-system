@@ -16,23 +16,24 @@ enum {
   LOOM_SERVE_REALTIME_AUDIO_BYTES = 4 * 1024 * 1024,
 };
 
-iree_status_t loom_serve_realtime_audio_begin(
+iree_status_t loom_serve_realtime_audio_filter_initialize(
     loom_serve_speech_format_t format, iree_allocator_t host_allocator,
-    loom_serve_realtime_audio_t* audio) {
-  audio->host_allocator = host_allocator;
+    loom_serve_audio_resampler_filter_t* filter) {
+  return loom_serve_audio_resampler_filter_initialize(
+      format.sample_rate, 24000, LOOM_SERVE_REALTIME_AUDIO_BYTES,
+      host_allocator, filter);
+}
+
+iree_status_t loom_serve_realtime_audio_begin(
+    loom_serve_speech_format_t format,
+    const loom_serve_audio_resampler_filter_t* filter,
+    iree_allocator_t host_allocator, loom_serve_realtime_audio_t* audio) {
   audio->format = format;
   audio->source_offset = 0;
   audio->frames = 0;
-  if (!audio->filter_ready) {
-    loom_serve_audio_resampler_filter_deinitialize(&audio->filter);
-    IREE_RETURN_IF_ERROR(loom_serve_audio_resampler_filter_initialize(
-        format.sample_rate, 24000, LOOM_SERVE_REALTIME_AUDIO_BYTES,
-        host_allocator, &audio->filter));
-    audio->filter_ready = true;
-  }
   loom_serve_audio_resampler_deinitialize(&audio->resampler);
   return loom_serve_audio_resampler_initialize(
-      &audio->filter, 1, LOOM_SERVE_REALTIME_AUDIO_FRAMES,
+      filter, 1, LOOM_SERVE_REALTIME_AUDIO_FRAMES,
       LOOM_SERVE_REALTIME_AUDIO_BYTES, host_allocator, &audio->resampler);
 }
 
@@ -114,5 +115,4 @@ iree_status_t loom_serve_realtime_audio_convert(
 void loom_serve_realtime_audio_deinitialize(
     loom_serve_realtime_audio_t* audio) {
   loom_serve_audio_resampler_deinitialize(&audio->resampler);
-  loom_serve_audio_resampler_filter_deinitialize(&audio->filter);
 }
