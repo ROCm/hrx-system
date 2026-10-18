@@ -40,8 +40,7 @@ class GpuTsanTest : public GpuNativeTest,
     }
     ASSERT_NE(artifact_.data, nullptr);
     options_.tsan.memory.workgroup_local_memory_size = 256;
-    options_.tsan.memory.workgroup_capacity = 4;
-    options_.tsan.memory.shadow_slot_count = GetParam();
+    options_.tsan.memory.workgroup_capacity = GetParam();
   }
 
   void TearDown() override {
@@ -99,22 +98,23 @@ class GpuTsanTest : public GpuNativeTest,
     }
     const auto* report = reinterpret_cast<const iree_hal_device_tsan_report_t*>(
         event->payload.data);
-    EXPECT_EQ(report->check_kind, IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE);
-    EXPECT_EQ(report->memory_space,
+    ASSERT_EQ(report->check_kind, IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE);
+    const auto& data_race = report->detail.data_race;
+    EXPECT_EQ(data_race.memory_space,
               IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_WORKGROUP);
-    EXPECT_EQ(report->current_access_kind,
+    EXPECT_EQ(data_race.current_access_kind,
               IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE);
-    EXPECT_EQ(report->prior_access_kind,
+    EXPECT_EQ(data_race.prior_access_kind,
               IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE);
-    EXPECT_EQ(report->access_length, 4u);
-    EXPECT_NE(report->shadow_address, 0u);
+    EXPECT_EQ(data_race.access_length, 4u);
+    EXPECT_NE(data_race.shadow_address, 0u);
     EXPECT_NE(report->source_dispatch_ptr, 0u);
     EXPECT_NE(event->source.executable_id, 0u);
     uint64_t identity = 0;
     self.executable_id_.compare_exchange_strong(identity,
                                                 event->source.executable_id);
     EXPECT_EQ(self.executable_id_.load(), event->source.executable_id);
-    self.last_shadow_.store(report->shadow_address);
+    self.last_shadow_.store(data_race.shadow_address);
     self.reports_.fetch_add(1);
   }
 
@@ -177,7 +177,7 @@ class GpuTsanTest : public GpuNativeTest,
   std::atomic<uint64_t> last_shadow_ = 0;
 };
 
-TEST_P(GpuTsanTest, SharedRecordingSelectsQueueShadowAndJoinsSlotReuse) {
+TEST_P(GpuTsanTest, SharedRecordingSelectsQueueShadowAndJoinsArenaReuse) {
   Load(IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_REPORT_ONLY);
   ASSERT_FALSE(HasFatalFailure());
   std::array<uint64_t, 2> shadows = {};
@@ -323,8 +323,8 @@ TEST_P(GpuTsanTest, IndirectDispatchRelocatesPacketAndPreparationProgram) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(ShadowWindow, GpuTsanTest,
-                         ::testing::Values(1u, 2u, 16u));
+INSTANTIATE_TEST_SUITE_P(ShadowCapacity, GpuTsanTest,
+                         ::testing::Values(4u, 8u, 64u));
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu::cts

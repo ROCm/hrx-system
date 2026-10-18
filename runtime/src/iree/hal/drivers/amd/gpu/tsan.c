@@ -71,8 +71,7 @@ void iree_hal_amd_gpu_tsan_options_initialize(
     iree_hal_amd_gpu_tsan_options_t* out_options) {
   *out_options = (iree_hal_amd_gpu_tsan_options_t){
       .memory_granule_shift = 2,
-      .workgroup_capacity = 256,
-      .shadow_slot_count = 16,
+      .workgroup_capacity = 4096,
   };
 }
 
@@ -82,7 +81,6 @@ iree_status_t iree_hal_amd_gpu_tsan_calculate_config(
     iree_hal_amd_gpu_tsan_config_t* out_config) {
   *out_config = (iree_hal_amd_gpu_tsan_config_t){0};
   if (options->memory_granule_shift > 16 || !options->workgroup_capacity ||
-      !iree_device_size_is_power_of_two(options->shadow_slot_count) ||
       (options->workgroup_local_memory_size &&
        !iree_device_size_is_power_of_two(
            options->workgroup_local_memory_size))) {
@@ -99,10 +97,8 @@ iree_status_t iree_hal_amd_gpu_tsan_calculate_config(
   const uint64_t granule_size = UINT64_C(1) << options->memory_granule_shift;
   const uint64_t workgroup_stride =
       8 + iree_device_size_ceil_div(local_size, granule_size) * 8;
-  uint64_t dispatch_stride = 0, shadow_size = 0;
+  uint64_t shadow_size = 0;
   if (!iree_checked_mul_u64(workgroup_stride, options->workgroup_capacity,
-                            &dispatch_stride) ||
-      !iree_checked_mul_u64(dispatch_stride, options->shadow_slot_count,
                             &shadow_size) ||
       shadow_size > SIZE_MAX - 128) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -113,11 +109,11 @@ iree_status_t iree_hal_amd_gpu_tsan_calculate_config(
       .flags = 3,
       .memory_granule_shift = options->memory_granule_shift,
       .shadow_size = shadow_size,
-      .dispatch_shadow_stride = dispatch_stride,
+      .dispatch_shadow_stride = shadow_size,
       .workgroup_shadow_stride = workgroup_stride,
       .workgroup_capacity = options->workgroup_capacity,
       .shadow_entry_size = 8,
-      .shadow_slot_count = options->shadow_slot_count,
+      .shadow_slot_count = 1,
   };
   return iree_ok_status();
 }

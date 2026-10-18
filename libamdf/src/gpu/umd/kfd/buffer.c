@@ -137,8 +137,8 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare_import(
       .gpu_id = device->topology.gpu_id,
       .dmabuf_fd = (uint32_t)descriptor,
   };
-  if (amdf_gpu_kfd_buffer_ioctl(device, AMDKFD_IOC_IMPORT_DMABUF, &import) !=
-      0) {
+  if (amdf_gpu_kfd_buffer_ioctl(device, AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE,
+                                AMDKFD_IOC_IMPORT_DMABUF, &import) != 0) {
     status = amdf_linux_error(errno);
   } else {
     buffer->handle = import.handle;

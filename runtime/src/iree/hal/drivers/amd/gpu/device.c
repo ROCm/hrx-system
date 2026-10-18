@@ -773,8 +773,7 @@ iree_status_t iree_hal_amd_gpu_device_create(
       .allocations = &device->memory.allocations,
       .mappings = &device->memory.mappings,
       .feedback = feedback_enabled ? &device->feedback : NULL,
-      .tsan_shadow_slot_count =
-          tsan_enabled ? options->tsan.memory.shadow_slot_count : 0,
+      .tsan_enabled = tsan_enabled,
       .retirement_capacity = options->pm4.retirement_capacity,
       .argument_capacity = options->pm4.argument_capacity,
       .capture_block_size = options->pm4.capture_block_size,
@@ -1024,10 +1023,8 @@ static iree_status_t iree_hal_amd_gpu_device_create_command_buffer(
       family, &device->programs, mode, categories, binding_capacity,
       (uint32_t)
           device->context->target_info.compute.local_data_share_byte_length,
-      device->memory.tsan_count
-          ? device->memory.tsan[0].config.shadow_slot_count
-          : 0,
-      &profile, device->host_allocator, out_command_buffer);
+      device->memory.tsan_count != 0, &profile, device->host_allocator,
+      out_command_buffer);
 }
 
 static iree_status_t iree_hal_amd_gpu_device_import_file(

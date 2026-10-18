@@ -262,7 +262,9 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
   iree_hal_device_asan_report_t asan = {0};
   iree_hal_device_tsan_report_t tsan = {0};
   iree_hal_device_ubsan_report_t ubsan = {0};
-  uint64_t site_id = 0;
+  // Dispatch-wide diagnostics have no instrumentation site. Zero is a valid
+  // site index and must not attribute those reports to the first instruction.
+  uint64_t site_id = UINT64_MAX;
   iree_const_byte_span_t report;
   if (packet->kind == 1) {
     const uint32_t access_kind = iree_unaligned_load_le_u32(payload + 8);
@@ -286,47 +288,74 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
     report = iree_make_const_byte_span(&asan, sizeof(asan));
   } else if (packet->kind == 4) {
     const uint32_t check_kind = iree_unaligned_load_le_u32(payload + 8);
-    const uint32_t memory_space = iree_unaligned_load_le_u32(payload + 16);
-    const uint32_t current_access = iree_unaligned_load_le_u32(payload + 20);
-    const uint32_t prior_access = iree_unaligned_load_le_u32(payload + 24);
     tsan = (iree_hal_device_tsan_report_t){
         .record_length = sizeof(tsan),
         .abi_version = IREE_HAL_DEVICE_TSAN_REPORT_ABI_VERSION_0,
-        .check_kind = check_kind <= IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE
-                          ? check_kind
-                          : IREE_HAL_DEVICE_TSAN_CHECK_KIND_UNKNOWN,
+        .check_kind =
+            check_kind <= IREE_HAL_DEVICE_TSAN_CHECK_KIND_SHADOW_CAPACITY
+                ? check_kind
+                : IREE_HAL_DEVICE_TSAN_CHECK_KIND_UNKNOWN,
         .flags = iree_unaligned_load_le_u32(payload + 12),
-        .memory_space =
-            memory_space <= IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_PRIVATE
-                ? memory_space
-                : IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_UNKNOWN,
-        .current_access_kind =
-            current_access <= IREE_HAL_DEVICE_TSAN_ACCESS_KIND_ATOMIC
-                ? current_access
-                : IREE_HAL_DEVICE_TSAN_ACCESS_KIND_UNKNOWN,
-        .prior_access_kind =
-            prior_access <= IREE_HAL_DEVICE_TSAN_ACCESS_KIND_ATOMIC
-                ? prior_access
-                : IREE_HAL_DEVICE_TSAN_ACCESS_KIND_UNKNOWN,
-        .access_length = iree_unaligned_load_le_u32(payload + 28),
-        .current_site_id = iree_unaligned_load_le_u64(payload + 32),
-        .prior_site_id = iree_unaligned_load_le_u64(payload + 40),
-        .memory_address = iree_unaligned_load_le_u64(payload + 48),
-        .shadow_address = iree_unaligned_load_le_u64(payload + 56),
-        .shadow_value = iree_unaligned_load_le_u64(payload + 64),
         .source_dispatch_ptr = packet->source_dispatch_ptr,
     };
-    for (uint32_t i = 0; i < 3; ++i) {
-      tsan.current_workgroup_id[i] =
-          iree_unaligned_load_le_u32(payload + 72 + i * 4);
-      tsan.current_workitem_id[i] =
-          iree_unaligned_load_le_u32(payload + 84 + i * 4);
-      tsan.prior_workgroup_id[i] =
-          iree_unaligned_load_le_u32(payload + 96 + i * 4);
-      tsan.prior_workitem_id[i] =
-          iree_unaligned_load_le_u32(payload + 108 + i * 4);
+    if (tsan.check_kind == IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE) {
+      const uint32_t memory_space = iree_unaligned_load_le_u32(payload + 16);
+      const uint32_t current_access = iree_unaligned_load_le_u32(payload + 20);
+      const uint32_t prior_access = iree_unaligned_load_le_u32(payload + 24);
+      iree_hal_device_tsan_data_race_report_t* data_race =
+          &tsan.detail.data_race;
+      *data_race = (iree_hal_device_tsan_data_race_report_t){
+          .memory_space =
+              memory_space <= IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_PRIVATE
+                  ? memory_space
+                  : IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_UNKNOWN,
+          .current_access_kind =
+              current_access <= IREE_HAL_DEVICE_TSAN_ACCESS_KIND_ATOMIC
+                  ? current_access
+                  : IREE_HAL_DEVICE_TSAN_ACCESS_KIND_UNKNOWN,
+          .prior_access_kind =
+              prior_access <= IREE_HAL_DEVICE_TSAN_ACCESS_KIND_ATOMIC
+                  ? prior_access
+                  : IREE_HAL_DEVICE_TSAN_ACCESS_KIND_UNKNOWN,
+          .access_length = iree_unaligned_load_le_u32(payload + 28),
+          .current_site_id = iree_unaligned_load_le_u64(payload + 32),
+          .prior_site_id = iree_unaligned_load_le_u64(payload + 40),
+          .memory_address = iree_unaligned_load_le_u64(payload + 48),
+          .shadow_address = iree_unaligned_load_le_u64(payload + 56),
+          .shadow_value = iree_unaligned_load_le_u64(payload + 64),
+      };
+      for (uint32_t i = 0; i < 3; ++i) {
+        data_race->current_workgroup_id[i] =
+            iree_unaligned_load_le_u32(payload + 72 + i * 4);
+        data_race->current_workitem_id[i] =
+            iree_unaligned_load_le_u32(payload + 84 + i * 4);
+        data_race->prior_workgroup_id[i] =
+            iree_unaligned_load_le_u32(payload + 96 + i * 4);
+        data_race->prior_workitem_id[i] =
+            iree_unaligned_load_le_u32(payload + 108 + i * 4);
+      }
+      site_id = data_race->current_site_id;
+    } else if (tsan.check_kind ==
+               IREE_HAL_DEVICE_TSAN_CHECK_KIND_SHADOW_CAPACITY) {
+      iree_hal_device_tsan_shadow_capacity_report_t* capacity =
+          &tsan.detail.shadow_capacity;
+      *capacity = (iree_hal_device_tsan_shadow_capacity_report_t){
+          .shadow_size = iree_unaligned_load_le_u64(payload + 16),
+          .required_shadow_end = iree_unaligned_load_le_u64(payload + 24),
+          .workgroup_shadow_stride = iree_unaligned_load_le_u64(payload + 32),
+          .workgroup_ordinal = iree_unaligned_load_le_u64(payload + 40),
+          .workgroup_local_memory_size =
+              iree_unaligned_load_le_u32(payload + 48),
+          .memory_granule_shift = iree_unaligned_load_le_u32(payload + 52),
+          .shadow_entry_size = iree_unaligned_load_le_u32(payload + 56),
+      };
+      for (uint32_t i = 0; i < 3; ++i) {
+        capacity->current_workgroup_id[i] =
+            iree_unaligned_load_le_u32(payload + 64 + i * 4);
+        capacity->current_workitem_id[i] =
+            iree_unaligned_load_le_u32(payload + 76 + i * 4);
+      }
     }
-    site_id = tsan.current_site_id;
     report = iree_make_const_byte_span(&tsan, sizeof(tsan));
   } else {
     const uint32_t check_kind = iree_unaligned_load_le_u32(payload + 8);
@@ -373,9 +402,12 @@ static iree_status_t iree_hal_amd_gpu_feedback_publish(
       (packet->kind == 4 &&
        feedback->tsan_report_policy ==
            IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE)) {
-    iree_hal_amd_gpu_feedback_fail(feedback, packet->kind == 4
-                                                 ? IREE_STATUS_DATA_LOSS
-                                                 : IREE_STATUS_ABORTED);
+    const iree_status_code_t code =
+        packet->kind != 4 ? IREE_STATUS_ABORTED
+        : tsan.check_kind == IREE_HAL_DEVICE_TSAN_CHECK_KIND_SHADOW_CAPACITY
+            ? IREE_STATUS_RESOURCE_EXHAUSTED
+            : IREE_STATUS_DATA_LOSS;
+    iree_hal_amd_gpu_feedback_fail(feedback, code);
   }
   return iree_ok_status();
 }

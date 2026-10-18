@@ -20,22 +20,24 @@ typedef struct iree_hal_amd_gpu_tsan_options_t {
   uint32_t memory_granule_shift;
   // Workgroup LDS coverage; zero uses the native device limit.
   uint32_t workgroup_local_memory_size;
-  // Maximum workgroup ordinals represented by each dispatch slot.
+  // Arena capacity in workgroups at the configured LDS coverage. Smaller
+  // dispatch-local LDS records may fit more workgroups in the same arena.
   uint32_t workgroup_capacity;
-  // Power-of-two dispatch window; publication joins before reusing its slots.
-  uint32_t shadow_slot_count;
 } iree_hal_amd_gpu_tsan_options_t;
 
-// Initializes the existing four-byte granule, 256-workgroup, 16-dispatch
-// layout.
+// Initializes four-byte granules and capacity for 4096 workgroups at the
+// native LDS limit.
 void iree_hal_amd_gpu_tsan_options_initialize(
     iree_hal_amd_gpu_tsan_options_t* out_options);
 
 // Runtime-published TSAN configuration read by instrumented device code.
 //
-// Queue-scoped executable variants publish queue-specific shadow storage so
-// device code can derive a queue-local dispatch slot from the dispatch ID
-// without host per-dispatch mutation.
+// Queue-scoped executable variants publish one shared shadow arena. The
+// compiler sizes each workgroup record from the final dispatch LDS size.
+// Instrumented dispatches execute serially within the queue; dispatch IDs
+// distinguish reused generations without host mutation of the arena. Fixed slot
+// geometry remains in the device ABI and describes a single slot covering the
+// complete arena.
 typedef struct iree_hal_amd_gpu_tsan_config_t {
   // Size of this record in bytes for forward-compatible parsing.
   uint32_t record_length;

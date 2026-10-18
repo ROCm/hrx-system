@@ -251,9 +251,6 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
     } else if (iree_string_view_equal(params[i].key,
                                       IREE_SV("tsan_workgroup_capacity"))) {
       value = &options.tsan.memory.workgroup_capacity;
-    } else if (iree_string_view_equal(params[i].key,
-                                      IREE_SV("tsan_shadow_slot_count"))) {
-      value = &options.tsan.memory.shadow_slot_count;
     }
     if (!value || !iree_string_view_atoi_uint32(params[i].value, value)) {
       return iree_make_status(

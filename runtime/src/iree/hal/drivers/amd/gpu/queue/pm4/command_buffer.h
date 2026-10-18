@@ -23,7 +23,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     iree_hal_amd_gpu_pm4_program_pool_t* pool,
     iree_hal_command_buffer_mode_t mode, iree_hal_command_category_t categories,
     iree_host_size_t binding_capacity,
-    uint32_t maximum_group_segment_byte_length, uint32_t tsan_shadow_slot_count,
+    uint32_t maximum_group_segment_byte_length, bool tsan_enabled,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     iree_allocator_t host_allocator, iree_hal_command_buffer_t** out_buffer);
 
@@ -42,8 +42,6 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   uint32_t dispatch_count;
   // Encoded payload operation count used only by optional queue profiling.
   uint32_t operation_count;
-  // Power-of-two sanitizer window, or zero when no shadow slots are consumed.
-  uint32_t tsan_shadow_slot_count;
   // Asynchronous native copies still requiring a join at program exit.
   bool pending_dma;
 } iree_hal_amd_gpu_pm4_command_program_t;
