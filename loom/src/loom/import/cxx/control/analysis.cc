@@ -338,6 +338,30 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
   }
 }
 
+void ControlFlow::visit(cxx::CallExpressionAST* ast) {
+  cxx::ASTVisitor::visit(ast);
+  auto* function = direct_callee(ast);
+  if (!function) {
+    return;
+  }
+  auto parameters = function->parameters();
+  auto* argument = ast->expressionList;
+  auto traits = unit_.typeTraits();
+  for (size_t ordinal = 0; ordinal < parameters.size() && argument;
+       ++ordinal, argument = argument->next) {
+    auto* parameter_type = parameters[ordinal]->type();
+    if (!traits.is_lvalue_reference(parameter_type) ||
+        argument->value->valueCategory != cxx::ValueCategory::kLValue) {
+      continue;
+    }
+    if (traits.is_const(traits.remove_reference(parameter_type))) {
+      retain_destination(argument->value);
+    } else {
+      record(argument->value);
+    }
+  }
+}
+
 void ControlFlow::analyze_default_constructor(const cxx::Type* type,
                                               cxx::FunctionSymbol* constructor,
                                               cxx::AST* owner) {
@@ -418,13 +442,22 @@ bool ControlFlow::structured(cxx::AST* ast) {
          cxx::ast_cast<cxx::ConditionalExpressionAST>(ast);
 }
 
-void ControlFlow::record(cxx::ExpressionAST* expression) {
-  auto target = classify_destination(expression);
+std::optional<Destination> ControlFlow::retain_destination(
+    cxx::ExpressionAST* expression) {
+  auto target = classify_destination(unwrap_expression(expression));
   if (!target) {
-    return;
+    return std::nullopt;
   }
   if (!cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     destinations_.emplace(expression, *target);
+  }
+  return target;
+}
+
+void ControlFlow::record(cxx::ExpressionAST* expression) {
+  auto target = retain_destination(expression);
+  if (!target) {
+    return;
   }
   for (auto* owner : owners_) {
     auto& writes = writes_[owner];

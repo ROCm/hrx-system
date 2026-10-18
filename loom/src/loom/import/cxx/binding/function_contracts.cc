@@ -220,8 +220,9 @@ std::vector<loom_predicate_t> FunctionContracts::bind(
         signature == FunctionContractSignature::Kernel
             ? 1
             : types
-                  .partition(types.unqualified(parameters[ordinal]->type()),
-                             owner)
+                  .partition(
+                      types.unqualified_value(parameters[ordinal]->type()),
+                      owner)
                   .component_count;
   }
   const size_t result_offset = component_count;
@@ -243,9 +244,9 @@ std::vector<loom_predicate_t> FunctionContracts::bind(
     size_t component_offset = 0;
     if (value.root == RootKind::Parameter) {
       root_type =
-          types.unqualified(parameters[value.parameter_ordinal]->type());
+          types.unqualified_value(parameters[value.parameter_ordinal]->type());
       component_offset = parameter_offsets[value.parameter_ordinal];
-      if (types.unqualified(value.root_type) != root_type) {
+      if (types.unqualified_value(value.root_type) != root_type) {
         diagnostics_.reject(unit_, value.source,
                             "predicate parameter type changed across source "
                             "redeclarations");

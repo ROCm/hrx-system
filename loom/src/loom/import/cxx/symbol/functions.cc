@@ -605,6 +605,8 @@ loom_symbol_ref_t Functions::retain(cxx::FunctionSymbol* function,
           "called function with internal linkage requires a definition");
     }
     external_.insert(function->canonical());
+    admit_reference_parameters(declaration.function,
+                               owner ? owner : declaration.source);
     auto callee = create_symbol(declaration.function, declaration.source);
     pending_declarations_.push_back(declaration);
     return callee;
@@ -626,6 +628,7 @@ loom_symbol_ref_t Functions::retain(cxx::FunctionSymbol* function,
       function_contracts_.declaration(function, prototype);
     }
   }
+  admit_reference_parameters(function, owner ? owner : body->declaration());
   auto callee = create_symbol(function, body->declaration());
   pending_.push_back(body);
   return callee;
@@ -687,10 +690,83 @@ loom_symbol_ref_t Functions::create_symbol(cxx::FunctionSymbol* function,
   return callee;
 }
 
+void Functions::admit_reference_parameters(cxx::FunctionSymbol* symbol,
+                                           cxx::AST* source) {
+  auto* canonical = symbol->canonical();
+  auto* signature = cxx::type_cast<cxx::FunctionType>(symbol->type());
+  if (!signature) {
+    diagnostics_.reject(unit_, source,
+                        "value references require a function type");
+  }
+  auto traits = unit_.typeTraits();
+  if (traits.is_reference(signature->returnType())) {
+    diagnostics_.reject(
+        unit_, source,
+        "runtime reference returns require object identity; return an "
+        "admitted value instead");
+  }
+
+  std::vector<ValueReferenceParameter> references;
+  auto parameters = symbol->parameters();
+  for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+    auto* parameter_type = parameters[ordinal]->type();
+    if (traits.is_rvalue_reference(parameter_type)) {
+      diagnostics_.reject(
+          unit_, source,
+          "rvalue-reference parameters require consuming object identity");
+    }
+    if (!traits.is_lvalue_reference(parameter_type)) {
+      continue;
+    }
+    auto* value_type = traits.remove_reference(parameter_type);
+    if (traits.is_volatile(value_type)) {
+      diagnostics_.reject(unit_, source,
+                          "volatile reference parameters require addressable "
+                          "storage");
+    }
+    if (traits.is_array(value_type)) {
+      diagnostics_.reject(
+          unit_, source,
+          "array reference parameters require addressable storage; pass a "
+          "view or pointer instead");
+    }
+    if (traits.is_function(value_type)) {
+      diagnostics_.reject(unit_, source,
+                          "function reference parameters are not callable "
+                          "value references");
+    }
+    references.push_back(
+        {ordinal, !traits.is_const(traits.remove_reference(parameter_type))});
+  }
+
+  if (!references.empty()) {
+    auto* body = definition(symbol);
+    if (!body || exported_.contains(body) || external_.contains(canonical) ||
+        annotated(body, "kernel") || is_check_record(body) ||
+        launches_.is_configuration(body) ||
+        template_definitions_.lookup(body)) {
+      diagnostics_.reject(
+          unit_, source,
+          "runtime reference parameters require an internal ordinary "
+          "function definition");
+    }
+    reference_parameters_.emplace(canonical, std::move(references));
+  }
+}
+
+std::span<const ValueReferenceParameter> Functions::reference_parameters(
+    cxx::FunctionSymbol* symbol) const {
+  auto found = reference_parameters_.find(symbol->canonical());
+  return found == reference_parameters_.end()
+             ? std::span<const ValueReferenceParameter>{}
+             : std::span<const ValueReferenceParameter>{found->second};
+}
+
 BoundSignature Functions::bind_callable_signature(
     cxx::FunctionSymbol* symbol, cxx::AST* source, Types& types,
     loom_builder_t* builder, std::vector<loom_type_t>& arguments,
     std::vector<loom_type_t>& results,
+    std::vector<loom_tied_result_t>& tied_results,
     std::vector<loom_predicate_t>& predicates) {
   auto* signature = cxx::type_cast<cxx::FunctionType>(symbol->type());
   if (!signature || signature->isVariadic()) {
@@ -712,17 +788,40 @@ BoundSignature Functions::bind_callable_signature(
   }
   std::vector<const cxx::Type*> sources;
   auto parameters = symbol->parameters();
+  auto references = reference_parameters(symbol);
   const bool returns_void =
       signature->returnType()->kind() == cxx::TypeKind::kVoid;
-  sources.reserve(parameters.size() + !returns_void);
+  sources.reserve(parameters.size() + !returns_void + references.size());
   size_t argument_count = 0;
-  for (auto* parameter : parameters) {
-    auto* value_type = types.unqualified(parameter->type());
+  std::vector<size_t> argument_offsets;
+  if (!references.empty()) {
+    argument_offsets.resize(parameters.size());
+  }
+  size_t reference_index = 0;
+  for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+    auto* parameter = parameters[ordinal];
+    const bool is_reference = reference_index < references.size() &&
+                              references[reference_index].ordinal == ordinal;
+    auto* value_type = is_reference ? types.unqualified_value(parameter->type())
+                                    : types.unqualified(parameter->type());
+    if (!references.empty()) {
+      argument_offsets[ordinal] = argument_count;
+    }
     sources.push_back(value_type);
     argument_count += types.partition(value_type, source).component_count;
+    reference_index += is_reference;
   }
+  size_t ordinary_result_count = 0;
   if (!returns_void) {
     sources.push_back(signature->returnType());
+    ordinary_result_count =
+        types.partition(signature->returnType(), source).component_count;
+  }
+  for (const auto& reference : references) {
+    if (reference.mutable_access) {
+      sources.push_back(
+          types.unqualified_value(parameters[reference.ordinal]->type()));
+    }
   }
   const bool has_predicates = function_contracts_.has_predicates(symbol);
   auto callable = bind_signature(
@@ -732,8 +831,42 @@ BoundSignature Functions::bind_callable_signature(
   arguments.assign(callable.types.begin(),
                    callable.types.begin() + argument_count);
   results.assign(callable.types.begin() + argument_count, callable.types.end());
+  size_t result_offset = ordinary_result_count;
+  for (const auto& reference : references) {
+    if (!reference.mutable_access) {
+      continue;
+    }
+    const auto component_count =
+        types
+            .partition(
+                types.unqualified_value(parameters[reference.ordinal]->type()),
+                source)
+            .component_count;
+    const size_t argument_offset = argument_offsets[reference.ordinal];
+    if (argument_offset + component_count > UINT16_MAX ||
+        result_offset + component_count > UINT16_MAX) {
+      diagnostics_.reject(unit_, source,
+                          "value-reference signature exceeds native operand "
+                          "or result limits");
+    }
+    for (size_t component = 0; component < component_count; ++component) {
+      tied_results.push_back({
+          .result_index = static_cast<uint16_t>(result_offset + component),
+          .operand_index = static_cast<uint16_t>(argument_offset + component),
+          .has_type_change =
+              !loom_type_equal(arguments[argument_offset + component],
+                               results[result_offset + component]),
+      });
+    }
+    result_offset += component_count;
+  }
+  auto predicate_identities = std::span(callable.identities);
+  if (!predicate_identities.empty()) {
+    predicate_identities =
+        predicate_identities.first(argument_count + ordinary_result_count);
+  }
   predicates =
-      function_contracts_.bind(symbol, types, callable.identities,
+      function_contracts_.bind(symbol, types, predicate_identities,
                                FunctionContractSignature::Flattened, source);
   return callable;
 }
@@ -756,11 +889,13 @@ void Functions::build_declarations(Types& types, Locations& locations,
     }
     std::vector<loom_type_t> arguments;
     std::vector<loom_type_t> results;
+    std::vector<loom_tied_result_t> tied_results;
     std::vector<loom_predicate_t> predicates;
     // Dependent type payloads in this signature must outlive the declaration
     // builder call below.
-    auto bound_signature = bind_callable_signature(
-        symbol, source, types, builder, arguments, results, predicates);
+    auto bound_signature =
+        bind_callable_signature(symbol, source, types, builder, arguments,
+                                results, tied_results, predicates);
 
     loom_func_decl_build_flags_t flags = 0;
     loom_string_id_t import_module = LOOM_STRING_ID_INVALID;
@@ -792,8 +927,8 @@ void Functions::build_declarations(Types& types, Locations& locations,
         annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0, {},
         /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
         callees_.at(symbol->canonical()), arguments.data(), arguments.size(),
-        results.data(), results.size(), /*tied_results=*/nullptr,
-        /*tied_result_count=*/0, predicates.data(), predicates.size(),
+        results.data(), results.size(), tied_results.data(),
+        tied_results.size(), predicates.data(), predicates.size(),
         locations.get(source), &op));
   }
 }
@@ -833,6 +968,7 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
   }
   std::vector<loom_type_t> arguments;
   std::vector<loom_type_t> results;
+  std::vector<loom_tied_result_t> tied_results;
   std::vector<loom_predicate_t> predicates;
   std::optional<LaunchConfiguration> launch_configuration;
   BoundSignature configuration_signature;
@@ -853,8 +989,9 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
           launches_.bind_configuration(configuration_symbol, types);
     }
   } else if (!check_case && !check_scenario) {
-    callable_signature = bind_callable_signature(
-        symbol, definition, types, builder, arguments, results, predicates);
+    callable_signature =
+        bind_callable_signature(symbol, definition, types, builder, arguments,
+                                results, tied_results, predicates);
   }
   loom_op_t* op;
   if (check_case) {
@@ -997,8 +1134,8 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
                                            requirements.size()),
         template_definition->priority.value_or(0),
         callees_.at(symbol->canonical()), arguments.data(), arguments.size(),
-        results.data(), results.size(), /*tied_results=*/nullptr,
-        /*tied_result_count=*/0, predicates.data(), predicates.size(),
+        results.data(), results.size(), tied_results.data(),
+        tied_results.size(), predicates.data(), predicates.size(),
         locations.get(definition), &op));
   } else {
     launches_.reject_ordinary_function(symbol);
@@ -1016,8 +1153,9 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0, 0, 0,
         annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0, {},
         0, {}, 0, {}, callees_.at(symbol->canonical()), arguments.data(),
-        arguments.size(), results.data(), results.size(), nullptr, 0,
-        predicates.data(), predicates.size(), locations.get(definition), &op));
+        arguments.size(), results.data(), results.size(), tied_results.data(),
+        tied_results.size(), predicates.data(), predicates.size(),
+        locations.get(definition), &op));
   }
   auto* region = check_case            ? loom_check_case_body(op)
                  : check_scenario      ? loom_check_scenario_body(op)
@@ -1036,6 +1174,7 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
       : template_definition ? FunctionKind::TemplateDefinition
                             : FunctionKind::Ordinary,
       parameter_contracts,
+      reference_parameters(symbol),
   };
   std::optional<FunctionBody> configuration;
   if (launch_configuration) {
@@ -1048,6 +1187,7 @@ DefinedFunction Functions::define(cxx::FunctionSymbol* symbol, Types& types,
         launch_configuration->kind == LaunchConfigurationKind::Clustered
             ? FunctionKind::ClusteredLaunchConfiguration
             : FunctionKind::LaunchConfiguration,
+        {},
         {},
     };
   }

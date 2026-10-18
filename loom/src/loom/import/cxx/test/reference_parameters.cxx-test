@@ -1,0 +1,379 @@
+// RUN: roundtrip
+static unsigned adjust(unsigned& value, const unsigned& delta) {
+  value += delta;
+  return value * 2u;
+}
+
+unsigned scalar_reference(unsigned value, unsigned delta) {
+  unsigned doubled = adjust(value, delta);
+  return doubled + value;
+}
+
+// ----
+func.def public @scalar_reference(%value$0: i32, %delta: i32) -> (i32) {
+  %doubled, %value$4 = func.call pure @adjust(%value$0, %delta) : (i32, i32) -> (i32, %value$0 as i32)
+  %5 = scalar.addi %doubled, %value$4 : i32
+  func.return %5 : i32
+}
+
+func.def @adjust(%value$6: i32, %delta: i32) -> (i32, %value$6 as i32) {
+  %value$10 = scalar.addi %value$6, %delta : i32
+  %11 = scalar.constant 2 : i32
+  %12 = scalar.muli %value$10, %11 : i32
+  func.return %12, %value$10 : i32, i32
+}
+
+// ====
+using UInt4 = unsigned __attribute__((vector_size(16)));
+
+static void update_lane(UInt4& values, unsigned lane, unsigned amount) {
+  values[lane] += amount;
+}
+
+UInt4 vector_reference(UInt4 values, unsigned lane, unsigned amount) {
+  update_lane(values, lane, amount);
+  return values;
+}
+
+// ----
+func.def public @vector_reference(%values$0: vector<4xi32>, %lane: i32, %amount: i32) -> (vector<4xi32>) {
+  %values$4 = func.call pure @update_lane(%values$0, %lane, %amount) : (vector<4xi32>, i32, i32) -> (%values$0 as vector<4xi32>)
+  func.return %values$4 : vector<4xi32>
+}
+
+func.def @update_lane(%values$5: vector<4xi32>, %lane: i32, %amount: i32) -> (%values$5 as vector<4xi32>) {
+  %9 = index.cast %lane : i32 to index
+  %10 = vector.extract %values$5[%9] : vector<4xi32> -> i32
+  %11 = scalar.addi %10, %amount : i32
+  %12 = index.cast %lane : i32 to index
+  %values$13 = vector.insert %11 into %values$5[%12] : i32, vector<4xi32>
+  func.return %values$13 : vector<4xi32>
+}
+
+// ====
+using UInt4 = unsigned __attribute__((vector_size(16)));
+
+struct Cursor {
+  unsigned bit_offset;
+  unsigned syntax_count;
+  UInt4 dc;
+  unsigned cached_word;
+};
+
+static unsigned consume(Cursor& cursor, const Cursor& limit, unsigned lane) {
+  cursor.bit_offset += 3u;
+  if (cursor.syntax_count < limit.syntax_count) ++cursor.syntax_count;
+  cursor.dc[lane & 3u] += cursor.cached_word;
+  return cursor.dc[lane & 3u] + limit.cached_word;
+}
+
+Cursor cursor_reference(Cursor cursor, Cursor limit, unsigned lane) {
+  cursor.cached_word = consume(cursor, limit, lane);
+  return cursor;
+}
+
+// ----
+func.def public @cursor_reference(%cursor_bit_offset$0: i32, %cursor_syntax_count$1: i32, %cursor_dc$2: vector<4xi32>, %cursor_cached_word$3: i32, %limit_bit_offset: i32, %limit_syntax_count: i32, %limit_dc: vector<4xi32>, %limit_cached_word: i32, %lane: i32) -> (i32, i32, vector<4xi32>, i32) {
+  %cursor_cached_word$13, %cursor_bit_offset$14, %cursor_syntax_count$15, %cursor_dc$16, %cursor_cached_word$17 = func.call pure @consume(%cursor_bit_offset$0, %cursor_syntax_count$1, %cursor_dc$2, %cursor_cached_word$3, %limit_bit_offset, %limit_syntax_count, %limit_dc, %limit_cached_word, %lane) : (i32, i32, vector<4xi32>, i32, i32, i32, vector<4xi32>, i32, i32) -> (i32, %cursor_bit_offset$0 as i32, %cursor_syntax_count$1 as i32, %cursor_dc$2 as vector<4xi32>, %cursor_cached_word$3 as i32)
+  func.return %cursor_bit_offset$14, %cursor_syntax_count$15, %cursor_dc$16, %cursor_cached_word$13 : i32, i32, vector<4xi32>, i32
+}
+
+func.def @consume(%cursor_bit_offset$18: i32, %cursor_syntax_count$19: i32, %cursor_dc$20: vector<4xi32>, %cursor_cached_word$21: i32, %limit_bit_offset: i32, %limit_syntax_count: i32, %limit_dc: vector<4xi32>, %limit_cached_word: i32, %lane: i32) -> (i32, %cursor_bit_offset$18 as i32, %cursor_syntax_count$19 as i32, %cursor_dc$20 as vector<4xi32>, %cursor_cached_word$21 as i32) {
+  %32 = scalar.constant 3 : i32
+  %cursor_bit_offset$33 = scalar.addi %cursor_bit_offset$18, %32 : i32
+  %34 = scalar.cmpi ult, %cursor_syntax_count$19, %limit_syntax_count : i32
+  %cursor_bit_offset$35, %cursor_syntax_count$36, %cursor_dc$37, %cursor_cached_word$38 = scf.if %34 -> (i32, i32, vector<4xi32>, i32) {
+    %39 = scalar.constant 1 : i32
+    %cursor_syntax_count = scalar.addi %cursor_syntax_count$19, %39 : i32
+    scf.yield %cursor_bit_offset$33, %cursor_syntax_count, %cursor_dc$20, %cursor_cached_word$21 : i32, i32, vector<4xi32>, i32
+  } else {
+    scf.yield %cursor_bit_offset$33, %cursor_syntax_count$19, %cursor_dc$20, %cursor_cached_word$21 : i32, i32, vector<4xi32>, i32
+  }
+  %41 = scalar.constant 3 : i32
+  %42 = scalar.andi %lane, %41 : i32
+  %43 = index.cast %42 : i32 to index
+  %44 = vector.extract %cursor_dc$37[%43] : vector<4xi32> -> i32
+  %45 = scalar.addi %44, %cursor_cached_word$38 : i32
+  %46 = index.cast %42 : i32 to index
+  %cursor_dc$47 = vector.insert %45 into %cursor_dc$37[%46] : i32, vector<4xi32>
+  %48 = scalar.constant 3 : i32
+  %49 = scalar.andi %lane, %48 : i32
+  %50 = index.cast %49 : i32 to index
+  %51 = vector.extract %cursor_dc$47[%50] : vector<4xi32> -> i32
+  %52 = scalar.addi %51, %limit_cached_word : i32
+  func.return %52, %cursor_bit_offset$35, %cursor_syntax_count$36, %cursor_dc$47, %cursor_cached_word$38 : i32, i32, i32, vector<4xi32>, i32
+}
+
+// ====
+struct Half { unsigned low, high; };
+struct Pair { Half left, right; };
+
+static void update_members(unsigned& first, unsigned& second) {
+  ++first;
+  second += first;
+}
+
+Pair member_references(Pair value) {
+  update_members(value.left.high, value.right.low);
+  return value;
+}
+
+// ----
+func.def public @member_references(%value_left_low: i32, %value_left_high$1: i32, %value_right_low$2: i32, %value_right_high: i32) -> (i32, i32, i32, i32) {
+  %value_left_high$8, %value_right_low$9 = func.call pure @update_members(%value_left_high$1, %value_right_low$2) : (i32, i32) -> (%value_left_high$1 as i32, %value_right_low$2 as i32)
+  func.return %value_left_low, %value_left_high$8, %value_right_low$9, %value_right_high : i32, i32, i32, i32
+}
+
+func.def @update_members(%first$10: i32, %second$11: i32) -> (%first$10 as i32, %second$11 as i32) {
+  %14 = scalar.constant 1 : i32
+  %first$15 = scalar.addi %first$10, %14 : i32
+  %second$16 = scalar.addi %second$11, %first$15 : i32
+  func.return %first$15, %second$16 : i32, i32
+}
+
+// ====
+static unsigned add_references(const unsigned& left, const unsigned& right) {
+  return left + right;
+}
+
+unsigned aliased_const_references(unsigned value) {
+  return add_references(value, value);
+}
+
+// ----
+func.def public @aliased_const_references(%value: i32) -> (i32) {
+  %2 = func.call pure @add_references(%value, %value) : (i32, i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @add_references(%left: i32, %right: i32) -> (i32) {
+  %6 = scalar.addi %left, %right : i32
+  func.return %6 : i32
+}
+
+// ====
+struct Pair { unsigned first, second; };
+
+static unsigned sum(const Pair& value) { return value.first + value.second; }
+
+unsigned temporary_reference(unsigned first, unsigned second) {
+  return sum(Pair{first, second});
+}
+
+// ----
+func.def public @temporary_reference(%first: i32, %second: i32) -> (i32) {
+  %3 = func.call pure @sum(%first, %second) : (i32, i32) -> (i32)
+  func.return %3 : i32
+}
+
+func.def @sum(%value_first: i32, %value_second: i32) -> (i32) {
+  %7 = scalar.addi %value_first, %value_second : i32
+  func.return %7 : i32
+}
+
+// ====
+static void advance(unsigned*& pointer, unsigned amount) { pointer += amount; }
+
+unsigned pointer_reference(unsigned* pointer, unsigned amount) {
+  advance(pointer, amount);
+  return *pointer;
+}
+
+// ----
+func.def public @pointer_reference(%pointer$0: buffer, %pointer_byte_offset$1: offset, %amount: i32) -> (i32) {
+  %pointer$4, %pointer_byte_offset$5 = func.call pure @advance(%pointer$0, %pointer_byte_offset$1, %amount) : (buffer, offset, i32) -> (%pointer$0 as buffer, %pointer_byte_offset$1 as offset)
+  %6 = buffer.view %pointer$4[%pointer_byte_offset$5] : buffer -> view<1xi32>
+  %7 = view.load %6[0] : view<1xi32> -> i32
+  func.return %7 : i32
+}
+
+func.def @advance(%pointer: buffer, %pointer_byte_offset$9: offset, %amount: i32) -> (%pointer as buffer, %pointer_byte_offset$9 as offset) {
+  %13 = scalar.extui %amount : i32 to i64
+  %14 = scalar.constant 4 : i64
+  %15 = scalar.muli %13, %14 : i64
+  %16 = index.cast %pointer_byte_offset$9 : offset to i64
+  %17 = scalar.addi %16, %15 : i64
+  %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset$19 = index.cast %18 : i64 to offset
+  func.return %pointer, %pointer_byte_offset$19 : buffer, offset
+}
+
+// ====
+template <typename T>
+static void increment(T& value) { ++value; }
+
+unsigned template_reference(unsigned value) {
+  increment(value);
+  return value;
+}
+
+// ----
+func.def public @template_reference(%value$0: i32) -> (i32) {
+  %value$2 = func.call pure @increment_unsigned_int(%value$0) : (i32) -> (%value$0 as i32)
+  func.return %value$2 : i32
+}
+
+func.def @increment_unsigned_int(%value$3: i32) -> (%value$3 as i32) {
+  %5 = scalar.constant 1 : i32
+  %value$6 = scalar.addi %value$3, %5 : i32
+  func.return %value$6 : i32
+}
+
+// ====
+static unsigned choose_update(unsigned& value, bool choose) {
+  if (choose) {
+    value += 1u;
+    return value;
+  }
+  value += 2u;
+  return value * 2u;
+}
+
+unsigned returning_reference_update(unsigned value, bool choose) {
+  unsigned result = choose_update(value, choose);
+  return result + value;
+}
+
+// ----
+func.def public @returning_reference_update(%value$0: i32, %choose: i1) -> (i32) {
+  %result, %value$4 = func.call pure @choose_update(%value$0, %choose) : (i32, i1) -> (i32, %value$0 as i32)
+  %5 = scalar.addi %result, %value$4 : i32
+  func.return %5 : i32
+}
+
+func.def @choose_update(%value$6: i32, %choose: i1) -> (i32, %value$6 as i32) {
+  %10, %11 = scf.if %choose -> (i32, i32) {
+    %12 = scalar.constant 1 : i32
+    %value = scalar.addi %value$6, %12 : i32
+    scf.yield %value, %value : i32, i32
+  } else {
+    %14 = scalar.constant 2 : i32
+    %value = scalar.addi %value$6, %14 : i32
+    %16 = scalar.constant 2 : i32
+    %17 = scalar.muli %value, %16 : i32
+    scf.yield %17, %value : i32, i32
+  }
+  func.return %10, %11 : i32, i32
+}
+
+// ====
+static void bump(unsigned& value) { ++value; }
+
+unsigned loop_reference(unsigned value, unsigned count) {
+  for (unsigned i = 0; i < count; ++i) bump(value);
+  return value;
+}
+
+// ----
+func.def public @loop_reference(%value$0: i32, %count: i32) -> (i32) {
+  %i = scalar.constant 0 : i32
+  %4 = index.cast %i : i32 to offset
+  %5 = index.cast %count : i32 to offset
+  %6 = index.constant 1 : offset
+  %value$9 = scf.for %i = [%4 to %5 step %6](%value$8 = %value$0 : i32) -> (i32) {
+    %10 = index.cast %i : offset to i32
+    %value$11 = func.call pure @bump(%value$8) : (i32) -> (%value$8 as i32)
+    scf.yield %value$11 : i32
+  }
+  func.return %value$9 : i32
+}
+
+func.def @bump(%value$12: i32) -> (%value$12 as i32) {
+  %14 = scalar.constant 1 : i32
+  %value$15 = scalar.addi %value$12, %14 : i32
+  func.return %value$15 : i32
+}
+
+// ====
+#include <loomcxx/predicate.h>
+
+static void constrained_increment(unsigned& value, unsigned limit)
+    [[loom::where(value < limit)]] {
+  ++value;
+}
+
+unsigned predicate_reference(unsigned value, unsigned limit) {
+  constrained_increment(value, limit);
+  return value;
+}
+
+// ----
+func.def public @predicate_reference(%value$0: i32, %limit: i32) -> (i32) {
+  %value$3 = func.call pure @constrained_increment(%value$0, %limit) : (i32, i32) -> (%value$0 as i32)
+  func.return %value$3 : i32
+}
+
+func.def @constrained_increment(%value$4: i32, %limit: i32) -> (%value$4 as i32) where [ult(%value$4, %limit)] {
+  %7 = scalar.constant 1 : i32
+  %value$8 = scalar.addi %value$4, %7 : i32
+  func.return %value$8 : i32
+}
+
+// ====
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+
+namespace loomt = loom::type;
+using Rows = loomt::view<loomt::shape<loomt::dynamic, 4>, const float>;
+
+static void trim(Rows& rows, unsigned first, unsigned remaining) {
+  rows = loom::view::subview(rows, {first, 0}, {remaining});
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void dynamic_view_reference(const float* input, float* output, unsigned rows) {
+  auto layout = loom::encoding::layout::dense<2>();
+  auto source = loom::buffer::view<loomt::dynamic, 4>(input, {rows}, layout);
+  trim(source, 1u, rows - 1u);
+  output[0] = loom::view::load(source, 0, 0);
+}
+
+// ----
+kernel.def @dynamic_view_reference() {
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
+} launch(%input: buffer, %output: buffer, %rows: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %12 = scalar.extui %rows : i32 to i64
+  %source_dim0$13 = index.cast %12 : i64 to index
+  %source$14 = buffer.view %input[%input_byte_offset] : buffer -> view<[%source_dim0$13]x4xf32, %layout>
+  %15 = scalar.constant 1 : i32
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.subi %rows, %16 : i32
+  %source_dim0$18, %source_layout, %source$20 = func.call pure @trim(%source_dim0$13, %layout, %source$14, %15, %17) : (index, encoding<layout>, view<[%source_dim0$13]x4xf32, %layout>, i32, i32) -> (%source_dim0$13 as index, %layout as encoding<layout>, %source$14 as view<[%source_dim0$18]x4xf32, %source_layout>)
+  %21 = scalar.constant 0 : i32
+  %22 = scalar.constant 0 : i32
+  %23 = index.cast %21 : i32 to index
+  %24 = index.cast %22 : i32 to index
+  %25 = view.load %source$20[%23, %24] : view<[%source_dim0$18]x4xf32, %source_layout> -> f32
+  %26 = scalar.constant 0 : i32
+  %27 = scalar.extsi %26 : i32 to i64
+  %28 = scalar.constant 4 : i64
+  %29 = scalar.muli %27, %28 : i64
+  %30 = index.cast %output_byte_offset : offset to i64
+  %31 = scalar.addi %30, %29 : i64
+  %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
+  %33 = index.cast %32 : i64 to offset
+  %34 = buffer.view %output[%33] : buffer -> view<1xf32>
+  view.store %25, %34[0] : f32, view<1xf32>
+  kernel.return
+}
+
+func.def @trim(%rows_dim0$35: index, %rows_layout: encoding<layout>, %rows$37: view<[%rows_dim0$35]x4xf32, %rows_layout>, %first: i32, %remaining: i32) -> (%40: %rows_dim0$35 as index, %41: %rows_layout as encoding<layout>, %rows$37 as view<[%40]x4xf32, %41>) {
+  %43 = scalar.extui %first : i32 to i64
+  %44 = scalar.constant 0 : i32
+  %45 = scalar.extsi %44 : i32 to i64
+  %46 = scalar.extui %remaining : i32 to i64
+  %rows_dim0$47 = index.cast %46 : i64 to index
+  %48 = index.cast %43 : i64 to index
+  %49 = index.cast %45 : i64 to index
+  %rows$50 = view.subview %rows$37[%48, %49] : view<[%rows_dim0$35]x4xf32, %rows_layout> -> view<[%rows_dim0$47]x4xf32, %rows_layout>
+  func.return %rows_dim0$47, %rows_layout, %rows$50 : index, encoding<layout>, view<[%rows_dim0$47]x4xf32, %rows_layout>
+}

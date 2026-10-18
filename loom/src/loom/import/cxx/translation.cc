@@ -17,7 +17,9 @@
 #include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
+#include <algorithm>
 #include <array>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -503,6 +505,43 @@ class Translator final : private Initialization::Evaluation {
     cxx::AST* source;
   };
 
+  const ValueReferenceParameter* reference_parameter(size_t ordinal) const {
+    for (const auto& reference : current_function_.reference_parameters) {
+      if (reference.ordinal == ordinal) {
+        return &reference;
+      }
+      if (reference.ordinal > ordinal) {
+        break;
+      }
+    }
+    return nullptr;
+  }
+
+  std::vector<const cxx::Type*> function_result_sources() {
+    std::vector<const cxx::Type*> sources;
+    if (current_function_.return_type->kind() != cxx::TypeKind::kVoid) {
+      sources.push_back(current_function_.return_type);
+    }
+    auto parameters = current_function_.source->symbol->parameters();
+    for (const auto& reference : current_function_.reference_parameters) {
+      if (reference.mutable_access) {
+        sources.push_back(
+            types_.unqualified_value(parameters[reference.ordinal]->type()));
+      }
+    }
+    return sources;
+  }
+
+  Returned complete_return(Returned returned) {
+    auto parameters = current_function_.source->symbol->parameters();
+    for (const auto& reference : current_function_.reference_parameters) {
+      if (reference.mutable_access) {
+        values_.at(parameters[reference.ordinal]).append_to(returned.values);
+      }
+    }
+    return returned;
+  }
+
   void function(cxx::FunctionSymbol* symbol) {
     auto defined = functions_.define(symbol, types_, locations_, &builder_);
     if (defined.configuration) {
@@ -546,7 +585,9 @@ class Translator final : private Initialization::Evaluation {
     size_t argument_index = 0;
     size_t parameter_index = 0;
     for (auto* parameter : parameters) {
-      auto* value_type = types_.unqualified(parameter->type());
+      const auto* reference = reference_parameter(parameter_index);
+      auto* value_type = reference ? types_.unqualified_value(parameter->type())
+                                   : types_.unqualified(parameter->type());
       const auto& partition = types_.partition(value_type, defined.source);
       bool kernel_pointer = defined.kind == FunctionKind::Kernel &&
                             partition.kind == ValueKind::Pointer;
@@ -564,6 +605,11 @@ class Translator final : private Initialization::Evaluation {
         value = storage_.root(buffer, defined.source);
       }
       value = name(value, cxx::to_string(parameter->name()));
+      if (reference && control_->addressed(parameter)) {
+        fail(defined.source,
+             "taking the address of a value-reference parameter requires "
+             "addressable reference storage");
+      }
       if (control_->addressed(parameter) ||
           unit_.typeTraits().is_volatile(parameter->type())) {
         auto access = allocate_local(parameter, 0, defined.source);
@@ -636,7 +682,7 @@ class Translator final : private Initialization::Evaluation {
           fail(current_function_.source,
                "non-void function can reach its end without returning a value");
         }
-        return {{}, current_function_.source};
+        return complete_return({{}, current_function_.source});
       }
       auto* child = sequence.remaining->value;
       sequence.remaining = sequence.remaining->next;
@@ -800,14 +846,14 @@ class Translator final : private Initialization::Evaluation {
         if (!returns_void) {
           fail(ast, "non-void return requires a value");
         }
-        return {{}, ret};
+        return complete_return({{}, ret});
       }
       if (ret->expression->type->kind() == cxx::TypeKind::kVoid) {
         if (!returns_void) {
           fail(ast, "non-void return requires a value");
         }
         effect(ret->expression);
-        return {{}, ret};
+        return complete_return({{}, ret});
       }
       if (returns_void) {
         fail(ast, "void return cannot carry a value");
@@ -815,7 +861,7 @@ class Translator final : private Initialization::Evaluation {
       Returned returned = {{}, ret};
       convert(ret->expression, current_function_.return_type, ret)
           .append_to(returned.values);
-      return returned;
+      return complete_return(std::move(returned));
     }
     if (auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(ast)) {
       return return_sequence(
@@ -831,13 +877,9 @@ class Translator final : private Initialization::Evaluation {
       }
       auto condition = branch_condition(branch);
       auto outer_values = values_;
-      BoundSignature result_signature;
-      if (current_function_.return_type->kind() != cxx::TypeKind::kVoid) {
-        std::array<const cxx::Type*, 1> result_sources = {
-            current_function_.return_type};
-        result_signature =
-            bind_signature(types_, result_sources, ast, &builder_);
-      }
+      auto result_sources = function_result_sources();
+      auto result_signature =
+          bind_signature(types_, result_sources, ast, &builder_);
       loom_op_t* op;
       auto source = locations_.get(ast);
       check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
@@ -1047,10 +1089,15 @@ class Translator final : private Initialization::Evaluation {
     std::variant<ObjectLvalue, VectorLaneLvalue> projection;
   };
 
+  enum class LvalueAccess { Read, Write };
+
   ObjectLvalue object_destination(
       cxx::ExpressionAST* expression, cxx::AST* owner,
+      LvalueAccess access = LvalueAccess::Write,
       std::optional<Destination> retained_destination = std::nullopt) {
-    types_.require_mutable(expression->type, expression);
+    if (access == LvalueAccess::Write) {
+      types_.require_mutable(expression->type, expression);
+    }
     auto destination = retained_destination ? retained_destination
                                             : control_->destination(expression);
     if (destination) {
@@ -1119,7 +1166,8 @@ class Translator final : private Initialization::Evaluation {
 
   Lvalue vector_lane_destination(
       cxx::SubscriptExpressionAST* subscript, cxx::AST* owner,
-      std::optional<Destination> retained_destination) {
+      std::optional<Destination> retained_destination,
+      LvalueAccess access = LvalueAccess::Write) {
     if (subscript->symbol) {
       fail(subscript, "overloaded indexing is not admitted");
     }
@@ -1136,8 +1184,8 @@ class Translator final : private Initialization::Evaluation {
     cxx::ExpressionAST* index_expression =
         left_vector ? subscript->indexExpression : subscript->baseExpression;
     if (left_vector) {
-      auto vector_destination =
-          object_destination(vector_expression, owner, retained_destination);
+      auto vector_destination = object_destination(
+          vector_expression, owner, access, retained_destination);
       auto index_value = expression(index_expression);
       auto vector_value = read(vector_destination, vector_expression);
       return {VectorLaneLvalue{vector_destination, vector_value,
@@ -1147,14 +1195,15 @@ class Translator final : private Initialization::Evaluation {
     // The commuted spelling i[v] still evaluates its written left operand
     // before resolving and loading the vector on the right.
     auto index_value = expression(index_expression);
-    auto vector_destination =
-        object_destination(vector_expression, owner, retained_destination);
+    auto vector_destination = object_destination(vector_expression, owner,
+                                                 access, retained_destination);
     auto vector_value = read(vector_destination, vector_expression);
     return {VectorLaneLvalue{vector_destination, vector_value,
                              index_value.ssa(), index_expression->type}};
   }
 
-  Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner) {
+  Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner,
+                     LvalueAccess access = LvalueAccess::Write) {
     auto* projected = strip_implicit_casts(expression);
     while (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(projected)) {
       projected = strip_implicit_casts(nested->expression);
@@ -1163,9 +1212,9 @@ class Translator final : private Initialization::Evaluation {
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
                       types_.native_vector(subscript->indexExpression->type))) {
       return vector_lane_destination(subscript, owner,
-                                     control_->destination(expression));
+                                     control_->destination(expression), access);
     }
-    return {object_destination(expression, owner)};
+    return {object_destination(expression, owner, access)};
   }
 
   Value read(const Lvalue& target, cxx::AST* owner) {
@@ -1188,6 +1237,235 @@ class Translator final : private Initialization::Evaluation {
         vectors_.insert(lane.value.ssa(), value.ssa(), lane.index,
                         lane.destination.type, lane.index_type, owner);
     write(lane.destination, Value(updated), owner);
+  }
+
+  struct ReferenceOrigin {
+    // Automatic object that owns this flattened component interval.
+    cxx::Symbol* binding;
+    // Inclusive first flattened component within the owning object.
+    size_t begin;
+    // Exclusive end of the flattened component interval.
+    size_t end;
+    // Whether the callee may replace this interval.
+    bool mutable_access;
+  };
+
+  struct ReferenceWriteback {
+    // Once-evaluated lvalue receiving the mutable result.
+    Lvalue target;
+    // Admitted value representation transported through the call.
+    const Partition* partition;
+    // Unqualified source value type used to bind the tied result.
+    const cxx::Type* value_type;
+    // First flattened call operand for this source parameter.
+    size_t argument_offset;
+  };
+
+  ReferenceOrigin reference_origin(const Lvalue& target, const Value& value,
+                                   bool mutable_access, cxx::AST* owner) {
+    const ObjectLvalue* object = std::get_if<ObjectLvalue>(&target.projection);
+    size_t component_count = value.partition().component_count;
+    if (!object) {
+      const auto& lane = std::get<VectorLaneLvalue>(target.projection);
+      object = &lane.destination;
+      component_count =
+          types_.partition(lane.destination.type, owner).component_count;
+    }
+    auto* destination = std::get_if<Destination>(&object->location);
+    if (!destination) {
+      fail(owner,
+           "runtime value-reference arguments require an automatic SSA "
+           "object");
+    }
+    return {
+        destination->binding,
+        destination->component_offset,
+        destination->component_offset + component_count,
+        mutable_access,
+    };
+  }
+
+  void require_nonoverlapping_references(std::vector<ReferenceOrigin> origins,
+                                         cxx::AST* owner) {
+    if (std::ranges::none_of(origins, [](const ReferenceOrigin& origin) {
+          return origin.mutable_access;
+        })) {
+      return;
+    }
+    std::ranges::sort(
+        origins, [](const ReferenceOrigin& left, const ReferenceOrigin& right) {
+          if (left.binding != right.binding) {
+            return std::less<cxx::Symbol*>{}(left.binding, right.binding);
+          }
+          return left.begin < right.begin;
+        });
+    cxx::Symbol* binding = nullptr;
+    size_t active_end = 0;
+    bool active_mutable = false;
+    for (const auto& origin : origins) {
+      if (origin.begin == origin.end) {
+        continue;
+      }
+      if (origin.binding != binding || origin.begin >= active_end) {
+        binding = origin.binding;
+        active_end = origin.end;
+        active_mutable = origin.mutable_access;
+        continue;
+      }
+      if (origin.mutable_access || active_mutable) {
+        fail(owner,
+             "mutable value-reference arguments must select nonoverlapping "
+             "automatic objects or member slices");
+      }
+      active_end = std::max(active_end, origin.end);
+    }
+  }
+
+  std::optional<Value> ordinary_call(cxx::CallExpressionAST* call,
+                                     cxx::FunctionSymbol* function,
+                                     loom_location_id_t source) {
+    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+    IREE_ASSERT(signature);
+    auto parameters = function->parameters();
+    auto callee = functions_.declare(function, call);
+    auto references = functions_.reference_parameters(function);
+    if (references.empty()) {
+      std::vector<loom_value_id_t> arguments;
+      for (auto* argument : cxx::ListView{call->expressionList}) {
+        expression(argument).append_to(arguments);
+      }
+      loom_op_t* op;
+      if (signature->returnType()->kind() == cxx::TypeKind::kVoid) {
+        check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee,
+                                   arguments.data(), arguments.size(), nullptr,
+                                   0, nullptr, 0, source, &op));
+        return std::nullopt;
+      }
+      std::array<const cxx::Type*, 1> result_sources = {
+          signature->returnType()};
+      auto results = bind_signature(types_, result_sources, call, &builder_);
+      check(loom_func_call_build(
+          &builder_, 0, 0, 0, 0, callee, arguments.data(), arguments.size(),
+          results.types.data(), results.types.size(), nullptr, 0, source, &op));
+      return value_arena_.capture(types_.partition(call->type, call),
+                                  {loom_op_results(op), results.types.size()});
+    }
+    std::vector<loom_value_id_t> arguments;
+    std::vector<ReferenceWriteback> writebacks;
+    std::vector<ReferenceOrigin> origins;
+    writebacks.reserve(references.size());
+    origins.reserve(references.size());
+
+    size_t reference_index = 0;
+    auto* argument = call->expressionList;
+    for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+      IREE_ASSERT(argument);
+      const bool is_reference = reference_index < references.size() &&
+                                references[reference_index].ordinal == ordinal;
+      if (!is_reference) {
+        expression(argument->value).append_to(arguments);
+        argument = argument->next;
+        continue;
+      }
+
+      const auto reference = references[reference_index++];
+      auto* expected_type =
+          types_.unqualified_value(parameters[ordinal]->type());
+      const auto& expected_partition = types_.partition(expected_type, call);
+      const size_t argument_offset = arguments.size();
+      std::optional<Lvalue> target;
+      Value value;
+      if (argument->value->valueCategory == cxx::ValueCategory::kLValue) {
+        target = destination(argument->value, call,
+                             reference.mutable_access ? LvalueAccess::Write
+                                                      : LvalueAccess::Read);
+        value = read(*target, argument->value);
+        origins.push_back(reference_origin(
+            *target, value, reference.mutable_access, argument->value));
+      } else {
+        if (reference.mutable_access) {
+          fail(argument->value,
+               "mutable value references require an lvalue argument");
+        }
+        value = expression(argument->value);
+      }
+      if (&value.partition() != &expected_partition) {
+        fail(argument->value,
+             "runtime value-reference binding must preserve the admitted "
+             "source value type");
+      }
+      value.append_to(arguments);
+      if (reference.mutable_access) {
+        writebacks.push_back({std::move(*target), &expected_partition,
+                              expected_type, argument_offset});
+      }
+      argument = argument->next;
+    }
+    for (; argument; argument = argument->next) {
+      expression(argument->value).append_to(arguments);
+    }
+    require_nonoverlapping_references(std::move(origins), call);
+
+    const bool returns_void =
+        signature->returnType()->kind() == cxx::TypeKind::kVoid;
+    std::vector<const cxx::Type*> result_sources;
+    result_sources.reserve(!returns_void + writebacks.size());
+    size_t ordinary_result_count = 0;
+    if (!returns_void) {
+      result_sources.push_back(signature->returnType());
+      ordinary_result_count =
+          types_.partition(signature->returnType(), call).component_count;
+    }
+    for (const auto& writeback : writebacks) {
+      result_sources.push_back(writeback.value_type);
+    }
+    BoundSignature results;
+    if (!result_sources.empty()) {
+      results = bind_signature(types_, result_sources, call, &builder_);
+    }
+    std::vector<loom_tied_result_t> tied_results;
+    size_t result_offset = ordinary_result_count;
+    for (const auto& writeback : writebacks) {
+      const size_t component_count = writeback.partition->component_count;
+      if (writeback.argument_offset + component_count > UINT16_MAX ||
+          result_offset + component_count > UINT16_MAX) {
+        fail(call,
+             "value-reference call exceeds native operand or result limits");
+      }
+      for (size_t component = 0; component < component_count; ++component) {
+        tied_results.push_back({
+            .result_index = static_cast<uint16_t>(result_offset + component),
+            .operand_index =
+                static_cast<uint16_t>(writeback.argument_offset + component),
+            .has_type_change = !loom_type_equal(
+                loom_module_value_type(
+                    module_, arguments[writeback.argument_offset + component]),
+                results.types[result_offset + component]),
+        });
+      }
+      result_offset += component_count;
+    }
+
+    loom_op_t* op;
+    check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee, arguments.data(),
+                               arguments.size(), results.types.data(),
+                               results.types.size(), tied_results.data(),
+                               tied_results.size(), source, &op));
+
+    result_offset = ordinary_result_count;
+    for (const auto& writeback : writebacks) {
+      const size_t component_count = writeback.partition->component_count;
+      auto updated = value_arena_.capture(
+          *writeback.partition,
+          {loom_op_results(op) + result_offset, component_count});
+      write(writeback.target, updated, call);
+      result_offset += component_count;
+    }
+    if (returns_void) {
+      return std::nullopt;
+    }
+    return value_arena_.capture(types_.partition(signature->returnType(), call),
+                                {loom_op_results(op), ordinary_result_count});
   }
 
   Value increment(cxx::ExpressionAST* destination, cxx::TokenKind token,
@@ -1310,7 +1588,7 @@ class Translator final : private Initialization::Evaluation {
       sources.push_back(ast->type);
     }
     for (auto* symbol : written) {
-      sources.push_back(symbol->type());
+      sources.push_back(types_.unqualified_value(symbol->type()));
     }
     auto initial = current(written);
     auto source = locations_.get(ast);
@@ -1921,6 +2199,17 @@ class Translator final : private Initialization::Evaluation {
       if (binding && std::holds_alternative<TargetIntrinsic>(*binding)) {
         require_launch_configuration_context(ast);
       }
+      const bool shuffle_xor = annotated(function, "shuffle_xor");
+      if (!binding && !shuffle_xor) {
+        if (annotated(function, "kernel")) {
+          fail(ast, "kernels require an explicit launch operation");
+        }
+        auto called = ordinary_call(call, function, source);
+        if (!called) {
+          fail(ast, "void function cannot be used as a value");
+        }
+        return *called;
+      }
       auto* assembly =
           binding ? std::get_if<AssemblyIntrinsic>(binding) : nullptr;
       loom_symbol_ref_t fragment = {};
@@ -1946,7 +2235,7 @@ class Translator final : private Initialization::Evaluation {
         return arguments;
       };
       loom_op_t* op;
-      if (annotated(function, "shuffle_xor")) {
+      if (shuffle_xor) {
         require_kernel_context(ast);
         auto arguments = flatten_arguments();
         if (arguments.size() != 3) {
@@ -1967,18 +2256,7 @@ class Translator final : private Initialization::Evaluation {
         }
         return *called.value;
       }
-      if (annotated(function, "kernel")) {
-        fail(ast, "kernels require an explicit launch operation");
-      }
-      auto symbol = functions_.declare(function, ast);
-      auto arguments = flatten_arguments();
-      std::array<const cxx::Type*, 1> result_sources = {ast->type};
-      auto results = bind_signature(types_, result_sources, ast, &builder_);
-      check(loom_func_call_build(
-          &builder_, 0, 0, 0, 0, symbol, arguments.data(), arguments.size(),
-          results.types.data(), results.types.size(), nullptr, 0, source, &op));
-      return value_arena_.capture(types_.partition(ast->type, ast),
-                                  {loom_op_results(op), results.types.size()});
+      fail(ast, "call has no admitted Loom binding");
     }
     fail(ast,
          "unsupported expression: " + std::string(cxx::to_string(ast->kind())));
@@ -2028,7 +2306,7 @@ class Translator final : private Initialization::Evaluation {
     const size_t control_count = sources.size();
     sources.reserve(control_count + written.size());
     for (auto* symbol : written) {
-      sources.push_back(symbol->type());
+      sources.push_back(types_.unqualified_value(symbol->type()));
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -2298,7 +2576,7 @@ class Translator final : private Initialization::Evaluation {
       std::vector<const cxx::Type*> sources;
       sources.reserve(written.size());
       for (auto* symbol : written) {
-        sources.push_back(symbol->type());
+        sources.push_back(types_.unqualified_value(symbol->type()));
       }
       auto results = bind_signature(types_, sources, ast, &builder_);
       loom_op_t* op;
@@ -2401,7 +2679,7 @@ class Translator final : private Initialization::Evaluation {
     std::vector<const cxx::Type*> sources = {unit_.control()->getBoolType()};
     sources.reserve(1 + written.size());
     for (auto* symbol : written) {
-      sources.push_back(symbol->type());
+      sources.push_back(types_.unqualified_value(symbol->type()));
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -2443,7 +2721,7 @@ class Translator final : private Initialization::Evaluation {
     std::vector<const cxx::Type*> sources;
     sources.reserve(written.size());
     for (auto* symbol : written) {
-      sources.push_back(symbol->type());
+      sources.push_back(types_.unqualified_value(symbol->type()));
     }
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
@@ -2500,7 +2778,7 @@ class Translator final : private Initialization::Evaluation {
         std::vector<const cxx::Type*> result_sources;
         result_sources.reserve(written.size());
         for (auto* symbol : written) {
-          result_sources.push_back(symbol->type());
+          result_sources.push_back(types_.unqualified_value(symbol->type()));
         }
         auto result_signature =
             bind_signature(types_, result_sources, ast, &builder_);
@@ -2896,15 +3174,10 @@ class Translator final : private Initialization::Evaluation {
         if (annotated(function, "kernel")) {
           fail(ast, "kernels require an explicit launch operation");
         }
-        std::vector<loom_value_id_t> arguments;
-        for (auto* argument : cxx::ListView{call->expressionList}) {
-          expression(argument).append_to(arguments);
+        auto called = ordinary_call(call, function, locations_.get(ast));
+        if (called) {
+          fail(ast, "value-producing function reached a void call");
         }
-        auto callee = functions_.declare(function, ast);
-        loom_op_t* op;
-        check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee,
-                                   arguments.data(), arguments.size(), nullptr,
-                                   0, nullptr, 0, locations_.get(ast), &op));
         return;
       }
       if (call->expressionList) {

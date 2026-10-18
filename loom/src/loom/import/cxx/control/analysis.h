@@ -131,6 +131,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::CompoundAssignmentExpressionAST* ast) override;
   void visit(cxx::PostIncrExpressionAST* ast) override;
   void visit(cxx::UnaryExpressionAST* ast) override;
+  void visit(cxx::CallExpressionAST* ast) override;
   void visit(cxx::InitDeclaratorAST* ast) override;
   void visit(cxx::ConditionExpressionAST* ast) override;
   void visit(cxx::BracedInitListAST* ast) override;
@@ -140,6 +141,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void analyze_default_constructor(const cxx::Type* type,
                                    cxx::FunctionSymbol* constructor,
                                    cxx::AST* owner);
+  std::optional<Destination> retain_destination(cxx::ExpressionAST* expression);
   void record(cxx::ExpressionAST* expression);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);

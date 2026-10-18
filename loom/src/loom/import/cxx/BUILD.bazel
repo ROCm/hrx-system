@@ -50,6 +50,7 @@ loom_cc_test(
         "//loom/src/loom/import/cxx/source:catalog",
         "//loom/src/loom/import/cxx/source:preamble",
         "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/func",
         "//loom/src/loom/target/test:descriptors",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

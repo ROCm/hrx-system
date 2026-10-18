@@ -147,6 +147,8 @@ loom_check_test_suite(
     "record_memory_invalid.cxx-test"
     "records.cxx-test"
     "records_invalid.cxx-test"
+    "reference_parameters.cxx-test"
+    "reference_parameters_invalid.cxx-test"
     "scalar.cxx-test"
     "scalar_invalid.cxx-test"
     "scalar_templates.cxx-test"

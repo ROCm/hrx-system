@@ -16,6 +16,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/printer.h"
 #include "loom/import/cxx/source/catalog.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/target/test/descriptors.h"
 
@@ -205,6 +206,39 @@ TEST_F(ImportTest, ViewFacadePreservesItsObjectContractAcrossDataModels) {
     EXPECT_NE(text.find("view<[%value_dim0]x32xf32, %value_layout>"),
               std::string::npos);
   }
+  EXPECT_EQ(diagnostic_count_, 0);
+}
+
+TEST_F(ImportTest, MutableViewReferencesRetainTypeChangingTies) {
+  const auto source = IREE_SV(
+      "#include <loomcxx/view.h>\n"
+      "namespace loomt = loom::type;\n"
+      "using Rows = loomt::view<loomt::shape<loomt::dynamic, 4>, float>;\n"
+      "static void replace(Rows& rows, Rows replacement) {\n"
+      "  rows = replacement;\n"
+      "}\n"
+      "Rows entry(Rows rows, Rows replacement) {\n"
+      "  replace(rows, replacement);\n"
+      "  return rows;\n"
+      "}\n");
+  IREE_ASSERT_OK(Import(source));
+  ASSERT_NE(module_, nullptr);
+
+  auto* entry = loom_block_op(loom_module_block(module_), 0);
+  ASSERT_TRUE(loom_func_def_isa(entry));
+  auto* call = loom_region_entry_block(loom_func_def_body(entry))->first_op;
+  ASSERT_TRUE(loom_func_call_isa(call));
+  ASSERT_EQ(call->tied_result_count, 3u);
+  EXPECT_FALSE(loom_op_tied_results(call)[0].has_type_change);
+  EXPECT_FALSE(loom_op_tied_results(call)[1].has_type_change);
+  EXPECT_TRUE(loom_op_tied_results(call)[2].has_type_change);
+
+  auto* replace = loom_block_op(loom_module_block(module_), 1);
+  ASSERT_TRUE(loom_func_def_isa(replace));
+  ASSERT_EQ(replace->tied_result_count, 3u);
+  EXPECT_FALSE(loom_op_tied_results(replace)[0].has_type_change);
+  EXPECT_FALSE(loom_op_tied_results(replace)[1].has_type_change);
+  EXPECT_TRUE(loom_op_tied_results(replace)[2].has_type_change);
   EXPECT_EQ(diagnostic_count_, 0);
 }
 

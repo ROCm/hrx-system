@@ -1,0 +1,97 @@
+// RUN: verify
+// Runtime reference ABIs require every caller to satisfy the SSA value-borrow
+// contract, so externally callable definitions remain rejected.
+// ERROR@+1: LOWERING/059 "runtime reference parameters require an internal ordinary function definition"
+void public_reference(unsigned& value) { ++value; }
+
+// ====
+// Bodyless declarations cannot establish the internal call graph contract.
+static void external_reference(unsigned& value);
+// ERROR@+1: LOWERING/059 "runtime reference parameters require an internal ordinary function definition"
+void caller(unsigned& value) { external_reference(value); }
+
+// ====
+static void consume(unsigned&& value) { ++value; }
+unsigned rvalue_reference(unsigned value) {
+  // ERROR@+1: LOWERING/059 "rvalue-reference parameters require consuming object identity"
+  consume(static_cast<unsigned&&>(value));
+  return value;
+}
+
+// ====
+static unsigned observe(volatile unsigned& value) { return value; }
+unsigned volatile_reference(volatile unsigned* value) {
+  // ERROR@+1: LOWERING/059 "volatile reference parameters require addressable storage"
+  return observe(*value);
+}
+
+// ====
+static unsigned first(const unsigned (&values)[4]) { return values[0]; }
+unsigned array_reference() {
+  unsigned values[4] = {};
+  // ERROR@+1: LOWERING/059 "array reference parameters require addressable storage"
+  return first(values);
+}
+
+// ====
+static unsigned& identity(unsigned& value) { return value; }
+unsigned reference_return(unsigned value) {
+  // ERROR@+1: LOWERING/059 "runtime reference returns require object identity"
+  return identity(value);
+}
+
+// ====
+static void escape(unsigned& value) {
+  // ERROR@-1: LOWERING/059 "taking the address of a value-reference parameter requires addressable reference storage"
+  unsigned* pointer = &value;
+  ++*pointer;
+}
+unsigned addressed_reference(unsigned value) {
+  escape(value);
+  return value;
+}
+
+// ====
+static void increment(unsigned& value) { ++value; }
+unsigned storage_reference(unsigned value) {
+  unsigned* alias = &value;
+  // ERROR@+1: LOWERING/059 "runtime value-reference arguments require an automatic SSA object"
+  increment(value);
+  return *alias;
+}
+
+// ====
+static unsigned read(const unsigned& value) { return value; }
+unsigned storage_const_reference(const unsigned* value) {
+  // ERROR@+1: LOWERING/059 "runtime value-reference arguments require an automatic SSA object"
+  return read(*value);
+}
+
+// ====
+static void combine(unsigned& output, const unsigned& input) { output += input; }
+unsigned overlapping_references(unsigned value) {
+  // ERROR@+1: LOWERING/059 "mutable value-reference arguments must select nonoverlapping automatic objects or member slices"
+  combine(value, value);
+  return value;
+}
+
+// ====
+struct Pair { unsigned first, second; };
+static void combine(Pair& output, const unsigned& input) { output.first += input; }
+Pair overlapping_member_reference(Pair value) {
+  // ERROR@+1: LOWERING/059 "mutable value-reference arguments must select nonoverlapping automatic objects or member slices"
+  combine(value, value.first);
+  return value;
+}
+
+// ====
+using UInt4 = unsigned __attribute__((vector_size(16)));
+static void update_lanes(unsigned& first, unsigned& second) {
+  ++first;
+  ++second;
+}
+UInt4 overlapping_vector_lanes(UInt4 values) {
+  // ERROR@+1: LOWERING/059 "mutable value-reference arguments must select nonoverlapping automatic objects or member slices"
+  update_lanes(values[0], values[1]);
+  return values;
+}

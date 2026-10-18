@@ -41,6 +41,16 @@ enum class FunctionKind {
   CheckScenario,
 };
 
+// One source lvalue-reference parameter projected through Loom's value ABI.
+// Parameters remain in source order and are indexed by semantic ordinal so
+// redeclarations need not share parameter symbol identities.
+struct ValueReferenceParameter {
+  // Ordinal in the source function parameter list.
+  size_t ordinal;
+  // Whether the callee returns and the caller writes back the final value.
+  bool mutable_access;
+};
+
 // Admitted definition ready for recursive body construction. The source owns
 // AST/types and the module owns native IR; both outlive this borrowed contract.
 struct FunctionBody {
@@ -58,6 +68,8 @@ struct FunctionBody {
   FunctionKind kind;
   // Incoming pointer contracts in source parameter order, empty when absent.
   std::span<const ParameterContract> parameter_contracts;
+  // Admitted non-escaping value references in source parameter order.
+  std::span<const ValueReferenceParameter> reference_parameters;
 };
 
 // Native definition and any source-owned launch configuration body that must
@@ -121,6 +133,9 @@ class Functions {
   // module insertion point. The caller then enters and fills the returned body.
   DefinedFunction define(cxx::FunctionSymbol* symbol, Types& types,
                          Locations& locations, loom_builder_t* builder);
+  // Returns the retained value-reference ABI for a reached function.
+  std::span<const ValueReferenceParameter> reference_parameters(
+      cxx::FunctionSymbol* symbol) const;
 
  private:
   enum class DeclarationScope { Namespace, Nested };
@@ -133,10 +148,13 @@ class Functions {
   loom_symbol_ref_t create_symbol(cxx::FunctionSymbol* function,
                                   cxx::AST* source);
   loom_symbol_ref_t retain(cxx::FunctionSymbol* function, cxx::AST* owner);
+  void admit_reference_parameters(cxx::FunctionSymbol* symbol,
+                                  cxx::AST* source);
   BoundSignature bind_callable_signature(
       cxx::FunctionSymbol* symbol, cxx::AST* source, Types& types,
       loom_builder_t* builder, std::vector<loom_type_t>& arguments,
       std::vector<loom_type_t>& results,
+      std::vector<loom_tied_result_t>& tied_results,
       std::vector<loom_predicate_t>& predicates);
   void collect(cxx::List<cxx::DeclarationAST*>* declarations,
                DeclarationScope scope,
@@ -206,6 +224,9 @@ class Functions {
   std::unordered_set<cxx::FunctionSymbol*> exported_;
   // Reached bodyless declarations whose names must remain stable for linking.
   std::unordered_set<cxx::FunctionSymbol*> external_;
+  // Nonempty value-reference ABIs indexed by canonical declaration identity.
+  std::unordered_map<cxx::FunctionSymbol*, std::vector<ValueReferenceParameter>>
+      reference_parameters_;
   // Each reached source function receives one native identity.
   std::unordered_map<cxx::FunctionSymbol*, loom_symbol_ref_t> callees_;
   // Reachable worklist in deterministic discovery order.
