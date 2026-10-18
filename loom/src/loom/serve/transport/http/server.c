@@ -34,6 +34,12 @@ struct loom_serve_http_connection_t {
   loom_serve_http_connection_release_callback_t release_callback;
   // Parser owns the complete request bytes through application release.
   loom_serve_http_request_parser_t* parser;
+  // Joins the single protocol transition with ordered receive callbacks.
+  iree_slim_mutex_t receive_mutex;
+  // Optional owned receiver replacing HTTP parsing after request claim.
+  loom_serve_http_protocol_t protocol;
+  // Peer EOF observed under receive_mutex, including before an upgrade.
+  bool receive_eof;
   // Borrowed complete request, published once under the mutex.
   const loom_serve_http_request_t* request;
   // Accepted sends not yet returned by completion callbacks.
@@ -117,16 +123,24 @@ static iree_status_t loom_serve_http_connection_receive(
     void* user_data, iree_async_span_t data, iree_async_buffer_lease_t* lease) {
   loom_serve_http_connection_t* connection = user_data;
   const loom_serve_http_request_t* request = NULL;
+  iree_slim_mutex_lock(&connection->receive_mutex);
+  connection->receive_eof |= data.length == 0;
+  const bool upgraded = connection->protocol.receive != NULL;
   iree_status_t status =
-      data.length
+      upgraded ? connection->protocol.receive(connection->protocol.user_data,
+                                              iree_async_span_const_data(data))
+      : data.length
           ? loom_serve_http_request_parser_feed(
                 connection->parser, iree_async_span_const_data(data), &request)
           : loom_serve_http_request_parser_finalize(connection->parser,
                                                     &request);
-  if (iree_status_is_ok(status) && request) {
+  iree_slim_mutex_unlock(&connection->receive_mutex);
+  if (iree_status_is_ok(status) && (request || upgraded)) {
     iree_slim_mutex_lock(&connection->server->mutex);
-    connection->request = request;
-    connection->flags |= HTTP_CONNECTION_REQUEST_READY;
+    if (request) {
+      connection->request = request;
+      connection->flags |= HTTP_CONNECTION_REQUEST_READY;
+    }
     loom_serve_http_notify_locked(connection->server);
     iree_slim_mutex_unlock(&connection->server->mutex);
   }
@@ -186,6 +200,7 @@ bool loom_serve_http_server_try_accept(
     return true;
   }
 
+  iree_slim_mutex_initialize(&connection->receive_mutex);
   iree_status_t status = loom_serve_http_request_parser_allocate(
       server->options.request_limits, server->host_allocator,
       &connection->parser);
@@ -242,6 +257,10 @@ static void loom_serve_http_connection_reclaim(
   if (connection->release_callback.fn) {
     connection->release_callback.fn(connection->release_callback.user_data);
   }
+  if (connection->protocol.release) {
+    connection->protocol.release(connection->protocol.user_data);
+  }
+  iree_slim_mutex_deinitialize(&connection->receive_mutex);
   loom_serve_http_request_parser_free(connection->parser);
   if (!iree_status_is_ok(connection->failure)) {
     loom_serve_http_server_record_error(server, connection->failure);
@@ -437,6 +456,21 @@ loom_serve_http_connection_t* loom_serve_http_server_take_request(
   return selected;
 }
 
+void loom_serve_http_connection_upgrade(
+    loom_serve_http_connection_t* connection,
+    loom_serve_http_protocol_t protocol) {
+  iree_slim_mutex_lock(&connection->receive_mutex);
+  connection->protocol = protocol;
+  iree_status_t status =
+      connection->receive_eof
+          ? protocol.receive(protocol.user_data, iree_const_byte_span_empty())
+          : iree_ok_status();
+  iree_slim_mutex_unlock(&connection->receive_mutex);
+  if (!iree_status_is_ok(status)) {
+    loom_serve_http_connection_error(connection, status);
+  }
+}
+
 bool loom_serve_http_connection_failed(
     loom_serve_http_connection_t* connection) {
   iree_slim_mutex_lock(&connection->server->mutex);
@@ -452,12 +486,18 @@ bool loom_serve_http_connection_can_send(
 
 iree_status_t loom_serve_http_connection_send(
     loom_serve_http_connection_t* connection, iree_string_view_t bytes) {
+  return loom_serve_http_connection_send_generated(
+      connection, iree_net_send_prefix_from_bytes(
+                      iree_make_const_byte_span(bytes.data, bytes.size)));
+}
+
+iree_status_t loom_serve_http_connection_send_generated(
+    loom_serve_http_connection_t* connection, iree_net_send_prefix_t prefix) {
   iree_slim_mutex_lock(&connection->server->mutex);
   ++connection->pending_sends;
   iree_slim_mutex_unlock(&connection->server->mutex);
   const iree_net_send_params_t params = {
-      .generated_prefix = iree_net_send_prefix_from_bytes(
-          iree_make_const_byte_span(bytes.data, bytes.size)),
+      .generated_prefix = prefix,
       .completion_callback = {loom_serve_http_connection_send_completed,
                               connection},
   };
