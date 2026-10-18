@@ -1093,13 +1093,22 @@ static iree_status_t loom_serve_realtime_item_create(
     return status;
   }
   item->status = LOOM_SERVE_REALTIME_ITEM_COMPLETED;
+  loom_serve_realtime_wire_message_t* tail = session->wire.last;
+  status = loom_serve_realtime_item_event(session, "conversation.item.added",
+                                          item, previous);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_realtime_item_event(session, "conversation.item.done",
+                                            item, previous);
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_serve_realtime_wire_rewind(&session->wire, tail);
+    loom_serve_realtime_conversation_remove(&session->conversation, item);
+    return status;
+  }
   if (inserted) {
     loom_serve_realtime_history_invalidate(&session->history, 0);
   }
-  IREE_RETURN_IF_ERROR(loom_serve_realtime_item_event(
-      session, "conversation.item.added", item, previous));
-  return loom_serve_realtime_item_event(session, "conversation.item.done", item,
-                                        previous);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_realtime_command_create(
