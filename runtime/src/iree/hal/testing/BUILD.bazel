@@ -36,6 +36,7 @@ iree_runtime_cc_library(
     testonly = True,
     hdrs = ["deferred_pool.h"],
     deps = [
+        "//runtime/src/iree/async",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
     ],

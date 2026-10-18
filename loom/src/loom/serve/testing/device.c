@@ -6,13 +6,22 @@
 
 #include "loom/serve/testing/device.h"
 
+#include "iree/base/threading/call_once.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/pool_wait.h"
 
-iree_status_t loom_serve_test_driver_create(loom_serve_host_t* host,
-                                            iree_allocator_t host_allocator,
-                                            iree_hal_driver_t** out_driver) {
+static iree_once_flag loom_serve_test_driver_once = IREE_ONCE_FLAG_INIT;
+static iree_status_t loom_serve_test_driver_registration_status = 0;
+
+static void loom_serve_test_driver_register(void) {
+  loom_serve_test_driver_registration_status =
+      loom_serve_test_device()->driver_register(
+          iree_hal_driver_registry_default());
+}
+
+iree_status_t loom_serve_test_driver_acquire(loom_serve_host_t* host,
+                                             iree_hal_driver_t** out_driver) {
   const loom_serve_test_device_t* device = loom_serve_test_device();
   *out_driver = NULL;
   if (!device->driver_register) {
@@ -20,16 +29,13 @@ iree_status_t loom_serve_test_driver_create(loom_serve_host_t* host,
     iree_hal_driver_retain(*out_driver);
     return iree_ok_status();
   }
-  iree_hal_driver_registry_t* registry = NULL;
+  // Native process contexts remain shared across independently created groups.
+  // A fixture may release every device without ending that process lifetime.
+  iree_call_once(&loom_serve_test_driver_once, loom_serve_test_driver_register);
   IREE_RETURN_IF_ERROR(
-      iree_hal_driver_registry_allocate(host_allocator, &registry));
-  iree_status_t status = device->driver_register(registry);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_driver_registry_acquire_driver(
-        registry, device->driver_name, out_driver);
-  }
-  iree_hal_driver_registry_free(registry);
-  return status;
+      iree_status_clone(loom_serve_test_driver_registration_status));
+  return iree_hal_driver_registry_acquire_driver(
+      iree_hal_driver_registry_default(), device->driver_name, out_driver);
 }
 
 typedef struct loom_serve_test_capacity_wait_t {

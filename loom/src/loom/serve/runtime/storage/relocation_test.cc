@@ -27,8 +27,7 @@ class RelocationTest : public ::testing::Test {
     IREE_ASSERT_OK(
         loom_serve_host_create(1, nullptr, iree_allocator_system(), &host));
     iree_hal_driver_t* driver = nullptr;
-    IREE_ASSERT_OK(
-        loom_serve_test_driver_create(host, iree_allocator_system(), &driver));
+    IREE_ASSERT_OK(loom_serve_test_driver_acquire(host, &driver));
     const loom_serve_device_options_t options = {
         .driver = driver,
         .uri = loom_serve_test_device()->device_uri,

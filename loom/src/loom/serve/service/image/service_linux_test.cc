@@ -123,8 +123,7 @@ class ImageServiceFixture : public ::testing::Test {
         worker_count, nullptr, iree_allocator_system(), &host);
     iree_hal_driver_t* driver = nullptr;
     if (iree_status_is_ok(status)) {
-      status =
-          loom_serve_test_driver_create(host, iree_allocator_system(), &driver);
+      status = loom_serve_test_driver_acquire(host, &driver);
     }
     const auto uri = loom_serve_test_device()->device_uri;
     const loom_serve_device_options_t options[] = {

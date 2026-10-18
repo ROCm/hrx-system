@@ -41,6 +41,7 @@ iree_cc_library(
   HDRS
     "deferred_pool.h"
   DEPS
+    iree::async
     iree::hal
     iree::testing::gtest
   TESTONLY

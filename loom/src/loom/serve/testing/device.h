@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-// Registers one HAL driver factory in a temporary registry.
+// Registers one HAL driver factory in the supplied registry.
 typedef iree_status_t(IREE_API_PTR* loom_serve_test_driver_register_fn_t)(
     iree_hal_driver_registry_t* registry);
 
@@ -34,11 +34,11 @@ typedef struct loom_serve_test_device_t {
 // Implemented exactly once by the linked physical-device leaf.
 const loom_serve_test_device_t* loom_serve_test_device(void);
 
-// Creates the linked physical device's runtime driver. The caller releases the
-// returned reference after all devices have been created.
-iree_status_t loom_serve_test_driver_create(loom_serve_host_t* host,
-                                            iree_allocator_t host_allocator,
-                                            iree_hal_driver_t** out_driver);
+// Acquires the linked physical device's registry-owned runtime driver, or the
+// host's task driver. Native process state is shared across test cases. The
+// caller releases its reference after creating devices.
+iree_status_t loom_serve_test_driver_acquire(loom_serve_host_t* host,
+                                             iree_hal_driver_t** out_driver);
 
 // Trims managed backing and observes native capacity notifications, including
 // cascading slab returns, before tests inspect physical accounting. Device work

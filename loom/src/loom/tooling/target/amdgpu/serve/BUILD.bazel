@@ -419,8 +419,8 @@ loom_cc_test(
         data = EMBEDDING_SOURCES + PROJECTOR_SOURCES + TEXT_SOURCES,
         env = {
             "LOOM_SERVE_TEST_MEDIA_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
-            "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
             "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+            "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
         },
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
         tags = runtime_tags,
@@ -817,6 +817,7 @@ loom_cc_test(
             "//loom/src/loom/serve/testing:native_allocator",
             "//runtime/src/iree/base",
             "//runtime/src/iree/hal",
+            "//runtime/src/iree/hal/testing:deferred_pool",
             "//runtime/src/iree/testing:gtest",
             "//runtime/src/iree/testing:gtest_main",
         ],

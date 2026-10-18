@@ -8,7 +8,12 @@
 #define IREE_HAL_TESTING_DEFERRED_POOL_H_
 
 #include <algorithm>
+#include <condition_variable>
+#include <cstring>
+#include <mutex>
+#include <vector>
 
+#include "iree/async/frontier.h"
 #include "iree/hal/pool.h"
 #include "iree/testing/gtest.h"
 
@@ -26,6 +31,10 @@ struct DeferredBackingPool : iree_hal_pool_t {
   size_t depth = 0;
   // Maximum simultaneously active parent submissions.
   size_t maximum_depth = 0;
+  // Publishes a held request between the queue owner and the test thread.
+  std::mutex acquire_mutex;
+  // Signals that a real consumer has handed off its borrowed request.
+  std::condition_variable acquire_condition;
   // One captured request; the consumer submits its next request on completion.
   struct Pending {
     // Number of borrowed request and output array elements.
@@ -44,6 +53,22 @@ struct DeferredBackingPool : iree_hal_pool_t {
     iree_hal_pool_reserve_flags_t flags;
   } pending = {};
 
+  IREE_ASYNC_FIXED_FRONTIER_TYPE(ReturnFrontier, UINT8_MAX);
+  struct PendingReturn {
+    // Parent tokens kept live after the consumer has logically returned them.
+    std::vector<iree_hal_pool_reservation_t> reservations;
+    // Exact copied release history, independent of the caller's capture.
+    ReturnFrontier frontier = {};
+    // Distinguishes a null history from a supplied empty history.
+    bool has_frontier = false;
+  };
+  // Serializes returned tokens with explicit test-controlled retirement.
+  std::mutex return_mutex;
+  // Holds subsequent returns without blocking the queue performing them.
+  bool defer_returns = false;
+  // Real parent ownership awaiting explicit forwarding by the test.
+  std::vector<PendingReturn> pending_returns;
+
   static iree_status_t Create(iree_hal_pool_t* backing,
                               DeferredBackingPool** out_pool) {
     static const iree_hal_pool_vtable_t vtable = {
@@ -51,6 +76,7 @@ struct DeferredBackingPool : iree_hal_pool_t {
             [](iree_hal_pool_t* base) {
               auto* self = static_cast<DeferredBackingPool*>(base);
               EXPECT_EQ(self->pending.count, 0u);
+              EXPECT_TRUE(self->pending_returns.empty());
               iree_hal_pool_deinitialize(base);
               iree_hal_pool_release(self->backing);
               delete self;
@@ -73,10 +99,14 @@ struct DeferredBackingPool : iree_hal_pool_t {
               .completion = completion,
               .flags = flags,
           };
-          if (self->defer) {
-            EXPECT_EQ(self->pending.count, 0u);
-            self->pending = pending;
-            return iree_ok_status();
+          {
+            std::lock_guard<std::mutex> lock(self->acquire_mutex);
+            if (self->defer) {
+              EXPECT_EQ(self->pending.count, 0u);
+              self->pending = pending;
+              self->acquire_condition.notify_all();
+              return iree_ok_status();
+            }
           }
           return self->Forward(pending);
         },
@@ -84,9 +114,8 @@ struct DeferredBackingPool : iree_hal_pool_t {
             [](iree_hal_pool_t* base, iree_host_size_t count,
                const iree_hal_pool_reservation_t* reservations,
                const iree_async_frontier_t* frontier) {
-              iree_hal_pool_release_reservations(
-                  static_cast<DeferredBackingPool*>(base)->backing, count,
-                  reservations, frontier);
+              static_cast<DeferredBackingPool*>(base)->Return(
+                  count, reservations, frontier);
             },
         .materialize_reservations =
             [](iree_hal_pool_t* base, iree_host_size_t count,
@@ -146,9 +175,13 @@ struct DeferredBackingPool : iree_hal_pool_t {
   }
 
   void CompleteOne() {
-    ASSERT_NE(pending.count, 0u);
-    Pending call = pending;
-    pending = {};
+    Pending call;
+    {
+      std::lock_guard<std::mutex> lock(acquire_mutex);
+      ASSERT_NE(pending.count, 0u);
+      call = pending;
+      pending = {};
+    }
     iree_status_t status = Forward(call);
     if (!iree_status_is_ok(status)) {
       call.completion.fn(call.completion.user_data, status,
@@ -157,13 +190,89 @@ struct DeferredBackingPool : iree_hal_pool_t {
   }
 
   void FailOne() {
-    ASSERT_NE(pending.count, 0u);
-    Pending call = pending;
-    pending = {};
+    Pending call;
+    {
+      std::lock_guard<std::mutex> lock(acquire_mutex);
+      ASSERT_NE(pending.count, 0u);
+      call = pending;
+      pending = {};
+    }
     call.completion.fn(call.completion.user_data,
                        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                         "native allocation failed"),
                        IREE_HAL_POOL_ACQUIRE_NONE);
+  }
+
+  void WaitForAcquisition() {
+    std::unique_lock<std::mutex> lock(acquire_mutex);
+    acquire_condition.wait(lock, [&] { return pending.count != 0; });
+  }
+
+  void ResumeAcquisitions() {
+    Pending call;
+    {
+      std::lock_guard<std::mutex> lock(acquire_mutex);
+      defer = false;
+      call = pending;
+      pending = {};
+    }
+    if (call.count) {
+      iree_status_t status = Forward(call);
+      if (!iree_status_is_ok(status)) {
+        call.completion.fn(call.completion.user_data, status,
+                           IREE_HAL_POOL_ACQUIRE_NONE);
+      }
+    }
+  }
+
+  void DeferReturns() {
+    std::lock_guard<std::mutex> lock(return_mutex);
+    defer_returns = true;
+  }
+
+  size_t PendingReturnCount() {
+    std::lock_guard<std::mutex> lock(return_mutex);
+    size_t count = 0;
+    for (const auto& pending : pending_returns) {
+      count += pending.reservations.size();
+    }
+    return count;
+  }
+
+  void Return(iree_host_size_t count,
+              const iree_hal_pool_reservation_t* reservations,
+              const iree_async_frontier_t* frontier) {
+    {
+      std::lock_guard<std::mutex> lock(return_mutex);
+      if (defer_returns) {
+        auto& pending = pending_returns.emplace_back();
+        pending.reservations.assign(reservations, reservations + count);
+        if (frontier) {
+          pending.has_frontier = true;
+          memcpy(&pending.frontier, frontier,
+                 sizeof(*frontier) +
+                     frontier->entry_count * sizeof(frontier->entries[0]));
+        }
+        return;
+      }
+    }
+    iree_hal_pool_release_reservations(backing, count, reservations, frontier);
+  }
+
+  void CompleteReturns() {
+    std::vector<PendingReturn> returns;
+    {
+      std::lock_guard<std::mutex> lock(return_mutex);
+      defer_returns = false;
+      returns.swap(pending_returns);
+    }
+    for (const auto& pending : returns) {
+      iree_hal_pool_release_reservations(
+          backing, pending.reservations.size(), pending.reservations.data(),
+          pending.has_frontier
+              ? iree_async_fixed_frontier_as_const_frontier(&pending.frontier)
+              : nullptr);
+    }
   }
 };
 

@@ -57,8 +57,7 @@ iree_status_t AcquireJitTestApplication(iree_host_size_t worker_count,
   IREE_RETURN_IF_ERROR(
       loom_serve_test_host_create(worker_count, host_allocator, &host));
   iree_hal_driver_t* driver = nullptr;
-  iree_status_t status =
-      loom_serve_test_driver_create(host, host_allocator, &driver);
+  iree_status_t status = loom_serve_test_driver_acquire(host, &driver);
   if (iree_status_is_ok(status)) {
     const loom_serve_device_options_t options = {
         .driver = driver,

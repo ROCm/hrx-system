@@ -56,8 +56,7 @@ class ControlTest
   static void SetUpTestSuite() {
     IREE_ASSERT_OK(
         loom_serve_test_host_create(2, iree_allocator_system(), &host_));
-    IREE_ASSERT_OK(loom_serve_test_driver_create(host_, iree_allocator_system(),
-                                                 &driver_));
+    IREE_ASSERT_OK(loom_serve_test_driver_acquire(host_, &driver_));
   }
 
   static void TearDownTestSuite() {

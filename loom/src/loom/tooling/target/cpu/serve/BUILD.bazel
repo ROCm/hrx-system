@@ -577,6 +577,7 @@ loom_cc_test(
         "//loom/src/loom/serve/testing:native_allocator",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/testing:deferred_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

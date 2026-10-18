@@ -102,8 +102,7 @@ iree_status_t loom_serve_test_application_acquire(
   IREE_RETURN_IF_ERROR(loom_serve_test_host_create(options->worker_count,
                                                    host_allocator, &host));
   iree_hal_driver_t* driver = nullptr;
-  iree_status_t status =
-      loom_serve_test_driver_create(host, host_allocator, &driver);
+  iree_status_t status = loom_serve_test_driver_acquire(host, &driver);
   loom_serve_device_group_t* group = nullptr;
   const iree_string_view_t device_uri = loom_serve_test_device()->device_uri;
   if (iree_status_is_ok(status)) {

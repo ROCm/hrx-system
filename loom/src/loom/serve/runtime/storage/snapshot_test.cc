@@ -33,8 +33,7 @@ class SnapshotEnvironment : public ::testing::Environment {
   void SetUp() override {
     IREE_ASSERT_OK(
         loom_serve_host_create(1, nullptr, iree_allocator_system(), &host));
-    IREE_ASSERT_OK(
-        loom_serve_test_driver_create(host, iree_allocator_system(), &driver));
+    IREE_ASSERT_OK(loom_serve_test_driver_acquire(host, &driver));
   }
 
   void TearDown() override {

@@ -660,6 +660,7 @@ loom_cc_test(
     ::test_device
     iree::base
     iree::hal
+    iree::hal::testing::deferred_pool
     iree::testing::gtest
     iree::testing::gtest_main
     loom::serve::runtime::device

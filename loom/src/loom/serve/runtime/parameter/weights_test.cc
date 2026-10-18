@@ -280,8 +280,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     loom_serve_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_serve_test_host_create(1, host_allocator, &host));
     iree_hal_driver_t* driver = nullptr;
-    IREE_ASSERT_OK(
-        loom_serve_test_driver_create(host, host_allocator, &driver));
+    IREE_ASSERT_OK(loom_serve_test_driver_acquire(host, &driver));
     for (size_t i = 0; i < IREE_ARRAYSIZE(groups_); ++i) {
       const bool elastic = i != 0;
       const loom_serve_device_options_t options = {
