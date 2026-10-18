@@ -219,11 +219,6 @@ iree_status_t iree_hal_amd_gpu_pm4_semaphore_acquire_submission_semaphore(
 static iree_status_t iree_hal_amd_gpu_pm4_semaphore_signal(
     iree_async_semaphore_t* base_semaphore, uint64_t value,
     const iree_async_frontier_t* frontier) {
-  iree_status_t failure = (iree_status_t)iree_atomic_load(
-      &base_semaphore->failure_status, iree_memory_order_acquire);
-  if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
-    return iree_status_clone(failure);
-  }
   IREE_RETURN_IF_ERROR(
       iree_async_semaphore_advance_timeline(base_semaphore, value, frontier));
   iree_status_t status = iree_hal_amd_gpu_pm4_semaphore_update_submission(

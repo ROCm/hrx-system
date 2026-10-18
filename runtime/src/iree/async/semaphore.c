@@ -679,6 +679,12 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_advance_timeline(
   // each timeline value must be signaled exactly once and concurrent races are
   // not valid (they indicate duplicate signals or non-monotonic scheduling).
 
+  iree_status_t failure = (iree_status_t)iree_atomic_load(
+      &semaphore->failure_status, iree_memory_order_acquire);
+  if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
+    return iree_status_clone(failure);
+  }
+
   // CAS loop to advance the timeline value monotonically.
   // We store uint64 values as bit patterns in int64_t atomics. Comparisons
   // must cast BOTH sides to uint64_t to handle the full range correctly.

@@ -230,6 +230,26 @@ TEST_P(SemaphoreTest, FailThenWait) {
   iree_hal_semaphore_release(semaphore);
 }
 
+// Signals after failure preserve the original status, including when the
+// requested value would otherwise violate monotonicity.
+TEST_P(SemaphoreTest, FailThenSignal) {
+  iree_hal_semaphore_t* semaphore = CreateSemaphore();
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
+  iree_hal_semaphore_fail(
+      semaphore, iree_make_status(IREE_STATUS_CANCELLED, "failed timeline"));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        iree_hal_semaphore_signal(semaphore, 2, nullptr));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        iree_hal_semaphore_signal(semaphore, 1, nullptr));
+  uint64_t value = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        iree_hal_semaphore_query(semaphore, &value));
+  EXPECT_GE(value, IREE_HAL_SEMAPHORE_FAILURE_VALUE);
+
+  iree_hal_semaphore_release(semaphore);
+}
+
 // Tests that failure status codes are preserved through the query round-trip.
 // Validates the failure encoding mechanism: drivers encode failure status in
 // the semaphore value via iree_hal_status_as_semaphore_failure(), and the HAL

@@ -440,6 +440,8 @@ static inline uint64_t iree_async_semaphore_query(
 // Signals the semaphore to |value| with causal context |frontier|. The value
 // must be strictly greater than the current timeline value; signaling a value
 // at or below the current value returns IREE_STATUS_INVALID_ARGUMENT.
+// A failed semaphore returns its original failure without advancing the
+// timeline.
 //
 // The |frontier| encodes the causal context of this signal for cross-machine
 // ordering propagation. The semaphore merges it with its accumulated frontier
@@ -669,6 +671,7 @@ iree_async_semaphore_query_untainted_value(iree_async_semaphore_t* semaphore);
 
 // Advances the timeline value (CAS) and merges the frontier.
 // Does NOT dispatch timepoints (caller does that after native signaling).
+// A failed semaphore returns its original failure without changing either.
 //
 // Returns INVALID_ARGUMENT if the timeline is already at or past |value| —
 // each timeline value must be signaled exactly once and concurrent races are

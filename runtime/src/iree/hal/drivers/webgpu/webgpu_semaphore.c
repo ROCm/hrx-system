@@ -122,13 +122,9 @@ static iree_status_t iree_hal_webgpu_semaphore_signal(
   // standard CAS timeline advance + frontier merge + timepoint dispatch.
   iree_status_t status =
       iree_async_semaphore_advance_timeline(base_semaphore, value, frontier);
-  if (iree_status_code(status) == IREE_STATUS_INVALID_ARGUMENT) {
-    // Timeline was not advanced (duplicate signal or non-monotonic value).
+  if (!iree_status_is_ok(status)) {
     return status;
   }
-  // Timeline was advanced. Dispatch satisfied timepoints even if a frontier
-  // merge error occurred — waiters must be woken since the value has been
-  // published via the CAS in advance_timeline.
   iree_async_semaphore_dispatch_timepoints(base_semaphore, value);
   return status;
 }

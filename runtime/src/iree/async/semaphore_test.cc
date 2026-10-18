@@ -175,6 +175,23 @@ TEST(SemaphoreTest, SignalEqualToCurrentFails) {
   iree_async_semaphore_release(sem);
 }
 
+TEST(SemaphoreTest, SignalAfterFailurePreservesTimeline) {
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      test_proactor(), 10, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+      iree_allocator_system(), &semaphore));
+  iree_async_semaphore_fail(
+      semaphore, iree_make_status(IREE_STATUS_CANCELLED, "failed timeline"));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        iree_async_semaphore_signal(semaphore, 11, nullptr));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        iree_async_semaphore_signal(semaphore, 10, nullptr));
+  EXPECT_EQ(iree_async_semaphore_query(semaphore), 10u);
+
+  iree_async_semaphore_release(semaphore);
+}
+
 TEST(SemaphoreTest, SignalLargeJump) {
   iree_async_semaphore_t* sem = nullptr;
   IREE_ASSERT_OK(iree_async_semaphore_create(
