@@ -306,8 +306,9 @@ bool loom_aie2p_native_encode_ingress(const loom_xdna_array_family_t* family,
 }
 
 // A finite DMA sequence fits all its tasks in the hardware queue before any
-// completion wait. Fixed-slot chains cover whole ring rotations. A final task
-// reuses an aligned suffix or uses a separate prefix for a partial rotation.
+// completion wait. Fixed-slot chains cover whole ring rotations. Queued tasks
+// can repeat the complete chain or an aligned suffix; a separate final prefix
+// covers a partial rotation.
 iree_status_t loom_aie2p_native_build_sequence(
     const loom_xdna_dma_facts_t* dma,
     const loom_aie2p_native_memory_layout_t* layout, uint16_t first_descriptor,
@@ -330,6 +331,8 @@ iree_status_t loom_aie2p_native_build_sequence(
   uint32_t tail_length = 0;
   uint32_t tail_descriptor = 0;
   uint32_t cycles = repetitions;
+  uint32_t suffix_length = 0;
+  uint32_t suffix_cycles = 0;
   uint32_t required_descriptors = 1;
   uint32_t task_count =
       (uint32_t)iree_host_size_ceil_div(repetitions, repeat_limit);
@@ -337,26 +340,58 @@ iree_status_t loom_aie2p_native_build_sequence(
     required_descriptors = 0;
     for (uint32_t span = capacity; span <= available_descriptors;
          span += capacity) {
-      const uint32_t candidate_cycles = repetitions / span;
-      const uint32_t candidate_tail = repetitions % span;
-      const bool separate_tail = candidate_tail % capacity != 0;
-      const uint32_t candidate_descriptors =
-          span + (separate_tail ? candidate_tail : 0);
-      const uint32_t candidate_tasks =
-          (uint32_t)iree_host_size_ceil_div(candidate_cycles, repeat_limit) +
-          (candidate_tail != 0);
+      const uint32_t candidate_tail = repetitions % capacity;
+      const uint32_t candidate_descriptors = span + candidate_tail;
+      const uint32_t candidate_task_limit = queue_depth - (candidate_tail != 0);
+      const uint32_t aligned_repetitions = repetitions - candidate_tail;
       if (candidate_descriptors > available_descriptors ||
-          candidate_tasks > queue_depth ||
-          (required_descriptors &&
-           candidate_descriptors >= required_descriptors)) {
+          (uint64_t)aligned_repetitions >
+              (uint64_t)candidate_task_limit * repeat_limit * span) {
         continue;
       }
-      chain_length = span;
-      tail_length = candidate_tail;
-      tail_descriptor = separate_tail ? span : span - candidate_tail;
-      cycles = candidate_cycles;
-      required_descriptors = candidate_descriptors;
-      task_count = candidate_tasks;
+      const uint32_t maximum_full_cycles = aligned_repetitions / span;
+      for (uint32_t candidate_cycles = maximum_full_cycles;;
+           --candidate_cycles) {
+        const uint32_t candidate_remainder =
+            aligned_repetitions - candidate_cycles * span;
+        const uint32_t full_tasks =
+            (uint32_t)iree_host_size_ceil_div(candidate_cycles, repeat_limit);
+        uint32_t candidate_suffix_length = 0;
+        uint32_t candidate_suffix_cycles = 0;
+        if (full_tasks <= candidate_task_limit && candidate_remainder) {
+          for (uint32_t length = span;; length -= capacity) {
+            if (!(candidate_remainder % length) &&
+                candidate_remainder / length <= repeat_limit) {
+              candidate_suffix_length = length;
+              candidate_suffix_cycles = candidate_remainder / length;
+              break;
+            }
+            if (length == capacity) {
+              break;
+            }
+          }
+        }
+        const uint32_t candidate_tasks =
+            full_tasks + (candidate_suffix_length != 0) + (candidate_tail != 0);
+        if (candidate_tasks <= queue_depth &&
+            (!candidate_remainder || candidate_suffix_length)) {
+          chain_length = span;
+          tail_length = candidate_tail;
+          tail_descriptor = span;
+          cycles = candidate_cycles;
+          suffix_length = candidate_suffix_length;
+          suffix_cycles = candidate_suffix_cycles;
+          required_descriptors = candidate_descriptors;
+          task_count = candidate_tasks;
+          break;
+        }
+        if (!candidate_cycles) {
+          break;
+        }
+      }
+      if (required_descriptors) {
+        break;
+      }
     }
     if (!required_descriptors) {
       *out_reason = IREE_SV(
@@ -434,6 +469,12 @@ iree_status_t loom_aie2p_native_build_sequence(
                                                  out_sequence->descriptor) |
         loom_xdna_register_field_encode_admitted(repeat, count - 1);
     cycles -= count;
+  }
+  if (suffix_length) {
+    out_sequence->tasks[task++] =
+        loom_xdna_register_field_encode_admitted(
+            start, out_sequence->descriptor + chain_length - suffix_length) |
+        loom_xdna_register_field_encode_admitted(repeat, suffix_cycles - 1);
   }
   if (tail_length) {
     out_sequence->tasks[task] = loom_xdna_register_field_encode_admitted(
