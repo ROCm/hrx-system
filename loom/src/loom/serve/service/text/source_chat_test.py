@@ -88,7 +88,6 @@ class RequestTest(unittest.TestCase):
         result = self.execute(self.request(tools=tools))
         self.assertEqual(result.returncode, 0, result.stderr)
         value = json.loads(result.stdout)
-        self.assertEqual(value["declared_tool_count"], 24)
         self.assertEqual(value["prompt"], "#" * 24 + "abxa")
         self.assertEqual(value["tokens"], [3] * 24 + [0, 1, 2, 0])
 

@@ -6,93 +6,15 @@
 
 #include "loom/serve/service/text/chat.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "iree/base/internal/json.h"
 #include "iree/base/internal/unicode.h"
 #include "iree/vm/reflection.h"
 #include "iree/vm/sync.h"
+#include "loom/serve/service/text/chat_fields.h"
+#include "loom/serve/service/text/tool_schemas.h"
 #include "loom/util/json.h"
-
-#define CHAT_TYPE(type) (1u << IREE_JSON_VALUE_TYPE_##type)
-#define CHAT_STRING CHAT_TYPE(STRING)
-#define CHAT_NUMBER CHAT_TYPE(NUMBER)
-#define CHAT_OBJECT CHAT_TYPE(OBJECT)
-#define CHAT_ARRAY CHAT_TYPE(ARRAY)
-#define CHAT_NULL CHAT_TYPE(NULL)
-#define CHAT_BOOL (CHAT_TYPE(TRUE) | CHAT_TYPE(FALSE))
-
-// Typed fields preserve the distinction between JSON null and the string
-// "null". This is request-boundary decoding, not an internal object model.
-typedef struct loom_serve_text_chat_field_t {
-  // Literal protocol key; escaped protocol keys are not accepted.
-  const char* name;
-  // Accepted JSON types as CHAT_TYPE bits.
-  uint32_t types;
-  // Borrowed value; null data denotes an absent optional field.
-  iree_string_view_t value;
-  // Actual JSON type, valid only when value.data is non-null.
-  iree_json_value_type_t type;
-} loom_serve_text_chat_field_t;
-
-typedef enum loom_serve_text_chat_field_flag_bits_e {
-  CHAT_FIELDS_IGNORE_UNKNOWN = 1u << 0,
-} loom_serve_text_chat_field_flag_bits_t;
-typedef uint32_t loom_serve_text_chat_field_flags_t;
-
-typedef struct loom_serve_text_chat_fields_t {
-  // Number of declared fields.
-  iree_host_size_t count;
-  // Mutable decoding destinations.
-  loom_serve_text_chat_field_t* values;
-  // Whether descriptive schema keys outside this view may pass through.
-  loom_serve_text_chat_field_flags_t flags;
-} loom_serve_text_chat_fields_t;
-
-static iree_status_t loom_serve_text_chat_field_visit(
-    void* user_data, iree_string_view_t key, iree_json_value_type_t type,
-    iree_string_view_t value) {
-  loom_serve_text_chat_fields_t* fields = user_data;
-  for (iree_host_size_t i = 0; i < fields->count; ++i) {
-    loom_serve_text_chat_field_t* field = &fields->values[i];
-    if (!iree_string_view_equal(key, iree_make_cstring_view(field->name))) {
-      continue;
-    }
-    if (field->value.data || !(field->types & (1u << type))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate or wrongly typed chat field '%s'",
-                              field->name);
-    }
-    field->value = value;
-    field->type = type;
-    return iree_ok_status();
-  }
-  if (iree_any_bit_set(fields->flags, CHAT_FIELDS_IGNORE_UNKNOWN)) {
-    return iree_ok_status();
-  }
-  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "unsupported chat field '%.*s'", (int)key.size,
-                          key.data);
-}
-
-static iree_status_t loom_serve_text_chat_fields_read(
-    iree_string_view_t object, iree_host_size_t count,
-    loom_serve_text_chat_field_t* fields,
-    loom_serve_text_chat_field_flags_t flags) {
-  loom_serve_text_chat_fields_t context = {count, fields, flags};
-  return iree_json_enumerate_object_typed(
-      object, loom_serve_text_chat_field_visit, &context);
-}
-
-static iree_status_t loom_serve_text_chat_required(
-    const loom_serve_text_chat_field_t* field) {
-  if (!field->value.data) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "missing chat field '%s'", field->name);
-  }
-  return iree_ok_status();
-}
 
 static iree_status_t loom_serve_text_chat_append_decoded(
     iree_string_builder_t* output, iree_string_view_t raw) {
@@ -113,20 +35,6 @@ static iree_status_t loom_serve_text_chat_quote(iree_string_builder_t* output,
   return loom_json_write_escaped_string(&stream, value);
 }
 
-static bool loom_serve_text_chat_is_identifier(iree_string_view_t name) {
-  if (!name.size || name.size > 128) {
-    return false;
-  }
-  for (iree_host_size_t i = 0; i < name.size; ++i) {
-    const char c = name.data[i];
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-          (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static iree_status_t loom_serve_text_chat_text_part(void* user_data,
                                                     iree_host_size_t index,
                                                     iree_json_value_type_t type,
@@ -135,8 +43,9 @@ static iree_status_t loom_serve_text_chat_text_part(void* user_data,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "chat content parts must be text objects");
   }
-  loom_serve_text_chat_field_t fields[] = {{"type", CHAT_STRING},
-                                           {"text", CHAT_STRING}};
+  loom_serve_text_chat_field_t fields[] = {
+      {"type", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"text", LOOM_SERVE_TEXT_CHAT_STRING}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
@@ -238,8 +147,9 @@ static iree_status_t loom_serve_text_chat_image_part(
         "chat request supports at most %zu image occurrences",
         content->chat->policy->images.maximum_count);
   }
-  loom_serve_text_chat_field_t fields[] = {{"url", CHAT_STRING},
-                                           {"detail", CHAT_STRING}};
+  loom_serve_text_chat_field_t fields[] = {
+      {"url", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"detail", LOOM_SERVE_TEXT_CHAT_STRING}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
@@ -292,7 +202,9 @@ static iree_status_t loom_serve_text_chat_ordered_content_part(
                             "chat content parts must be objects");
   }
   loom_serve_text_chat_field_t fields[] = {
-      {"type", CHAT_STRING}, {"text", CHAT_STRING}, {"image_url", CHAT_OBJECT}};
+      {"type", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"text", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"image_url", LOOM_SERVE_TEXT_CHAT_OBJECT}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
@@ -352,110 +264,6 @@ static iree_status_t loom_serve_text_chat_ordered_content(
       field->value, loom_serve_text_chat_ordered_content_part, &content));
   *out_count = content.count;
   return iree_ok_status();
-}
-
-static iree_status_t loom_serve_text_chat_tool_schema(
-    void* user_data, iree_host_size_t index, iree_json_value_type_t type,
-    iree_string_view_t value) {
-  loom_serve_text_chat_t* chat = user_data;
-  if (type != IREE_JSON_VALUE_TYPE_OBJECT ||
-      index >= LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "tools must contain at most %d function objects",
-                            LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT);
-  }
-  iree_host_size_t required_capacity = 0;
-  if (!iree_host_size_checked_add(index, 1, &required_capacity)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "tool descriptor capacity overflow");
-  }
-  if (required_capacity > chat->tool_capacity) {
-    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-        chat->host_allocator, required_capacity, sizeof(*chat->tools),
-        &chat->tool_capacity, (void**)&chat->tools));
-  }
-  loom_serve_text_chat_field_t fields[] = {{"type", CHAT_STRING},
-                                           {"function", CHAT_OBJECT}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields, 0));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
-  if (!iree_string_view_equal(fields[0].value, IREE_SV("function"))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "only function tools are supported");
-  }
-  loom_serve_text_chat_field_t function[] = {{"name", CHAT_STRING},
-                                             {"description", CHAT_STRING},
-                                             {"parameters", CHAT_OBJECT},
-                                             {"strict", CHAT_BOOL}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      fields[1].value, IREE_ARRAYSIZE(function), function, 0));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&function[2]));
-  if (function[3].value.data && function[3].type == IREE_JSON_VALUE_TYPE_TRUE) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "strict constrained tool sampling is not implemented");
-  }
-  if (!loom_serve_text_chat_is_identifier(function[0].value)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "tool name must be a literal ASCII identifier");
-  }
-  loom_serve_text_chat_field_t schema[] = {{"type", CHAT_STRING},
-                                           {"properties", CHAT_OBJECT},
-                                           {"required", CHAT_ARRAY}};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      function[2].value, IREE_ARRAYSIZE(schema), schema,
-      CHAT_FIELDS_IGNORE_UNKNOWN));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&schema[1]));
-  if (!iree_string_view_equal(schema[0].value, IREE_SV("object"))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "tool parameters must use an object schema");
-  }
-  chat->tools[chat->tool_count++] = (loom_serve_text_chat_tool_t){
-      function[0].value, schema[1].value, schema[2].value};
-  return iree_ok_status();
-}
-
-static int loom_serve_text_chat_tool_compare(const void* left,
-                                             const void* right) {
-  const loom_serve_text_chat_tool_t* left_tool = left;
-  const loom_serve_text_chat_tool_t* right_tool = right;
-  return iree_string_view_compare(left_tool->name, right_tool->name);
-}
-
-static iree_status_t loom_serve_text_chat_tools_parse(
-    iree_string_view_t schemas, loom_serve_text_chat_t* chat) {
-  IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
-      schemas, loom_serve_text_chat_tool_schema, chat));
-  if (chat->tool_count > 1) {
-    qsort(chat->tools, chat->tool_count, sizeof(*chat->tools),
-          loom_serve_text_chat_tool_compare);
-  }
-  for (iree_host_size_t i = 1; i < chat->tool_count; ++i) {
-    if (iree_string_view_equal(chat->tools[i - 1].name, chat->tools[i].name)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate tool name");
-    }
-  }
-  return iree_ok_status();
-}
-
-static const loom_serve_text_chat_tool_t* loom_serve_text_chat_tool_find(
-    const loom_serve_text_chat_t* chat, iree_string_view_t name) {
-  iree_host_size_t begin = 0;
-  iree_host_size_t end = chat->tool_count;
-  while (begin < end) {
-    const iree_host_size_t middle = begin + (end - begin) / 2;
-    const int comparison =
-        iree_string_view_compare(name, chat->tools[middle].name);
-    if (comparison < 0) {
-      end = middle;
-    } else if (comparison > 0) {
-      begin = middle + 1;
-    } else {
-      return &chat->tools[middle];
-    }
-  }
-  return NULL;
 }
 
 void loom_serve_text_chat_policy_deinitialize(
@@ -881,8 +689,9 @@ iree_status_t loom_serve_text_chat_prepare_input(
 static iree_status_t loom_serve_text_chat_function_decode(
     iree_string_view_t value, iree_string_builder_t* scratch,
     iree_string_view_t* out_name, iree_string_view_t* out_arguments) {
-  loom_serve_text_chat_field_t fields[] = {{"name", CHAT_STRING},
-                                           {"arguments", CHAT_STRING}};
+  loom_serve_text_chat_field_t fields[] = {
+      {"name", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"arguments", LOOM_SERVE_TEXT_CHAT_STRING}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
@@ -987,7 +796,9 @@ static iree_status_t loom_serve_text_chat_history_tool(
         LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT);
   }
   loom_serve_text_chat_field_t fields[] = {
-      {"id", CHAT_STRING}, {"type", CHAT_STRING}, {"function", CHAT_OBJECT}};
+      {"id", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"type", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"function", LOOM_SERVE_TEXT_CHAT_OBJECT}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[2]));
@@ -1012,12 +823,13 @@ static iree_status_t loom_serve_text_chat_history_message(
                             "messages must contain objects");
   }
   loom_serve_text_chat_field_t fields[] = {
-      {"role", CHAT_STRING},
-      {"content", CHAT_STRING | CHAT_ARRAY | CHAT_NULL},
-      {"reasoning_content", CHAT_STRING},
-      {"tool_calls", CHAT_ARRAY},
-      {"tool_call_id", CHAT_STRING},
-      {"name", CHAT_STRING}};
+      {"role", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"content", LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_ARRAY |
+                      LOOM_SERVE_TEXT_CHAT_NULL},
+      {"reasoning_content", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"tool_calls", LOOM_SERVE_TEXT_CHAT_ARRAY},
+      {"tool_call_id", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"name", LOOM_SERVE_TEXT_CHAT_STRING}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       value, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
@@ -1065,21 +877,22 @@ static iree_status_t loom_serve_text_chat_request_render(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "trailing chat JSON");
   }
   loom_serve_text_chat_field_t fields[] = {
-      {"model", CHAT_STRING},
-      {"messages", CHAT_ARRAY},
-      {"stream", CHAT_BOOL | CHAT_NULL},
-      {"tools", CHAT_ARRAY},
-      {"max_tokens", CHAT_NUMBER},
-      {"max_completion_tokens", CHAT_NUMBER},
-      {"temperature", CHAT_NUMBER},
-      {"stream_options", CHAT_OBJECT | CHAT_NULL},
-      {"store", CHAT_BOOL},
-      {"tool_choice", CHAT_STRING},
-      {"enable_thinking", CHAT_BOOL},
-      {"model_options", CHAT_OBJECT},
-      {"top_p", CHAT_NUMBER},
-      {"top_k", CHAT_NUMBER},
-      {"seed", CHAT_NUMBER}};
+      {"model", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"messages", LOOM_SERVE_TEXT_CHAT_ARRAY},
+      {"stream", LOOM_SERVE_TEXT_CHAT_BOOL | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"tools", LOOM_SERVE_TEXT_CHAT_ARRAY},
+      {"max_tokens", LOOM_SERVE_TEXT_CHAT_NUMBER},
+      {"max_completion_tokens", LOOM_SERVE_TEXT_CHAT_NUMBER},
+      {"temperature", LOOM_SERVE_TEXT_CHAT_NUMBER},
+      {"stream_options",
+       LOOM_SERVE_TEXT_CHAT_OBJECT | LOOM_SERVE_TEXT_CHAT_NULL},
+      {"store", LOOM_SERVE_TEXT_CHAT_BOOL},
+      {"tool_choice", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"enable_thinking", LOOM_SERVE_TEXT_CHAT_BOOL},
+      {"model_options", LOOM_SERVE_TEXT_CHAT_OBJECT},
+      {"top_p", LOOM_SERVE_TEXT_CHAT_NUMBER},
+      {"top_k", LOOM_SERVE_TEXT_CHAT_NUMBER},
+      {"seed", LOOM_SERVE_TEXT_CHAT_NUMBER}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
       object, IREE_ARRAYSIZE(fields), fields, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
@@ -1125,7 +938,8 @@ static iree_status_t loom_serve_text_chat_request_render(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "stream_options requires stream=true");
     }
-    loom_serve_text_chat_field_t options[] = {{"include_usage", CHAT_BOOL}};
+    loom_serve_text_chat_field_t options[] = {
+        {"include_usage", LOOM_SERVE_TEXT_CHAT_BOOL}};
     IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
         fields[7].value, IREE_ARRAYSIZE(options), options, 0));
     if (options[0].value.data && options[0].type == IREE_JSON_VALUE_TYPE_TRUE) {
@@ -1134,8 +948,10 @@ static iree_status_t loom_serve_text_chat_request_render(
   }
   history->chat->tool_schemas =
       fields[3].value.data ? fields[3].value : IREE_SV("[]");
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_tools_parse(
-      history->chat->tool_schemas, history->chat));
+  loom_serve_text_tool_schemas_t schemas;
+  IREE_RETURN_IF_ERROR(loom_serve_text_tool_schemas_initialize(
+      history->chat->tool_schemas, history->chat->host_allocator, &schemas));
+  loom_serve_text_tool_schemas_deinitialize(&schemas);
   const iree_string_view_t inputs[] = {body, history->chat->tool_schemas};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_render(
       history->chat->policy, history->chat->policy->chat_begin,
@@ -1222,7 +1038,6 @@ iree_status_t loom_serve_text_chat_initialize(
 void loom_serve_text_chat_deinitialize(loom_serve_text_chat_t* chat) {
   iree_string_builder_deinitialize(&chat->images.metadata);
   iree_allocator_free(chat->host_allocator, chat->images.values);
-  iree_allocator_free(chat->host_allocator, chat->tools);
   iree_vm_buffer_release(chat->options);
   iree_string_builder_deinitialize(&chat->output.reasoning);
   iree_string_builder_deinitialize(&chat->output.content);
@@ -1426,14 +1241,17 @@ static iree_status_t loom_serve_text_chat_parameter_value(
   char name_storage[129];
   memcpy(name_storage, name.data, name.size);
   name_storage[name.size] = 0;
-  loom_serve_text_chat_field_t property = {name_storage, CHAT_OBJECT};
+  loom_serve_text_chat_field_t property = {name_storage,
+                                           LOOM_SERVE_TEXT_CHAT_OBJECT};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      tool->properties, 1, &property, CHAT_FIELDS_IGNORE_UNKNOWN));
+      tool->properties, 1, &property,
+      LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&property));
-  loom_serve_text_chat_field_t schema[] = {{"type", CHAT_STRING}};
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_chat_fields_read(property.value, IREE_ARRAYSIZE(schema),
-                                       schema, CHAT_FIELDS_IGNORE_UNKNOWN));
+  loom_serve_text_chat_field_t schema[] = {
+      {"type", LOOM_SERVE_TEXT_CHAT_STRING}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
+      property.value, IREE_ARRAYSIZE(schema), schema,
+      LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&schema[0]));
   if (iree_string_view_equal(schema[0].value, IREE_SV("string"))) {
     return loom_serve_text_chat_quote(arguments, value);
@@ -1603,7 +1421,7 @@ static iree_status_t loom_serve_text_chat_parameters_parse(
 }
 
 static iree_status_t loom_serve_text_chat_parse_xml(
-    const loom_serve_text_chat_t* chat, iree_string_view_t text,
+    const loom_serve_text_tool_schemas_t* schemas, iree_string_view_t text,
     iree_string_builder_t* tool_calls) {
   iree_host_size_t tool_count = 0;
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(tool_calls, "["));
@@ -1619,7 +1437,7 @@ static iree_status_t loom_serve_text_chat_parse_xml(
           loom_serve_text_chat_xml_name(&cursor, IREE_SV("<function="), &name);
     }
     const loom_serve_text_chat_tool_t* tool =
-        loom_serve_text_chat_tool_find(chat, name);
+        loom_serve_text_tool_schemas_find(schemas, name);
     if (iree_status_is_ok(status) &&
         tool_count >= LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1694,8 +1512,9 @@ static iree_status_t loom_serve_text_chat_completion_tool(
                             "source tool calls must contain at most %d objects",
                             LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT);
   }
-  loom_serve_text_chat_field_t call[] = {{"type", CHAT_STRING},
-                                         {"function", CHAT_OBJECT}};
+  loom_serve_text_chat_field_t call[] = {
+      {"type", LOOM_SERVE_TEXT_CHAT_STRING},
+      {"function", LOOM_SERVE_TEXT_CHAT_OBJECT}};
   IREE_RETURN_IF_ERROR(
       loom_serve_text_chat_fields_read(value, IREE_ARRAYSIZE(call), call, 0));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&call[1]));
@@ -1913,12 +1732,13 @@ static iree_status_t loom_serve_text_chat_tools_start(
                               "tool input must be UTF-8");
     }
   }
-  loom_serve_text_chat_t schema = {.host_allocator = module->host_allocator};
+  loom_serve_text_tool_schemas_t schemas;
   iree_string_builder_t output;
   iree_string_builder_initialize(module->host_allocator, &output);
-  iree_status_t status = loom_serve_text_chat_tools_parse(inputs[0], &schema);
+  iree_status_t status = loom_serve_text_tool_schemas_initialize(
+      inputs[0], module->host_allocator, &schemas);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_chat_parse_xml(&schema, inputs[1], &output);
+    status = loom_serve_text_chat_parse_xml(&schemas, inputs[1], &output);
   }
   iree_vm_buffer_t* buffer = NULL;
   if (iree_status_is_ok(status)) {
@@ -1936,7 +1756,7 @@ static iree_status_t loom_serve_text_chat_tools_start(
   }
   iree_vm_buffer_release(buffer);
   iree_string_builder_deinitialize(&output);
-  iree_allocator_free(schema.host_allocator, schema.tools);
+  loom_serve_text_tool_schemas_deinitialize(&schemas);
   return status;
 }
 
