@@ -21,6 +21,7 @@ from loom.target.arch.x86.vector_families import (
     AVX2_FLOAT_ROOT_FAMILIES,
     AVX2_INTEGER_BINARY_FAMILIES,
     AVX2_INTEGER_COMPARE_MNEMONICS,
+    AVX2_INTEGER_FLOAT_I32_FORMS,
     AVX2_SCALAR_FLOAT_BINARY_FAMILIES,
     AVX2_SCALAR_FLOAT_EXTREMA_MNEMONICS,
     AVX2_SCALAR_FLOAT_FMA_MNEMONICS,
@@ -102,7 +103,10 @@ from .float_integer import (
     scalar_float_integer_descriptors,
     vector_float_integer_descriptors,
 )
-from .integer_float import integer_float_descriptors
+from .integer_float import (
+    integer_float_descriptors,
+    vector_integer_float_descriptors,
+)
 from .memory import memory_descriptors
 from .scalar import (
     X86_SCALAR_DESCRIPTOR_SET,
@@ -554,6 +558,27 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         native.VBLENDVPD,
+    ),
+    _vex_descriptor(
+        Descriptor(
+            key="x86.avx2.vblendvps.xmm",
+            mnemonic="vblendvps",
+            semantic_tag="float.select.f32x4",
+            operands=(
+                _xmm_result(),
+                _xmm_operand("false_value"),
+                _xmm_operand("true_value"),
+                _xmm_operand("mask"),
+            ),
+            asm_forms=_asm(
+                mnemonic="vblendvps.xmm",
+                results=("dst",),
+                operands=("false_value", "true_value", "mask"),
+            ),
+            schedule_class=_SCHEDULE_VECTOR_F32_XMM,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        native.VBLENDVPS,
     ),
     _vex_descriptor(
         Descriptor(
@@ -1316,6 +1341,9 @@ X86_AVX2_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
     *X86_AVX2_VECTOR_DESCRIPTORS,
     *integer_float_descriptors(unsigned=False),
+    *vector_integer_float_descriptors(
+        AVX2_INTEGER_FLOAT_I32_FORMS, unsigned=False, evex=False
+    ),
     *scalar_float_integer_descriptors(unsigned=False),
     *vector_float_integer_descriptors(
         AVX2_FLOAT_INTEGER_I32_FORMS, unsigned=False, evex=False

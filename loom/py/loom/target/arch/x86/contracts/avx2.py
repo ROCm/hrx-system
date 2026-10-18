@@ -34,7 +34,10 @@ from loom.target.arch.x86.contracts.floating_reduction import (
     avx2_float_dot_rules,
     avx2_float_reduction_rules,
 )
-from loom.target.arch.x86.contracts.integer_float import avx2_integer_float_rules
+from loom.target.arch.x86.contracts.integer_float import (
+    avx2_integer_float_rules,
+    avx2_vector_integer_float_rules,
+)
 from loom.target.arch.x86.contracts.integer_reduction import (
     avx2_integer_reduction_rules,
 )
@@ -106,6 +109,7 @@ def _cases() -> Sequence[ContractCase]:
             families=AVX2_SCALAR_FLOAT_ROOT_FAMILIES,
         ),
         *avx2_integer_float_rules(_descriptor),
+        *avx2_vector_integer_float_rules(_descriptor),
         *avx2_scalar_float_integer_rules(_descriptor),
         *avx2_vector_float_integer_rules(_descriptor),
         *x86_float_narrowing_rules(_descriptor),

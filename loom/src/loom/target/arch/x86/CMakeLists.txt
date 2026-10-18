@@ -135,6 +135,7 @@ loom_cc_library(
     "vector_insert.h"
   DEPS
     iree::base
+    loom::codegen::low::descriptors
     loom::ir
     loom::ops::index
     loom::ops::scalar

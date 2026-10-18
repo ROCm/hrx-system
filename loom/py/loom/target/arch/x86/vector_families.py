@@ -101,6 +101,23 @@ class FloatIntegerVectorForm:
 
 
 @dataclass(frozen=True, slots=True)
+class IntegerFloatVectorForm:
+    """One packed integer-to-floating conversion shape."""
+
+    source: VectorElement
+    result: VectorElement
+    lane_count: int
+
+    @property
+    def source_vector_bit_width(self) -> int:
+        return self.source.bit_width * self.lane_count
+
+    @property
+    def result_vector_bit_width(self) -> int:
+        return self.result.bit_width * self.lane_count
+
+
+@dataclass(frozen=True, slots=True)
 class VectorLaneFamily:
     """Bit-compatible scalar lane movement shared by source element types."""
 
@@ -200,6 +217,27 @@ AVX512_FLOAT_INTEGER_I32_FORMS = (
 AVX512_FLOAT_INTEGER_I64_FORMS = tuple(
     FloatIntegerVectorForm(source, 64, lane_count)
     for source in FLOAT_ELEMENTS
+    for lane_count in (2, 4, 8)
+)
+
+# XMM packed i32-to-f32 converts four physical lanes. Two-lane logical packets
+# use its low half, matching the subregister convention used by other AVX2
+# packed arithmetic families.
+AVX2_INTEGER_FLOAT_I32_FORMS = tuple(
+    IntegerFloatVectorForm(INTEGER_ELEMENTS[2], result, lane_count)
+    for result, lane_counts in zip(FLOAT_ELEMENTS, ((2, 4, 8), (2, 4)), strict=True)
+    for lane_count in lane_counts
+)
+
+AVX512_INTEGER_FLOAT_I32_FORMS = (
+    *AVX2_INTEGER_FLOAT_I32_FORMS,
+    IntegerFloatVectorForm(INTEGER_ELEMENTS[2], FLOAT_ELEMENTS[0], 16),
+    IntegerFloatVectorForm(INTEGER_ELEMENTS[2], FLOAT_ELEMENTS[1], 8),
+)
+
+AVX512_INTEGER_FLOAT_I64_FORMS = tuple(
+    IntegerFloatVectorForm(INTEGER_ELEMENTS[3], result, lane_count)
+    for result in FLOAT_ELEMENTS
     for lane_count in (2, 4, 8)
 )
 

@@ -23,6 +23,8 @@ from loom.target.arch.x86.vector_families import (
     AVX512_FLOAT_ROOT_FAMILIES,
     AVX512_INTEGER_BINARY_FAMILIES,
     AVX512_INTEGER_COMPARE_MNEMONICS,
+    AVX512_INTEGER_FLOAT_I32_FORMS,
+    AVX512_INTEGER_FLOAT_I64_FORMS,
     AVX512_SCALAR_FLOAT_ROOT_FAMILIES,
     AVX512_SELECT_MNEMONICS,
     AVX512_UNIFORM_SHIFT_FAMILIES,
@@ -124,7 +126,10 @@ from .float_integer import (
     vector_float_integer_descriptors,
 )
 from .half_conversion import half_conversion_descriptors
-from .integer_float import integer_float_descriptors
+from .integer_float import (
+    integer_float_descriptors,
+    vector_integer_float_descriptors,
+)
 from .integer_rotation import X86_AVX512_ROTATION_DESCRIPTORS
 from .memory import memory_descriptors
 from .scalar import X86_SCALAR_DESCRIPTOR_SET
@@ -582,6 +587,18 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
         *X86_AVX2_DESCRIPTORS,
         *X86_AVX512_ROTATION_DESCRIPTORS,
         *integer_float_descriptors(unsigned=True),
+        *vector_integer_float_descriptors(
+            AVX512_INTEGER_FLOAT_I32_FORMS[-2:], unsigned=False, evex=True
+        ),
+        *vector_integer_float_descriptors(
+            AVX512_INTEGER_FLOAT_I32_FORMS, unsigned=True, evex=True
+        ),
+        *vector_integer_float_descriptors(
+            AVX512_INTEGER_FLOAT_I64_FORMS, unsigned=False, evex=True
+        ),
+        *vector_integer_float_descriptors(
+            AVX512_INTEGER_FLOAT_I64_FORMS, unsigned=True, evex=True
+        ),
         *scalar_float_integer_descriptors(unsigned=True),
         *vector_float_integer_descriptors(
             AVX512_FLOAT_INTEGER_I32_FORMS[-2:], unsigned=False, evex=True

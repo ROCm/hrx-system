@@ -111,3 +111,81 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
   %unsigned64 = vcvtusi2sd.xmm.gpr64 %14, %input
   return %signed32, %signed64, %unsigned32, %unsigned64
 }
+
+// ====
+
+func.def @convert_native_packets(%words16: vector<16xi32>, %words8: vector<8xi32>, %wide8: vector<8xi64>) -> (vector<16xf32>, vector<16xf32>, vector<8xf64>, vector<8xf64>, vector<8xf32>, vector<8xf32>, vector<8xf64>, vector<8xf64>) {
+  %signed_words_f32 = vector.sitofp %words16 : vector<16xi32> to vector<16xf32>
+  %unsigned_words_f32 = vector.uitofp %words16 : vector<16xi32> to vector<16xf32>
+  %signed_words_f64 = vector.sitofp %words8 : vector<8xi32> to vector<8xf64>
+  %unsigned_words_f64 = vector.uitofp %words8 : vector<8xi32> to vector<8xf64>
+  %signed_wide_f32 = vector.sitofp %wide8 : vector<8xi64> to vector<8xf32>
+  %unsigned_wide_f32 = vector.uitofp %wide8 : vector<8xi64> to vector<8xf32>
+  %signed_wide_f64 = vector.sitofp %wide8 : vector<8xi64> to vector<8xf64>
+  %unsigned_wide_f64 = vector.uitofp %wide8 : vector<8xi64> to vector<8xf64>
+  func.return %signed_words_f32, %unsigned_words_f32, %signed_words_f64, %unsigned_words_f64, %signed_wide_f32, %unsigned_wide_f32, %signed_wide_f64, %unsigned_wide_f64 : vector<16xf32>, vector<16xf32>, vector<8xf64>, vector<8xf64>, vector<8xf32>, vector<8xf32>, vector<8xf64>, vector<8xf64>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<16xi32>, vector<8xi32>, vector<8xi64>) -> (vector<16xf32>, vector<16xf32>, vector<8xf64>, vector<8xf64>, vector<8xf32>, vector<8xf32>, vector<8xf64>, vector<8xf64>)}) @convert_native_packets(%words16: reg<x86.zmm>, %words8: reg<x86.ymm>, %wide8: reg<x86.zmm>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.zmm>, reg<x86.zmm>) asm {
+  %signed_words_f32 = avx512.vcvtdq2ps.zmm.zmm %words16
+  %unsigned_words_f32 = avx512.vcvtudq2ps.zmm.zmm %words16
+  %signed_words_f64 = avx512.vcvtdq2pd.zmm.ymm %words8
+  %unsigned_words_f64 = avx512.vcvtudq2pd.zmm.ymm %words8
+  %signed_wide_f32 = avx512.vcvtqq2ps.ymm.zmm %wide8
+  %unsigned_wide_f32 = avx512.vcvtuqq2ps.ymm.zmm %wide8
+  %signed_wide_f64 = avx512.vcvtqq2pd.zmm.zmm %wide8
+  %unsigned_wide_f64 = avx512.vcvtuqq2pd.zmm.zmm %wide8
+  return %signed_words_f32, %unsigned_words_f32, %signed_words_f64, %unsigned_words_f64, %signed_wide_f32, %unsigned_wide_f32, %signed_wide_f64, %unsigned_wide_f64
+}
+
+// ====
+
+func.def @convert_narrow_packet(%input: vector<4xi16>) -> (vector<4xf64>) {
+  %result = vector.uitofp %input : vector<4xi16> to vector<4xf64>
+  func.return %result : vector<4xf64>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<4xi16>) -> (vector<4xf64>)}) @convert_narrow_packet(%input: reg<x86.xmm>) -> (reg<x86.ymm>) asm {
+  %7 = vpmovzxwd.xmm %input
+  %result = avx512.vcvtudq2pd.ymm.xmm %7
+  return %result
+}
+
+// ====
+
+// AVX-512VL is optional. Small word packets retain the exact AVX2 composition,
+// while packed i64 conversions scalarize when VL is unavailable.
+// RUN: emit source-low output=low
+x86.target<avx512> @target {features = [-avx512vl]}
+
+func.def target(@target) @without_avx512vl(%words: vector<4xi32>, %wide: vector<2xi64>) -> (vector<4xf32>, vector<4xf64>, vector<2xf32>) {
+  %unsigned_words_f32 = vector.uitofp %words : vector<4xi32> to vector<4xf32>
+  %unsigned_words_f64 = vector.uitofp %words : vector<4xi32> to vector<4xf64>
+  %signed_wide = vector.sitofp %wide : vector<2xi64> to vector<2xf32>
+  func.return %unsigned_words_f32, %unsigned_words_f64, %signed_wide : vector<4xf32>, vector<4xf64>, vector<2xf32>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<4xi32>, vector<2xi64>) -> (vector<4xf32>, vector<4xf64>, vector<2xf32>)}) @without_avx512vl(%words: reg<x86.xmm>, %wide: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.ymm>, reg<x86.xmm>) asm {
+  %18 = vpsrld.xmm %words, 1
+  %19 = vpslld.xmm %words, 31
+  %20 = vpsrld.xmm %19, 31
+  %21 = vpor.xmm %18, %20
+  %22 = vcvtdq2ps.xmm.xmm %words
+  %23 = vcvtdq2ps.xmm.xmm %21
+  %24 = vaddps.xmm %23, %23
+  %unsigned_words_f32 = vblendvps.xmm %22, %24, %words
+  %26 = vpmovzxdq.ymm %words
+  %27 = avx2.vmovdqu.rodata.ymm @__low_rodata_a3e49c3f
+  %28 = vpor.ymm %26, %27
+  %unsigned_words_f64 = vsubpd.ymm %28, %27
+  %30 = vpextrq.xmm %wide, 0
+  %31 = vxorps.zero.xmm
+  %32 = vcvtsi2ss.xmm.gpr64 %31, %30
+  %33 = vpextrq.xmm %wide, 1
+  %35 = vcvtsi2ss.xmm.gpr64 %31, %33
+  %signed_wide = vinsertps.xmm %32, %35, 16
+  return %unsigned_words_f32, %unsigned_words_f64, %signed_wide
+}

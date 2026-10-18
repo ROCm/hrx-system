@@ -140,6 +140,67 @@ def integer_float_instruction(
     )
 
 
+def vector_integer_float_mnemonic(
+    source_bit_width: int, result_bit_width: int, *, unsigned: bool
+) -> str:
+    if source_bit_width not in (32, 64) or result_bit_width not in (32, 64):
+        raise ValueError("packed integer conversion requires 32/64-bit elements")
+    source_suffix = "dq" if source_bit_width == 32 else "qq"
+    result_suffix = "ps" if result_bit_width == 32 else "pd"
+    return f"vcvt{'u' if unsigned else ''}{source_suffix}2{result_suffix}"
+
+
+def vector_integer_float_instruction(
+    source_bit_width: int, result_bit_width: int, *, unsigned: bool
+) -> VectorMachineInstruction:
+    mnemonic = vector_integer_float_mnemonic(
+        source_bit_width, result_bit_width, unsigned=unsigned
+    )
+    if result_bit_width == 32:
+        opcode = 0x7A if unsigned else 0x5B
+        mandatory_prefix = 3 if unsigned else 0
+    else:
+        opcode = 0x7A if unsigned else 0xE6
+        mandatory_prefix = 2
+    encodings = []
+    if source_bit_width == 32 and not unsigned:
+        encodings.append(
+            VectorEncoding(
+                prefix=VectorEncodingPrefix.VEX,
+                opcode_map=VectorOpcodeMap.MAP_0F,
+                mandatory_prefix=mandatory_prefix,
+                w=0,
+                opcode=opcode,
+                vector_bit_widths=(128, 256),
+            )
+        )
+    encodings.append(
+        VectorEncoding(
+            prefix=VectorEncodingPrefix.EVEX,
+            opcode_map=VectorOpcodeMap.MAP_0F,
+            mandatory_prefix=mandatory_prefix,
+            w=int(source_bit_width == 64),
+            opcode=opcode,
+            vector_bit_widths=(128, 256, 512),
+        )
+    )
+    return VectorMachineInstruction(
+        descriptor_mnemonic=mnemonic,
+        encoding_mnemonic=mnemonic,
+        encoding_format_id=vector_encoding_recipe(
+            VectorRegisterSelector.RESULT,
+            VectorRegisterSelector.NONE,
+            VectorRegisterSelector.INPUT_0,
+        ),
+        operands=(
+            VectorOperandShape(OperandRole.RESULT, ("x86.simd",)),
+            VectorOperandShape(OperandRole.OPERAND, ("x86.simd",)),
+        ),
+        immediates=(),
+        encodings=tuple(encodings),
+    )
+
+
 def scalar_float_integer_mnemonic(source_bit_width: int, *, unsigned: bool) -> str:
     if source_bit_width not in (32, 64):
         raise ValueError("scalar float conversion requires an F32/F64 source")
