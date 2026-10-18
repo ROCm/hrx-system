@@ -14,15 +14,15 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
 #include "loom/target/reporting/low.h"
 
-// Uses the scheduler's retained call inventory. Input verification admits Low
-// helper calls so saved intermediate programs can run the normal inliner;
-// native emission still requires a complete call-free core image.
+// Uses the scheduler's retained call inventory. A call-bearing frame is
+// admitted only when program planning supplied the complete direct-call ABI.
 static iree_status_t loom_aie2p_leaf_admit_calls(
     void* user_data, const loom_low_emission_frame_t* frame,
     iree_arena_allocator_t* arena, bool* out_accepted) {
   (void)arena;
   const loom_aie2p_leaf_compile_options_t* options = user_data;
-  *out_accepted = frame->schedule.call_node_count == 0;
+  *out_accepted = frame->schedule.call_node_count == 0 ||
+                  options->call_contracts.query != NULL;
   if (*out_accepted) {
     return iree_ok_status();
   }
@@ -40,8 +40,7 @@ static iree_status_t loom_aie2p_leaf_admit_calls(
               frame->module, loom_low_func_call_callee(op))),
           loom_low_func_call_callee_diagnostic_ref()),
       loom_param_string(IREE_SV(
-          "the selected target requires every Low call to be inlined before "
-          "emission")),
+          "the selected target has no native ABI contract for this call")),
   };
   const loom_diagnostic_emission_t emission = {
       .op = op,
@@ -63,6 +62,15 @@ static iree_status_t loom_aie2p_leaf_build_frame(
       .function_target_facts = options->function_target_facts,
       .allocation_fixed_values = options->allocation_fixed_values,
       .allocation_fixed_value_count = options->allocation_fixed_value_count,
+      .allocation_entry_locations = options->allocation_entry_locations,
+      .allocation_entry_location_count =
+          options->allocation_entry_location_count,
+      .allocation_exit_locations = options->allocation_exit_locations,
+      .allocation_exit_location_count = options->allocation_exit_location_count,
+      .call_contracts = options->call_contracts,
+      .allocation_reserved_ranges = options->allocation_reserved_ranges,
+      .allocation_reserved_range_count =
+          options->allocation_reserved_range_count,
       .allocation_diagnostic_flags = options->allocation_diagnostic_flags,
       .memory_accesses = options->memory_accesses,
       .loop_execution = options->loop_execution,
@@ -129,8 +137,12 @@ iree_status_t loom_aie2p_leaf_compile(
       module, function_op, options, &scratch_arena, &frame, &frame_accepted);
   loom_aie2p_leaf_program_plan_t program_plan = {0};
   if (iree_status_is_ok(status) && frame_accepted) {
-    status =
-        loom_aie2p_bundle_plan_build(&frame, &scratch_arena, &program_plan);
+    const loom_aie2p_bundle_plan_options_t plan_options = {
+        .preserve_link_register = options->preserve_link_register,
+        .link_shadow_register = options->link_shadow_register,
+    };
+    status = loom_aie2p_bundle_plan_build(&frame, &plan_options, &scratch_arena,
+                                          &program_plan);
   }
   if (iree_status_is_ok(status) && frame_accepted) {
     status =

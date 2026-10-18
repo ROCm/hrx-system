@@ -892,6 +892,21 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     )
     assert DescriptorFlag.ALLOCATION_MOVE in address_move.flags
 
+    link_to_scalar = descriptors["amd.xdna.aie2p.move.link-to-scalar"]
+    scalar_to_link = descriptors["amd.xdna.aie2p.move.scalar-to-link"]
+    assert [operand.reg_alts[0].reg_class for operand in link_to_scalar.operands] == [
+        "aie2p.er",
+        "aie2p.mlrm",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in scalar_to_link.operands] == [
+        "aie2p.mlrm",
+        "aie2p.er",
+    ]
+    assert link_to_scalar.asm_forms[0].mnemonic == "mov.link-to-scalar"
+    assert scalar_to_link.asm_forms[0].mnemonic == "mov.scalar-to-link"
+    assert DescriptorFlag.ALLOCATION_MOVE in link_to_scalar.flags
+    assert DescriptorFlag.ALLOCATION_MOVE in scalar_to_link.flags
+
     address_to_scalar = descriptors["amd.xdna.aie2p.move.local-address-to-scalar"]
     scalar_to_address = descriptors["amd.xdna.aie2p.move.scalar-to-local-address"]
     assert [
@@ -1974,7 +1989,7 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
         OperandFlag.IMPLICIT,
         OperandFlag.STATE_READ,
     }
-    assert link_register.reg_alts[0].reg_class == "aie2p.state.lr"
+    assert link_register.reg_alts[0].reg_class == "aie2p.mlrm"
 
     vector_extract = descriptors["amd.xdna.aie2p.extract.i8.immediate"]
     vector_add_sign = next(

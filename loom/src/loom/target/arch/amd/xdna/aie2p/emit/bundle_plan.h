@@ -24,6 +24,14 @@ extern "C" {
 // Architectural core program-memory capacity in bytes.
 #define LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE 16384u
 
+typedef struct loom_aie2p_bundle_plan_options_t {
+  // Whether this entry program preserves its incoming link register across
+  // direct helper calls.
+  bool preserve_link_register;
+  // Reserved scalar register holding the entry link while preservation is on.
+  loom_aie2p_physical_register_id_t link_shadow_register;
+} loom_aie2p_bundle_plan_options_t;
+
 // Plans physical bundles for one successful, spill-free AIE2P Low frame.
 //
 // Blocks retain source order. Entry and selected native branch destinations
@@ -61,8 +69,9 @@ extern "C" {
 // requirements, and physical tables in |arena|. It contains no compiler frame
 // or IR references.
 iree_status_t loom_aie2p_bundle_plan_build(
-    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
-    loom_aie2p_leaf_program_plan_t* out_plan);
+    const loom_low_emission_frame_t* frame,
+    const loom_aie2p_bundle_plan_options_t* options,
+    iree_arena_allocator_t* arena, loom_aie2p_leaf_program_plan_t* out_plan);
 
 #ifdef __cplusplus
 }  // extern "C"

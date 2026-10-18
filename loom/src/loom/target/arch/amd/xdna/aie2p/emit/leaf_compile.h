@@ -41,6 +41,24 @@ typedef struct loom_aie2p_leaf_compile_options_t {
   const loom_low_allocation_fixed_value_t* allocation_fixed_values;
   // Number of records in |allocation_fixed_values|.
   iree_host_size_t allocation_fixed_value_count;
+  // Incoming register locations indexed by formal argument.
+  const loom_low_allocation_abi_location_t* allocation_entry_locations;
+  // Number of records in |allocation_entry_locations|.
+  iree_host_size_t allocation_entry_location_count;
+  // Outgoing register locations indexed by function result.
+  const loom_low_allocation_abi_location_t* allocation_exit_locations;
+  // Number of records in |allocation_exit_locations|.
+  iree_host_size_t allocation_exit_location_count;
+  // Direct-callee ABI locations and exact physical clobbers.
+  loom_low_call_contract_provider_t call_contracts;
+  // Whole-function registers owned by the native calling convention.
+  const loom_low_allocation_reserved_range_t* allocation_reserved_ranges;
+  // Number of records in |allocation_reserved_ranges|.
+  iree_host_size_t allocation_reserved_range_count;
+  // Whether the entry program preserves its incoming link across calls.
+  bool preserve_link_register;
+  // Reserved scalar register holding that incoming link.
+  loom_aie2p_physical_register_id_t link_shadow_register;
   // Optional structured allocation and repair feedback to emit.
   loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags;
   // Diagnostic emitter receiving scheduling and allocation failures.

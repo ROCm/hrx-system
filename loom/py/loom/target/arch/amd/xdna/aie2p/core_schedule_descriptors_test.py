@@ -404,6 +404,43 @@ def test_direct_branch_forms_retain_exact_control_contracts() -> None:
         assert _INSTRUCTION_ENCODINGS[form_name].delay_slot_count == 5
 
 
+def test_direct_call_retains_link_write_and_delay_contract() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    specifications = {spec.key: spec for spec in _DESCRIPTOR_SPECS}
+    call = descriptors["amd.xdna.aie2p.call.direct"]
+    specification = specifications[call.key]
+
+    assert specification.form_name == "JL_lng"
+    assert specification.itinerary == "II_JL_lng"
+    assert call.mnemonic == "jl"
+    assert call.asm_forms[0].mnemonic == "jl"
+    assert call.asm_forms[0].results == ()
+    assert call.asm_forms[0].operands == ()
+    assert len(call.immediates) == 1
+    immediate = call.immediates[0]
+    assert immediate.field_name == "i"
+    assert immediate.kind is ImmediateKind.ORDINAL
+    assert immediate.flags == (ImmediateFlag.SYMBOLIC,)
+    assert immediate.bit_width == 20
+    assert immediate.value_step == 1
+    assert immediate.signed_min == 0
+    assert immediate.unsigned_max == (1 << 20) - 1
+    assert len(call.operands) == 1
+    link = call.operands[0]
+    assert link.field_name == "implicit_def_lr"
+    assert link.role is OperandRole.IMPLICIT
+    assert link.reg_alts[0].reg_class == "aie2p.mlrm"
+    assert link.encoding_field_id == 0
+    assert call.effects[0].kind is EffectKind.CONTROL
+    assert call.instruction_classes == (InstructionClass.CONTROL,)
+    assert DescriptorFlag.SIDE_EFFECTING in call.flags
+    assert DescriptorFlag.TERMINATOR not in call.flags
+    assert _INSTRUCTION_ENCODINGS["JL_lng"].delay_slot_count == 5
+
+
 def test_lock_memory_timing_matches_aie2p_stall_and_resume_oracle() -> None:
     descriptors = {
         descriptor.key: descriptor

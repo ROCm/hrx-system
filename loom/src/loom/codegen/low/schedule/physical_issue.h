@@ -55,6 +55,13 @@ iree_status_t loom_low_physical_issue_initialize(
     const loom_low_schedule_table_t* schedule, iree_arena_allocator_t* arena,
     loom_low_physical_issue_t* out_issue);
 
+// Clears physical register, resource, and effect history after a synchronous
+// execution boundary has completed. Logical node readiness is retained so the
+// source schedule continues across the boundary without rediscovering or
+// weakening semantic dependencies.
+void loom_low_physical_issue_reset_execution_state(
+    loom_low_physical_issue_t* issue);
+
 // Earliest issue from already realized semantic producers of a scheduled
 // packet. Storage setup may issue before its payload is available; native
 // moves still observe the concrete register-event rules.
@@ -73,6 +80,15 @@ uint32_t loom_low_physical_issue_source_ready_cycle(
 void loom_low_physical_issue_commit_source(loom_low_physical_issue_t* issue,
                                            uint32_t scheduled_packet_index,
                                            uint32_t issue_cycle);
+
+// Forwards a source whose synchronous execution and explicit result transport
+// have completed at |available_cycle|. The completion boundary has already
+// paid the source operation's latency, so consumers inherit that availability
+// directly instead of applying the logical dependency separation again.
+// Concrete result moves remain responsible for register-event timing.
+void loom_low_physical_issue_commit_completed_source(
+    loom_low_physical_issue_t* issue, uint32_t scheduled_packet_index,
+    uint32_t available_cycle);
 
 // Tests coissue without touching retained state. Instruction order is the
 // semantic order when zero-distance dependencies share one issue cycle.

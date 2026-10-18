@@ -70,6 +70,14 @@ typedef struct loom_aie2p_planned_branch_fixup_t {
   uint32_t target_block_index;
 } loom_aie2p_planned_branch_fixup_t;
 
+// One direct module-local call target requiring program-level symbol binding.
+typedef struct loom_aie2p_planned_call_fixup_t {
+  // Bundle containing the JL instruction.
+  uint32_t bundle_index;
+  // Arena-owned module-local callee name.
+  iree_string_view_t target_name;
+} loom_aie2p_planned_call_fixup_t;
+
 // One contribution-relative local-storage address requiring final placement.
 typedef struct loom_aie2p_planned_storage_fixup_t {
   // Bundle containing the address-materialization instruction.
@@ -190,6 +198,10 @@ typedef struct loom_aie2p_leaf_program_plan_t {
   const loom_aie2p_planned_branch_fixup_t* branch_fixups;
   // Number of records in |branch_fixups|.
   iree_host_size_t branch_fixup_count;
+  // Direct call sites whose symbols require program-level binding.
+  const loom_aie2p_planned_call_fixup_t* call_fixups;
+  // Number of records in |call_fixups|.
+  iree_host_size_t call_fixup_count;
   // Storage-address sites whose domains require final contribution placement.
   const loom_aie2p_planned_storage_fixup_t* storage_fixups;
   // Number of records in |storage_fixups|.

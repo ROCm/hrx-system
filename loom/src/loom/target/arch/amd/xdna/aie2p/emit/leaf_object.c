@@ -263,9 +263,15 @@ iree_status_t loom_aie2p_leaf_object_emit(
   loom_native_section_contribution_t* sections = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, section_count, sizeof(*sections), (void**)&sections));
+  iree_host_size_t symbol_count = 0;
+  if (!iree_host_size_checked_add(section_count, plan->call_fixup_count,
+                                  &symbol_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AIE2P leaf symbol count exceeds host size");
+  }
   loom_native_object_symbol_t* symbols = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, section_count, sizeof(*symbols), (void**)&symbols));
+      arena, symbol_count, sizeof(*symbols), (void**)&symbols));
   loom_aie2p_leaf_storage_domain_t* storage_domains = NULL;
   if (storage_domain_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, storage_domain_count,
@@ -402,9 +408,30 @@ iree_status_t loom_aie2p_leaf_object_emit(
   realization->storage_domains = storage_domains;
   realization->storage_domain_count = storage_domain_count;
 
+  for (iree_host_size_t i = 0; i < plan->call_fixup_count; ++i) {
+    const iree_string_view_t source_name = plan->call_fixups[i].target_name;
+    char* name_data = NULL;
+    if (!iree_string_view_is_empty(source_name)) {
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate(arena, source_name.size, (void**)&name_data));
+      memcpy(name_data, source_name.data, source_name.size);
+    }
+    symbols[section_count + i] = (loom_native_object_symbol_t){
+        .name = iree_make_string_view(name_data, source_name.size),
+        .section_contribution_index = IREE_HOST_SIZE_MAX,
+        .section_offset = 0,
+        .size = 0,
+        .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+        .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+        .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+    };
+  }
+
   iree_host_size_t fixup_count = 0;
   if (!iree_host_size_checked_add(plan->branch_fixup_count,
-                                  plan->storage_fixup_count, &fixup_count) ||
+                                  plan->call_fixup_count, &fixup_count) ||
+      !iree_host_size_checked_add(fixup_count, plan->storage_fixup_count,
+                                  &fixup_count) ||
       !iree_host_size_checked_add(fixup_count, plan->read_only_data_fixup_count,
                                   &fixup_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -429,6 +456,20 @@ iree_status_t loom_aie2p_leaf_object_emit(
         .addend = plan->block_byte_offsets[branch_fixup->target_block_index],
     };
   }
+  const iree_host_size_t call_fixup_start = plan->branch_fixup_count;
+  for (iree_host_size_t i = 0; i < plan->call_fixup_count; ++i) {
+    const loom_aie2p_planned_call_fixup_t* call_fixup = &plan->call_fixups[i];
+    IREE_ASSERT_LT(call_fixup->bundle_index, plan->bundle_count);
+    fixups[call_fixup_start + i] = (loom_native_object_fixup_t){
+        .section_contribution_index = 0,
+        .section_offset = plan->bundles[call_fixup->bundle_index].byte_offset,
+        .relocation_kind = LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE,
+        .target_symbol_index = section_count + i,
+        .addend = 0,
+    };
+  }
+  const iree_host_size_t storage_fixup_start =
+      call_fixup_start + plan->call_fixup_count;
   for (iree_host_size_t i = 0; i < plan->storage_fixup_count; ++i) {
     const loom_aie2p_planned_storage_fixup_t* storage_fixup =
         &plan->storage_fixups[i];
@@ -438,7 +479,7 @@ iree_status_t loom_aie2p_leaf_object_emit(
         storage_symbol_indices[storage_fixup->storage_space];
     IREE_ASSERT(target_symbol_index != UINT32_MAX &&
                 "planned storage address must reference a placement domain");
-    fixups[plan->branch_fixup_count + i] = (loom_native_object_fixup_t){
+    fixups[storage_fixup_start + i] = (loom_native_object_fixup_t){
         .section_contribution_index = 0,
         .section_offset =
             plan->bundles[storage_fixup->bundle_index].byte_offset,
@@ -449,7 +490,7 @@ iree_status_t loom_aie2p_leaf_object_emit(
     };
   }
   const iree_host_size_t read_only_data_fixup_start =
-      plan->branch_fixup_count + plan->storage_fixup_count;
+      storage_fixup_start + plan->storage_fixup_count;
   for (iree_host_size_t i = 0; i < plan->read_only_data_fixup_count; ++i) {
     const loom_aie2p_planned_read_only_data_fixup_t* data_fixup =
         &plan->read_only_data_fixups[i];
@@ -471,7 +512,7 @@ iree_status_t loom_aie2p_leaf_object_emit(
       .sections = sections,
       .section_count = section_count,
       .symbols = symbols,
-      .symbol_count = section_count,
+      .symbol_count = symbol_count,
       .fixups = fixups,
       .fixup_count = fixup_count,
   };

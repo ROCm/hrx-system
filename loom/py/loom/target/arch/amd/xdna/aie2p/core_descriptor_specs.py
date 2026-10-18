@@ -882,6 +882,13 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="j",
     ),
     _DescriptorSpec(
+        "JL_lng",
+        f"{_TARGET_KEY}.call.direct",
+        "control.call.direct",
+        "II_JL_lng",
+        asm_mnemonic="jl",
+    ),
+    _DescriptorSpec(
         "JNZ",
         f"{_TARGET_KEY}.branch.nonzero",
         "control.branch.nonzero",
@@ -1719,6 +1726,24 @@ _BASE_DESCRIPTOR_SPECS = (
         (("dst", "eP"), ("src", "eP")),
         allocation_move=True,
         flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_scl",
+        f"{_TARGET_KEY}.move.link-to-scalar",
+        "register.move.link-to-scalar",
+        "II_MOV_alu_mv_mv_mv_scl_eR_mLRm",
+        (("dst", "eR"), ("src", "mLRm")),
+        asm_mnemonic="mov.link-to-scalar",
+        allocation_move=True,
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_scl",
+        f"{_TARGET_KEY}.move.scalar-to-link",
+        "register.move.scalar-to-link",
+        "II_MOV_alu_mv_mv_mv_scl_mLRm_eR",
+        (("dst", "mLRm"), ("src", "eR")),
+        asm_mnemonic="mov.scalar-to-link",
+        allocation_move=True,
     ),
     _DescriptorSpec(
         "MOV_alu_mv_mv_mv_scl",

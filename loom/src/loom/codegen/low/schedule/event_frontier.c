@@ -30,6 +30,18 @@ iree_status_t loom_low_schedule_event_frontier_initialize(
   return iree_ok_status();
 }
 
+void loom_low_schedule_event_frontier_reset(
+    loom_low_schedule_event_frontier_t* frontier) {
+  const loom_low_descriptor_set_t* descriptor_set = frontier->descriptor_set;
+  const iree_host_size_t count =
+      (iree_host_size_t)descriptor_set->physical_register_unit_count *
+      descriptor_set->timing_event_count;
+  if (count != 0) {
+    memset(frontier->deadlines, 0, count * sizeof(*frontier->deadlines));
+  }
+  frontier->quiescent_cycle = 0;
+}
+
 uint32_t loom_low_schedule_event_frontier_query(
     const loom_low_schedule_event_frontier_t* frontier,
     uint16_t physical_register_id, uint16_t event_id) {

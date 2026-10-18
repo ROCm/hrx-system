@@ -25,6 +25,12 @@ static const loom_low_schedule_structural_model_t kStructuralScheduleModels[] =
             .schedule_descriptor_ordinal =
                 AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32,
         },
+        {
+            .op_kind = LOOM_OP_LOW_FUNC_CALL,
+            .result_reg_class_id = LOOM_LOW_REG_CLASS_NONE,
+            .schedule_descriptor_ordinal =
+                AIE2P_CORE_DESCRIPTOR_REF_CALL_DIRECT,
+        },
 };
 
 void loom_aie2p_low_descriptor_registry_initialize(

@@ -24,6 +24,8 @@ typedef enum loom_aie2p_native_relocation_kind_e {
   LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE = 1,
   // Absolute core-visible local-memory address in MOVXM i.
   LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE = 2,
+  // Absolute core program-memory address in JL cpmaddr.
+  LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE = 3,
 } loom_aie2p_native_relocation_kind_t;
 
 // Applies all AIE2P fixups after contribution assembly and address placement.

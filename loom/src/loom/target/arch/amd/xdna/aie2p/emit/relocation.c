@@ -96,10 +96,13 @@ loom_aie2p_native_relocation_immediate(
   return result;
 }
 
-static bool loom_aie2p_native_relocation_is_core_branch(
-    loom_aie2p_instruction_id_t instruction) {
+static bool loom_aie2p_native_relocation_is_core_control(
+    loom_aie2p_instruction_id_t instruction, bool is_call) {
   const loom_aie2p_machine_form_info_t form_info =
       loom_aie2p_native_relocation_machine_form(instruction);
+  if (is_call) {
+    return form_info.control_flow_kind == LOOM_AIE2P_CONTROL_FLOW_CALL_DIRECT;
+  }
   switch (form_info.control_flow_kind) {
     case LOOM_AIE2P_CONTROL_FLOW_BRANCH_CONDITIONAL_NONZERO:
     case LOOM_AIE2P_CONTROL_FLOW_BRANCH_CONDITIONAL_ZERO:
@@ -110,8 +113,8 @@ static bool loom_aie2p_native_relocation_is_core_branch(
   }
 }
 
-static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
-    uint64_t target_address, uint64_t fixup_offset,
+static iree_status_t loom_aie2p_native_relocation_patch_core_control(
+    bool is_call, uint64_t target_address, uint64_t fixup_offset,
     loom_native_section_t* section) {
   if (fixup_offset > IREE_HOST_SIZE_MAX ||
       (iree_host_size_t)fixup_offset >= section->contents.data_length) {
@@ -155,20 +158,21 @@ static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
       LOOM_AIE2P_INSTRUCTION_ID_INVALID;
   for (iree_host_size_t i = 0; i < candidate_count; ++i) {
     const loom_aie2p_instruction_id_t candidate = instruction_candidates[i];
-    if (!loom_aie2p_native_relocation_is_core_branch(candidate)) {
+    if (!loom_aie2p_native_relocation_is_core_control(candidate, is_call)) {
       continue;
     }
     if (branch_instruction != LOOM_AIE2P_INSTRUCTION_ID_INVALID) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
-          "AIE2P branch relocation matches multiple instruction forms");
+          "AIE2P core control relocation matches multiple instruction forms");
     }
     branch_instruction = candidate;
   }
   if (branch_instruction == LOOM_AIE2P_INSTRUCTION_ID_INVALID) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "AIE2P branch relocation does not reference J, JZ, or JNZ");
+        is_call ? "AIE2P call relocation does not reference JL"
+                : "AIE2P branch relocation does not reference J, JZ, or JNZ");
   }
 
   const loom_aie2p_native_relocation_immediate_t target_immediate =
@@ -358,11 +362,15 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
                               "AIE2P relocation address overflows");
     }
     switch ((loom_aie2p_native_relocation_kind_t)fixup->relocation_kind) {
-      case LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE: {
+      case LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE:
+      case LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE: {
+        const bool is_call =
+            fixup->relocation_kind ==
+            LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE;
         if (fixup_layout->section_index != target_layout->section_index) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
-              "AIE2P core branch target must share its executable section");
+              "AIE2P core control target must share its executable section");
         }
         if (source_section->storage != LOOM_NATIVE_SECTION_STORAGE_CONTENTS ||
             (source_section->access & (LOOM_NATIVE_SECTION_ACCESS_READ |
@@ -378,8 +386,9 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
               IREE_STATUS_OUT_OF_RANGE,
               "AIE2P core branch target lies outside its code section");
         }
-        IREE_RETURN_IF_ERROR(loom_aie2p_native_relocation_patch_core_branch(
-            target_address, fixup_layout->section_offset, source_section));
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_relocation_patch_core_control(
+            is_call, target_address, fixup_layout->section_offset,
+            source_section));
         break;
       }
       case LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE:

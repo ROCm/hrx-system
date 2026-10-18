@@ -1265,6 +1265,46 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
+    program_object
+  HDRS
+    "emit/program_object.h"
+  SRCS
+    "emit/program_object.c"
+  DEPS
+    ::bundle_plan
+    ::leaf_object
+    ::relocation
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
+    program_compile
+  HDRS
+    "emit/program_compile.h"
+  SRCS
+    "emit/program_compile.c"
+  DEPS
+    ::core_descriptors
+    ::leaf_compile
+    ::program_object
+    iree::base
+    iree::base::internal::arena
+    loom::ops::low
+    loom::ops::op_defs
+    loom::target::registers
+    loom::util::call_graph
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
     tile_link
   HDRS
     "emit/tile_link.h"
@@ -1577,6 +1617,39 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_test(
+  NAME
+    program_compile_test
+  SRCS
+    "emit/program_compile_test.cc"
+  DEPS
+    ::bundle_plan
+    ::core_descriptors
+    ::descriptor_encoding
+    ::encoding
+    ::low_registry
+    ::machine
+    ::program_compile
+    ::provider
+    ::relocation
+    ::tile_link
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::ops::op_registry
+    loom::target::emit::native::object
+    loom::testing::module_ptr
   LABELS
     "iree-build-requirement=loom.target.arch.xdna"
 )

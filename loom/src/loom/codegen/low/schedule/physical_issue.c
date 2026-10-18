@@ -28,6 +28,13 @@ iree_status_t loom_low_physical_issue_initialize(
                                                         &out_issue->resources);
 }
 
+void loom_low_physical_issue_reset_execution_state(
+    loom_low_physical_issue_t* issue) {
+  loom_low_schedule_event_frontier_reset(&issue->events);
+  loom_low_schedule_resource_calendar_reset(&issue->resources);
+  issue->effect_quiescent_cycle = 0;
+}
+
 uint32_t loom_low_physical_issue_source_ready_cycle(
     const loom_low_physical_issue_t* issue, uint32_t scheduled_packet_index) {
   const uint32_t node =
@@ -38,9 +45,9 @@ uint32_t loom_low_physical_issue_source_ready_cycle(
              : issue->node_ready_cycles[node];
 }
 
-void loom_low_physical_issue_commit_source(loom_low_physical_issue_t* issue,
-                                           uint32_t scheduled_packet_index,
-                                           uint32_t issue_cycle) {
+static void loom_low_physical_issue_commit_source_impl(
+    loom_low_physical_issue_t* issue, uint32_t scheduled_packet_index,
+    uint32_t issue_cycle, bool source_completed) {
   const loom_low_schedule_table_t* schedule = issue->schedule;
   const uint32_t node =
       schedule->scheduled_node_indices[scheduled_packet_index];
@@ -72,13 +79,29 @@ void loom_low_physical_issue_commit_source(loom_low_physical_issue_t* issue,
         loom_low_schedule_dependency_index_group_has_ssa(index, i) &&
         !loom_low_schedule_dependency_index_group_has_effect(index, i);
     const int32_t separation =
-        is_storage_setup ? 0
-                         : iree_max(0, group->minimum_issue_separation_cycles);
+        source_completed || is_storage_setup
+            ? 0
+            : iree_max(0, group->minimum_issue_separation_cycles);
     issue->node_ready_cycles[consumer] =
         iree_max(issue->node_ready_cycles[consumer],
                  loom_low_schedule_add_signed_issue_separation(available_cycle,
                                                                separation));
   }
+}
+
+void loom_low_physical_issue_commit_source(loom_low_physical_issue_t* issue,
+                                           uint32_t scheduled_packet_index,
+                                           uint32_t issue_cycle) {
+  loom_low_physical_issue_commit_source_impl(
+      issue, scheduled_packet_index, issue_cycle, /*source_completed=*/false);
+}
+
+void loom_low_physical_issue_commit_completed_source(
+    loom_low_physical_issue_t* issue, uint32_t scheduled_packet_index,
+    uint32_t available_cycle) {
+  loom_low_physical_issue_commit_source_impl(issue, scheduled_packet_index,
+                                             available_cycle,
+                                             /*source_completed=*/true);
 }
 
 static const loom_low_schedule_class_t* loom_low_physical_instruction_class(

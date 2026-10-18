@@ -32,6 +32,8 @@ typedef enum loom_aie2p_core_structure_kind_e {
   LOOM_AIE2P_CORE_STRUCTURE_CONDITIONAL_BRANCH = 6,
   // Function return materialized as native control flow.
   LOOM_AIE2P_CORE_STRUCTURE_RETURN = 7,
+  // Direct module-local function call materialized as native control flow.
+  LOOM_AIE2P_CORE_STRUCTURE_CALL = 8,
 } loom_aie2p_core_structure_kind_t;
 
 // Classifies |op| against the closed structural representation accepted by

@@ -1077,6 +1077,36 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_object",
+    srcs = ["emit/program_object.c"],
+    hdrs = ["emit/program_object.h"],
+    deps = [
+        ":bundle_plan",
+        ":leaf_object",
+        ":relocation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_compile",
+    srcs = ["emit/program_compile.c"],
+    hdrs = ["emit/program_compile.h"],
+    deps = [
+        ":core_descriptors",
+        ":leaf_compile",
+        ":program_object",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:call_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "tile_link",
     srcs = ["emit/tile_link.c"],
     hdrs = ["emit/tile_link.h"],
@@ -1326,6 +1356,34 @@ loom_cc_test(
         ":encoding",
         ":leaf_object",
         ":relocation",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "program_compile_test",
+    srcs = ["emit/program_compile_test.cc"],
+    deps = [
+        ":bundle_plan",
+        ":core_descriptors",
+        ":descriptor_encoding",
+        ":encoding",
+        ":low_registry",
+        ":machine",
+        ":program_compile",
+        ":provider",
+        ":relocation",
+        ":tile_link",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/emit/native:object",
+        "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
