@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVER_REALTIME_SETTINGS_H_
 
 #include "loom/serve/server/realtime/event.h"
+#include "loom/serve/server/realtime/tools.h"
 #include "loom/serve/server/realtime/turn.h"
 
 #ifdef __cplusplus
@@ -47,6 +48,11 @@ typedef struct loom_serve_realtime_output_settings_t {
   iree_string_builder_t instructions;
   // Source voice selected independently of speech deployment identity.
   iree_string_builder_t voice;
+  // Retained immutable declarations shared with response snapshots.
+  loom_serve_realtime_tools_t* tools;
+  // Suppresses declarations for native generation without dropping the
+  // catalogue.
+  bool tool_choice_none;
   // Text-only versus audio output; generated audio also carries its transcript.
   bool audio;
   // Explicit maximum native output token count.
@@ -85,17 +91,22 @@ iree_status_t loom_serve_realtime_settings_initialize(
 void loom_serve_realtime_settings_deinitialize(
     loom_serve_realtime_settings_t* settings);
 
-// Transactionally applies the supported GA session settings.
-// Unknown fields and unsupported formats/turn policies reject explicitly. A
-// requested transcription model must match the selected assistant composition.
-// Optional out_instructions_changed reports whether committed text
-// policy changed. Audio/voice/output-budget changes preserve compatible text
-// prefixes. input_open prevents changes to input policy until explicit
-// commit/clear; such changes cannot reinterpret already classified samples.
-iree_status_t loom_serve_realtime_settings_update(
-    loom_serve_realtime_settings_t* settings,
+// Builds independently owned candidate settings. The caller publishes their
+// echo before replacing the effective settings. Failure leaves the candidate
+// deinitializable and does not change defaults. Open microphone input forbids
+// changes that would reinterpret already classified samples.
+iree_status_t loom_serve_realtime_settings_prepare(
+    const loom_serve_realtime_settings_t* settings,
     const loom_serve_realtime_profile_t* profile, iree_string_view_t object,
-    bool input_open, bool* out_instructions_changed);
+    bool input_open, loom_serve_realtime_settings_t* candidate);
+
+// Native prompt policy alone determines checkpoint compatibility. Voice,
+// modality, output limits, and metadata never change an existing text prefix.
+bool loom_serve_realtime_output_settings_text_equal(
+    const loom_serve_realtime_output_settings_t* left,
+    const loom_serve_realtime_output_settings_t* right);
+iree_string_view_t loom_serve_realtime_output_settings_tools(
+    const loom_serve_realtime_output_settings_t* settings);
 
 // Copies defaults, then applies one response's output policy and metadata.
 // overrides is empty or a complete JSON object. Input policy and session type

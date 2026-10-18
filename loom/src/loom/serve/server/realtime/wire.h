@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVER_REALTIME_WIRE_H_
 
 #include "loom/serve/transport/websocket/connection.h"
+#include "loom/util/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,6 +53,14 @@ void loom_serve_realtime_wire_clear(loom_serve_realtime_wire_t* wire);
 // Earlier queued events and their owned payloads remain unchanged.
 void loom_serve_realtime_wire_rewind(loom_serve_realtime_wire_t* wire,
                                      loom_serve_realtime_wire_message_t* tail);
+
+// Shared event prefix and exact per-message byte boundary, used by real queue
+// admission and complete-call preflight. Prefix leaves the outer object open.
+iree_status_t loom_serve_realtime_wire_prefix(uint64_t session_id,
+                                              uint64_t sequence,
+                                              const char* type,
+                                              loom_output_stream_t* output);
+iree_status_t loom_serve_realtime_wire_check_size(iree_host_size_t size);
 
 // Begins one object with event_id and type, leaving the object open. The caller
 // adds event-specific fields and closes it before commit. No queue mutation
