@@ -20,11 +20,11 @@ extern "C" {
 
 // One default-conversation writer and independently retiring cancelled work.
 // All calls belong to the serialized session owner. CPU work borrows only
-// generation-owned state and the stable conversion workspace.
+// generation-owned state and stable immutable conversion coefficients.
 typedef struct loom_serve_realtime_responses_t loom_serve_realtime_responses_t;
 
 // Borrows every dependency through retirement. Only the response records and
-// speech conversion workspace belong to this owner; no model work starts here.
+// shared speech coefficients belong to this owner; no model work starts here.
 iree_status_t loom_serve_realtime_responses_allocate(
     uint64_t session_id, const loom_serve_realtime_profile_t* profile,
     loom_serve_realtime_binding_t text, loom_serve_realtime_binding_t speech,

@@ -110,8 +110,8 @@ struct loom_serve_realtime_responses_t {
   loom_serve_realtime_wire_t* wire;
   // One default writer plus one cancelled response whose CPU borrower retires.
   loom_serve_realtime_response_t responses[2];
-  // Reusable speech conversion coefficients, borrowed by one worker at a time.
-  loom_serve_realtime_audio_t audio;
+  // Immutable speech coefficients shared by independently owned audio cursors.
+  loom_serve_realtime_generation_filter_t filter;
   // Current earliest unfinished committed input, supplied by transcription
   // owner.
   uint64_t earliest_input;
@@ -454,9 +454,8 @@ static bool loom_serve_realtime_response_ready(
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(owner->responses); ++i) {
     const loom_serve_realtime_response_t* other = &owner->responses[i];
-    if (other != response && other->generation &&
-        (loom_serve_realtime_generation_pending(other->generation) ||
-         (!other->stop && !other->captured))) {
+    if (other != response && other->generation && !other->stop &&
+        !other->captured) {
       return false;
     }
   }
@@ -492,7 +491,7 @@ static iree_status_t loom_serve_realtime_response_start(
         response->settings.output.audio
             ? iree_string_builder_view(&response->settings.output.voice)
             : iree_string_view_empty(),
-        owner->profile->seed, &owner->audio, owner->observer,
+        owner->profile->seed, &owner->filter, owner->observer,
         owner->host_allocator, &response->generation);
   }
   iree_string_builder_deinitialize(&request.body);
@@ -756,7 +755,7 @@ iree_status_t loom_serve_realtime_responses_allocate(
 void loom_serve_realtime_responses_free(
     loom_serve_realtime_responses_t* owner) {
   if (owner) {
-    loom_serve_realtime_audio_deinitialize(&owner->audio);
+    loom_serve_realtime_generation_filter_deinitialize(&owner->filter);
     iree_allocator_free(owner->host_allocator, owner);
   }
 }

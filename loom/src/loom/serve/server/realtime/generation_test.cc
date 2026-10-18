@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "iree/base/internal/base64.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -96,7 +97,8 @@ class RealtimeGenerationTest : public ::testing::Test {
     }));
   }
 
-  iree_status_t Start(iree_string_view_t content, iree_string_view_t voice) {
+  iree_status_t Start(iree_string_view_t content, iree_string_view_t voice,
+                      size_t index = 0) {
     loom_serve_realtime_binding_t text;
     loom_serve_realtime_binding_t speech;
     IREE_RETURN_IF_ERROR(loom_serve_realtime_binding_resolve(
@@ -116,22 +118,18 @@ class RealtimeGenerationTest : public ::testing::Test {
     if (iree_status_is_ok(status)) {
       status = loom_serve_realtime_generation_allocate(
           loom_serve_host_executor(host_), registry_, text, speech, &request,
-          voice, 42, &audio_, Wake(), iree_allocator_system(), &generation_);
+          voice, 42, &filter_, Wake(), iree_allocator_system(),
+          &generations_[index]);
     }
     iree_string_builder_deinitialize(&request.body);
     return status;
   }
 
   void TearDown() override {
-    if (generation_) {
-      loom_serve_realtime_generation_cancel(generation_);
-      IREE_EXPECT_OK(Until([&] {
-        return !loom_serve_realtime_generation_pending(generation_);
-      }));
-      loom_serve_realtime_generation_free(generation_);
-      generation_ = nullptr;
+    for (size_t i = 0; i < generations_.size(); ++i) {
+      Close(i);
     }
-    loom_serve_realtime_audio_deinitialize(&audio_);
+    loom_serve_realtime_generation_filter_deinitialize(&filter_);
     if (registry_) {
       for (iree_host_size_t i = 0; i < 2; ++i) {
         auto* model = loom_serve_registry_at(registry_, i);
@@ -145,6 +143,39 @@ class RealtimeGenerationTest : public ::testing::Test {
       IREE_EXPECT_OK(loom_serve_registry_free(registry_));
     }
     iree_notification_deinitialize(&notification_);
+  }
+
+  void Close(size_t index) {
+    if (!generations_[index]) {
+      return;
+    }
+    loom_serve_realtime_generation_cancel(generations_[index]);
+    IREE_EXPECT_OK(Until([&] {
+      return !loom_serve_realtime_generation_pending(generations_[index]);
+    }));
+    loom_serve_realtime_generation_free(generations_[index]);
+    generations_[index] = nullptr;
+  }
+
+  iree_status_t Receive(size_t index, bool* progress) {
+    auto* generation = generations_[index];
+    const auto text = loom_serve_realtime_generation_text(generation);
+    if (text.size) {
+      text_[index].append(text.data, text.size);
+      loom_serve_realtime_generation_consume_text(generation);
+      *progress = true;
+    }
+    const auto audio = loom_serve_realtime_generation_audio(generation);
+    if (audio.size) {
+      std::string decoded(iree_base64_decoded_size(audio), '\0');
+      iree_host_size_t length = 0;
+      IREE_RETURN_IF_ERROR(iree_base64_decode(
+          audio, iree_make_byte_span(decoded.data(), decoded.size()), &length));
+      pcm_[index].append(decoded.data(), length);
+      loom_serve_realtime_generation_consume_audio(generation);
+      *progress = true;
+    }
+    return iree_ok_status();
   }
 
   loom_serve_wake_callback_t Wake() {
@@ -161,9 +192,15 @@ class RealtimeGenerationTest : public ::testing::Test {
     while (iree_status_is_ok(status) && !done()) {
       auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      if (generation_) {
-        status = loom_serve_realtime_generation_advance(
-            generation_, can_publish_, &progress);
+      for (size_t i = 0; i < generations_.size() && iree_status_is_ok(status);
+           ++i) {
+        if (generations_[i]) {
+          status = loom_serve_realtime_generation_advance(
+              generations_[i], can_publish_[i], &progress);
+          if (iree_status_is_ok(status) && receive_[i]) {
+            status = Receive(i, &progress);
+          }
+        }
       }
       for (iree_host_size_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
         auto* model = loom_serve_registry_at(registry_, i);
@@ -200,25 +237,31 @@ class RealtimeGenerationTest : public ::testing::Test {
   loom_serve_registry_t* registry_ = nullptr;
   // Model and conversion completion notification, independent of wall time.
   iree_notification_t notification_;
-  // Production native text-to-speech response under test.
-  loom_serve_realtime_generation_t* generation_ = nullptr;
-  // Session storage retained through the response's accepted conversion job.
-  loom_serve_realtime_audio_t audio_ = {};
+  // Production native text-to-speech owners, each with independent publication.
+  std::array<loom_serve_realtime_generation_t*, 4> generations_ = {};
+  // One immutable coefficient owner shared through all response retirement.
+  loom_serve_realtime_generation_filter_t filter_ = {};
   // Publication credit withheld until the native speech block is ready.
-  bool can_publish_ = true;
+  std::array<bool, 4> can_publish_ = {true, true, true, true};
+  // Consumer interest, independently withheld while native output remains live.
+  std::array<bool, 4> receive_ = {};
+  // Received semantic text for exact isolated/concurrent comparison.
+  std::array<std::string, 4> text_;
+  // Decoded wire PCM, independent of packet partitioning.
+  std::array<std::string, 4> pcm_;
 };
 
 TEST_F(RealtimeGenerationTest, CancellationRetainsWaveformUntilWorkerRelease) {
   IREE_ASSERT_OK(Start(IREE_SV("abxa"), IREE_SV("positive")));
   IREE_ASSERT_OK(Until([&] {
-    return loom_serve_realtime_generation_text(generation_).size != 0;
+    return loom_serve_realtime_generation_text(generations_[0]).size != 0;
   }));
-  can_publish_ = false;
+  can_publish_[0] = false;
   IREE_ASSERT_OK(Until([&] {
     const auto& service = loom_serve_registry_at(registry_, 1)->service;
     return std::strcmp(service.snapshot(service.self).phase, "delivering") == 0;
   }));
-  ASSERT_FALSE(loom_serve_realtime_generation_pending(generation_));
+  ASSERT_FALSE(loom_serve_realtime_generation_pending(generations_[0]));
   std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
   for (int32_t i = 0; i < FLAG_test_workers; ++i) {
     gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
@@ -226,47 +269,117 @@ TEST_F(RealtimeGenerationTest, CancellationRetainsWaveformUntilWorkerRelease) {
   }
   bool progress = false;
   IREE_ASSERT_OK(
-      loom_serve_realtime_generation_advance(generation_, true, &progress));
+      loom_serve_realtime_generation_advance(generations_[0], true, &progress));
   ASSERT_TRUE(progress);
-  ASSERT_TRUE(loom_serve_realtime_generation_pending(generation_));
-  loom_serve_realtime_generation_cancel(generation_);
+  ASSERT_TRUE(loom_serve_realtime_generation_pending(generations_[0]));
+  loom_serve_realtime_generation_cancel(generations_[0]);
+  IREE_ASSERT_OK(loom_serve_realtime_generation_advance(generations_[0], false,
+                                                        &progress));
+  EXPECT_TRUE(loom_serve_realtime_generation_pending(generations_[0]));
+  EXPECT_EQ(loom_serve_realtime_generation_text(generations_[0]).size, 0);
+  EXPECT_EQ(loom_serve_realtime_generation_audio(generations_[0]).size, 0);
+  EXPECT_EQ(filter_.phase, LOOM_SERVE_REALTIME_FILTER_PREPARING);
+  receive_[1] = true;
+  IREE_ASSERT_OK(Start(IREE_SV("ab"), IREE_SV("negative"), 1));
   IREE_ASSERT_OK(
-      loom_serve_realtime_generation_advance(generation_, false, &progress));
-  EXPECT_TRUE(loom_serve_realtime_generation_pending(generation_));
-  EXPECT_EQ(loom_serve_realtime_generation_text(generation_).size, 0);
-  EXPECT_EQ(loom_serve_realtime_generation_audio(generation_).size, 0);
+      loom_serve_realtime_generation_advance(generations_[1], true, &progress));
   gates.clear();
-  IREE_ASSERT_OK(Until(
-      [&] { return !loom_serve_realtime_generation_pending(generation_); }));
-  EXPECT_EQ(loom_serve_realtime_generation_audio(generation_).size, 0);
+  IREE_ASSERT_OK(Until([&] {
+    return !loom_serve_realtime_generation_pending(generations_[0]) &&
+           loom_serve_realtime_generation_complete(generations_[1]);
+  }));
+  EXPECT_EQ(filter_.phase, LOOM_SERVE_REALTIME_FILTER_READY);
+  EXPECT_FALSE(pcm_[1].empty());
+  EXPECT_EQ(loom_serve_realtime_generation_audio(generations_[0]).size, 0);
 }
 
 TEST_F(RealtimeGenerationTest, EmptyContentDoesNotValidateAnUnusedVoice) {
   IREE_ASSERT_OK(Start(IREE_SV("aaaaaaaaaaa"), IREE_SV("unknown-voice")));
-  IREE_ASSERT_OK(Until(
-      [&] { return loom_serve_realtime_generation_complete(generation_); }));
-  const auto* result = loom_serve_realtime_generation_result(generation_);
+  IREE_ASSERT_OK(Until([&] {
+    return loom_serve_realtime_generation_complete(generations_[0]);
+  }));
+  const auto* result = loom_serve_realtime_generation_result(generations_[0]);
   ASSERT_NE(result, nullptr);
   EXPECT_EQ(result->content.size, 0);
   EXPECT_EQ(result->calls->count, 0);
   EXPECT_TRUE(iree_string_view_equal(result->finish_reason, IREE_SV("stop")));
   EXPECT_EQ(result->response.usage.output_tokens, 1);
-  EXPECT_EQ(loom_serve_realtime_generation_text(generation_).size, 0);
-  EXPECT_EQ(loom_serve_realtime_generation_audio(generation_).size, 0);
-  EXPECT_EQ(loom_serve_realtime_generation_frames(generation_), 0);
+  EXPECT_EQ(loom_serve_realtime_generation_text(generations_[0]).size, 0);
+  EXPECT_EQ(loom_serve_realtime_generation_audio(generations_[0]).size, 0);
+  EXPECT_EQ(loom_serve_realtime_generation_frames(generations_[0]), 0);
 }
 
 TEST_F(RealtimeGenerationTest,
        EmptyContentDoesNotWaitForClosedSpeechAdmission) {
   loom_serve_registry_at(registry_, 1)->closed = true;
   IREE_ASSERT_OK(Start(IREE_SV("aaaaaaaaaaa"), IREE_SV("positive")));
-  IREE_ASSERT_OK(Until(
-      [&] { return loom_serve_realtime_generation_complete(generation_); }));
-  const auto* result = loom_serve_realtime_generation_result(generation_);
+  IREE_ASSERT_OK(Until([&] {
+    return loom_serve_realtime_generation_complete(generations_[0]);
+  }));
+  const auto* result = loom_serve_realtime_generation_result(generations_[0]);
   ASSERT_NE(result, nullptr);
   EXPECT_EQ(result->content.size, 0);
-  EXPECT_EQ(loom_serve_realtime_generation_audio(generation_).size, 0);
-  EXPECT_EQ(loom_serve_realtime_generation_frames(generation_), 0);
+  EXPECT_EQ(loom_serve_realtime_generation_audio(generations_[0]).size, 0);
+  EXPECT_EQ(loom_serve_realtime_generation_frames(generations_[0]), 0);
+}
+
+TEST_F(RealtimeGenerationTest,
+       StaggeredResponsesKeepIndependentOutputAndCredit) {
+  const std::array<iree_string_view_t, 4> prompts = {
+      IREE_SV("abxa"), IREE_SV("ab"), IREE_SV("aba"), IREE_SV("abxxa")};
+  const std::array<iree_string_view_t, 4> voices = {
+      IREE_SV("positive"), IREE_SV("negative"), IREE_SV("positive"),
+      IREE_SV("negative")};
+  std::array<std::string, 4> expected_text, expected_pcm;
+  receive_[0] = true;
+  for (size_t i = 0; i < prompts.size(); ++i) {
+    ASSERT_NO_FATAL_FAILURE(Close(0));
+    text_[0].clear();
+    pcm_[0].clear();
+    IREE_ASSERT_OK(Start(prompts[i], voices[i]));
+    IREE_ASSERT_OK(Until([&] {
+      return loom_serve_realtime_generation_complete(generations_[0]);
+    }));
+    ASSERT_FALSE(pcm_[0].empty()) << "request " << i;
+    EXPECT_EQ(loom_serve_realtime_generation_frames(generations_[0]),
+              pcm_[0].size() / sizeof(int16_t));
+    expected_text[i] = text_[0];
+    expected_pcm[i] = pcm_[0];
+  }
+  ASSERT_NO_FATAL_FAILURE(Close(0));
+  loom_serve_realtime_generation_filter_deinitialize(&filter_);
+  text_ = {};
+  pcm_ = {};
+  receive_ = {true, false, true, true};
+  IREE_ASSERT_OK(Start(prompts[0], voices[0]));
+  IREE_ASSERT_OK(Start(prompts[1], voices[1], 1));
+  IREE_ASSERT_OK(Until([&] {
+    return loom_serve_realtime_generation_audio(generations_[1]).size != 0;
+  }));
+  IREE_ASSERT_OK(Start(prompts[2], voices[2], 2));
+  IREE_ASSERT_OK(Start(prompts[3], voices[3], 3));
+  IREE_ASSERT_OK(Until([&] { return !pcm_[2].empty(); }));
+  loom_serve_realtime_generation_cancel(generations_[2]);
+  IREE_ASSERT_OK(Until([&] {
+    return loom_serve_realtime_generation_complete(generations_[0]) &&
+           loom_serve_realtime_generation_complete(generations_[3]) &&
+           !loom_serve_realtime_generation_pending(generations_[2]);
+  }));
+  EXPECT_FALSE(loom_serve_realtime_generation_complete(generations_[1]));
+  EXPECT_TRUE(pcm_[1].empty());
+  EXPECT_EQ(expected_pcm[2].substr(0, pcm_[2].size()), pcm_[2]);
+  ASSERT_NO_FATAL_FAILURE(Close(2));
+  receive_[1] = true;
+  IREE_ASSERT_OK(Until([&] {
+    return loom_serve_realtime_generation_complete(generations_[1]);
+  }));
+  for (size_t i : {0u, 1u, 3u}) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(text_[i], expected_text[i]);
+    EXPECT_EQ(pcm_[i], expected_pcm[i]);
+    EXPECT_EQ(loom_serve_realtime_generation_frames(generations_[i]),
+              pcm_[i].size() / sizeof(int16_t));
+  }
 }
 
 }  // namespace
