@@ -8,10 +8,13 @@
 #define LOOM_SERVE_SERVER_REALTIME_SETTINGS_H_
 
 #include "loom/serve/server/realtime/event.h"
+#include "loom/serve/server/realtime/turn.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+enum { LOOM_SERVE_REALTIME_INPUT_CAPACITY_DEFAULT = 48000 };
 
 // Explicit composition of independently registered and scheduled deployments.
 // All strings are borrowed from application configuration through router exit.
@@ -22,6 +25,8 @@ typedef struct loom_serve_realtime_profile_t {
   iree_string_view_t text;
   // Recognition deployment supplying source-defined input geometry.
   iree_string_view_t recognition;
+  // Optional independent activity deployment for automatic microphone turns.
+  iree_string_view_t activity;
   // Speech deployment supplying continuing text input and waveform geometry.
   iree_string_view_t speech;
   // Default source-owned voice ID; contains no model selector.
@@ -32,6 +37,8 @@ typedef struct loom_serve_realtime_profile_t {
   uint32_t max_output_tokens;
   // Explicit reproducibility key for independent native requests.
   uint64_t seed;
+  // Immutable original 24 kHz microphone ring capacity; zero uses the default.
+  iree_host_size_t input_capacity;
 } loom_serve_realtime_profile_t;
 
 typedef struct loom_serve_realtime_settings_t {
@@ -49,6 +56,14 @@ typedef struct loom_serve_realtime_settings_t {
   bool audio;
   // Explicit maximum native output token count.
   uint32_t max_output_tokens;
+  // Server activity detection is enabled; false selects explicit manual turns.
+  bool detect_turns;
+  // Continuous detector threshold, pre-roll, and silence policy.
+  loom_serve_realtime_turn_options_t turn;
+  // A detected stop requests a response once committed transcripts are ready.
+  bool create_response;
+  // A detected onset cancels the currently active response.
+  bool interrupt_response;
 } loom_serve_realtime_settings_t;
 
 iree_status_t loom_serve_realtime_settings_initialize(
@@ -57,20 +72,21 @@ iree_status_t loom_serve_realtime_settings_initialize(
 void loom_serve_realtime_settings_deinitialize(
     loom_serve_realtime_settings_t* settings);
 
-// Transactionally applies the supported manual-turn GA session settings.
+// Transactionally applies the supported GA session settings.
 // Unknown fields and unsupported formats/turn policies reject explicitly. A
 // requested transcription model must match the selected assistant composition.
 // response restricts the object to per-response overrides of text policy and
 // output modality; session type and input/output audio settings are not
 // overrides. Optional out_instructions_changed reports whether committed text
 // policy changed. Audio/voice/output-budget changes preserve compatible text
-// prefixes.
+// prefixes. input_open prevents changes to input policy until explicit
+// commit/clear; such changes cannot reinterpret already classified samples.
 iree_status_t loom_serve_realtime_settings_update(
     loom_serve_realtime_settings_t* settings,
     const loom_serve_realtime_profile_t* profile, iree_string_view_t object,
-    bool response, bool* out_instructions_changed);
+    bool response, bool input_open, bool* out_instructions_changed);
 
-// Appends the actual effective session settings, including manual turn policy.
+// Appends the actual effective session settings, including turn policy.
 iree_status_t loom_serve_realtime_settings_write(
     const loom_serve_realtime_settings_t* settings,
     const loom_serve_realtime_profile_t* profile, uint64_t session_id,

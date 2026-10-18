@@ -26,9 +26,10 @@ typedef struct loom_serve_realtime_binding_t {
 
 // Resolves metadata without preparing or activating the deployment. Native
 // admission still owns readiness, queue pressure, and source capabilities.
+// kinds uses model-kind bit positions, as native registry admission does.
 iree_status_t loom_serve_realtime_binding_resolve(
-    loom_serve_registry_t* registry, iree_string_view_t name,
-    loom_serve_model_kind_t kind, loom_serve_realtime_binding_t* out_binding);
+    loom_serve_registry_t* registry, iree_string_view_t name, uint32_t kinds,
+    loom_serve_realtime_binding_t* out_binding);
 
 // Checks the copied identity before another admission or checkpoint operation.
 // An accepted stream already owns its result independently of this check.
