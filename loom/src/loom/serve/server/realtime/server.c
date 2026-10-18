@@ -184,21 +184,30 @@ iree_status_t loom_serve_realtime_server_accept(
   }
   const loom_serve_realtime_profile_t* profile = NULL;
   loom_serve_realtime_binding_t text, recognition, speech;
+  loom_serve_realtime_binding_t activity = {0};
   iree_status_t status =
       loom_serve_realtime_profile_select(server, request->target, &profile);
   if (iree_status_is_ok(status)) {
     status = loom_serve_realtime_binding_resolve(
-        server->registry, profile->text, LOOM_SERVE_MODEL_KIND_TEXT, &text);
+        server->registry, profile->text, 1u << LOOM_SERVE_MODEL_KIND_TEXT,
+        &text);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_realtime_binding_resolve(
         server->registry, profile->recognition,
-        LOOM_SERVE_MODEL_KIND_RECOGNITION, &recognition);
+        1u << LOOM_SERVE_MODEL_KIND_RECOGNITION, &recognition);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_realtime_binding_resolve(
-        server->registry, profile->speech, LOOM_SERVE_MODEL_KIND_SPEECH,
+        server->registry, profile->speech, 1u << LOOM_SERVE_MODEL_KIND_SPEECH,
         &speech);
+  }
+  if (iree_status_is_ok(status) && profile->activity.size) {
+    status = loom_serve_realtime_binding_resolve(
+        server->registry, profile->activity,
+        (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY) |
+            (1u << LOOM_SERVE_MODEL_KIND_RECOGNITION),
+        &activity);
   }
   if (iree_status_is_ok(status)) {
     iree_string_builder_reset(scratch);
@@ -228,9 +237,9 @@ iree_status_t loom_serve_realtime_server_accept(
   }
   loom_serve_realtime_session_t* session = NULL;
   status = loom_serve_realtime_session_allocate(
-      ++server->sequence, profile, text, recognition, speech, server->executor,
-      server->registry, server->transport, connection, socket, server->observer,
-      server->host_allocator, &session);
+      ++server->sequence, profile, text, recognition, speech, activity,
+      server->executor, server->registry, server->transport, connection, socket,
+      server->observer, server->host_allocator, &session);
   if (!iree_status_is_ok(status)) {
     loom_serve_http_connection_abort(connection);
     return status;

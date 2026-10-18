@@ -461,7 +461,7 @@ The model query selects a named composition supplied by `--realtime_assistant`.
 The [conversation workflow](workflows/realtime-conversation.md) covers its model
 requirements, startup document, and playback ownership.
 
-The manual-turn profile uses GA event names and nested `audio.input` /
+The profile uses GA event names and nested `audio.input` /
 `audio.output` settings. Both formats are `{"type":"audio/pcm","rate":24000}`:
 mono PCM16LE carried in base64 JSON strings. Supported commands are:
 
@@ -479,10 +479,41 @@ mono PCM16LE carried in base64 JSON strings. Supported commands are:
 
 Session settings accept instructions, one output modality (`audio` or `text`),
 positive `max_output_tokens`, the configured transcription model plus language
-and prompt hints, the speech voice, and speed 1. Turn detection and input noise
-reduction are null. Tools must be empty; tool choice may be `none` or `auto`.
+and prompt hints, the speech voice, and speed 1. Input noise reduction is null.
+Turn detection defaults to null for explicit commits. An assistant with an
+`activity` deployment also accepts `audio.input.turn_detection` with:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `type` | Required | `server_vad`. |
+| `threshold` | `0.5` | Speech probability threshold in `[0, 1]`. |
+| `prefix_padding_ms` | `300` | Retained audio before detected onset. |
+| `silence_duration_ms` | `500` | Consecutive silence before committing the utterance. |
+| `create_response` | `true` | Request an answer after committed transcripts finish. |
+| `interrupt_response` | `true` | Cancel the active response on detected onset. |
+
+`speech_started` and `speech_stopped` events use the same item ID as the
+subsequent commit and transcript. Their millisecond positions share the original
+microphone clock across utterances. The detector continues through automatic
+boundaries; each transcription receives an independent finite audio interval.
+Quiet audio older than the configured pre-roll is discarded. Explicit commit
+ends the current retained interval and never creates an automatic response.
+Commit and clear end the detector epoch; later appends begin a new epoch at their
+ordered position. Changing input policy or transcription hints requires this
+empty boundary so updates cannot reinterpret earlier samples.
+
+Automatic response intent waits for committed transcripts and active generation.
+A new onset supersedes an unanswered automatic turn; disabling interruption lets
+the current response finish before the later answer starts. Disabling response
+creation leaves VAD events and transcription available for client orchestration.
+Automatic interruption removes unaligned assistant audio text from future prompts;
+the client still reports actual playback through `conversation.item.truncate`.
+A repeated report for already removed text is harmless during a successor response.
+
+Tools must be empty; tool choice may be `none` or `auto`.
 Other policies, formats, function transactions, and out-of-band responses reject
-explicitly. This profile does not satisfy Open WebUI's automatic-turn/tool bridge.
+explicitly. Open WebUI's tool bridge additionally requires function transactions
+and out-of-band responses.
 
 Text and speech output are incremental. Audio responses publish
 `response.output_audio_transcript.delta` and `response.output_audio.delta`;
@@ -494,6 +525,12 @@ A rejected checkpoint capture does not terminate other sessions or deployments.
 Each received message is at most 512 KiB. Receive storage retains at most 64
 records and 1 MiB of allocations, including worker-borrowed messages. Up to four
 input items can remain live, including cancelled work awaiting retirement.
+Assistant `input_capacity` sets the immutable original-rate microphone ring in
+24 kHz mono frames (default 48000, or 96 KiB). Source window capacity, conversion
+history, pending output, and pre-roll must fit this bound; an incompatible
+activity deployment fails before its detector receives samples. Increasing
+`input_capacity` supports larger source windows. Independent consumers apply
+bounded backpressure without copying an entire utterance or blocking a worker.
 Conversation storage permits 128 items and 1 MiB of text and identifiers;
 delete earlier items to reclaim it. Capacity exhaustion ends the connection
 instead of silently dropping audio or controls. WebSocket connections share the

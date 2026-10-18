@@ -55,7 +55,7 @@ class RealtimeInputTest : public ::testing::Test {
     loom_serve_realtime_binding_t binding;
     IREE_ASSERT_OK(loom_serve_realtime_binding_resolve(
         registry_, iree_make_string_view(name_.data(), name_.size()),
-        LOOM_SERVE_MODEL_KIND_RECOGNITION, &binding));
+        1u << LOOM_SERVE_MODEL_KIND_RECOGNITION, &binding));
     IREE_ASSERT_OK(loom_serve_realtime_input_allocate(
         loom_serve_host_executor(host_), registry_, binding, Wake(),
         iree_allocator_system(), &input_));
@@ -200,6 +200,81 @@ TEST_F(RealtimeInputTest, IndependentPcmItemsFlushFiniteConversion) {
   }
   IREE_ASSERT_OK(
       Until([&] { return !loom_serve_realtime_input_pending(input_); }));
+}
+
+TEST_F(RealtimeInputTest, PrimedActivityPreservesCoverageAndIndependentOutput) {
+  for (auto outputs : {LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY,
+                       LOOM_SERVE_RECOGNITION_OUTPUT_ALL}) {
+    SCOPED_TRACE(outputs);
+    const loom_serve_recognition_request_t activity_request = {
+        .outputs = outputs,
+    };
+    loom_serve_realtime_input_item_t* activity = nullptr;
+    IREE_ASSERT_OK(
+        loom_serve_realtime_input_begin(input_, &activity_request, &activity));
+    IREE_ASSERT_OK(Until([&] {
+      return loom_serve_realtime_input_geometry(activity) != nullptr;
+    }));
+    const auto geometry = *loom_serve_realtime_input_geometry(activity);
+    EXPECT_EQ(geometry.sample_rate, 16000u);
+    EXPECT_GT(geometry.retention_frames, 4096u);
+    EXPECT_FALSE(loom_serve_realtime_input_complete(activity));
+
+    const loom_serve_recognition_request_t transcript_request = {
+        .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+    };
+    loom_serve_realtime_input_item_t* transcript = nullptr;
+    IREE_ASSERT_OK(loom_serve_realtime_input_begin(input_, &transcript_request,
+                                                   &transcript));
+    const uint8_t samples[38] = {};
+    unsigned releases = 0;
+    for (auto* item : {activity, transcript}) {
+      size_t offset = 0;
+      for (size_t frames : {1u, 7u, 11u}) {
+        IREE_ASSERT_OK(loom_serve_realtime_input_append(
+            input_, item,
+            iree_make_const_byte_span(samples + offset, frames * 2),
+            [](void* data) { ++*static_cast<unsigned*>(data); }, &releases));
+        offset += frames * 2;
+      }
+      loom_serve_realtime_input_finish(item);
+    }
+    // Keeping one source observation borrowed cannot stall another item.
+    IREE_ASSERT_OK(Until([&] {
+      return loom_serve_realtime_input_activity(activity) &&
+             loom_serve_realtime_input_transcript(transcript);
+    }));
+    const auto* text = loom_serve_realtime_input_transcript(transcript);
+    EXPECT_EQ(std::string(text->buffer, text->size), "A");
+    uint64_t covered = 0;
+    while (!loom_serve_realtime_input_complete(activity)) {
+      IREE_ASSERT_OK(Until([&] {
+        return loom_serve_realtime_input_activity(activity) ||
+               loom_serve_realtime_input_complete(activity);
+      }));
+      IREE_ASSERT_OK(loom_serve_realtime_input_status(activity));
+      if (const auto* observation =
+              loom_serve_realtime_input_activity(activity)) {
+        EXPECT_EQ(observation->begin, covered);
+        EXPECT_GT(observation->end, observation->begin);
+        EXPECT_EQ(observation->speech_probability, 0.0f);
+        covered = observation->end;
+        loom_serve_realtime_input_consume_activity(activity);
+      }
+    }
+    EXPECT_EQ(covered, 13u);  // ceil(19 original frames * 16000 / 24000).
+    EXPECT_EQ(releases, 6u);
+    EXPECT_EQ(loom_serve_realtime_input_geometry(activity)->retention_frames,
+              geometry.retention_frames);
+    if (outputs & LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT) {
+      text = loom_serve_realtime_input_transcript(activity);
+      EXPECT_EQ(std::string(text->buffer, text->size), "A");
+    }
+    loom_serve_realtime_input_close(activity);
+    loom_serve_realtime_input_close(transcript);
+    IREE_ASSERT_OK(
+        Until([&] { return !loom_serve_realtime_input_pending(input_); }));
+  }
 }
 
 }  // namespace
