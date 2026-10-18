@@ -99,12 +99,13 @@ class SourceRecognitionModelTest : public ::testing::Test {
     return status;
   }
 
-  void Admit(size_t index,
-             iree_string_view_t prompt = iree_string_view_empty()) {
+  void Admit(size_t index, iree_string_view_t prompt = iree_string_view_empty(),
+             loom_serve_recognition_output_flags_t outputs =
+                 LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT) {
     auto& row = rows_[index];
     const loom_serve_recognition_request_t request = {
         .prompt = prompt,
-        .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+        .outputs = outputs,
     };
     IREE_ASSERT_OK(
         generator_.prepare(generator_.self, index, &request, &row.invocation));
@@ -266,6 +267,41 @@ TEST_F(SourceRecognitionModelTest, ChangingMembershipRetainsInputAndRevisions) {
   ASSERT_NO_FATAL_FAILURE(Submit({1}));
   ASSERT_NO_FATAL_FAILURE(Collect({'U'}, {10}, {true}));
   ASSERT_NO_FATAL_FAILURE(Release(1));
+}
+
+TEST_F(SourceRecognitionModelTest, ActivityLeavesUnacknowledgedInputAvailable) {
+  ASSERT_NO_FATAL_FAILURE(Admit(0, iree_string_view_empty(),
+                                LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY));
+  ASSERT_NO_FATAL_FAILURE(Append(0, {1, 2, 3, 4, 5, 6, 7}));
+  auto& row = rows_[0];
+  for (uint64_t end : {3u, 6u, 9u, 10u}) {
+    ASSERT_NO_FATAL_FAILURE(Submit({0}));
+    IREE_ASSERT_OK(Wait(frontier_));
+    loom_serve_recognition_result_t result;
+    IREE_ASSERT_OK(generator_.collect(generator_.self, 0, row.events, &result));
+    ASSERT_EQ(loom_serve_recognition_events_count(row.events), 1u);
+    const auto* event = loom_serve_recognition_events_at(row.events, 0);
+    ASSERT_EQ(event->kind, LOOM_SERVE_RECOGNITION_EVENT_ACTIVITY);
+    EXPECT_EQ(event->activity.begin, row.input.consumed);
+    EXPECT_EQ(event->activity.end, end);
+    EXPECT_EQ(result.consumed_frames, end - row.input.consumed);
+    EXPECT_EQ(result.complete, end == 10);
+    loom_serve_recognition_input_consume(&row.input, result.consumed_frames);
+    generator_.release_batch(generator_.self);
+
+    if (end == 3) {
+      const auto remaining = loom_serve_recognition_input_peek(&row.input);
+      ASSERT_EQ(remaining.frame_count, 4u);
+      ASSERT_EQ(remaining.spans[0].data_length, 4 * sizeof(float));
+      for (size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(iree_unaligned_load_le_f32(remaining.spans[0].data + i * 4),
+                  static_cast<float>(i + 4));
+      }
+      ASSERT_NO_FATAL_FAILURE(Append(0, {8, 9, 10}));
+      row.input.complete = true;
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Release(0));
 }
 
 TEST_F(SourceRecognitionModelTest,
