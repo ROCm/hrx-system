@@ -52,48 +52,8 @@ static const loom_low_call_contract_t* loom_aie2p_program_call_contract_query(
   return &context->bindings_by_symbol[callee.symbol_id]->call_contract;
 }
 
-static iree_status_t loom_aie2p_program_select_abi_register(
-    const loom_low_descriptor_set_t* descriptor_set, loom_type_t type,
-    uint16_t* er_count, uint16_t* ep_count,
-    loom_low_allocation_abi_location_t* out_location) {
-  loom_aie2p_call_abi_requirements_t requirements = {0};
-  if (!loom_aie2p_call_abi_add_low_type(type, &requirements)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "AIE2P direct helper ABI requires one-unit register values");
-  }
-  const uint16_t register_class = loom_low_register_type_class_id(type);
-  uint16_t* count = NULL;
-  if (requirements.scalar_count == 1) {
-    IREE_ASSERT_EQ(register_class, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER);
-    count = er_count;
-    if (*count >= 16) {
-      return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "AIE2P direct helper ABI supports at most 16 scalar values per side");
-    }
-  } else {
-    IREE_ASSERT_EQ(register_class, AIE2P_CORE_REG_CLASS_ID_AIE2P_EP);
-    count = ep_count;
-  }
-  const loom_low_reg_class_t* reg_class =
-      &descriptor_set->reg_classes[register_class];
-  if (*count >= reg_class->allocatable_count) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AIE2P direct helper ABI register bank overflow");
-  }
-  *out_location = (loom_low_allocation_abi_location_t){
-      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-      .descriptor_reg_class_id = register_class,
-      .location_base = loom_low_descriptor_set_physical_register_candidate(
-          descriptor_set, register_class, (*count)++),
-  };
-  return iree_ok_status();
-}
-
 static iree_status_t loom_aie2p_program_prepare_abi(
     const loom_module_t* module, loom_op_t* function_op,
-    const loom_low_descriptor_set_t* descriptor_set,
     iree_arena_allocator_t* arena, loom_aie2p_program_callable_t* callable) {
   const loom_func_like_t function = loom_func_like_cast(module, function_op);
   const loom_value_id_t* arguments =
@@ -105,8 +65,7 @@ static iree_status_t loom_aie2p_program_prepare_abi(
                                                  sizeof(*callable->locations),
                                                  (void**)&callable->locations));
   for (uint16_t side = 0; side < 2; ++side) {
-    uint16_t er_count = 0;
-    uint16_t ep_count = 0;
+    loom_aie2p_call_abi_requirements_t requirements = {0};
     const uint16_t count =
         side == 0 ? callable->argument_count : callable->result_count;
     for (uint16_t i = 0; i < count; ++i) {
@@ -114,9 +73,8 @@ static iree_status_t loom_aie2p_program_prepare_abi(
           side == 0 ? arguments[i] : loom_op_results(function_op)[i];
       loom_low_allocation_abi_location_t* location =
           &callable->locations[(side == 0 ? 0 : callable->argument_count) + i];
-      IREE_RETURN_IF_ERROR(loom_aie2p_program_select_abi_register(
-          descriptor_set, loom_module_value_type(module, value), &er_count,
-          &ep_count, location));
+      IREE_RETURN_IF_ERROR(loom_aie2p_call_abi_select_location(
+          loom_module_value_type(module, value), &requirements, location));
     }
   }
   callable->call_contract = (loom_low_call_contract_t){
@@ -243,6 +201,23 @@ static iree_status_t loom_aie2p_program_compile_impl(
       .location_base = link_shadow_register,
       .location_count = 1,
   };
+  enum {
+    LOOM_AIE2P_PROGRAM_HELPER_RESERVATION_COUNT =
+        LOOM_AIE2P_CALL_ABI_PRESERVED_SCALAR_REGISTER_COUNT + 1,
+  };
+  loom_low_allocation_reserved_range_t
+      helper_reservations[LOOM_AIE2P_PROGRAM_HELPER_RESERVATION_COUNT];
+  for (uint16_t i = 0; i < LOOM_AIE2P_CALL_ABI_PRESERVED_SCALAR_REGISTER_COUNT;
+       ++i) {
+    helper_reservations[i] = (loom_low_allocation_reserved_range_t){
+        .register_class = IREE_SV("aie2p.er"),
+        .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+        .location_base = loom_aie2p_call_abi_preserved_scalar_register(i),
+        .location_count = 1,
+    };
+  }
+  helper_reservations[LOOM_AIE2P_PROGRAM_HELPER_RESERVATION_COUNT - 1] =
+      link_reservation;
 
   loom_aie2p_program_callable_t* helpers = NULL;
   loom_aie2p_program_callable_t** bindings_by_symbol = NULL;
@@ -284,7 +259,7 @@ static iree_status_t loom_aie2p_program_compile_impl(
     helper->function_op = symbol->defining_op;
     bindings_by_symbol[symbol_id] = helper;
     IREE_RETURN_IF_ERROR(loom_aie2p_program_prepare_abi(
-        module, helper->function_op, descriptor_set, scratch_arena, helper));
+        module, helper->function_op, scratch_arena, helper));
     const loom_aie2p_leaf_compile_options_t helper_options = {
         .function_target_facts = entry_options->function_target_facts,
         .descriptor_registry = entry_options->descriptor_registry,
@@ -292,8 +267,9 @@ static iree_status_t loom_aie2p_program_compile_impl(
         .allocation_entry_location_count = helper->call_contract.argument_count,
         .allocation_exit_locations = helper->call_contract.results,
         .allocation_exit_location_count = helper->call_contract.result_count,
-        .allocation_reserved_ranges = &link_reservation,
-        .allocation_reserved_range_count = 1,
+        .allocation_reserved_ranges = helper_reservations,
+        .allocation_reserved_range_count =
+            LOOM_AIE2P_PROGRAM_HELPER_RESERVATION_COUNT,
         .diagnostic_emitter = entry_options->diagnostic_emitter,
     };
     bool helper_compiled = false;

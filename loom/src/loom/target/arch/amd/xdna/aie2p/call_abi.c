@@ -10,12 +10,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/registers.h"
 
-enum {
-  // The first sixteen ERs form the scalar argument and result bank. Keeping
-  // the two sides independent lets a returned value reuse an argument ER.
-  LOOM_AIE2P_CALL_ABI_SCALAR_REGISTER_COUNT = 16,
-};
-
 static bool loom_aie2p_call_abi_add_count(uint16_t* count, uint16_t increment) {
   if (*count > UINT16_MAX - increment) {
     return false;
@@ -77,9 +71,55 @@ bool loom_aie2p_call_abi_requirements_fit(
     loom_aie2p_call_abi_requirements_t requirements) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();
+  const uint16_t pointer_register_count =
+      descriptor_set->reg_classes[AIE2P_CORE_REG_CLASS_ID_AIE2P_EP]
+          .allocatable_count;
+  IREE_ASSERT_GE(pointer_register_count,
+                 LOOM_AIE2P_CALL_ABI_POINTER_REGISTER_OFFSET);
   return requirements.scalar_count <=
              LOOM_AIE2P_CALL_ABI_SCALAR_REGISTER_COUNT &&
          requirements.pointer_count <=
-             descriptor_set->reg_classes[AIE2P_CORE_REG_CLASS_ID_AIE2P_EP]
-                 .allocatable_count;
+             pointer_register_count -
+                 LOOM_AIE2P_CALL_ABI_POINTER_REGISTER_OFFSET;
+}
+
+uint16_t loom_aie2p_call_abi_preserved_scalar_register(uint16_t ordinal) {
+  static const uint16_t candidate_ordinals[] = {15, 18, 19, 20, 21, 22};
+  IREE_ASSERT_LT(ordinal, IREE_ARRAYSIZE(candidate_ordinals));
+  return loom_low_descriptor_set_physical_register_candidate(
+      loom_aie2p_core_descriptor_set(), AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+      candidate_ordinals[ordinal]);
+}
+
+iree_status_t loom_aie2p_call_abi_select_location(
+    loom_type_t low_type,
+    loom_aie2p_call_abi_requirements_t* inout_requirements,
+    loom_low_allocation_abi_location_t* out_location) {
+  const loom_aie2p_call_abi_requirements_t prior_requirements =
+      *inout_requirements;
+  if (!loom_aie2p_call_abi_add_low_type(low_type, inout_requirements)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "AIE2P direct helper ABI requires one-unit register values");
+  }
+  if (!loom_aie2p_call_abi_requirements_fit(*inout_requirements)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P direct helper ABI register bank overflow");
+  }
+
+  const uint16_t register_class = loom_low_register_type_class_id(low_type);
+  uint16_t candidate_ordinal = prior_requirements.scalar_count;
+  if (register_class == AIE2P_CORE_REG_CLASS_ID_AIE2P_EP) {
+    candidate_ordinal = LOOM_AIE2P_CALL_ABI_POINTER_REGISTER_OFFSET +
+                        prior_requirements.pointer_count;
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  *out_location = (loom_low_allocation_abi_location_t){
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .descriptor_reg_class_id = register_class,
+      .location_base = loom_low_descriptor_set_physical_register_candidate(
+          descriptor_set, register_class, candidate_ordinal),
+  };
+  return iree_ok_status();
 }

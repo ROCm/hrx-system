@@ -453,6 +453,7 @@ loom_cc_library(
     hdrs = ["call_abi.h"],
     deps = [
         ":core_descriptors",
+        "//loom/src/loom/codegen/low/allocation:call",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:registers",
     ],
@@ -1286,6 +1287,7 @@ loom_cc_test(
     deps = [
         ":call_abi",
         ":core_descriptors",
+        ":machine",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:registers",
         "//runtime/src/iree/testing:gtest",

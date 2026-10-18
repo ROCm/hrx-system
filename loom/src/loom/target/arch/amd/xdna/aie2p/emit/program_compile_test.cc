@@ -55,6 +55,37 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @entry() 
 }
 )";
 
+constexpr char kPointerHelperSource[] = R"(
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @sum_streams(%first_base: reg<aie2p.ep>, %second_base: reg<aie2p.ep>, %vector_output: reg<aie2p.ep>, %scalar_output: reg<aie2p.ep>) asm {
+  %first_pointer = copy %first_base : reg<aie2p.ep> -> reg<aie2p.eps>
+  %first_low = vlda.load-fifo.low512 %first_base, 0
+  %first_fifo = vlda.load-fifo.high512 %first_base, %first_low, 64
+  %first_position = mova.fifo.position 0
+  %second_pointer = copy %second_base : reg<aie2p.ep> -> reg<aie2p.eps>
+  %second_low = vlda.load-fifo.low512 %second_base, 0
+  %second_fifo = vlda.load-fifo.high512 %second_base, %second_low, 64
+  %second_position = mova.fifo.position 0
+  %first, %first_pointer1, %first_fifo1, %first_position1 = vlda.pop.512.i32x16 %first_pointer, %first_fifo, %first_position
+  %second, %second_pointer1, %second_fifo1, %second_position1 = vldb.pop.512.i32x16 %second_pointer, %second_fifo, %second_position
+  %combined = vadd.32 %first, %second
+  vst.512.i32x16 %combined, %vector_output, 0
+  %complete = mov.i32 1
+  st %complete, %scalar_output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @entry() asm {
+  %first_base = mov.local-address 458752
+  %second_base = mov.local-address 458880
+  %vector_output = mov.local-address 459008
+  %scalar_output = mov.local-address 459072
+  low.func.call @sum_streams(%first_base, %second_base, %vector_output, %scalar_output) : (reg<aie2p.ep>, reg<aie2p.ep>, reg<aie2p.ep>, reg<aie2p.ep>)
+  return
+}
+)";
+
 iree_status_t InitializeXdnaContext(loom_context_t* context) {
   loom_context_initialize(iree_allocator_system(), context);
   iree_status_t status = loom_op_registry_register_all_dialects(context);
@@ -433,6 +464,55 @@ TEST_F(Aie2pProgramCompileTest,
       linked_code.address +
       symbol_layouts[call_fixup->target_symbol_index].section_offset;
   EXPECT_EQ(call_fields[0].value, helper_address);
+}
+
+TEST_F(Aie2pProgramCompileTest,
+       CompilesFourPointerHelperUsingBothLoadFifoTuples) {
+  ModulePtr module = ParseModule(IREE_SV(kPointerHelperSource));
+  loom_op_t* entry = FindFunction(module.get(), IREE_SV("entry"));
+  ASSERT_NE(entry, nullptr);
+  const loom_aie2p_leaf_compile_options_t options = {
+      .descriptor_registry = &low_registry_.registry,
+  };
+  bool compiled = false;
+  loom_aie2p_leaf_contribution_t contribution = {};
+  IREE_ASSERT_OK(loom_aie2p_program_compile(module.get(), entry, &options,
+                                            &program_arena_, &compiled,
+                                            &contribution));
+  ASSERT_TRUE(compiled);
+  ASSERT_EQ(contribution.object.section_count, 2u);
+  EXPECT_EQ(contribution.realization.spill.byte_length, 0u);
+
+  const loom_native_object_symbol_t* helper_symbol = nullptr;
+  for (iree_host_size_t i = 0; i < contribution.object.symbol_count; ++i) {
+    const loom_native_object_symbol_t* symbol = &contribution.object.symbols[i];
+    if (iree_string_view_equal(symbol->name, IREE_SV("sum_streams")) &&
+        symbol->section_contribution_index != IREE_HOST_SIZE_MAX) {
+      helper_symbol = symbol;
+      break;
+    }
+  }
+  ASSERT_NE(helper_symbol, nullptr);
+  const iree_const_byte_span_t helper_code =
+      contribution.object.sections[helper_symbol->section_contribution_index]
+          .contents;
+  std::vector<DecodedProgramBundle> helper_bundles;
+  IREE_ASSERT_OK(DecodeProgram(helper_code, &helper_bundles));
+  const loom_aie2p_instruction_id_t first_fifo_pop =
+      loom_aie2p_encoding_find_instruction(IREE_SV("VLDA_POP_512_normal_pop"));
+  const loom_aie2p_instruction_id_t second_fifo_pop =
+      loom_aie2p_encoding_find_instruction(IREE_SV("VLDB_POP_512_normal_pop"));
+  ASSERT_NE(first_fifo_pop, LOOM_AIE2P_INSTRUCTION_ID_INVALID);
+  ASSERT_NE(second_fifo_pop, LOOM_AIE2P_INSTRUCTION_ID_INVALID);
+  EXPECT_TRUE(std::any_of(helper_bundles.begin(), helper_bundles.end(),
+                          [first_fifo_pop](const auto& bundle) {
+                            return BundleHasInstruction(bundle, first_fifo_pop);
+                          }));
+  EXPECT_TRUE(std::any_of(helper_bundles.begin(), helper_bundles.end(),
+                          [second_fifo_pop](const auto& bundle) {
+                            return BundleHasInstruction(bundle,
+                                                        second_fifo_pop);
+                          }));
 }
 
 }  // namespace

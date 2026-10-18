@@ -534,6 +534,7 @@ loom_cc_library(
     "call_abi.c"
   DEPS
     ::core_descriptors
+    loom::codegen::low::allocation::call
     loom::ir
     loom::target::registers
   PUBLIC
@@ -1514,6 +1515,7 @@ loom_cc_test(
   DEPS
     ::call_abi
     ::core_descriptors
+    ::machine
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir

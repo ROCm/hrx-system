@@ -7,8 +7,10 @@
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 #include "loom/target/registers.h"
 
 namespace loom {
@@ -68,20 +70,60 @@ TEST(Aie2pCallAbiTest, RejectsNonAbiLowCarriers) {
 
 TEST(Aie2pCallAbiTest, EnforcesIndependentRegisterBankCapacity) {
   loom_aie2p_call_abi_requirements_t requirements = {
-      .scalar_count = 16,
+      .scalar_count = LOOM_AIE2P_CALL_ABI_SCALAR_REGISTER_COUNT,
   };
   EXPECT_TRUE(loom_aie2p_call_abi_requirements_fit(requirements));
   ++requirements.scalar_count;
   EXPECT_FALSE(loom_aie2p_call_abi_requirements_fit(requirements));
 
   requirements = {
-      .pointer_count = loom_aie2p_core_descriptor_set()
-                           ->reg_classes[AIE2P_CORE_REG_CLASS_ID_AIE2P_EP]
-                           .allocatable_count,
+      .pointer_count = static_cast<uint16_t>(
+          loom_aie2p_core_descriptor_set()
+              ->reg_classes[AIE2P_CORE_REG_CLASS_ID_AIE2P_EP]
+              .allocatable_count -
+          2),
   };
   EXPECT_TRUE(loom_aie2p_call_abi_requirements_fit(requirements));
   ++requirements.pointer_count;
   EXPECT_FALSE(loom_aie2p_call_abi_requirements_fit(requirements));
+}
+
+TEST(Aie2pCallAbiTest, KeepsLoadFifoPointerTuplesOutsideTheAbi) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  const loom_type_t scalar_type = loom_low_register_type(
+      AIE2P_CORE_DESCRIPTOR_SET_ID, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, 1);
+  const loom_type_t pointer_type = loom_low_register_type(
+      AIE2P_CORE_DESCRIPTOR_SET_ID, AIE2P_CORE_REG_CLASS_ID_AIE2P_EP, 1);
+  loom_aie2p_call_abi_requirements_t requirements = {};
+  loom_low_allocation_abi_location_t location = {};
+
+  IREE_ASSERT_OK(loom_aie2p_call_abi_select_location(scalar_type, &requirements,
+                                                     &location));
+  EXPECT_EQ(location.location_base,
+            loom_low_descriptor_set_physical_register_candidate(
+                descriptor_set, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, 0));
+  for (uint16_t i = 0; i < 4; ++i) {
+    IREE_ASSERT_OK(loom_aie2p_call_abi_select_location(
+        pointer_type, &requirements, &location));
+    EXPECT_EQ(location.location_base,
+              loom_low_descriptor_set_physical_register_candidate(
+                  descriptor_set, AIE2P_CORE_REG_CLASS_ID_AIE2P_EP,
+                  LOOM_AIE2P_CALL_ABI_POINTER_REGISTER_OFFSET + i));
+  }
+}
+
+TEST(Aie2pCallAbiTest, SeparatesBoundaryAndPreservedScalarBanks) {
+  const iree_string_view_t expected_registers[] = {
+      IREE_SV("r15"), IREE_SV("r18"), IREE_SV("r19"),
+      IREE_SV("r20"), IREE_SV("r21"), IREE_SV("r22"),
+  };
+  static_assert(IREE_ARRAYSIZE(expected_registers) ==
+                LOOM_AIE2P_CALL_ABI_PRESERVED_SCALAR_REGISTER_COUNT);
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(expected_registers); ++i) {
+    EXPECT_EQ(loom_aie2p_call_abi_preserved_scalar_register(i),
+              loom_aie2p_machine_find_physical_register(expected_registers[i]));
+  }
 }
 
 }  // namespace
