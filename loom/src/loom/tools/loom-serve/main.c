@@ -31,7 +31,8 @@ IREE_FLAG(int32_t, model_capacity, 32,
           "entries.");
 IREE_FLAG_LIST(string, realtime_assistant,
                "Assistant JSON document naming text, recognition, speech, and "
-               "voice. Repeat to expose named /v1/realtime compositions.");
+               "voice, with optional activity detection and input_capacity. "
+               "Repeat to expose named /v1/realtime compositions.");
 IREE_FLAG_LIST(
     string, realtime_origin,
     "Allowed browser Origin for realtime WebSocket upgrades; repeat "
@@ -151,7 +152,9 @@ static int loom_serve_main_agents_markdown(void) {
              "recognition, text and continuing speech deployments plus a "
              "voice. Connect to `/v1/realtime?model=NAME` over WebSocket. "
              "Append base64 mono 24 kHz PCM16LE, commit the utterance, then "
-             "send `response.create`. Text feeds speech inside the process. "
+             "send `response.create`. An optional activity deployment enables "
+             "server_vad turn detection and automatic responses. Text feeds "
+             "speech inside the process. "
              "Cancel stops generation; explicit item truncation reconciles "
              "actual playback with conversation history. Browser Origins "
              "require exact `--realtime_origin` entries. See "

@@ -16,14 +16,14 @@ extern "C" {
 typedef struct loom_serve_realtime_configuration_t {
   // Profile view borrowing the decoded configuration strings below.
   loom_serve_realtime_profile_t profile;
-  // Owned name, text, recognition, speech, voice, and instructions, in that
-  // order.
-  iree_string_builder_t strings[6];
+  // Owned name, text, recognition, speech, voice, instructions, and activity.
+  iree_string_builder_t strings[7];
 } loom_serve_realtime_configuration_t;
 
 // Parses one complete assistant document with required name/text/recognition/
-// speech/voice and optional instructions/max_output_tokens/seed. Every selector
-// names an ordinary independent registration; this document owns no weights.
+// speech/voice and optional activity/instructions/max_output_tokens/seed/
+// input_capacity. Every selector names an independent registration; this
+// document owns no weights.
 // Failure leaves a deinitializable value and performs no model or file I/O.
 iree_status_t loom_serve_realtime_configuration_initialize(
     iree_string_view_t document, iree_allocator_t host_allocator,

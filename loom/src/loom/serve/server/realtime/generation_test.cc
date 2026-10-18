@@ -98,10 +98,10 @@ class RealtimeGenerationTest : public ::testing::Test {
     loom_serve_realtime_binding_t speech;
     IREE_ASSERT_OK(loom_serve_realtime_binding_resolve(
         registry_, loom_serve_registry_at(registry_, 0)->service.name,
-        LOOM_SERVE_MODEL_KIND_TEXT, &text));
+        1u << LOOM_SERVE_MODEL_KIND_TEXT, &text));
     IREE_ASSERT_OK(loom_serve_realtime_binding_resolve(
         registry_, loom_serve_registry_at(registry_, 1)->service.name,
-        LOOM_SERVE_MODEL_KIND_SPEECH, &speech));
+        1u << LOOM_SERVE_MODEL_KIND_SPEECH, &speech));
     loom_serve_text_request_t request = {};
     iree_string_builder_initialize(iree_allocator_system(), &request.body);
     auto status = iree_string_builder_append_string(

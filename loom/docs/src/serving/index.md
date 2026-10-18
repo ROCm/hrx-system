@@ -33,7 +33,7 @@ controls, pressure, counters and telemetry cursors.
 | --- | --- | --- |
 | `--device=URI` | Required, repeatable | HAL device URI; encounter order defines device indices. |
 | `--model=path` | None, repeatable | One JSON deployment document per value; omission starts empty. |
-| `--realtime_assistant=path` | None, repeatable | Named recognition/text/speech composition for the Realtime endpoint. |
+| `--realtime_assistant=path` | None, repeatable | Named recognition/text/speech composition, with optional activity detection, for the Realtime endpoint. |
 | `--realtime_origin=origin` | None, repeatable | Exact allowed browser Origin for WebSocket upgrades. |
 | `--listen=address` | `127.0.0.1:8080`, repeatable | Numeric IPv4 `host:port`, IPv6 `[host]:port`, or `unix:path`. |
 | `--workers=N` | `8` | Shared CPU workers for JIT, model scheduling and media work. |
