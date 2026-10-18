@@ -83,6 +83,12 @@ base64-decode each `response.output_audio.delta` into a continuous playback queu
 `response.done` describes generation completion, not how much the listener heard.
 An output-token cutoff reports `incomplete` with reason `max_output_tokens`.
 
+A text or speech request failure reports `response.done` with status `failed`
+and the original diagnostic in `status_details.error`. Microphone capture and
+the connection remain available. Correct the request settings or conversation
+input before requesting another response. Failed audio contributes no unaligned
+assistant transcript to subsequent model context.
+
 `session.update` changes subsequent instructions, voice, transcription hints,
 output modality, or token budget at an idle response boundary. Selecting
 `output_modalities:["text"]` produces `response.output_text.delta` without speech.
