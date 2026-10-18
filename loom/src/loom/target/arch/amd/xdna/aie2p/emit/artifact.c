@@ -20,7 +20,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/array/resident.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/array_report.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration.h"
-#include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_link.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h"
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"
@@ -464,10 +464,10 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
         .diagnostic_emitter = request->diagnostic_emitter,
         .compile_report = worker_report_ptr,
     };
-    bool leaf_compiled = false;
-    iree_status_t status = loom_aie2p_leaf_compile(
+    bool program_compiled = false;
+    iree_status_t status = loom_aie2p_program_compile(
         resident_module, resident->function_op, &worker_compile_options,
-        request->scratch_arena, &leaf_compiled, contribution);
+        request->scratch_arena, &program_compiled, contribution);
     if (worker_report_ptr != NULL) {
       status = iree_status_join(
           status, loom_target_compile_report_record_entry_report(
@@ -475,7 +475,7 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
       loom_target_compile_report_deinitialize(worker_report_ptr);
     }
     IREE_RETURN_IF_ERROR(status);
-    if (!leaf_compiled) {
+    if (!program_compiled) {
       return iree_ok_status();
     }
     if (contribution->realization.resource_import_count != 0) {

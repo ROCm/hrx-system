@@ -1,0 +1,54 @@
+// RUN: emit aie2p-xdna
+
+// A resident worker calls one module-internal native helper. The helper remains
+// one shared code region in the tile program while the entry retains its
+// channel resource contract.
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @resident_helper() asm {
+  %channel_capacity = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %records_per_activation = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %first_lane = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %second_lane = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %worker_count = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %producer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %consumer_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %group = group %worker_count
+  %producer = worker %group, %first_lane, @produce_with_helper
+  %consumer = worker %group, %second_lane, @consume_helper_result
+  %sender = sender %producer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %consumer, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %channel_capacity, %records_per_activation : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %producer, %column, %producer_row
+  constrain.location %consumer, %column, %consumer_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce_with_helper() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %lhs = mov.i32 7
+  %rhs = mov.i32 9
+  %sum = low.func.call @add_pair(%lhs, %rhs) : (reg<aie2p.er>, reg<aie2p.er>) -> (reg<aie2p.er>)
+  st %sum, %output, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_helper_result() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) @add_pair(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %sum = add.rr %lhs, %rhs
+  return %sum
+}
+
+// ----
+partition: 1 columns, 6 rows
+entries: 1
+entry 0: 0 bindings, 0 dynamic relocations
+  invocation 0: bytes=868 next=1
+  invocation 1: bytes=16 next=1

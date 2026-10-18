@@ -61,7 +61,7 @@ low.func.def target<amd.xdna.aie2p.core>(@core_target) @callee() asm {
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@core_target) @residual_call() asm {
-  // ERROR@+1: TARGET/072 {target_key="core_target", export_name="residual_call", config_key="core_target", function_name="residual_call", op_name="low.func.call", callee_name="callee", reason="the selected target requires every Low call to be inlined before emission"}
+  // ERROR@+1: TARGET/072 {target_key="core_target", export_name="residual_call", config_key="core_target", function_name="residual_call", op_name="low.func.call", callee_name="callee", reason="the selected target has no native ABI contract for this call"}
   low.func.call @callee() : ()
   return
 }

@@ -159,6 +159,9 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
   // First bundle in the current synchronous execution segment. Retrospective
   // control placement cannot cross a call boundary that reset physical state.
   iree_host_size_t execution_bundle_start;
+  // First issue cycle in the current synchronous execution segment. A segment
+  // may begin in an implicit timing gap with no bundle at this cycle.
+  uint32_t execution_issue_cycle;
   // Bounded encoded-packet history matching shared physical admission.
   struct {
     // Scratch ring indexed by absolute issue cycle modulo |capacity|.
@@ -1732,9 +1735,10 @@ static iree_status_t loom_aie2p_bundle_plan_append_call(
                             "AIE2P call delay window exceeds cycle domain");
   }
   required_delay_end += (uint32_t)delay_move_slot_count;
-  const uint32_t minimum_call_issue_cycle =
-      required_delay_end > control_cycles ? required_delay_end - control_cycles
-                                          : 0;
+  const uint32_t minimum_call_issue_cycle = iree_max(
+      builder->execution_issue_cycle, required_delay_end > control_cycles
+                                          ? required_delay_end - control_cycles
+                                          : 0);
   uint32_t call_bundle_index = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_control(
       builder, packet_index, LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
@@ -1779,6 +1783,7 @@ static iree_status_t loom_aie2p_bundle_plan_append_call(
   // allocation; caller-side timing history therefore restarts at continuation.
   loom_low_physical_issue_reset_execution_state(&builder->issue);
   builder->execution_bundle_start = builder->bundle_count;
+  builder->execution_issue_cycle = builder->next_issue_cycle;
   builder->pending.minimum_issue_cycle = builder->next_issue_cycle;
   builder->pending.end_cycle = builder->next_issue_cycle;
   const uint32_t result_move_start_cycle = builder->next_issue_cycle;
@@ -1915,7 +1920,7 @@ static iree_status_t loom_aie2p_bundle_plan_append_terminator(
         builder, block_analysis->terminator_packet_index,
         block_analysis->terminator_packet_index,
         block_analysis->terminator_issue_cycle, block_bundle_start,
-        builder->block_issue_cycle, AIE2P_CORE_DESCRIPTOR_REF_RETURN_,
+        builder->execution_issue_cycle, AIE2P_CORE_DESCRIPTOR_REF_RETURN_,
         loom_aie2p_bundle_plan_encode_structural_descriptor(
             builder->descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_RETURN_),
         /*close_delay_window=*/true, &bundle_index);
@@ -1946,7 +1951,7 @@ static iree_status_t loom_aie2p_bundle_plan_append_terminator(
     if (iree_status_is_ok(status)) {
       // A second branch follows the first branch's complete delay window.
       const uint32_t minimum_issue_cycle =
-          i == 0 ? builder->block_issue_cycle : builder->next_issue_cycle;
+          i == 0 ? builder->execution_issue_cycle : builder->next_issue_cycle;
       status = loom_aie2p_bundle_plan_append_control(
           builder, block_analysis->terminator_packet_index,
           block_analysis->terminator_packet_index,
@@ -2190,6 +2195,7 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
     builder.current_block_index = block_index;
     builder.block_issue_cycle = builder.next_issue_cycle;
     builder.execution_bundle_start = builder.bundle_count;
+    builder.execution_issue_cycle = builder.next_issue_cycle;
     builder.block_byte_offsets[block_index] = block_byte_offset;
     const loom_low_schedule_block_t* block =
         &frame->schedule.blocks[block_index];

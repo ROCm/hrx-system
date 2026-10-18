@@ -286,6 +286,7 @@ static iree_status_t loom_aie2p_program_compile_impl(
     IREE_RETURN_IF_ERROR(loom_aie2p_program_prepare_abi(
         module, helper->function_op, descriptor_set, scratch_arena, helper));
     const loom_aie2p_leaf_compile_options_t helper_options = {
+        .function_target_facts = entry_options->function_target_facts,
         .descriptor_registry = entry_options->descriptor_registry,
         .allocation_entry_locations = helper->call_contract.arguments,
         .allocation_entry_location_count = helper->call_contract.argument_count,

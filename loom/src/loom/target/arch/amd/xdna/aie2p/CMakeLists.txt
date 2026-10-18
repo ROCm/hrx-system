@@ -451,6 +451,7 @@ loom_cc_library(
     loom::rewrite::rewriter
     loom::target::arch::amd::xdna::array_facts
     loom::transforms::cfg::block_fusion
+    loom::util::call_graph
     loom::util::cfg_graph
     loom::util::dominance
   PUBLIC
@@ -988,6 +989,7 @@ loom_check_test_suite(
     "test/module_contracts.loom-test"
     "test/native_admission.loom-test"
     "test/native_bindings.loom-test"
+    "test/native_calls.loom-test"
     "test/native_completion.loom-test"
     "test/native_distribution.loom-test"
     "test/native_dma_completions.loom-test"
@@ -1397,6 +1399,7 @@ loom_cc_library(
     ::configuration_descriptors
     ::configuration_storage
     ::leaf_compile
+    ::program_compile
     ::provider
     ::target_facts
     ::target_profile

@@ -47,7 +47,11 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @entry() 
   %rhs = mov.i32 9
   %sum = low.func.call @add_pair(%lhs, %rhs) : (reg<aie2p.er>, reg<aie2p.er>) -> (reg<aie2p.er>)
   %result = add %sum, 1
-  return %result
+  low.br ^finish(%result: reg<aie2p.er>)
+^return(%final_result: reg<aie2p.er>):
+  return %final_result
+^finish(%finished_result: reg<aie2p.er>):
+  low.br ^return(%finished_result: reg<aie2p.er>)
 }
 )";
 
@@ -276,17 +280,31 @@ TEST_F(Aie2pProgramCompileTest,
                                             &contribution));
   ASSERT_TRUE(compiled);
   ASSERT_EQ(contribution.object.section_count, 2u);
-  ASSERT_EQ(contribution.object.fixup_count, 1u);
+  ASSERT_EQ(contribution.object.fixup_count, 3u);
   EXPECT_LE(contribution.realization.code.byte_length,
             LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE);
   EXPECT_EQ(contribution.realization.spill.byte_length, 0u);
 
-  const loom_native_object_fixup_t& call_fixup = contribution.object.fixups[0];
-  EXPECT_EQ(call_fixup.relocation_kind,
-            LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE);
-  ASSERT_LT(call_fixup.target_symbol_index, contribution.object.symbol_count);
+  const loom_native_object_fixup_t* call_fixup = nullptr;
+  iree_host_size_t call_fixup_index = IREE_HOST_SIZE_MAX;
+  iree_host_size_t branch_fixup_count = 0;
+  for (iree_host_size_t i = 0; i < contribution.object.fixup_count; ++i) {
+    const loom_native_object_fixup_t* fixup = &contribution.object.fixups[i];
+    if (fixup->relocation_kind ==
+        LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE) {
+      ASSERT_EQ(call_fixup, nullptr);
+      call_fixup = fixup;
+      call_fixup_index = i;
+    } else if (fixup->relocation_kind ==
+               LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE) {
+      ++branch_fixup_count;
+    }
+  }
+  ASSERT_NE(call_fixup, nullptr);
+  EXPECT_EQ(branch_fixup_count, 2u);
+  ASSERT_LT(call_fixup->target_symbol_index, contribution.object.symbol_count);
   const loom_native_object_symbol_t& helper_symbol =
-      contribution.object.symbols[call_fixup.target_symbol_index];
+      contribution.object.symbols[call_fixup->target_symbol_index];
   EXPECT_TRUE(iree_string_view_equal(helper_symbol.name, IREE_SV("add_pair")));
   EXPECT_NE(helper_symbol.section_contribution_index, IREE_HOST_SIZE_MAX);
 
@@ -377,12 +395,15 @@ TEST_F(Aie2pProgramCompileTest,
       contribution.object.symbols, contribution.object.symbol_count,
       linked_tile.assembly.contribution_layouts,
       linked_tile.assembly.contribution_layout_count, symbol_layouts.data()));
-  loom_native_object_fixup_layout_t fixup_layout;
+  std::vector<loom_native_object_fixup_layout_t> fixup_layouts(
+      contribution.object.fixup_count);
   IREE_ASSERT_OK(loom_native_object_resolve_fixup_layouts(
       contribution.object.fixups, contribution.object.fixup_count,
       contribution.object.symbol_count,
       linked_tile.assembly.contribution_layouts,
-      linked_tile.assembly.contribution_layout_count, &fixup_layout));
+      linked_tile.assembly.contribution_layout_count, fixup_layouts.data()));
+  const loom_native_object_fixup_layout_t& fixup_layout =
+      fixup_layouts[call_fixup_index];
   ASSERT_EQ(fixup_layout.section_index, 0u);
   const loom_native_section_t& linked_code = linked_tile.assembly.sections[0];
   loom_aie2p_decoded_bundle_t relocated_call_bundle;
@@ -410,7 +431,7 @@ TEST_F(Aie2pProgramCompileTest,
   ASSERT_EQ(call_field_count, 1u);
   const uint64_t helper_address =
       linked_code.address +
-      symbol_layouts[call_fixup.target_symbol_index].section_offset;
+      symbol_layouts[call_fixup->target_symbol_index].section_offset;
   EXPECT_EQ(call_fields[0].value, helper_address);
 }
 
